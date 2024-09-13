@@ -192,8 +192,8 @@ class LycorisTuner(BaseTuner):
     prefix: str
     layers_mapping: dict[type[torch.nn.Module], type[LycorisLayer]]
 
-    def __init__(self, model, config, adapter_name):
-        super().__init__(model, config, adapter_name)
+    def __init__(self, model, config, adapter_name, init_empty: bool = False):
+        super().__init__(model, config, adapter_name, init_empty=init_empty)
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""

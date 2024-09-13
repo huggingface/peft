@@ -156,6 +156,7 @@ class BaseTuner(nn.Module, ABC):
         model,
         peft_config: Union[PeftConfig, dict[str, PeftConfig]],
         adapter_name: str,
+        init_empty: bool = False,
     ) -> None:
         super().__init__()
 
@@ -180,7 +181,7 @@ class BaseTuner(nn.Module, ABC):
         self.active_adapter: str | list[str] = adapter_name
         self._pre_injection_hook(self.model, self.peft_config[adapter_name], adapter_name)
         if peft_config != PeftType.XLORA or peft_config[adapter_name] != PeftType.XLORA:
-            self.inject_adapter(self.model, adapter_name)
+            self.inject_adapter(self.model, adapter_name, init_empty=init_empty)
 
         # Copy the peft_config in the injected model.
         self.model.peft_config = self.peft_config
@@ -416,6 +417,7 @@ class BaseTuner(nn.Module, ABC):
                 The adapter name.
             autocast_adapter_dtype (`bool`, *optional*):
                 Whether to autocast the adapter dtype. Defaults to `True`.
+            init_empty TODO
         """
         peft_config = self.peft_config[adapter_name]
         # Note: If possible, all checks should be performed *at the start of this method*.

@@ -48,6 +48,7 @@ from peft import (
     VeraConfig,
     get_peft_model,
     get_peft_model_state_dict,
+    inject_adapter_in_model,
     prepare_model_for_kbit_training,
 )
 from peft.tuners.lora import LoraLayer
@@ -307,7 +308,7 @@ class PeftCommonTester:
     def _test_load_model_empty_weights(self, model_id, config_cls, config_kwargs):
         # Ensure that init_empty=True works for from_pretrained and load_adapter and that the resulting model's
         # parameters are on the correct device.
-        model = self.transformers_class.from_pretrained(model_id)
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -323,6 +324,16 @@ class PeftCommonTester:
 
             model.load_adapter(tmp_dirname, adapter_name="other", init_empty=True)
             assert {p.device.type for p in model.parameters()} == {self.torch_device}
+
+        # also test injecting directly
+        del model
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        inject_adapter_in_model(config, model, init_empty=True)  # check that there is no error
+
+        if not isinstance(config, LNTuningConfig):
+            # LN tuning does not add adapter layers that could be on meta device, it only changes the requires_grad.
+            # Therefore, there is no meta device for LN tuning.
+            assert "meta" in {p.device.type for p in model.parameters()}
 
     def _test_save_pretrained(self, model_id, config_cls, config_kwargs, safe_serialization=True):
         # ensure that the weights are randomly initialized

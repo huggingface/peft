@@ -76,6 +76,7 @@ class VeraModel(BaseTuner):
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
         config ([`VeraConfig`]): The configuration of the Vera model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
+        TODO
 
     Returns:
         `torch.nn.Module`: The Vera model.
@@ -98,8 +99,8 @@ class VeraModel(BaseTuner):
 
     prefix: str = "vera_lambda"
 
-    def __init__(self, model, config, adapter_name) -> None:
-        super().__init__(model, config, adapter_name)
+    def __init__(self, model, config, adapter_name, init_empty: bool = False) -> None:
+        super().__init__(model, config, adapter_name, init_empty=init_empty)
 
     def _find_dim(self, config) -> tuple[int, int]:
         """

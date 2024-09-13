@@ -20,6 +20,7 @@ from unittest.mock import patch
 import pytest
 import torch
 from huggingface_hub.utils import reset_sessions
+from safetensors.torch import load_file
 from scipy import stats
 from torch import nn
 from transformers import AutoModelForCausalLM
@@ -39,6 +40,8 @@ from peft import (
     VBLoRAConfig,
     VeraConfig,
     get_peft_model,
+    inject_adapter_in_model,
+    set_peft_model_state_dict,
 )
 from peft.utils import infer_device
 
@@ -1353,12 +1356,15 @@ class TestEmptyInitialization:
         return AutoModelForCausalLM.from_pretrained(self.model_id)
 
     @pytest.fixture(scope="class")
-    def lora_path(self, tmp_path_factory):
+    def lora_config(self):
+        return LoraConfig(init_lora_weights=False, target_modules="all-linear")
+
+    @pytest.fixture(scope="class")
+    def lora_path(self, tmp_path_factory, lora_config):
         torch.manual_seed(0)
         tmp_path = tmp_path_factory.mktemp("lora")
         model = self.get_model()
-        config = LoraConfig(init_lora_weights=False, target_modules="all-linear")
-        model = get_peft_model(model, config)
+        model = get_peft_model(model, lora_config)
         model.save_pretrained(tmp_path)
         return tmp_path
 
@@ -1371,41 +1377,83 @@ class TestEmptyInitialization:
         model = self.get_model().to(device)
         inputs = {k: v.to(device) for k, v in inputs.items()}
         model = PeftModel.from_pretrained(model, lora_path, torch_device=device).eval()
-        device_set_not_empty = {p.device for p in model.parameters()}
+        device_set_not_empty = {p.device.type for p in model.parameters()}
         logits_not_empty = model(**inputs).logits
 
         del model
 
         model = self.get_model().to(device)
         model = PeftModel.from_pretrained(model, lora_path, init_empty=True, torch_device=device).eval()
-        device_set_empty = {p.device for p in model.parameters()}
+        device_set_empty = {p.device.type for p in model.parameters()}
         logits_empty = model(**inputs).logits
 
         assert device_set_empty == device_set_not_empty
         assert torch.allclose(logits_empty, logits_not_empty)
 
     @pytest.mark.parametrize("device", devices)
-    def test_load_adapter_empty_init_works(self, device, inputs, lora_path):
+    def test_load_adapter_empty_init_works(self, device, inputs, lora_path, lora_config):
         model = self.get_model().to(device)
         inputs = {k: v.to(device) for k, v in inputs.items()}
 
         torch.manual_seed(0)
-        model = get_peft_model(model, LoraConfig(init_lora_weights=False, target_modules="all-linear"))
+        model = get_peft_model(model, lora_config)
         model.load_adapter(lora_path, adapter_name="other", torch_device=device)
         model.set_adapter("other")
         model.eval()
-        device_set_not_empty = {p.device for p in model.parameters()}
+        device_set_not_empty = {p.device.type for p in model.parameters()}
         logits_not_empty = model(**inputs).logits
 
         del model
 
         model = self.get_model().to(device)
         torch.manual_seed(0)
-        model = get_peft_model(model, LoraConfig(init_lora_weights=False, target_modules="all-linear"))
+        model = get_peft_model(model, lora_config)
         model.load_adapter(lora_path, adapter_name="other", init_empty=True, torch_device=device)
         model.set_adapter("other")
         model.eval()
-        device_set_empty = {p.device for p in model.parameters()}
+        device_set_empty = {p.device.type for p in model.parameters()}
+        logits_empty = model(**inputs).logits
+
+        assert device_set_empty == device_set_not_empty
+        assert torch.allclose(logits_empty, logits_not_empty)
+
+    @pytest.mark.parametrize("device", devices)
+    def test_inject_adapter_empty_init_works(self, device, inputs, lora_path, lora_config):
+        # external libs like transformers and diffusers use inject_adapter_in_model, let's check that this also works
+        model = self.get_model().to(device)
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+
+        torch.manual_seed(0)
+        model = get_peft_model(model, lora_config)
+        model.load_adapter(lora_path, adapter_name="other", torch_device=device)
+        model.set_adapter("other")
+        model.eval()
+        device_set_not_empty = {p.device.type for p in model.parameters()}
+        logits_not_empty = model(**inputs).logits
+
+        del model
+
+        torch.manual_seed(0)
+        model = self.get_model().to(device)
+        inject_adapter_in_model(lora_config, model, init_empty=True)
+        device_set_before_loading = {p.device.type for p in model.parameters()}
+        # at this stage, lora weights are still on meta device
+        assert device_set_before_loading == {"meta", device}
+
+        state_dict = load_file(lora_path / "adapter_model.safetensors")
+        remapped_dict = {}
+        prefix = "base_model.model."
+        for key, val in state_dict.items():
+            new_key = key[len(prefix) :]
+            # module_name, _, param_name = new_key.rpartition(".")
+            # new_key = f"{module_name}.default.{param_name}"
+            remapped_dict[new_key] = val.to(device)
+        errors = set_peft_model_state_dict(model, remapped_dict, init_empty=True)
+        # sanity check: no unexpected keys
+        assert not errors.unexpected_keys
+
+        model.eval()
+        device_set_empty = {p.device.type for p in model.parameters()}
         logits_empty = model(**inputs).logits
 
         assert device_set_empty == device_set_not_empty

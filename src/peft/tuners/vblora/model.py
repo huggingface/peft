@@ -40,6 +40,7 @@ class VBLoRAModel(BaseTuner):
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
         config ([`VBLoRAConfig`]): The configuration of the VBLoRA model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
+        TODO
 
     Returns:
         `torch.nn.Module`: The VBLoRA model.
@@ -69,8 +70,8 @@ class VBLoRAModel(BaseTuner):
 
     prefix: str = "vblora_"
 
-    def __init__(self, model, config, adapter_name) -> None:
-        super().__init__(model, config, adapter_name)
+    def __init__(self, model, config, adapter_name, init_empty: bool = False) -> None:
+        super().__init__(model, config, adapter_name, init_empty=init_empty)
 
     def _init_vblora_vector_bank(self, config: VBLoRAConfig, adapter_name: str) -> None:
         vblora_vector_bank = torch.zeros(config.num_vectors, config.vector_length)

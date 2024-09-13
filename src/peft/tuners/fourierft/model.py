@@ -45,6 +45,7 @@ class FourierFTModel(BaseTuner):
         model ([`torch.nn.Module`]): The model to be adapted.
         config ([`FourierFTConfig`]): The configuration of the FourierFT model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
+        TODO
 
     Returns:
         `torch.nn.Module`: The FourierFT model.
@@ -56,8 +57,8 @@ class FourierFTModel(BaseTuner):
 
     prefix: str = "fourierft_"
 
-    def __init__(self, model, config, adapter_name) -> None:
-        super().__init__(model, config, adapter_name)
+    def __init__(self, model, config, adapter_name, init_empty: bool = False) -> None:
+        super().__init__(model, config, adapter_name, init_empty=init_empty)
 
     def _check_new_adapter_config(self, config: FourierFTConfig) -> None:
         """

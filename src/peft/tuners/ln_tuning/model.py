@@ -37,6 +37,7 @@ class LNTuningModel(BaseTuner):
         model ([`torch.nn.Module`]): The model to be adapted.
         config ([`LNTuningConfig`]): The configuration of the Lora model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
+        TODO
 
     Returns:
         'torch.nn.Module': The adapted model with LayerNorm tuned on.
@@ -63,9 +64,9 @@ class LNTuningModel(BaseTuner):
 
     prefix: str = "ln_tuning_"
 
-    def __init__(self, model, config, adapter_name) -> None:
+    def __init__(self, model, config, adapter_name, init_empty: bool = False) -> None:
         # self.adapter_name = adapter_name
-        super().__init__(model, config, adapter_name)
+        super().__init__(model, config, adapter_name, init_empty=init_empty)
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
