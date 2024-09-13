@@ -1335,9 +1335,9 @@ class TestCustomModelConfigWarning:
 class TestEmptyInitialization:
     """Test for the empty initialization option for loading PEFT models.
 
-    Note that we have `test_load_model_empty_weights` in the custom model tests. This is a a broad test (i.e. testing
-    all the PEFT methods) but not very deep (only tests if loading works and the device is correctly set). This test
-    class goes deeper but only tests LoRA, as checking all PEFT methods would be too much.
+    Note that we have `test_load_model_empty_weights` in the custom model tests. That test is a a broad test (i.e.
+    testing all the PEFT methods) but not very deep (only tests if loading works and the device is correctly set). The
+    test class here goes deeper but only tests LoRA, as checking all PEFT methods would be too much.
 
     """
 

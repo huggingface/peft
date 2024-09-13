@@ -142,10 +142,12 @@ class FourierFTModel(BaseTuner):
                 new_module.state = child.state
             new_module.to(child.weight.device)
 
+        meta = torch.device("meta")
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if "fourierft_" in name:
-                module.to(child.weight.device)
+                if not any(p.device == meta for p in module.parameters()):
+                    module.to(child.weight.device)
 
     def _mark_only_adapters_as_trainable(self, model: torch.nn.Module) -> None:
         for n, p in model.named_parameters():

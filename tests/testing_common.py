@@ -321,7 +321,7 @@ class PeftCommonTester:
             model = PeftModel.from_pretrained(model, tmp_dirname, torch_device=self.torch_device, init_empty=True)
             assert {p.device.type for p in model.parameters()} == {self.torch_device}
 
-            model.load_adapter(tmp_dirname, adapter_name="other")
+            model.load_adapter(tmp_dirname, adapter_name="other", init_empty=True)
             assert {p.device.type for p in model.parameters()} == {self.torch_device}
 
     def _test_save_pretrained(self, model_id, config_cls, config_kwargs, safe_serialization=True):
