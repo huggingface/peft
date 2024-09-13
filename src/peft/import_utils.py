@@ -99,7 +99,7 @@ def is_torchao_available():
 
     if torchao_version < TORCHAO_MINIMUM_VERSION:
         raise ImportError(
-            f"Found an incompatible version of auto-gptq. Found version {torchao_version}, "
+            f"Found an incompatible version of torchao. Found version {torchao_version}, "
             f"but only versions above {TORCHAO_MINIMUM_VERSION} are supported"
         )
     return True
