@@ -337,7 +337,7 @@ class BOFTLayer(BaseTunerLayer):
             perm_mat = self.perm2mat(perm)
             P[i] = perm_mat
 
-        self.register_buffer("boft_P", P)
+        self.register_buffer("boft_P", P, persistent=False)
 
         self.boft_R[adapter_name] = nn.Parameter(
             torch.zeros(boft_n_butterfly_factor + 1, boft_block_num, boft_block_size, boft_block_size)
@@ -771,7 +771,7 @@ class Conv2d(nn.Module, BOFTLayer):
             perm_mat = self.perm2mat(perm)
             P[i] = perm_mat
 
-        self.register_buffer("boft_P", P)
+        self.register_buffer("boft_P", P, persistent=False)
 
         self.boft_R[adapter_name] = nn.Parameter(
             torch.zeros(boft_n_butterfly_factor + 1, boft_block_num, boft_block_size, boft_block_size)
