@@ -530,6 +530,29 @@ class MLP(nn.Module):
         return X
 
 
+class MLPWithGRU(nn.Module):
+    def __init__(self, bias=True):
+        super().__init__()
+        self.lin0 = nn.Linear(10, 20, bias=bias)
+        self.relu = nn.ReLU()
+        self.drop = nn.Dropout(0.5)
+        self.gru = nn.GRU(input_size=20, hidden_size=20, num_layers=1, batch_first=True, bias=bias)
+        self.fc = nn.Linear(20, 2, bias=bias)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        X = X.float()
+        X = self.lin0(X)
+        X = self.relu(X)
+        X = self.drop(X)
+        X = X.unsqueeze(1)
+        X, _ = self.gru(X)
+        X = X.squeeze(1)
+        X = self.fc(X)
+        X = self.sm(X)
+        return X
+
+
 class MLP_LayerNorm(nn.Module):
     def __init__(self, bias=True):
         super().__init__()
@@ -3194,6 +3217,18 @@ class TestMixedAdapterBatches:
         inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
         self.run_checks(peft_model, inputs)
 
+    def test_mixed_adapter_batches_lora_unsupported_layer(self, mlp_lora):
+        base_model = MLPWithGRU().to(self.torch_device).eval()
+        config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["gru"], init_lora_weights=False)
+        config1 = LoraConfig(target_modules=["lin0"], modules_to_save=["gru"], init_lora_weights=False)
+        peft_model = get_peft_model(base_model, config0, "adapter0").eval()
+        peft_model.add_adapter("adapter1", config1)
+        inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
+        with pytest.raises(
+            TypeError, match="Mixed batching is only supported for Linear, Embedding, Conv2d, and Conv1D modules."
+        ):
+            self.run_checks(peft_model, inputs)
+
     def test_mixed_adapter_batches_lora_partly_overlapping_target_layers(self, mlp_lora):
         base_model = MLP().to(self.torch_device).eval()
         # target different lora layers
@@ -3212,6 +3247,15 @@ class TestMixedAdapterBatches:
         peft_model = get_peft_model(base_model, config0, "adapter0").eval()
         peft_model.add_adapter("adapter1", config1)
 
+        inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
+        self.run_checks(peft_model, inputs)
+
+    def test_mixed_adapter_batches_lora_conv1d_emb_different_classifiers(self):
+        base_model = ModelEmbConv1D().to(self.torch_device).eval()
+        config0 = LoraConfig(target_modules=["emb", "conv1d"], modules_to_save=["lin0"], init_lora_weights=False)
+        config1 = LoraConfig(target_modules=["emb", "conv1d"], modules_to_save=["lin0"], init_lora_weights=False)
+        peft_model = get_peft_model(base_model, config0, "adapter0").eval()
+        peft_model.add_adapter("adapter1", config1)
         inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
         self.run_checks(peft_model, inputs)
 
