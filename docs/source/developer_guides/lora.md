@@ -369,21 +369,7 @@ output = peft_model.generate(**inputs, adapter_names=adapter_names, max_new_toke
 
 Note that the order does not matter here, i.e. the samples in the batch don't need to be grouped by adapter as in the example above. We just need to ensure that the `adapter_names` argument is aligned correctly with the samples.
 
-In certain scenarios, it is necessary to replicate specific neural network layers for each set of LoRA weights. A common use case is in classification tasks, where the classification head may need to be customized for each LoRA weight. The `modules_to_save` feature allows for the creation of multiple replicas of a given layer, each corresponding to a different set of LoRA weights. For example:
-```python
-from transformers import AutoModelForCausalLM, OPTForCausalLM, AutoTokenizer
-from peft import LoraConfig
-
-model_id = "facebook/opt-350m"
-model = AutoModelForCausalLM.from_pretrained(model_id)
-
-lora_config = LoraConfig(
-    target_modules=["q_proj", "k_proj"],
-    modules_to_save=["lm_head"],
-)
-
-model.add_adapter(lora_config)
-```
+Additionally, the same approach also works with the `modules_to_save` feature, which allows for saving and reusing specific neural network layers, such as custom heads for classification tasks, across different LoRA adapters. 
 
 ### Caveats
 
@@ -394,8 +380,8 @@ Using this features has some drawbacks, namely:
 - You cannot pass `adapter_names` when some adapter weights where merged with base weight using the `merge_adapter` method. Please unmerge all adapters first by calling `model.unmerge_adapter()`.
 - For obvious reasons, this cannot be used after calling `merge_and_unload()`, since all the LoRA adapters will be merged into the base weights in this case.
 - This feature does not currently work with DoRA, so set `use_dora=False` in your `LoraConfig` if you want to use it.
+- The `modules_to_save` feature is currently only supported for the layers of types `Linear`, `Embedding`, `Conv2d` and `Conv1d`.
 - There is an expected overhead for inference with `adapter_names`, especially if the amount of different adapters in the batch is high. This is because the batch size is effectively reduced to the number of samples per adapter. If runtime performance is your top priority, try the following:
   - Increase the batch size.
   - Try to avoid having a large number of different adapters in the same batch, prefer homogeneous batches. This can be achieved by buffering samples with the same adapter and only perform inference with a small handfull of different adapters.
   - Take a look at alternative implementations such as [LoRAX](https://github.com/predibase/lorax), [punica](https://github.com/punica-ai/punica), or [S-LoRA](https://github.com/S-LoRA/S-LoRA), which are specialized to work with a large number of different adapters.
-- The `modules_to_save` feature is currently only supported for the layers of types `Linear`, `Embedding`, `Conv2d` and `Conv1d`.

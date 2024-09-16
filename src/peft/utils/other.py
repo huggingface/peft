@@ -279,8 +279,10 @@ class ModulesToSaveWrapper(torch.nn.Module):
 
         SUPPORTED_MODULES = (torch.nn.Linear, torch.nn.Embedding, torch.nn.Conv2d, torch.nn.Conv1d)
 
+        module_names = ", ".join([module.__name__ for module in SUPPORTED_MODULES])
+
         if not isinstance(self.original_module, SUPPORTED_MODULES):
-            raise TypeError("Mixed batching is only supported for Linear, Embedding, Conv2d, and Conv1D modules.")
+            raise TypeError(f"Mixed batching is only supported for the following modules: {module_names}.")
 
         unique_adapters = set(adapter_names)
         sub_batch_indices_list = []
@@ -311,8 +313,7 @@ class ModulesToSaveWrapper(torch.nn.Module):
             return self.original_module(x, *args, **kwargs)
         if adapter_names is None:
             return self.modules_to_save[self.active_adapter](x, *args, **kwargs)
-        else:
-            return self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
+        return self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
 
     def enable_adapters(self, enabled: bool):
         """Toggle the enabling and disabling of adapters
