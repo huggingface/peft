@@ -219,12 +219,32 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         finally:
             self.base_model.enable_adapter_layers()
 
-    def add_adapter(self, adapter_name: str, peft_config: PeftConfig):
+    def add_adapter(self, adapter_name: str, peft_config: PeftConfig, init_empty: bool = False) -> None:
+        """
+        Add an adapter to the model based on the passed configuration.
+
+        This adapter is not trained. To load a trained adapter, check out [`PeftModel.load_adapter`].
+
+        The name for the new adapter should be unique.
+
+        The new adapter is not automatically set as the active adapter. Use [`PeftModel.set_adapter`] to set the active
+        adapter.
+
+        Args:
+            adapter_name (`str`):
+                The name of the adapter to be added.
+            peft_config ([`PeftConfig`]):
+                The configuration of the adapter to be added.
+            init_empty (`bool`, `optional``, defaults to `False`):
+                Create empty adapter weights on meta device. Useful to speed up the process when loading saved
+                adapters. Don't use this option when creating a new PEFT adapter for training.
+
+        """
         _check_config_compatible(peft_config)
 
         try:
             self.peft_config[adapter_name] = peft_config
-            self.base_model.inject_adapter(self, adapter_name)
+            self.base_model.inject_adapter(self, adapter_name, init_empty=init_empty)
         except Exception:  # something went wrong, roll back
             if adapter_name in self.peft_config:
                 del self.peft_config[adapter_name]
@@ -323,6 +343,37 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         return PeftModel._split_kwargs(kwargs)
 
     def load_adapter(self, model_id: str, adapter_name: str, *args: Any, **kwargs: Any):
+        """
+        Load a trained adapter into the model.
+
+        The name for the new adapter should be unique.
+
+        The new adapter is not automatically set as the active adapter. Use [`PeftModel.set_adapter`] to set the active
+        adapter.
+
+        Args:
+            adapter_name (`str`):
+                The name of the adapter to be added.
+            peft_config ([`PeftConfig`]):
+                The configuration of the adapter to be added.
+            is_trainable (`bool`, *optional*, defaults to `False`):
+                Whether the adapter should be trainable or not. If `False`, the adapter will be frozen and can only be
+                used for inference.
+            torch_device (`str`, *optional*, defaults to None):
+                The device to load the adapter on. If `None`, the device will be inferred.
+            autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
+                Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter
+                weights using float16 and bfloat16 to float32, as this is typically required for stable training, and
+                only affect select PEFT tuners.
+            ephemeral_gpu_offload (`bool`, *optional*, defaults to `False`):
+                Whether to use ephemeral GPU offloading for partially loaded modules. Defaults to `False`.
+            init_empty (`bool`, `optional``, defaults to `False`):
+                Create empty adapter weights on meta device before loading the saved weights. Useful to speed up the
+                process.
+            kwargs: (`optional`):
+                Additional arguments to modify the way the adapter is loaded, e.g. the token for Hugging Face Hub.
+        """
+        # the init_empty option is handled through kwargs
         output = PeftModel.load_adapter(self, model_id, adapter_name, *args, **kwargs)
         # TODO: not quite clear why this is necessary but tests fail without it
         self.set_adapter(self.active_adapters)
@@ -373,6 +424,9 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
                 The configuration object to use instead of an automatically loaded configuration. This configuration
                 object is mutually exclusive with `model_id` and `kwargs`. This is useful when configuration is already
                 loaded before calling `from_pretrained`.
+            init_empty (`bool`, `optional``, defaults to `False`):
+                Create empty adapter weights on meta device before loading the saved weights. Useful to speed up the
+                process.
             kwargs: (`optional`):
                 Additional keyword arguments passed along to the specific PEFT configuration class.
         """
@@ -412,5 +466,6 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
 
         # note: this is different from PeftModel.from_pretrained, we always return a PeftMixedModel
         model = cls(model, config, adapter_name)
+        # the init_empty option is handled through kwargs
         model.load_adapter(model_id, adapter_name, is_trainable=is_trainable, **kwargs)
         return model

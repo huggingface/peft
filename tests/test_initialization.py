@@ -1458,3 +1458,52 @@ class TestEmptyInitialization:
 
         assert device_set_empty == device_set_not_empty
         assert torch.allclose(logits_empty, logits_not_empty)
+
+    ############################
+    # tests for PeftMixedModel #
+    ############################
+
+    @pytest.mark.parametrize("device", devices)
+    def test_mixed_model_from_pretrained_empty_init_works(self, device, inputs, lora_path):
+        model = self.get_model().to(device)
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+        model = PeftMixedModel.from_pretrained(model, lora_path, torch_device=device).eval()
+        device_set_not_empty = {p.device.type for p in model.parameters()}
+        logits_not_empty = model(**inputs).logits
+
+        del model
+
+        model = self.get_model().to(device)
+        model = PeftMixedModel.from_pretrained(model, lora_path, init_empty=True, torch_device=device).eval()
+        device_set_empty = {p.device.type for p in model.parameters()}
+        logits_empty = model(**inputs).logits
+
+        assert device_set_empty == device_set_not_empty
+        assert torch.allclose(logits_empty, logits_not_empty)
+
+    @pytest.mark.parametrize("device", devices)
+    def test_mixed_model_load_adapter_empty_init_works(self, device, inputs, lora_path, lora_config):
+        model = self.get_model().to(device)
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+
+        torch.manual_seed(0)
+        model = PeftModel.from_pretrained(model, lora_path)
+        model.load_adapter(lora_path, adapter_name="other", torch_device=device)
+        model.set_adapter("other")
+        model.eval()
+        device_set_not_empty = {p.device.type for p in model.parameters()}
+        logits_not_empty = model(**inputs).logits
+
+        del model
+
+        model = self.get_model().to(device)
+        torch.manual_seed(0)
+        model = PeftModel.from_pretrained(model, lora_path)
+        model.load_adapter(lora_path, adapter_name="other", init_empty=True, torch_device=device)
+        model.set_adapter("other")
+        model.eval()
+        device_set_empty = {p.device.type for p in model.parameters()}
+        logits_empty = model(**inputs).logits
+
+        assert device_set_empty == device_set_not_empty
+        assert torch.allclose(logits_empty, logits_not_empty)
