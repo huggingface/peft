@@ -18,8 +18,6 @@ from typing import List, Optional, Union
 from peft.config import PeftConfig
 from peft.utils import PeftType
 
-import warnings
-
 
 @dataclass
 class OFTConfig(PeftConfig):
