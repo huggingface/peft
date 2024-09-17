@@ -432,7 +432,7 @@ class LoraModel(BaseTuner):
 
         hook_handles = []
         for module in self.modules():
-            if isinstance(module, LoraLayer):
+            if isinstance(module, LoraLayer) or isinstance(module, ModulesToSaveWrapper):
                 pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
                 handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                 hook_handles.append(handle)
