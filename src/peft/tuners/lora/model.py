@@ -46,7 +46,6 @@ from peft.utils import (
 )
 from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
 
-from ...utils.other import ModulesToSaveWrapper
 from .aqlm import dispatch_aqlm
 from .awq import dispatch_awq
 from .config import LoraConfig
