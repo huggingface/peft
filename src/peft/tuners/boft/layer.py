@@ -91,7 +91,6 @@ def get_fbd_cuda():
                 # build_directory='/tmp/'  # for debugging
             )
             # extra_cuda_cflags = ['-std=c++14', '-ccbin=$$(which gcc-7)']) # cuda10.2 is not compatible with gcc9. Specify gcc 7
-            import fbd_cuda
     except Exception as e:
         warnings.warn(f"Failed to load the CUDA extension: {e}, check if ninja is available.")
         warnings.warn("Setting boft_n_butterfly_factor to 1 to speed up the finetuning process.")
@@ -335,7 +334,7 @@ class BOFTLayer(BaseTunerLayer):
             perm_mat = self.perm2mat(perm)
             P[i] = perm_mat
 
-        self.register_buffer("boft_P", P)
+        self.register_buffer("boft_P", P, persistent=False)
 
         self.boft_R[adapter_name] = nn.Parameter(
             torch.zeros(boft_n_butterfly_factor + 1, boft_block_num, boft_block_size, boft_block_size)
@@ -765,7 +764,7 @@ class Conv2d(nn.Module, BOFTLayer):
             perm_mat = self.perm2mat(perm)
             P[i] = perm_mat
 
-        self.register_buffer("boft_P", P)
+        self.register_buffer("boft_P", P, persistent=False)
 
         self.boft_R[adapter_name] = nn.Parameter(
             torch.zeros(boft_n_butterfly_factor + 1, boft_block_num, boft_block_size, boft_block_size)

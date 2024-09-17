@@ -432,7 +432,7 @@ class LoraModel(BaseTuner):
 
         hook_handles = []
         for module in self.modules():
-            if isinstance(module, LoraLayer):
+            if isinstance(module, LoraLayer) or isinstance(module, ModulesToSaveWrapper):
                 pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
                 handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                 hook_handles.append(handle)
@@ -447,6 +447,7 @@ class LoraModel(BaseTuner):
 
         Currently gptq quantization and replicated layers do not support merging.
         """
+        super()._check_merge_allowed()
         if getattr(self.model, "quantization_method", None) == "gptq":
             raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
         if self.peft_config.get("layer_replication"):
@@ -553,9 +554,9 @@ class LoraModel(BaseTuner):
                 "Combining adapters with `target_modules` type being a mix of list/set and string is not supported."
             )
 
-        if target_module_types[0] == str:
+        if target_module_types[0] is str:
             new_target_modules = "|".join(f"({self.peft_config[adapter].target_modules})" for adapter in adapters)
-        elif target_module_types[0] == set:
+        elif target_module_types[0] is set:
             new_target_modules = reduce(
                 operator.or_, (self.peft_config[adapter].target_modules for adapter in adapters)
             )

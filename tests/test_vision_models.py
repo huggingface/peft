@@ -76,7 +76,7 @@ class TestPastKV:
 
 
 class TestResnet:
-    model_id = "microsoft/resnet-18"
+    model_id = "hf-internal-testing/tiny-random-ResNetForImageClassification"
 
     @pytest.fixture(autouse=True)
     def teardown(self):
@@ -117,8 +117,8 @@ class TestResnet:
         optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
         batch_size = 4
         max_steps = 5 * batch_size
-        labels = torch.zeros(1, 1000)
-        labels[0, 283] = 1
+        labels = torch.zeros(1, 3)
+        labels[0, 1] = 1
         for i in range(0, max_steps, batch_size):
             optimizer.zero_grad()
             outputs = model(**data, labels=labels)
