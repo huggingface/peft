@@ -187,7 +187,7 @@ def _low_rank_decomposition(weight, reduced_rank=32):
 
 
 @torch.no_grad()
-def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, reduced_rank: int, num_iter=1):
+def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, reduced_rank: int, num_iter=1, scaling=1):
     if is_bnb_available():
         import bitsandbytes as bnb
     else:
@@ -233,7 +233,7 @@ def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, r
         L, R, reduced_rank = output["L"], output["R"], output["reduced_rank"]
         res = weight - torch.mm(L, R)
 
-    lora_A, lora_B = R, L
+    lora_A, lora_B = R, L/scaling
 
     return dequantized_weight.to(device=device, dtype=dtype), lora_A, lora_B
 
