@@ -142,9 +142,7 @@ class OFTLayer(BaseTunerLayer):
 
             warnings.warn("Unscaling operation for OFT not supported! Keeping scale to 1.")
 
-    def update_layer(
-        self, adapter_name, r, oft_block_size, module_dropout, coft, eps, block_share, init_weights
-    ):
+    def update_layer(self, adapter_name, r, oft_block_size, module_dropout, coft, eps, block_share, init_weights):
         """
         Update the linear layer with trainable OFT weights. Override for other layer types.
         """
@@ -170,18 +168,20 @@ class OFTLayer(BaseTunerLayer):
 
         if r == 0 and oft_block_size != 0:
             if self.in_features % oft_block_size != 0 or oft_block_size > self.in_features:
-                warnings.warn(f"Invalid `oft_block_size` ({oft_block_size})!")
+                old_oft_block_size = oft_block_size
                 oft_block_size = self.adjust_oft_parameters(self.in_features, oft_block_size)
-                warnings.warn(f"Adjusted `oft_block_size` to ({oft_block_size}).")
+                warnings.warn(f"Invalid `oft_block_size` ({old_oft_block_size})! Adjusted `oft_block_size` to ({oft_block_size}).")
             r = int(self.in_features // oft_block_size)
         elif r != 0 and oft_block_size == 0:
             if self.in_features % r != 0 or r > self.in_features:
-                warnings.warn(f"Invalid `r` ({r})!")
+                old_r = r
                 r = self.adjust_oft_parameters(self.in_features, r)
-                warnings.warn(f"Adjusted `r` to ({r}).")
+                warnings.warn(f"Invalid `r` ({old_r})! Adjusted `r` to ({r}).")
             oft_block_size = int(self.in_features // r)
         else:
-            raise ValueError("Something went wrong, please report this error: https://github.com/huggingface/peft/issues")
+            raise ValueError(
+                "Something went wrong, please report this error: https://github.com/huggingface/peft/issues"
+            )
 
         self.coft[adapter_name] = coft
         self.block_share[adapter_name] = block_share
@@ -189,9 +189,13 @@ class OFTLayer(BaseTunerLayer):
 
         # Create weights with provided shape
         if block_share:
-            self.oft_r[adapter_name] = nn.Parameter(torch.empty(1, math.ceil(self.in_features / r), math.ceil(self.in_features / r)))
+            self.oft_r[adapter_name] = nn.Parameter(
+                torch.empty(1, math.ceil(self.in_features / r), math.ceil(self.in_features / r))
+            )
         else:
-            self.oft_r[adapter_name] = nn.Parameter(torch.empty(r, math.ceil(self.in_features / r), math.ceil(self.in_features / r)))
+            self.oft_r[adapter_name] = nn.Parameter(
+                torch.empty(r, math.ceil(self.in_features / r), math.ceil(self.in_features / r))
+            )
         self.oft_s[adapter_name] = nn.Parameter(torch.empty(int(self.out_features), 1))
 
         # Initialize weights
@@ -312,9 +316,7 @@ class Linear(nn.Module, OFTLayer):
 
         self._active_adapter = adapter_name
 
-        self.update_layer(
-            adapter_name, r, oft_block_size, module_dropout, coft, eps, block_share, init_weights
-        )
+        self.update_layer(adapter_name, r, oft_block_size, module_dropout, coft, eps, block_share, init_weights)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
@@ -492,13 +494,9 @@ class Conv2d(nn.Module, OFTLayer):
         self._active_adapter = adapter_name
 
         # Create adapter and set it active
-        self.update_layer(
-            adapter_name, r, oft_block_size, module_dropout, coft, eps, block_share, init_weights
-        )
+        self.update_layer(adapter_name, r, oft_block_size, module_dropout, coft, eps, block_share, init_weights)
 
-    def update_layer(
-        self, adapter_name, r, oft_block_size, module_dropout, coft, eps, block_share, init_weights
-    ):
+    def update_layer(self, adapter_name, r, oft_block_size, module_dropout, coft, eps, block_share, init_weights):
         """
         Update the conv2d layer with trainable OFT weights.
         """
@@ -515,18 +513,20 @@ class Conv2d(nn.Module, OFTLayer):
 
         if r == 0 and oft_block_size != 0:
             if conv_filter_dim % oft_block_size != 0 or oft_block_size > conv_filter_dim:
-                warnings.warn(f"Invalid `oft_block_size` ({oft_block_size})!")
+                old_oft_block_size = oft_block_size
                 oft_block_size = self.adjust_oft_parameters(conv_filter_dim, oft_block_size)
-                warnings.warn(f"Adjusted `oft_block_size` to ({oft_block_size}).")
+                warnings.warn(f"Invalid `oft_block_size` ({old_oft_block_size})! Adjusted `oft_block_size` to ({oft_block_size}).")
             r = int(conv_filter_dim // oft_block_size)
         elif r != 0 and oft_block_size == 0:
             if conv_filter_dim % r != 0 or r > conv_filter_dim:
-                warnings.warn(f"Invalid `r` ({r})!")
+                old_r = r
                 r = self.adjust_oft_parameters(conv_filter_dim, r)
-                warnings.warn(f"Adjusted `r` to ({r}).")
+                warnings.warn(f"Invalid `r` ({old_r})! Adjusted `r` to ({r}).")
             oft_block_size = int(conv_filter_dim // r)
         else:
-            raise ValueError("Something went wrong, please report this error: https://github.com/huggingface/peft/issues")
+            raise ValueError(
+                "Something went wrong, please report this error: https://github.com/huggingface/peft/issues"
+            )
 
         self.coft[adapter_name] = coft
         self.block_share[adapter_name] = block_share
@@ -534,9 +534,13 @@ class Conv2d(nn.Module, OFTLayer):
 
         # Create weights with provided shape
         if block_share:
-            self.oft_r[adapter_name] = nn.Parameter(torch.empty(1, math.ceil(conv_filter_dim / r), math.ceil(conv_filter_dim / r)))
+            self.oft_r[adapter_name] = nn.Parameter(
+                torch.empty(1, math.ceil(conv_filter_dim / r), math.ceil(conv_filter_dim / r))
+            )
         else:
-            self.oft_r[adapter_name] = nn.Parameter(torch.empty(r, math.ceil(conv_filter_dim / r), math.ceil(conv_filter_dim / r)))
+            self.oft_r[adapter_name] = nn.Parameter(
+                torch.empty(r, math.ceil(conv_filter_dim / r), math.ceil(conv_filter_dim / r))
+            )
         self.oft_s[adapter_name] = nn.Parameter(torch.empty(int(self.out_features), 1))
 
         # Initialize weights
@@ -578,8 +582,7 @@ class Conv2d(nn.Module, OFTLayer):
                     oft_mat, oft_s = self.get_delta_weight(active_adapter)
 
                     orig_weights = orig_weights.view(
-                        self.out_features,
-                        self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
+                        self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
                     )
                     orig_weights = torch.transpose(orig_weights, 0, 1)
                     orig_weights = torch.mm(oft_mat, orig_weights)
@@ -595,8 +598,7 @@ class Conv2d(nn.Module, OFTLayer):
 
                     orig_weights = base_layer.weight.data.clone()
                     orig_weights = orig_weights.view(
-                        self.out_features,
-                        self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
+                        self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
                     )
                     orig_weights = torch.transpose(orig_weights, 0, 1)
                     orig_weights = torch.mm(oft_mat, orig_weights)
@@ -677,7 +679,7 @@ class Conv2d(nn.Module, OFTLayer):
             oft_rotation = torch.eye(
                 self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
                 device=x.device,
-                dtype=previous_dtype
+                dtype=previous_dtype,
             )
             oft_scale = torch.ones((int(self.out_features), 1), device=x.device, dtype=previous_dtype)
 

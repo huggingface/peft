@@ -70,7 +70,10 @@ class OFTConfig(PeftConfig):
         },
     )
     module_dropout: float = field(
-        default=0.0, metadata={"help": "OFT multiplicative dropout, randomly setting blocks of OFT to be identity matrix, similar to the dropout layer in LoRA."}
+        default=0.0,
+        metadata={
+            "help": "OFT multiplicative dropout, randomly setting blocks of OFT to be identity matrix, similar to the dropout layer in LoRA."
+        },
     )
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,
@@ -174,8 +177,7 @@ class OFTConfig(PeftConfig):
         """
         if "oft_block_size" not in kwargs:
             raise ValueError(
-                'OFT has been updated since PEFT 0.13.0. Your trained adapter weights is incompatible with the latest version of OFT. Please retrain your adapter weights with newer PEFT versions.'
-                'Downgrade PEFT to version 0.12.0 to merge the old adapter weights.'
+                "OFT has been updated since PEFT 0.13.0. Your trained adapter weights are incompatible with the latest version of OFT. Please retrain your adapter weights with newer PEFT versions."
+                "Alternatively, downgrade PEFT to version 0.12.0 to use the old adapter weights."
             )
         return super().check_kwargs(**kwargs)
-

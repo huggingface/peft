@@ -81,7 +81,12 @@ class BOFTConfig(PeftConfig):
             "example": "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' ",
         },
     )
-    boft_dropout: float = field(default=0.0, metadata={"help": "BOFT multiplicative dropout, randomly setting blocks of OFT to be identity matrix, similar to the dropout layer in LoRA."})
+    boft_dropout: float = field(
+        default=0.0,
+        metadata={
+            "help": "BOFT multiplicative dropout, randomly setting blocks of OFT to be identity matrix, similar to the dropout layer in LoRA."
+        },
+    )
     fan_in_fan_out: bool = field(
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},

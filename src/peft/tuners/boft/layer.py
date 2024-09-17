@@ -315,7 +315,9 @@ class BOFTLayer(BaseTunerLayer):
             boft_block_num = int(self.in_features // boft_block_size)
 
         else:
-            raise ValueError("Something went wrong, please report this error: https://github.com/huggingface/peft/issues")
+            raise ValueError(
+                "Something went wrong, please report this error: https://github.com/huggingface/peft/issues"
+            )
 
         # In OFT you can specify the number of blocks to be 1
         if boft_n_butterfly_factor != 0:
@@ -744,8 +746,9 @@ class Conv2d(nn.Module, BOFTLayer):
             boft_block_num = int(conv_filter_dim // boft_block_size)
 
         else:
-            raise ValueError("Something went wrong, please report this error: https://github.com/huggingface/peft/issues")
-
+            raise ValueError(
+                "Something went wrong, please report this error: https://github.com/huggingface/peft/issues"
+            )
 
         # In OFT you can specify the number of blocks to be 1
         if boft_n_butterfly_factor != 0:
@@ -808,8 +811,7 @@ class Conv2d(nn.Module, BOFTLayer):
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
 
                     orig_weight = orig_weight.view(
-                        self.out_features,
-                        self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
+                        self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
                     )
                     orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
@@ -825,8 +827,7 @@ class Conv2d(nn.Module, BOFTLayer):
 
                     orig_weight = base_layer.weight.data.clone()
                     orig_weight = orig_weight.view(
-                        self.out_features,
-                        self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
+                        self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
                     )
                     orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
