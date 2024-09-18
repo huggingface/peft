@@ -547,6 +547,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "vector_length": 2, "init_vector_bank_bound": 0.1},
         {"target_modules": ["lin1"], "vector_length": 2, "init_vector_bank_bound": 0.1},
     ),
+    (
+        "BOFT Same",
+        "boft",
+        BOFTConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "boft_block_size": 2},
+        {"target_modules": ["lin0"], "init_weights": False, "boft_block_size": 2},
+    ),
+    (
+        "BOFT Different",
+        "boft",
+        BOFTConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "boft_block_size": 2},
+        {"target_modules": ["lin1"], "init_weights": False, "boft_block_size": 2},
+    ),
 ]
 
 PREFIXES = {
@@ -842,6 +856,10 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(TEST_CASES)
     def test_from_pretrained_config_construction(self, test_name, model_id, config_cls, config_kwargs):
         self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(TEST_CASES)
+    def test_load_multiple_adapters(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_load_multiple_adapters(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(TEST_CASES)
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
