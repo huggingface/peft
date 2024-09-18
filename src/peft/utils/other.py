@@ -81,7 +81,7 @@ __all__ = [
 def infer_device() -> str:
     if torch.cuda.is_available():
         return "cuda"
-    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available() and os.environ.get("PYTORCH_ENABLE_MPS", "1") == "1":
         return "mps"
     elif mlu_available:
         return "mlu"

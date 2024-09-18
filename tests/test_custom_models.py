@@ -171,6 +171,26 @@ TEST_CASES = [
         IA3Config,
         {"target_modules": ["conv2d", "lin0"], "feedforward_modules": ["conv2d", "lin0"]},
     ),
+    ("Conv3d 1 IA3", "Conv3d", IA3Config, {"target_modules": ["conv3d"], "feedforward_modules": []}),
+    ("Conv3d 2 IA3", "Conv3d", IA3Config, {"target_modules": ["conv3d"], "feedforward_modules": ["conv3d"]}),
+    (
+        "Conv3d 3 IA3",
+        "Conv3d",
+        IA3Config,
+        {"target_modules": ["conv3d", "lin0"], "feedforward_modules": []},
+    ),
+    (
+        "Conv3d 4 IA3",
+        "Conv3d",
+        IA3Config,
+        {"target_modules": ["conv3d", "lin0"], "feedforward_modules": ["conv3d"]},
+    ),
+    (
+        "Conv3d 5 IA3",
+        "Conv3d",
+        IA3Config,
+        {"target_modules": ["conv3d", "lin0"], "feedforward_modules": ["conv3d", "lin0"]},
+    ),
     ########
     # LoHa #
     ########
@@ -784,6 +804,50 @@ class ModelConv2D2(nn.Module):
         return X
 
 
+class ModelConv3D(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv3d = nn.Conv3d(5, 10, 3)
+        self.relu = nn.ReLU()
+        self.flat = nn.Flatten()
+        self.lin0 = nn.Linear(10, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        if X.dim() == 2:
+            X = torch.stack([X] * 3, dim=-1)
+        X = X.float().reshape(-1, 5, 3, 3, 3)
+        X = self.conv3d(X)
+        X = self.relu(X)
+        X = self.flat(X)
+        X = self.lin0(X)
+        X = self.sm(X)
+        return X
+
+class ModelConv3D2(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin0 = nn.Linear(10, 40)
+        self.conv3d = nn.Conv3d(8, 32, 3)
+        self.relu = nn.ReLU()
+        self.flat = nn.Flatten()
+        self.lin1 = nn.Linear(32, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        if X.dim() == 2:
+            X = torch.stack([X] * 3, dim=-1)
+        X = X.float()
+        X = self.lin0(X)
+        X = self.relu(X)
+        X = X.reshape(-1, 8, 3, 3, 3)
+        X = self.conv3d(X)
+        X = self.relu(X)
+        X = self.flat(X)
+        X = self.lin1(X)
+        X = self.sm(X)
+        return X
+
 class MockTransformerWrapper:
     """Mock class to behave like a transformers model.
 
@@ -808,6 +872,9 @@ class MockTransformerWrapper:
         if model_id == "Conv2d":
             return ModelConv2D().to(torch_dtype)
 
+        if model_id == "Conv3d":
+            return ModelConv3D().to(torch_dtype)
+
         if model_id == "MLP_LayerNorm":
             return MLP_LayerNorm().to(torch_dtype)
 
@@ -816,6 +883,9 @@ class MockTransformerWrapper:
 
         if model_id == "Conv2d2":
             return ModelConv2D2().to(torch_dtype)
+
+        if model_id == "Conv3d2":
+            return ModelConv3D2().to(torch_dtype)
 
         raise ValueError(f"model_id {model_id} not implemented")
 
@@ -1160,7 +1230,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         atol, rtol = 1e-5, 1e-5  # tolerances higher than defaults since merging introduces some numerical instability
 
-        if issubclass(config_cls, IA3Config) and model_id == "Conv2d":  # more instability with Conv2d + IA3
+        if issubclass(config_cls, IA3Config) and model_id in ["Conv2d", "Conv3d"]:  # more instability with Conv2d + IA3
             atol, rtol = 1e-3, 1e-3
 
         if config_kwargs.get("use_dora") and model_id == "EmbConv1D":
@@ -1169,7 +1239,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # check that there is a difference in results after training
         assert not torch.allclose(outputs_before, outputs_after, atol=atol, rtol=rtol)
 
-        if self.torch_device in ["mlu"] and model_id in ["Conv2d"]:
+        if self.torch_device in ["mlu"] and model_id in ["Conv2d", "Conv3d"]:
             atol, rtol = 1e-3, 1e-2  # MLU
 
         # unmerged or merged should make no difference
