@@ -315,7 +315,9 @@ class PeftCommonTester:
         )
         model = get_peft_model(model, config)
 
-        with tempfile.TemporaryDirectory() as tmp_dirname:
+        # note: not using the context manager here because it fails on Windows CI for some reason
+        tmp_dirname = tempfile.mkdtemp()
+        try:
             model.save_pretrained(tmp_dirname)
 
             model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
@@ -324,6 +326,12 @@ class PeftCommonTester:
 
             model.load_adapter(tmp_dirname, adapter_name="other", init_empty=True)
             assert {p.device.type for p in model.parameters()} == {self.torch_device}
+        finally:
+            try:
+                shutil.rmtree(tmp_dirname)
+            except PermissionError:
+                # windows error
+                pass
 
         # also test injecting directly
         del model
