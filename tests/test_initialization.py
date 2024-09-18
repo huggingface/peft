@@ -1041,9 +1041,9 @@ class TestLoraInitialization:
     @pytest.fixture
     def mha_cls(self):
         class ModelMha(nn.Module):
-            def __init__(self):
+            def __init__(self, kdim=None, vdim=None):
                 super().__init__()
-                self.mha = nn.MultiheadAttention(10, 2)
+                self.mha = nn.MultiheadAttention(10, 2, kdim=kdim, vdim=vdim)
                 self.lin0 = nn.Linear(10, 2)
                 self.sm = nn.LogSoftmax(dim=-1)
 
@@ -1078,6 +1078,21 @@ class TestLoraInitialization:
         #         module._restore_weights()
         model(inputs)
         model.load_state_dict(restore_state_dict)
+
+    def test_mha_with_separate_qkv_embed_raises(self, mha_cls):
+        # passing different kdim and vdim results in separate parameters for q, k, v, which is not supported (yet)
+        model = mha_cls(kdim=20, vdim=30)
+        config = LoraConfig(target_modules=["mha"])
+        msg = "Only same embed for query/key/value is supported as of now for MultiheadAttention"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+    def test_mha_with_dora_raises(self, mha_cls):
+        model = mha_cls()
+        config = LoraConfig(target_modules=["mha"], use_dora=True)
+        msg = re.escape("MultiheadAttention does not support DoRA (yet), please set use_dora to False")
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
 
 
 class TestAdaLoraInitialization:

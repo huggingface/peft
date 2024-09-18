@@ -1144,11 +1144,15 @@ class MultiheadAttention(nn.Module, LoraLayer):
         **kwargs,
     ) -> None:
         # TODO work with separate weights
-        if not base_layer._qkv_same_embed_dim:
-            raise ValueError(f"Only same embed for query/key/value is supported as of now for {self.__class__}.")
+        if not getattr(base_layer, "_qkv_same_embed_dim", True):
+            # default for this value appears to be True:
+            # https://github.com/pytorch/pytorch/blob/701ba5203fe68d55d655bd4d6c008be94cf34ea5/torch/nn/modules/activation.py#L1128-L1130
+            raise ValueError(
+                f"Only same embed for query/key/value is supported as of now for {self.__class__.__name__}."
+            )
         if use_dora:
             # TODO: probably not so hard to implement
-            raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
+            raise ValueError(f"{self.__class__.__name__} does not support DoRA (yet), please set use_dora to False")
 
         super().__init__()
         LoraLayer.__init__(self, base_layer, **kwargs)
