@@ -40,6 +40,13 @@ def require_non_cpu(test_case):
     return unittest.skipUnless(torch_device != "cpu", "test requires a hardware accelerator")(test_case)
 
 
+def require_non_xpu(test_case):
+    """
+    Decorator marking a test that should be skipped for XPU.
+    """
+    return unittest.skipUnless(torch_device != "xpu", "test requires a non-XPU")(test_case)
+
+
 def require_torch_gpu(test_case):
     """
     Decorator marking a test that requires a GPU. Will be skipped when no GPU is available.
