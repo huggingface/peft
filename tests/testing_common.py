@@ -476,6 +476,24 @@ class PeftCommonTester:
             assert model_from_pretrained.peft_config["default"].inference_mode
             assert model_from_pretrained.peft_config["default"] is config
 
+    def _test_load_multiple_adapters(self, model_id, config_cls, config_kwargs):
+        # just ensure that this works and raises no error
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname)
+            del model
+
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            model = PeftModel.from_pretrained(model, tmp_dirname, torch_device=self.torch_device)
+            model.load_adapter(tmp_dirname, adapter_name="other")
+            model.load_adapter(tmp_dirname, adapter_name="yet-another")
+
     def _test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
         if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig, VBLoRAConfig):
             # Merge layers only supported for LoRA and IA³
