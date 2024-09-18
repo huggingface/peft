@@ -60,11 +60,13 @@ from .tuners import (
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
+    VBLoRAConfig,
+    VBLoRAModel,
     VeraConfig,
     VeraModel,
     XLoraConfig,
 )
-from .tuners.tuners_utils import BaseTuner as _BaseTuner
+from .tuners.tuners_utils import BaseTuner
 from .utils import _prepare_prompt_learning_config
 
 
@@ -101,9 +103,10 @@ PEFT_TYPE_TO_CONFIG_MAPPING: dict[str, type[PeftConfig]] = {
     "FOURIERFT": FourierFTConfig,
     "XLORA": XLoraConfig,
     "HRA": HRAConfig,
+    "VBLORA": VBLoRAConfig,
 }
 
-PEFT_TYPE_TO_TUNER_MAPPING: dict[str, type[_BaseTuner]] = {
+PEFT_TYPE_TO_TUNER_MAPPING: dict[str, type[BaseTuner]] = {
     "LORA": LoraModel,
     "LOHA": LoHaModel,
     "LOKR": LoKrModel,
@@ -117,6 +120,7 @@ PEFT_TYPE_TO_TUNER_MAPPING: dict[str, type[_BaseTuner]] = {
     "FOURIERFT": FourierFTModel,
     "XLORA": XLoraModel,
     "HRA": HRAModel,
+    "VBLORA": VBLoRAModel,
 }
 
 
@@ -159,13 +163,11 @@ def get_peft_model(
             The revision of the base model. If this isn't set, the saved peft model will load the `main` revision for
             the base model
     """
-    model_config = getattr(model, "config", {"model_type": "custom"})
-    if hasattr(model_config, "to_dict"):
-        model_config = model_config.to_dict()
-
+    model_config = BaseTuner.get_model_config(model)
     old_name = peft_config.base_model_name_or_path
     new_name = model.__dict__.get("name_or_path", None)
     peft_config.base_model_name_or_path = new_name
+
     if (old_name is not None) and (old_name != new_name):
         warnings.warn(
             f"The PEFT config's `base_model_name_or_path` was renamed from '{old_name}' to '{new_name}'. "

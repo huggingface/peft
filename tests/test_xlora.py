@@ -15,8 +15,10 @@
 import os
 
 import huggingface_hub
+import packaging
 import pytest
 import torch
+import transformers
 from safetensors.torch import load_file
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -25,21 +27,24 @@ from peft.peft_model import PeftModel
 from peft.utils import infer_device
 
 
+uses_transformers_4_45 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.45.0")
+
+
 class TestXlora:
     torch_device = infer_device()
 
     model_id = "facebook/opt-125m"
     num_loras = 4
 
-    @pytest.fixture(scope="function")
+    @pytest.fixture(scope="class")
     def lora_dir(self, tmp_path_factory):
         return tmp_path_factory.mktemp("lora")
 
-    @pytest.fixture(scope="function")
+    @pytest.fixture(scope="class")
     def lora_embedding_dir(self, tmp_path_factory):
         return tmp_path_factory.mktemp("lora_embedding")
 
-    @pytest.fixture(scope="function")
+    @pytest.fixture(scope="class")
     def saved_lora_adapters(self, lora_dir):
         file_names = []
         for i in range(1, self.num_loras + 1):
@@ -52,7 +57,7 @@ class TestXlora:
             file_names.append(file_name)
         return file_names
 
-    @pytest.fixture(scope="function")
+    @pytest.fixture(scope="class")
     def saved_lora_embedding_adapters(self, lora_embedding_dir):
         file_names = []
         for i in range(1, self.num_loras + 1):
@@ -65,7 +70,7 @@ class TestXlora:
             file_names.append(file_name)
         return file_names
 
-    @pytest.fixture(scope="function")
+    @pytest.fixture(scope="class")
     def tokenizer(self):
         tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True, device_map=self.torch_device)
         return tokenizer
@@ -128,6 +133,8 @@ class TestXlora:
         )
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
 
+    # TODO: remove the skip when 4.45 is released!
+    @pytest.mark.skipif(not uses_transformers_4_45, reason="Requires transformers >= 4.45")
     def test_scalings_logging_methods(self, tokenizer, model):
         model.enable_scalings_logging()
 
@@ -155,16 +162,13 @@ class TestXlora:
 
         bucketed = model.get_bucketed_scalings_log()
         keys = bucketed.keys()
-        # One bucket for prompt (seqlen=...) and one for the completion (seqlen=1)
-        assert len(bucketed) == 2
-        # One bucket for prompt (which has 1 elem)
-        assert len(bucketed[max(keys)][0]) == 1
-        assert len(bucketed[max(keys)][1]) == 1
-        assert bucketed[max(keys)][0][0] == 0
-        # One bucket for completions with bucket name 1
-        assert len(bucketed[1][0]) > 1
-        assert len(bucketed[1][1]) > 1
-        assert bucketed[1][0][0] > 0
+        # Once bucket for each token as we aren't using cache
+        assert len(bucketed) == 32 == len(keys)
+        seq_len = inputs.shape[1]
+        for key in keys:
+            assert len(bucketed[key][0]) == 1
+            assert len(bucketed[key][1]) == 1
+            assert bucketed[key][0][0] == key - seq_len
 
         model.clear_scalings_log()
         assert len(model.get_scalings_log()) == 0

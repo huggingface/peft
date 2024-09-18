@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2024-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,150 +11,76 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 from __future__ import annotations
 
-import math
 import warnings
 from dataclasses import asdict
 from enum import Enum
-from typing import Optional, Union
+from typing import Optional
 
 import torch
 import torch.nn as nn
-from torch.nn.init import _calculate_correct_fan
 from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
-from peft.utils import (
-    TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
-    ModulesToSaveWrapper,
-    _get_submodules,
-)
+from peft.utils import TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING, ModulesToSaveWrapper, _get_submodules
 
-from .._buffer_dict import BufferDict
-from ..tuners_utils import _maybe_include_all_linear_layers
-from .config import VeraConfig
-from .layer import Linear, VeraLayer
+from .config import VBLoRAConfig
+from .layer import Linear, VBLoRALayer
 
 
-def _kaiming_init(
-    tensor_or_shape: Union[torch.Tensor, tuple[int, ...]],
-    generator: torch.Generator,
-) -> torch.Tensor:
+class VBLoRAModel(BaseTuner):
     """
-    Kaiming Uniform Initialisation adapted to accept a `torch.Generator` object for PRNG.
+    Creates VBLoRA model from a pretrained transformers model.
 
-    Args:
-        tensor_or_shape (`Union[torch.Tensor, tuple[int, ...]]`):
-            Tensor to initialise, or shape of new tensor to create and then initialise.
-        generator: (`torch.Generator`):
-            Generator object that manages the state of the PRNG algorithm in use.
-
-    Returns:
-        `torch.Tensor`: The initialised tensor.
-    """
-    if isinstance(tensor_or_shape, tuple):
-        tensor = torch.empty(tensor_or_shape)
-    else:
-        tensor = tensor_or_shape
-    fan = _calculate_correct_fan(tensor, "fan_in")
-    gain = math.sqrt(2)
-    std = gain / math.sqrt(fan)
-    bound = math.sqrt(3.0) * std
-
-    with torch.no_grad():
-        return tensor.uniform_(-bound, bound, generator=generator)
-
-
-class VeraModel(BaseTuner):
-    """
-    Creates Vector-based Random Matrix Adaptation (Vera) model from a pretrained transformers model.
+    The method is described in detail in https://arxiv.org/abs/2405.15179.
 
     Args:
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
-        config ([`VeraConfig`]): The configuration of the Vera model.
+        config ([`VBLoRAConfig`]): The configuration of the VBLoRA model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
 
     Returns:
-        `torch.nn.Module`: The Vera model.
+        `torch.nn.Module`: The VBLoRA model.
 
     Example:
 
         ```py
         >>> from transformers import AutoModelForCausalLM
-        >>> from peft import VeraConfig, get_peft_model
+        >>> from peft import VBLoRAConfig, get_peft_model
 
         >>> base_model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
-        >>> config = VeraConfig(r=128)
+        >>> config = VBLoRAConfig(
+        ...     task_type="SEQ_CLS",
+        ...     r=4,
+        ...     target_modules=["fc1", "fc2", "k_proj", "out_proj", "q_proj", "v_proj"],
+        ...     num_vectors=60,
+        ...     vector_length=256,
+        ...     save_only_topk_weights=True,
+        ... )
         >>> model = get_peft_model(base_model, config)
         ```
 
     **Attributes**:
         - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
-        - **peft_config** ([`VeraConfig`]): The configuration of the Vera model.
+        - **peft_config** ([`VBLoRAConfig`]): The configuration of the VBLoRAConfig model.
     """
 
-    prefix: str = "vera_lambda"
+    prefix: str = "vblora_"
 
     def __init__(self, model, config, adapter_name) -> None:
         super().__init__(model, config, adapter_name)
 
-    def _find_dim(self, config) -> tuple[int, int]:
-        """
-        Finds the largest input and output dimensions across linear layers that have been wrapped with VeRA.
+    def _init_vblora_vector_bank(self, config: VBLoRAConfig, adapter_name: str) -> None:
+        vblora_vector_bank = torch.zeros(config.num_vectors, config.vector_length)
+        torch.nn.init.uniform_(vblora_vector_bank, -config.init_vector_bank_bound, config.init_vector_bank_bound)
+        self.vblora_vector_bank[adapter_name] = vblora_vector_bank
 
-        This will be used for determining the size of the shared vera_A and vera_B matrices.
-        """
-        model_config = self.get_model_config(self.model)
+    def _pre_injection_hook(self, model: nn.Module, config: VBLoRAConfig, adapter_name: str) -> None:
+        self.vblora_vector_bank = nn.ParameterDict({})
 
-        peft_config = self._prepare_adapter_config(config, model_config)
-        peft_config = _maybe_include_all_linear_layers(peft_config, self.model)
-
-        largest_shape = None
-        for key, module in self.model.named_modules():
-            if not self._check_target_module_exists(peft_config, key):
-                continue
-
-            if isinstance(module, (nn.Linear, Conv1D)):
-                module_shape = tuple(module.weight.shape)
-                if isinstance(module, Conv1D):
-                    module_shape = module_shape[::-1]
-            else:
-                continue
-
-            if largest_shape is None:
-                largest_shape = module_shape
-                continue
-
-            if module_shape != largest_shape:
-                largest_shape = tuple(max(a, b) for a, b in zip(largest_shape, module_shape))
-
-        if largest_shape is None:
-            msg = "No layers types compatible with VeRA were found. Please check `peft_config.target_modules`."
-            raise ValueError(msg)
-
-        return largest_shape
-
-    def _init_vera_A_vera_B(self, config: VeraConfig, adapter_name: str) -> None:
-        linear_out_dim, linear_in_dim = self._find_dim(config)
-
-        # use of persistent to exclude vera_A and vera_B from the state dict if we choose not to save them.
-        self.vera_A = BufferDict({}, persistent=config.save_projection)
-        self.vera_B = BufferDict({}, persistent=config.save_projection)
-
-        # deterministic init of vera_A and vera_B if we know the key
-        generator = torch.Generator(device="cpu").manual_seed(config.projection_prng_key)
-        vera_A = _kaiming_init((config.r, linear_in_dim), generator=generator)
-        vera_B = _kaiming_init((linear_out_dim, config.r), generator=generator)
-        self.vera_A[adapter_name] = vera_A
-        self.vera_B[adapter_name] = vera_B
-
-    def _pre_injection_hook(self, model: nn.Module, config: VeraConfig, adapter_name: str) -> None:
-        self._init_vera_A_vera_B(config, adapter_name)
-
-    def _check_new_adapter_config(self, config: VeraConfig) -> None:
+    def _check_new_adapter_config(self, config: VBLoRAConfig) -> None:
         """
         A helper method to check the config when a new adapter is being added.
 
@@ -170,64 +96,49 @@ class VeraModel(BaseTuner):
                 "set bias to 'none' for all adapters."
             )
 
-        for existing_config in self.peft_config.values():
-            if existing_config is config:
-                # skip the current config
-                continue
-
-            if existing_config.projection_prng_key != config.projection_prng_key:
-                raise ValueError(
-                    f"Vera PRNG initialisation key must be the same for all adapters. Got {config.projection_prng_key=} but "
-                    f"previous config had {existing_config.projection_prng_key}."
-                )
-
-        save_project_unique_values = sorted({config.save_projection for config in self.peft_config.values()})
-        if len(save_project_unique_values) > 1:
-            raise ValueError(
-                "VeRA projection weights must be saved for all adapters or none, but got multiple different values: "
-                f"{save_project_unique_values}"
-            )
-
     @staticmethod
-    def _check_target_module_exists(vera_config, key):
-        return check_target_module_exists(vera_config, key)
+    def _check_target_module_exists(vblora_config, key):
+        return check_target_module_exists(vblora_config, key)
 
     def _create_and_replace(
         self,
-        vera_config,
+        vblora_config,
         adapter_name,
         target,
         target_name,
         parent,
         current_key,
-        **optional_kwargs,
     ):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
 
-        r = vera_config.r
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
-            "r": r,
-            "vera_dropout": vera_config.vera_dropout,
-            "fan_in_fan_out": vera_config.fan_in_fan_out,
-            "init_weights": vera_config.init_weights,
+            "fan_in_fan_out": vblora_config.fan_in_fan_out,
+            "bias": bias,
         }
-        kwargs["bias"] = bias
+        self._init_vblora_vector_bank(vblora_config, adapter_name)
         # TODO: add quantization support
 
         if isinstance(target, Linear):
             target.update_layer(
-                adapter_name,
-                self.vera_A,
-                self.vera_B,
-                r,
-                vera_config.vera_dropout,
-                vera_config.init_weights,
-                d_initial=vera_config.d_initial,
+                adapter_name=adapter_name,
+                vblora_vector_bank=self.vblora_vector_bank,
+                r=vblora_config.r,
+                topk=vblora_config.topk,
+                num_vectors=vblora_config.num_vectors,
+                vector_length=vblora_config.vector_length,
+                vblora_dropout=vblora_config.vblora_dropout,
+                init_logits_std=vblora_config.init_logits_std,
             )
         else:
-            new_module = self._create_new_module(vera_config, self.vera_A, self.vera_B, adapter_name, target, **kwargs)
+            new_module = self._create_new_module(
+                vblora_config=vblora_config,
+                vblora_vector_bank=self.vblora_vector_bank,
+                adapter_name=adapter_name,
+                target=target,
+                **kwargs,
+            )
             if adapter_name not in self.active_adapter:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
@@ -257,7 +168,7 @@ class VeraModel(BaseTuner):
 
         # dispatch to correct device
         for name, module in new_module.named_modules():
-            if "vera_" in name:
+            if "vblora_" in name:
                 module.to(child.weight.device)
 
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
@@ -269,22 +180,19 @@ class VeraModel(BaseTuner):
             bias = self.peft_config[active_adapter].bias
             if bias == "none":
                 continue
-
             if bias == "all":
                 for n, p in model.named_parameters():
                     if "bias" in n:
                         p.requires_grad = True
-            elif bias == "vera_only":
+            elif bias == "vblora_only":
                 for m in model.modules():
-                    if isinstance(m, VeraLayer) and hasattr(m, "bias") and m.bias is not None:
+                    if isinstance(m, VBLoRALayer) and hasattr(m, "bias") and m.bias is not None:
                         m.bias.requires_grad = True
             else:
                 raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
 
     @staticmethod
-    def _create_new_module(vera_config, vera_A, vera_B, adapter_name, target, **kwargs):
-        bias = kwargs.pop("bias", False)
-
+    def _create_new_module(vblora_config, vblora_vector_bank, adapter_name, target, **kwargs):
         if isinstance(target, BaseTunerLayer):
             target_base_layer = target.get_base_layer()
         else:
@@ -296,7 +204,7 @@ class VeraModel(BaseTuner):
                     "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                     "Setting fan_in_fan_out to False."
                 )
-                kwargs["fan_in_fan_out"] = vera_config.fan_in_fan_out = False
+                kwargs["fan_in_fan_out"] = vblora_config.fan_in_fan_out = False
         elif isinstance(target_base_layer, Conv1D):
             kwargs["is_target_conv_1d_layer"] = True
             if not kwargs["fan_in_fan_out"]:
@@ -304,19 +212,22 @@ class VeraModel(BaseTuner):
                     "fan_in_fan_out is set to False but the target module is `Conv1D`. "
                     "Setting fan_in_fan_out to True."
                 )
-                kwargs["fan_in_fan_out"] = vera_config.fan_in_fan_out = True
+                kwargs["fan_in_fan_out"] = vblora_config.fan_in_fan_out = True
         else:
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
                 "`torch.nn.Linear`, `transformers.pytorch_utils.Conv1D`."
             )
         new_module = Linear(
-            target,
-            vera_A,
-            vera_B,
-            adapter_name,
-            bias=bias,
-            d_initial=vera_config.d_initial,
+            base_layer=target,
+            vblora_vector_bank=vblora_vector_bank,
+            adapter_name=adapter_name,
+            r=vblora_config.r,
+            num_vectors=vblora_config.num_vectors,
+            vector_length=vblora_config.vector_length,
+            topk=vblora_config.topk,
+            vblora_dropout=vblora_config.vblora_dropout,
+            init_logits_std=vblora_config.init_logits_std,
             **kwargs,
         )
 
@@ -340,15 +251,23 @@ class VeraModel(BaseTuner):
         config_dict[key] = config
         return config
 
-    def _set_adapter_layers(self, enabled=True):
+    def _set_adapter_layers(self, enabled: bool = True) -> None:
         for module in self.model.modules():
             if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
                 module.enable_adapters(enabled)
 
-    def enable_adapter_layers(self):
+    def enable_adapter_layers(self) -> None:
+        """Enable all adapters.
+
+        Call this if you have previously disabled all adapters and want to re-enable them.
+        """
         self._set_adapter_layers(enabled=True)
 
-    def disable_adapter_layers(self):
+    def disable_adapter_layers(self) -> None:
+        """Disable all adapters.
+
+        When disabling all adapters, the model output corresponds to the output of the base model.
+        """
         for active_adapter in self.active_adapters:
             val = self.peft_config[active_adapter].bias
             if val != "none":
@@ -359,9 +278,23 @@ class VeraModel(BaseTuner):
                 warnings.warn(msg)
         self._set_adapter_layers(enabled=False)
 
-    def set_adapter(self, adapter_name):
+    def set_adapter(self, adapter_name: str | list[str]) -> None:
+        """Set the active adapter(s).
+
+        Additionally, this function will set the specified adapters to trainable (i.e., requires_grad=True). If this is
+        not desired, use the following code.
+
+        ```py
+        >>> for name, param in model_peft.named_parameters():
+        ...     if ...:  # some check on name (ex. if 'lora' in name)
+        ...         param.requires_grad = False
+        ```
+
+        Args:
+            adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
+        """
         for module in self.model.modules():
-            if isinstance(module, VeraLayer):
+            if isinstance(module, VBLoRALayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
@@ -371,10 +304,10 @@ class VeraModel(BaseTuner):
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
         if peft_config.target_modules is None:
-            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING:
+            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING:
                 raise ValueError("Please specify `target_modules` in `peft_config`")
             peft_config.target_modules = set(
-                TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING[model_config["model_type"]]
+                TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
             )
         return peft_config
 
@@ -385,8 +318,7 @@ class VeraModel(BaseTuner):
         safe_merge: bool = False,
         adapter_names: Optional[list[str]] = None,
     ):
-        # we cannot use self.prefix as we want to include non-trainable vera parameters
-        key_list = [key for key, _ in self.model.named_modules() if "vera" not in key]
+        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for key in tqdm(key_list, disable=not progressbar, desc=desc):
             try:
@@ -405,7 +337,7 @@ class VeraModel(BaseTuner):
 
         return self.model
 
-    def delete_adapter(self, adapter_name: str):
+    def delete_adapter(self, adapter_name: str) -> None:
         """
         Deletes an existing adapter.
 
@@ -416,12 +348,11 @@ class VeraModel(BaseTuner):
             raise ValueError(f"Adapter {adapter_name} does not exist")
         del self.peft_config[adapter_name]
 
-        # we cannot use self.prefix as we want to include non-trainable vera parameters
-        key_list = [key for key, _ in self.model.named_modules() if "vera" not in key]
+        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         new_adapter = None
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
-            if isinstance(target, VeraLayer):
+            if isinstance(target, VBLoRALayer):
                 target.delete_adapter(adapter_name)
                 if new_adapter is None:
                     new_adapter = target.active_adapter[:]
@@ -430,9 +361,9 @@ class VeraModel(BaseTuner):
 
     def merge_and_unload(
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
-    ):
+    ) -> torch.nn.Module:
         r"""
-        This method merges the Vera layers into the base model. This is needed if someone wants to use the base model
+        This method merges the VBLoRA layers into the base model. This is needed if someone wants to use the base model
         as a standalone model.
 
         Args:
@@ -463,7 +394,53 @@ class VeraModel(BaseTuner):
 
     def unload(self):
         """
-        Gets back the base model by removing all the Vera modules without merging. This gives back the original base
+        Gets back the base model by removing all the VBLoRA modules without merging. This gives back the original base
         model.
         """
         return self._unload_and_optionally_merge(merge=False)
+
+    def get_nb_savable_parameters(self, adapter="default") -> tuple[int, int]:
+        r"""
+        Returns the number of savable VB-LoRA parameters and other savable parameters.
+        """
+        logits_params = 0
+        vector_bank_params = 0
+        other_params = 0
+        for name, param in self.named_parameters():
+            if "vblora_logits" in name:
+                logits_params += param.numel()
+            elif "vblora_vector_bank" in name:
+                vector_bank_params += param.numel()
+            elif param.requires_grad:
+                other_params += param.numel()
+        if self.peft_config[adapter].save_only_topk_weights:
+            num_vectors = self.peft_config[adapter].num_vectors
+            factor = 1  # factor to count float32-equivalent parameters
+            if num_vectors < 2**8:
+                factor = 0.25
+            elif num_vectors < 2**15:
+                factor = 0.5
+            elif num_vectors < 2**31:
+                factor = 1
+            else:
+                factor = 2
+            topk_weight_params = (
+                logits_params / self.peft_config[adapter].num_vectors * (self.peft_config[adapter].topk - 1)
+            )
+            topk_indices_params = (
+                logits_params / self.peft_config[adapter].num_vectors * self.peft_config[adapter].topk * factor
+            )
+            vblora_params = int(vector_bank_params + topk_weight_params + topk_indices_params)
+        else:
+            vblora_params = vector_bank_params + logits_params
+        return vblora_params, other_params
+
+    def print_savable_parameters(self) -> None:
+        r"""
+        Prints the number of savable VB-LoRA parameters and total savable parameters.
+        """
+        vblora_params, other_params = self.get_nb_savable_parameters()
+        print(
+            f"VB-LoRA params to-be-saved (float32-equivalent): {vblora_params:,d} "
+            f"|| total params to-be-saved: {(vblora_params + other_params):,d}"
+        )

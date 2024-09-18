@@ -23,6 +23,8 @@ from accelerate.hooks import remove_hook_from_submodules
 from torch import nn
 from transformers.utils import PushToHubMixin
 
+from peft.utils.constants import DUMMY_MODEL_CONFIG
+
 from .config import PeftConfig
 from .peft_model import PeftModel
 from .tuners import (
@@ -120,7 +122,7 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         self.base_model = MixedModel(model, {adapter_name: peft_config}, adapter_name)
         self.set_modules_to_save(peft_config, adapter_name)
 
-        self.config = getattr(model, "config", {"model_type": "custom"})
+        self.config = getattr(model, "config", DUMMY_MODEL_CONFIG)
 
         # the `pretraining_tp` is set for some models to simulate Tensor Parallelism during inference to avoid
         # numerical differences, https://github.com/pytorch/pytorch/issues/76232 - to avoid any unexpected
