@@ -145,7 +145,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
     def prepare_inputs_for_testing(self):
         return {
             "prompt": "a high quality digital photo of a cute corgi",
-            "num_inference_steps": 20,
+            "num_inference_steps": 3,
         }
 
     @parameterized.expand(

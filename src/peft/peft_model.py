@@ -58,6 +58,7 @@ from .tuners import (
     PrefixEncoder,
     PromptEmbedding,
     PromptEncoder,
+    VBLoRAModel,
     VeraModel,
     XLoraConfig,
     XLoraModel,
@@ -100,6 +101,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.FOURIERFT: FourierFTModel,
     PeftType.XLORA: XLoraModel,
     PeftType.HRA: HRAModel,
+    PeftType.VBLORA: VBLoRAModel,
 }
 
 
@@ -690,9 +692,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 prompts = prompt_encoder(prompt_tokens, task_ids)
             else:
                 if peft_config.inference_mode:
-                    prompts = prompt_encoder.embedding.weight.repeat(batch_size, 1, 1)
+                    prompts = prompt_encoder.embedding.weight
                 else:
+                    # Take only one prompt token sample and expand the output instead of expanding the input, see:
+                    # https://github.com/huggingface/peft/issues/2043#issuecomment-2321522577
+                    prompt_tokens = prompt_tokens[:1]
                     prompts = prompt_encoder(prompt_tokens)
+                prompts = prompts.repeat(batch_size, 1, 1)
             return prompts
 
     def get_nb_trainable_parameters(self) -> tuple[int, int]:
@@ -2643,10 +2649,9 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
             if isinstance(adapter_module, torch.nn.ModuleDict):
                 for key, submodule in adapter_module.items():
                     devices_dd[key].extend([param.device.type for param in submodule.parameters()])
-            elif (
-                isinstance(adapter_module, torch.nn.ParameterDict)
-                or (adapter_module.__class__.__name__ == "BufferDict")  # VeRA
-            ):
+            elif isinstance(adapter_module, torch.nn.ParameterDict) or (
+                adapter_module.__class__.__name__ == "BufferDict"
+            ):  # VeRA
                 for key, param in adapter_module.items():
                     devices_dd[key].append(param.device.type)
         devices = {key: sorted(set(val)) for key, val in devices_dd.items()}

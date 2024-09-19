@@ -52,6 +52,7 @@ from peft import (
     LoftQConfig,
     LoraConfig,
     PeftModel,
+    PromptEncoderConfig,
     TaskType,
     get_peft_model,
     prepare_model_for_kbit_training,
@@ -70,6 +71,7 @@ from .testing_utils import (
     require_eetq,
     require_hqq,
     require_non_cpu,
+    require_non_xpu,
     require_optimum,
     require_torch_gpu,
     require_torch_multi_gpu,
@@ -1786,6 +1788,41 @@ class TestOLoRA:
         # Same test as test_bloomz_olora_4bit but with 8 bits.
         self.get_errors(bits=8, device=device, tmp_path=tmp_path)
 
+    @pytest.mark.parametrize("bits", [4, 8])
+    def test_olora_with_quantized_model(self, bits):
+        import bitsandbytes as bnb
+
+        # issue 1999
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        if bits == 4:
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_quant_storage=torch.float16,
+                bnb_4bit_use_double_quant=True,
+            )
+        elif bits == 8:
+            bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+        else:
+            raise ValueError("bits must be 4 or 8")
+
+        model = AutoModelForCausalLM.from_pretrained(model_id, quantization_config=bnb_config)
+        model = prepare_model_for_kbit_training(model)
+        config = LoraConfig(init_lora_weights="olora")
+        model = get_peft_model(model, config)
+
+        # check that the correct type is used for the weights
+        base_layer = model.base_model.model.model.decoder.layers[0].self_attn.v_proj.base_layer.weight
+        if bits == 4:
+            assert isinstance(base_layer, bnb.nn.modules.Params4bit)
+        else:
+            assert isinstance(base_layer, bnb.nn.modules.Int8Params)
+
+        inputs = torch.arange(10).unsqueeze(0).to(model.device)
+        logits = model(inputs).logits  # does not raise
+        assert torch.isfinite(logits).all()
+
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
 class TestLoftQ:
@@ -2419,6 +2456,7 @@ class MixedPrecisionTests(unittest.TestCase):
             trainer.train()  # does not raise
 
 
+@require_non_xpu
 @require_torch_gpu
 @require_aqlm
 @unittest.skipUnless(
@@ -2504,6 +2542,7 @@ class PeftAqlmGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
 
+@require_non_xpu
 @require_torch_gpu
 @require_hqq
 @unittest.skipUnless(
@@ -2825,6 +2864,7 @@ class PeftAwqGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
 
+@require_non_xpu
 @require_torch_gpu
 @require_eetq
 class PeftEetqGPUTests(unittest.TestCase):
@@ -3147,3 +3187,42 @@ class TestBOFT:
         conv = boft.layer.Conv2d(conv, "conv", boft_n_butterfly_factor=2).to(dtype=torch.bfloat16)
         x = torch.randn(1, 160, 160, device="cuda", dtype=torch.bfloat16)
         conv(x)  # does not raise
+
+
+@require_torch_gpu
+class TestPTuningReproducibility:
+    device = infer_device()
+
+    def test_p_tuning_exactly_reproducible_after_loading(self, tmp_path):
+        # See: https://github.com/huggingface/peft/issues/2043#issuecomment-2321522577
+        # Ensure that after loading a p-tuning checkpoint, results are exactly reproducible (before the patch, they were
+        # only _almost_ identical).
+
+        # The model must be sufficiently large for the effect to be measurable, which is why this test requires is not
+        # run on CPU.
+        model_id = "facebook/opt-125m"
+        inputs = torch.arange(10).view(-1, 1).to(self.device)
+
+        torch.manual_seed(0)
+        model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
+        peft_config = PromptEncoderConfig(task_type="CAUSAL_LM", num_virtual_tokens=20, encoder_hidden_size=128)
+        model = get_peft_model(model, peft_config).eval()
+
+        with torch.inference_mode():
+            output_peft = model(inputs).logits
+            gen_peft = model.generate(inputs, min_new_tokens=10, max_new_tokens=10)
+
+        model.save_pretrained(tmp_path)
+        del model
+        torch.cuda.empty_cache()
+        gc.collect()
+
+        model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
+        model = PeftModel.from_pretrained(model, tmp_path)
+
+        with torch.inference_mode():
+            output_loaded = model(inputs).logits
+            gen_loaded = model.generate(inputs, min_new_tokens=10, max_new_tokens=10)
+
+        torch.testing.assert_close(output_loaded, output_peft)
+        torch.testing.assert_close(gen_loaded, gen_peft)
