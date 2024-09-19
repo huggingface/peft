@@ -3013,6 +3013,7 @@ class PeftEetqGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
 
+@require_non_xpu
 @require_torch_gpu
 @require_torchao
 class PeftTorchaoGPUTests(unittest.TestCase):
