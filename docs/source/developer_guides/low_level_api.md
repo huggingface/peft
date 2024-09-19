@@ -120,7 +120,7 @@ If injecting the adapter is slow or you need to load a large number of adapters,
 model = DummyModel()
 model = inject_adapter_in_model(lora_config, model, low_cpu_mem_usage=True)
 
-model.linear.lora_A["default"].weight.device.type == "meta"  # should be True
+print(model.linear.lora_A["default"].weight.device.type == "meta")  # should be True
 set_peft_model_state_dict(model, peft_state_dict, low_cpu_mem_usage=True)
-model.linear.lora_A["default"].weight.device.type == "cpu"  # should be True
+print(model.linear.lora_A["default"].weight.device.type == "cpu")  # should be True
 ```
