@@ -1338,9 +1338,10 @@ class TestCustomModelConfigWarning:
 class TestLowCpuMemUsage:
     """Test for the low CPU memory usage option for loading PEFT models.
 
-    Note that we have `test_load_model_low_cpu_mem_usage` in the custom model tests. That test is a a broad test (i.e.
-    testing all the PEFT methods) but not very deep (only tests if loading works and the device is correctly set). The
-    test class here goes deeper but only tests LoRA, as checking all PEFT methods would be too much.
+    Note that we have `test_load_model_low_cpu_mem_usage` in the custom model and stable diffusion tests. Those are
+    broad tests (i.e. testing all the supported PEFT methods) but not very deep (only testing if loading works and the
+    device is correctly set). The test class here goes deeper but only tests LoRA, as checking all PEFT methods would
+    be too much.
 
     """
 
