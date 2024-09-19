@@ -71,6 +71,7 @@ from .testing_utils import (
     require_eetq,
     require_hqq,
     require_non_cpu,
+    require_non_xpu,
     require_optimum,
     require_torch_gpu,
     require_torch_multi_gpu,
@@ -2456,6 +2457,7 @@ class MixedPrecisionTests(unittest.TestCase):
             trainer.train()  # does not raise
 
 
+@require_non_xpu
 @require_torch_gpu
 @require_aqlm
 @unittest.skipUnless(
@@ -2541,6 +2543,7 @@ class PeftAqlmGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
 
+@require_non_xpu
 @require_torch_gpu
 @require_hqq
 @unittest.skipUnless(
@@ -2862,6 +2865,7 @@ class PeftAwqGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
 
+@require_non_xpu
 @require_torch_gpu
 @require_eetq
 class PeftEetqGPUTests(unittest.TestCase):

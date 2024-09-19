@@ -547,6 +547,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "vector_length": 2, "init_vector_bank_bound": 0.1},
         {"target_modules": ["lin1"], "vector_length": 2, "init_vector_bank_bound": 0.1},
     ),
+    (
+        "BOFT Same",
+        "boft",
+        BOFTConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "boft_block_size": 2},
+        {"target_modules": ["lin0"], "init_weights": False, "boft_block_size": 2},
+    ),
+    (
+        "BOFT Different",
+        "boft",
+        BOFTConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "boft_block_size": 2},
+        {"target_modules": ["lin1"], "init_weights": False, "boft_block_size": 2},
+    ),
 ]
 
 PREFIXES = {
@@ -579,6 +593,29 @@ class MLP(nn.Module):
         X = self.relu(X)
         X = self.drop(X)
         X = self.lin1(X)
+        X = self.sm(X)
+        return X
+
+
+class MLPWithGRU(nn.Module):
+    def __init__(self, bias=True):
+        super().__init__()
+        self.lin0 = nn.Linear(10, 20, bias=bias)
+        self.relu = nn.ReLU()
+        self.drop = nn.Dropout(0.5)
+        self.gru = nn.GRU(input_size=20, hidden_size=20, num_layers=1, batch_first=True, bias=bias)
+        self.fc = nn.Linear(20, 2, bias=bias)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        X = X.float()
+        X = self.lin0(X)
+        X = self.relu(X)
+        X = self.drop(X)
+        X = X.unsqueeze(1)
+        X, _ = self.gru(X)
+        X = X.squeeze(1)
+        X = self.fc(X)
         X = self.sm(X)
         return X
 
@@ -819,6 +856,10 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(TEST_CASES)
     def test_from_pretrained_config_construction(self, test_name, model_id, config_cls, config_kwargs):
         self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(TEST_CASES)
+    def test_load_multiple_adapters(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_load_multiple_adapters(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(TEST_CASES)
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
@@ -3326,14 +3367,35 @@ class TestMixedAdapterBatches:
 
     def test_mixed_adapter_batches_lora_different_target_layers(self, mlp_lora):
         base_model = MLP().to(self.torch_device).eval()
-        # target different lora layers
         config0 = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
         config1 = LoraConfig(target_modules=["lin1"], init_lora_weights=False)
         peft_model = get_peft_model(base_model, config0, "adapter0").eval()
         peft_model.add_adapter("adapter1", config1)
-
         inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
         self.run_checks(peft_model, inputs)
+
+    def test_mixed_adapter_batches_lora_multiple_modules_to_save(self, mlp_lora):
+        base_model = MLP().to(self.torch_device).eval()
+        config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"], init_lora_weights=False)
+        config1 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"], init_lora_weights=False)
+        peft_model = get_peft_model(base_model, config0, "adapter0").eval()
+        peft_model.add_adapter("adapter1", config1)
+        inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
+        self.run_checks(peft_model, inputs)
+
+    def test_mixed_adapter_batches_lora_unsupported_layer_raises(self, mlp_lora):
+        base_model = MLPWithGRU().to(self.torch_device).eval()
+        config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["gru"], init_lora_weights=False)
+        config1 = LoraConfig(target_modules=["lin0"], modules_to_save=["gru"], init_lora_weights=False)
+        peft_model = get_peft_model(base_model, config0, "adapter0").eval()
+        peft_model.add_adapter("adapter1", config1)
+        inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
+        SUPPORTED_MODULES = (torch.nn.Linear, torch.nn.Embedding, torch.nn.Conv2d, torch.nn.Conv1d)
+        module_names = ", ".join([module.__name__ for module in SUPPORTED_MODULES])
+        with pytest.raises(
+            TypeError, match=f"Mixed batching is only supported for the following modules: {module_names}."
+        ):
+            self.run_checks(peft_model, inputs)
 
     def test_mixed_adapter_batches_lora_partly_overlapping_target_layers(self, mlp_lora):
         base_model = MLP().to(self.torch_device).eval()
@@ -3353,6 +3415,15 @@ class TestMixedAdapterBatches:
         peft_model = get_peft_model(base_model, config0, "adapter0").eval()
         peft_model.add_adapter("adapter1", config1)
 
+        inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
+        self.run_checks(peft_model, inputs)
+
+    def test_mixed_adapter_batches_lora_conv1d_emb_multiple_modules_to_save(self):
+        base_model = ModelEmbConv1D().to(self.torch_device).eval()
+        config0 = LoraConfig(target_modules=["emb", "conv1d"], modules_to_save=["lin0"], init_lora_weights=False)
+        config1 = LoraConfig(target_modules=["emb", "conv1d"], modules_to_save=["lin0"], init_lora_weights=False)
+        peft_model = get_peft_model(base_model, config0, "adapter0").eval()
+        peft_model.add_adapter("adapter1", config1)
         inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
         self.run_checks(peft_model, inputs)
 
