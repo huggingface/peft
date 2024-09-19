@@ -211,7 +211,7 @@ def inject_adapter_in_model(
         adapter_name (`str`, `optional`, defaults to `"default"`):
             The name of the adapter to be injected, if not provided, the default adapter name is used ("default").
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
-            Create empty adapter weights on meta device. Useful to speed up the process.
+            Create empty adapter weights on meta device. Useful to speed up the loading process.
     """
     if peft_config.is_prompt_learning or peft_config.is_adaption_prompt:
         raise ValueError("`create_and_replace` does not support prompt learning and adaption prompt yet.")

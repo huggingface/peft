@@ -113,7 +113,7 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         adapter_name (`str`, `optional`, defaults to `"default"`):
             The name of the first adapter.
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
-            Create empty adapter weights on meta device. Useful to speed up the process.
+            Create empty adapter weights on meta device. Useful to speed up the loading process.
     """
 
     def __init__(self, model: nn.Module, peft_config: PeftConfig, adapter_name: str = "default") -> None:

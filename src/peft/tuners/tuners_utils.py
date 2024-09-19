@@ -418,7 +418,7 @@ class BaseTuner(nn.Module, ABC):
             autocast_adapter_dtype (`bool`, *optional*):
                 Whether to autocast the adapter dtype. Defaults to `True`.
             low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
-                Create empty adapter weights on meta device. Useful to speed up the process.
+                Create empty adapter weights on meta device. Useful to speed up the loading process.
 
         """
         peft_config = self.peft_config[adapter_name]

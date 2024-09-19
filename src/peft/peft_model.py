@@ -118,7 +118,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
             select PEFT tuners.
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
-            Create empty adapter weights on meta device. Useful to speed up the loading process.
+            Create empty adapter weights on meta device. Useful to speed up the loading loading process.
 
             <Tip>
 

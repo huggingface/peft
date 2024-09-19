@@ -193,7 +193,7 @@ class LycorisTuner(BaseTuner):
         config ([`LoraConfig`]): The configuration of the Lora model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
-            Create empty adapter weights on meta device. Useful to speed up the process.
+            Create empty adapter weights on meta device. Useful to speed up the loading process.
 
     """
 

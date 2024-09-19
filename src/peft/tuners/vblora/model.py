@@ -41,7 +41,7 @@ class VBLoRAModel(BaseTuner):
         config ([`VBLoRAConfig`]): The configuration of the VBLoRA model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
-            Create empty adapter weights on meta device. Useful to speed up the process.
+            Create empty adapter weights on meta device. Useful to speed up the loading process.
 
     Returns:
         `torch.nn.Module`: The VBLoRA model.
