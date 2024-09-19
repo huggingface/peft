@@ -40,7 +40,7 @@ class VBLoRAModel(BaseTuner):
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
         config ([`VBLoRAConfig`]): The configuration of the VBLoRA model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
-        init_empty (`bool`, `optional``, defaults to `False`):
+        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
             Create empty adapter weights on meta device. Useful to speed up the process.
 
     Returns:
@@ -71,8 +71,8 @@ class VBLoRAModel(BaseTuner):
 
     prefix: str = "vblora_"
 
-    def __init__(self, model, config, adapter_name, init_empty: bool = False) -> None:
-        super().__init__(model, config, adapter_name, init_empty=init_empty)
+    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
+        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
     def _init_vblora_vector_bank(self, config: VBLoRAConfig, adapter_name: str) -> None:
         vblora_vector_bank = torch.zeros(config.num_vectors, config.vector_length)

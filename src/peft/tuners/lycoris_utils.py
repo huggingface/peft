@@ -192,7 +192,7 @@ class LycorisTuner(BaseTuner):
         model ([`torch.nn.Module`]): The model to be adapted.
         config ([`LoraConfig`]): The configuration of the Lora model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
-        init_empty (`bool`, `optional``, defaults to `False`):
+        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
             Create empty adapter weights on meta device. Useful to speed up the process.
 
     """
@@ -200,8 +200,8 @@ class LycorisTuner(BaseTuner):
     prefix: str
     layers_mapping: dict[type[torch.nn.Module], type[LycorisLayer]]
 
-    def __init__(self, model, config, adapter_name, init_empty: bool = False):
-        super().__init__(model, config, adapter_name, init_empty=init_empty)
+    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False):
+        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""

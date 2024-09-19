@@ -854,8 +854,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         self._test_save_pretrained(model_id, config_cls, config_kwargs, safe_serialization=False)
 
     @parameterized.expand(TEST_CASES)
-    def test_load_model_empty_weights(self, test_name, model_id, config_cls, config_kwargs):
-        self._test_load_model_empty_weights(model_id, config_cls, config_kwargs)
+    def test_load_model_low_cpu_mem_usage(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_load_model_low_cpu_mem_usage(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(TEST_CASES)
     def test_from_pretrained_config_construction(self, test_name, model_id, config_cls, config_kwargs):

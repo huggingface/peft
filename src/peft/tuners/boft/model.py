@@ -49,7 +49,7 @@ class BOFTModel(BaseTuner):
         model ([`transformers.PreTrainedModel`]): The model to be adapted.
         config ([`BOFTConfig`]): The configuration of the BOFT model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
-        init_empty (`bool`, `optional``, defaults to `False`):
+        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
             Create empty adapter weights on meta device. Useful to speed up the process.
 
     Returns:
@@ -74,8 +74,8 @@ class BOFTModel(BaseTuner):
 
     prefix: str = "boft_"
 
-    def __init__(self, model, config, adapter_name, init_empty: bool = False) -> None:
-        super().__init__(model, config, adapter_name, init_empty=init_empty)
+    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
+        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
     def _check_new_adapter_config(self, config: BOFTConfig) -> None:
         """

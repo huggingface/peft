@@ -112,6 +112,8 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
             The config of the model to be tuned. The adapter type must be compatible.
         adapter_name (`str`, `optional`, defaults to `"default"`):
             The name of the first adapter.
+        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+            Create empty adapter weights on meta device. Useful to speed up the process.
     """
 
     def __init__(self, model: nn.Module, peft_config: PeftConfig, adapter_name: str = "default") -> None:
@@ -219,7 +221,7 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         finally:
             self.base_model.enable_adapter_layers()
 
-    def add_adapter(self, adapter_name: str, peft_config: PeftConfig, init_empty: bool = False) -> None:
+    def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """
         Add an adapter to the model based on the passed configuration.
 
@@ -235,16 +237,22 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
                 The name of the adapter to be added.
             peft_config ([`PeftConfig`]):
                 The configuration of the adapter to be added.
-            init_empty (`bool`, `optional``, defaults to `False`):
+            low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
                 Create empty adapter weights on meta device. Useful to speed up the process when loading saved
-                adapters. Don't use this option when creating a new PEFT adapter for training.
+                adapters.
 
+                <Tip>
+
+                Don't use `low_cpu_mem_usage=True` when creating a new PEFT adapter for training (training is untested
+                and discouraged for PeftMixedModel in general).
+
+                </Tip>
         """
         _check_config_compatible(peft_config)
 
         try:
             self.peft_config[adapter_name] = peft_config
-            self.base_model.inject_adapter(self, adapter_name, init_empty=init_empty)
+            self.base_model.inject_adapter(self, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
         except Exception:  # something went wrong, roll back
             if adapter_name in self.peft_config:
                 del self.peft_config[adapter_name]
@@ -367,13 +375,13 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
                 only affect select PEFT tuners.
             ephemeral_gpu_offload (`bool`, *optional*, defaults to `False`):
                 Whether to use ephemeral GPU offloading for partially loaded modules. Defaults to `False`.
-            init_empty (`bool`, `optional``, defaults to `False`):
+            low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
                 Create empty adapter weights on meta device before loading the saved weights. Useful to speed up the
                 process.
             kwargs: (`optional`):
                 Additional arguments to modify the way the adapter is loaded, e.g. the token for Hugging Face Hub.
         """
-        # the init_empty option is handled through kwargs
+        # the low_cpu_mem_usage option is handled through kwargs
         output = PeftModel.load_adapter(self, model_id, adapter_name, *args, **kwargs)
         # TODO: not quite clear why this is necessary but tests fail without it
         self.set_adapter(self.active_adapters)
@@ -424,7 +432,7 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
                 The configuration object to use instead of an automatically loaded configuration. This configuration
                 object is mutually exclusive with `model_id` and `kwargs`. This is useful when configuration is already
                 loaded before calling `from_pretrained`.
-            init_empty (`bool`, `optional``, defaults to `False`):
+            low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
                 Create empty adapter weights on meta device before loading the saved weights. Useful to speed up the
                 process.
             kwargs: (`optional`):
@@ -466,6 +474,6 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
 
         # note: this is different from PeftModel.from_pretrained, we always return a PeftMixedModel
         model = cls(model, config, adapter_name)
-        # the init_empty option is handled through kwargs
+        # the low_cpu_mem_usage option is handled through kwargs
         model.load_adapter(model_id, adapter_name, is_trainable=is_trainable, **kwargs)
         return model

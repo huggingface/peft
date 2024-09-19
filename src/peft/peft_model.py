@@ -117,8 +117,14 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
             using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
             select PEFT tuners.
-        init_empty (`bool`, `optional``, defaults to `False`):
-            Create empty adapter weights on meta device. Useful to speed up the process.
+        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+            Create empty adapter weights on meta device. Useful to speed up the loading process.
+
+            <Tip>
+
+            Don't use `low_cpu_mem_usage=True` when creating a new PEFT adapter for training.
+
+            </Tip>
 
     **Attributes**:
         - **base_model** ([`torch.nn.Module`]) -- The base transformer model used for Peft.
@@ -141,7 +147,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         peft_config: PeftConfig,
         adapter_name: str = "default",
         autocast_adapter_dtype: bool = True,
-        init_empty: bool = False,
+        low_cpu_mem_usage: bool = False,
     ) -> None:
         super().__init__()
         self.modules_to_save = None
@@ -155,11 +161,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if self._is_prompt_learning:
             self._peft_config = {adapter_name: peft_config}
             self.base_model = model
-            self.add_adapter(adapter_name, peft_config, init_empty=init_empty)
+            self.add_adapter(adapter_name, peft_config, low_cpu_mem_usage=low_cpu_mem_usage)
         else:
             self._peft_config = None
             cls = PEFT_TYPE_TO_MODEL_MAPPING[peft_config.peft_type]
-            ctx = init_empty_weights if init_empty else nullcontext
+            ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
             with ctx():
                 self.base_model = cls(model, {adapter_name: peft_config}, adapter_name)
             self.set_additional_trainable_modules(peft_config, adapter_name)
@@ -424,7 +430,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         config: Optional[PeftConfig] = None,
         autocast_adapter_dtype: bool = True,
         ephemeral_gpu_offload: bool = False,
-        init_empty: bool = False,
+        low_cpu_mem_usage: bool = False,
         **kwargs: Any,
     ) -> PeftModel:
         r"""
@@ -459,7 +465,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 are needed. Rather than perform expensive operations on small data, the data is transferred to the GPU
                 on-demand, the operation(s) performed, and the results moved back to CPU memory. This brings a slight
                 momentary VRAM overhead but gives orders of magnitude speedup in certain cases.
-            init_empty (`bool`, `optional``, defaults to `False`):
+            low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
                 Create empty adapter weights on meta device before loading the saved weights. Useful to speed up the
                 process.
             torch_device (`str`, *optional*, defaults to None):
@@ -559,11 +565,19 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         if config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys():
             model = cls(
-                model, config, adapter_name, autocast_adapter_dtype=autocast_adapter_dtype, init_empty=init_empty
+                model,
+                config,
+                adapter_name,
+                autocast_adapter_dtype=autocast_adapter_dtype,
+                low_cpu_mem_usage=low_cpu_mem_usage,
             )
         else:
             model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](
-                model, config, adapter_name, autocast_adapter_dtype=autocast_adapter_dtype, init_empty=init_empty
+                model,
+                config,
+                adapter_name,
+                autocast_adapter_dtype=autocast_adapter_dtype,
+                low_cpu_mem_usage=low_cpu_mem_usage,
             )
 
         model.load_adapter(
@@ -571,7 +585,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             adapter_name,
             is_trainable=is_trainable,
             autocast_adapter_dtype=autocast_adapter_dtype,
-            init_empty=init_empty,
+            low_cpu_mem_usage=low_cpu_mem_usage,
             **kwargs,
         )
 
@@ -865,7 +879,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             else self.base_model.model
         )
 
-    def add_adapter(self, adapter_name: str, peft_config: PeftConfig, init_empty: bool = False) -> None:
+    def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """
         Add an adapter to the model based on the passed configuration.
 
@@ -881,7 +895,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 The name of the adapter to be added.
             peft_config ([`PeftConfig`]):
                 The configuration of the adapter to be added.
-            init_empty (`bool`, `optional``, defaults to `False`):
+            low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
                 Create empty adapter weights on meta device. Useful to speed up the process when loading saved
                 adapters. Don't use this option when creating a new PEFT adapter for training.
 
@@ -906,7 +920,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self.base_model.add_adapter(adapter_name, peft_config)
             else:
                 self.peft_config[adapter_name] = peft_config
-                self.base_model.inject_adapter(self.base_model.model, adapter_name, init_empty=init_empty)
+                self.base_model.inject_adapter(
+                    self.base_model.model, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage
+                )
         except Exception:  # something went wrong, roll back
             if adapter_name in self.peft_config:
                 del self.peft_config[adapter_name]
@@ -1094,7 +1110,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         torch_device: Optional[str] = None,
         autocast_adapter_dtype: bool = True,
         ephemeral_gpu_offload: bool = False,
-        init_empty: bool = False,
+        low_cpu_mem_usage: bool = False,
         **kwargs: Any,
     ):
         """
@@ -1121,7 +1137,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 only affect select PEFT tuners.
             ephemeral_gpu_offload (`bool`, *optional*, defaults to `False`):
                 Whether to use ephemeral GPU offloading for partially loaded modules. Defaults to `False`.
-            init_empty (`bool`, `optional``, defaults to `False`):
+            low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
                 Create empty adapter weights on meta device before loading the saved weights. Useful to speed up the
                 process.
             kwargs: (`optional`):
@@ -1149,7 +1165,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 raise ValueError("Cannot set a prompt learning adapter to trainable when loading pretrained adapter.")
             else:
                 peft_config.inference_mode = not is_trainable
-            self.add_adapter(adapter_name, peft_config, init_empty=init_empty)
+            self.add_adapter(adapter_name, peft_config, low_cpu_mem_usage=low_cpu_mem_usage)
 
         adapters_weights = load_peft_weights(model_id, device=torch_device, **hf_hub_download_kwargs)
 
@@ -1160,7 +1176,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             adapters_weights,
             adapter_name=adapter_name,
             ignore_mismatched_sizes=ignore_mismatched_sizes,
-            init_empty=init_empty,
+            low_cpu_mem_usage=low_cpu_mem_usage,
         )
         if (
             (getattr(self, "hf_device_map", None) is not None)

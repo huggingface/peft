@@ -111,16 +111,16 @@ model = DummyModel()
 model = inject_adapter_in_model(lora_config, model)
 outcome = set_peft_model_state_dict(model, peft_state_dict)
 # check that there were no wrong keys
-assert not outcome.unexpected_keys
+print(outcome.unexpected_keys)
 ```
 
-If injecting the adapter is slow or you need to load a large number of adapters, you may use an optimization that allows to create an "empty" adapter on meta device and only fills the weights with real weights when the [`set_peft_model_state_dict`] is called. To do this, pass `init_empty=True` to both [`inject_adapter_in_model`] and [`set_peft_model_state_dict`].
+If injecting the adapter is slow or you need to load a large number of adapters, you may use an optimization that allows to create an "empty" adapter on meta device and only fills the weights with real weights when the [`set_peft_model_state_dict`] is called. To do this, pass `low_cpu_mem_usage=True` to both [`inject_adapter_in_model`] and [`set_peft_model_state_dict`].
 
 ```python
 model = DummyModel()
-model = inject_adapter_in_model(lora_config, model, init_empty=True)
+model = inject_adapter_in_model(lora_config, model, low_cpu_mem_usage=True)
 
-assert model.linear.lora_A["default"].weight.device.type == "meta"
-set_peft_model_state_dict(model, peft_state_dict, init_empty=True)
+model.linear.lora_A["default"].weight.device.type == "meta"  # should be True
+set_peft_model_state_dict(model, peft_state_dict, low_cpu_mem_usage=True)
 model.linear.lora_A["default"].weight.device.type == "cpu"
 ```

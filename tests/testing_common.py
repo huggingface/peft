@@ -305,8 +305,8 @@ class PeftCommonTester:
 
         assert dummy_output.requires_grad
 
-    def _test_load_model_empty_weights(self, model_id, config_cls, config_kwargs):
-        # Ensure that init_empty=True works for from_pretrained and load_adapter and that the resulting model's
+    def _test_load_model_low_cpu_mem_usage(self, model_id, config_cls, config_kwargs):
+        # Ensure that low_cpu_mem_usage=True works for from_pretrained and load_adapter and that the resulting model's
         # parameters are on the correct device.
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = config_cls(
@@ -321,10 +321,12 @@ class PeftCommonTester:
             model.save_pretrained(tmp_dirname)
 
             model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
-            model = PeftModel.from_pretrained(model, tmp_dirname, torch_device=self.torch_device, init_empty=True)
+            model = PeftModel.from_pretrained(
+                model, tmp_dirname, torch_device=self.torch_device, low_cpu_mem_usage=True
+            )
             assert {p.device.type for p in model.parameters()} == {self.torch_device}
 
-            model.load_adapter(tmp_dirname, adapter_name="other", init_empty=True)
+            model.load_adapter(tmp_dirname, adapter_name="other", low_cpu_mem_usage=True)
             assert {p.device.type for p in model.parameters()} == {self.torch_device}
         finally:
             try:
@@ -336,7 +338,7 @@ class PeftCommonTester:
         # also test injecting directly
         del model
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
-        inject_adapter_in_model(config, model, init_empty=True)  # check that there is no error
+        inject_adapter_in_model(config, model, low_cpu_mem_usage=True)  # check that there is no error
 
         if not isinstance(config, LNTuningConfig):
             # LN tuning does not add adapter layers that could be on meta device, it only changes the requires_grad.

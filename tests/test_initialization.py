@@ -1335,10 +1335,10 @@ class TestCustomModelConfigWarning:
         assert any(msg in str(warning.message) for warning in recwarn.list)
 
 
-class TestEmptyInitialization:
-    """Test for the empty initialization option for loading PEFT models.
+class TestLowCpuMemUsage:
+    """Test for the low CPU memory usage option for loading PEFT models.
 
-    Note that we have `test_load_model_empty_weights` in the custom model tests. That test is a a broad test (i.e.
+    Note that we have `test_load_model_low_cpu_mem_usage` in the custom model tests. That test is a a broad test (i.e.
     testing all the PEFT methods) but not very deep (only tests if loading works and the device is correctly set). The
     test class here goes deeper but only tests LoRA, as checking all PEFT methods would be too much.
 
@@ -1373,25 +1373,25 @@ class TestEmptyInitialization:
         return {"input_ids": torch.randint(0, 100, (1, 10)), "attention_mask": torch.ones(1, 10)}
 
     @pytest.mark.parametrize("device", devices)
-    def test_from_pretrained_empty_init_works(self, device, inputs, lora_path):
+    def test_from_pretrained_low_cpu_mem_usage_works(self, device, inputs, lora_path):
         model = self.get_model().to(device)
         inputs = {k: v.to(device) for k, v in inputs.items()}
         model = PeftModel.from_pretrained(model, lora_path, torch_device=device).eval()
-        device_set_not_empty = {p.device.type for p in model.parameters()}
-        logits_not_empty = model(**inputs).logits
+        device_set_not_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_not_low_cpu_mem = model(**inputs).logits
 
         del model
 
         model = self.get_model().to(device)
-        model = PeftModel.from_pretrained(model, lora_path, init_empty=True, torch_device=device).eval()
-        device_set_empty = {p.device.type for p in model.parameters()}
-        logits_empty = model(**inputs).logits
+        model = PeftModel.from_pretrained(model, lora_path, low_cpu_mem_usage=True, torch_device=device).eval()
+        device_set_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_low_cpu_mem = model(**inputs).logits
 
-        assert device_set_empty == device_set_not_empty
-        assert torch.allclose(logits_empty, logits_not_empty)
+        assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
 
     @pytest.mark.parametrize("device", devices)
-    def test_load_adapter_empty_init_works(self, device, inputs, lora_path, lora_config):
+    def test_load_adapter_low_cpu_mem_usage_works(self, device, inputs, lora_path, lora_config):
         model = self.get_model().to(device)
         inputs = {k: v.to(device) for k, v in inputs.items()}
 
@@ -1400,25 +1400,25 @@ class TestEmptyInitialization:
         model.load_adapter(lora_path, adapter_name="other", torch_device=device)
         model.set_adapter("other")
         model.eval()
-        device_set_not_empty = {p.device.type for p in model.parameters()}
-        logits_not_empty = model(**inputs).logits
+        device_set_not_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_not_low_cpu_mem = model(**inputs).logits
 
         del model
 
         model = self.get_model().to(device)
         torch.manual_seed(0)
         model = get_peft_model(model, lora_config)
-        model.load_adapter(lora_path, adapter_name="other", init_empty=True, torch_device=device)
+        model.load_adapter(lora_path, adapter_name="other", low_cpu_mem_usage=True, torch_device=device)
         model.set_adapter("other")
         model.eval()
-        device_set_empty = {p.device.type for p in model.parameters()}
-        logits_empty = model(**inputs).logits
+        device_set_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_low_cpu_mem = model(**inputs).logits
 
-        assert device_set_empty == device_set_not_empty
-        assert torch.allclose(logits_empty, logits_not_empty)
+        assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
 
     @pytest.mark.parametrize("device", devices)
-    def test_inject_adapter_empty_init_works(self, device, inputs, lora_path, lora_config):
+    def test_inject_adapter_low_cpu_mem_usage_works(self, device, inputs, lora_path, lora_config):
         # external libs like transformers and diffusers use inject_adapter_in_model, let's check that this also works
         model = self.get_model().to(device)
         inputs = {k: v.to(device) for k, v in inputs.items()}
@@ -1428,14 +1428,14 @@ class TestEmptyInitialization:
         model.load_adapter(lora_path, adapter_name="other", torch_device=device)
         model.set_adapter("other")
         model.eval()
-        device_set_not_empty = {p.device.type for p in model.parameters()}
-        logits_not_empty = model(**inputs).logits
+        device_set_not_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_not_low_cpu_mem = model(**inputs).logits
 
         del model
 
         torch.manual_seed(0)
         model = self.get_model().to(device)
-        inject_adapter_in_model(lora_config, model, init_empty=True)
+        inject_adapter_in_model(lora_config, model, low_cpu_mem_usage=True)
         device_set_before_loading = {p.device.type for p in model.parameters()}
         # at this stage, lora weights are still on meta device
         assert device_set_before_loading == {"meta", device}
@@ -1445,44 +1445,42 @@ class TestEmptyInitialization:
         prefix = "base_model.model."
         for key, val in state_dict.items():
             new_key = key[len(prefix) :]
-            # module_name, _, param_name = new_key.rpartition(".")
-            # new_key = f"{module_name}.default.{param_name}"
             remapped_dict[new_key] = val.to(device)
-        errors = set_peft_model_state_dict(model, remapped_dict, init_empty=True)
+        errors = set_peft_model_state_dict(model, remapped_dict, low_cpu_mem_usage=True)
         # sanity check: no unexpected keys
         assert not errors.unexpected_keys
 
         model.eval()
-        device_set_empty = {p.device.type for p in model.parameters()}
-        logits_empty = model(**inputs).logits
+        device_set_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_low_cpu_mem = model(**inputs).logits
 
-        assert device_set_empty == device_set_not_empty
-        assert torch.allclose(logits_empty, logits_not_empty)
+        assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
 
     ############################
     # tests for PeftMixedModel #
     ############################
 
     @pytest.mark.parametrize("device", devices)
-    def test_mixed_model_from_pretrained_empty_init_works(self, device, inputs, lora_path):
+    def test_mixed_model_from_pretrained_low_cpu_mem_usage_works(self, device, inputs, lora_path):
         model = self.get_model().to(device)
         inputs = {k: v.to(device) for k, v in inputs.items()}
         model = PeftMixedModel.from_pretrained(model, lora_path, torch_device=device).eval()
-        device_set_not_empty = {p.device.type for p in model.parameters()}
-        logits_not_empty = model(**inputs).logits
+        device_set_not_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_not_low_cpu_mem = model(**inputs).logits
 
         del model
 
         model = self.get_model().to(device)
-        model = PeftMixedModel.from_pretrained(model, lora_path, init_empty=True, torch_device=device).eval()
-        device_set_empty = {p.device.type for p in model.parameters()}
-        logits_empty = model(**inputs).logits
+        model = PeftMixedModel.from_pretrained(model, lora_path, low_cpu_mem_usage=True, torch_device=device).eval()
+        device_set_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_low_cpu_mem = model(**inputs).logits
 
-        assert device_set_empty == device_set_not_empty
-        assert torch.allclose(logits_empty, logits_not_empty)
+        assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
 
     @pytest.mark.parametrize("device", devices)
-    def test_mixed_model_load_adapter_empty_init_works(self, device, inputs, lora_path, lora_config):
+    def test_mixed_model_load_adapter_low_cpu_mem_usage_works(self, device, inputs, lora_path, lora_config):
         model = self.get_model().to(device)
         inputs = {k: v.to(device) for k, v in inputs.items()}
 
@@ -1491,19 +1489,19 @@ class TestEmptyInitialization:
         model.load_adapter(lora_path, adapter_name="other", torch_device=device)
         model.set_adapter("other")
         model.eval()
-        device_set_not_empty = {p.device.type for p in model.parameters()}
-        logits_not_empty = model(**inputs).logits
+        device_set_not_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_not_low_cpu_mem = model(**inputs).logits
 
         del model
 
         model = self.get_model().to(device)
         torch.manual_seed(0)
         model = PeftModel.from_pretrained(model, lora_path)
-        model.load_adapter(lora_path, adapter_name="other", init_empty=True, torch_device=device)
+        model.load_adapter(lora_path, adapter_name="other", low_cpu_mem_usage=True, torch_device=device)
         model.set_adapter("other")
         model.eval()
-        device_set_empty = {p.device.type for p in model.parameters()}
-        logits_empty = model(**inputs).logits
+        device_set_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_low_cpu_mem = model(**inputs).logits
 
-        assert device_set_empty == device_set_not_empty
-        assert torch.allclose(logits_empty, logits_not_empty)
+        assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)

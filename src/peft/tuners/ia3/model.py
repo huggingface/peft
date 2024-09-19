@@ -45,7 +45,7 @@ class IA3Model(BaseTuner):
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
         config ([`IA3Config`]): The configuration of the (IA)^3 model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
-        init_empty (`bool`, `optional``, defaults to `False`):
+        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
             Create empty adapter weights on meta device. Useful to speed up the process.
 
     Returns:
@@ -75,8 +75,8 @@ class IA3Model(BaseTuner):
 
     prefix: str = "ia3_"
 
-    def __init__(self, model, config, adapter_name, init_empty: bool = False):
-        super().__init__(model, config, adapter_name, init_empty=init_empty)
+    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False):
+        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
     @staticmethod
     def _create_new_module(ia3_config, adapter_name, target, **kwargs):
