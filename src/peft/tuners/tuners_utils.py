@@ -871,14 +871,16 @@ def _find_minimal_target_modules(
     # Initialize a set for required suffixes
     required_suffixes = set()
 
-    for item, suffixes in target_modules_suffix_map.items():
+    # We sort the target_modules_suffix_map simple to get deterministic behavior, since sets have no order. In theory
+    # the order should not matter but in case there is a bug, it's better for the bug to be deterministic.
+    for item, suffixes in sorted(target_modules_suffix_map.items(), key=lambda tup: tup[1]):
         # Go through target_modules items, shortest suffixes first
         for suffix in suffixes:
             # If the suffix is already in required_suffixes or matches other_module_names, skip it
             if suffix in required_suffixes or suffix in other_module_suffixes:
                 continue
             # Check if adding this suffix covers the item
-            if not any(item.endswith(req_suffix) for req_suffix in required_suffixes):
+            if not any(item.endswith("." + req_suffix) for req_suffix in required_suffixes):
                 required_suffixes.add(suffix)
                 break
 
