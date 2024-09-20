@@ -72,7 +72,13 @@ TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING = {
     "mistral": ["input_layernorm", "post_attention_layernorm", "norm"],
     "phi": ["input_layernorm", "final_layernorm"],
     "gemma": ["input_layernorm", "post_attention_layernorm", "norm"],
-    "gemma2": ["input_layernorm", "norm"],
+    "gemma2": [
+        "input_layernorm",
+        "post_attention_layernorm",
+        "pre_feedforward_layernorm",
+        "post_feedforward_layernorm",
+        "norm",
+    ],
     "qwen2": ["post_attention_layernorm"],
 }
 
