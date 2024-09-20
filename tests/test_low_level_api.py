@@ -27,6 +27,7 @@ class DummyModel(torch.nn.Module):
         super().__init__()
         self.embedding = torch.nn.Embedding(10, 10)
         self.linear = torch.nn.Linear(10, 10)
+        self.linear2 = torch.nn.Linear(10, 10, bias=True)
         self.lm_head = torch.nn.Linear(10, 10)
 
     def forward(self, input_ids):
@@ -74,7 +75,7 @@ class TestPeft(unittest.TestCase):
             r=64,
             bias="none",
             target_modules=["linear"],
-            modules_to_save=["embedding"],
+            modules_to_save=["embedding", "linear2"],
         )
 
         self.model = inject_adapter_in_model(lora_config, self.model)
@@ -83,7 +84,7 @@ class TestPeft(unittest.TestCase):
             if name == "linear":
                 assert hasattr(module, "lora_A")
                 assert hasattr(module, "lora_B")
-            elif name == "embedding":
+            elif name in ["embedding", "linear2"]:
                 assert isinstance(module, ModulesToSaveWrapper)
 
         state_dict = get_peft_model_state_dict(self.model)
@@ -91,3 +92,6 @@ class TestPeft(unittest.TestCase):
         assert "embedding.weight" in state_dict.keys()
 
         assert hasattr(self.model.embedding, "weight")
+
+        assert hasattr(self.model.linear2, "weight")
+        assert hasattr(self.model.linear2, "bias")

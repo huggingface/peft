@@ -233,6 +233,12 @@ class ModulesToSaveWrapper(torch.nn.Module):
             return self.original_module.weight
         return self.modules_to_save[self.active_adapter].weight
 
+    @property
+    def bias(self):
+        if self.active_adapter not in self.modules_to_save:
+            return self.original_module.bias
+        return self.modules_to_save[self.active_adapter].bias
+
     def update(self, adapter_name):
         context_manager = nullcontext()
         for _, param in self.original_module.named_parameters():
