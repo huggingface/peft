@@ -15,11 +15,11 @@
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 
 from .config import IA3Config
-from .layer import Conv2d, IA3Layer, Linear
+from .layer import Conv2d, Conv3d, IA3Layer, Linear
 from .model import IA3Model
 
 
-__all__ = ["Conv2d", "IA3Config", "IA3Layer", "IA3Model", "Linear"]
+__all__ = ["Conv2d", "Conv3d", "IA3Config", "IA3Layer", "IA3Model", "Linear"]
 
 
 def __getattr__(name):

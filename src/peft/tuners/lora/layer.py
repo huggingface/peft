@@ -29,7 +29,7 @@ from peft.utils.integrations import dequantize_module_weight, gather_params_ctx,
 from peft.utils.other import transpose
 
 from .config import LoraConfig
-from .dora import DoraConv2dLayer, DoraEmbeddingLayer, DoraLinearLayer
+from .dora import DoraEmbeddingLayer, DoraLinearLayer, DoraConvNdLayer
 
 
 class LoraLayer(BaseTunerLayer):
@@ -62,6 +62,8 @@ class LoraLayer(BaseTunerLayer):
         if isinstance(base_layer, nn.Linear):
             in_features, out_features = base_layer.in_features, base_layer.out_features
         elif isinstance(base_layer, nn.Conv2d):
+            in_features, out_features = base_layer.in_channels, base_layer.out_channels
+        elif isinstance(base_layer, nn.Conv3d):
             in_features, out_features = base_layer.in_channels, base_layer.out_channels
         elif isinstance(base_layer, nn.Embedding):
             in_features, out_features = base_layer.num_embeddings, base_layer.embedding_dim
@@ -849,8 +851,8 @@ class Embedding(nn.Module, LoraLayer):
         return "lora." + rep
 
 
-class Conv2d(nn.Module, LoraLayer):
-    # Lora implemented in a conv2d layer
+class ConvNd(nn.Module, LoraLayer):
+    # Lora implemented in a conv(2,3)d layer
     def __init__(
         self,
         base_layer: nn.Module,
@@ -867,6 +869,9 @@ class Conv2d(nn.Module, LoraLayer):
         LoraLayer.__init__(self, base_layer)
 
         self._active_adapter = adapter_name
+        self._kernel_rank = base_layer.weight.dim()
+        self._convd = self._kernel_rank - 2
+
         self.update_layer(
             adapter_name,
             r,
@@ -894,8 +899,10 @@ class Conv2d(nn.Module, LoraLayer):
         kernel_size = base_layer.kernel_size
         stride = base_layer.stride
         padding = base_layer.padding
-        self.lora_A[adapter_name] = nn.Conv2d(self.in_features, r, kernel_size, stride, padding, bias=False)
-        self.lora_B[adapter_name] = nn.Conv2d(r, self.out_features, (1, 1), (1, 1), bias=False)
+        conv_layer = type(base_layer)
+        out_kernel = out_stride = (1,) * self._convd
+        self.lora_A[adapter_name] = conv_layer(self.in_features, r, kernel_size, stride, padding, bias=False)
+        self.lora_B[adapter_name] = conv_layer(r, self.out_features, out_kernel, out_stride, bias=False)
         if use_rslora:
             self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
         else:
@@ -917,12 +924,15 @@ class Conv2d(nn.Module, LoraLayer):
 
         self.set_adapter(self.active_adapters)
 
+    def _get_dora_factor_view(self):
+        return (-1,) + (1,) * (self._convd + 1)
+
     def dora_init(self, adapter_name: str) -> None:
         if self.lora_magnitude_vector is None:
             # first dora layer being added, add lora_magnitude_vector to the list of learnable parameters
             self.adapter_layer_names = self.adapter_layer_names[:] + ("lora_magnitude_vector",)
 
-        dora_layer = DoraConv2dLayer(fan_in_fan_out=False)
+        dora_layer = DoraConvNdLayer(fan_in_fan_out=False)
         lora_A = self.lora_A[adapter_name].weight
         lora_B = self.lora_B[adapter_name].weight
         scaling = self.scaling[adapter_name]
@@ -971,7 +981,7 @@ class Conv2d(nn.Module, LoraLayer):
                         # different value
                         self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
                         dora_factor = self.lora_magnitude_vector[active_adapter].weight / weight_norm
-                        orig_weights = dora_factor.view(-1, 1, 1, 1) * (orig_weights + delta_weight)
+                        orig_weights = dora_factor.view(*self._get_dora_factor_view()) * (orig_weights + delta_weight)
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
@@ -995,7 +1005,7 @@ class Conv2d(nn.Module, LoraLayer):
                         # different value
                         self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
                         dora_factor = self.lora_magnitude_vector[active_adapter].weight / weight_norm
-                        new_weight = dora_factor.view(-1, 1, 1, 1) * (base_layer.weight.data + delta_weight)
+                        new_weight = dora_factor.view(*self._get_dora_factor_view()) * (base_layer.weight.data + delta_weight)
                         base_layer.weight.data = new_weight
 
                 self.merged_adapters.append(active_adapter)
@@ -1017,7 +1027,7 @@ class Conv2d(nn.Module, LoraLayer):
                 else:
                     weight_norm = self._cache_pop(f"{active_adapter}-weight_norm")
                     dora_factor = self.lora_magnitude_vector[active_adapter].weight / weight_norm
-                    weight_orig = weight.data / dora_factor.view(-1, 1, 1, 1) - delta_weight
+                    weight_orig = weight.data / dora_factor.view(*self._get_dora_factor_view()) - delta_weight
                     weight.data = weight_orig
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
@@ -1050,12 +1060,12 @@ class Conv2d(nn.Module, LoraLayer):
                 3
             ) * self.scaling[adapter]
         else:
-            # conv2d 3x3
+            F_conv = F.conv3d if self._convd >= 3 else F.conv2d
             output_tensor = (
-                F.conv2d(
-                    weight_A.permute(1, 0, 2, 3),
+                F_conv(
+                    weight_A.transpose(0, 1),
                     weight_B,
-                ).permute(1, 0, 2, 3)
+                ).transpose(0, 1)
                 * self.scaling[adapter]
             )
 
@@ -1112,6 +1122,13 @@ class Conv2d(nn.Module, LoraLayer):
         rep = super().__repr__()
         return "lora." + rep
 
+class Conv2d(ConvNd):
+    # Lora implemented in a conv2d layer
+    pass
+
+class Conv3d(ConvNd):
+    # Lora implemented in a conv3d layer
+    pass
 
 def dispatch_default(
     target: torch.nn.Module,
@@ -1134,6 +1151,9 @@ def dispatch_default(
     elif isinstance(target_base_layer, torch.nn.Conv2d):
         kwargs.update(lora_config.loftq_config)
         new_module = Conv2d(target, adapter_name, **kwargs)
+    elif isinstance(target_base_layer, torch.nn.Conv3d):
+        kwargs.update(lora_config.loftq_config)
+        new_module = Conv3d(target, adapter_name, **kwargs)
     elif isinstance(target_base_layer, torch.nn.Linear):
         if kwargs["fan_in_fan_out"]:
             warnings.warn(

@@ -16,7 +16,7 @@ from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_eetq_a
 
 from .config import LoftQConfig, LoraConfig, LoraRuntimeConfig
 from .gptq import QuantLinear
-from .layer import Conv2d, Embedding, Linear, LoraLayer
+from .layer import Conv2d, Conv3d, Embedding, Linear, LoraLayer
 from .model import LoraModel
 
 
@@ -25,6 +25,7 @@ __all__ = [
     "LoraRuntimeConfig",
     "LoftQConfig",
     "Conv2d",
+    "Conv3d",
     "Embedding",
     "LoraLayer",
     "Linear",

@@ -106,6 +106,10 @@ TEST_CASES = [
     ("Conv2d 2 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
     ("Conv2d 1 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"], "use_dora": True}),
     ("Conv2d 2 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"], "use_dora": True}),
+    ("Conv3d 1 LoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d"]}),
+    ("Conv3d 2 LoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d", "lin0"]}),
+    ("Conv3d 1 LoRA with DoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d"], "use_dora": True}),
+    ("Conv3d 2 LoRA with DoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d", "lin0"], "use_dora": True}),
     #######
     # IA³ #
     #######
@@ -814,6 +818,7 @@ class ModelConv3D(nn.Module):
         self.sm = nn.LogSoftmax(dim=-1)
 
     def forward(self, X):
+        # If necessary, convert from 2D image to 3D volume
         if X.dim() == 2:
             X = torch.stack([X] * 3, dim=-1)
         X = X.float().reshape(-1, 5, 3, 3, 3)

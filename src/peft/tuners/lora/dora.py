@@ -48,7 +48,7 @@ class DoraLinearLayer(nn.Module):
                 base_layer = deepcopy(base_layer)
 
             weight = dequantize_module_weight(base_layer)
-            if weight.data.ndim == 4:  # For handling LoRAs applied to Conv2Ds.
+            if weight.data.ndim >= 4:  # For handling LoRAs applied to Conv layers.
                 lora_weight = torch.mm(lora_B.flatten(start_dim=1), lora_A.flatten(start_dim=1))
                 lora_weight = lora_weight.reshape(weight.shape)
             else:
@@ -133,12 +133,13 @@ class DoraEmbeddingLayer(DoraLinearLayer):
         return "lora.dora." + rep
 
 
-class DoraConv2dLayer(DoraLinearLayer):
+class DoraConvNdLayer(DoraLinearLayer):
     def get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
         # calculate L2 norm of weight matrix, column-wise
         weight = weight + scaling * lora_weight
-        # the following is needed to have compatibility with the 4D weight tensors of Conv2D
-        weight_norm = weight.norm(p=2, dim=(1, 2, 3), keepdim=True).transpose(1, 0)
+        # the following is needed to have compatibility with the 4/5D weight tensors of Conv2D/3D
+        dim = tuple(range(1, weight.dim()))
+        weight_norm = weight.norm(p=2, dim=dim, keepdim=True).transpose(1, 0)
         return weight_norm
 
     def forward(self, x, *, lora_A, lora_B, scaling, base_layer):
@@ -159,8 +160,9 @@ class DoraConv2dLayer(DoraLinearLayer):
         # during backpropagation"
         weight_norm = weight_norm.detach()
         mag_norm_scale = magnitude / weight_norm
+        F_conv = F.conv3d if weight.dim() >= 5 else F.conv2d
         result_dora = (mag_norm_scale - 1) * (
-            F.conv2d(
+            F_conv(
                 x,
                 weight,
                 bias=None,
