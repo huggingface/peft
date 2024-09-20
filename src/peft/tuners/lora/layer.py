@@ -29,7 +29,7 @@ from peft.utils.integrations import dequantize_module_weight, gather_params_ctx,
 from peft.utils.other import transpose
 
 from .config import LoraConfig
-from .dora import DoraEmbeddingLayer, DoraLinearLayer, DoraConvNdLayer
+from .dora import DoraConvNdLayer, DoraEmbeddingLayer, DoraLinearLayer
 
 
 class LoraLayer(BaseTunerLayer):
@@ -1005,7 +1005,9 @@ class ConvNd(nn.Module, LoraLayer):
                         # different value
                         self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
                         dora_factor = self.lora_magnitude_vector[active_adapter].weight / weight_norm
-                        new_weight = dora_factor.view(*self._get_dora_factor_view()) * (base_layer.weight.data + delta_weight)
+                        new_weight = dora_factor.view(*self._get_dora_factor_view()) * (
+                            base_layer.weight.data + delta_weight
+                        )
                         base_layer.weight.data = new_weight
 
                 self.merged_adapters.append(active_adapter)
@@ -1122,13 +1124,16 @@ class ConvNd(nn.Module, LoraLayer):
         rep = super().__repr__()
         return "lora." + rep
 
+
 class Conv2d(ConvNd):
     # Lora implemented in a conv2d layer
     pass
 
+
 class Conv3d(ConvNd):
     # Lora implemented in a conv3d layer
     pass
+
 
 def dispatch_default(
     target: torch.nn.Module,

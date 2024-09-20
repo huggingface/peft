@@ -623,13 +623,14 @@ class PeftCommonTester:
         model = model.merge_and_unload()
         logits_merged_unloaded = model(**dummy_input)[0]
 
+        conv_ids = ["Conv2d", "Conv3d", "Conv2d2", "Conv3d2"]
         atol, rtol = 1e-4, 1e-4
         if self.torch_device in ["mlu"]:
             atol, rtol = 1e-3, 1e-3  # MLU
         if config.peft_type == "ADALORA":
             # AdaLoRA is a bit flaky on CI, but this cannot be reproduced locally
             atol, rtol = 1e-2, 1e-2
-        if (config.peft_type == "IA3") and (model_id in ["Conv2d", "Conv3d"]):
+        if (config.peft_type == "IA3") and (model_id in conv_ids):
             # for some reason, the IA³ Conv2d introduces a larger error
             atol, rtol = 0.3, 0.01
         assert torch.allclose(logits, logits_merged, atol=atol, rtol=rtol)
