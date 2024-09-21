@@ -106,7 +106,21 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.VBLORA: VBLoRAModel,
 }
 
-
+PEFT_TYPE_TO_PREFIX_MAPPING = {
+    PeftType.ADALORA: "lora_",
+    PeftType.BOFT: "boft_",
+    PeftType.FOURIERFT: "fourierft_",
+    PeftType.HRA: "hra_",
+    PeftType.IA3: "ia3_",
+    PeftType.LN_TUNING: "ln_tuning_",
+    PeftType.LOHA: "hada_",
+    PeftType.LOKR: "lokr",
+    PeftType.LORA: "lora_",
+    PeftType.OFT: "oft_",
+    PeftType.POLY: "poly_",
+    PeftType.VBLORA: "vblora_",
+    PeftType.VERA: "vera_lambda",
+}
 class PeftModel(PushToHubMixin, torch.nn.Module):
     """
     Base model encompassing various Peft methods.
