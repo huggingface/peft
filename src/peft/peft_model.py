@@ -105,7 +105,21 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.VBLORA: VBLoRAModel,
 }
 
-
+PEFT_TYPE_TO_PREFIX_MAPPING = {
+    PeftType.ADALORA: "lora_",
+    PeftType.BOFT: "boft_",
+    PeftType.FOURIERFT: "fourierft_",
+    PeftType.HRA: "hra_",
+    PeftType.IA3: "ia3_",
+    PeftType.LN_TUNING: "ln_tuning_",
+    PeftType.LOHA: "hada_",
+    PeftType.LOKR: "lokr",
+    PeftType.LORA: "lora_",
+    PeftType.OFT: "oft_",
+    PeftType.POLY: "poly_",
+    PeftType.VBLORA: "vblora_",
+    PeftType.VERA: "vera_lambda",
+}
 class PeftModel(PushToHubMixin, torch.nn.Module):
     """
     Base model encompassing various Peft methods.
@@ -1185,6 +1199,20 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             ignore_mismatched_sizes=ignore_mismatched_sizes,
             low_cpu_mem_usage=low_cpu_mem_usage,
         )
+        missing_keys, unexpected_keys = load_result.missing_keys, load_result.unexpected_keys
+        tuner = self.peft_config[adapter_name].peft_type
+
+        if unexpected_keys:
+            warnings.warn(f"Unexpected keys found: {unexpected_keys}. These keys do not match the model architecture.")
+
+        # Check for missing keys related to the adapter's tuner
+        tuner_prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(tuner, "")
+        adapter_missing_keys = [key for key in missing_keys if tuner_prefix in key]
+
+        if adapter_missing_keys:
+            warnings.warn(f"Missing keys related to adapter: {adapter_missing_keys}")
+        else:
+            print(f"{tuner} adapter loaded successfully!")
         if (
             (getattr(self, "hf_device_map", None) is not None)
             and (len(set(self.hf_device_map.values()).intersection({"cpu", "disk"})) > 0)
