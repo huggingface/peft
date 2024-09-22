@@ -87,10 +87,6 @@ class VeraConfig(PeftConfig):
             )
         },
     )
-    loaded_in_8bit: bool = field(
-        default=False,
-        metadata={"help": "Whether the model is loaded in 8-bit precision"}
-    )
     save_projection: bool = field(
         default=True,
         metadata={
