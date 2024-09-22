@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from peft.import_utils import is_bnb_available
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 
 from .config import VeraConfig
 from .layer import Linear, VeraLayer
@@ -27,5 +27,10 @@ def __getattr__(name):
         from .bnb import Linear8bitLt
 
         return Linear8bitLt
+
+    if (name == "Linear4bit") and is_bnb_4bit_available():
+        from .bnb import Linear4bit
+
+        return Linear4bit
 
     raise AttributeError(f"module {__name__} has no attribute {name}")
