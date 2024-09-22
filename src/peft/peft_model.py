@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import collections
+import copy
 import inspect
 import os
 import warnings
@@ -348,6 +349,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     for shared_tensor_name in names[1:]:
                         output_state_dict[shared_tensor_name] = output_state_dict[shared_tensor_name].clone()
                 if path_initial_model_for_weight_conversion is not None:
+                    peft_config = copy.deepcopy(peft_config)
                     peft_config.init_lora_weights = True
                     peft_config.save_pretrained(path_initial_model_for_weight_conversion)
                     output_state_dict = save_mutated_as_lora(
@@ -360,6 +362,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 )
             elif is_main_process:
                 if path_initial_model_for_weight_conversion is not None:
+                    peft_config = copy.deepcopy(peft_config)
                     peft_config.init_lora_weights = True
                     peft_config.save_pretrained(path_initial_model_for_weight_conversion)
                     output_state_dict = save_mutated_as_lora(
