@@ -26,7 +26,7 @@ from torch.nn.init import _calculate_correct_fan
 from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
 
-from peft.import_utils import is_bnb_available
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
@@ -102,13 +102,6 @@ class VeraModel(BaseTuner):
     def __init__(self, model, config, adapter_name) -> None:
         super().__init__(model, config, adapter_name)
 
-        # Check if the model is loaded in 8-bit
-        self.is_loaded_in_8bit = getattr(model, "is_loaded_in_8bit", False)
-        if self.is_loaded_in_8bit:
-            if not is_bnb_available():
-                raise ImportError("To use 8-bit quantization, please install the `bitsandbytes` package.")
-            self.peft_config[adapter_name].loaded_in_8bit = True
-
     def _find_dim(self, config) -> tuple[int, int]:
         """
         Finds the largest input and output dimensions across linear layers that have been wrapped with VeRA.
@@ -157,11 +150,6 @@ class VeraModel(BaseTuner):
         vera_A = _kaiming_init((config.r, linear_in_dim), generator=generator)
         vera_B = _kaiming_init((linear_out_dim, config.r), generator=generator)
 
-        # Add this check for 8-bit quantization
-        if config.loaded_in_8bit:
-            vera_A = vera_A.to(torch.int8)
-            vera_B = vera_B.to(torch.int8)
-
         self.vera_A[adapter_name] = vera_A
         self.vera_B[adapter_name] = vera_B
 
@@ -202,14 +190,6 @@ class VeraModel(BaseTuner):
                 f"{save_project_unique_values}"
             )
 
-        if config.loaded_in_8bit:
-            for existing_config in self.peft_config.values():
-                if existing_config.loaded_in_8bit != config.loaded_in_8bit:
-                    raise ValueError(
-                        "All adapters must have the same 8-bit loading configuration. "
-                        f"Found conflicting configurations: {existing_config.loaded_in_8bit} and {config.loaded_in_8bit}"
-                    )
-
     @staticmethod
     def _check_target_module_exists(vera_config, key):
         return check_target_module_exists(vera_config, key)
@@ -234,10 +214,11 @@ class VeraModel(BaseTuner):
             "vera_dropout": vera_config.vera_dropout,
             "fan_in_fan_out": vera_config.fan_in_fan_out,
             "init_weights": vera_config.init_weights,
-            "loaded_in_8bit": self.is_loaded_in_8bit,
+            "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
+            "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
         kwargs["bias"] = bias
-        # TODO: add quantization support
+
 
         if isinstance(target, Linear):
             target.update_layer(
@@ -306,29 +287,46 @@ class VeraModel(BaseTuner):
 
     @staticmethod
     def _create_new_module(vera_config, vera_A, vera_B, adapter_name, target, **kwargs):
+        # avoid eager bnb import
+        if is_bnb_available():
+            import bitsandbytes as bnb
+
+            from .bnb import Linear8bitLt
+
+        if is_bnb_4bit_available():
+            from .bnb import Linear4bit
+
         bias = kwargs.pop("bias", False)
+        loaded_in_8bit = kwargs.get("loaded_in_8bit", False)
+        loaded_in_4bit = kwargs.get("loaded_in_4bit", False)
 
         if isinstance(target, BaseTunerLayer):
             target_base_layer = target.get_base_layer()
         else:
             target_base_layer = target
 
-        loaded_in_8bit = kwargs.get("loaded_in_8bit", False)
-
-        if loaded_in_8bit and is_bnb_available():
-            from .bnb import dispatch_bnb_8bit
+        if loaded_in_8bit and isinstance(target_base_layer, bnb.nn.Linear8bitLt):
             eightbit_kwargs = kwargs.copy()
-            eightbit_kwargs.update({
-                "has_fp16_weights": getattr(target, "has_fp16_weights", False),
-                "memory_efficient_backward": getattr(target, "memory_efficient_backward", False),
-                "threshold": getattr(target, "threshold", 0.0),
-                "index": getattr(target, "index", None),
-            })
-            new_module = dispatch_bnb_8bit(target, adapter_name, vera_A, vera_B, **eightbit_kwargs)
-            if new_module is not None:
-                return new_module
-
-        if isinstance(target_base_layer, torch.nn.Linear):
+            eightbit_kwargs.update(
+                {
+                    "has_fp16_weights": target_base_layer.state.has_fp16_weights,
+                    "memory_efficient_backward": target_base_layer.state.memory_efficient_backward,
+                    "threshold": target_base_layer.state.threshold,
+                    "index": target_base_layer.index,
+                }
+            )
+            return Linear8bitLt(target, adapter_name, vera_A, vera_B, **eightbit_kwargs)
+        elif loaded_in_4bit and isinstance(target_base_layer, bnb.nn.Linear4bit):
+            fourbit_kwargs = kwargs.copy()
+            fourbit_kwargs.update(
+                {
+                    "compute_dtype": target_base_layer.compute_dtype,
+                    "compress_statistics": target_base_layer.weight.compress_statistics,
+                    "quant_type": target_base_layer.weight.quant_type,
+                }
+            )
+            return Linear4bit(target, adapter_name, vera_A, vera_B, **fourbit_kwargs)
+        elif isinstance(target_base_layer, torch.nn.Linear):
             if kwargs["fan_in_fan_out"]:
                 warnings.warn(
                     "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
