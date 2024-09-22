@@ -871,7 +871,7 @@ def _find_minimal_target_modules(
     # Initialize a set for required suffixes
     required_suffixes = set()
 
-    # We sort the target_modules_suffix_map simple to get deterministic behavior, since sets have no order. In theory
+    # We sort the target_modules_suffix_map simply to get deterministic behavior, since sets have no order. In theory
     # the order should not matter but in case there is a bug, it's better for the bug to be deterministic.
     for item, suffixes in sorted(target_modules_suffix_map.items(), key=lambda tup: tup[1]):
         # Go through target_modules items, shortest suffixes first
