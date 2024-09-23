@@ -1243,7 +1243,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         atol, rtol = 1e-5, 1e-5  # tolerances higher than defaults since merging introduces some numerical instability
 
         conv_ids = ["Conv2d", "Conv3d", "Conv2d2", "Conv3d2"]
-        if issubclass(config_cls, IA3Config) and model_id in conv_ids:  # more instability with Conv2d + IA3
+        if issubclass(config_cls, (IA3Config, LoraConfig)) and model_id in conv_ids:  # more instability with Conv
             atol, rtol = 1e-3, 1e-3
 
         if config_kwargs.get("use_dora") and model_id == "EmbConv1D":

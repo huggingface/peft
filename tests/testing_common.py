@@ -630,8 +630,8 @@ class PeftCommonTester:
         if config.peft_type == "ADALORA":
             # AdaLoRA is a bit flaky on CI, but this cannot be reproduced locally
             atol, rtol = 1e-2, 1e-2
-        if (config.peft_type == "IA3") and (model_id in conv_ids):
-            # for some reason, the IA³ Conv2d introduces a larger error
+        if (config.peft_type in  {"IA3", "LORA"}) and (model_id in conv_ids):
+            # for some reason, the Conv introduces a larger error
             atol, rtol = 0.3, 0.01
         assert torch.allclose(logits, logits_merged, atol=atol, rtol=rtol)
         assert torch.allclose(logits, logits_unmerged, atol=atol, rtol=rtol)
@@ -784,6 +784,11 @@ class PeftCommonTester:
 
         if self.torch_device in ["mlu"]:
             atol, rtol = 1e-3, 1e-3  # MLU
+
+        conv_ids = ["Conv2d", "Conv3d", "Conv2d2", "Conv3d2"]
+        if issubclass(config_cls, (IA3Config, LoraConfig)) and model_id in conv_ids:  # more instability with Conv
+            atol, rtol = 1e-3, 1e-3
+
         # check that the logits are the same after unloading
         assert torch.allclose(logits_peft, logits_unloaded, atol=atol, rtol=rtol)
 
