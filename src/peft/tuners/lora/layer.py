@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 import warnings
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, Type
 
 import torch
 import torch.nn as nn
@@ -29,7 +29,8 @@ from peft.utils.integrations import dequantize_module_weight, gather_params_ctx,
 from peft.utils.other import transpose
 
 from .config import LoraConfig
-from .dora import DoraConvNdLayer, DoraEmbeddingLayer, DoraLinearLayer
+from .dora import DoraEmbeddingLayer, DoraLinearLayer, DoraConv2dLayer, DoraConv3dLayer, \
+    _DoraConvNdLayer
 
 
 class LoraLayer(BaseTunerLayer):
@@ -932,12 +933,17 @@ class _ConvNd(nn.Module, LoraLayer):
             # first dora layer being added, add lora_magnitude_vector to the list of learnable parameters
             self.adapter_layer_names = self.adapter_layer_names[:] + ("lora_magnitude_vector",)
 
-        dora_layer = DoraConvNdLayer(fan_in_fan_out=False)
+        dora_layer_class = self._get_dora_layer_class()
+        dora_layer = dora_layer_class(fan_in_fan_out=False)
         lora_A = self.lora_A[adapter_name].weight
         lora_B = self.lora_B[adapter_name].weight
         scaling = self.scaling[adapter_name]
         dora_layer.update_layer(base_layer=self.get_base_layer(), lora_A=lora_A, lora_B=lora_B, scaling=scaling)
         self.lora_magnitude_vector[adapter_name] = dora_layer
+
+    def _get_dora_layer_class(self) -> Type[_DoraConvNdLayer]:
+        # Subclasses should override this method to return the appropriate DoraLayer class
+        raise NotImplementedError
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -1062,9 +1068,8 @@ class _ConvNd(nn.Module, LoraLayer):
                 3
             ) * self.scaling[adapter]
         else:
-            F_conv = F.conv3d if self._convd >= 3 else F.conv2d
             output_tensor = (
-                F_conv(
+                self.conv_fn(
                     weight_A.transpose(0, 1),
                     weight_B,
                 ).transpose(0, 1)
@@ -1131,6 +1136,10 @@ class Conv2d(_ConvNd):
         super().__init__(*args, **kwargs)
         if not self._kernel_dim == 4:
             raise ValueError(f"Conv2d layer kernel must have 4 dimensions, not {self._kernel_dim}")
+        self.conv_fn = F.conv2d
+
+    def _get_dora_layer_class(self):
+        return DoraConv2dLayer
 
 
 class Conv3d(_ConvNd):
@@ -1138,7 +1147,11 @@ class Conv3d(_ConvNd):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if not self._kernel_dim == 5:
-            raise ValueError(f"Conv2d layer kernel must have 5 dimensions, not {self._kernel_dim}")
+            raise ValueError(f"Conv3d layer kernel must have 5 dimensions, not {self._kernel_dim}")
+        self.conv_fn = F.conv3d
+
+    def _get_dora_layer_class(self):
+        return DoraConv3dLayer
 
 
 def dispatch_default(

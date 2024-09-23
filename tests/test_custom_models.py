@@ -3473,7 +3473,7 @@ class TestMixedAdapterBatches:
         peft_model = get_peft_model(base_model, config0, "adapter0").eval()
         peft_model.add_adapter("adapter1", config1)
         inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
-        SUPPORTED_MODULES = (torch.nn.Linear, torch.nn.Embedding, torch.nn.Conv2d, torch.nn.Conv1d)
+        SUPPORTED_MODULES = (torch.nn.Linear, torch.nn.Embedding, torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d)
         module_names = ", ".join([module.__name__ for module in SUPPORTED_MODULES])
         with pytest.raises(
             TypeError, match=f"Mixed batching is only supported for the following modules: {module_names}."

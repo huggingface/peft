@@ -133,7 +133,7 @@ class DoraEmbeddingLayer(DoraLinearLayer):
         return "lora.dora." + rep
 
 
-class DoraConvNdLayer(DoraLinearLayer):
+class _DoraConvNdLayer(DoraLinearLayer):
     def get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
         # calculate L2 norm of weight matrix, column-wise
         weight = weight + scaling * lora_weight
@@ -160,9 +160,8 @@ class DoraConvNdLayer(DoraLinearLayer):
         # during backpropagation"
         weight_norm = weight_norm.detach()
         mag_norm_scale = magnitude / weight_norm
-        F_conv = F.conv3d if weight.dim() >= 5 else F.conv2d
         result_dora = (mag_norm_scale - 1) * (
-            F_conv(
+            self.conv_fn(
                 x,
                 weight,
                 bias=None,
@@ -178,3 +177,13 @@ class DoraConvNdLayer(DoraLinearLayer):
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "lora.dora." + rep
+
+class DoraConv2dLayer(_DoraConvNdLayer):
+    def __init__(self, fan_in_fan_out):
+        super().__init__(fan_in_fan_out)
+        self.conv_fn = F.conv2d
+
+class DoraConv3dLayer(_DoraConvNdLayer):
+    def __init__(self, fan_in_fan_out):
+        super().__init__(fan_in_fan_out)
+        self.conv_fn = F.conv3d
