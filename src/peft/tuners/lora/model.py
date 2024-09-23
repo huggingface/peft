@@ -434,6 +434,19 @@ class LoraModel(BaseTuner):
         if self.training:
             raise ValueError("Cannot pass `adapter_names` when the model is in training mode.")
 
+        # Check that users only passed actually existing adapters.
+        # Note: We cannot do this on the layer level, as each individual layer may not have each adapter. Still, we want
+        # to check that there is at least one layer with the given name, or else something like typos can easily slip.
+        expected_adapters = set()
+        for layer in self.modules():
+            if isinstance(layer, LoraLayer):
+                expected_adapters |= layer.lora_A.keys()
+                expected_adapters |= layer.lora_embedding_A.keys()
+        unique_adapters = {name for name in adapter_names if name != "__base__"}
+        unexpected_adapters = unique_adapters - expected_adapters
+        if unexpected_adapters:
+            raise ValueError(f"Trying to infer with non-existing adapter(s): {', '.join(sorted(unexpected_adapters))}")
+
         hook_handles = []
         for module in self.modules():
             if isinstance(module, LoraLayer) or isinstance(module, ModulesToSaveWrapper):

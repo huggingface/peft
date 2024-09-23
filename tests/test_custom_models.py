@@ -3477,12 +3477,39 @@ class TestMixedAdapterBatches:
         # When there are merged adapters, passing adapter names should raise an error
         inputs = {
             "X": torch.arange(90).view(-1, 10).to(self.torch_device),
-            "adapter_names": ["default"] * 9,
+            "adapter_names": ["adapter0"] * 9,
         }
         mlp_lora.merge_adapter(["adapter0"])
         msg = r"Cannot pass `adapter_names` when there are merged adapters, please call `unmerge_adapter` first."
         with pytest.raises(ValueError, match=msg):
             mlp_lora.forward(**inputs)
+
+    def test_mixed_adapter_batches_lora_wrong_adapter_name_raises(self):
+        # Ensure that all of the adapter names that are being passed actually exist
+        torch.manual_seed(0)
+        x = torch.arange(90).view(-1, 10).to(self.torch_device)
+
+        base_model = MLP().to(self.torch_device).eval()
+        config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+        peft_model = get_peft_model(base_model, config).eval()
+        peft_model.add_adapter(adapter_name="other", peft_config=config)
+
+        # sanity check: this works
+        peft_model.forward(x, adapter_names=["default"] * 5 + ["other"] * 4)
+
+        # check one correct and one incorrect adapter
+        msg = re.escape("Trying to infer with non-existing adapter(s): does-not-exist")
+        with pytest.raises(ValueError, match=msg):
+            peft_model.forward(x, adapter_names=["default"] * 5 + ["does-not-exist"] * 4)
+
+        # check two correct adapters and one incorrect adapter
+        with pytest.raises(ValueError, match=msg):
+            peft_model.forward(x, adapter_names=["default"] * 3 + ["does-not-exist"] * 4 + ["other"] * 2)
+
+        # check only incorrect adapters
+        msg = re.escape("Trying to infer with non-existing adapter(s): does-not-exist, other-does-not-exist")
+        with pytest.raises(ValueError, match=msg):
+            peft_model.forward(x, adapter_names=["does-not-exist"] * 5 + ["other-does-not-exist"] * 4)
 
     def test_mixed_adapter_batches_lora_with_dora_raises(self):
         # When there are Dora adapters, passing adapter names should raise an error
