@@ -48,7 +48,7 @@ setup(
     keywords="deep learning",
     license="Apache",
     author="The HuggingFace team",
-    author_email="sourab@huggingface.co",
+    author_email="benjamin@huggingface.co",
     url="https://github.com/huggingface/peft",
     package_dir={"": "src"},
     packages=find_packages("src"),
