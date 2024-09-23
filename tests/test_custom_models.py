@@ -3510,7 +3510,8 @@ class TestMixedAdapterBatches:
         peft_model.add_adapter(adapter_name="other", peft_config=config_no_dora)
         peft_model.eval()
 
-        # we have a DoRA adapter but it's not included in the mixed batch, so we're good
+        # The "default" adapter uses DoRA but "other" is not using it, so using "other" is fine. Also, "__base__" is
+        # fine since it uses the base model and thus DoRA is not involved either.
         inputs = {
             "X": torch.arange(90).view(-1, 10).to(self.torch_device),
             "adapter_names": ["other"] * 4 + ["__base__"] * 5,
