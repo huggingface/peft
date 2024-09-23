@@ -38,7 +38,7 @@ class IA3Layer(BaseTunerLayer):
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
             in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif isinstance(base_layer, nn.Conv2d) or isinstance(base_layer, nn.Conv3d):
+        elif isinstance(base_layer, (nn.Conv2d, nn.Conv3d)):
             in_features, out_features = base_layer.in_channels, base_layer.out_channels
         elif isinstance(base_layer, nn.Embedding):
             in_features, out_features = base_layer.num_embeddings, base_layer.embedding_dim
@@ -184,7 +184,7 @@ class Linear(nn.Module, IA3Layer):
         return result
 
 
-class ConvNd(nn.Module, IA3Layer):
+class _ConvNd(nn.Module, IA3Layer):
     def __init__(
         self,
         base_layer: nn.Module,
@@ -198,14 +198,14 @@ class ConvNd(nn.Module, IA3Layer):
         IA3Layer.__init__(self, base_layer, is_feedforward=is_feedforward)
         self.fan_in_fan_out = fan_in_fan_out
         self._active_adapter = adapter_name
-        self._kernel_rank = base_layer.weight.dim()
+        self._kernel_dim = base_layer.weight.dim()
 
         self.update_layer(adapter_name, init_ia3_weights)
 
     def update_layer(self, adapter_name, init_ia3_weights):
         # Actual trainable parameters
         num_features = self.in_features if self.is_feedforward else self.out_features
-        weights_size = (1, num_features) + (1,) * (self._kernel_rank - 2)
+        weights_size = (1, num_features) + (1,) * (self._kernel_dim - 2)
         weight = torch.randn(weights_size)
         self.ia3_l[adapter_name] = nn.Parameter(weight)
         if init_ia3_weights:
@@ -310,11 +310,18 @@ class ConvNd(nn.Module, IA3Layer):
         return result
 
 
-class Conv2d(ConvNd):
+class Conv2d(_ConvNd):
     # IA3 implemented in a 2D convolutional layer
-    pass
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self._kernel_dim == 4:
+            raise ValueError(f"Conv2d layer kernel must have 4 dimensions, not {self._kernel_dim}")
 
 
-class Conv3d(ConvNd):
+class Conv3d(_ConvNd):
     # IA3 implemented in a 3D convolutional layer
-    pass
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self._kernel_dim == 5:
+            raise ValueError(f"Conv2d layer kernel must have 5 dimensions, not {self._kernel_dim}")

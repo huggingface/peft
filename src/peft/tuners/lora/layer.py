@@ -851,7 +851,7 @@ class Embedding(nn.Module, LoraLayer):
         return "lora." + rep
 
 
-class ConvNd(nn.Module, LoraLayer):
+class _ConvNd(nn.Module, LoraLayer):
     # Lora implemented in a conv(2,3)d layer
     def __init__(
         self,
@@ -869,8 +869,8 @@ class ConvNd(nn.Module, LoraLayer):
         LoraLayer.__init__(self, base_layer)
 
         self._active_adapter = adapter_name
-        self._kernel_rank = base_layer.weight.dim()
-        self._convd = self._kernel_rank - 2
+        self._kernel_dim = base_layer.weight.dim()
+        self._convd = self._kernel_dim - 2
 
         self.update_layer(
             adapter_name,
@@ -1125,14 +1125,20 @@ class ConvNd(nn.Module, LoraLayer):
         return "lora." + rep
 
 
-class Conv2d(ConvNd):
+class Conv2d(_ConvNd):
     # Lora implemented in a conv2d layer
-    pass
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self._kernel_dim == 4:
+            raise ValueError(f"Conv2d layer kernel must have 4 dimensions, not {self._kernel_dim}")
 
 
-class Conv3d(ConvNd):
+class Conv3d(_ConvNd):
     # Lora implemented in a conv3d layer
-    pass
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self._kernel_dim == 5:
+            raise ValueError(f"Conv2d layer kernel must have 5 dimensions, not {self._kernel_dim}")
 
 
 def dispatch_default(
