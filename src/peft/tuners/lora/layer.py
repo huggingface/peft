@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 import warnings
-from typing import Any, Optional, Union, Type
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -29,8 +29,7 @@ from peft.utils.integrations import dequantize_module_weight, gather_params_ctx,
 from peft.utils.other import transpose
 
 from .config import LoraConfig
-from .dora import DoraEmbeddingLayer, DoraLinearLayer, DoraConv2dLayer, DoraConv3dLayer, \
-    _DoraConvNdLayer
+from .dora import DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer, _DoraConvNdLayer
 
 
 class LoraLayer(BaseTunerLayer):
@@ -871,7 +870,6 @@ class _ConvNd(nn.Module, LoraLayer):
 
         self._active_adapter = adapter_name
         self._kernel_dim = base_layer.weight.dim()
-        self._convd = self._kernel_dim - 2
 
         self.update_layer(
             adapter_name,
@@ -901,7 +899,7 @@ class _ConvNd(nn.Module, LoraLayer):
         stride = base_layer.stride
         padding = base_layer.padding
         conv_layer = type(base_layer)
-        out_kernel = out_stride = (1,) * self._convd
+        out_kernel = out_stride = (1,) * (self._kernel_dim - 2)
         self.lora_A[adapter_name] = conv_layer(self.in_features, r, kernel_size, stride, padding, bias=False)
         self.lora_B[adapter_name] = conv_layer(r, self.out_features, out_kernel, out_stride, bias=False)
         if use_rslora:
@@ -926,7 +924,7 @@ class _ConvNd(nn.Module, LoraLayer):
         self.set_adapter(self.active_adapters)
 
     def _get_dora_factor_view(self):
-        return (-1,) + (1,) * (self._convd + 1)
+        return (-1,) + (1,) * (self._kernel_dim - 1)
 
     def dora_init(self, adapter_name: str) -> None:
         if self.lora_magnitude_vector is None:
@@ -941,7 +939,7 @@ class _ConvNd(nn.Module, LoraLayer):
         dora_layer.update_layer(base_layer=self.get_base_layer(), lora_A=lora_A, lora_B=lora_B, scaling=scaling)
         self.lora_magnitude_vector[adapter_name] = dora_layer
 
-    def _get_dora_layer_class(self) -> Type[_DoraConvNdLayer]:
+    def _get_dora_layer_class(self) -> type[_DoraConvNdLayer]:
         # Subclasses should override this method to return the appropriate DoraLayer class
         raise NotImplementedError
 

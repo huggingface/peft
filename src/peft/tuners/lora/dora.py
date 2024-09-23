@@ -178,10 +178,12 @@ class _DoraConvNdLayer(DoraLinearLayer):
         rep = super().__repr__()
         return "lora.dora." + rep
 
+
 class DoraConv2dLayer(_DoraConvNdLayer):
     def __init__(self, fan_in_fan_out):
         super().__init__(fan_in_fan_out)
         self.conv_fn = F.conv2d
+
 
 class DoraConv3dLayer(_DoraConvNdLayer):
     def __init__(self, fan_in_fan_out):

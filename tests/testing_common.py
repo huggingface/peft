@@ -630,7 +630,7 @@ class PeftCommonTester:
         if config.peft_type == "ADALORA":
             # AdaLoRA is a bit flaky on CI, but this cannot be reproduced locally
             atol, rtol = 1e-2, 1e-2
-        if (config.peft_type in  {"IA3", "LORA"}) and (model_id in conv_ids):
+        if (config.peft_type in {"IA3", "LORA"}) and (model_id in conv_ids):
             # for some reason, the Conv introduces a larger error
             atol, rtol = 0.3, 0.01
         assert torch.allclose(logits, logits_merged, atol=atol, rtol=rtol)
