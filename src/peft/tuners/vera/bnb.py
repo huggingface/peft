@@ -386,7 +386,7 @@ if is_bnb_4bit_available():
                         if x.dtype != compute_dtype:
                             x = x.to(compute_dtype)
 
-                    sliced_A = vera_A.repeat(1, self.in_features)
+                    sliced_A = vera_A[:, : self.in_features]
                     sliced_B = vera_B[: self.out_features, :]
 
                     x_temp = dropout(x.to(lambda_d.dtype))
