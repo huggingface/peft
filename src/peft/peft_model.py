@@ -1107,7 +1107,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
     def load_adapter(
         self,
-        model_id: str,
+        model_id: Union[str, os.PathLike],
         adapter_name: str,
         is_trainable: bool = False,
         torch_device: Optional[str] = None,
@@ -1125,10 +1125,14 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         adapter.
 
         Args:
+            model_id (`str` or `os.PathLike`):
+                The name of the PEFT configuration to use. Can be either:
+                    - A string, the `model id` of a PEFT configuration hosted inside a model repo on the Hugging Face
+                      Hub.
+                    - A path to a directory containing a PEFT configuration file saved using the `save_pretrained`
+                      method (`./my_peft_config_directory/`).
             adapter_name (`str`):
                 The name of the adapter to be added.
-            peft_config ([`PeftConfig`]):
-                The configuration of the adapter to be added.
             is_trainable (`bool`, *optional*, defaults to `False`):
                 Whether the adapter should be trainable or not. If `False`, the adapter will be frozen and can only be
                 used for inference.
