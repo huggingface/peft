@@ -1068,8 +1068,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
     def load_adapter(
         self,
-        model_id: str,
-        adapter_name: Union[str, os.PathLike],
+        model_id: Union[str, os.PathLike],
+        adapter_name: str,
         is_trainable: bool = False,
         torch_device: Optional[str] = None,
         autocast_adapter_dtype: bool = True,
