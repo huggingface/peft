@@ -20,10 +20,11 @@ import re
 import textwrap
 import warnings
 from abc import ABC, abstractmethod
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import Any, Optional, Union
 
 import torch
+from accelerate import init_empty_weights
 from accelerate.hooks import AlignDevicesHook
 from accelerate.utils import named_module_tensors, offload_state_dict
 from torch import nn
@@ -155,6 +156,7 @@ class BaseTuner(nn.Module, ABC):
         model,
         peft_config: Union[PeftConfig, dict[str, PeftConfig]],
         adapter_name: str,
+        low_cpu_mem_usage: bool = False,
     ) -> None:
         super().__init__()
 
@@ -179,7 +181,7 @@ class BaseTuner(nn.Module, ABC):
         self.active_adapter: str | list[str] = adapter_name
         self._pre_injection_hook(self.model, self.peft_config[adapter_name], adapter_name)
         if peft_config != PeftType.XLORA or peft_config[adapter_name] != PeftType.XLORA:
-            self.inject_adapter(self.model, adapter_name)
+            self.inject_adapter(self.model, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
         # Copy the peft_config in the injected model.
         self.model.peft_config = self.peft_config
@@ -399,7 +401,9 @@ class BaseTuner(nn.Module, ABC):
                 + example_code
             )
 
-    def inject_adapter(self, model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
+    def inject_adapter(
+        self, model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True, low_cpu_mem_usage: bool = False
+    ) -> None:
         r"""
         Creates adapter layers and replaces the target modules with the adapter layers. This method is called under the
         hood by `peft.mapping.get_peft_model` if a non-prompt tuning adapter class is passed.
@@ -413,6 +417,9 @@ class BaseTuner(nn.Module, ABC):
                 The adapter name.
             autocast_adapter_dtype (`bool`, *optional*):
                 Whether to autocast the adapter dtype. Defaults to `True`.
+            low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+                Create empty adapter weights on meta device. Useful to speed up the loading process.
+
         """
         peft_config = self.peft_config[adapter_name]
         # Note: If possible, all checks should be performed *at the start of this method*.
@@ -482,7 +489,9 @@ class BaseTuner(nn.Module, ABC):
             self.targeted_module_names.append(key)
             is_target_modules_in_base_model = True
             parent, target, target_name = _get_submodules(model, key)
-            self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
+            ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
+            with ctx():
+                self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
 
         tied_target_modules = self._get_tied_target_modules(model=model)
         if tied_target_modules:
@@ -792,6 +801,8 @@ class BaseTunerLayer(ABC):
                 # no break encountered: could not determine the device
                 return
 
+        meta = torch.device("meta")
+
         # loop through all potential adapter layers and move them to the device of the base layer; be careful to only
         # move this specific adapter to the device, as the other adapters could be on different devices
         # see #1639
@@ -801,6 +812,9 @@ class BaseTunerLayer(ABC):
                 continue
             if adapter_name not in adapter_layer:
                 continue
+            if any(p.device == meta for p in adapter_layer.parameters()):
+                continue
+
             if weight.dtype.is_floating_point or weight.dtype.is_complex:
                 adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device, dtype=dtype)
             else:
