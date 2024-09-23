@@ -305,7 +305,11 @@ def _find_mismatched_keys(
 
 
 def set_peft_model_state_dict(
-    model, peft_model_state_dict, adapter_name="default", ignore_mismatched_sizes: bool = False
+    model,
+    peft_model_state_dict,
+    adapter_name="default",
+    ignore_mismatched_sizes: bool = False,
+    low_cpu_mem_usage: bool = False,
 ):
     """
     Set the state dict of the Peft model.
@@ -319,6 +323,10 @@ def set_peft_model_state_dict(
             The name of the adapter whose state dict should be set.
         ignore_mismatched_sizes (`bool`, *optional*, defaults to `False`):
             Whether to ignore mismatched in the state dict.
+        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+            This argument must be `True` if the `model` was loaded with adapter weights on the meta device, e.g. after
+            calling `inject_adapter_in_model` with `low_cpu_mem_usage=True`. Otherwise, leave it as `False`.
+
     """
     config = model.peft_config[adapter_name]
     state_dict = {}
@@ -446,7 +454,11 @@ def set_peft_model_state_dict(
     peft_model_state_dict, mismatched_keys = _find_mismatched_keys(
         model, peft_model_state_dict, ignore_mismatched_sizes=ignore_mismatched_sizes
     )
-    load_result = model.load_state_dict(peft_model_state_dict, strict=False)
+    if low_cpu_mem_usage:
+        load_result = model.load_state_dict(peft_model_state_dict, strict=False, assign=True)
+    else:
+        load_result = model.load_state_dict(peft_model_state_dict, strict=False)
+
     if config.is_prompt_learning:
         model.prompt_encoder[adapter_name].embedding.load_state_dict(
             {"weight": peft_model_state_dict["prompt_embeddings"]}, strict=True

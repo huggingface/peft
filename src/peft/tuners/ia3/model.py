@@ -45,6 +45,8 @@ class IA3Model(BaseTuner):
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
         config ([`IA3Config`]): The configuration of the (IA)^3 model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
+        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+            Create empty adapter weights on meta device. Useful to speed up the loading process.
 
     Returns:
         `torch.nn.Module`: The (IA)^3 model.
@@ -73,8 +75,8 @@ class IA3Model(BaseTuner):
 
     prefix: str = "ia3_"
 
-    def __init__(self, model, config, adapter_name):
-        super().__init__(model, config, adapter_name)
+    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False):
+        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
     @staticmethod
     def _create_new_module(ia3_config, adapter_name, target, **kwargs):
@@ -217,10 +219,12 @@ class IA3Model(BaseTuner):
                 new_module.state = child.state
             new_module.to(child.weight.device)
 
+        meta = torch.device("meta")
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if self.prefix in name:
-                module.to(child.weight.device)
+                if not any(p.device == meta for p in module.parameters()):
+                    module.to(child.weight.device)
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
