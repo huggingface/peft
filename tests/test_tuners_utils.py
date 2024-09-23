@@ -1282,3 +1282,48 @@ class TestFindMinimalTargetModules:
         # check that the resulting model is still the same
         model_check_after = sum(p.sum() for p in model.parameters())
         assert model_check_sum_before == model_check_after
+
+    def test_suffix_is_substring_of_other_suffix(self):
+        # This test is based on a real world bug found in diffusers. The issue was that we needed the suffix
+        # 'time_emb_proj' in the minimal target modules. However, if there already was the suffix 'proj' in the
+        # required_suffixes, 'time_emb_proj' would not be added because the test was `endswith(suffix)` and
+        # 'time_emb_proj' ends with 'proj'. The correct logic is to test if `endswith("." + suffix")`. The module names
+        # chosen here are only a subset of the hundreds of actual module names but this subset is sufficient to
+        # replicate the bug.
+        target_modules = [
+            "down_blocks.1.attentions.0.transformer_blocks.0.ff.net.0.proj",
+            "mid_block.attentions.0.transformer_blocks.0.ff.net.0.proj",
+            "up_blocks.0.attentions.0.transformer_blocks.0.ff.net.0.proj",
+            "mid_block.attentions.0.proj_out",
+            "up_blocks.0.attentions.0.proj_out",
+            "down_blocks.1.attentions.0.proj_out",
+            "up_blocks.0.resnets.0.time_emb_proj",
+            "down_blocks.0.resnets.0.time_emb_proj",
+            "mid_block.resnets.0.time_emb_proj",
+        ]
+        other_module_names = [
+            "conv_in",
+            "time_proj",
+            "time_embedding",
+            "time_embedding.linear_1",
+            "add_time_proj",
+            "add_embedding",
+            "add_embedding.linear_1",
+            "add_embedding.linear_2",
+            "down_blocks",
+            "down_blocks.0",
+            "down_blocks.0.resnets",
+            "down_blocks.0.resnets.0",
+            "up_blocks",
+            "up_blocks.0",
+            "up_blocks.0.attentions",
+            "up_blocks.0.attentions.0",
+            "up_blocks.0.attentions.0.norm",
+            "up_blocks.0.attentions.0.transformer_blocks",
+            "up_blocks.0.attentions.0.transformer_blocks.0",
+            "up_blocks.0.attentions.0.transformer_blocks.0.norm1",
+            "up_blocks.0.attentions.0.transformer_blocks.0.attn1",
+        ]
+        expected = {"time_emb_proj", "proj", "proj_out"}
+        result = find_minimal_target_modules(target_modules, other_module_names)
+        assert result == expected
