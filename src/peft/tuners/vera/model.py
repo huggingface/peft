@@ -120,10 +120,10 @@ class VeraModel(BaseTuner):
             if not self._check_target_module_exists(peft_config, key):
                 continue
 
-            if isinstance(module, (nn.Linear, Conv1D)):
-                module_shape = tuple(module.weight.shape)
-                if isinstance(module, Conv1D):
-                    module_shape = module_shape[::-1]
+            if isinstance(module, nn.Linear):
+                module_shape = module.in_features, module.out_features
+            elif isinstance(module, Conv1D):
+                module_shape = module.weight.ds_shape if hasattr(module.weight, "ds_shape") else module.weight.shape
             else:
                 continue
 
