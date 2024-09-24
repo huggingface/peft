@@ -1203,9 +1203,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         missing_keys, unexpected_keys = load_result.missing_keys, load_result.unexpected_keys
         tuner = self.peft_config[adapter_name].peft_type
 
-        # Check for missing keys related to the adapter tuner
         tuner_prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(tuner, "")
-        adapter_missing_keys = [key for key in missing_keys if tuner_prefix in key]
+        adapter_missing_keys = []
+
+        # Filter missing keys specific to the current adapter and tuner prefix.
+        for key in missing_keys:
+            if tuner_prefix in key and adapter_name in key:
+                adapter_missing_keys.append(key)
 
         load_result = _IncompatibleKeys(missing_keys=adapter_missing_keys, unexpected_keys=unexpected_keys)
 
