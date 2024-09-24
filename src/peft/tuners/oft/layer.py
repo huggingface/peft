@@ -170,7 +170,9 @@ class OFTLayer(BaseTunerLayer):
             if self.in_features % oft_block_size != 0 or oft_block_size > self.in_features:
                 old_oft_block_size = oft_block_size
                 oft_block_size = self.adjust_oft_parameters(self.in_features, oft_block_size)
-                warnings.warn(f"Invalid `oft_block_size` ({old_oft_block_size})! Adjusted `oft_block_size` to ({oft_block_size}).")
+                warnings.warn(
+                    f"Invalid `oft_block_size` ({old_oft_block_size})! Adjusted `oft_block_size` to ({oft_block_size})."
+                )
             r = int(self.in_features // oft_block_size)
         elif r != 0 and oft_block_size == 0:
             if self.in_features % r != 0 or r > self.in_features:
@@ -515,7 +517,9 @@ class Conv2d(nn.Module, OFTLayer):
             if conv_filter_dim % oft_block_size != 0 or oft_block_size > conv_filter_dim:
                 old_oft_block_size = oft_block_size
                 oft_block_size = self.adjust_oft_parameters(conv_filter_dim, oft_block_size)
-                warnings.warn(f"Invalid `oft_block_size` ({old_oft_block_size})! Adjusted `oft_block_size` to ({oft_block_size}).")
+                warnings.warn(
+                    f"Invalid `oft_block_size` ({old_oft_block_size})! Adjusted `oft_block_size` to ({oft_block_size})."
+                )
             r = int(conv_filter_dim // oft_block_size)
         elif r != 0 and oft_block_size == 0:
             if conv_filter_dim % r != 0 or r > conv_filter_dim:
