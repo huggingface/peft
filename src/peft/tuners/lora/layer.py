@@ -344,7 +344,9 @@ class LoraLayer(BaseTunerLayer):
             msg = "Cannot pass `adapter_names` when there are merged adapters, please call `unmerge_adapter` first."
             raise ValueError(msg)
 
-        unique_adapters = set(self.active_adapters)
+        # DoRA is not supported (yet), check that it's not being used. Don't check "__base__", as this is the
+        # placeholder for the base model.
+        unique_adapters = {name for name in adapter_names if name != "__base__"}
         for adapter_name in unique_adapters:
             if self.use_dora.get(adapter_name, False):
                 msg = "Cannot pass `adapter_names` when DoRA is enabled."
