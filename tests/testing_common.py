@@ -532,8 +532,12 @@ class PeftCommonTester:
 
             model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
             model = PeftModel.from_pretrained(model, tmp_dirname, torch_device=self.torch_device)
-            model.load_adapter(tmp_dirname, adapter_name="other")
-            model.load_adapter(tmp_dirname, adapter_name="yet-another")
+
+            load_result1 = model.load_adapter(tmp_dirname, adapter_name="other")
+            load_result2 = model.load_adapter(tmp_dirname, adapter_name="yet-another")
+
+            assert load_result1.missing_keys == []
+            assert load_result2.missing_keys == []
 
     def _test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
         if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig, VBLoRAConfig):
