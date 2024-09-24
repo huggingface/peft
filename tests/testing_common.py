@@ -623,7 +623,7 @@ class PeftCommonTester:
         model = model.merge_and_unload()
         logits_merged_unloaded = model(**dummy_input)[0]
 
-        conv_ids = ["Conv2d", "Conv3d", "Conv2d2", "Conv3d2"]
+        conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
         atol, rtol = 1e-4, 1e-4
         if self.torch_device in ["mlu"]:
             atol, rtol = 1e-3, 1e-3  # MLU
@@ -785,7 +785,7 @@ class PeftCommonTester:
         if self.torch_device in ["mlu"]:
             atol, rtol = 1e-3, 1e-3  # MLU
 
-        conv_ids = ["Conv2d", "Conv3d", "Conv2d2", "Conv3d2"]
+        conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
         if issubclass(config_cls, (IA3Config, LoraConfig)) and model_id in conv_ids:  # more instability with Conv
             atol, rtol = 1e-3, 1e-3
 

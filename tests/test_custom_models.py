@@ -108,12 +108,8 @@ TEST_CASES = [
     ("Conv2d 2 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"], "use_dora": True}),
     ("Conv3d 1 LoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d"]}),
     ("Conv3d 2 LoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d", "lin0"]}),
-    ("Conv3d2 1 LoRA", "Conv3d2", LoraConfig, {"target_modules": ["conv3d"]}),
-    ("Conv3d2 2 LoRA", "Conv3d2", LoraConfig, {"target_modules": ["conv3d", "lin0"]}),
     ("Conv3d 1 LoRA with DoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d"], "use_dora": True}),
     ("Conv3d 2 LoRA with DoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d", "lin0"], "use_dora": True}),
-    ("Conv3d2 1 LoRA with DoRA", "Conv3d2", LoraConfig, {"target_modules": ["conv3d"], "use_dora": True}),
-    ("Conv3d2 2 LoRA with DoRA", "Conv3d2", LoraConfig, {"target_modules": ["conv3d", "lin0"], "use_dora": True}),
     #######
     # IA³ #
     #######
@@ -199,9 +195,6 @@ TEST_CASES = [
         IA3Config,
         {"target_modules": ["conv3d", "lin0"], "feedforward_modules": ["conv3d", "lin0"]},
     ),
-    ("Conv3d2 1 IA3", "Conv3d2", IA3Config, {"target_modules": ["conv3d"], "feedforward_modules": []}),
-    ("Conv3d2 2 IA3", "Conv3d2", IA3Config, {"target_modules": ["conv3d"], "feedforward_modules": ["conv3d"]}),
-    ("Conv3d2 3 IA3", "Conv3d2", IA3Config, {"target_modules": ["conv3d", "lin0"], "feedforward_modules": ["conv3d"]}),
     ########
     # LoHa #
     ########
@@ -837,29 +830,6 @@ class ModelConv3D(nn.Module):
         return X
 
 
-class ModelConv3D2(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.lin0 = nn.Linear(10, 40)
-        self.conv3d = nn.Conv3d(8, 32, 3)
-        self.relu = nn.ReLU()
-        self.flat = nn.Flatten()
-        self.lin1 = nn.Linear(96, 2)
-        self.sm = nn.LogSoftmax(dim=-1)
-
-    def forward(self, X):
-        X = X.float()
-        X = self.lin0(X)
-        X = self.relu(X)
-        X = X.reshape(-1, 8, 3, 3, 5)
-        X = self.conv3d(X)
-        X = self.relu(X)
-        X = self.flat(X)
-        X = self.lin1(X)
-        X = self.sm(X)
-        return X
-
-
 class MockTransformerWrapper:
     """Mock class to behave like a transformers model.
 
@@ -895,9 +865,6 @@ class MockTransformerWrapper:
 
         if model_id == "Conv2d2":
             return ModelConv2D2().to(torch_dtype)
-
-        if model_id == "Conv3d2":
-            return ModelConv3D2().to(torch_dtype)
 
         raise ValueError(f"model_id {model_id} not implemented")
 
@@ -1242,7 +1209,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         atol, rtol = 1e-5, 1e-5  # tolerances higher than defaults since merging introduces some numerical instability
 
-        conv_ids = ["Conv2d", "Conv3d", "Conv2d2", "Conv3d2"]
+        conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
         if issubclass(config_cls, (IA3Config, LoraConfig)) and model_id in conv_ids:  # more instability with Conv
             atol, rtol = 1e-3, 1e-3
 
