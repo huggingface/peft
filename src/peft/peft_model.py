@@ -34,7 +34,6 @@ from huggingface_hub import HfFileSystem, ModelCard, ModelCardData, hf_hub_downl
 from safetensors import safe_open
 from safetensors.torch import save_file as safe_save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
-from torch.nn.modules.module import _IncompatibleKeys
 from transformers import PreTrainedModel
 from transformers.modeling_outputs import QuestionAnsweringModelOutput, SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
@@ -106,21 +105,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.VBLORA: VBLoRAModel,
 }
 
-PEFT_TYPE_TO_PREFIX_MAPPING = {
-    PeftType.ADALORA: "lora_",
-    PeftType.BOFT: "boft_",
-    PeftType.FOURIERFT: "fourierft_",
-    PeftType.HRA: "hra_",
-    PeftType.IA3: "ia3_",
-    PeftType.LN_TUNING: "ln_tuning_",
-    PeftType.LOHA: "hada_",
-    PeftType.LOKR: "lokr",
-    PeftType.LORA: "lora_",
-    PeftType.OFT: "oft_",
-    PeftType.POLY: "poly_",
-    PeftType.VBLORA: "vblora_",
-    PeftType.VERA: "vera_lambda",
-}
+
 class PeftModel(PushToHubMixin, torch.nn.Module):
     """
     Base model encompassing various Peft methods.
@@ -1200,18 +1185,18 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             ignore_mismatched_sizes=ignore_mismatched_sizes,
             low_cpu_mem_usage=low_cpu_mem_usage,
         )
-        missing_keys, unexpected_keys = load_result.missing_keys, load_result.unexpected_keys
-        tuner = self.peft_config[adapter_name].peft_type
 
+        tuner = self.peft_config[adapter_name].peft_type
         tuner_prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(tuner, "")
         adapter_missing_keys = []
 
         # Filter missing keys specific to the current adapter and tuner prefix.
-        for key in missing_keys:
+        for key in load_result.missing_keys:
             if tuner_prefix in key and adapter_name in key:
                 adapter_missing_keys.append(key)
 
-        load_result = _IncompatibleKeys(missing_keys=adapter_missing_keys, unexpected_keys=unexpected_keys)
+        load_result.missing_keys.clear()
+        load_result.missing_keys.extend(adapter_missing_keys)
 
         if (
             (getattr(self, "hf_device_map", None) is not None)
