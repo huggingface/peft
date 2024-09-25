@@ -25,6 +25,8 @@ Check the table below to see when you should inject adapters.
 | the model is modified inplace, keeping all the original attributes and methods | manually write the `from_pretrained` and `save_pretrained` utility functions from Hugging Face to save and load adapters |
 | works for any `torch` module and modality | doesn't work with any of the utility methods provided by `PeftModel` such as disabling and merging adapters |
 
+## Creating a new PEFT model
+
 To perform the adapter injection, use the [`inject_adapter_in_model`] method. This method takes 3 arguments, the PEFT config, the model, and an optional adapter name. You can also attach multiple adapters to the model if you call [`inject_adapter_in_model`] multiple times with different adapter names.
 
 For example, to inject LoRA adapters into the `linear` submodule of the `DummyModel` module:
@@ -85,6 +87,8 @@ DummyModel(
 )
 ```
 
+## Saving the model
+
 To only save the adapter, use the [`get_peft_model_state_dict`] function:
 
 ```python
@@ -95,3 +99,28 @@ print(peft_state_dict)
 ```
 
 Otherwise, `model.state_dict()` returns the full state dict of the model.
+
+## Loading the model
+
+After loading the saved `state_dict`, it can be applied using the [`set_peft_model_state_dict`] function:
+
+```python
+from peft import set_peft_model_state_dict
+
+model = DummyModel()
+model = inject_adapter_in_model(lora_config, model)
+outcome = set_peft_model_state_dict(model, peft_state_dict)
+# check that there were no wrong keys
+print(outcome.unexpected_keys)
+```
+
+If injecting the adapter is slow or you need to load a large number of adapters, you may use an optimization that allows to create an "empty" adapter on meta device and only fills the weights with real weights when the [`set_peft_model_state_dict`] is called. To do this, pass `low_cpu_mem_usage=True` to both [`inject_adapter_in_model`] and [`set_peft_model_state_dict`].
+
+```python
+model = DummyModel()
+model = inject_adapter_in_model(lora_config, model, low_cpu_mem_usage=True)
+
+print(model.linear.lora_A["default"].weight.device.type == "meta")  # should be True
+set_peft_model_state_dict(model, peft_state_dict, low_cpu_mem_usage=True)
+print(model.linear.lora_A["default"].weight.device.type == "cpu")  # should be True
+```

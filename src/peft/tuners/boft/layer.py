@@ -264,6 +264,14 @@ class BOFTLayer(BaseTunerLayer):
         """
         Update the linear layer with trainable BOFT weights. Override for other layer types.
         """
+        # Attempt to load the CUDA extension during model initialization
+        if not get_fbd_cuda():
+            self.fbd_cuda_available = False
+            # If the CUDA extension is not available, set the butterfly factor to 1 to speed up the finetuning process
+            boft_n_butterfly_factor = 1
+        else:
+            self.fbd_cuda_available = True
+
         # to be consistent with the paper notation
         boft_n_butterfly_factor = boft_n_butterfly_factor - 1
         if boft_n_butterfly_factor < 0:
@@ -469,14 +477,6 @@ class Linear(nn.Module, BOFTLayer):
 
         self._active_adapter = adapter_name
 
-        # Attempt to load the CUDA extension during model initialization
-        if not get_fbd_cuda():
-            self.fbd_cuda_available = False
-            # If the CUDA extension is not available, set the butterfly factor to 1 to speed up the finetuning process
-            boft_n_butterfly_factor = 1
-        else:
-            self.fbd_cuda_available = True
-
         self.update_layer(
             adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
         )
@@ -671,15 +671,6 @@ class Conv2d(nn.Module, BOFTLayer):
         BOFTLayer.__init__(self, base_layer)
 
         self._active_adapter = adapter_name
-
-        # Attempt to load the CUDA extension during model initialization
-        if not get_fbd_cuda():
-            self.fbd_cuda_available = False
-            # If the CUDA extension is not available, set the butterfly factor to 1 to speed up the finetuning process
-            boft_n_butterfly_factor = 1
-        else:
-            self.fbd_cuda_available = True
-
         self.update_layer(
             adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
         )
@@ -690,6 +681,15 @@ class Conv2d(nn.Module, BOFTLayer):
         """
         Update the conv2d layer with trainable BOFT weights.
         """
+
+        # Attempt to load the CUDA extension during model initialization
+        if not get_fbd_cuda():
+            self.fbd_cuda_available = False
+            # If the CUDA extension is not available, set the butterfly factor to 1 to speed up the finetuning process
+            boft_n_butterfly_factor = 1
+        else:
+            self.fbd_cuda_available = True
+
         # to be consistent with the paper notation
         boft_n_butterfly_factor = boft_n_butterfly_factor - 1
         if boft_n_butterfly_factor < 0:

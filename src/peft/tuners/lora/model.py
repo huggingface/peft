@@ -72,6 +72,8 @@ class LoraModel(BaseTuner):
         model ([`torch.nn.Module`]): The model to be adapted.
         config ([`LoraConfig`]): The configuration of the Lora model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
+        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+            Create empty adapter weights on meta device. Useful to speed up the loading process.
 
     Returns:
         `torch.nn.Module`: The Lora model.
@@ -135,8 +137,8 @@ class LoraModel(BaseTuner):
 
     prefix: str = "lora_"
 
-    def __init__(self, model, config, adapter_name) -> None:
-        super().__init__(model, config, adapter_name)
+    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
+        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
     def _check_new_adapter_config(self, config: LoraConfig) -> None:
         """
@@ -251,6 +253,7 @@ class LoraModel(BaseTuner):
                 new_module.state = child.state
             new_module.to(child.weight.device)
 
+        meta = torch.device("meta")
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if (self.prefix in name) or ("ranknum" in name):
@@ -263,7 +266,8 @@ class LoraModel(BaseTuner):
                     if hasattr(child, "weight")
                     else next(child.parameters())
                 )
-                module.to(weight.device)
+                if not any(p.device == meta for p in module.parameters()):
+                    module.to(weight.device)
 
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
         for n, p in model.named_parameters():
@@ -345,7 +349,8 @@ class LoraModel(BaseTuner):
             # no module could be matched
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
-                "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `transformers.pytorch_utils.Conv1D`."
+                "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `torch.nn.Conv3d`, "
+                "`transformers.pytorch_utils.Conv1D`."
             )
 
         return new_module

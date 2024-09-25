@@ -233,6 +233,12 @@ class ModulesToSaveWrapper(torch.nn.Module):
             return self.original_module.weight
         return self.modules_to_save[self.active_adapter].weight
 
+    @property
+    def bias(self):
+        if self.active_adapter not in self.modules_to_save:
+            return self.original_module.bias
+        return self.modules_to_save[self.active_adapter].bias
+
     def update(self, adapter_name):
         context_manager = nullcontext()
         for _, param in self.original_module.named_parameters():
@@ -289,7 +295,7 @@ class ModulesToSaveWrapper(torch.nn.Module):
         # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
         # extra argument that allows mixing different adapters in the same batch at inference time.
 
-        SUPPORTED_MODULES = (torch.nn.Linear, torch.nn.Embedding, torch.nn.Conv2d, torch.nn.Conv1d)
+        SUPPORTED_MODULES = (torch.nn.Linear, torch.nn.Embedding, torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d)
 
         module_names = ", ".join([module.__name__ for module in SUPPORTED_MODULES])
 

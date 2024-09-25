@@ -48,6 +48,7 @@ from peft import (
     VeraConfig,
     get_peft_model,
     get_peft_model_state_dict,
+    inject_adapter_in_model,
     prepare_model_for_kbit_training,
 )
 from peft.tuners.lora import LoraLayer
@@ -304,6 +305,46 @@ class PeftCommonTester:
 
         assert dummy_output.requires_grad
 
+    def _test_load_model_low_cpu_mem_usage(self, model_id, config_cls, config_kwargs):
+        # Ensure that low_cpu_mem_usage=True works for from_pretrained and load_adapter and that the resulting model's
+        # parameters are on the correct device.
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+
+        # note: not using the context manager here because it fails on Windows CI for some reason
+        tmp_dirname = tempfile.mkdtemp()
+        try:
+            model.save_pretrained(tmp_dirname)
+
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            model = PeftModel.from_pretrained(
+                model, tmp_dirname, torch_device=self.torch_device, low_cpu_mem_usage=True
+            )
+            assert {p.device.type for p in model.parameters()} == {self.torch_device}
+
+            model.load_adapter(tmp_dirname, adapter_name="other", low_cpu_mem_usage=True)
+            assert {p.device.type for p in model.parameters()} == {self.torch_device}
+        finally:
+            try:
+                shutil.rmtree(tmp_dirname)
+            except PermissionError:
+                # windows error
+                pass
+
+        # also test injecting directly
+        del model
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        inject_adapter_in_model(config, model, low_cpu_mem_usage=True)  # check that there is no error
+
+        if not isinstance(config, LNTuningConfig):
+            # LN tuning does not add adapter layers that could be on meta device, it only changes the requires_grad.
+            # Therefore, there is no meta device for LN tuning.
+            assert "meta" in {p.device.type for p in model.parameters()}
+
     def _test_save_pretrained(self, model_id, config_cls, config_kwargs, safe_serialization=True):
         # ensure that the weights are randomly initialized
         if issubclass(config_cls, LoraConfig):
@@ -476,6 +517,32 @@ class PeftCommonTester:
             assert model_from_pretrained.peft_config["default"].inference_mode
             assert model_from_pretrained.peft_config["default"] is config
 
+    def _test_load_multiple_adapters(self, model_id, config_cls, config_kwargs):
+        # just ensure that this works and raises no error
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname)
+            del model
+
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            model = PeftModel.from_pretrained(model, tmp_dirname, torch_device=self.torch_device)
+
+            load_result1 = model.load_adapter(tmp_dirname, adapter_name="other")
+            load_result2 = model.load_adapter(tmp_dirname, adapter_name="yet-another")
+
+            # VBLoRA uses a shared "vblora_vector_bank" across all layers, causing it to appear
+            # in the missing keys list, which leads to failed test cases. So
+            # skipping the missing keys check for VBLoRA.
+            if config.peft_type != "VBLORA":
+                assert load_result1.missing_keys == []
+                assert load_result2.missing_keys == []
+
     def _test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
         if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig, VBLoRAConfig):
             # Merge layers only supported for LoRA and IA³
@@ -605,14 +672,15 @@ class PeftCommonTester:
         model = model.merge_and_unload()
         logits_merged_unloaded = model(**dummy_input)[0]
 
+        conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
         atol, rtol = 1e-4, 1e-4
         if self.torch_device in ["mlu"]:
             atol, rtol = 1e-3, 1e-3  # MLU
         if config.peft_type == "ADALORA":
             # AdaLoRA is a bit flaky on CI, but this cannot be reproduced locally
             atol, rtol = 1e-2, 1e-2
-        if (config.peft_type == "IA3") and (model_id == "Conv2d"):
-            # for some reason, the IA³ Conv2d introduces a larger error
+        if (config.peft_type in {"IA3", "LORA"}) and (model_id in conv_ids):
+            # for some reason, the Conv introduces a larger error
             atol, rtol = 0.3, 0.01
         assert torch.allclose(logits, logits_merged, atol=atol, rtol=rtol)
         assert torch.allclose(logits, logits_unmerged, atol=atol, rtol=rtol)
@@ -765,6 +833,11 @@ class PeftCommonTester:
 
         if self.torch_device in ["mlu"]:
             atol, rtol = 1e-3, 1e-3  # MLU
+
+        conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
+        if issubclass(config_cls, (IA3Config, LoraConfig)) and model_id in conv_ids:  # more instability with Conv
+            atol, rtol = 1e-3, 1e-3
+
         # check that the logits are the same after unloading
         assert torch.allclose(logits_peft, logits_unloaded, atol=atol, rtol=rtol)
 

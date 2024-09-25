@@ -106,6 +106,10 @@ TEST_CASES = [
     ("Conv2d 2 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
     ("Conv2d 1 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"], "use_dora": True}),
     ("Conv2d 2 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"], "use_dora": True}),
+    ("Conv3d 1 LoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d"]}),
+    ("Conv3d 2 LoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d", "lin0"]}),
+    ("Conv3d 1 LoRA with DoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d"], "use_dora": True}),
+    ("Conv3d 2 LoRA with DoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d", "lin0"], "use_dora": True}),
     #######
     # IA³ #
     #######
@@ -170,6 +174,26 @@ TEST_CASES = [
         "Conv2d",
         IA3Config,
         {"target_modules": ["conv2d", "lin0"], "feedforward_modules": ["conv2d", "lin0"]},
+    ),
+    ("Conv3d 1 IA3", "Conv3d", IA3Config, {"target_modules": ["conv3d"], "feedforward_modules": []}),
+    ("Conv3d 2 IA3", "Conv3d", IA3Config, {"target_modules": ["conv3d"], "feedforward_modules": ["conv3d"]}),
+    (
+        "Conv3d 3 IA3",
+        "Conv3d",
+        IA3Config,
+        {"target_modules": ["conv3d", "lin0"], "feedforward_modules": []},
+    ),
+    (
+        "Conv3d 4 IA3",
+        "Conv3d",
+        IA3Config,
+        {"target_modules": ["conv3d", "lin0"], "feedforward_modules": ["conv3d"]},
+    ),
+    (
+        "Conv3d 5 IA3",
+        "Conv3d",
+        IA3Config,
+        {"target_modules": ["conv3d", "lin0"], "feedforward_modules": ["conv3d", "lin0"]},
     ),
     ########
     # LoHa #
@@ -548,6 +572,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "vector_length": 2, "init_vector_bank_bound": 0.1},
         {"target_modules": ["lin1"], "vector_length": 2, "init_vector_bank_bound": 0.1},
     ),
+    (
+        "BOFT Same",
+        "boft",
+        BOFTConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "boft_block_size": 2},
+        {"target_modules": ["lin0"], "init_weights": False, "boft_block_size": 2},
+    ),
+    (
+        "BOFT Different",
+        "boft",
+        BOFTConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "boft_block_size": 2},
+        {"target_modules": ["lin1"], "init_weights": False, "boft_block_size": 2},
+    ),
 ]
 
 PREFIXES = {
@@ -771,6 +809,28 @@ class ModelConv2D2(nn.Module):
         return X
 
 
+class ModelConv3D(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv3d = nn.Conv3d(5, 10, 3)
+        self.relu = nn.ReLU()
+        self.flat = nn.Flatten()
+        self.lin0 = nn.Linear(10, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        # If necessary, convert from 2D image to 3D volume
+        if X.dim() == 2:
+            X = torch.stack([X] * 3, dim=-1)
+        X = X.float().reshape(-1, 5, 3, 3, 3)
+        X = self.conv3d(X)
+        X = self.relu(X)
+        X = self.flat(X)
+        X = self.lin0(X)
+        X = self.sm(X)
+        return X
+
+
 class MockTransformerWrapper:
     """Mock class to behave like a transformers model.
 
@@ -794,6 +854,9 @@ class MockTransformerWrapper:
 
         if model_id == "Conv2d":
             return ModelConv2D().to(torch_dtype)
+
+        if model_id == "Conv3d":
+            return ModelConv3D().to(torch_dtype)
 
         if model_id == "MLP_LayerNorm":
             return MLP_LayerNorm().to(torch_dtype)
@@ -841,8 +904,16 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         self._test_save_pretrained(model_id, config_cls, config_kwargs, safe_serialization=False)
 
     @parameterized.expand(TEST_CASES)
+    def test_load_model_low_cpu_mem_usage(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_load_model_low_cpu_mem_usage(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(TEST_CASES)
     def test_from_pretrained_config_construction(self, test_name, model_id, config_cls, config_kwargs):
         self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(TEST_CASES)
+    def test_load_multiple_adapters(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_load_multiple_adapters(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(TEST_CASES)
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
@@ -1143,7 +1214,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         atol, rtol = 1e-5, 1e-5  # tolerances higher than defaults since merging introduces some numerical instability
 
-        if issubclass(config_cls, IA3Config) and model_id == "Conv2d":  # more instability with Conv2d + IA3
+        conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
+        if issubclass(config_cls, (IA3Config, LoraConfig)) and model_id in conv_ids:  # more instability with Conv
             atol, rtol = 1e-3, 1e-3
 
         if config_kwargs.get("use_dora") and model_id == "EmbConv1D":
@@ -1152,7 +1224,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # check that there is a difference in results after training
         assert not torch.allclose(outputs_before, outputs_after, atol=atol, rtol=rtol)
 
-        if self.torch_device in ["mlu"] and model_id in ["Conv2d"]:
+        if self.torch_device in ["mlu"] and model_id in conv_ids:
             atol, rtol = 1e-3, 1e-2  # MLU
 
         # unmerged or merged should make no difference
@@ -3381,7 +3453,7 @@ class TestMixedAdapterBatches:
         peft_model = get_peft_model(base_model, config0, "adapter0").eval()
         peft_model.add_adapter("adapter1", config1)
         inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
-        SUPPORTED_MODULES = (torch.nn.Linear, torch.nn.Embedding, torch.nn.Conv2d, torch.nn.Conv1d)
+        SUPPORTED_MODULES = (torch.nn.Linear, torch.nn.Embedding, torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d)
         module_names = ", ".join([module.__name__ for module in SUPPORTED_MODULES])
         with pytest.raises(
             TypeError, match=f"Mixed batching is only supported for the following modules: {module_names}."
@@ -3472,7 +3544,7 @@ class TestMixedAdapterBatches:
             mlp_lora.forward(**inputs)
 
     def test_mixed_adapter_batches_lora_with_dora_raises(self):
-        # When there are Dora adapters, passing adapter names should raise an error
+        # When there are DoRA adapters, passing adapter names should raise an error
         torch.manual_seed(0)
         inputs = {
             "X": torch.arange(90).view(-1, 10).to(self.torch_device),
@@ -3485,6 +3557,25 @@ class TestMixedAdapterBatches:
         msg = r"Cannot pass `adapter_names` when DoRA is enabled."
         with pytest.raises(ValueError, match=msg):
             peft_model.forward(**inputs)
+
+    def test_mixed_adapter_batches_lora_with_dora_but_dora_not_included_works(self):
+        # When there are DoRA adapters, passing adapter names should raise an error, see previous test. However, when
+        # the adapter that uses DoRA is not included in adapter_names, it's actually fine.
+        torch.manual_seed(0)
+        base_model = MLP().to(self.torch_device).eval()
+        config_dora = LoraConfig(target_modules=["lin0"], init_lora_weights=False, use_dora=True)
+        peft_model = get_peft_model(base_model, config_dora)
+        config_no_dora = LoraConfig(target_modules=["lin0"], init_lora_weights=False, use_dora=False)
+        peft_model.add_adapter(adapter_name="other", peft_config=config_no_dora)
+        peft_model.eval()
+
+        # The "default" adapter uses DoRA but "other" is not using it, so using "other" is fine. Also, "__base__" is
+        # fine since it uses the base model and thus DoRA is not involved either.
+        inputs = {
+            "X": torch.arange(90).view(-1, 10).to(self.torch_device),
+            "adapter_names": ["other"] * 4 + ["__base__"] * 5,
+        }
+        peft_model.forward(**inputs)
 
     @require_non_cpu
     def test_mixed_adapter_batches_lora_opt_timing(self):

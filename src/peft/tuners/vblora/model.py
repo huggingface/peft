@@ -40,6 +40,8 @@ class VBLoRAModel(BaseTuner):
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
         config ([`VBLoRAConfig`]): The configuration of the VBLoRA model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
+        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+            Create empty adapter weights on meta device. Useful to speed up the loading process.
 
     Returns:
         `torch.nn.Module`: The VBLoRA model.
@@ -69,8 +71,8 @@ class VBLoRAModel(BaseTuner):
 
     prefix: str = "vblora_"
 
-    def __init__(self, model, config, adapter_name) -> None:
-        super().__init__(model, config, adapter_name)
+    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
+        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
     def _init_vblora_vector_bank(self, config: VBLoRAConfig, adapter_name: str) -> None:
         vblora_vector_bank = torch.zeros(config.num_vectors, config.vector_length)
@@ -166,10 +168,12 @@ class VBLoRAModel(BaseTuner):
                 new_module.state = child.state
             new_module.to(child.weight.device)
 
+        meta = torch.device("meta")
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if "vblora_" in name:
-                module.to(child.weight.device)
+                if not any(p.device == meta for p in module.parameters()):
+                    module.to(child.weight.device)
 
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
         for n, p in model.named_parameters():
