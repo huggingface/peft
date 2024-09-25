@@ -48,7 +48,7 @@ class DoraLinearLayer(nn.Module):
                 base_layer = deepcopy(base_layer)
 
             weight = dequantize_module_weight(base_layer)
-            if weight.data.ndim == 4:  # For handling LoRAs applied to Conv2Ds.
+            if weight.data.ndim >= 4:  # For handling LoRAs applied to Conv layers.
                 lora_weight = torch.mm(lora_B.flatten(start_dim=1), lora_A.flatten(start_dim=1))
                 lora_weight = lora_weight.reshape(weight.shape)
             else:
@@ -133,12 +133,13 @@ class DoraEmbeddingLayer(DoraLinearLayer):
         return "lora.dora." + rep
 
 
-class DoraConv2dLayer(DoraLinearLayer):
+class _DoraConvNdLayer(DoraLinearLayer):
     def get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
         # calculate L2 norm of weight matrix, column-wise
         weight = weight + scaling * lora_weight
-        # the following is needed to have compatibility with the 4D weight tensors of Conv2D
-        weight_norm = weight.norm(p=2, dim=(1, 2, 3), keepdim=True).transpose(1, 0)
+        # the following is needed to have compatibility with the 4/5D weight tensors of Conv2D/3D
+        dim = tuple(range(1, weight.dim()))
+        weight_norm = weight.norm(p=2, dim=dim, keepdim=True).transpose(1, 0)
         return weight_norm
 
     def forward(self, x, *, lora_A, lora_B, scaling, base_layer):
@@ -160,7 +161,7 @@ class DoraConv2dLayer(DoraLinearLayer):
         weight_norm = weight_norm.detach()
         mag_norm_scale = magnitude / weight_norm
         result_dora = (mag_norm_scale - 1) * (
-            F.conv2d(
+            self.conv_fn(
                 x,
                 weight,
                 bias=None,
@@ -176,3 +177,15 @@ class DoraConv2dLayer(DoraLinearLayer):
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "lora.dora." + rep
+
+
+class DoraConv2dLayer(_DoraConvNdLayer):
+    def __init__(self, fan_in_fan_out):
+        super().__init__(fan_in_fan_out)
+        self.conv_fn = F.conv2d
+
+
+class DoraConv3dLayer(_DoraConvNdLayer):
+    def __init__(self, fan_in_fan_out):
+        super().__init__(fan_in_fan_out)
+        self.conv_fn = F.conv3d
