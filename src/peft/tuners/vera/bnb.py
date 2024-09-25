@@ -134,9 +134,9 @@ if is_bnb_available():
                 torch.Tensor: The computed delta weight for the VeRA adapter.
 
             Note:
-                This method implements the VeRA-specific weight update. Unlike LoRA, VeRA uses shared
-                projection matrices (vera_A and vera_B) across all layers, along with per-layer
-                trainable parameters (lambda_d and lambda_b).
+                This method implements the VeRA-specific weight update. Unlike LoRA, VeRA uses shared projection
+                matrices (vera_A and vera_B) across all layers, along with per-layer trainable parameters (lambda_d and
+                lambda_b).
             """
             # Retrieve shared projection matrices
             vera_A = self.vera_A[adapter]
@@ -187,9 +187,9 @@ if is_bnb_available():
                 torch.Tensor: Output tensor after applying the VeRA adaptation.
 
             Note:
-                This method implements the VeRA-specific forward pass. It applies the shared
-                projections (vera_A and vera_B) along with the per-layer trainable parameters
-                (lambda_d and lambda_b) to compute the adapter output.
+                This method implements the VeRA-specific forward pass. It applies the shared projections (vera_A and
+                vera_B) along with the per-layer trainable parameters (lambda_d and lambda_b) to compute the adapter
+                output.
             """
             if self.disable_adapters:
                 if self.merged:
