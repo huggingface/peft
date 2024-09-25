@@ -536,7 +536,7 @@ class PeftCommonTester:
             load_result1 = model.load_adapter(tmp_dirname, adapter_name="other")
             load_result2 = model.load_adapter(tmp_dirname, adapter_name="yet-another")
 
-            # VBLoRA uses a shared "vblora_vector_bank" across all layers, causing it to appear 
+            # VBLoRA uses a shared "vblora_vector_bank" across all layers, causing it to appear
             # in the missing keys list, which leads to failed test cases. So
             # skipping the missing keys check for VBLoRA.
             if config.peft_type != "VBLORA":
