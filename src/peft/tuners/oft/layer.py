@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 import warnings
-from typing import Any, List, Optional, Set, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -116,7 +116,7 @@ class OFTLayer(BaseTunerLayer):
         self.out_features = out_features
 
     @property
-    def _available_adapters(self) -> Set[str]:
+    def _available_adapters(self) -> set[str]:
         return {*self.oft_r}
 
     def set_scale(self, adapter, scale):
@@ -323,7 +323,7 @@ class Linear(nn.Module, OFTLayer):
         self.update_layer(adapter_name, r, oft_block_size, module_dropout, coft, eps, block_share, init_weights)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
