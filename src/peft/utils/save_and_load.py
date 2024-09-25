@@ -24,6 +24,7 @@ from huggingface_hub.utils import EntryNotFoundError, LocalEntryNotFoundError
 from packaging import version
 from safetensors.torch import load_file as safe_load_file
 
+from .constants import PEFT_TYPE_TO_PREFIX_MAPPING
 from .other import (
     EMBEDDING_LAYER_NAMES,
     SAFETENSORS_WEIGHTS_NAME,
@@ -357,21 +358,7 @@ def set_peft_model_state_dict(
         PeftType.VBLORA,
     ):
         peft_model_state_dict = {}
-        parameter_prefix = {
-            PeftType.IA3: "ia3_",
-            PeftType.LORA: "lora_",
-            PeftType.ADALORA: "lora_",
-            PeftType.LOHA: "hada_",
-            PeftType.LOKR: "lokr_",
-            PeftType.OFT: "oft_",
-            PeftType.POLY: "poly_",
-            PeftType.BOFT: "boft_",
-            PeftType.LN_TUNING: "ln_tuning_",
-            PeftType.VERA: "vera_lambda_",
-            PeftType.FOURIERFT: "fourierft_",
-            PeftType.HRA: "hra_",
-            PeftType.VBLORA: "vblora_",
-        }[config.peft_type]
+        parameter_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
         if config.peft_type == PeftType.VBLORA and config.save_only_topk_weights:
             num_vectors, _ = model.vblora_vector_bank[adapter_name].shape
             state_dict_keys = list(state_dict.keys())
