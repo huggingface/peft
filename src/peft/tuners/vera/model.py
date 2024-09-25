@@ -221,7 +221,6 @@ class VeraModel(BaseTuner):
         }
         kwargs["bias"] = bias
 
-
         if isinstance(target, Linear):
             target.update_layer(
                 adapter_name,

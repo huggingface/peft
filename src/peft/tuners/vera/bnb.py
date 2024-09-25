@@ -30,17 +30,17 @@ if is_bnb_available():
 
     class Linear8bitLt(torch.nn.Module, VeraLayer):
         def __init__(
-                self,
-                base_layer: torch.nn.Module,
-                adapter_name: str,
-                vera_A,
-                vera_B,
-                r: int = 0,
-                vera_dropout: float = 0.0,
-                fan_in_fan_out: bool = False,
-                init_weights: bool = True,
-                d_initial: float = 0.1,
-                **kwargs,
+            self,
+            base_layer: torch.nn.Module,
+            adapter_name: str,
+            vera_A,
+            vera_B,
+            r: int = 0,
+            vera_dropout: float = 0.0,
+            fan_in_fan_out: bool = False,
+            init_weights: bool = True,
+            d_initial: float = 0.1,
+            **kwargs,
         ) -> None:
             super().__init__()
             VeraLayer.__init__(self, base_layer)
@@ -392,7 +392,7 @@ if is_bnb_4bit_available():
                     x_temp = dropout(x.to(lambda_d.dtype))
 
                     adapter_output = lambda_b * torch.nn.functional.linear(
-                       lambda_d * torch.nn.functional.linear(x_temp, sliced_A), sliced_B
+                        lambda_d * torch.nn.functional.linear(x_temp, sliced_A), sliced_B
                     )
 
                     if requires_conversion:
