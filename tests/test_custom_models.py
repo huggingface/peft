@@ -3485,7 +3485,7 @@ class TestMixedAdapterBatches:
             mlp_lora.forward(**inputs)
 
     def test_mixed_adapter_batches_lora_with_dora_raises(self):
-        # When there are Dora adapters, passing adapter names should raise an error
+        # When there are DoRA adapters, passing adapter names should raise an error
         torch.manual_seed(0)
         inputs = {
             "X": torch.arange(90).view(-1, 10).to(self.torch_device),
@@ -3498,6 +3498,25 @@ class TestMixedAdapterBatches:
         msg = r"Cannot pass `adapter_names` when DoRA is enabled."
         with pytest.raises(ValueError, match=msg):
             peft_model.forward(**inputs)
+
+    def test_mixed_adapter_batches_lora_with_dora_but_dora_not_included_works(self):
+        # When there are DoRA adapters, passing adapter names should raise an error, see previous test. However, when
+        # the adapter that uses DoRA is not included in adapter_names, it's actually fine.
+        torch.manual_seed(0)
+        base_model = MLP().to(self.torch_device).eval()
+        config_dora = LoraConfig(target_modules=["lin0"], init_lora_weights=False, use_dora=True)
+        peft_model = get_peft_model(base_model, config_dora)
+        config_no_dora = LoraConfig(target_modules=["lin0"], init_lora_weights=False, use_dora=False)
+        peft_model.add_adapter(adapter_name="other", peft_config=config_no_dora)
+        peft_model.eval()
+
+        # The "default" adapter uses DoRA but "other" is not using it, so using "other" is fine. Also, "__base__" is
+        # fine since it uses the base model and thus DoRA is not involved either.
+        inputs = {
+            "X": torch.arange(90).view(-1, 10).to(self.torch_device),
+            "adapter_names": ["other"] * 4 + ["__base__"] * 5,
+        }
+        peft_model.forward(**inputs)
 
     @require_non_cpu
     def test_mixed_adapter_batches_lora_opt_timing(self):
