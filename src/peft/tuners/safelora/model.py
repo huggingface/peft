@@ -22,6 +22,7 @@ from transformers import AutoModelForCausalLM
 class SafeLoRA:
     def __init__(self, peft_model:torch.nn.Module, config):
         """
+        The paper of SafeLoRA is https://arxiv.org/abs/2405.16833.
         Please use safelora.model to get the projected model.
 
         How to use SafeLoRA:
