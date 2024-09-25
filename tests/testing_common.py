@@ -38,6 +38,7 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
+    OFTConfig,
     PeftModel,
     PeftType,
     PrefixTuningConfig,
@@ -113,6 +114,10 @@ CONFIG_TESTING_KWARGS = (
     },
     # VBLoRA
     {"target_modules": None, "vblora_dropout": 0.05, "vector_length": 1, "num_vectors": 2},
+    # OFT
+    {
+        "target_modules": None,
+    },
 )
 
 CLASSES_MAPPING = {
@@ -127,6 +132,7 @@ CLASSES_MAPPING = {
     "fourierft": (FourierFTConfig, CONFIG_TESTING_KWARGS[8]),
     "hra": (HRAConfig, CONFIG_TESTING_KWARGS[9]),
     "vblora": (VBLoRAConfig, CONFIG_TESTING_KWARGS[10]),
+    "oft": (OFTConfig, CONFIG_TESTING_KWARGS[11]),
 }
 
 

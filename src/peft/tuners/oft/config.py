@@ -12,8 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from typing import Literal, Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
@@ -30,7 +32,7 @@ class OFTConfig(PeftConfig):
         module_dropout (`float`):
             The multiplicative dropout probability, by setting OFT blocks to identity during training, similar to the
             dropout layer in LoRA.
-        target_modules (`Optional[Union[List[str], str]]`):
+        target_modules (`Optional[Union[list[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
             names will be replaced. When passing a string, a regex match will be performed. When passing a list of
             strings, either an exact match will be performed or it is checked if the name of the module ends with any
@@ -77,7 +79,7 @@ class OFTConfig(PeftConfig):
             "help": "OFT multiplicative dropout, randomly setting blocks of OFT to be identity matrix, similar to the dropout layer in LoRA."
         },
     )
-    target_modules: Optional[Union[List[str], str]] = field(
+    target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
             "help": "List of module names or regex expression of the module names to replace with OFT."
@@ -89,7 +91,9 @@ class OFTConfig(PeftConfig):
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
     )
-    bias: str = field(default="none", metadata={"help": "Bias type for OFT. Can be 'none', 'all' or 'oft_only'"})
+    bias: Literal["none", "all", "oft_only"] = field(
+        default="none", metadata={"help": "Bias type for OFT. Can be 'none', 'all' or 'oft_only'"}
+    )
     init_weights: bool = field(
         default=True,
         metadata={
@@ -99,7 +103,7 @@ class OFTConfig(PeftConfig):
             ),
         },
     )
-    layers_to_transform: Optional[Union[List[int], int]] = field(
+    layers_to_transform: Optional[Union[list[int], int]] = field(
         default=None,
         metadata={
             "help": "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at this index."
@@ -111,7 +115,7 @@ class OFTConfig(PeftConfig):
             "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
         },
     )
-    modules_to_save: Optional[List[str]] = field(
+    modules_to_save: Optional[list[str]] = field(
         default=None,
         metadata={
             "help": "List of modules apart from OFT layers to be set as trainable and saved in the final checkpoint. "

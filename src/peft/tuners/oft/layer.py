@@ -359,7 +359,7 @@ class Linear(nn.Module, OFTLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    self.base_layer.weight.data = orig_weights.contiguous()
+                    base_layer.weight.data = orig_weights.contiguous()
                 else:
                     oft_mat, oft_s = self.get_delta_weight(active_adapter)
                     orig_weights = base_layer.weight.data
@@ -368,7 +368,7 @@ class Linear(nn.Module, OFTLayer):
                     orig_weights = torch.transpose(orig_weights, 0, 1)
                     orig_weights = orig_weights * oft_s
 
-                    self.base_layer.weight.data = orig_weights.contiguous()
+                    base_layer.weight.data = orig_weights.contiguous()
 
                 self.merged_adapters.append(active_adapter)
 
@@ -598,7 +598,7 @@ class Conv2d(nn.Module, OFTLayer):
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
                     )
 
-                    self.base_layer.weight.data = orig_weights.contiguous()
+                    base_layer.weight.data = orig_weights.contiguous()
                 else:
                     oft_mat, oft_s = self.get_delta_weight(active_adapter)
 
@@ -614,7 +614,7 @@ class Conv2d(nn.Module, OFTLayer):
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
                     )
 
-                    self.base_layer.weight.data = orig_weights.contiguous()
+                    base_layer.weight.data = orig_weights.contiguous()
 
                 self.merged_adapters.append(active_adapter)
 
@@ -683,7 +683,7 @@ class Conv2d(nn.Module, OFTLayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             oft_rotation = torch.eye(
-                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
+                self.in_features * self.get_base_layer().kernel_size[0] * self.get_base_layer().kernel_size[0],
                 device=x.device,
                 dtype=previous_dtype,
             )
@@ -716,7 +716,7 @@ class Conv2d(nn.Module, OFTLayer):
             orig_weights = self.base_layer.weight.data
             orig_weights = orig_weights.view(
                 self.out_features,
-                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
+                self.in_features * self.get_base_layer().kernel_size[0] * self.get_base_layer().kernel_size[0],
             )
             orig_weights = torch.transpose(orig_weights, 0, 1)
             oft_rotation = oft_rotation.to(previous_dtype)
@@ -727,14 +727,17 @@ class Conv2d(nn.Module, OFTLayer):
             scaled_rotated_weight = rotated_weight * oft_scale
 
             scaled_rotated_weight = scaled_rotated_weight.view(
-                self.out_features, self.in_features, self.base_layer.kernel_size[0], self.base_layer.kernel_size[0]
+                self.out_features,
+                self.in_features,
+                self.get_base_layer().kernel_size[0],
+                self.get_base_layer().kernel_size[0],
             )
             result = F.conv2d(
                 input=x,
                 weight=scaled_rotated_weight,
-                bias=self.base_layer.bias,
-                padding=self.base_layer.padding[0],
-                stride=self.base_layer.stride[0],
+                bias=self.get_base_layer().bias,
+                padding=self.get_base_layer().padding[0],
+                stride=self.get_base_layer().stride[0],
             )
 
         result = result.to(previous_dtype)
