@@ -44,8 +44,8 @@ class MultiplicativeDropoutLayer(nn.Module):
 
         Parameters:
         x (Tensor): The input tensor of shape (D, H, H), where `D` represents
-                    the number of OFT blocks, and `H` is the size of the square
-                    blocks along the last two dimensions, the block size in OFT.
+                    the number of OFT blocks, and `H` is the size of the square blocks along the last two dimensions,
+                    the block size in OFT.
         """
         if self.training:
             # Ensure the last two dimensions are the same
@@ -152,7 +152,8 @@ class OFTLayer(BaseTunerLayer):
             adapter_name (`str`): Name for the adapter to add.
             r (`int`): Rank for the added adapter.
             oft_block_size (`int`): The block size for added adapter.
-            module_dropout (`float`): The multiplicative dropout probability for disabling adapter blocks during training.
+            module_dropout (`float`):
+                The multiplicative dropout probability for disabling adapter blocks during training.
             coft (`bool`): Whether to use the constrained variant of OFT or not.
             eps (`float`):
                 The control strength of COFT. The freedom of rotation. Only has an effect if `coft` is set to True.

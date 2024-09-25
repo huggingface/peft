@@ -331,8 +331,8 @@ class OFTModel(BaseTuner):
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None
     ) -> torch.nn.Module:
         r"""
-        This method merges the OFT layers into the base model. This is needed if someone wants to use the base model
-        as a standalone model.
+        This method merges the OFT layers into the base model. This is needed if someone wants to use the base model as
+        a standalone model.
 
         Args:
             progressbar (`bool`):
