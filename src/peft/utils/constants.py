@@ -15,6 +15,8 @@
 import torch
 from transformers import BloomPreTrainedModel
 
+from .peft_types import PeftType
+
 
 # needed for prefix-tuning of bloom model
 def bloom_model_postprocess_past_key_value(past_key_values):
@@ -282,6 +284,22 @@ TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING = {
     "gpt_bigcode": ["c_attn"],
     "deberta": ["in_proj"],
     "qwen2": ["q_proj", "v_proj"],
+}
+
+PEFT_TYPE_TO_PREFIX_MAPPING = {
+    PeftType.IA3: "ia3_",
+    PeftType.LORA: "lora_",
+    PeftType.ADALORA: "lora_",
+    PeftType.LOHA: "hada_",
+    PeftType.LOKR: "lokr_",
+    PeftType.OFT: "oft_",
+    PeftType.POLY: "poly_",
+    PeftType.BOFT: "boft_",
+    PeftType.LN_TUNING: "ln_tuning_",
+    PeftType.VERA: "vera_lambda_",
+    PeftType.FOURIERFT: "fourierft_",
+    PeftType.HRA: "hra_",
+    PeftType.VBLORA: "vblora_",
 }
 
 WEIGHTS_NAME = "adapter_model.bin"
