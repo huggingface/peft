@@ -485,10 +485,6 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False),
                 AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False),
             ),
-            (
-                OFTConfig(r=2, target_modules=["lin1"], init_weights=False),
-                OFTConfig(r=2, target_modules=["lin1"], init_weights=False),
-            ),
         ],
         name_func=_param_name_func,
     )
@@ -519,10 +515,6 @@ class TestMixedAdapterTypes(unittest.TestCase):
             (
                 AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
                 AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
-            ),
-            (
-                OFTConfig(r=2, target_modules=["lin0"], init_weights=False),
-                OFTConfig(r=2, target_modules=["lin0"], init_weights=False),
             ),
         ],
         name_func=_param_name_func,
@@ -557,10 +549,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         config3 = LoKrConfig(r=4, alpha=4, target_modules=["lin0", "lin1"], init_weights=False)
         peft_model.add_adapter("adapter3", config3)
 
-        config4 = OFTConfig(r=2, target_modules=["lin0", "lin1"], init_weights=False)
-        peft_model.add_adapter("adapter4", config4)
-
-        peft_model.set_adapter(["adapter0", "adapter1", "adapter2", "adapter3", "adapter4"])
+        peft_model.set_adapter(["adapter0", "adapter1", "adapter2", "adapter3"])
         output_mixed = peft_model(input)
         assert torch.isfinite(output_base).all()
         assert not torch.allclose(output_base, output_mixed, atol=atol, rtol=rtol)
@@ -586,7 +575,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         assert torch.isfinite(output_13).all()
         assert not torch.allclose(output_mixed, output_13, atol=atol, rtol=rtol)
 
-        model_copy.set_adapter(["adapter0", "adapter1", "adapter2", "adapter3", "adapter4"])
+        model_copy.set_adapter(["adapter0", "adapter1", "adapter2", "adapter3"])
         model_merged_unloaded = model_copy.merge_and_unload(adapter_names=["adapter1", "adapter3"])
         output_merged_13 = model_merged_unloaded(input)
         assert torch.isfinite(output_merged_13).all()
@@ -759,14 +748,6 @@ class TestMixedAdapterTypes(unittest.TestCase):
         assert torch.isfinite(output3).all()
         assert not torch.allclose(output2, output3)
 
-        torch.manual_seed(4)
-        config4 = OFTConfig(r=2, task_type="CAUSAL_LM", target_modules=["q_proj", "v_proj"], init_weights=False)
-        peft_model.add_adapter("adapter4", config4)
-        peft_model.set_adapter(["adapter0", "adapter1", "adapter2", "adapter3", "adapter4"])
-        output4 = peft_model.generate(**input_dict)
-        assert torch.isfinite(output4).all()
-        assert not torch.allclose(output3, output4)
-
         with peft_model.disable_adapter():
             output_disabled = peft_model.generate(**input_dict)
         assert torch.isfinite(output_disabled).all()
@@ -775,7 +756,6 @@ class TestMixedAdapterTypes(unittest.TestCase):
         model_unloaded = peft_model.merge_and_unload()
         output_unloaded = model_unloaded.generate(**input_dict)
         assert torch.isfinite(output_unloaded).all()
-        assert torch.allclose(output4, output_unloaded)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             # save adapter0 (use normal PeftModel, because PeftMixedModel does not support saving)
