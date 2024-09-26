@@ -742,7 +742,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         output3 = peft_model.generate(**input_dict)
         assert torch.isfinite(output3).all()
         assert not torch.allclose(output2, output3)
-        
+
         torch.manual_seed(4)
         peft_model.set_adapter(["adapter0", "adapter1", "adapter2", "adapter3"])
 
