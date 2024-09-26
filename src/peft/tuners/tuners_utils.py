@@ -914,6 +914,14 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
         `bool` | `re.Match[str]` | `None`: True of match object if key matches any target modules from config, False or
         None if no match found
     """
+    if hasattr(config, "exclude_modules") and config.exclude_modules:
+        if isinstance(config.exclude_modules, str):
+            if re.fullmatch(config.exclude_modules, key):
+                return False
+        elif key in config.exclude_modules:
+            return False
+        elif any(key.endswith(f".{exclude_key}") for exclude_key in config.exclude_modules):
+            return False
     if isinstance(config.target_modules, str):
         target_module_found = re.fullmatch(config.target_modules, key)
     elif key in config.target_modules:
