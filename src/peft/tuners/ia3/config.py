@@ -33,6 +33,10 @@ class IA3Config(PeftConfig):
             excluding the output layer. If this is not specified, modules will be chosen according to the model
             architecture. If the architecture is not known, an error will be raised -- in this case, you should specify
             the target modules manually.
+        exclude_modules (`Optional[Union[List[str], str]]`):
+            The names of the modules to not apply the adapter. When passing a string, a regex match will be performed. When passing a list of
+            strings, either an exact match will be performed or it is checked if the name of the module ends with any
+            of the passed strings.
         feedforward_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to be treated as feedforward modules, as in the original paper. These modules will
             have (IA)³ vectors multiplied to the input, instead of the output. `feedforward_modules` must be a name or
@@ -57,6 +61,12 @@ class IA3Config(PeftConfig):
                 "If not specified, modules will be chosen according to the model architecture, If the architecture is "
                 "not known, an error will be raised -- in this case, you should specify the target modules manually."
             ),
+        },
+    )
+    exclude_modules: Optional[Union[list[str], str]] = field(
+        default=None,
+        metadata={
+            "help": "List of module names or regex expression of the module names to exclude from Lora."
         },
     )
     feedforward_modules: Optional[Union[List[str], str]] = field(
@@ -87,6 +97,9 @@ class IA3Config(PeftConfig):
         self.peft_type = PeftType.IA3
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
+        )
+        self.exclude_modules = (
+            set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
         self.feedforward_modules = (
             set(self.feedforward_modules) if isinstance(self.feedforward_modules, list) else self.feedforward_modules

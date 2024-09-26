@@ -47,6 +47,10 @@ class LoKrConfig(LycorisConfig):
             excluding the output layer. If this is not specified, modules will be chosen according to the model
             architecture. If the architecture is not known, an error will be raised -- in this case, you should specify
             the target modules manually.
+        exclude_modules (`Optional[Union[List[str], str]]`):
+            The names of the modules to not apply the adapter. When passing a string, a regex match will be performed. When passing a list of
+            strings, either an exact match will be performed or it is checked if the name of the module ends with any
+            of the passed strings.
         init_weights (`bool`):
             Whether to perform initialization of adapter weights. This defaults to `True`, passing `False` is
             discouraged.
@@ -91,6 +95,12 @@ class LoKrConfig(LycorisConfig):
             "help": "List of module names or regex expression of the module names to replace with LoKr."
             "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
             "This can also be a wildcard 'all-linear' which matches all linear/Conv1D layers except the output layer."
+        },
+    )
+    exclude_modules: Optional[Union[list[str], str]] = field(
+        default=None,
+        metadata={
+            "help": "List of module names or regex expression of the module names to exclude from Lora."
         },
     )
     init_weights: bool = field(

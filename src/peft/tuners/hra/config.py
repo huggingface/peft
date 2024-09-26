@@ -38,6 +38,10 @@ class HRAConfig(PeftConfig):
             the output layer. If this is not specified, modules will be chosen according to the model architecture. If
             the architecture is not known, an error will be raised -- in this case, you should specify the target
             modules manually.
+        exclude_modules (`Optional[Union[List[str], str]]`):
+            The names of the modules to not apply the adapter. When passing a string, a regex match will be performed. When passing a list of
+            strings, either an exact match will be performed or it is checked if the name of the module ends with any
+            of the passed strings.
         init_weights (`bool`):
             Whether to perform initialization of HRA weights.
         layers_to_transform (`Union[List[int], int]`):
@@ -69,6 +73,12 @@ class HRAConfig(PeftConfig):
         metadata={
             "help": "List of module names or regex expression of the module names to replace with HRA.",
             "example": "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' ",
+        },
+    )
+    exclude_modules: Optional[Union[list[str], str]] = field(
+        default=None,
+        metadata={
+            "help": "List of module names or regex expression of the module names to exclude from Lora."
         },
     )
     init_weights: bool = field(
@@ -106,6 +116,9 @@ class HRAConfig(PeftConfig):
         self.peft_type = PeftType.HRA
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
+        )
+        self.exclude_modules = (
+            set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
         # if target_modules is a regex expression, then layers_to_transform should be None
         if isinstance(self.target_modules, str) and self.layers_to_transform is not None:

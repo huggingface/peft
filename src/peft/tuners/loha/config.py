@@ -43,6 +43,10 @@ class LoHaConfig(LycorisConfig):
             excluding the output layer. If this is not specified, modules will be chosen according to the model
             architecture. If the architecture is not known, an error will be raised -- in this case, you should specify
             the target modules manually.
+        exclude_modules (`Optional[Union[List[str], str]]`):
+            The names of the modules to not apply the adapter. When passing a string, a regex match will be performed. When passing a list of
+            strings, either an exact match will be performed or it is checked if the name of the module ends with any
+            of the passed strings.
         init_weights (`bool`):
             Whether to perform initialization of adapter weights. This defaults to `True`, passing `False` is
             discouraged.
@@ -84,6 +88,12 @@ class LoHaConfig(LycorisConfig):
             "This can also be a wildcard 'all-linear' which matches all linear/Conv1D layers except the output layer."
         },
     )
+    exclude_modules: Optional[Union[list[str], str]] = field(
+        default=None,
+        metadata={
+            "help": "List of module names or regex expression of the module names to exclude from Lora."
+        },
+    )
     init_weights: bool = field(
         default=True,
         metadata={
@@ -118,4 +128,7 @@ class LoHaConfig(LycorisConfig):
         self.peft_type = PeftType.LOHA
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
+        )
+        self.exclude_modules = (
+            set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
