@@ -747,6 +747,11 @@ class TestMixedAdapterTypes(unittest.TestCase):
         output3 = peft_model.generate(**input_dict)
         assert torch.isfinite(output3).all()
         assert not torch.allclose(output2, output3)
+        
+        torch.manual_seed(4)
+        config4 = OFTConfig(r=2, task_type="CAUSAL_LM", target_modules=["q_proj", "v_proj"], init_weights=False)
+        peft_model.add_adapter("adapter4", config4)
+        peft_model.set_adapter(["adapter0", "adapter1", "adapter2", "adapter3"])
 
         with peft_model.disable_adapter():
             output_disabled = peft_model.generate(**input_dict)
