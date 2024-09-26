@@ -121,9 +121,10 @@ class VeraModel(BaseTuner):
                 continue
 
             if isinstance(module, nn.Linear):
-                module_shape = module.in_features, module.out_features
+                module_shape = module.out_features, module.in_features
             elif isinstance(module, Conv1D):
                 module_shape = module.weight.ds_shape if hasattr(module.weight, "ds_shape") else module.weight.shape
+                module_shape = module_shape[::-1]
             else:
                 continue
 
