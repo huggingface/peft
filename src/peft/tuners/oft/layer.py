@@ -462,9 +462,8 @@ class Linear(nn.Module, OFTLayer):
             scaled_rotated_weight = rotated_weight * oft_scale
 
             scaled_rotated_weight = scaled_rotated_weight.to(previous_dtype)
-            if self.base_layer.bias is not None:
-                self.base_layer.bias = self.base_layer.bias.to(previous_dtype)
-            result = F.linear(input=x, weight=scaled_rotated_weight, bias=self.base_layer.bias)
+            bias = self.get_base_layer().bias.to(previous_dtype) if self.get_base_layer().bias is not None else None
+            result = F.linear(input=x, weight=scaled_rotated_weight, bias=bias)
 
         result = result.to(previous_dtype)
         return result
