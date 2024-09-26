@@ -30,7 +30,6 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
-    OFTConfig,
     PeftMixedModel,
     PrefixTuningConfig,
     get_peft_model,
@@ -426,14 +425,12 @@ class TestMixedAdapterTypes(unittest.TestCase):
         # to the output, the results should be commutative. This would *not* work if the adapters do something more
         # complex or if we target an earlier layer, because of the non-linearity would destroy the commutativity.
         input = torch.arange(90).reshape(9, 10).to(self.torch_device)
-        # OFT is not commutative, as it's not a linear operation on the inputs
-        is_commutative = not any(isinstance(config, OFTConfig) for config in [config0, config1])
 
-        self._check_mixed_outputs(SimpleNet, config0, config1, input, is_commutative=is_commutative)
+        self._check_mixed_outputs(SimpleNet, config0, config1, input, is_commutative=True)
         self._check_merging(SimpleNet, config0, config1, input)
         self._check_unload(SimpleNet, config0, config1, input)
         self._check_disable(SimpleNet, config1, config0, input)
-        self._check_loading(SimpleNet, config0, config1, input, is_commutative=is_commutative)
+        self._check_loading(SimpleNet, config0, config1, input, is_commutative=True)
 
     @parameterized.expand(
         itertools.combinations(
@@ -490,10 +487,8 @@ class TestMixedAdapterTypes(unittest.TestCase):
     )
     def test_target_last_layer_same_type(self, config0, config1):
         input = torch.arange(90).reshape(9, 10).to(self.torch_device)
-        # OFT is not commutative, as it's not a linear operation on the inputs
-        is_commutative = not any(isinstance(config, OFTConfig) for config in [config0, config1])
 
-        self._check_mixed_outputs(SimpleNet, config0, config1, input, is_commutative=is_commutative)
+        self._check_mixed_outputs(SimpleNet, config0, config1, input, is_commutative=True)
         self._check_merging(SimpleNet, config0, config1, input)
         self._check_unload(SimpleNet, config0, config1, input)
         self._check_disable(SimpleNet, config1, config0, input)
@@ -749,8 +744,6 @@ class TestMixedAdapterTypes(unittest.TestCase):
         assert not torch.allclose(output2, output3)
         
         torch.manual_seed(4)
-        config4 = OFTConfig(r=2, task_type="CAUSAL_LM", target_modules=["q_proj", "v_proj"], init_weights=False)
-        peft_model.add_adapter("adapter4", config4)
         peft_model.set_adapter(["adapter0", "adapter1", "adapter2", "adapter3"])
 
         with peft_model.disable_adapter():
