@@ -46,6 +46,10 @@ class VBLoRAConfig(PeftConfig):
             excluding the output layer. If this is not specified, modules will be chosen according to the model
             architecture. If the architecture is not known, an error will be raised -- in this case, you should specify
             the target modules manually.
+        exclude_modules (`Optional[Union[List[str], str]]`):
+            The names of the modules to not apply the adapter. When passing a string, a regex match will be performed. When passing a list of
+            strings, either an exact match will be performed or it is checked if the name of the module ends with any
+            of the passed strings.
         save_only_topk_weights (`bool`):
             Whether to only save the topk weights. Setting `save_only_topk_weights = True` significantly reduces
             storage space. However, models saved in this mode can be used for merging or inference only, not for
@@ -107,6 +111,12 @@ class VBLoRAConfig(PeftConfig):
                 "If not specified, modules will be chosen according to the model architecture, If the architecture is "
                 "not known, an error will be raised -- in this case, you should specify the target modules manually."
             )
+        },
+    )
+    exclude_modules: Optional[Union[list[str], str]] = field(
+        default=None,
+        metadata={
+            "help": "List of module names or regex expression of the module names to exclude from VBLoRA."
         },
     )
     save_only_topk_weights: bool = field(
@@ -174,4 +184,7 @@ class VBLoRAConfig(PeftConfig):
         self.peft_type = PeftType.VBLORA
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
+        )
+        self.exclude_modules = (
+            set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )

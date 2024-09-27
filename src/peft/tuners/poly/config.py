@@ -29,6 +29,10 @@ class PolyConfig(PeftConfig):
     Args:
         r (`int`): Attention dimension of each Lora in Poly.
         target_modules (`Union[List[str],str]`): The names of the modules to apply Poly to.
+        exclude_modules (`Optional[Union[List[str], str]]`):
+            The names of the modules to not apply the adapter. When passing a string, a regex match will be performed. When passing a list of
+            strings, either an exact match will be performed or it is checked if the name of the module ends with any
+            of the passed strings.
         modules_to_save (`List[str]`): List of modules apart from Poly layers to be set as trainable
             and saved in the final checkpoint.
         init_weights (bool): Whether to perform initialization of Poly weights.
@@ -46,6 +50,12 @@ class PolyConfig(PeftConfig):
         metadata={
             "help": "List of module names or regex expression of the module names to replace with Poly."
             "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
+        },
+    )
+    exclude_modules: Optional[Union[list[str], str]] = field(
+        default=None,
+        metadata={
+            "help": "List of module names or regex expression of the module names to exclude from Poly."
         },
     )
     modules_to_save: Optional[List[str]] = field(
@@ -86,4 +96,7 @@ class PolyConfig(PeftConfig):
         self.peft_type = PeftType.POLY
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
+        )
+        self.exclude_modules = (
+            set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
