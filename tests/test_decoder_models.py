@@ -22,9 +22,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
-    OFTConfig,
     HRAConfig,
     LoraConfig,
+    OFTConfig,
     PrefixTuningConfig,
     PromptTuningConfig,
     PromptTuningInit,
@@ -60,7 +60,10 @@ def skip_oft_or_hra_and_gpt2(test_list):
     return [
         test
         for test in test_list
-        if not (("GPT2LMHeadModel" in test[1]) and ((test[2] == BOFTConfig) or (test[2] == HRAConfig) or (test[2] == OFTConfig)))
+        if not (
+            ("GPT2LMHeadModel" in test[1])
+            and ((test[2] == BOFTConfig) or (test[2] == HRAConfig) or (test[2] == OFTConfig))
+        )
     ]
 
 
@@ -70,7 +73,12 @@ def skip_adalora_or_oft_or_hra_and_gpt2(test_list):
         for test in test_list
         if not (
             ("GPT2LMHeadModel" in test[1])
-            and ((test[2] == AdaLoraConfig) or (test[2] == BOFTConfig) or (test[2] == HRAConfig) or (test[2] == OFTConfig))
+            and (
+                (test[2] == AdaLoraConfig)
+                or (test[2] == BOFTConfig)
+                or (test[2] == HRAConfig)
+                or (test[2] == OFTConfig)
+            )
         )
     ]
 

@@ -1112,9 +1112,9 @@ class PeftCommonTester:
             # TODO: no gradients on the "dense" layer, other layers work, not sure why
             self.skipTest("AdaLora with RoBERTa does not work correctly")
 
-        if (config_cls == OFTConfig) and ("deberta" in model_id.lower()): 
-            # TODO: no gradients on the "dense" layer, other layers work, not sure why 
-            self.skipTest("OFT with Deberta does not work correctly") 
+        if (config_cls == OFTConfig) and ("deberta" in model_id.lower()):
+            # TODO: no gradients on the "dense" layer, other layers work, not sure why
+            self.skipTest("OFT with Deberta does not work correctly")
 
         model = self.transformers_class.from_pretrained(model_id)
 
