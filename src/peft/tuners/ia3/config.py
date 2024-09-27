@@ -66,7 +66,7 @@ class IA3Config(PeftConfig):
     exclude_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
-            "help": "List of module names or regex expression of the module names to exclude from Lora."
+            "help": "List of module names or regex expression of the module names to exclude from (IA)³."
         },
     )
     feedforward_modules: Optional[Union[List[str], str]] = field(
