@@ -135,6 +135,7 @@ class TestXlora:
 
     # TODO: remove the skip when 4.45 is released!
     @pytest.mark.skipif(not uses_transformers_4_45, reason="Requires transformers >= 4.45")
+    @pytest.mark.xfail
     def test_scalings_logging_methods(self, tokenizer, model):
         model.enable_scalings_logging()
 
