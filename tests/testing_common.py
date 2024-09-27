@@ -655,6 +655,9 @@ class PeftCommonTester:
         if issubclass(config_cls, BOFTConfig):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
+        if issubclass(config_cls, OFTConfig):
+            return pytest.skip(f"Test not applicable for {config_cls}")
+
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
 
@@ -1290,7 +1293,7 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        if config.peft_type not in ("LORA", "ADALORA", "IA3", "BOFT", "VERA", "FOURIERFT", "HRA", "VBLORA"):
+        if config.peft_type not in ("LORA", "ADALORA", "IA3", "BOFT", "OFT", "VERA", "FOURIERFT", "HRA", "VBLORA"):
             with pytest.raises(AttributeError):
                 model = model.unload()
         else:
