@@ -652,10 +652,7 @@ class PeftCommonTester:
         if issubclass(config_cls, PromptLearningConfig):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
-        if issubclass(config_cls, BOFTConfig):
-            return pytest.skip(f"Test not applicable for {config_cls}")
-
-        if issubclass(config_cls, OFTConfig):
+        if issubclass(config_cls, (OFTConfig, BOFTConfig)):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
