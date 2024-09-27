@@ -366,7 +366,7 @@ class MLP(nn.Module):
         self.lin0 = nn.Linear(10, 20, bias=bias)
         self.relu = nn.ReLU()
         self.drop = nn.Dropout(0.5)
-        self.lin1 = nn.Linear(20, 2, bias=bias)
+        self.lin1 = nn.Linear(20, 10, bias=bias)
         self.sm = nn.LogSoftmax(dim=-1)
 
 
@@ -378,6 +378,7 @@ class TestTargetedModuleNames(unittest.TestCase):
 
     def test_one_targeted_module_regex(self):
         model = MLP()
+        print(model)
         model = get_peft_model(model, LoraConfig(target_modules="lin0"))
         assert model.targeted_module_names == ["lin0"]
 
@@ -431,10 +432,20 @@ class TestExcludedModuleNames(unittest.TestCase):
         model = get_peft_model(model, LoraConfig(target_modules=["lin0", "lin1"], exclude_modules="lin0"))
         assert model.targeted_module_names == ["lin1"]
     
+    def test_multiple_excluded_modules_list(self):
+        model = MLP()
+        model = get_peft_model(model, LoraConfig(target_modules=["lin0", "lin1"], exclude_modules=["lin0"]))
+        assert model.targeted_module_names == ["lin1"]
+    
     def test_ia3_two_excluded_module_regex(self):
         model = MLP()
         model = get_peft_model(model, IA3Config(target_modules=".*lin.*", feedforward_modules=".*lin.*", exclude_modules="lin0"))
         assert model.targeted_module_names == ["lin1"]
+    
+    def test_ia3_multiple_excluded_modules_list(self):
+        model = MLP()
+        model = get_peft_model(model, IA3Config(target_modules=["lin0", "lin1"], feedforward_modules=".*lin.*", exclude_modules=["lin1"]))
+        assert model.targeted_module_names == ["lin0"]
     
     def test_realistic_example(self):
         model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-BloomForCausalLM")
