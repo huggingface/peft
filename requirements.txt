@@ -8,6 +8,8 @@ transformers
 tqdm
 packaging
 pytest
+pytest-coverage
+pytest-xdist
 numpy
 pyyaml
 datasets
