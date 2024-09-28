@@ -5,6 +5,7 @@ bitsandbytes
 scipy
 peft
 transformers
+hf-doc-builder
 tqdm
 packaging
 pytest
