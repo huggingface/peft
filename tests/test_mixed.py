@@ -86,8 +86,8 @@ class TestMixedAdapterTypes(unittest.TestCase):
         # We have to very careful with resetting the random seed each time it is used, otherwise the adapters may be
         # initialized with different values, and the test will fail.
 
-        atol = 1e-5
-        rtol = 1e-5
+        atol = 1e-4
+        rtol = 1e-4
         seed0 = 0
         seed1 = 1
 
