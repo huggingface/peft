@@ -497,7 +497,12 @@ class BaseTuner(nn.Module, ABC):
                 ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
                 with ctx():
                     self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
-
+        
+        if len(self.targeted_module_names) == 0:
+            # this means all the targeted modules have been excluded hence both are identical
+            raise ValueError(
+            "The exclude_modules and the target_modules are identical. Ensure exclude_modules only contains modules that should be excluded from target_modules"
+        )
         tied_target_modules = self._get_tied_target_modules(model=model)
         if tied_target_modules:
             warnings.warn(
@@ -517,7 +522,7 @@ class BaseTuner(nn.Module, ABC):
         if hasattr(peft_config, "exclude_modules") and peft_config.exclude_modules and not excluded_modules:
             raise ValueError(
             f"Exclude modules={peft_config.exclude_modules} not found in the base model. "
-            f"Please check the target modules and try again."
+            f"Please check the excluded modules and try again."
         )
         # It's important to set the adapter here (again), because otherwise it can happen that if a 2nd adapter is
         # added, and it targets different layer(s) than the first adapter (which is active), then those different
@@ -930,12 +935,6 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
         `bool` | `re.Match[str]` | `None`: True of match object if key matches any target modules from config, False or
         None if no match found
     """
-    if config.target_modules and config.exclude_modules:
-        if config.exclude_modules == config.target_modules:
-            raise ValueError(
-            "The exclude_modules and the target_modules are identical. Ensure exclude_modules only contains modules that should be excluded from target_modules"
-        )
-
     if hasattr(config, "exclude_modules") and config.exclude_modules:
         if isinstance(config.exclude_modules, str):
             if re.fullmatch(config.exclude_modules, key):
