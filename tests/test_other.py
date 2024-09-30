@@ -18,6 +18,7 @@ from torch import nn
 from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
 
 from peft import LoraConfig, get_peft_model
+from peft.utils.other import ModulesToSaveWrapper
 
 
 class ModelWithModuleDict(nn.Module):
@@ -103,3 +104,90 @@ def test_get_peft_model_revision_warning(tmp_path):
     overwrite_warning = f"peft config has already set base model revision to {base_revision}, overwriting with revision {overwrite_revision}"
     with pytest.warns(UserWarning, match=overwrite_warning):
         _ = get_peft_model(base_model, lora_config, revision=overwrite_revision)
+
+
+class TestModulesToSaveAttributeAccess:
+    """Test attribute accces on the ModulesToSaveWrapper class.
+
+    When we have modules_to_save, the original module is wrapped. As long as only forward was called on this wrapped
+    module, we were good. However, if, for instance, model parameters were directly accessed by another module, this
+    would typically fail, as the wrapper does not have this attribute. We had special properties for weight and bias,
+    but this is not enough. Therefore, attribute access is now transiently delegated to the active adapter (or original
+    module, if the adapter is disabled).
+
+    For one example, see #2099.
+
+    """
+
+    @pytest.fixture
+    def mlp(self):
+        class MLP(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(1, 2)
+                self.lin1 = nn.Linear(3, 4)
+
+        return MLP()
+
+    def test_transient_attribute_access_default_adapter(self, mlp):
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        model = get_peft_model(mlp, config)
+        assert model.lin1.weight is model.lin1.modules_to_save["default"].weight
+        assert model.lin1.bias is model.lin1.modules_to_save["default"].bias
+
+    def test_transient_attribute_access_non_default_adapter(self, mlp):
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        model = get_peft_model(mlp, config)
+        model.add_adapter("other", config)
+
+        # at this point, default is still active
+        assert model.lin1.weight is model.lin1.modules_to_save["default"].weight
+        assert model.lin1.bias is model.lin1.modules_to_save["default"].bias
+        assert model.lin1.weight is not model.lin1.modules_to_save["other"].weight
+        assert model.lin1.bias is not model.lin1.modules_to_save["other"].bias
+
+        model.set_adapter("other")
+        assert model.lin1.weight is not model.lin1.modules_to_save["default"].weight
+        assert model.lin1.bias is not model.lin1.modules_to_save["default"].bias
+        assert model.lin1.weight is model.lin1.modules_to_save["other"].weight
+        assert model.lin1.bias is model.lin1.modules_to_save["other"].bias
+
+    def test_transient_attribute_access_disabled_adapter(self, mlp):
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        model = get_peft_model(mlp, config)
+
+        # at this point, default is still active
+        assert model.lin1.weight is model.lin1.modules_to_save["default"].weight
+        assert model.lin1.bias is model.lin1.modules_to_save["default"].bias
+        assert model.lin1.weight is not model.lin1.original_module.weight
+        assert model.lin1.bias is not model.lin1.original_module.bias
+
+        with model.disable_adapter():
+            assert model.lin1.weight is not model.lin1.modules_to_save["default"].weight
+            assert model.lin1.bias is not model.lin1.modules_to_save["default"].bias
+            assert model.lin1.weight is model.lin1.original_module.weight
+            assert model.lin1.bias is model.lin1.original_module.bias
+
+    def test_transient_attribute_access_uninitialized_adapter(self, mlp):
+        # ensure that there is no weird infinite recursion when accessing a non-existing attribute on the class itself
+        with pytest.raises(AttributeError, match="has no attribute 'original_module'"):
+            ModulesToSaveWrapper.original_module
+
+    def test_transient_attribute_access_attr_does_not_exist_on_modules_to_save(self, mlp):
+        # ensure that there is no weird infinite recursion when accessing a non-existing attribute on the
+        # ModelToSaveWrapper instance
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        model = get_peft_model(mlp, config)
+
+        with pytest.raises(AttributeError, match="has no attribute 'foo'"):
+            model.lin1.foo
+
+    def test_transient_attribute_access_attr_does_not_exist_on_original_module(self, mlp):
+        # ensure that there is no weird infinite recursion when accessing a non-existing attribute on the
+        # original module of the ModelToSaveWrapper instance
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        model = get_peft_model(mlp, config)
+
+        with pytest.raises(AttributeError, match="has no attribute 'foo'"):
+            with model.disable_adapter():
+                model.lin1.foo

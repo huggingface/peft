@@ -227,17 +227,25 @@ class ModulesToSaveWrapper(torch.nn.Module):
         # use a property to ensure that active_adapter is not set directly, instead use the set_adapter method
         return self._active_adapter
 
-    @property
-    def weight(self):
-        if self.active_adapter not in self.modules_to_save:
-            return self.original_module.weight
-        return self.modules_to_save[self.active_adapter].weight
+    def __getattr__(self, name: str):
+        # Note: This whole method may seem overly complex at first but PyTorch messes with __getattr__ in a way that
+        # requires very careful handling to avoid infinite recursion.
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            pass
 
-    @property
-    def bias(self):
-        if self.active_adapter not in self.modules_to_save:
-            return self.original_module.bias
-        return self.modules_to_save[self.active_adapter].bias
+        if "_modules" not in self.__dict__:
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
+        # Could not find the attribute the PyTorch way. So let's check if it's an attribute on the
+        # original_module/modules_to_save.
+        modules = self.__dict__["_modules"]
+        if self.disable_adapters:
+            module = modules["original_module"]
+        else:
+            module = modules["modules_to_save"][self.active_adapter]
+        return getattr(module, name)
 
     def update(self, adapter_name):
         context_manager = nullcontext()
