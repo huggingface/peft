@@ -583,7 +583,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 low_cpu_mem_usage=low_cpu_mem_usage,
             )
 
-        model.load_adapter(
+        load_result = model.load_adapter(
             model_id,
             adapter_name,
             is_trainable=is_trainable,
@@ -591,6 +591,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             low_cpu_mem_usage=low_cpu_mem_usage,
             **kwargs,
         )
+
+        if load_result.missing_keys:
+            # Let's warn here since (in contrast to load_adapter) we don't return the load result, so it could be quite
+            # difficult for users to even notice that something might have gone wrong here. As we filter out non PEFT
+            # keys from the missing keys, this gives no false positives.
+            warnings.warn(f"Found missing adapter keys while loading the checkpoint: {load_result.missing_keys}")
 
         return model
 

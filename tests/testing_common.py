@@ -18,6 +18,7 @@ import pickle
 import re
 import shutil
 import tempfile
+import warnings
 from collections import OrderedDict
 from dataclasses import replace
 
@@ -372,7 +373,10 @@ class PeftCommonTester:
                 model.save_pretrained(tmp_dirname, safe_serialization=False)
 
             model_from_pretrained = self.transformers_class.from_pretrained(model_id)
-            model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
+            with warnings.catch_warnings(record=True) as recs:
+                model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
+                # ensure that there is no warning
+                assert not any("found missing adapter keys" in str(rec.message) for rec in recs)
 
             # check if the state dicts are equal
             if issubclass(config_cls, PromptEncoderConfig):

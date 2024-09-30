@@ -1512,3 +1512,35 @@ class TestLowCpuMemUsage:
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
         assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+
+
+def test_from_pretrained_missing_keys_warning(recwarn, tmp_path):
+    # For more context, see issue 2115
+    # When loading a PEFT adapter and we're missing a PEFT-specific weight, there should be a warning.
+    model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+    config = LoraConfig()
+    model = get_peft_model(model, config)
+    state_dict = model.state_dict()
+
+    # first, sanity check that there are no warnings if no key is missing
+    model.save_pretrained(tmp_path)
+    del model
+    model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+    model = PeftModel.from_pretrained(model, tmp_path)
+    msg = "Found missing adapter keys"
+    assert not any(msg in str(w.message) for w in recwarn.list)
+
+    # remove a key from the state_dict
+    missing_key = "base_model.model.model.decoder.layers.0.self_attn.v_proj.lora_A.default.weight"
+
+    def new_state_dict():
+        return {k: v for k, v in state_dict.items() if k != missing_key}
+
+    model.state_dict = new_state_dict
+    model.save_pretrained(tmp_path)
+    del model
+
+    model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+    model = PeftModel.from_pretrained(model, tmp_path)
+    assert any(msg in str(w.message) for w in recwarn.list)
+    assert any(missing_key in str(w.message) for w in recwarn.list)
