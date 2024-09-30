@@ -415,6 +415,7 @@ class TestTargetedModuleNames(unittest.TestCase):
         ]
         assert model.targeted_module_names == expected
 
+
 class TestExcludedModuleNames(unittest.TestCase):
     """Check that the attribute exclude_module is correctly set.
 
@@ -425,35 +426,68 @@ class TestExcludedModuleNames(unittest.TestCase):
         model = MLP()
         model = get_peft_model(model, LoraConfig(target_modules=("lin.*"), exclude_modules="lin0"))
         assert model.targeted_module_names == ["lin1"]
-    
+
     def test_two_excluded_module_list(self):
         model = MLP()
         model = get_peft_model(model, LoraConfig(target_modules=["lin0", "lin1"], exclude_modules="lin0"))
         assert model.targeted_module_names == ["lin1"]
-    
+
     def test_multiple_excluded_modules_list(self):
         model = MLP()
         model = get_peft_model(model, LoraConfig(target_modules=["lin0", "lin1"], exclude_modules=["lin0"]))
         assert model.targeted_module_names == ["lin1"]
-    
+
     def test_ia3_two_excluded_module_regex(self):
         model = MLP()
-        model = get_peft_model(model, IA3Config(target_modules=".*lin.*", feedforward_modules=".*lin.*", exclude_modules="lin0"))
+        model = get_peft_model(
+            model, IA3Config(target_modules=".*lin.*", feedforward_modules=".*lin.*", exclude_modules="lin0")
+        )
         assert model.targeted_module_names == ["lin1"]
-    
+
     def test_ia3_multiple_excluded_modules_list(self):
         model = MLP()
-        model = get_peft_model(model, IA3Config(target_modules=["lin0", "lin1"], feedforward_modules=".*lin.*", exclude_modules=["lin1"]))
+        model = get_peft_model(
+            model, IA3Config(target_modules=["lin0", "lin1"], feedforward_modules=".*lin.*", exclude_modules=["lin1"])
+        )
         assert model.targeted_module_names == ["lin0"]
-    
+
+    def test_all_modules_excluded(self):
+        model = MLP()
+        with pytest.raises(ValueError, match="All modules were excluded"):
+            get_peft_model(
+                model,
+                LoraConfig(
+                    target_modules=["lin0", "lin1", "relu", "drop", "sm"],
+                    exclude_modules=["lin0", "lin1", "relu", "drop", "sm"],
+                ),
+            )
+
+    def test_no_modules_matched(self):
+        model = MLP()
+        with pytest.raises(ValueError, match="Target modules .* not found in the base model"):
+            get_peft_model(model, LoraConfig(target_modules=["non_existent_module"]))
+
+    def test_some_modules_excluded_some_unmatched(self):
+        model = MLP()
+        with pytest.raises(ValueError, match="No modules were targeted for adaptation"):
+            get_peft_model(model, LoraConfig(target_modules=["lin0", "non_existent_module"], exclude_modules=["lin0"]))
+
+    def test_exclude_modules_not_used(self):
+        model = MLP()
+        with pytest.warns(UserWarning, match="You have passed exclude_modules=.* but no modules were excluded"):
+            get_peft_model(model, LoraConfig(target_modules=["lin1"], exclude_modules=["non_existent_module"]))
+
     def test_realistic_example(self):
         model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-BloomForCausalLM")
         config = LoraConfig(task_type="CAUSAL_LM", exclude_modules="transformer.h.2.self_attention.query_key_value")
         model = get_peft_model(model, config)
         expected = [
-            f"transformer.h.{i}.self_attention.query_key_value" for i in range(len(model.base_model.transformer.h)) if i != 2
+            f"transformer.h.{i}.self_attention.query_key_value"
+            for i in range(len(model.base_model.transformer.h))
+            if i != 2
         ]
         assert model.targeted_module_names == expected
+
 
 class TestModelAndLayerStatus:
     """Check the methods `get_layer_status` and `get_model_status`.`
