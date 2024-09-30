@@ -422,6 +422,8 @@ class BaseTuner(nn.Module, ABC):
 
         """
         peft_config = self.peft_config[adapter_name]
+        excluded_modules = []
+        unmatched_modules = []
         # Note: If possible, all checks should be performed *at the start of this method*.
         # This way, we can raise early if something goes wrong, without leaving the model
         # in a bad (half-initialized) state.
@@ -483,15 +485,18 @@ class BaseTuner(nn.Module, ABC):
                 _has_modules_to_save = True
                 continue
 
-            if not self._check_target_module_exists(peft_config, key):
-                continue
-
-            self.targeted_module_names.append(key)
-            is_target_modules_in_base_model = True
-            parent, target, target_name = _get_submodules(model, key)
-            ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
-            with ctx():
-                self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
+            result = self._check_target_module_exists(peft_config, key)
+            if isinstance(result, ExcludedModule):
+                excluded_modules.append(key)
+            elif not result:
+                unmatched_modules.append(key)
+            else:
+                self.targeted_module_names.append(key)
+                is_target_modules_in_base_model = True
+                parent, target, target_name = _get_submodules(model, key)
+                ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
+                with ctx():
+                    self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
 
         tied_target_modules = self._get_tied_target_modules(model=model)
         if tied_target_modules:
@@ -508,7 +513,12 @@ class BaseTuner(nn.Module, ABC):
                 f"Target modules {peft_config.target_modules} not found in the base model. "
                 f"Please check the target modules and try again."
             )
-
+        
+        if hasattr(peft_config, "exclude_modules") and peft_config.exclude_modules and not excluded_modules:
+            raise ValueError(
+            f"Exclude modules={peft_config.exclude_modules} not found in the base model. "
+            f"Please check the target modules and try again."
+        )
         # It's important to set the adapter here (again), because otherwise it can happen that if a 2nd adapter is
         # added, and it targets different layer(s) than the first adapter (which is active), then those different
         # layers will be activated, which we don't want.
@@ -902,6 +912,12 @@ def _find_minimal_target_modules(
         return set(target_modules)
     return required_suffixes
 
+class ExcludedModule:
+    def __bool__(self):
+        return False
+
+    def __repr__(self):
+        return "ExcludedModule()"
 
 def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
     """A helper method to check if the passed module's key name matches any of the target modules in the adapter_config.
@@ -923,11 +939,12 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
     if hasattr(config, "exclude_modules") and config.exclude_modules:
         if isinstance(config.exclude_modules, str):
             if re.fullmatch(config.exclude_modules, key):
-                return False
+                return ExcludedModule()
         elif key in config.exclude_modules:
-            return False
+            return ExcludedModule()
         elif any(key.endswith(f".{exclude_key}") for exclude_key in config.exclude_modules):
-            return False
+            return ExcludedModule()
+        
     if isinstance(config.target_modules, str):
         target_module_found = re.fullmatch(config.target_modules, key)
     elif key in config.target_modules:
