@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import platform
 import re
 from contextlib import contextmanager
 from copy import deepcopy
@@ -1516,6 +1517,9 @@ class TestLowCpuMemUsage:
         assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
 
 
+@pytest.mark.skipif(
+    platform.system() != "Linux", reason="Out of the box, torch.compile does not work on Windows or MacOS"
+)
 class TestHotSwapping:
     """Tests for the hotswapping function"""
 
