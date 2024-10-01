@@ -38,6 +38,7 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
+    OFTConfig,
     PeftModel,
     PeftType,
     PrefixTuningConfig,
@@ -113,6 +114,10 @@ CONFIG_TESTING_KWARGS = (
     },
     # VBLoRA
     {"target_modules": None, "vblora_dropout": 0.05, "vector_length": 1, "num_vectors": 2},
+    # OFT
+    {
+        "target_modules": None,
+    },
 )
 
 CLASSES_MAPPING = {
@@ -127,6 +132,7 @@ CLASSES_MAPPING = {
     "fourierft": (FourierFTConfig, CONFIG_TESTING_KWARGS[8]),
     "hra": (HRAConfig, CONFIG_TESTING_KWARGS[9]),
     "vblora": (VBLoRAConfig, CONFIG_TESTING_KWARGS[10]),
+    "oft": (OFTConfig, CONFIG_TESTING_KWARGS[11]),
 }
 
 
@@ -646,7 +652,7 @@ class PeftCommonTester:
         if issubclass(config_cls, PromptLearningConfig):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
-        if issubclass(config_cls, BOFTConfig):
+        if issubclass(config_cls, (OFTConfig, BOFTConfig)):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
@@ -1106,6 +1112,10 @@ class PeftCommonTester:
             # TODO: no gradients on the "dense" layer, other layers work, not sure why
             self.skipTest("AdaLora with RoBERTa does not work correctly")
 
+        if (config_cls == OFTConfig) and ("deberta" in model_id.lower()):
+            # TODO: no gradients on the "dense" layer, other layers work, not sure why
+            self.skipTest("OFT with Deberta does not work correctly")
+
         model = self.transformers_class.from_pretrained(model_id)
 
         if not getattr(model, "supports_gradient_checkpointing", False):
@@ -1284,7 +1294,7 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        if config.peft_type not in ("LORA", "ADALORA", "IA3", "BOFT", "VERA", "FOURIERFT", "HRA", "VBLORA"):
+        if config.peft_type not in ("LORA", "ADALORA", "IA3", "BOFT", "OFT", "VERA", "FOURIERFT", "HRA", "VBLORA"):
             with pytest.raises(AttributeError):
                 model = model.unload()
         else:

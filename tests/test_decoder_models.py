@@ -32,6 +32,7 @@ from peft import (
     BOFTConfig,
     HRAConfig,
     LoraConfig,
+    OFTConfig,
     PrefixTuningConfig,
     PromptTuningConfig,
     PromptTuningInit,
@@ -63,21 +64,29 @@ def skip_adalora_and_gpt2(test_list):
     return [test for test in test_list if not (("GPT2LMHeadModel" in test[1]) and (test[2] == AdaLoraConfig))]
 
 
-def skip_boft_or_hra_and_gpt2(test_list):
-    return [
-        test
-        for test in test_list
-        if not (("GPT2LMHeadModel" in test[1]) and ((test[2] == BOFTConfig) or (test[2] == HRAConfig)))
-    ]
-
-
-def skip_adalora_or_boft_or_hra_and_gpt2(test_list):
+def skip_oft_or_hra_and_gpt2(test_list):
     return [
         test
         for test in test_list
         if not (
             ("GPT2LMHeadModel" in test[1])
-            and ((test[2] == AdaLoraConfig) or (test[2] == BOFTConfig) or (test[2] == HRAConfig))
+            and ((test[2] == BOFTConfig) or (test[2] == HRAConfig) or (test[2] == OFTConfig))
+        )
+    ]
+
+
+def skip_adalora_or_oft_or_hra_and_gpt2(test_list):
+    return [
+        test
+        for test in test_list
+        if not (
+            ("GPT2LMHeadModel" in test[1])
+            and (
+                (test[2] == AdaLoraConfig)
+                or (test[2] == BOFTConfig)
+                or (test[2] == HRAConfig)
+                or (test[2] == OFTConfig)
+            )
         )
     ]
 
@@ -104,19 +113,19 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         return input_dict
 
     @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_oft_or_hra_and_gpt2)
     )
     def test_attributes_parametrized(self, test_name, model_id, config_cls, config_kwargs):
         self._test_model_attr(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_oft_or_hra_and_gpt2)
     )
     def test_adapter_name(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adapter_name(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_oft_or_hra_and_gpt2)
     )
     def test_prepare_for_training_parametrized(self, test_name, model_id, config_cls, config_kwargs):
         self._test_prepare_for_training(model_id, config_cls, config_kwargs)
@@ -176,31 +185,31 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
             )
 
     @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_oft_or_hra_and_gpt2)
     )
     def test_save_pretrained(self, test_name, model_id, config_cls, config_kwargs):
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_oft_or_hra_and_gpt2)
     )
     def test_save_pretrained_pickle(self, test_name, model_id, config_cls, config_kwargs):
         self._test_save_pretrained(model_id, config_cls, config_kwargs, safe_serialization=False)
 
     @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_oft_or_hra_and_gpt2)
     )
     def test_save_pretrained_selected_adapters(self, test_name, model_id, config_cls, config_kwargs):
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_oft_or_hra_and_gpt2)
     )
     def test_save_pretrained_selected_adapters_pickle(self, test_name, model_id, config_cls, config_kwargs):
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs, safe_serialization=False)
 
     @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_oft_or_hra_and_gpt2)
     )
     def test_from_pretrained_config_construction(self, test_name, model_id, config_cls, config_kwargs):
         self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs)
@@ -213,6 +222,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "adalora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
+                "oft_kwargs": {"init_weights": [False]},
                 "vera_kwargs": {"init_weights": [False]},
                 "fourierft_kwargs": {"init_weights": [False]},
                 "hra_kwargs": {"init_weights": [False]},
@@ -230,12 +240,13 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
+                "oft_kwargs": {"init_weights": [False]},
                 "vera_kwargs": {"init_weights": [False]},
                 "fourierft_kwargs": {"init_weights": [False]},
                 "hra_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
-            filter_params_func=skip_boft_or_hra_and_gpt2,
+            filter_params_func=skip_oft_or_hra_and_gpt2,
         )
     )
     def test_merge_layers_multi(self, test_name, model_id, config_cls, config_kwargs):
@@ -248,6 +259,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
+                "oft_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
         )
@@ -268,13 +280,13 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         self._test_mixed_adapter_batches(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_oft_or_hra_and_gpt2)
     )
     def test_generate(self, test_name, model_id, config_cls, config_kwargs):
         self._test_generate(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_oft_or_hra_and_gpt2)
     )
     def test_generate_pos_args(self, test_name, model_id, config_cls, config_kwargs):
         # positional args are supported for PeftModelForCausalLM
@@ -293,7 +305,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         self._test_prefix_tuning_half_prec_conversion(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_oft_or_hra_and_gpt2)
     )
     def test_training_decoders(self, test_name, model_id, config_cls, config_kwargs):
         self._test_training(model_id, config_cls, config_kwargs)
@@ -303,13 +315,13 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         self._test_training_layer_indexing(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_oft_or_hra_and_gpt2)
     )
     def test_training_decoders_gradient_checkpointing(self, test_name, model_id, config_cls, config_kwargs):
         self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_oft_or_hra_and_gpt2)
     )
     def test_inference_safetensors(self, test_name, model_id, config_cls, config_kwargs):
         self._test_inference_safetensors(model_id, config_cls, config_kwargs)
@@ -319,19 +331,19 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         self._test_peft_model_device_map(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_oft_or_hra_and_gpt2)
     )
     def test_delete_adapter(self, test_name, model_id, config_cls, config_kwargs):
         self._test_delete_adapter(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_oft_or_hra_and_gpt2)
     )
     def test_delete_inactive_adapter(self, test_name, model_id, config_cls, config_kwargs):
         self._test_delete_inactive_adapter(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_oft_or_hra_and_gpt2)
     )
     def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
@@ -344,12 +356,13 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "adalora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
+                "oft_kwargs": {"init_weights": [False]},
                 "vera_kwargs": {"init_weights": [False]},
                 "fourierft_kwargs": {"init_weights": [False]},
                 "hra_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
-            filter_params_func=skip_adalora_or_boft_or_hra_and_gpt2,
+            filter_params_func=skip_adalora_or_oft_or_hra_and_gpt2,
         )
     )
     def test_unload_adapter(self, test_name, model_id, config_cls, config_kwargs):
@@ -362,6 +375,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
+                "oft_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
         )
@@ -381,12 +395,13 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "adalora_kwargs": {"init_lora_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
+                "oft_kwargs": {"init_weights": [False]},
                 "vera_kwargs": {"init_weights": [False]},
                 "fourierft_kwargs": {"init_weights": [False]},
                 "hra_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
-            filter_params_func=skip_boft_or_hra_and_gpt2,
+            filter_params_func=skip_oft_or_hra_and_gpt2,
         )
     )
     def test_disable_adapter(self, test_name, model_id, config_cls, config_kwargs):
@@ -403,7 +418,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         self._test_generate(model_id, AdaLoraConfig, config_kwargs)
 
     @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_oft_or_hra_and_gpt2)
     )
     def test_passing_input_embeds_works(self, test_name, model_id, config_cls, config_kwargs):
         self._test_passing_input_embeds_works(test_name, model_id, config_cls, config_kwargs)
