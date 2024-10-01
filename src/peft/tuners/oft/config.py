@@ -36,9 +36,9 @@ class OFTConfig(LycorisConfig):
             the architecture is not known, an error will be raised -- in this case, you should specify the target
             modules manually.
         exclude_modules (`Optional[Union[List[str], str]]`):
-            The names of the modules to not apply the adapter. When passing a string, a regex match will be performed. When passing a list of
-            strings, either an exact match will be performed or it is checked if the name of the module ends with any
-            of the passed strings.
+            The names of the modules to not apply the adapter. When passing a string, a regex match will be performed.
+            When passing a list of strings, either an exact match will be performed or it is checked if the name of the
+            module ends with any of the passed strings.
         init_weights (`bool`):
             Whether to perform initialization of OFT weights.
         layers_to_transform (`Union[List[int], int]`):

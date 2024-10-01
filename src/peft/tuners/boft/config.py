@@ -33,9 +33,9 @@ class BOFTConfig(PeftConfig):
         boft_n_butterfly_factor (`int`): Number of butterfly factors across different layers.
         target_modules (`Union[List[str],str]`): The names of the modules to apply the adapter to.
         exclude_modules (`Optional[Union[List[str], str]]`):
-            The names of the modules to not apply the adapter. When passing a string, a regex match will be performed. When passing a list of
-            strings, either an exact match will be performed or it is checked if the name of the module ends with any
-            of the passed strings.
+            The names of the modules to not apply the adapter. When passing a string, a regex match will be performed.
+            When passing a list of strings, either an exact match will be performed or it is checked if the name of the
+            module ends with any of the passed strings.
         boft_dropout (`float`): The multiplicative dropout probability for BOFT layers.
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
             For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set

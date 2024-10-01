@@ -30,9 +30,9 @@ class PolyConfig(PeftConfig):
         r (`int`): Attention dimension of each Lora in Poly.
         target_modules (`Union[List[str],str]`): The names of the modules to apply Poly to.
         exclude_modules (`Optional[Union[List[str], str]]`):
-            The names of the modules to not apply the adapter. When passing a string, a regex match will be performed. When passing a list of
-            strings, either an exact match will be performed or it is checked if the name of the module ends with any
-            of the passed strings.
+            The names of the modules to not apply the adapter. When passing a string, a regex match will be performed.
+            When passing a list of strings, either an exact match will be performed or it is checked if the name of the
+            module ends with any of the passed strings.
         modules_to_save (`List[str]`): List of modules apart from Poly layers to be set as trainable
             and saved in the final checkpoint.
         init_weights (bool): Whether to perform initialization of Poly weights.
