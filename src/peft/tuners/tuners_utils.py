@@ -544,11 +544,6 @@ class BaseTuner(nn.Module, ABC):
                 f"Please check the target modules and try again."
             )
 
-        if hasattr(peft_config, "exclude_modules") and peft_config.exclude_modules and not excluded_modules:
-            warnings.warn(
-            f"You have passed exclude_modules={peft_config.exclude_modules} but no modules were excluded. "
-            "Please check that exclude_modules was set correctly."
-        )
         # It's important to set the adapter here (again), because otherwise it can happen that if a 2nd adapter is
         # added, and it targets different layer(s) than the first adapter (which is active), then those different
         # layers will be activated, which we don't want.
