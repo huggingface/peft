@@ -77,9 +77,7 @@ class HRAConfig(PeftConfig):
     )
     exclude_modules: Optional[Union[list[str], str]] = field(
         default=None,
-        metadata={
-            "help": "List of module names or regex expression of the module names to exclude from HRA."
-        },
+        metadata={"help": "List of module names or regex expression of the module names to exclude from HRA."},
     )
     init_weights: bool = field(
         default=True,

@@ -937,12 +937,15 @@ def _find_minimal_target_modules(
         return set(target_modules)
     return required_suffixes
 
+
 class _ExcludedModule:
     """
     A private helper method used to represent excluded modules in the check_target_module_exists function.
     """
+
     def __bool__(self):
         return False
+
 
 def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
     """A helper method to check if the passed module's key name matches any of the target modules in the adapter_config.

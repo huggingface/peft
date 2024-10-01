@@ -129,9 +129,7 @@ class FourierFTConfig(PeftConfig):
     )
     exclude_modules: Optional[Union[list[str], str]] = field(
         default=None,
-        metadata={
-            "help": "List of module names or regex expression of the module names to exclude from fourierft."
-        },
+        metadata={"help": "List of module names or regex expression of the module names to exclude from fourierft."},
     )
     bias: str = field(
         default="none", metadata={"help": "Bias type for FourierFT. Can be 'none', 'all' or 'fourier_only'."}

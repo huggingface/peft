@@ -74,9 +74,7 @@ class OFTConfig(LycorisConfig):
     )
     exclude_modules: Optional[Union[list[str], str]] = field(
         default=None,
-        metadata={
-            "help": "List of module names or regex expression of the module names to exclude from OFT."
-        },
+        metadata={"help": "List of module names or regex expression of the module names to exclude from OFT."},
     )
     init_weights: bool = field(
         default=True,

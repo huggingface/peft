@@ -90,9 +90,7 @@ class LoHaConfig(LycorisConfig):
     )
     exclude_modules: Optional[Union[list[str], str]] = field(
         default=None,
-        metadata={
-            "help": "List of module names or regex expression of the module names to exclude from LoHa."
-        },
+        metadata={"help": "List of module names or regex expression of the module names to exclude from LoHa."},
     )
     init_weights: bool = field(
         default=True,

@@ -87,9 +87,7 @@ class BOFTConfig(PeftConfig):
     )
     exclude_modules: Optional[Union[list[str], str]] = field(
         default=None,
-        metadata={
-            "help": "List of module names or regex expression of the module names to exclude from BOFT."
-        },
+        metadata={"help": "List of module names or regex expression of the module names to exclude from BOFT."},
     )
     boft_dropout: float = field(default=0.0, metadata={"help": "BOFT multiplicative dropout"})
     fan_in_fan_out: bool = field(
