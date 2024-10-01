@@ -1776,7 +1776,8 @@ class PeftModelForCausalLM(PeftModel):
 
             # no past_key_values or past_key_values empty cache
             requires_prompt_injection = (model_kwargs["past_key_values"] is None) or (
-                isinstance(model_kwargs["past_key_values"], transformers.Cache) and not model_kwargs["past_key_values"]
+                isinstance(model_kwargs["past_key_values"], transformers.Cache)
+                and not model_kwargs["past_key_values"].get_seq_length()
             )
 
             if requires_prompt_injection and peft_config.peft_type == PeftType.PREFIX_TUNING:
