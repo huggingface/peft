@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from typing import Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
@@ -53,7 +53,7 @@ class IA3Config(PeftConfig):
             discouraged.
     """
 
-    target_modules: Optional[Union[List[str], str]] = field(
+    target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
             "help": (
@@ -69,7 +69,7 @@ class IA3Config(PeftConfig):
         default=None,
         metadata={"help": "List of module names or regex expression of the module names to exclude from (IA)³."},
     )
-    feedforward_modules: Optional[Union[List[str], str]] = field(
+    feedforward_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
             "help": "List of module names or a regex expression of module names which are feedforward"
@@ -80,7 +80,7 @@ class IA3Config(PeftConfig):
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
     )
-    modules_to_save: Optional[List[str]] = field(
+    modules_to_save: Optional[list[str]] = field(
         default=None,
         metadata={
             "help": "List of modules apart from (IA)^3 layers to be set as trainable and saved in the final checkpoint. "

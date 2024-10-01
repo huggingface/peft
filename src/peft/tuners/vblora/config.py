@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from typing import Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
@@ -103,7 +103,7 @@ class VBLoRAConfig(PeftConfig):
             "For more details, refer to the discussion in the paper."
         },
     )
-    target_modules: Optional[Union[List[str], str]] = field(
+    target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
             "help": (
@@ -135,7 +135,7 @@ class VBLoRAConfig(PeftConfig):
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
     )
     bias: str = field(default="none", metadata={"help": "Bias type for VBLoRA. Can be 'none', 'all' or 'vblora_only'"})
-    modules_to_save: Optional[List[str]] = field(
+    modules_to_save: Optional[list[str]] = field(
         default=None,
         metadata={
             "help": (
@@ -165,14 +165,14 @@ class VBLoRAConfig(PeftConfig):
             ),
         },
     )
-    layers_to_transform: Optional[Union[List[int], int]] = field(
+    layers_to_transform: Optional[Union[list[int], int]] = field(
         default=None,
         metadata={
             "help": "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at this index. "
             "This only works when target_modules is a list of str."
         },
     )
-    layers_pattern: Optional[Union[List[str], str]] = field(
+    layers_pattern: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
             "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."

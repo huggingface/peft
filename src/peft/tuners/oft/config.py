@@ -12,8 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from typing import Optional, Union
 
 from peft.tuners.lycoris_utils import LycorisConfig
 from peft.utils import PeftType
@@ -64,7 +65,7 @@ class OFTConfig(LycorisConfig):
     module_dropout: float = field(
         default=0.0, metadata={"help": "The dropout probability for disabling OFT modules during training"}
     )
-    target_modules: Optional[Union[List[str], str]] = field(
+    target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
             "help": "List of module names or regex expression of the module names to replace with OFT."
@@ -85,7 +86,7 @@ class OFTConfig(LycorisConfig):
             ),
         },
     )
-    layers_to_transform: Optional[Union[List[int], int]] = field(
+    layers_to_transform: Optional[Union[list[int], int]] = field(
         default=None,
         metadata={
             "help": "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at this index."
@@ -97,7 +98,7 @@ class OFTConfig(LycorisConfig):
             "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
         },
     )
-    modules_to_save: Optional[List[str]] = field(
+    modules_to_save: Optional[list[str]] = field(
         default=None,
         metadata={
             "help": "List of modules apart from OFT layers to be set as trainable and saved in the final checkpoint. "
