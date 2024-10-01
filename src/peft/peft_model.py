@@ -592,11 +592,16 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             **kwargs,
         )
 
-        if load_result.missing_keys:
+        # 1. Remove VB-LoRA vector bank, since it's a shared parameter set via the VBLoRAModel
+        # 2. Remove the prompt encoder, as it does not need to be part of the checkpoint
+        missing_keys = [
+            k for k in load_result.missing_keys if "vblora_vector_bank" not in k and "prompt_encoder" not in k
+        ]
+        if missing_keys:
             # Let's warn here since (in contrast to load_adapter) we don't return the load result, so it could be quite
             # difficult for users to even notice that something might have gone wrong here. As we filter out non PEFT
             # keys from the missing keys, this gives no false positives.
-            warnings.warn(f"Found missing adapter keys while loading the checkpoint: {load_result.missing_keys}")
+            warnings.warn(f"Found missing adapter keys while loading the checkpoint: {missing_keys}")
 
         return model
 

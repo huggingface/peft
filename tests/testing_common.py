@@ -376,7 +376,7 @@ class PeftCommonTester:
             with warnings.catch_warnings(record=True) as recs:
                 model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
                 # ensure that there is no warning
-                assert not any("found missing adapter keys" in str(rec.message) for rec in recs)
+                assert not any("Found missing adapter keys" in str(rec.message) for rec in recs)
 
             # check if the state dicts are equal
             if issubclass(config_cls, PromptEncoderConfig):
