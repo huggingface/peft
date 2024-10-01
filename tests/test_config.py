@@ -40,6 +40,7 @@ from peft import (
     PromptEncoder,
     PromptEncoderConfig,
     PromptTuningConfig,
+    VBLoRAConfig,
     VeraConfig,
 )
 
@@ -64,6 +65,7 @@ ALL_CONFIG_CLASSES = (
     PromptEncoderConfig,
     PromptTuningConfig,
     VeraConfig,
+    VBLoRAConfig,
 )
 
 
@@ -238,7 +240,9 @@ class TestPeftConfig:
         expected_msg = "for MLP, the argument `encoder_num_layers` is ignored. Exactly 2 MLP layers are used."
         assert str(record.list[0].message) == expected_msg
 
-    @pytest.mark.parametrize("config_class", [LoHaConfig, LoraConfig, IA3Config, OFTConfig, BOFTConfig, HRAConfig])
+    @pytest.mark.parametrize(
+        "config_class", [LoHaConfig, LoraConfig, IA3Config, OFTConfig, BOFTConfig, HRAConfig, VBLoRAConfig]
+    )
     def test_save_pretrained_with_target_modules(self, config_class):
         # See #1041, #1045
         config = config_class(target_modules=["a", "list"])

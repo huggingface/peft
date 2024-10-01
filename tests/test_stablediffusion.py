@@ -19,7 +19,18 @@ import numpy as np
 from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
 
-from peft import BOFTConfig, HRAConfig, LoHaConfig, LoraConfig, OFTConfig, get_peft_model
+from peft import (
+    BOFTConfig,
+    HRAConfig,
+    LoHaConfig,
+    LoraConfig,
+    OFTConfig,
+    get_peft_model,
+    get_peft_model_state_dict,
+    inject_adapter_in_model,
+    set_peft_model_state_dict,
+)
+from peft.tuners.tuners_utils import BaseTunerLayer
 
 from .testing_common import ClassInstantier, PeftCommonTester
 from .testing_utils import temp_seed
@@ -145,7 +156,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
     def prepare_inputs_for_testing(self):
         return {
             "prompt": "a high quality digital photo of a cute corgi",
-            "num_inference_steps": 20,
+            "num_inference_steps": 3,
         }
 
     @parameterized.expand(
@@ -260,3 +271,47 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
     )
     def test_disable_adapter(self, test_name, model_id, config_cls, config_kwargs):
         self._test_disable_adapter(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(
+        PeftStableDiffusionTestConfigManager.get_grid_parameters(
+            {"model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST},
+        )
+    )
+    def test_load_model_low_cpu_mem_usage(self, test_name, model_id, config_cls, config_kwargs):
+        # Instantiate model & adapters
+        pipe = self.instantiate_sd_peft(model_id, config_cls, config_kwargs)
+
+        te_state_dict = get_peft_model_state_dict(pipe.text_encoder)
+        unet_state_dict = get_peft_model_state_dict(pipe.unet)
+
+        del pipe
+        pipe = self.instantiate_sd_peft(model_id, config_cls, config_kwargs)
+
+        config_kwargs = config_kwargs.copy()
+        text_encoder_kwargs = config_kwargs.pop("text_encoder")
+        unet_kwargs = config_kwargs.pop("unet")
+        # the remaining config kwargs should be applied to both configs
+        for key, val in config_kwargs.items():
+            text_encoder_kwargs[key] = val
+            unet_kwargs[key] = val
+
+        config_text_encoder = config_cls(**text_encoder_kwargs)
+        config_unet = config_cls(**unet_kwargs)
+
+        # check text encoder
+        inject_adapter_in_model(config_text_encoder, pipe.text_encoder, low_cpu_mem_usage=True)
+        # sanity check that the adapter was applied:
+        assert any(isinstance(module, BaseTunerLayer) for module in pipe.text_encoder.modules())
+
+        assert "meta" in {p.device.type for p in pipe.text_encoder.parameters()}
+        set_peft_model_state_dict(pipe.text_encoder, te_state_dict, low_cpu_mem_usage=True)
+        assert "meta" not in {p.device.type for p in pipe.text_encoder.parameters()}
+
+        # check unet
+        inject_adapter_in_model(config_unet, pipe.unet, low_cpu_mem_usage=True)
+        # sanity check that the adapter was applied:
+        assert any(isinstance(module, BaseTunerLayer) for module in pipe.unet.modules())
+
+        assert "meta" in {p.device.type for p in pipe.unet.parameters()}
+        set_peft_model_state_dict(pipe.unet, unet_state_dict, low_cpu_mem_usage=True)
+        assert "meta" not in {p.device.type for p in pipe.unet.parameters()}

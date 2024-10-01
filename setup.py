@@ -15,7 +15,7 @@
 from setuptools import find_packages, setup
 
 
-VERSION = "0.12.1.dev0"
+VERSION = "0.13.1.dev0"
 
 extras = {}
 extras["quality"] = [
@@ -48,7 +48,7 @@ setup(
     keywords="deep learning",
     license="Apache",
     author="The HuggingFace team",
-    author_email="sourab@huggingface.co",
+    author_email="benjamin@huggingface.co",
     url="https://github.com/huggingface/peft",
     package_dir={"": "src"},
     packages=find_packages("src"),

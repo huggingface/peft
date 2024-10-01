@@ -76,6 +76,8 @@ class VeraModel(BaseTuner):
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
         config ([`VeraConfig`]): The configuration of the Vera model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
+        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+            Create empty adapter weights on meta device. Useful to speed up the loading process.
 
     Returns:
         `torch.nn.Module`: The Vera model.
@@ -98,8 +100,8 @@ class VeraModel(BaseTuner):
 
     prefix: str = "vera_lambda"
 
-    def __init__(self, model, config, adapter_name) -> None:
-        super().__init__(model, config, adapter_name)
+    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
+        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
     def _find_dim(self, config) -> tuple[int, int]:
         """
@@ -107,9 +109,7 @@ class VeraModel(BaseTuner):
 
         This will be used for determining the size of the shared vera_A and vera_B matrices.
         """
-        model_config = getattr(self.model, "config", {"model_type": "custom"})
-        if hasattr(model_config, "to_dict"):
-            model_config = model_config.to_dict()
+        model_config = self.get_model_config(self.model)
 
         peft_config = self._prepare_adapter_config(config, model_config)
         peft_config = _maybe_include_all_linear_layers(peft_config, self.model)
@@ -257,10 +257,12 @@ class VeraModel(BaseTuner):
                 new_module.state = child.state
             new_module.to(child.weight.device)
 
+        meta = torch.device("meta")
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if "vera_" in name:
-                module.to(child.weight.device)
+                if not any(p.device == meta for p in module.parameters()):
+                    module.to(child.weight.device)
 
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
         for n, p in model.named_parameters():

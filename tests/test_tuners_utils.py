@@ -42,13 +42,19 @@ from peft import (
     get_model_status,
     get_peft_model,
 )
+from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import (
+    BaseTuner,
     BaseTunerLayer,
     _maybe_include_all_linear_layers,
     check_target_module_exists,
     inspect_matched_modules,
 )
+from peft.tuners.tuners_utils import (
+    _find_minimal_target_modules as find_minimal_target_modules,
+)
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND, ModulesToSaveWrapper, infer_device
+from peft.utils.constants import DUMMY_MODEL_CONFIG, MIN_TARGET_MODULES_FOR_OPTIMIZATION
 
 from .testing_utils import require_bitsandbytes, require_non_cpu, require_torch_gpu
 
@@ -1065,3 +1071,259 @@ class TestModelAndLayerStatus:
 
         with pytest.raises(TypeError, match="get_model_status is not supported for PeftMixedModel"):
             model.get_model_status()
+
+
+# Tests for BaseTuner
+class MockModelConfig:
+    config = {"mock_key": "mock_value"}
+
+    def to_dict(self):
+        return self.config
+
+
+class ModelWithConfig(nn.Module):
+    def __init__(self):
+        self.config = MockModelConfig()
+
+
+class ModelWithDictConfig(nn.Module):
+    def __init__(self):
+        self.config = MockModelConfig.config
+
+
+class ModelWithNoConfig(nn.Module):
+    pass
+
+
+class TestBaseTunerGetModelConfig(unittest.TestCase):
+    def test_get_model_config_use_to_dict(self):
+        config = BaseTuner.get_model_config(ModelWithConfig())
+        assert config == MockModelConfig.config
+
+    def test_get_model_config_as_dict(self):
+        config = BaseTuner.get_model_config(ModelWithDictConfig())
+        assert config == MockModelConfig.config
+
+    def test_get_model_config_with_no_config(self):
+        config = BaseTuner.get_model_config(ModelWithNoConfig())
+        assert config == DUMMY_MODEL_CONFIG
+
+
+class TestBaseTunerWarnForTiedEmbeddings:
+    model_id = "HuggingFaceH4/tiny-random-LlamaForCausalLM"
+    warn_end_inject = "huggingface/peft/issues/2018."
+    warn_end_merge = (
+        "# Now use the original model but in untied format\n"
+        "model = AutoModelForCausalLM.from_pretrained(untied_model_dir)\n```\n"
+    )
+
+    def _get_peft_model(self, tie_word_embeddings, target_module):
+        model = get_peft_model(
+            AutoModelForCausalLM.from_pretrained(self.model_id, tie_word_embeddings=tie_word_embeddings),
+            LoraConfig(target_modules=[target_module]),
+        )
+        return model
+
+    def _is_warn_triggered(self, warning_list, endswith):
+        return any(str(warning.message).endswith(endswith) for warning in warning_list)
+
+    def test_warn_for_tied_embeddings_inject(self, recwarn):
+        self._get_peft_model(tie_word_embeddings=True, target_module="lm_head")
+        assert self._is_warn_triggered(recwarn.list, self.warn_end_inject)
+
+    def test_warn_for_tied_embeddings_merge(self, recwarn):
+        model = self._get_peft_model(tie_word_embeddings=True, target_module="lm_head")
+        model.merge_and_unload()
+        assert self._is_warn_triggered(recwarn.list, self.warn_end_merge)
+
+    def test_no_warn_for_untied_embeddings_inject(self, recwarn):
+        self._get_peft_model(tie_word_embeddings=False, target_module="lm_head")
+        assert not self._is_warn_triggered(recwarn.list, self.warn_end_inject)
+
+    def test_no_warn_for_untied_embeddings_merge(self, recwarn):
+        model_not_tied = self._get_peft_model(tie_word_embeddings=False, target_module="lm_head")
+        model_not_tied.merge_and_unload()
+        assert not self._is_warn_triggered(recwarn.list, self.warn_end_merge)
+
+    def test_no_warn_for_no_target_module_inject(self, recwarn):
+        self._get_peft_model(tie_word_embeddings=True, target_module="q_proj")
+        assert not self._is_warn_triggered(recwarn.list, self.warn_end_inject)
+
+    def test_no_warn_for_no_target_module_merge(self, recwarn):
+        model_no_target_module = self._get_peft_model(tie_word_embeddings=True, target_module="q_proj")
+        model_no_target_module.merge_and_unload()
+        assert not self._is_warn_triggered(recwarn.list, self.warn_end_merge)
+
+
+class TestFindMinimalTargetModules:
+    @pytest.mark.parametrize(
+        "target_modules, other_module_names, expected",
+        [
+            (["bar"], [], {"bar"}),
+            (["foo"], ["bar"], {"foo"}),
+            (["1.foo", "2.foo"], ["3.foo", "4.foo"], {"1.foo", "2.foo"}),
+            # Could also return "bar.baz" but we want the shorter one
+            (["bar.baz"], ["foo.bar"], {"baz"}),
+            (["1.foo", "2.foo", "bar.baz"], ["3.foo", "bar.bla"], {"1.foo", "2.foo", "baz"}),
+            # Case with longer suffix chains and nested suffixes
+            (["a.b.c", "d.e.f", "g.h.i"], ["j.k.l", "m.n.o"], {"c", "f", "i"}),
+            (["a.b.c", "d.e.f", "g.h.i"], ["a.b.x", "d.x.f", "x.h.i"], {"c", "e.f", "g.h.i"}),
+            # Case with multiple items that can be covered by a single suffix
+            (["foo.bar.baz", "qux.bar.baz"], ["baz.bar.foo"], {"baz"}),
+            # Realistic examples
+            # Only match k_proj
+            (
+                ["model.decoder.layers.{i}.self_attn.k_proj" for i in range(12)],
+                (
+                    ["model.decoder.layers.{i}.self_attn" for i in range(12)]
+                    + ["model.decoder.layers.{i}.self_attn.v_proj" for i in range(12)]
+                    + ["model.decoder.layers.{i}.self_attn.q_proj" for i in range(12)]
+                ),
+                {"k_proj"},
+            ),
+            # Match all k_proj except the one in layer 5 => no common suffix
+            (
+                ["model.decoder.layers.{i}.self_attn.k_proj" for i in range(12) if i != 5],
+                (
+                    ["model.decoder.layers.5.self_attn.k_proj"]
+                    + ["model.decoder.layers.{i}.self_attn" for i in range(12)]
+                    + ["model.decoder.layers.{i}.self_attn.v_proj" for i in range(12)]
+                    + ["model.decoder.layers.{i}.self_attn.q_proj" for i in range(12)]
+                ),
+                {"{i}.self_attn.k_proj" for i in range(12) if i != 5},
+            ),
+        ],
+    )
+    def test_find_minimal_target_modules(self, target_modules, other_module_names, expected):
+        # check all possible combinations of list and set
+        result = find_minimal_target_modules(target_modules, other_module_names)
+        assert result == expected
+
+        result = find_minimal_target_modules(set(target_modules), other_module_names)
+        assert result == expected
+
+        result = find_minimal_target_modules(target_modules, set(other_module_names))
+        assert result == expected
+
+        result = find_minimal_target_modules(set(target_modules), set(other_module_names))
+        assert result == expected
+
+    def test_find_minimal_target_modules_empty_raises(self):
+        with pytest.raises(ValueError, match="target_modules should be a list or set of strings"):
+            find_minimal_target_modules([], ["foo"])
+
+        with pytest.raises(ValueError, match="target_modules should be a list or set of strings"):
+            find_minimal_target_modules(set(), ["foo"])
+
+    def test_find_minimal_target_modules_contains_empty_string_raises(self):
+        target_modules = ["", "foo", "bar.baz"]
+        other_module_names = ["bar"]
+        with pytest.raises(ValueError, match="target_modules should not contain an empty string"):
+            find_minimal_target_modules(target_modules, other_module_names)
+
+    def test_find_minimal_target_modules_string_raises(self):
+        target_modules = "foo"
+        other_module_names = ["bar"]
+        with pytest.raises(ValueError, match="target_modules should be a list or set of strings"):
+            find_minimal_target_modules(target_modules, other_module_names)
+
+    @pytest.mark.parametrize(
+        "target_modules, other_module_names",
+        [
+            (["foo"], ["foo"]),
+            (["foo.bar"], ["foo.bar"]),
+            (["foo.bar", "spam", "eggs"], ["foo.bar"]),
+            (["foo.bar", "spam"], ["foo.bar", "eggs"]),
+            (["foo.bar"], ["foo.bar", "spam", "eggs"]),
+        ],
+    )
+    def test_find_minimal_target_modules_not_disjoint_raises(self, target_modules, other_module_names):
+        msg = (
+            "target_modules and other_module_names contain common elements, this should not happen, please "
+            "open a GitHub issue at https://github.com/huggingface/peft/issues with the code to reproduce this issue"
+        )
+        with pytest.raises(ValueError, match=msg):
+            find_minimal_target_modules(target_modules, other_module_names)
+
+    def test_get_peft_model_applies_find_target_modules(self):
+        # Check that when calling get_peft_model, the target_module optimization is indeed applied if the lenght of
+        # target_modules is big enough. The resulting model itself should be unaffected.
+        torch.manual_seed(0)
+        model_id = "facebook/opt-125m"  # must be big enough for optimization to trigger
+        model = AutoModelForCausalLM.from_pretrained(model_id)
+
+        # base case: specify target_modules in a minimal fashion
+        config = LoraConfig(init_lora_weights=False, target_modules=["q_proj", "v_proj"])
+        model = get_peft_model(model, config)
+
+        # this list contains all targeted modules listed separately
+        big_target_modules = [name for name, module in model.named_modules() if isinstance(module, LoraLayer)]
+        # sanity check
+        assert len(big_target_modules) > MIN_TARGET_MODULES_FOR_OPTIMIZATION
+
+        # make a "checksum" of the model for comparison
+        model_check_sum_before = sum(p.sum() for p in model.parameters())
+
+        # strip prefix so that the names they can be used as new target_modules
+        prefix_to_strip = "base_model.model.model."
+        big_target_modules = [name[len(prefix_to_strip) :] for name in big_target_modules]
+
+        del model
+
+        torch.manual_seed(0)
+        model = AutoModelForCausalLM.from_pretrained(model_id)
+        # pass the big target_modules to config
+        config = LoraConfig(init_lora_weights=False, target_modules=big_target_modules)
+        model = get_peft_model(model, config)
+
+        # check that target modules have been condensed
+        assert model.peft_config["default"].target_modules == {"q_proj", "v_proj"}
+
+        # check that the resulting model is still the same
+        model_check_after = sum(p.sum() for p in model.parameters())
+        assert model_check_sum_before == model_check_after
+
+    def test_suffix_is_substring_of_other_suffix(self):
+        # This test is based on a real world bug found in diffusers. The issue was that we needed the suffix
+        # 'time_emb_proj' in the minimal target modules. However, if there already was the suffix 'proj' in the
+        # required_suffixes, 'time_emb_proj' would not be added because the test was `endswith(suffix)` and
+        # 'time_emb_proj' ends with 'proj'. The correct logic is to test if `endswith("." + suffix")`. The module names
+        # chosen here are only a subset of the hundreds of actual module names but this subset is sufficient to
+        # replicate the bug.
+        target_modules = [
+            "down_blocks.1.attentions.0.transformer_blocks.0.ff.net.0.proj",
+            "mid_block.attentions.0.transformer_blocks.0.ff.net.0.proj",
+            "up_blocks.0.attentions.0.transformer_blocks.0.ff.net.0.proj",
+            "mid_block.attentions.0.proj_out",
+            "up_blocks.0.attentions.0.proj_out",
+            "down_blocks.1.attentions.0.proj_out",
+            "up_blocks.0.resnets.0.time_emb_proj",
+            "down_blocks.0.resnets.0.time_emb_proj",
+            "mid_block.resnets.0.time_emb_proj",
+        ]
+        other_module_names = [
+            "conv_in",
+            "time_proj",
+            "time_embedding",
+            "time_embedding.linear_1",
+            "add_time_proj",
+            "add_embedding",
+            "add_embedding.linear_1",
+            "add_embedding.linear_2",
+            "down_blocks",
+            "down_blocks.0",
+            "down_blocks.0.resnets",
+            "down_blocks.0.resnets.0",
+            "up_blocks",
+            "up_blocks.0",
+            "up_blocks.0.attentions",
+            "up_blocks.0.attentions.0",
+            "up_blocks.0.attentions.0.norm",
+            "up_blocks.0.attentions.0.transformer_blocks",
+            "up_blocks.0.attentions.0.transformer_blocks.0",
+            "up_blocks.0.attentions.0.transformer_blocks.0.norm1",
+            "up_blocks.0.attentions.0.transformer_blocks.0.attn1",
+        ]
+        expected = {"time_emb_proj", "proj", "proj_out"}
+        result = find_minimal_target_modules(target_modules, other_module_names)
+        assert result == expected
