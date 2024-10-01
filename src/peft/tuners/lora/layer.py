@@ -585,6 +585,11 @@ class Linear(nn.Module, LoraLayer):
                 if not self.use_dora[active_adapter]:
                     result = result + lora_B(lora_A(dropout(x))) * scaling
                 else:
+                    if isinstance(dropout, nn.Identity):
+                        print("no dropout, optimize here")
+                    else:
+                        print("dropout, same ops")
+                    
                     x = dropout(x)
                     result = result + self.lora_magnitude_vector[active_adapter](
                         x,
