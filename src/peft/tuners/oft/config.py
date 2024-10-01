@@ -183,8 +183,8 @@ class OFTConfig(PeftConfig):
         """
         if "oft_block_size" not in kwargs:
             raise ValueError(
-                "OFT has been updated since PEFT 0.14.0. Your trained adapter weights are incompatible"
-                "with the latest version of OFT. Please retrain your adapter weights with newer PEFT versions."
+                "OFT has been updated since PEFT 0.14.0. Your trained adapter weights are incompatible "
+                "with the latest version of OFT. Please retrain your adapter weights with newer PEFT versions. "
                 "Alternatively, downgrade PEFT to version 0.13.0 to use the old adapter weights."
             )
         return super().check_kwargs(**kwargs)
