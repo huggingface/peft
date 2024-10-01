@@ -24,6 +24,10 @@ from transformers.utils import PushToHubMixin
 from .utils import CONFIG_NAME, PeftType, TaskType
 
 
+# we expect at least these keys to be present in a PEFT adapter_config.json
+MIN_EXPECTED_CONFIG_KEYS = {"peft_type"}
+
+
 def _check_and_remove_unused_kwargs(cls, kwargs):
     """Make PEFT configs forward-compatible by removing unused kwargs that were added in later PEFT versions.
 
@@ -134,11 +138,19 @@ class PeftConfigMixin(PushToHubMixin):
         try:
             config = config_cls(**kwargs)
         except TypeError as exc:
+            # Here we potentially handle forward compatibility. Sometimes new keywords are added to configs, which makes
+            # new configs incompatible with older PEFT versions. We catch these and remove them to allow the program to
+            # continue, but warn the user about it.
+
             # First check if the error is due to unexpected keyword arguments, we don't want to accidentally catch
             # other TypeErrors.
             if "got an unexpected keyword argument" not in str(exc):
                 raise exc
+
             filtered_kwargs, unexpected_kwargs = _check_and_remove_unused_kwargs(cls, kwargs)
+            if not MIN_EXPECTED_CONFIG_KEYS.issubset(set(filtered_kwargs.keys())):
+                raise TypeError(f"The config that is trying to be loaded is not a valid {cls.__name__} config.")
+
             warnings.warn(
                 f"Unexpected keyword arguments {sorted(unexpected_kwargs)} for class {cls.__name__}, these are "
                 "ignored. This probably means that you're loading a configuration file that was saved using a "

@@ -314,8 +314,8 @@ class TestPeftConfig:
             AdaLoraConfig(r=10)
 
     @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
-    def test_from_pretrained_future_proof(self, config_class, tmp_path, recwarn):
-        r"""
+    def test_from_pretrained_forward_compatible(self, config_class, tmp_path, recwarn):
+        """
         Make it possible to load configs that contain unknown keys by ignoring them.
 
         The idea is to make PEFT configs forward-compatible with future versions of the library.
@@ -323,11 +323,11 @@ class TestPeftConfig:
         config = config_class()
         config.save_pretrained(tmp_path)
         # add a spurious key to the config
-        with open(os.path.join(tmp_path, "adapter_config.json")) as f:
+        with open(tmp_path / "adapter_config.json") as f:
             config_dict = json.load(f)
         config_dict["foobar"] = "baz"
         config_dict["spam"] = 123
-        with open(os.path.join(tmp_path, "adapter_config.json"), "w") as f:
+        with open(tmp_path / "adapter_config.json", "w") as f:
             json.dump(config_dict, f)
 
         msg = f"Unexpected keyword arguments ['foobar', 'spam'] for class {config_class.__name__}, these are ignored."
@@ -339,3 +339,16 @@ class TestPeftConfig:
         assert "spam" not in config_from_pretrained.to_dict()
         assert config.to_dict() == config_from_pretrained.to_dict()
         assert isinstance(config_from_pretrained, config_class)
+
+    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
+    def test_from_pretrained_sanity_check(self, config_class, tmp_path):
+        """Following up on the previous test about forward compatibility, we *don't* want any random json to be accepted as
+        a PEFT config. There should be a minimum set of required keys.
+        """
+        non_peft_json = {"foo": "bar", "baz": 123}
+        with open(tmp_path / "adapter_config.json", "w") as f:
+            json.dump(non_peft_json, f)
+
+        msg = f"The config that is trying to be loaded is not a valid {config_class.__name__} config"
+        with pytest.raises(TypeError, match=msg):
+            config_class.from_pretrained(tmp_path)
