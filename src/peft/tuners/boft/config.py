@@ -38,7 +38,9 @@ class BOFTConfig(PeftConfig):
             The names of the modules to not apply the adapter. When passing a string, a regex match will be performed.
             When passing a list of strings, either an exact match will be performed or it is checked if the name of the
             module ends with any of the passed strings.
-        boft_dropout (`float`): The multiplicative dropout probability for BOFT layers.
+        boft_dropout (`float`):
+            The multiplicative dropout probability, by setting OFT blocks to identity during training, similar to the
+            dropout layer in LoRA.
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
             For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set
             to `True`.
@@ -91,7 +93,12 @@ class BOFTConfig(PeftConfig):
         default=None,
         metadata={"help": "List of module names or regex expression of the module names to exclude from BOFT."},
     )
-    boft_dropout: float = field(default=0.0, metadata={"help": "BOFT multiplicative dropout"})
+    boft_dropout: float = field(
+        default=0.0,
+        metadata={
+            "help": "BOFT multiplicative dropout, randomly setting blocks of OFT to be identity matrix, similar to the dropout layer in LoRA."
+        },
+    )
     fan_in_fan_out: bool = field(
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
@@ -138,9 +145,10 @@ class BOFTConfig(PeftConfig):
             set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
         if self.boft_block_size == 0 and self.boft_block_num == 0:
-            raise ValueError("You must specify either boft_block_size or boft_block_num.")
+            raise ValueError(
+                f"Either `boft_block_size` or `boft_block_num` must be non-zero. Currently, boft_block_size = {self.boft_block_size} and boft_block_num = {self.boft_block_num}."
+            )
         if not (self.boft_block_size != 0) ^ (self.boft_block_num != 0):
             raise ValueError(
-                f"You can only specify either boft_block_size ({self.boft_block_size}) or boft_block_num ({self.boft_block_num}), "
-                "but not both simultaneously, because boft_block_size x boft_block_num != in_features."
+                f"You can only specify either boft_block_size ({self.boft_block_size}) or boft_block_num ({self.boft_block_num}), but not both simultaneously, because boft_block_size x boft_block_num == in_features."
             )
