@@ -437,13 +437,12 @@ class BaseTuner(nn.Module, ABC):
         peft_config = self._prepare_adapter_config(peft_config, model_config)
 
         self._prepare_model(peft_config, model)
-        is_target_modules_in_base_model = False
         key_list = [key for key, _ in model.named_modules()]
 
-        if getattr(peft_config, "target_modules", None) == DUMMY_TARGET_MODULES:
+        uses_dummy_target_modules = getattr(peft_config, "target_modules", None) == DUMMY_TARGET_MODULES
+        if uses_dummy_target_modules:
             # dummy adapter, we allow not matching any module
             key_list = []
-            is_target_modules_in_base_model = True
 
         # update peft_config.target_modules if required
         peft_config = _maybe_include_all_linear_layers(peft_config, model)
@@ -494,19 +493,12 @@ class BaseTuner(nn.Module, ABC):
                 unmatched_modules.append(key)
             else:
                 self.targeted_module_names.append(key)
-                is_target_modules_in_base_model = True
                 parent, target, target_name = _get_submodules(model, key)
                 ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
                 with ctx():
                     self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
 
-        # Handle X-LoRA case.
-        if not is_target_modules_in_base_model and hasattr(peft_config, "target_modules"):
-            raise ValueError(
-                f"Target modules {peft_config.target_modules} not found in the base model. "
-                f"Please check the target modules and try again."
-            )
-        elif not self.targeted_module_names:
+        if not self.targeted_module_names and not uses_dummy_target_modules:
             if excluded_modules and not unmatched_modules:
                 # All targeted modules were excluded
                 raise ValueError(
