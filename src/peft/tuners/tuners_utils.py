@@ -500,7 +500,13 @@ class BaseTuner(nn.Module, ABC):
                 with ctx():
                     self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
 
-        if not self.targeted_module_names:
+        # Handle X-LoRA case.
+        if not is_target_modules_in_base_model and hasattr(peft_config, "target_modules"):
+            raise ValueError(
+                f"Target modules {peft_config.target_modules} not found in the base model. "
+                f"Please check the target modules and try again."
+            )
+        elif not self.targeted_module_names:
             if excluded_modules and not unmatched_modules:
                 # All targeted modules were excluded
                 raise ValueError(
@@ -535,13 +541,6 @@ class BaseTuner(nn.Module, ABC):
                 "This can lead to complications, for example when merging the adapter "
                 "or converting your model to formats other than safetensors. "
                 "See for example https://github.com/huggingface/peft/issues/2018."
-            )
-
-        # Handle X-LoRA case.
-        if not is_target_modules_in_base_model and hasattr(peft_config, "target_modules"):
-            raise ValueError(
-                f"Target modules {peft_config.target_modules} not found in the base model. "
-                f"Please check the target modules and try again."
             )
 
         # It's important to set the adapter here (again), because otherwise it can happen that if a 2nd adapter is
