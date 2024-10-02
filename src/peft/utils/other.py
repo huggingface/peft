@@ -243,8 +243,12 @@ class ModulesToSaveWrapper(torch.nn.Module):
         modules = self.__dict__["_modules"]
         if self.disable_adapters:
             module = modules["original_module"]
-        else:
+        elif self.active_adapter in modules["modules_to_save"]:
             module = modules["modules_to_save"][self.active_adapter]
+        else:
+            # For some reason, there is no module corresponding to the active adapter; this should normally not be
+            # reached and exists as a failsafe (otherwise, a KeyError would be raised)
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
         return getattr(module, name)
 
     def update(self, adapter_name):

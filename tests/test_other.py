@@ -191,3 +191,11 @@ class TestModulesToSaveAttributeAccess:
         with pytest.raises(AttributeError, match="has no attribute 'foo'"):
             with model.disable_adapter():
                 model.lin1.foo
+
+    def test_transient_attribute_access_non_existing_adapter(self, mlp):
+        # This should normally never happen, as the active adapter should always exist, but it's a failsafe
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        model = get_peft_model(mlp, config)
+        model.base_model.model.lin1._active_adapter = "does-not-exist"
+        with pytest.raises(AttributeError, match="has no attribute 'weight'"):
+            model.lin1.weight
