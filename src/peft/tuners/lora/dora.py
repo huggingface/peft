@@ -62,7 +62,7 @@ class DoraLinearLayer(nn.Module):
             weight_norm = weight_norm.to("cpu")
         self.weight = nn.Parameter(weight_norm, requires_grad=True)
 
-    def forward(self, x, *, lora_A, lora_B, scaling, base_layer, do_optimize=False, result=None):
+    def forward(self, x, *, lora_A, lora_B, scaling, base_layer, base_result=None):
         """
         For DoRA, calculate the extra output from LoRA with DoRA applied. This should be added on top of the base layer
         output.
@@ -85,29 +85,18 @@ class DoraLinearLayer(nn.Module):
         weight_norm = weight_norm.detach()
         mag_norm_scale = (magnitude / weight_norm).view(1, -1)
 
-        if do_optimize:
+        lora_result = lora_B(lora_A(x))
+
+        if base_result is not None:
             bias = base_layer.bias
             if bias is not None:
-                result = result - bias
-            result = mag_norm_scale * result + mag_norm_scale * lora_B(lora_A(x)) * scaling
+                base_result = base_result - bias
+            result_dora = mag_norm_scale * base_result + mag_norm_scale * lora_result * scaling
             if bias is not None:
-                result = result + bias
-            return result
-
-        lora_result = lora_B(lora_A(x))
-        result_dora = (mag_norm_scale - 1) * (
-            F.linear(x, transpose(weight, self.fan_in_fan_out))
-        ) + mag_norm_scale * lora_result * scaling
-
-        # Note: Computation could potentially be accelerated by using the code below instead of calculating X@W again.
-        # This is only correct if dropout=0, otherwise results will differ:
-        # https://github.com/huggingface/peft/pull/1474#issuecomment-1964682771
-        # bias = self.get_base_layer().bias
-        # if bias is not None:
-        #     result = result - bias
-        # result = mag_norm_scale * result + mag_norm_scale * lora_B(lora_A(x)) * scaling
-        # if bias is not None:
-        #     result = result + bias
+                result_dora = result_dora + bias
+        else:
+            base_result = F.linear(x, transpose(weight, self.fan_in_fan_out))
+            result_dora = (mag_norm_scale - 1) * base_result + mag_norm_scale * lora_result * scaling
 
         return result_dora
 

@@ -592,8 +592,7 @@ class Linear(nn.Module, LoraLayer):
                             lora_B=lora_B,
                             scaling=scaling,
                             base_layer=self.get_base_layer(),
-                            do_optimize=True,
-                            result=result,
+                            base_result=result,
                         )
                     else:
                         x = dropout(x)
@@ -603,7 +602,6 @@ class Linear(nn.Module, LoraLayer):
                             lora_B=lora_B,
                             scaling=scaling,
                             base_layer=self.get_base_layer(),
-                            do_optimize=False,
                             result=None,
                         )
 
