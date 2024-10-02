@@ -606,8 +606,6 @@ class Linear(nn.Module, LoraLayer):
                             do_optimize=False,
                             result=None,
                         )
-                    
-                    
 
             result = result.to(torch_result_dtype)
 
