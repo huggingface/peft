@@ -88,6 +88,8 @@ class DoraLinearLayer(nn.Module):
         lora_result = lora_B(lora_A(x))
 
         if base_result is not None:
+            # `base_result` is provided only if dropout is set to 0 or if the model is in evaluation mode.
+            # This means we already have a deterministic output from the base layer that can be reused.
             bias = base_layer.bias
             if bias is not None:
                 base_result = base_result - bias
@@ -95,6 +97,8 @@ class DoraLinearLayer(nn.Module):
             if bias is not None:
                 result_dora = result_dora + bias
         else:
+            # If `base_result` is not provided (likely due to dropout being used or training mode),
+            # calculate it directly using the base layer weights.
             base_result = F.linear(x, transpose(weight, self.fan_in_fan_out))
             result_dora = (mag_norm_scale - 1) * base_result + mag_norm_scale * lora_result * scaling
 
