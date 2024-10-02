@@ -86,7 +86,13 @@ class DoraLinearLayer(nn.Module):
         mag_norm_scale = (magnitude / weight_norm).view(1, -1)
 
         if do_optimize:
-            return mag_norm_scale * result + mag_norm_scale * lora_B(lora_A(x)) * scaling
+            bias = base_layer.bias
+            if bias is not None:
+                result = result - bias
+            result = mag_norm_scale * result + mag_norm_scale * lora_B(lora_A(x)) * scaling
+            if bias is not None:
+                result = result + bias
+            return result
 
         lora_result = lora_B(lora_A(x))
         result_dora = (mag_norm_scale - 1) * (
