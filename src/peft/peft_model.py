@@ -1316,7 +1316,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         model_config = BaseTuner.get_model_config(self)
         model_config = None if model_config == DUMMY_MODEL_CONFIG else model_config
-        if model_config is not None and "_name_or_path" in model_config:
+        if card.data.get("base_model") is None and model_config is not None and "_name_or_path" in model_config:
             card.data["base_model"] = model_config["_name_or_path"]
 
         lines = card.text.splitlines()
