@@ -55,6 +55,7 @@ from .hqq import dispatch_hqq
 from .layer import Conv2d, LoraLayer, dispatch_default
 from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
+from .eva import compute_pca
 
 
 def _adapter_names_pre_forward_hook(target, args, kwargs, adapter_names):
@@ -139,7 +140,24 @@ class LoraModel(BaseTuner):
     prefix: str = "lora_"
 
     def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
+        
+        init_lora_weights = config[adapter_name].init_lora_weights
+        if init_lora_weights == "eva":
+            eva_state_dict = compute_pca(
+                model,
+                r = config[adapter_name].r,
+                target_modules = config[adapter_name].target_modules,
+                **config[adapter_name].eva_config.__dict__
+            )
+            config[adapter_name].rank_pattern = {k: v.size(0) for k, v in eva_state_dict.items()}
+            config[adapter_name].init_lora_weights = False      # temporarily set init_lora_weights to False
+
         super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
+        
+        if init_lora_weights == "eva":
+            eva_state_dict = {f"{k}.lora_A.{adapter_name}.weight": v for k, v in eva_state_dict.items()}
+            self.model.load_state_dict(eva_state_dict, strict=False)
+            self.peft_config[adapter_name].init_lora_weights = "eva" # TODO not sure if we should do this because it will raise errors for some methods
 
     def _check_new_adapter_config(self, config: LoraConfig) -> None:
         """
