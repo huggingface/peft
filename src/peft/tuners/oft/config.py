@@ -44,6 +44,10 @@ class OFTConfig(PeftConfig):
         bias (`str`): Bias type for OFT. Can be 'none', 'all' or 'oft_only'. If 'all' or 'oft_only', the
             corresponding biases will be updated during training. Be aware that this means that, even when disabling
             the adapters, the model will not produce the same output as the base model would have without adaptation.
+        exclude_modules (`Optional[Union[List[str], str]]`):
+            The names of the modules to not apply the adapter. When passing a string, a regex match will be performed.
+            When passing a list of strings, either an exact match will be performed or it is checked if the name of the
+            module ends with any of the passed strings.
         init_weights (`bool`):
             Whether to perform initialization of OFT weights.
         layers_to_transform (`Union[List[int], int]`):
@@ -93,6 +97,10 @@ class OFTConfig(PeftConfig):
     )
     bias: Literal["none", "all", "oft_only"] = field(
         default="none", metadata={"help": "Bias type for OFT. Can be 'none', 'all' or 'oft_only'"}
+    )
+    exclude_modules: Optional[Union[list[str], str]] = field(
+        default=None,
+        metadata={"help": "List of module names or regex expression of the module names to exclude from OFT."},
     )
     init_weights: bool = field(
         default=True,
@@ -162,6 +170,9 @@ class OFTConfig(PeftConfig):
         self.peft_type = PeftType.OFT
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
+        )
+        self.exclude_modules = (
+            set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
         if self.r == 0 and self.oft_block_size == 0:
             raise ValueError(
