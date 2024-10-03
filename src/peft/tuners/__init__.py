@@ -37,3 +37,4 @@ from .fourierft import FourierFTConfig, FourierFTModel
 from .xlora import XLoraConfig, XLoraModel
 from .hra import HRAConfig, HRAModel
 from .vblora import VBLoRAConfig, VBLoRAModel
+from .lokrv2 import LoKrModelv2,LoKrConfigv2
