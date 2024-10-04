@@ -146,6 +146,9 @@ class LoKrModelv2(BaseTuner):
             "rank_dropout": lokr_config.rank_dropout,
             "fan_in_fan_out": lokr_config.fan_in_fan_out,
             "init_weights": lokr_config.init_weights,
+            'use_effective_conv2d': lokr_config.use_effective_conv2d,
+            'decompose_both':lokr_config.decompose_both,
+            'decompose_factor':lokr_config.decompose_factor
         }
         kwargs["bias"] = bias
         
