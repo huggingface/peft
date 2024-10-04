@@ -187,6 +187,29 @@ peft_config = LoraConfig(...)
 quantized_model = get_peft_model(quantized_model, peft_config)
 ```
 
+## Optimum-quanto
+
+PEFT supports models quantized with [optimum-quanto](https://github.com/huggingface/optimum-quanto). This has been tested with 2bit, 4bit, and 8bit int quantization. Optimum-quanto also works on CPU and MPS.
+
+```python
+from transformers import AutoModelForCausalLM
+from optimum.quanto import QuantizedModelForCausalLM, qint2, qint4, qint8
+
+model_id = ...
+base_model = AutoModelForCausalLM.from_pretrained(model_id)
+QuantizedModelForCausalLM.quantize(model, weights=qint4)  # or qint2 or qint8
+peft_config = LoraConfig(...)
+model = get_peft_model(base_model, peft_config)
+```
+
+<!-- TODO: adjust code once correctly supported in transformers, https://github.com/huggingface/transformers/pull/31732 -->
+
+### Caveats:
+
+- Use a version > 2.4.0, otherwise saving and loading won't work properly.
+- Float8 is discouraged as it can easily produce NaNs.
+- There is explicit support for optimum-quanto when used with LoRA. However, when optimum-quanto quantizes a layer, it remains a subclass of the corresponding torch class (e.g., quanto's `QLinear` is a subclass of `nn.Linear`). For this reason, methods will generally also work with optimum-quanto, even if not explicitly supported. Be aware, however, that **merging only works correctly with LoRA**. If you use a method other than LoRA, merging may not raise an error but the results will be incorrect.
+
 ## Next steps
 
 If you're interested in learning more about quantization, the following may be helpful:

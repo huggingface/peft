@@ -692,6 +692,10 @@ class PeftCommonTester:
         if (config.peft_type in {"IA3", "LORA"}) and (model_id in conv_ids):
             # for some reason, the Conv introduces a larger error
             atol, rtol = 0.3, 0.01
+        if quant_method := getattr(model, "quantization_method", None):
+            if quant_method.value == "quanto":
+                atol, rtol = 5e-3, 5e-3
+
         assert torch.allclose(logits, logits_merged, atol=atol, rtol=rtol)
         assert torch.allclose(logits, logits_unmerged, atol=atol, rtol=rtol)
         assert torch.allclose(logits, logits_merged_unloaded, atol=atol, rtol=rtol)

@@ -87,3 +87,8 @@ def is_eetq_available():
 @lru_cache
 def is_hqq_available():
     return importlib.util.find_spec("hqq") is not None
+
+
+@lru_cache
+def is_quanto_available():
+    return importlib.util.find_spec("optimum.quanto") is not None
