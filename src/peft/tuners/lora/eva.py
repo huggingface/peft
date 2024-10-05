@@ -1,4 +1,3 @@
-import time
 import torch
 from tqdm import tqdm
 from functools import reduce, partial
@@ -360,16 +359,16 @@ class HashHook:
 
 @torch.no_grad()
 def compute_pca(
-    model,
-    r,
-    dataloader,
-    rho=2,
-    tau=0.99,
-    use_label_mask=True,
-    label_mask_value=-100,
-    whiten=False,
-    target_modules=None,
-    device="cuda"
+    model: torch.nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    r: int,
+    rho: Union[int, float] = 2,
+    tau: float = 0.99,
+    use_label_mask: bool = True,
+    label_mask_value: int = -100,
+    whiten: bool = False,
+    target_modules: Optional[list] = None,
+    device: Union[str, torch.device, int] = "cuda"
 ):
         
     def _get_rank_distribution(hooks, hook_layer_map, equal_inputs_map, rank_budget, max_components):
@@ -477,3 +476,27 @@ def compute_pca(
     model.to(orig_device) # TODO
 
     return pca_dict
+
+
+def get_eva_config_and_state_dict(model, config, adapter_name):
+    """
+    This function is used to initialize the weights of the LoRA adapter using the EVA method.
+    """
+    eva_state_dict = {}
+    if config[adapter_name].rank_pattern:
+        print(
+            "init_lora_weights is set to 'eva' and rank_pattern is provided. "
+            "Assuming model weights will be loaded from checkpoint. "
+            "lora A weights will not be initialized. "
+        )
+    else:
+        eva_state_dict = compute_pca(
+            model,
+            r = config[adapter_name].r,
+            target_modules = config[adapter_name].target_modules,
+            **config[adapter_name].eva_config.__dict__
+        )
+        different_rank_map = {k: v.size(0) for k, v in eva_state_dict.items() if v.size(0) != config[adapter_name].r}
+        config[adapter_name].target_modules = list(eva_state_dict.keys())
+        config[adapter_name].rank_pattern = different_rank_map     
+    return config, eva_state_dict 
