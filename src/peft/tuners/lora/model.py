@@ -149,6 +149,7 @@ class LoraModel(BaseTuner):
                 target_modules = config[adapter_name].target_modules,
                 **config[adapter_name].eva_config.__dict__
             )
+            config[adapter_name].target_modules = list(eva_state_dict.keys())
             config[adapter_name].rank_pattern = {k: v.size(0) for k, v in eva_state_dict.items()}
             config[adapter_name].init_lora_weights = False      # temporarily set init_lora_weights to False
 
