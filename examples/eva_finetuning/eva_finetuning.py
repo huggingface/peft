@@ -30,10 +30,8 @@ eva_config = EvaConfig(
 )
 peft_config = LoraConfig(
     r = 16,
-    lora_alpha = 8,
+    lora_alpha = 1,
     target_modules = ['q_proj', 'k_proj', 'v_proj', 'o_proj'],
-    lora_dropout = 0.05,
-    bias = 'none',
     init_lora_weights="eva",
     eva_config = eva_config,
 )
