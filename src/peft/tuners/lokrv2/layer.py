@@ -24,8 +24,6 @@ import torch.nn.functional as F
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
-from .config import LoKrConfigv2
-
 
 class LoKrLayerv2(BaseTunerLayer):
     # All names of layers that may contain adapter weights
@@ -102,7 +100,7 @@ class LoKrLayerv2(BaseTunerLayer):
         use_effective_conv2d: bool,
         decompose_both: bool,
         decompose_factor: int,
-        **kwargs
+        **kwargs,
     ) -> None:
         """Internal function to create lokr adapter
 
@@ -283,7 +281,7 @@ class Linear(nn.Linear, LoKrLayerv2):
         fan_in_fan_out: bool = False,
         **kwargs,
     ):
-        super(nn.Linear,self).__init__()
+        super(nn.Linear, self).__init__()
         LoKrLayerv2.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = fan_in_fan_out
 
@@ -304,7 +302,7 @@ class Linear(nn.Linear, LoKrLayerv2):
                 The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
                 to `None`.
         """
-        adapter_names = check_adapters_to_merge(self,adapter_names)
+        adapter_names = check_adapters_to_merge(self, adapter_names)
 
         if not adapter_names:
             return
@@ -461,7 +459,7 @@ class Conv2d(nn.Module, LoKrLayerv2):
                 The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
                 to `None`.
         """
-        adapter_names = check_adapters_to_merge(self,adapter_names)
+        adapter_names = check_adapters_to_merge(self, adapter_names)
 
         if not adapter_names:
             return

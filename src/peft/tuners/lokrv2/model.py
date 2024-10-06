@@ -21,7 +21,6 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
-from torch.nn.init import _calculate_correct_fan
 from tqdm import tqdm
 
 from peft.tuners.tuners_utils import (
@@ -181,6 +180,7 @@ class LoKrModelv2(BaseTuner):
 
             if bias == "all":
                 for n, p in model.named_parameters():
+                    print(n, p)
                     if "bias" in n:
                         p.requires_grad = True
             elif bias == "lokr_only":
