@@ -14,17 +14,15 @@
 
 from __future__ import annotations
 
-import math
 import warnings
 from dataclasses import asdict
 from enum import Enum
-from typing import Optional, Union
+from typing import Optional
 
 import torch
 import torch.nn as nn
 from torch.nn.init import _calculate_correct_fan
 from tqdm import tqdm
-from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import (
     BaseTuner,
@@ -120,11 +118,11 @@ class LoKrModelv2(BaseTuner):
                 f"{self.__class__.__name__} supports only 1 adapter with bias. When using multiple adapters, "
                 "set bias to 'none' for all adapters."
             )
-        
+
     @staticmethod
     def _check_target_module_exists(LoKrConfigv2, key):
         return check_target_module_exists(LoKrConfigv2, key)
-    
+
     def _create_and_replace(
         self,
         lokr_config: LoKrConfigv2,
@@ -140,35 +138,37 @@ class LoKrModelv2(BaseTuner):
 
         r = lokr_config.r
         bias = hasattr(target, "bias") and target.bias is not None
-        
+        # Can the config be directly converted to dict and passed
         kwargs = {
             "r": r,
             "rank_dropout": lokr_config.rank_dropout,
             "fan_in_fan_out": lokr_config.fan_in_fan_out,
             "init_weights": lokr_config.init_weights,
-            'use_effective_conv2d': lokr_config.use_effective_conv2d,
-            'decompose_both':lokr_config.decompose_both,
-            'decompose_factor':lokr_config.decompose_factor
+            "use_effective_conv2d": lokr_config.use_effective_conv2d,
+            "decompose_both": lokr_config.decompose_both,
+            "decompose_factor": lokr_config.decompose_factor,
         }
         kwargs["bias"] = bias
-        
-        if not isinstance(target,LoKrLayerv2):
-            new_module= self._create_new_module(lokr_config,adapter_name,target,**kwargs)
-            if adapter_name not in self.active_adapters:
-                new_module.required_grad(False)
-            self._replace_module(parent, target_name,new_module, target)
+
+        if isinstance(target, LoKrLayerv2):
+            target.update_layer(
+                adapter_name,
+                r=lokr_config.r,
+                alpha=lokr_config.alpha,
+                rank_dropout=lokr_config.rank_dropout,
+                module_dropout=lokr_config.module_dropout,
+                init_weights=lokr_config.init_weights,
+                use_effective_conv2d=lokr_config.use_effective_conv2d,
+                decompose_both=lokr_config.decompose_both,
+                decompose_factor=lokr_config.decompose_factor,
+            )
         else:
-            target.update_layer(adapter_name,
-                                r=lokr_config.r,
-                                alpha=lokr_config.alpha,
-                                rank_dropout=lokr_config.rank_dropout,
-                                module_dropout=lokr_config.module_dropout,
-                                init_weights=lokr_config.init_weights,
-                                use_effective_conv2d=lokr_config.use_effective_conv2d,
-                                decompose_both=lokr_config.decompose_both,
-                                decompose_factor=lokr_config.decompose_factor
-                                )
-            
+            new_module = self._create_new_module(lokr_config, adapter_name, target, **kwargs)
+            if adapter_name not in self.active_adapters:
+                # adding an additional adapter: it is not automatically trainable
+                new_module.requires_grad_(False)
+            self._replace_module(parent, target_name, new_module, target)
+
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
         for n, p in model.named_parameters():
             if self.prefix not in n:
@@ -189,7 +189,7 @@ class LoKrModelv2(BaseTuner):
                         m.bias.requires_grad = True
             else:
                 raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
-        
+
     def _replace_module(self, parent, child_name, new_module, child):
         setattr(parent, child_name, new_module)
         # It's not necessary to set requires_grad here, as that is handled by
@@ -355,8 +355,8 @@ class LoKrModelv2(BaseTuner):
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ) -> torch.nn.Module:
         r"""
-        This method merges the LoKr layers into the base model. This is needed if someone wants to use the base model as
-        a standalone model.
+        This method merges the LoKr layers into the base model. This is needed if someone wants to use the base model
+        as a standalone model.
 
         Args:
             progressbar (`bool`):

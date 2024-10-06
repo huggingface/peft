@@ -16,13 +16,11 @@
 
 import math
 import warnings
-from typing import Any, Optional, Set, Tuple
+from typing import Optional, Set, Tuple
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from lycoris.functional import lokr
-from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
@@ -76,7 +74,6 @@ class LoKrLayerv2(BaseTunerLayer):
         self._disable_adapters = False
         self.merged_adapters = []
         self.kwargs = kwargs
-        print(kwargs)
 
     @property
     def merged(self) -> bool:
@@ -133,7 +130,7 @@ class LoKrLayerv2(BaseTunerLayer):
         in_m, in_n = self.factorization(self.in_features, decompose_factor)
         out_l, out_k = self.factorization(self.out_features, decompose_factor)
 
-        if hasattr(self, "kernel_size"):  # For Conv2d
+        if hasattr(base_layer, "kernel_size"):  # For Conv2d
             k_size = base_layer.kernel_size
             shape = ((out_l, out_k), (in_m, in_n), *k_size)
             use_w2 = r >= max(shape[0][1], shape[1][1]) / 2
@@ -214,13 +211,13 @@ class LoKrLayerv2(BaseTunerLayer):
         Args:
             dimension (`int`): The number that needs to be factorized.
             factor (`int`, optional):
-                Factorization divider. The algorithm will try to output two numbers, one of each will be as close to the
-                factor as possible. If -1 is provided, the decomposition algorithm would try to search dividers near the
-                square root of the dimension. Defaults to -1.
+                Factorization divider. The algorithm will try to output two numbers, one of each will be as close to
+                the factor as possible. If -1 is provided, the decomposition algorithm would try to search dividers
+                near the square root of the dimension. Defaults to -1.
 
         Returns:
-            Tuple[`int`, `int`]: A tuple of two numbers, whose product is equal to the provided number. The first number is
-            always less than or equal to the second.
+            Tuple[`int`, `int`]: A tuple of two numbers, whose product is equal to the provided number. The first
+            number is always less than or equal to the second.
 
         Example:
             ```py
@@ -271,7 +268,7 @@ class LoKrLayerv2(BaseTunerLayer):
         return rebuild * scale
 
 
-class Linear(nn.Module, LoKrLayerv2):
+class Linear(nn.Linear, LoKrLayerv2):
     """LoKr implemented in Linear layer"""
 
     def __init__(
@@ -283,10 +280,10 @@ class Linear(nn.Module, LoKrLayerv2):
         rank_dropout: float = 0.0,
         module_dropout: float = 0.0,
         init_weights: bool | str = True,
-        fan_in_fan_out:bool = False,
+        fan_in_fan_out: bool = False,
         **kwargs,
     ):
-        super().__init__()
+        super(nn.Linear,self).__init__()
         LoKrLayerv2.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = fan_in_fan_out
 
@@ -307,7 +304,7 @@ class Linear(nn.Module, LoKrLayerv2):
                 The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
                 to `None`.
         """
-        adapter_names = check_adapters_to_merge(adapter_names)
+        adapter_names = check_adapters_to_merge(self,adapter_names)
 
         if not adapter_names:
             return
@@ -368,8 +365,8 @@ class Linear(nn.Module, LoKrLayerv2):
         else:
             w2 = self.lokr_w2_a[adapter_name] @ self.lokr_w2_b[adapter_name]
 
-        device = w1.weight.device
-        dtype = w1.weight.dtype
+        device = w1.device
+        dtype = w1.dtype
 
         cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
         if cast_to_fp32:
@@ -386,8 +383,8 @@ class Linear(nn.Module, LoKrLayerv2):
             drop = (torch.rand(weight.size(0)) > rank_dropout).float()
             drop = drop.view(-1, *[1] * len(weight.shape[1:])).to(weight.device)
             # consider adapter name check
-            if self.kwargs["rank_dropout_scale"]:
-                drop /= drop.mean()
+            # if self.kwargs["rank_dropout_scale"]:
+            drop /= drop.mean()
             weight *= drop
 
         if cast_to_fp32:
@@ -425,7 +422,7 @@ class Linear(nn.Module, LoKrLayerv2):
         return "lokr." + rep
 
 
-class Conv2d(LoKrLayerv2):
+class Conv2d(nn.Module, LoKrLayerv2):
     """LoKr implemented in Conv2d layer"""
 
     def __init__(
@@ -447,7 +444,9 @@ class Conv2d(LoKrLayerv2):
 
         # Create adapter and set it active
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, alpha, rank_dropout, module_dropout,init_weights, use_effective_conv2d,**kwargs)
+        self.update_layer(
+            adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, use_effective_conv2d, **kwargs
+        )
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -462,7 +461,7 @@ class Conv2d(LoKrLayerv2):
                 The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
                 to `None`.
         """
-        adapter_names = check_adapters_to_merge(adapter_names)
+        adapter_names = check_adapters_to_merge(self,adapter_names)
 
         if not adapter_names:
             return
@@ -522,8 +521,8 @@ class Conv2d(LoKrLayerv2):
         else:
             w2 = self.lokr_w2_a[adapter_name] @ self.lokr_w2_b[adapter_name]
 
-        device = w1.weight.device
-        dtype = w1.weight.dtype
+        device = w1.device
+        dtype = w1.dtype
 
         cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
         if cast_to_fp32:
@@ -583,4 +582,3 @@ class Conv2d(LoKrLayerv2):
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "lokr." + rep
-
