@@ -21,6 +21,7 @@ from typing import Optional, Set, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from lycoris.functional import lokr
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
@@ -58,11 +59,16 @@ class LoKrLayerv2(BaseTunerLayer):
         self.lokr_t2 = nn.ParameterDict({})
 
         base_layer = self.get_base_layer()
+        self.kernel_size = None
 
         if isinstance(base_layer, nn.Linear):
             in_features, out_features = base_layer.in_features, base_layer.out_features
         elif isinstance(base_layer, nn.Conv2d):
-            in_features, out_features = base_layer.in_channels, base_layer.out_channels
+            (
+                in_features,
+                out_features,
+            ) = base_layer.in_channels, base_layer.out_channels
+            self.kernel_size = base_layer.kernel_size
         else:
             raise ValueError(f"Unsupported layer type {type(base_layer)}")
 
@@ -100,6 +106,7 @@ class LoKrLayerv2(BaseTunerLayer):
         use_effective_conv2d: bool,
         decompose_both: bool,
         decompose_factor: int,
+        use_upstream: bool = False,
         **kwargs,
     ) -> None:
         """Internal function to create lokr adapter
@@ -128,19 +135,39 @@ class LoKrLayerv2(BaseTunerLayer):
         in_m, in_n = self.factorization(self.in_features, decompose_factor)
         out_l, out_k = self.factorization(self.out_features, decompose_factor)
 
-        if hasattr(base_layer, "kernel_size"):  # For Conv2d
-            k_size = base_layer.kernel_size
-            shape = ((out_l, out_k), (in_m, in_n), *k_size)
+        if isinstance(base_layer, nn.Conv2d):  # For Conv2d
+            shape = ((out_l, out_k), (in_m, in_n), *self.kernel_size)
             use_w2 = r >= max(shape[0][1], shape[1][1]) / 2
-            use_effective_conv2d = use_effective_conv2d and k_size != (1, 1)
+            use_effective_conv2d = use_effective_conv2d and self.kernel_size != (1, 1)
         else:
             shape = ((out_l, out_k), (in_m, in_n))
             use_w2 = not (r < max(shape[0][1], shape[1][1]) / 2)
 
         use_w1 = not (decompose_both and r < max(shape[0][0], shape[1][0]) / 2)
 
-        self.create_adapter_parameters(adapter_name, r, shape, use_w1, use_w2, use_effective_conv2d)
-        self.reset_lokr_parameters(adapter_name, init_weights)
+        if use_upstream:
+            if self.kernel_size:
+                dummy_weights = torch.rand((self.in_features, self.out_features, *self.kernel_size))
+            else:
+                dummy_weights = torch.rand((self.in_features, self.out_features))
+
+            weights = lokr.weight_gen(dummy_weights, rank=r, decompose_both=decompose_both, **kwargs)
+            attributes = [
+                "lokr_w1",
+                "lokr_w1_a",
+                "lokr_w1_b",
+                "lokr_w2",
+                "lokr_w2_a",
+                "lokr_w2_b",
+                "lokr_t2",
+            ]
+
+            for attr, weight in zip(attributes, weights):
+                if weight is not None:
+                    setattr(self, f"{attr}[{adapter_name}]", weight)
+        else:
+            self.create_adapter_parameters(adapter_name, r, shape, use_w1, use_w2, use_effective_conv2d)
+            self.reset_lokr_parameters(adapter_name, init_weights)
 
         # Move new weights to device
         self._move_adapter_to_device_of_base_layer(adapter_name)

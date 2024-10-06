@@ -136,8 +136,7 @@ class LoKrModelv2(BaseTuner):
             raise ValueError("Current Key shouldn't be `None`")
 
         r = lokr_config.r
-        bias = hasattr(target, "bias") and target.bias is not None
-        # Can the config be directly converted to dict and passed
+        # bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "r": r,
             "rank_dropout": lokr_config.rank_dropout,
@@ -147,7 +146,7 @@ class LoKrModelv2(BaseTuner):
             "decompose_both": lokr_config.decompose_both,
             "decompose_factor": lokr_config.decompose_factor,
         }
-        kwargs["bias"] = bias
+        # kwargs["bias"] = bias
 
         if isinstance(target, LoKrLayerv2):
             target.update_layer(
@@ -160,6 +159,8 @@ class LoKrModelv2(BaseTuner):
                 use_effective_conv2d=lokr_config.use_effective_conv2d,
                 decompose_both=lokr_config.decompose_both,
                 decompose_factor=lokr_config.decompose_factor,
+                use_upstream=lokr_config.use_upstream,
+                **kwargs,
             )
         else:
             new_module = self._create_new_module(lokr_config, adapter_name, target, **kwargs)
@@ -180,7 +181,6 @@ class LoKrModelv2(BaseTuner):
 
             if bias == "all":
                 for n, p in model.named_parameters():
-                    print(n, p)
                     if "bias" in n:
                         p.requires_grad = True
             elif bias == "lokr_only":

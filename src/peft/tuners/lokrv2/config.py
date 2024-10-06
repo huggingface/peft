@@ -15,9 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Union
-
-from torch import nn
+from typing import Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
@@ -103,7 +101,7 @@ class LoKrConfigv2(PeftConfig):
             "This can also be a wildcard 'all-linear' which matches all linear/Conv1D layers except the output layer."
         },
     )
-    bias: str = field(default="none", metadata={"help": "Bias type for Vera. Can be 'none', 'all' or 'vera_only'"})
+    bias: str = field(default="none", metadata={"help": "Bias type for Vera. Can be 'none', 'all' or 'lokr_only'"})
     init_weights: bool = field(
         default=True,
         metadata={
