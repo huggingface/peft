@@ -139,6 +139,9 @@ def get_peft_model_state_dict(
     elif config.peft_type == PeftType.LOKR:
         to_return = {k: state_dict[k] for k in state_dict if "lokr_" in k}
 
+    elif config.peft_type == PeftType.LOKRv2:
+        to_return = {k: state_dict[k] for k in state_dict if "lokr_" in k}
+
     elif config.peft_type == PeftType.ADAPTION_PROMPT:
         to_return = {k: state_dict[k] for k in state_dict if k.split(".")[-1].startswith("adaption_")}
 
@@ -346,6 +349,7 @@ def set_peft_model_state_dict(
         PeftType.LORA,
         PeftType.LOHA,
         PeftType.LOKR,
+        PeftType.LOKRv2,
         PeftType.ADALORA,
         PeftType.IA3,
         PeftType.OFT,

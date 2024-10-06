@@ -21,6 +21,7 @@ from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
 from .lora import LoraConfig, LoraModel, LoftQConfig, LoraRuntimeConfig
 from .loha import LoHaConfig, LoHaModel
 from .lokr import LoKrConfig, LoKrModel
+from .lokrv2 import LoKrModelv2, LoKrConfigv2
 from .ia3 import IA3Config, IA3Model
 from .adalora import AdaLoraConfig, AdaLoraModel
 from .boft import BOFTConfig, BOFTModel
@@ -37,4 +38,3 @@ from .fourierft import FourierFTConfig, FourierFTModel
 from .xlora import XLoraConfig, XLoraModel
 from .hra import HRAConfig, HRAModel
 from .vblora import VBLoRAConfig, VBLoRAModel
-from .lokrv2 import LoKrModelv2,LoKrConfigv2
