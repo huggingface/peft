@@ -291,6 +291,12 @@ TEST_CASES = [
         LoKrConfigv2,
         {"target_modules": "lin0", "decompose_both": True, "r": 1, "alpha": 1},
     ),
+    (
+        "Vanilla MLP 10 LOKRv2",
+        "MLP",
+        LoKrConfigv2,
+        {"target_modules": "lin0", "decompose_both": True, "r": 8, "alpha": 1, "use_upstream": True},
+    ),
     ("Conv2d 1 LOKRv2", "Conv2d", LoKrConfigv2, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 LOKRv2", "Conv2d", LoKrConfigv2, {"target_modules": ["conv2d", "lin0"]}),
     ("Conv2d 3 LOKRv2", "Conv2d", LoKrConfigv2, {"target_modules": ["conv2d"], "use_effective_conv2d": True}),
@@ -316,6 +322,24 @@ TEST_CASES = [
             "use_effective_conv2d": True,
             "decompose_both": True,
             "decompose_factor": 4,
+        },
+    ),
+    (
+        "Conv2d 8 LOKRv2",
+        "Conv2d",
+        LoKrConfigv2,
+        {"target_modules": ["conv2d"], "use_effective_conv2d": True, "use_upstream": True},
+    ),
+    (
+        "Conv2d 9 LOKRv2",
+        "Conv2d",
+        LoKrConfigv2,
+        {
+            "target_modules": ["conv2d", "lin0"],
+            "use_effective_conv2d": True,
+            "decompose_both": True,
+            "decompose_factor": 4,
+            "use_upstream": True,
         },
     ),
     ########
