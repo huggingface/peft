@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import warnings
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
 
@@ -104,9 +103,7 @@ class LoKrConfigv2(PeftConfig):
             "This can also be a wildcard 'all-linear' which matches all linear/Conv1D layers except the output layer."
         },
     )
-    bias: Literal["none", "all", "lokr_only"] = field(
-        default="none", metadata={"help": "Bias type for LoKr. Can be 'none', 'all' or 'lokr_only'"}
-    )
+    bias: str = field(default="none", metadata={"help": "Bias type for Vera. Can be 'none', 'all' or 'vera_only'"})
     init_weights: bool = field(
         default=True,
         metadata={
@@ -157,28 +154,24 @@ class LoKrConfigv2(PeftConfig):
         },
     )
     use_scalar: Optional[bool] = field(
-        default = False,
-        metadata={
-            "help":"Use scalar for multiplication instead of vector for LoKR."
-        },
+        default=False,
+        metadata={"help": "Use scalar for multiplication instead of vector for LoKR."},
     )
     weight_decompose: Optional[bool] = field(
-        default = False,
-        metadata={
-            "help":"Weight decompositon for LoKr matrices."
-        },
+        default=False,
+        metadata={"help": "Weight decompositon for LoKr matrices."},
     )
     use_full_matrix: Optional[bool] = field(
         default=False,
-        metadata={"help":"Use full matrix decompositon for full matrix."},
+        metadata={"help": "Use full matrix decompositon for full matrix."},
     )
     use_upstream: Optional[bool] = field(
         default=False,
-        metadata={"help":"Whether to use latest version of LoKr module or not."},
+        metadata={"help": "Whether to use latest version of LoKr module or not."},
     )
 
     def __post_init__(self):
-        self.peft_type = PeftType.LOKR
+        self.peft_type = PeftType.LOKRv2
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
