@@ -41,6 +41,7 @@ from peft import (
     LNTuningConfig,
     LoHaConfig,
     LoKrConfig,
+    LoKrConfigv2,
     LoraConfig,
     OFTConfig,
     PeftModel,
@@ -218,7 +219,9 @@ TEST_CASES = [
     ("Conv2d 2 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d", "lin0"]}),
     ("Conv2d 3 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d"], "use_effective_conv2d": True}),
     ("Conv2d 4 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True}),
-    # LoKr
+    ########
+    # LoKr #
+    ########
     ("Vanilla MLP 1 LOKR", "MLP", LoKrConfig, {"target_modules": "lin0"}),
     ("Vanilla MLP 2 LOKR", "MLP", LoKrConfig, {"target_modules": ["lin0"]}),
     ("Vanilla MLP 3 LOKR", "MLP", LoKrConfig, {"target_modules": ["lin1"]}),
@@ -256,6 +259,58 @@ TEST_CASES = [
         "Conv2d 7 LOKR",
         "Conv2d",
         LoKrConfig,
+        {
+            "target_modules": ["conv2d", "lin0"],
+            "use_effective_conv2d": True,
+            "decompose_both": True,
+            "decompose_factor": 4,
+        },
+    ),
+    ##########
+    # LoKrv2 #
+    ##########
+    ("Vanilla MLP 1 LOKRv2", "MLP", LoKrConfigv2, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 LOKRv2", "MLP", LoKrConfigv2, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 LOKRv2", "MLP", LoKrConfigv2, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 LOKRv2", "MLP", LoKrConfigv2, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 5 LOKRv2", "MLP", LoKrConfigv2, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    (
+        "Vanilla MLP 6 LOKRv2",
+        "MLP",
+        LoKrConfig,
+        {
+            "target_modules": ["lin0"],
+            "alpha": 4,
+            "module_dropout": 0.1,
+        },
+    ),
+    ("Vanilla MLP 7 LOKRv2", "MLP", LoKrConfigv2, {"target_modules": "lin0", "rank_dropout": 0.5}),
+    (
+        "Vanilla MLP 8 LOKRv2",
+        "MLP",
+        LoKrConfigv2,
+        {"target_modules": "lin0", "decompose_both": True, "r": 1, "alpha": 1},
+    ),
+    ("Conv2d 1 LOKRv2", "Conv2d", LoKrConfigv2, {"target_modules": ["conv2d"]}),
+    ("Conv2d 2 LOKRv2", "Conv2d", LoKrConfigv2, {"target_modules": ["conv2d", "lin0"]}),
+    ("Conv2d 3 LOKRv2", "Conv2d", LoKrConfigv2, {"target_modules": ["conv2d"], "use_effective_conv2d": True}),
+    ("Conv2d 4 LOKRv2", "Conv2d", LoKrConfigv2, {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True}),
+    (
+        "Conv2d 5 LOKRv2",
+        "Conv2d",
+        LoKrConfigv2,
+        {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True, "decompose_both": True},
+    ),
+    (
+        "Conv2d 6 LOKRv2",
+        "Conv2d",
+        LoKrConfigv2,
+        {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True, "decompose_factor": 4},
+    ),
+    (
+        "Conv2d 7 LOKRv2",
+        "Conv2d",
+        LoKrConfigv2,
         {
             "target_modules": ["conv2d", "lin0"],
             "use_effective_conv2d": True,
@@ -593,6 +648,7 @@ PREFIXES = {
     LoraConfig: "lora_",
     LoHaConfig: "hada_",
     LoKrConfig: "lokr_",
+    LoKrConfigv2: "lokr_",
     OFTConfig: "oft_",
     BOFTConfig: "boft_",
     LNTuningConfig: "ln_tuning_",
@@ -1420,7 +1476,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert "default" in model.base_model.classifier.modules_to_save
         assert "other" in model.base_model.classifier.modules_to_save
 
-    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig])
+    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoKrConfigv2, LoraConfig, OFTConfig, HRAConfig])
     def test_multiple_adapters_mixed_modules_to_save(self, config_cls):
         # See issue 1574
         # Check that we can have a model where one adapter has modules_to_save and the other doesn't. It should be
@@ -1445,7 +1501,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model.set_adapter("other")
         model(**inputs)
 
-    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig])
+    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoKrConfigv2, LoraConfig, OFTConfig, HRAConfig])
     def test_multiple_adapters_mixed_modules_to_save_order_switched(self, config_cls):
         # See issue 1574
         # Same test as test_multiple_adapters_mixed_modules_to_save, but this time the 2nd adapter has modules_to_save.
@@ -1645,6 +1701,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         [
             LoraConfig(target_modules=["lin0"], init_lora_weights=False),
             LoKrConfig(target_modules=["lin0"], init_weights=False),
+            LoKrConfigv2(target_modules=["lin0"], init_weights=False),
             LoHaConfig(target_modules=["lin0"], init_weights=False),
             AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
             IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
@@ -2688,6 +2745,91 @@ class RequiresGradTester(unittest.TestCase):
         peft_model = get_peft_model(MLP(), config0)
 
         config1 = LoKrConfig(target_modules=["lin0"], inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.lokr_w1.default",
+            "base_model.model.lin0.lokr_w2.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.lokr_w1.default",
+            "base_model.model.lin0.lokr_w2.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.lokr_w1.adapter1",
+            "base_model.model.lin0.lokr_w2.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.lokr_w1.adapter1",
+            "base_model.model.lin0.lokr_w2.adapter1",
+        )
+
+    def test_requires_grad_lokrv2_different_targets(self):
+        # test two different LoKr adapters that target different modules
+        config0 = LoKrConfigv2(target_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = LoKrConfigv2(target_modules=["lin1"], inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.lokr_w1.default",
+            "base_model.model.lin0.lokr_w2.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.lokr_w1.default",
+            "base_model.model.lin0.lokr_w2.default",
+        )
+
+        # change activate pter to pter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.lokr_w1.adapter1",
+            "base_model.model.lin1.lokr_w2.adapter1",
+        )
+
+        # disable all pters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.lokr_w1.adapter1",
+            "base_model.model.lin1.lokr_w2.adapter1",
+        )
+
+    def test_requires_grad_lokrv2_same_targets(self):
+        # same as previous test, except that LoKr adapters target the same layer
+        config0 = LoKrConfigv2(target_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = LoKrConfigv2(target_modules=["lin0"], inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
