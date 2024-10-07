@@ -16,7 +16,6 @@ RUN git lfs install
 
 # Create our conda env - copied from https://github.com/huggingface/accelerate/blob/main/docker/accelerate-gpu/Dockerfile
 RUN conda create --name peft python=${PYTHON_VERSION} ipython jupyter pip
-RUN python3 -m pip install --no-cache-dir --upgrade pip
 
 # Below is copied from https://github.com/huggingface/accelerate/blob/main/docker/accelerate-gpu/Dockerfile
 # We don't install pytorch here yet since CUDA isn't available
@@ -31,7 +30,7 @@ FROM nvidia/cuda:12.2.2-devel-ubuntu22.04 AS build-image
 COPY --from=compile-image /opt/conda /opt/conda
 ENV PATH /opt/conda/bin:$PATH
 
-# Install apt libs -- not sure why we need this again but otherwise there is an error
+# Install apt libs
 RUN apt-get update && \
     apt-get install -y curl git wget && \
     apt-get clean && \
@@ -57,9 +56,9 @@ RUN source activate peft && \
     git+https://github.com/huggingface/accelerate \
     peft[test]@git+https://github.com/huggingface/peft \
     # Add aqlm for quantization testing
-    pip install aqlm[gpu]>=1.0.2 \
+    aqlm[gpu]>=1.0.2 \
     # Add HQQ for quantization testing
-    pip install hqq
+    hqq
 
 RUN source activate peft && \
     pip freeze | grep transformers
