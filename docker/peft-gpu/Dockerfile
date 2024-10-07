@@ -6,16 +6,12 @@ FROM continuumio/miniconda3:latest AS compile-image
 # Specify py version
 ENV PYTHON_VERSION=3.11
 # Install apt libs - copied from https://github.com/huggingface/accelerate/blob/main/docker/accelerate-gpu/Dockerfile
+# Install audio-related libraries
 RUN apt-get update && \
-    apt-get install -y curl git wget software-properties-common git-lfs && \
+    apt-get install -y curl git wget software-properties-common git-lfs ffmpeg libsndfile1-dev && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists*
 
-# Install audio-related libraries 
-RUN apt-get update && \
-    apt install -y ffmpeg
-
-RUN apt install -y libsndfile1-dev
 RUN git lfs install
 
 # Create our conda env - copied from https://github.com/huggingface/accelerate/blob/main/docker/accelerate-gpu/Dockerfile
@@ -38,22 +34,11 @@ ENV PATH /opt/conda/bin:$PATH
 RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
 RUN source activate peft && \ 
-    python3 -m pip install --no-cache-dir bitsandbytes optimum auto-gptq
-
-# Add autoawq for quantization testing
-RUN source activate peft && \
-    python3 -m pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ/releases/download/v0.2.6/autoawq-0.2.6-cp311-cp311-linux_x86_64.whl
-RUN source activate peft && \
-    python3 -m pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ_kernels/releases/download/v0.0.8/autoawq_kernels-0.0.8-cp311-cp311-linux_x86_64.whl
-
-# Install apt libs
-RUN apt-get update && \
-    apt-get install -y curl git wget && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists*
-
-# Add eetq for quantization testing
-RUN source activate peft && \
+    python3 -m pip install --no-cache-dir bitsandbytes optimum auto-gptq && \
+    # Add autoawq for quantization testing
+    python3 -m pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ/releases/download/v0.2.6/autoawq-0.2.6-cp311-cp311-linux_x86_64.whl && \
+    python3 -m pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ_kernels/releases/download/v0.0.8/autoawq_kernels-0.0.8-cp311-cp311-linux_x86_64.whl && \
+    # Add eetq for quantization testing
     python3 -m pip install git+https://github.com/NetEase-FuXi/EETQ.git
 
 # Activate the conda env and install transformers + accelerate from source
@@ -64,17 +49,13 @@ RUN source activate peft && \
     scipy \
     git+https://github.com/huggingface/transformers \
     git+https://github.com/huggingface/accelerate \
-    peft[test]@git+https://github.com/huggingface/peft
+    peft[test]@git+https://github.com/huggingface/peft \
+    # Add aqlm for quantization testing
+    pip install aqlm[gpu]>=1.0.2 \
+    # Add HQQ for quantization testing
+    pip install hqq
 
-# Add aqlm for quantization testing
 RUN source activate peft && \
-    pip install aqlm[gpu]>=1.0.2
-
-# Add HQQ for quantization testing
-RUN source activate peft && \
-pip install hqq
-
-RUN source activate peft && \ 
     pip freeze | grep transformers
 
 RUN echo "source activate peft" >> ~/.profile
