@@ -187,9 +187,17 @@ peft_config = LoraConfig(...)
 quantized_model = get_peft_model(quantized_model, peft_config)
 ```
 
+## Other Supported PEFT Methods
+
+Besides LoRA, the following PEFT methods also support quantization:
+
+- **VeRA** (supports bitsandbytes quantization)
+- **AdaLoRA** (supports both bitsandbytes and GPTQ quantization)
+- **(IA)³** (supports bitsandbytes quantization)
+
 ## Next steps
 
 If you're interested in learning more about quantization, the following may be helpful:
 
-* Learn more about details about QLoRA and check out some benchmarks on its impact in the [Making LLMs even more accessible with bitsandbytes, 4-bit quantization and QLoRA](https://huggingface.co/blog/4bit-transformers-bitsandbytes) blog post.
+* Learn more details about QLoRA and check out some benchmarks on its impact in the [Making LLMs even more accessible with bitsandbytes, 4-bit quantization and QLoRA](https://huggingface.co/blog/4bit-transformers-bitsandbytes) blog post.
 * Read more about different quantization schemes in the Transformers [Quantization](https://hf.co/docs/transformers/main/quantization) guide.
