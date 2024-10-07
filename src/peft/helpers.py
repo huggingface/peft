@@ -168,7 +168,8 @@ def rescale_adapter_scale(model, multiplier):
 
     Args:
         model: The model containing `LoraLayer` modules whose scaling is to be adjusted.
-        multiplier (float or int): The multiplier that rescales the `scaling` attribute. Must be of type float or int.
+        multiplier (float or int):
+            The multiplier that rescales the `scaling` attribute. Must be of type float or int.
 
     Raises:
         ValueError: If the model does not contain any `LoraLayer`
