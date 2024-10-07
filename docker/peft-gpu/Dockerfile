@@ -31,6 +31,12 @@ FROM nvidia/cuda:12.2.2-devel-ubuntu22.04 AS build-image
 COPY --from=compile-image /opt/conda /opt/conda
 ENV PATH /opt/conda/bin:$PATH
 
+# Install apt libs -- not sure why we need this again but otherwise there is an error
+RUN apt-get update && \
+    apt-get install -y curl git wget && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists*
+
 RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
 RUN source activate peft && \ 
