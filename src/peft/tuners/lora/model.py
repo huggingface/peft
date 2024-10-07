@@ -145,11 +145,7 @@ class LoraModel(BaseTuner):
             config, eva_state_dict = get_eva_config_and_state_dict(model, config, adapter_name)
             super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
             eva_state_dict = {f"{k}.lora_A.{adapter_name}.weight": v for k, v in eva_state_dict.items()}
-            # set prefix for state dict loading
-            sample_key = list(eva_state_dict.keys())[0]
-            p = [nm for nm in [n for n, _ in self.named_parameters()] if nm[-len(sample_key):]==sample_key][0][::-1][len(sample_key):][::-1]
-            eva_state_dict = {f"{p}{k}": v for k, v in eva_state_dict.items()}
-            self.load_state_dict(eva_state_dict, strict=False)
+            self.model.load_state_dict(eva_state_dict, strict=False)
         else:
             super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
