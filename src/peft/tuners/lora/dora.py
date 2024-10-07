@@ -100,7 +100,7 @@ class DoraLinearLayer(nn.Module):
             # If `base_result` is not provided (likely due to dropout being used or training mode),
             # calculate it directly using the base layer weights.
             base_result = F.linear(x, transpose(weight, self.fan_in_fan_out))
-            result_dora = (mag_norm_scale - 1) * base_result + mag_norm_scale * lora_result * scaling
+            result_dora = mag_norm_scale * base_result + mag_norm_scale * lora_result * scaling
 
         return result_dora
 
