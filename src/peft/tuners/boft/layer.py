@@ -772,7 +772,7 @@ class Conv2d(nn.Module, BOFTLayer):
         self.boft_R[adapter_name] = nn.Parameter(
             torch.zeros(boft_n_butterfly_factor + 1, boft_block_num, boft_block_size, boft_block_size)
         )
-        self.boft_s[adapter_name] = nn.Parameter(torch.ones(int(self.out_features), 1))
+        self.boft_s[adapter_name] = nn.Parameter(torch.ones(1, int(self.out_features)))
 
         self.reset_boft_parameters(adapter_name, init_weights)
 
@@ -881,7 +881,7 @@ class Conv2d(nn.Module, BOFTLayer):
         """
 
         boft_R = self.boft_R[adapter]
-        boft_s = self.boft_s[adapter]
+        boft_s = self.boft_s[adapter].transpose(0, 1)
 
         N, D, H, _ = boft_R.shape
         boft_R = boft_R.view(N * D, H, H)
@@ -925,7 +925,7 @@ class Conv2d(nn.Module, BOFTLayer):
                 if active_adapter not in self.boft_R.keys():
                     continue
                 boft_R = self.boft_R[active_adapter]
-                boft_s = self.boft_s[active_adapter]
+                boft_s = self.boft_s[active_adapter].transpose(0, 1)
                 dropout = self.boft_dropout[active_adapter]
 
                 N, D, H, _ = boft_R.shape
