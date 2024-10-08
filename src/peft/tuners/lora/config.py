@@ -136,7 +136,7 @@ class LoraConfig(PeftConfig):
             initialization from the reference implementation from Microsoft. Passing 'gaussian' results in Gaussian
             initialization scaled by the LoRA rank for linear and layers. Setting the initialization to False leads to
             completely random initialization and is discouraged. Pass `'loftq'` to use LoftQ initialization. Passing 
-            `'eva'` results in a data-driven initialization of <ahref='https://arxiv.org/abs/000.000TODO'
+            `'eva'` results in a data-driven initialization of <ahref='https://github.com/ml-jku/eva'
             >Explained Variance Adaptation</a>. EVA initalizes LoRA based on the SVD of layer input activations and 
             achieves SOTA performance due to its ability to adapt to the finetuning data. Pass `'olora'` to use OLoRA 
             initialization. Passing `'pissa'` results in the initialization of <ahref='https://arxiv.org/abs/2404.02948'
@@ -398,6 +398,10 @@ class LoraConfig(PeftConfig):
                 raise ImportError("The required package 'scipy' is not installed. Please install it to continue.")
             if self.loftq_config is None:
                 raise ValueError("`loftq_config` must be specified when `init_lora_weights` is 'loftq'.")
+            
+        elif self.init_lora_weights == "eva":
+            if self.eva_config is None:
+                raise ValueError("`eva_config` must be specified when `init_lora_weights` is 'eva'.")
 
         # Using post training conversion of modified base weights to restore their initial values (PiSSA, OLoRA) cannot
         # be correctly done when using rslora + rank_pattern/alpha_pattern. We can't really know if the user intends

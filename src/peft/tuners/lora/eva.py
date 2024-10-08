@@ -3,6 +3,8 @@ from tqdm import tqdm
 from functools import reduce, partial
 from collections import Counter, defaultdict
 
+from peft.config import PeftConfig
+
 from typing import Optional, Union, Tuple
 
 
@@ -472,12 +474,27 @@ def compute_svd(
     return svd_dict
 
 
-def get_eva_config_and_state_dict(model, config, adapter_name):
+def is_eva_init(config: Union[dict, PeftConfig], adapter_name: str) -> bool:
+    if isinstance(config, PeftConfig):
+        return (config.__dict__.get("init_lora_weights") == "eva")
+    return (config[adapter_name].__dict__.get("init_lora_weights") == "eva")
+
+
+def get_eva_config_and_state_dict(
+    model: torch.nn.Module,
+    config: Union[dict, PeftConfig],
+    adapter_name: str
+) -> Tuple[Union[dict, PeftConfig], dict]:
     """
     This function is used to initialize the weights of the LoRA adapter using the EVA method.
     """
+    is_peft_config = isinstance(config, PeftConfig)
+    eva_config = config
+    if not is_peft_config:
+        eva_config = config[adapter_name]
+
     eva_state_dict = {}
-    if config[adapter_name].rank_pattern:
+    if eva_config.rank_pattern:
         print(
             "init_lora_weights is set to 'eva' and rank_pattern is provided. "
             "Assuming model weights will be loaded from checkpoint. "
@@ -486,11 +503,16 @@ def get_eva_config_and_state_dict(model, config, adapter_name):
     else:
         eva_state_dict = compute_svd(
             model,
-            r = config[adapter_name].r,
-            target_modules = config[adapter_name].target_modules,
-            **config[adapter_name].eva_config.__dict__
+            r = eva_config.r,
+            target_modules = eva_config.target_modules,
+            **eva_config.eva_config.__dict__
         )
-        different_rank_map = {k: v.size(0) for k, v in eva_state_dict.items() if v.size(0) != config[adapter_name].r}
-        config[adapter_name].target_modules = list(eva_state_dict.keys())
-        config[adapter_name].rank_pattern = different_rank_map     
-    return config, eva_state_dict 
+        different_rank_map = {k: v.size(0) for k, v in eva_state_dict.items() if v.size(0) != eva_config.r}
+        eva_config.target_modules = list(eva_state_dict.keys())
+        eva_config.rank_pattern = different_rank_map
+    
+    if is_peft_config:
+        return eva_config, eva_state_dict
+    else:
+        config[adapter_name] = eva_config
+        return config, eva_state_dict
