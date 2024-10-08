@@ -46,6 +46,7 @@ from transformers import (
     WhisperProcessor,
     WhisperTokenizer,
 )
+from transformers.pytorch_utils import Conv1D
 
 from peft import (
     AdaLoraConfig,
@@ -1719,7 +1720,7 @@ class TestPiSSA:
         # Quantize the `weight.data` of the linear layer in the model to `num_bits` and store it with full precision.
         quantizer = NFQuantizer(num_bits=num_bits, device=device, method="normal", block_size=64)
         for name, module in model.named_modules():
-            if isinstance(module, torch.nn.Linear) and "lm_head" not in name:
+            if isinstance(module, (torch.nn.Linear, Conv1D)) and "lm_head" not in name:
                 quantized_weight, max_abs, shape = quantizer.quantize_block(module.weight.data.to(device))
                 module.weight.data = quantizer.dequantize_block(quantized_weight, max_abs, shape)
         return model
@@ -1728,7 +1729,7 @@ class TestPiSSA:
         # Calculate the nuclear norm (sum of singular values) of the error matrices between the `quantized_model` and the `base_model`.
         error_list = []
         for name, module in base_model.named_modules():
-            if isinstance(module, torch.nn.Linear) and "lm_head" not in name:
+            if isinstance(module, (torch.nn.Linear, Conv1D)) and "lm_head" not in name:
                 quant_module = quantized_model.get_submodule(name)
                 error_list.append(torch.linalg.svdvals(module.weight.data - quant_module.weight.data).sum())
         return torch.Tensor(error_list).sum()
@@ -1821,6 +1822,16 @@ class TestPiSSA:
     @pytest.mark.parametrize("device", ["cuda", "cpu"])
     def test_t5_pissa_8bit(self, device, tmp_path):
         self.get_errors(bits=8, device=device, model_id="t5-small", tmp_path=tmp_path)
+
+    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    def test_gpt2_pissa_4bit(self, device, tmp_path):
+        # see 2104
+        self.get_errors(bits=4, device=device, model_id="gpt2", tmp_path=tmp_path)
+
+    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    def test_gpt2_pissa_8bit(self, device, tmp_path):
+        # see 2104
+        self.get_errors(bits=8, device=device, model_id="gpt2", tmp_path=tmp_path)
 
     @require_bitsandbytes
     def test_lora_pissa_conversion_same_output_after_loading_with_quantization(self, tmp_path):
