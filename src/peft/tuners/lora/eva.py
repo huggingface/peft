@@ -3,7 +3,7 @@ from tqdm import tqdm
 from functools import reduce, partial
 from collections import Counter, defaultdict
 
-from typing import Optional, Union
+from typing import Optional, Union, Tuple
 
 
 def find_equal_values(dictionary):
@@ -19,7 +19,7 @@ def cycle(iterable):
             yield x
 
 
-def match_module_name(module_name, name_to_match):
+def match_module_name(module_name, name_to_match) -> bool:
     return ".".join(module_name.split(".")[-name_to_match.count(".")-1:]) == name_to_match
 
 
@@ -60,38 +60,31 @@ class IncrementalPCA:
         self.n_components_ = n_components
         self.copy = copy
         self.batch_size = batch_size
-        self.lowrank = lowrank
 
         if lowrank:
             if lowrank_q is None:
+                assert n_components is not None, "n_components must be specified when using lowrank mode with lowrank_q=None."
                 lowrank_q = n_components * 2
-            else:
-                assert lowrank_q >= n_components, "lowrank_q must be greater than or equal to n_components."
-            
+            assert lowrank_q >= n_components, "lowrank_q must be greater than or equal to n_components."
             def svd_fn(X):
                 U, S, V = torch.svd_lowrank(X, q=lowrank_q, niter=lowrank_niter)
                 return U, S, V.mH # V is returned as a conjugate transpose
-            self.svd_fn = svd_fn
+            self._svd_fn = svd_fn
 
         else:
-            self.svd_fn = partial(torch.linalg.svd, full_matrices=False, driver=svd_driver)
+            self._svd_fn = partial(torch.linalg.svd, full_matrices=False, driver=svd_driver)
         
 
-    def _validate_data(self, X, dtype=torch.float32):
+    def _validate_data(self, X, dtype=torch.float32) -> torch.Tensor:
         """
         Validates and converts the input data `X` to the appropriate tensor format.
-
-        This method ensures that the input data is in the form of a PyTorch tensor and resides on the correct device (CPU or GPU).
-        It also provides an option to create a copy of the tensor, which is useful when the input data should not be overwritten.
 
         Args:
             X (torch.Tensor): Input data.
             dtype (torch.dtype, optional): Desired data type for the tensor. Defaults to torch.float32.
-            copy (bool, optional): Whether to clone the tensor. If True, a new tensor is returned; otherwise, the original tensor
-                                   (or its device-transferred version) is returned. Defaults to True.
 
         Returns:
-            torch.Tensor: Validated and possibly copied tensor residing on the specified device.
+            torch.Tensor: Converted to appropriate format.
         """
         if not isinstance(X, torch.Tensor):
             X = torch.tensor(X, dtype=dtype)
@@ -104,7 +97,7 @@ class IncrementalPCA:
         return X
 
     @staticmethod
-    def _incremental_mean_and_var(X, last_mean, last_variance, last_sample_count):
+    def _incremental_mean_and_var(X, last_mean, last_variance, last_sample_count) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Computes the incremental mean and variance for the data `X`.
 
@@ -115,7 +108,7 @@ class IncrementalPCA:
             last_sample_count (torch.Tensor): The count tensor of samples processed before the current batch.
 
         Returns:
-            Tuple[torch.Tensor, torch.Tensor, int]: Updated mean, variance tensors, and total sample count.
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: Updated mean, variance tensors, and total sample count.
         """
         if X.shape[0] == 0:
             return last_mean, last_variance, last_sample_count
@@ -163,7 +156,7 @@ class IncrementalPCA:
         return updated_mean, updated_variance, updated_sample_count
 
     @staticmethod
-    def _svd_flip(u, v, u_based_decision=True):
+    def _svd_flip(u, v, u_based_decision=True) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Adjusts the signs of the singular vectors from the SVD decomposition for deterministic output.
 
@@ -193,9 +186,10 @@ class IncrementalPCA:
 
         Args:
             X (torch.Tensor): The input data tensor with shape (n_samples, n_features).
+            check_input (bool, optional): If True, validates the input. Defaults to True.
 
         Returns:
-            IncrementalPCAGPU: The fitted IPCA model.
+            IncrementalPCA: The fitted IPCA model.
         """
         if check_input:
             X = self._validate_data(X)
@@ -221,7 +215,7 @@ class IncrementalPCA:
             check_input (bool, optional): If True, validates the input. Defaults to True.
 
         Returns:
-            IncrementalPCAGPU: The updated IPCA model after processing the batch.
+            IncrementalPCA: The updated IPCA model after processing the batch.
         """
         first_pass = not hasattr(self, "components_")
 
@@ -258,7 +252,7 @@ class IncrementalPCA:
                 )
             )
 
-        U, S, Vt = self.svd_fn(X)
+        U, S, Vt = self._svd_fn(X)
         U, Vt = self._svd_flip(U, Vt, u_based_decision=False)
         explained_variance = S**2 / (n_total_samples - 1)
         explained_variance_ratio = S**2 / torch.sum(col_var * n_total_samples)
@@ -276,7 +270,7 @@ class IncrementalPCA:
             self.noise_variance_ = torch.tensor(0.0, device=X.device)
         return self
 
-    def transform(self, X):
+    def transform(self, X) -> torch.Tensor:
         """
         Applies dimensionality reduction to `X`.
 
@@ -292,7 +286,7 @@ class IncrementalPCA:
         return torch.mm(X, self.components_.T)
     
 
-class PCAHook:
+class SVDHook:
     def __init__(
         self,
         name: str,
@@ -308,15 +302,15 @@ class PCAHook:
             check2 = len(sim_thresh.shape) == 1
             assert check1 and check2, "if sim_thresh is a tensor with more than 0 dimensions it must have shape (n_components,) or (1,)"
 
-        self.pca = IncrementalPCA(n_components=n_components, copy=True, lowrank=True)
+        self.svd = IncrementalPCA(n_components=n_components, copy=True, lowrank=True)
 
         self.indices = None
         self.converged = torch.zeros((n_components,), dtype=torch.bool)
 
     def __call__(self, model, input, output):
         previous_components = None
-        if hasattr(self.pca, "components_"):
-            previous_components = self.pca.components_.clone().detach()
+        if hasattr(self.svd, "components_"):
+            previous_components = self.svd.components_.clone().detach()
 
         try:
             states = input.detach()
@@ -327,10 +321,10 @@ class PCAHook:
         if states.size(0) < self.n_components:
             return
 
-        self.pca.partial_fit(states.to(torch.float32))
+        self.svd.partial_fit(states.to(torch.float32))
 
         if previous_components is not None:
-            components = self.pca.components_
+            components = self.svd.components_
             if len(components.shape) == 1:
                 components = components.reshape(1, -1)
                 previous_components = previous_components.reshape(1, -1)
@@ -358,7 +352,7 @@ class HashHook:
 
 
 @torch.no_grad()
-def compute_pca(
+def compute_svd(
     model: torch.nn.Module,
     dataloader: torch.utils.data.DataLoader,
     r: int,
@@ -369,10 +363,10 @@ def compute_pca(
     whiten: bool = False,
     target_modules: Optional[list] = None,
     device: Union[str, torch.device, int] = "cuda"
-):
+) -> dict:
         
     def _get_rank_distribution(hooks, hook_layer_map, equal_inputs_map, rank_budget, max_components):
-        exp_vars = {k: h.pca.explained_variance_ratio_[:max_components] for k, h in hooks.items()}
+        exp_vars = {k: h.svd.explained_variance_ratio_[:max_components] for k, h in hooks.items()}
         keys, values = zip(*[(k, c) for k, name in hook_layer_map.items() for c in exp_vars[name]])
         idx = torch.stack(values).argsort(descending=True)
         counts = Counter([keys[i] for i in idx[:rank_budget]])
@@ -406,18 +400,18 @@ def compute_pca(
     rank_budget = r * len(hooks)
     max_components = round(r * rho)
 
-    # forward for one batch to check which layer inputs are equal to avoid unneeded pca calculations
+    # forward for one batch to check which layer inputs are equal to avoid unneeded svd calculations
     inputs = {k: v.to(device) for k, v in next(iter(dataloader)).items() if k != "labels"}
     model(**inputs)
     hash_dict = {k: h.hashed_inputs[0] for k, h in hooks.items()}
     equal_inputs_map = {vv: v[0] for v in find_equal_values(hash_dict).values() for vv in v[1:]}
-    hooks = {k: PCAHook(k, max_components, tau) for k in hooks.keys() if k not in equal_inputs_map}
+    hooks = {k: SVDHook(k, max_components, tau) for k in hooks.keys() if k not in equal_inputs_map}
     layer_hook_map = {**dict(zip(hooks.keys(), hooks.keys())), **equal_inputs_map}
     for name in layer_hook_map.keys():
         module = reduce(getattr, name.split("."), model)
         module._forward_hooks.clear()
     
-    # start pca calculation
+    # start svd calculation
     pbar = tqdm(iter(cycle(dataloader)), position=0, leave=False)
     convergence_dict = {k: False for k in hooks.keys()}
     rank_dist = {k: max_components for k in layer_hook_map.keys()}
@@ -443,13 +437,13 @@ def compute_pca(
             module.register_forward_hook(hook)
 
         if all(convergence_dict.values()):
-            print("exiting - all PCA components have converged.")
+            print("exiting - all SVD components have converged.")
             break
 
         model(**inputs)
 
-        # in case some hooks have to skip the pca calculation because the number of tokens is less than the number of components
-        if not all([hasattr(h.pca, "components_") for h in hooks.values()]):
+        # in case some hooks have to skip the svd calculation because the number of tokens is less than the number of components
+        if not all([hasattr(h.svd, "components_") for h in hooks.values()]):
             continue
 
         rank_dist = _get_rank_distribution(hooks, layer_hook_map, equal_inputs_map, rank_budget, max_components)
@@ -457,25 +451,25 @@ def compute_pca(
         layer_converged = list(convergence_dict.values()) + [convergence_dict[v] for v in equal_inputs_map.values()]
         pbar.set_description(f"{sum(layer_converged)}/{len(layer_converged)} layers have converged")
 
-    pca_dict = {}
+    svd_dict = {}
     for name, rank in rank_dist.items():
         if rank == 0:
             continue
         hook = hooks[layer_hook_map[name]]
         assert torch.all(hook.converged[:rank]) # this should never happen because we check for convergence
-        u = hook.pca.components_[:rank]
+        u = hook.svd.components_[:rank]
         if whiten:
-            u /= hook.pca.singular_values_[:rank].sqrt().reshape(-1, 1)
-        pca_dict[name] = u
+            u /= hook.svd.singular_values_[:rank].sqrt().reshape(-1, 1)
+        svd_dict[name] = u
 
     # objects are torch tensors on the model device
-    pca_dict = {k: v.to(orig_device) for k, v in pca_dict.items()}
+    svd_dict = {k: v.to(orig_device) for k, v in svd_dict.items()}
 
     # restore model state
     model.train(training)
     model.to(orig_device) # TODO
 
-    return pca_dict
+    return svd_dict
 
 
 def get_eva_config_and_state_dict(model, config, adapter_name):
@@ -490,7 +484,7 @@ def get_eva_config_and_state_dict(model, config, adapter_name):
             "lora A weights will not be initialized. "
         )
     else:
-        eva_state_dict = compute_pca(
+        eva_state_dict = compute_svd(
             model,
             r = config[adapter_name].r,
             target_modules = config[adapter_name].target_modules,
