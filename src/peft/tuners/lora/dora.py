@@ -97,9 +97,6 @@ class DoraLinearLayer(nn.Module):
 
         result_dora = (mag_norm_scale - 1) * base_result + mag_norm_scale * lora_result * scaling
 
-        if bias is not None:
-            result_dora = result_dora + bias
-
         return result_dora
 
     def __repr__(self) -> str:

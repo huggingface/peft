@@ -586,24 +586,19 @@ class Linear(nn.Module, LoraLayer):
                     result = result + lora_B(lora_A(dropout(x))) * scaling
                 else:
                     if isinstance(dropout, nn.Identity) or not self.training:
-                        result = self.lora_magnitude_vector[active_adapter](
-                            x,
-                            lora_A=lora_A,
-                            lora_B=lora_B,
-                            scaling=scaling,
-                            base_layer=self.get_base_layer(),
-                            base_result=result,
-                        )
+                        base_result = result
                     else:
                         x = dropout(x)
-                        result = result + self.lora_magnitude_vector[active_adapter](
-                            x,
-                            lora_A=lora_A,
-                            lora_B=lora_B,
-                            scaling=scaling,
-                            base_layer=self.get_base_layer(),
-                            result=None,
-                        )
+                        base_result = None
+
+                    result = result + self.lora_magnitude_vector[active_adapter](
+                        x,
+                        lora_A=lora_A,
+                        lora_B=lora_B,
+                        scaling=scaling,
+                        base_layer=self.get_base_layer(),
+                        base_result=base_layer,
+                    )
 
             result = result.to(torch_result_dtype)
 
