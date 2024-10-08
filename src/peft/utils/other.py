@@ -239,11 +239,29 @@ class ModulesToSaveWrapper(torch.nn.Module):
         # use a property to ensure that active_adapter is not set directly, instead use the set_adapter method
         return self._active_adapter
 
-    @property
-    def weight(self):
-        if self.active_adapter not in self.modules_to_save:
-            return self.original_module.weight
-        return self.modules_to_save[self.active_adapter].weight
+    def __getattr__(self, name: str):
+        # Note: This whole method may seem overly complex at first but PyTorch messes with __getattr__ in a way that
+        # requires very careful handling to avoid infinite recursion.
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            pass
+
+        if "_modules" not in self.__dict__:
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
+        # Could not find the attribute the PyTorch way. So let's check if it's an attribute on the
+        # original_module/modules_to_save.
+        modules = self.__dict__["_modules"]
+        if self.disable_adapters:
+            module = modules["original_module"]
+        elif self.active_adapter in modules["modules_to_save"]:
+            module = modules["modules_to_save"][self.active_adapter]
+        else:
+            # For some reason, there is no module corresponding to the active adapter; this should normally not be
+            # reached and exists as a failsafe (otherwise, a KeyError would be raised)
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+        return getattr(module, name)
 
     def update(self, adapter_name):
         context_manager = nullcontext()
@@ -301,7 +319,7 @@ class ModulesToSaveWrapper(torch.nn.Module):
         # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
         # extra argument that allows mixing different adapters in the same batch at inference time.
 
-        SUPPORTED_MODULES = (torch.nn.Linear, torch.nn.Embedding, torch.nn.Conv2d, torch.nn.Conv1d)
+        SUPPORTED_MODULES = (torch.nn.Linear, torch.nn.Embedding, torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d)
 
         module_names = ", ".join([module.__name__ for module in SUPPORTED_MODULES])
 

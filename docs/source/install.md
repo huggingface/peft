@@ -43,5 +43,5 @@ repository:
 ```bash
 git clone https://github.com/huggingface/peft
 cd peft
-pip install -e .
+pip install -e .[test]
 ```

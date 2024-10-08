@@ -54,9 +54,13 @@ from peft import (
     PeftModel,
     PromptEncoderConfig,
     TaskType,
+    VeraConfig,
     get_peft_model,
+    get_peft_model_state_dict,
+    inject_adapter_in_model,
     prepare_model_for_kbit_training,
     replace_lora_weights_loftq,
+    set_peft_model_state_dict,
 )
 from peft.tuners import boft
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
@@ -1130,6 +1134,232 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         # check that the weights are still on CPU
         weights_not_cpu = [name for name, p in peft_model.named_parameters() if p.device != torch.device("cpu")]
         assert not weights_not_cpu
+
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_vera(self):
+        r"""
+        Same as test_causal_lm_training but with VeRA
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+                device_map="auto",
+            )
+
+            tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+            model = prepare_model_for_kbit_training(model)
+
+            config = VeraConfig(
+                r=16,
+                target_modules=["q_proj", "v_proj"],
+                vera_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("ybelkada/english_quotes_copy")
+            data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_4bit_vera(self):
+        r"""
+        Same as test_causal_lm_training_4bit but with VeRA
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+                device_map="auto",
+            )
+
+            tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+            model = prepare_model_for_kbit_training(model)
+
+            config = VeraConfig(
+                r=16,
+                target_modules=["q_proj", "v_proj"],
+                vera_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("ybelkada/english_quotes_copy")
+            data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.multi_gpu_tests
+    def test_causal_lm_training_multi_gpu_vera(self):
+        r"""
+        Same as test_causal_lm_training_multi_gpu but with VeRA
+        """
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                device_map="auto",
+                quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+            )
+
+            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+
+            model = prepare_model_for_kbit_training(model)
+
+            setattr(model, "model_parallel", True)
+            setattr(model, "is_parallelizable", True)
+
+            config = VeraConfig(
+                r=16,
+                target_modules=["q_proj", "v_proj"],
+                vera_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("Abirate/english_quotes")
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.multi_gpu_tests
+    def test_causal_lm_training_multi_gpu_4bit_vera(self):
+        r"""
+        Same as test_causal_lm_training_multi_gpu_4bit but with VeRA
+        """
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                device_map="auto",
+                quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+            )
+
+            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+
+            model = prepare_model_for_kbit_training(model)
+
+            setattr(model, "model_parallel", True)
+            setattr(model, "is_parallelizable", True)
+
+            config = VeraConfig(
+                r=16,
+                target_modules=["q_proj", "v_proj"],
+                vera_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("Abirate/english_quotes")
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
 
 
 @require_torch_gpu
@@ -3592,3 +3822,51 @@ class TestPTuningReproducibility:
 
         torch.testing.assert_close(output_loaded, output_peft)
         torch.testing.assert_close(gen_loaded, gen_peft)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+@pytest.mark.single_gpu_tests
+class TestLowCpuMemUsageDifferentDevices:
+    """Test for the low CPU memory usage option for loading PEFT models.
+
+    There are already tests for this in test_initialization.py but here we want to specifically test diverging devices
+    for the model and state_dict.
+
+    """
+
+    model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+
+    @pytest.mark.parametrize("device_model, device_sd", [("cpu", "cuda"), ("cuda", "cpu")])
+    def test_low_cpu_mem_usage_model_model_on_gpu_state_dict_on_cpu_works(self, device_model, device_sd):
+        inputs = {"input_ids": torch.randint(0, 100, (1, 10)), "attention_mask": torch.ones(1, 10)}
+        inputs = {k: v.to(device_model) for k, v in inputs.items()}
+
+        model = AutoModelForCausalLM.from_pretrained(self.model_id).to(device_model)
+        lora_config = LoraConfig(init_lora_weights=False, target_modules="all-linear")
+        model = get_peft_model(model, lora_config)
+        model.eval()
+        logits_not_low_cpu_mem = model(**inputs).logits
+
+        state_dict = get_peft_model_state_dict(model)
+        peft_model_state_dict = {}
+        # remap the state dict so that it can be correctly loaded, and move weights to the other device
+        prefix = "base_model.model."
+        for k, v in state_dict.items():
+            k = k[len(prefix) :]
+            peft_model_state_dict[k] = v.to(device_sd)
+
+        del model
+
+        model = AutoModelForCausalLM.from_pretrained(self.model_id).to(device_model)
+        model.eval()
+        inject_adapter_in_model(lora_config, model, low_cpu_mem_usage=True)
+        load_result = set_peft_model_state_dict(model, peft_model_state_dict, low_cpu_mem_usage=True)
+
+        # sanity check: all lora keys are matched
+        assert not any("lora" in k for k in load_result.missing_keys)
+        assert not any("lora" in k for k in load_result.unexpected_keys)
+
+        logits_low_cpu_mem = model(**inputs).logits
+
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert {p.device.type for p in model.parameters()} == {device_model}

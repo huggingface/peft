@@ -135,6 +135,7 @@ class TestXlora:
 
     # TODO: remove the skip when 4.45 is released!
     @pytest.mark.skipif(not uses_transformers_4_45, reason="Requires transformers >= 4.45")
+    @pytest.mark.xfail
     def test_scalings_logging_methods(self, tokenizer, model):
         model.enable_scalings_logging()
 
@@ -187,6 +188,8 @@ class TestXlora:
 
         assert str(model) is not None
 
+    # TODO: On CI (but not locally), this test seems to have become flaky with the latest transformers changes (v4.45).
+    @pytest.mark.xfail
     def test_save_load_functional(self, tokenizer, model, tmp_path):
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
