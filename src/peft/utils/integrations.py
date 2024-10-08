@@ -52,6 +52,10 @@ def dequantize_module_weight(module: torch.nn.Module) -> torch.nn.Parameter:
     if hasattr(module, "W_q"):  # For handling HQQ quantized weight
         weight = module.dequantize()
         return weight
+    elif type(module.weight).__module__.startswith("torchao."):
+        # check for torchao without requiring any torchao imports
+        weight = module.weight.dequantize()
+        return weight
 
     weight = module.weight
     if not isinstance(weight, torch.nn.Parameter):

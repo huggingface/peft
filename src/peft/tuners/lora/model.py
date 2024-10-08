@@ -53,6 +53,7 @@ from .eetq import dispatch_eetq
 from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
 from .layer import Conv2d, LoraLayer, dispatch_default
+from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
 
 
@@ -202,6 +203,13 @@ class LoraModel(BaseTuner):
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
+        # for torchao merging, we need the get_apply_tensor_subclass from the quantization config
+        try:
+            kwargs["get_apply_tensor_subclass"] = operator.attrgetter(
+                "hf_quantizer.quantization_config.get_apply_tensor_subclass"
+            )(self.model)
+        except AttributeError:
+            pass
 
         quant_methods = ["gptq", "aqlm", "awq"]
         for quant_method in quant_methods:
@@ -334,6 +342,7 @@ class LoraModel(BaseTuner):
                 dispatch_awq,
                 dispatch_gptq,
                 dispatch_hqq,
+                dispatch_torchao,
                 dispatch_megatron,
                 dispatch_default,
             ]
