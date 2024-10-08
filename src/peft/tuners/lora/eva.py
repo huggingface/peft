@@ -510,6 +510,7 @@ def get_eva_config_and_state_dict(
         different_rank_map = {k: v.size(0) for k, v in eva_state_dict.items() if v.size(0) != eva_config.r}
         eva_config.target_modules = list(eva_state_dict.keys())
         eva_config.rank_pattern = different_rank_map
+        eva_state_dict = {f"{k}.lora_A.{adapter_name}.weight": v for k, v in eva_state_dict.items()}
     
     if is_peft_config:
         return eva_config, eva_state_dict

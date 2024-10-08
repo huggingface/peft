@@ -144,7 +144,6 @@ class LoraModel(BaseTuner):
         if is_eva_init(config, adapter_name):
             config, eva_state_dict = get_eva_config_and_state_dict(model, config, adapter_name)
             super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
-            eva_state_dict = {f"{k}.lora_A.{adapter_name}.weight": v for k, v in eva_state_dict.items()}
             self.model.load_state_dict(eva_state_dict, strict=False)
         else:
             super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
