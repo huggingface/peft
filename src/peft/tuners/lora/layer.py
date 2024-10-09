@@ -1030,14 +1030,8 @@ class Conv2d(nn.Module, LoraLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-
-            if not self.use_dora:
-                # we don't want to compute this for dora becasue it is already computed in ln 137 of dora.py
-                result = self.base_layer(x, *args, **kwargs)
-                torch_result_dtype = result.dtype
-            else:
-                # assume that the dytpe of the output is the same as the input (does this hold everywhere?)
-                torch_result_dtype = x.dtype
+            result = self.base_layer(x, *args, **kwargs)
+            torch_result_dtype = result.dtype
 
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.lora_A.keys():
@@ -1052,12 +1046,13 @@ class Conv2d(nn.Module, LoraLayer):
                     result = result + lora_B(lora_A(dropout(x))) * scaling
                 else:
                     x = dropout(x)
-                    result = self.lora_magnitude_vector[active_adapter](
+                    result = result + self.lora_magnitude_vector[active_adapter](
                         x,
                         lora_A=lora_A,
                         lora_B=lora_B,
                         scaling=scaling,
                         base_layer=self.get_base_layer(),
+                        base_layer_result=result
                     )
 
             result = result.to(torch_result_dtype)

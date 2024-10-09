@@ -115,7 +115,7 @@ class DoraConv2dLayer(DoraLinearLayer):
         weight_norm = weight.norm(p=2, dim=(1, 2, 3), keepdim=True).transpose(1, 0)
         return weight_norm
 
-    def forward(self, x, *, lora_A, lora_B, scaling, base_layer):
+    def forward(self, x, *, lora_A, lora_B, scaling, base_layer, base_layer_result=None):
         """
         For DoRA, calculate the extra output from LoRA with DoRA applied. This should be added on top of the base layer
         output.
@@ -133,17 +133,21 @@ class DoraConv2dLayer(DoraLinearLayer):
         # during backpropagation"
         weight_norm = weight_norm.detach()
         mag_norm_scale = magnitude / weight_norm
-        result_dora = (mag_norm_scale - 1) * (
-            F.conv2d(
-                x,
-                weight,
-                bias=None,
-                stride=base_layer.stride,
-                padding=base_layer.padding,
-                dilation=base_layer.dilation,
-                groups=base_layer.groups,
-            )
-        ) + mag_norm_scale * lora_B(lora_A(x)) * scaling
+
+        if isinstance(base_layer_result, torch.Tensor):
+            result_dora = (mag_norm_scale - 1) * base_layer_result + mag_norm_scale * lora_B(lora_A(x)) * scaling
+        else:
+            result_dora = (mag_norm_scale - 1) * (
+                F.conv2d(
+                    x,
+                    weight,
+                    bias=None,
+                    stride=base_layer.stride,
+                    padding=base_layer.padding,
+                    dilation=base_layer.dilation,
+                    groups=base_layer.groups,
+                )
+            ) + mag_norm_scale * lora_B(lora_A(x)) * scaling
 
         return result_dora
 
