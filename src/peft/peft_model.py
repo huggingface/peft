@@ -1768,7 +1768,7 @@ class PeftModelForCausalLM(PeftModel):
         if peft_config.peft_type == PeftType.POLY:
             model_kwargs["task_ids"] = task_ids
         if peft_config.is_prompt_learning:
-            if uses_cache and (model_kwargs["past_key_values"] is not None):
+            if uses_cache and (model_kwargs.get("past_key_values", None) is not None):
                 # change in the logic of `prepare_inputs_for_generation` makes the below code necessary
                 # In prompt learning methods, past key values are longer when compared to the `input_ids`.
                 # As such only consider the last input ids in the autogressive generation phase.
@@ -1798,7 +1798,7 @@ class PeftModelForCausalLM(PeftModel):
                 kwargs["token_type_ids"] = None
 
             # no past_key_values or past_key_values empty cache
-            requires_prompt_injection = (model_kwargs["past_key_values"] is None) or (
+            requires_prompt_injection = (model_kwargs.get("past_key_values", None) is None) or (
                 isinstance(model_kwargs["past_key_values"], transformers.Cache)
                 and not model_kwargs["past_key_values"].get_seq_length()
             )
