@@ -15,8 +15,10 @@
 # The implementation is based on "Parameter-Efficient Orthogonal Finetuning
 # via Butterfly Factorization" (https://arxiv.org/abs/2311.06243) in ICLR 2024.
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from typing import Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
@@ -32,7 +34,13 @@ class BOFTConfig(PeftConfig):
         boft_block_num (`int`): Number of BOFT blocks per injected layer.
         boft_n_butterfly_factor (`int`): Number of butterfly factors across different layers.
         target_modules (`Union[List[str],str]`): The names of the modules to apply the adapter to.
-        boft_dropout (`float`): The multiplicative dropout probability for BOFT layers.
+        exclude_modules (`Optional[Union[List[str], str]]`):
+            The names of the modules to not apply the adapter. When passing a string, a regex match will be performed.
+            When passing a list of strings, either an exact match will be performed or it is checked if the name of the
+            module ends with any of the passed strings.
+        boft_dropout (`float`):
+            The multiplicative dropout probability, by setting OFT blocks to identity during training, similar to the
+            dropout layer in LoRA.
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
             For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set
             to `True`.
@@ -74,20 +82,29 @@ class BOFTConfig(PeftConfig):
             ),
         },
     )
-    target_modules: Optional[Union[List[str], str]] = field(
+    target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
             "help": "List of module names or regex expression of the module names to replace with BOFT.",
             "example": "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' ",
         },
     )
-    boft_dropout: float = field(default=0.0, metadata={"help": "BOFT multiplicative dropout"})
+    exclude_modules: Optional[Union[list[str], str]] = field(
+        default=None,
+        metadata={"help": "List of module names or regex expression of the module names to exclude from BOFT."},
+    )
+    boft_dropout: float = field(
+        default=0.0,
+        metadata={
+            "help": "BOFT multiplicative dropout, randomly setting blocks of OFT to be identity matrix, similar to the dropout layer in LoRA."
+        },
+    )
     fan_in_fan_out: bool = field(
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
     )
     bias: str = field(default="none", metadata={"help": "Bias type for BOFT. Can be 'none', 'all' or 'boft_only'"})
-    modules_to_save: Optional[List[str]] = field(
+    modules_to_save: Optional[list[str]] = field(
         default=None,
         metadata={
             "help": "List of modules apart from BOFT layers to be set as trainable and saved in the final checkpoint. ",
@@ -106,7 +123,7 @@ class BOFTConfig(PeftConfig):
             ),
         },
     )
-    layers_to_transform: Optional[Union[List[int], int]] = field(
+    layers_to_transform: Optional[Union[list[int], int]] = field(
         default=None,
         metadata={
             "help": "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at this index."
@@ -124,10 +141,14 @@ class BOFTConfig(PeftConfig):
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
+        self.exclude_modules = (
+            set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
+        )
         if self.boft_block_size == 0 and self.boft_block_num == 0:
-            raise ValueError("You must specify either boft_block_size or boft_block_num.")
+            raise ValueError(
+                f"Either `boft_block_size` or `boft_block_num` must be non-zero. Currently, boft_block_size = {self.boft_block_size} and boft_block_num = {self.boft_block_num}."
+            )
         if not (self.boft_block_size != 0) ^ (self.boft_block_num != 0):
             raise ValueError(
-                f"You can only specify either boft_block_size ({self.boft_block_size}) or boft_block_num ({self.boft_block_num}), "
-                "but not both simultaneously, because boft_block_size x boft_block_num != in_features."
+                f"You can only specify either boft_block_size ({self.boft_block_size}) or boft_block_num ({self.boft_block_num}), but not both simultaneously, because boft_block_size x boft_block_num == in_features."
             )

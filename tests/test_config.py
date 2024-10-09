@@ -59,7 +59,6 @@ ALL_CONFIG_CLASSES = (
     LoKrConfig,
     LoraConfig,
     MultitaskPromptTuningConfig,
-    OFTConfig,
     PolyConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,

@@ -192,6 +192,7 @@ class PeftConfigMixin(PushToHubMixin):
 
         loaded_attributes = cls.from_json_file(config_file)
         kwargs = {**class_kwargs, **loaded_attributes}
+        kwargs = cls.check_kwargs(**kwargs)
         return cls.from_peft_type(**kwargs)
 
     @classmethod
@@ -255,6 +256,15 @@ class PeftConfigMixin(PushToHubMixin):
 
         loaded_attributes = cls.from_json_file(config_file)
         return loaded_attributes["peft_type"]
+
+    @classmethod
+    def check_kwargs(cls, **kwargs):
+        """Check kwargs before initializing the config instance.
+
+        Subclasses can override this method to add specific checks.
+
+        """
+        return kwargs
 
     @property
     def is_prompt_learning(self) -> bool:
