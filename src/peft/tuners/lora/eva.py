@@ -382,8 +382,7 @@ def compute_svd(
         return counts
     
     assert rho >= 1.0, "early_stop_rho must be >= 1"
-    
-    # TODO multi gpu support, only run rank 0
+
     orig_device = next(model.parameters()).device
     training = model.training
     model = model.to(device)
@@ -469,7 +468,7 @@ def compute_svd(
 
     # restore model state
     model.train(training)
-    model.to(orig_device) # TODO
+    model.to(orig_device)
 
     return svd_dict
 

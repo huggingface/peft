@@ -88,8 +88,8 @@ class EvaConfig:
     dataloader: Iterable = field(metadata={"help": "Dataloader used for EVA initialization. Needs to contain column 'input_ids'"})
     rho: float = field(default=1.0, metadata={"help": "Rho value for EVA redistribution"})
     tau: float = field(default=0.99, metadata={"help": "Cosine similarity threshold for early stopping"})
-    use_label_mask: bool = field(default=False, metadata={"help": "Use label mask for EVA initialization"}) # TODO
-    label_mask_value: int = field(default=-100, metadata={"help": "if use_label_mask=True the value to look for to mask out ignored tokens"}) # TODO
+    use_label_mask: bool = field(default=False, metadata={"help": "Use label mask for EVA initialization"})
+    label_mask_value: int = field(default=-100, metadata={"help": "if use_label_mask=True the value to look for to mask out ignored tokens"})
     whiten: bool = field(default=False, metadata={"help": "Apply whitening to singular vectors"})
     device: str = field(default="cuda", metadata={"help": "Device to use for EVA initialization"})
 
