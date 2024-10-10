@@ -289,6 +289,22 @@ class IncrementalPCA:
     
 
 class SVDHook:
+    """
+    A forward hook for calculating incremental SVD/PCA on layer input activations.
+
+    This hook performs a step of incremental Singular Value Decomposition (SVD)
+    on the input activations of a specified layer during the forward pass of a neural network.
+
+    The hook also tracks convergence of the computed components using cosine similarity
+    between the current and previous components.
+
+    Attributes:
+        name (str): Name of the layer to which this hook is attached.
+        n_components (int): Number of principal components to compute.
+        sim_thresh (Union[float, torch.Tensor]): Similarity threshold for convergence.
+
+    The hook is designed to be registered to a PyTorch module using the `register_forward_hook` method.
+    """
     def __init__(
         self,
         name: str,
@@ -335,8 +351,19 @@ class SVDHook:
             self.converged = (sim >= self.sim_thresh)
 
 
+# This is used to determine if two input activations are equal. For such cases, SVD
+# needs to be done for only for one of the equal inputs.
 class HashHook:
+    """
+    A forward hook for hashing layer input activations.
 
+    This hook hashes the input activations of a specified layer during the forward pass
+    of a neural network and stores the hash values for later analysis or comparison.
+
+    Attributes:
+        name (str): Name of the layer to which this hook is attached.
+        hashed_inputs (list): List of hashed input activations.
+    """
     def __init__(self, name: str):
         self.name = name
         self.hashed_inputs = []
@@ -366,7 +393,8 @@ def compute_svd(
     target_modules: Optional[list] = None,
     device: Union[str, torch.device, int] = "cuda"
 ) -> dict:
-        
+    
+    # Computes the rank distribution for each layer based on the explained variance ratio.
     def _get_rank_distribution(hooks, hook_layer_map, equal_inputs_map, rank_budget, max_components):
         exp_vars = {k: h.svd.explained_variance_ratio_[:max_components] for k, h in hooks.items()}
         keys, values = zip(*[(k, c) for k, name in hook_layer_map.items() for c in exp_vars[name]])
@@ -392,7 +420,8 @@ def compute_svd(
     for name, module in model.named_modules():
         if isinstance(module, torch.nn.Linear):
             if target_modules:
-                check = [match_module_name(name, t) for t in target_modules] # TODO probably there is a helper function in peft already to do this matching
+                # TODO probably there is a helper function in peft already to do this matching
+                check = [match_module_name(name, t) for t in target_modules]
                 if not any(check):
                     continue
             hook = HashHook(name)
