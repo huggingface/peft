@@ -136,7 +136,7 @@ class LoraConfig(PeftConfig):
             initialization from the reference implementation from Microsoft. Passing 'gaussian' results in Gaussian
             initialization scaled by the LoRA rank for linear and layers. Setting the initialization to False leads to
             completely random initialization and is discouraged. Pass `'loftq'` to use LoftQ initialization. Passing 
-            `'eva'` results in a data-driven initialization of <ahref='https://github.com/ml-jku/eva'
+            `'eva'` results in a data-driven initialization of <ahref='https://arxiv.org/abs/2410.07170'
             >Explained Variance Adaptation</a>. EVA initalizes LoRA based on the SVD of layer input activations and 
             achieves SOTA performance due to its ability to adapt to the finetuning data. Pass `'olora'` to use OLoRA 
             initialization. Passing `'pissa'` results in the initialization of <ahref='https://arxiv.org/abs/2404.02948'
