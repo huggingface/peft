@@ -63,6 +63,25 @@ from peft import LoraConfig
 config = LoraConfig(init_lora_weights="olora", ...)
 ```
 For more advanced usage, please refer to our [documentation](https://github.com/huggingface/peft/tree/main/examples/olora_finetuning).
+
+### EVA
+[EVA](https://arxiv.org/pdf/2410.07170) initializes LoRA in a data-driven manner based on information of the downstream data. It achieves this by performing SVD on the input activations of each layer. It also adaptively allocates ranks throughout the model based on metric retrieved from SVD called "explained variance ratio"
+
+You can use EVA by setting the LoraConfig:
+```python
+eva_config = EvaConfig(
+    dataloader = dataloader
+)
+peft_config = LoraConfig(
+    r = 16,
+    lora_alpha = 1,
+    target_modules = ['q_proj', 'k_proj', 'v_proj', 'o_proj'],
+    init_lora_weights = "eva",
+    eva_config = eva_config,
+)
+peft_model = get_peft_model(model, peft_config)
+```
+
 ### LoftQ
 
 #### Standard approach
