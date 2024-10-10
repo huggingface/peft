@@ -55,6 +55,7 @@ from .hqq import dispatch_hqq
 from .layer import Conv2d, LoraLayer, dispatch_default
 from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
+from .eva import is_eva_init, get_eva_config_and_state_dict
 
 
 def _adapter_names_pre_forward_hook(target, args, kwargs, adapter_names):
@@ -139,7 +140,13 @@ class LoraModel(BaseTuner):
     prefix: str = "lora_"
 
     def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
-        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
+
+        if is_eva_init(config, adapter_name):
+            config, eva_state_dict = get_eva_config_and_state_dict(model, config, adapter_name)
+            super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
+            self.model.load_state_dict(eva_state_dict, strict=False)
+        else:
+            super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
     def _check_new_adapter_config(self, config: LoraConfig) -> None:
         """
