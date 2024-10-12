@@ -21,7 +21,7 @@ from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
 from .lora import LoraConfig, LoraModel, LoftQConfig, LoraRuntimeConfig
 from .loha import LoHaConfig, LoHaModel
 from .lokr import LoKrConfig, LoKrModel
-from .lokrv2 import LoKrModelv2, LoKrConfigv2
+from .lokrv2 import LoKrModelv2, LoKrV2Config
 from .ia3 import IA3Config, IA3Model
 from .adalora import AdaLoraConfig, AdaLoraModel
 from .boft import BOFTConfig, BOFTModel

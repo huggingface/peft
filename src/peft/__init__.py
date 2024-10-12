@@ -92,7 +92,7 @@ from .tuners import (
     HRAModel,
     VBLoRAConfig,
     LoKrModelv2,
-    LoKrConfigv2,
+    LoKrV2Config,
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,

@@ -38,7 +38,7 @@ from peft import (
     LNTuningConfig,
     LoHaConfig,
     LoKrConfig,
-    LoKrConfigv2,
+    LoKrV2Config,
     LoraConfig,
     OFTConfig,
     PeftModel,
@@ -561,7 +561,7 @@ class PeftCommonTester:
             AdaLoraConfig,
             LoHaConfig,
             LoKrConfig,
-            LoKrConfigv2,
+            LoKrV2Config,
             VBLoRAConfig,
         ):
             # Merge layers only supported for LoRA and IA³
@@ -593,7 +593,7 @@ class PeftCommonTester:
             AdaLoraConfig,
             LoHaConfig,
             LoKrConfig,
-            LoKrConfigv2,
+            LoKrV2Config,
             VeraConfig,
             FourierFTConfig,
         ):
