@@ -35,7 +35,7 @@ from peft.utils import (
     _get_submodules,
 )
 
-from .config import LoKrConfigv2
+from .config import LoKrV2Config
 from .layer import Conv2d, Linear, LoKrLayerv2
 
 
@@ -103,7 +103,7 @@ class LoKrModelv2(BaseTuner):
     def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
         super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
-    def _check_new_adapter_config(self, config: LoKrConfigv2) -> None:
+    def _check_new_adapter_config(self, config: LoKrV2Config) -> None:
         """
         A helper method to check the config when a new adapter is being added.
 
@@ -119,12 +119,12 @@ class LoKrModelv2(BaseTuner):
             )
 
     @staticmethod
-    def _check_target_module_exists(LoKrConfigv2, key):
-        return check_target_module_exists(LoKrConfigv2, key)
+    def _check_target_module_exists(LoKrV2Config, key):
+        return check_target_module_exists(LoKrV2Config, key)
 
     def _create_and_replace(
         self,
-        lokr_config: LoKrConfigv2,
+        lokr_config: LoKrV2Config,
         adapter_name,
         target,
         target_name,

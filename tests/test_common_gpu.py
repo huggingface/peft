@@ -44,7 +44,7 @@ from peft import (
     LNTuningConfig,
     LoHaConfig,
     LoKrConfig,
-    LoKrConfigv2,
+    LoKrV2Config,
     LoraConfig,
     OFTConfig,
     PeftModel,
@@ -1671,7 +1671,7 @@ class TestSameAdapterDifferentDevices:
 
     def test_lokrv2_add_new_adapter_does_not_change_device(self, mlp):
         # same as first test, but using LoKr
-        config = LoKrConfigv2(target_modules=["lin0"])
+        config = LoKrV2Config(target_modules=["lin0"])
         model = get_peft_model(mlp, config)
         model = model.cuda()
         model.lin0.lokr_w1.cpu()

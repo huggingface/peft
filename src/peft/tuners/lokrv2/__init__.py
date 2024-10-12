@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .config import LoKrConfigv2
+from .config import LoKrV2Config
 from .layer import Conv2d, Linear, LoKrLayerv2
 from .model import LoKrModelv2
 
 
-__all__ = ["LoKrConfigv2", "LoKrModelv2", "Conv2d", "Linear", "LoKrLayerv2"]
+__all__ = ["LoKrV2Config", "LoKrModelv2", "Conv2d", "Linear", "LoKrLayerv2"]
