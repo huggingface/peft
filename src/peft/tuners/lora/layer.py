@@ -80,7 +80,7 @@ class LoraLayer(BaseTunerLayer):
         elif hasattr(base_layer, "codebooks") and base_layer.__class__.__name__ == "QuantizedLinear":
             # AQLM QuantLinear
             in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif hasattr(base_layer, "w_bit") and base_layer.__class__.__name__ == "WQLinear_GEMM":
+        elif hasattr(base_layer, "w_bit") and base_layer.__class__.__name__ in ("WQLinear_GEMM", "WQLinear_IPEX"):
             # Awq layers
             in_features, out_features = base_layer.in_features, base_layer.out_features
         elif base_layer.__class__.__name__ == "EetqLinear":
