@@ -62,6 +62,7 @@ class LoraParallelLinear(nn.Module, LoraLayer):
         self.is_parallel_a = isinstance(base_layer, backend.RowParallelLinear)
         self.fan_in_fan_out = fan_in_fan_out
         self._active_adapter = adapter_name
+        self.is_expert = base_layer.is_expert
 
         megatron_config = kwargs["megatron_config"]
         parallel_linear_kwargs = {"megatron_config": megatron_config}
@@ -131,6 +132,7 @@ class LoraParallelLinear(nn.Module, LoraLayer):
                 skip_bias_add=True,
                 init_method=init_method,
                 config=megatron_config,
+                is_expert=self.is_expert,
             )
             lora_b = nn.Linear(in_features=r, out_features=self.out_features, bias=False, dtype=torch.float32)
         else:
@@ -142,6 +144,7 @@ class LoraParallelLinear(nn.Module, LoraLayer):
                 gather_output=gather_output,
                 init_method=init_method,
                 config=megatron_config,
+                is_expert=self.is_expert,
             )
         self.lora_A[adapter_name] = lora_a
         self.lora_B[adapter_name] = lora_b
