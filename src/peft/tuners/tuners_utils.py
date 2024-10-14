@@ -461,7 +461,9 @@ class BaseTuner(nn.Module, ABC):
             and len(peft_config.target_modules) >= MIN_TARGET_MODULES_FOR_OPTIMIZATION
         ):
             names_no_target = [
-                name for name in key_list if not any(name.endswith(suffix) for suffix in peft_config.target_modules)
+                name
+                for name in key_list
+                if not any((name == suffix) or name.endswith("." + suffix) for suffix in peft_config.target_modules)
             ]
             new_target_modules = _find_minimal_target_modules(peft_config.target_modules, names_no_target)
             if len(new_target_modules) < len(peft_config.target_modules):

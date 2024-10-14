@@ -2917,18 +2917,18 @@ class PeftHqqGPUTests(unittest.TestCase):
             output_hqq = model(**inputs).logits
 
         # check that outputs of HQQ are highly correlated; there are outliers, so don't check for equality
-        cc_matrix = torch.corrcoef(torch.stack((output_normal.flatten(), output_hqq.flatten())))
+        cc_matrix = torch.corrcoef(torch.stack((output_normal.float().flatten(), output_hqq.float().flatten())))
         assert cc_matrix.min() > 0.97
 
         # check that outputs are the same after merging
-        cc_matrix = torch.corrcoef(torch.stack((output_normal.flatten(), output_hqq.flatten())))
+        cc_matrix = torch.corrcoef(torch.stack((output_normal.float().flatten(), output_hqq.float().flatten())))
         assert cc_matrix.min() > 0.97
 
         # check outputs are the same after unmerging
         model.unmerge_adapter()
         with torch.inference_mode():
             output_unmerged = model(**inputs).logits
-        cc_matrix = torch.corrcoef(torch.stack((output_normal.flatten(), output_unmerged.flatten())))
+        cc_matrix = torch.corrcoef(torch.stack((output_normal.float().flatten(), output_unmerged.float().flatten())))
         assert cc_matrix.min() > 0.97
 
         # check that the results are the same after saving and loading
@@ -2957,7 +2957,9 @@ class PeftHqqGPUTests(unittest.TestCase):
         model = model.merge_and_unload()
         with torch.inference_mode():
             output_merged_unloaded = model(**inputs).logits
-        cc_matrix = torch.corrcoef(torch.stack((output_normal.flatten(), output_merged_unloaded.flatten())))
+        cc_matrix = torch.corrcoef(
+            torch.stack((output_normal.float().flatten(), output_merged_unloaded.float().flatten()))
+        )
         assert cc_matrix.min() > 0.97
 
 
