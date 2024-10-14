@@ -78,15 +78,15 @@ class BoneConfig(PeftConfig):
         default=None,
         metadata={"help": "List of module names or regex expression of the module names to exclude from Bone."},
     )
-    # init_weights: bool = field(
-    #     default=True,
-    #     metadata={
-    #         "help": (
-    #             "Whether to initialize the weights of the Bone layers with their default initialization. Don't change "
-    #             "this setting, except if you know exactly what you're doing."
-    #         ),
-    #     },
-    # )
+    init_weights: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Whether to initialize the weights of the Bone layers with their default initialization. Don't change "
+                "this setting, except if you know exactly what you're doing."
+            ),
+        },
+    )
     layers_to_transform: Optional[Union[list[int], int]] = field(
         default=None,
         metadata={

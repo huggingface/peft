@@ -71,7 +71,7 @@ class BoneLayer(BaseTunerLayer):
         # Determine shape of Bone weights
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
-            self.bone_block[adapter_name] = nn.Parameter(torch.zeros(self.in_features, r), requires_grad=True)
+            self.bone_block[adapter_name] = nn.Parameter(torch.zeros(self.out_features//r, r, r), requires_grad=True)
         # elif isinstance(base_layer, nn.Conv2d):
         #     self.bone_block[adapter_name] = nn.Parameter(
         #         torch.empty(self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0], r),
@@ -81,17 +81,17 @@ class BoneLayer(BaseTunerLayer):
             raise TypeError(f"Bone is not implemented for base layers of type {type(base_layer).__name__}")
 
         # Initialize weights
-        if init_weights:
-            self.reset_bone_parameters(adapter_name)
-        else:
-            self.reset_bone_parameters_random(adapter_name)
+    #     if init_weights:
+    #         self.reset_bone_parameters(adapter_name)
+    #     else:
+    #         self.reset_bone_parameters_random(adapter_name)
 
-        # Move new weights to device
-        self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+    #     # Move new weights to device
+    #     self._move_adapter_to_device_of_base_layer(adapter_name)
+    #     self.set_adapter(self.active_adapters)
 
-    def reset_bone_parameters(self, adapter_name: str):
-        self.bone_block[adapter_name] = nn.Parameter(torch.zeros(self.in_features, r), requires_grad=True)
+    # def reset_bone_parameters(self, adapter_name: str):
+    #     self.bone_block[adapter_name] = nn.Parameter(torch.zeros(self.in_features, r), requires_grad=True)
 
 
     # def reset_bone_parameters_random(self, adapter_name: str):
@@ -168,8 +168,8 @@ class BoneLinear(nn.Module, BoneLayer):
 
                     self.base_layer.weight.data = orig_weight
                 else:
-                    delta_weight = self.get_delta_weight(active_adapter)
-                    self.base_layer.weight.data = torch.mm(self.base_layer.weight.data, delta_weight)
+                    delta_weight = self.get_delta_weight(active_adapter, self.base_layer.weight.data)
+                    self.base_layer.weight.data += delta_weight
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -194,27 +194,27 @@ class BoneLinear(nn.Module, BoneLayer):
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
-        device = self.bone_block[adapter].weight.device
-        dtype = self.bone_block[adapter].weight.dtype
-
+        device = self.bone_block[adapter].device
+        dtype = self.bone_block[adapter].dtype
         # In case users wants to merge the adapter weights that are in
         # (b)float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
         # (b)float16 because some CPUs have slow bf16/fp16 matmuls.
         cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
 
-        weight_bone = self.bone_block[adapter].weight
-
+        weight_bone = self.bone_block[adapter]
+        
         if cast_to_fp32:
             weight_bone = weight_bone.float()
-
-        w =  rearrange(orig_weight, '(a r1) (b r2) -> b a r1 r2', r1 = self.bone_r, r2 = self.bone_r)@weight_bone+weight_bone
+        
+        #weight_bone = weight_bone.to(orig_weight.dtype)
+        w =  rearrange(orig_weight, '(a r1) (b r2) -> b a r1 r2', r1 = weight_bone.size(-1), r2 = weight_bone.size(-1))@weight_bone+weight_bone
         output_tensor = rearrange(w, 'b a r1 r2 ->(a r1) (b r2) ')
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
 
             # cast back the weights
-            self.bone_block[adapter].weight.data = weight_bone.to(dtype)
+            self.bone_block[adapter].data = weight_bone.to(dtype)
 
         return output_tensor
 
@@ -228,22 +228,30 @@ class BoneLinear(nn.Module, BoneLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            new_weight = torch.eye(self.in_features, device=x.device)
-
+            
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.bone_block.keys():
                     continue
-                delta_weight = self.get_delta_weight(active_adapter)
-                new_weight = torch.mm(new_weight, delta_weight)
+                orig_weight = self.base_layer.weight.data.clone()
+                delta_weight = self.get_delta_weight(active_adapter, orig_weight)
+                orig_weight += delta_weight
 
-            x = x.to(self.get_base_layer().weight.data.dtype)
-            orig_weight = self.get_base_layer().weight.data
-            new_weight = torch.mm(orig_weight, new_weight)
+            result = F.linear(input=x, weight=orig_weight, bias=self.base_layer.bias)
 
-            result = F.linear(input=x, weight=new_weight, bias=self.base_layer.bias)
+            # def fn_bone(weight, b, x, bias):
+            #     for active_adapter in b:
+            #         if active_adapter not in self.bone_block.keys():
+            #             continue
+            #         orig_weight = weight.clone()
+            #         delta_weight = self.get_delta_weight(active_adapter, orig_weight)
+            #         orig_weight += delta_weight
 
+            #     return F.linear(input=x, weight=orig_weight, bias=bias)
+            # return torch_checkpoint(fn_bone, self.base_layer.weight.data, self.active_adapters, x, self.base_layer.bias)
         result = result.to(previous_dtype)
         return result
+
+
 
     def __repr__(self) -> str:
         rep = super().__repr__()
