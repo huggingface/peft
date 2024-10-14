@@ -14,11 +14,11 @@
 
 import os
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Optional
 
 import torch
 from datasets import load_dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, HfArgumentParser, TrainingArguments
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, HfArgumentParser
 from trl import SFTConfig, SFTTrainer
 
 from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
