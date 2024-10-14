@@ -19,7 +19,7 @@ from typing import List, Optional
 import torch
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, HfArgumentParser, TrainingArguments
-from trl import SFTTrainer
+from trl import SFTConfig, SFTTrainer
 
 from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 
@@ -53,7 +53,7 @@ class TrainingArguments(TrainingArguments):
     )
 
 
-parser = HfArgumentParser(TrainingArguments)
+parser = HfArgumentParser(SFTConfig)
 script_args = parser.parse_args_into_dataclasses()[0]
 print(script_args)
 
@@ -133,8 +133,6 @@ trainer = SFTTrainer(
     model=peft_model,
     args=script_args,
     train_dataset=dataset,
-    dataset_text_field="text",
-    max_seq_length=script_args.max_seq_length,
     tokenizer=tokenizer,
 )
 trainer.train()
