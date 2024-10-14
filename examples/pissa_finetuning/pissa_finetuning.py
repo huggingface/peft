@@ -25,7 +25,7 @@ from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_t
 
 
 @dataclass
-class TrainingArguments(TrainingArguments):
+class ScriptArguments(SFTConfig):
     # model configs
     base_model_name_or_path: Optional[str] = field(
         default=None, metadata={"help": "The name or path of the fp32/16 base model."}
@@ -46,14 +46,9 @@ class TrainingArguments(TrainingArguments):
     # dataset configs
     data_path: str = field(default="imdb", metadata={"help": "Path to the training data."})
     dataset_split: str = field(default="train[:1%]", metadata={"help": "(`['train', 'test', 'eval']`):"})
-    dataset_field: List[str] = field(default=None, metadata={"help": "Fields of dataset input and output."})
-    max_seq_length: int = field(
-        default=512,
-        metadata={"help": "Maximum sequence length. Sequences will be right padded (and possibly truncated)."},
-    )
 
 
-parser = HfArgumentParser(SFTConfig)
+parser = HfArgumentParser(ScriptArguments)
 script_args = parser.parse_args_into_dataclasses()[0]
 print(script_args)
 
