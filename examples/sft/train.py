@@ -79,12 +79,6 @@ class DataTrainingArguments:
         default="timdettmers/openassistant-guanaco",
         metadata={"help": "The preference dataset to use."},
     )
-    packing: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Use packing dataset creating."},
-    )
-    dataset_text_field: str = field(default="text", metadata={"help": "Dataset field to use as input text."})
-    max_seq_length: Optional[int] = field(default=512)
     append_concat_token: Optional[bool] = field(
         default=False,
         metadata={"help": "If True, appends `eos_token_id` at the end of each sample being packed."},
