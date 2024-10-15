@@ -237,7 +237,7 @@ if is_bnb_available():
                     if not self.use_dora[active_adapter]:
                         result = result + lora_B(lora_A(dropout(x))) * scaling
                     else:
-                        if isinstance(dropout, nn.Identity) or not self.training:
+                        if isinstance(dropout, torch.nn.Identity) or not self.training:
                             base_result = result
                         else:
                             x = dropout(x)
@@ -492,7 +492,7 @@ if is_bnb_4bit_available():
                     if not self.use_dora[active_adapter]:
                         result = result + lora_B(lora_A(dropout(x))) * scaling
                     else:
-                        if isinstance(dropout, nn.Identity) or not self.training:
+                        if isinstance(dropout, torch.nn.Identity) or not self.training:
                             base_result = result
                         else:
                             x = dropout(x)
@@ -507,9 +507,7 @@ if is_bnb_4bit_available():
                             base_result=base_result,
                         )
                     if requires_conversion:
-                        output = output.to(expected_dtype)
-
-                    result = result + output
+                        result = result.to(expected_dtype)
 
             return result
 

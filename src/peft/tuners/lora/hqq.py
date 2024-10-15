@@ -220,7 +220,7 @@ if is_hqq_available():
                     if not self.use_dora[active_adapter]:
                         result = result + lora_B(lora_A(dropout(x))) * scaling
                     else:
-                        if isinstance(dropout, nn.Identity) or not self.training:
+                        if isinstance(dropout, torch.nn.Identity) or not self.training:
                             base_result = result
                         else:
                             x = dropout(x)
