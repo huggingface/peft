@@ -291,6 +291,8 @@ def initialize_lora_eva_weights(
         collate_fn = collate_fn_language_modeling
     if forward_fn is None:
         forward_fn = forward_fn_language_modeling
+    if config.eva_config is None:
+        config.eva_config = EvaConfig()
     with model.disable_adapter():
         svd_dict = compute_svd(model, config, dataloader, collate_fn, forward_fn)
     for k in list(svd_dict.keys()):

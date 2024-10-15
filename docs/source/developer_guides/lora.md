@@ -69,17 +69,14 @@ For more advanced usage, please refer to our [documentation](https://github.com/
 
 You can use EVA by setting the LoraConfig:
 ```python
-eva_config = EvaConfig(
-    dataloader = dataloader
-)
 peft_config = LoraConfig(
     r = 16,
     lora_alpha = 1,
     target_modules = ['q_proj', 'k_proj', 'v_proj', 'o_proj'],
     init_lora_weights = "eva",
-    eva_config = eva_config,
 )
-peft_model = get_peft_model(model, peft_config)
+peft_model = get_peft_model(model, peft_config, low_cpu_mem_usage=True)
+initialize_lora_eva_weights(peft_model, peft_config, dataloader, device="cuda")
 ```
 
 ### LoftQ

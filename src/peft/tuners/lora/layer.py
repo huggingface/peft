@@ -136,7 +136,6 @@ class LoraLayer(BaseTunerLayer):
             with gather_params_ctx(self.get_base_layer().weight):
                 self.loftq_init(adapter_name)
         elif init_lora_weights == "eva":
-            # lora_A is initialized in LoraModel.__init__
             nn.init.zeros_(self.lora_B[adapter_name].weight)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
