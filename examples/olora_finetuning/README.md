@@ -8,7 +8,7 @@
 import torch
 from peft import LoraConfig, get_peft_model
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from trl import SFTTrainer
+from trl import SFTConfig, SFTTrainer
 from datasets import load_dataset
 
 model = AutoModelForCausalLM.from_pretrained("facebook/opt-350m", torch_dtype=torch.bfloat16, device_map="auto")
@@ -18,11 +18,10 @@ lora_config = LoraConfig(
     init_lora_weights="olora"
 )
 peft_model = get_peft_model(model, lora_config)
+training_args = SFTConfig(dataset_text_field="text", max_seq_length=128)
 trainer = SFTTrainer(
     model=peft_model,
     train_dataset=dataset,
-    dataset_text_field="text",
-    max_seq_length=512,
     tokenizer=tokenizer,
 )
 trainer.train()

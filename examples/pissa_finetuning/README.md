@@ -6,8 +6,7 @@ PiSSA represents a matrix $W\in\mathbb{R}^{m\times n}$ within the model by the p
 ```python
 import torch
 from peft import LoraConfig, get_peft_model
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from trl import SFTTrainer
+from transformers import AutoTokenizer, AutoModelForCausalLMfrom trl import SFTConfig, SFTTrainer
 from datasets import load_dataset
 
 model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf", torch_dtype=torch.bfloat16, device_map="auto")
@@ -23,11 +22,11 @@ peft_model.print_trainable_parameters()
 
 dataset = load_dataset("imdb", split="train[:1%]")
 
+training_args = SFTConfig(dataset_text_field="text", max_seq_length=128)
 trainer = SFTTrainer(
     model=peft_model,
+    args=training_args,
     train_dataset=dataset,
-    dataset_text_field="text",
-    max_seq_length=128,
     tokenizer=tokenizer,
 )
 trainer.train()
