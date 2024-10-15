@@ -266,25 +266,26 @@ TEST_CASES = [
     ########
     # OFT #
     ########
-    ("Vanilla MLP 1 OFT", "MLP", OFTConfig, {"target_modules": "lin0"}),
-    ("Vanilla MLP 2 OFT", "MLP", OFTConfig, {"target_modules": ["lin0"]}),
-    ("Vanilla MLP 5 OFT", "MLP", OFTConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    ("Vanilla MLP 1 OFT", "MLP", OFTConfig, {"r": 2, "target_modules": "lin0"}),
+    ("Vanilla MLP 2 OFT", "MLP", OFTConfig, {"r": 2, "target_modules": ["lin0"]}),
+    ("Vanilla MLP 5 OFT", "MLP", OFTConfig, {"r": 2, "target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
     (
         "Vanilla MLP 6 OFT",
         "MLP",
         OFTConfig,
         {
+            "r": 2,
             "target_modules": ["lin0"],
             "module_dropout": 0.1,
         },
     ),
-    ("Vanilla MLP 7 OFT", "MLP", OFTConfig, {"target_modules": ["lin0"], "coft": True}),
-    ("Vanilla MLP 8 OFT", "MLP", OFTConfig, {"target_modules": ["lin0"], "block_share": True}),
-    ("Vanilla MLP 9 OFT", "MLP", OFTConfig, {"target_modules": ["lin0"], "coft": True, "block_share": True}),
-    ("Conv2d 1 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"]}),
-    ("Conv2d 3 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"], "coft": True}),
-    ("Conv2d 4 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"], "block_share": True}),
-    ("Conv2d 5 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"], "coft": True, "block_share": True}),
+    ("Vanilla MLP 7 OFT", "MLP", OFTConfig, {"r": 2, "target_modules": ["lin0"], "coft": True}),
+    ("Vanilla MLP 8 OFT", "MLP", OFTConfig, {"r": 2, "target_modules": ["lin0"], "block_share": True}),
+    ("Vanilla MLP 9 OFT", "MLP", OFTConfig, {"r": 2, "target_modules": ["lin0"], "coft": True, "block_share": True}),
+    ("Conv2d 1 OFT", "Conv2d", OFTConfig, {"r": 5, "target_modules": ["conv2d"]}),
+    ("Conv2d 3 OFT", "Conv2d", OFTConfig, {"r": 5, "target_modules": ["conv2d"], "coft": True}),
+    ("Conv2d 4 OFT", "Conv2d", OFTConfig, {"r": 5, "target_modules": ["conv2d"], "block_share": True}),
+    ("Conv2d 5 OFT", "Conv2d", OFTConfig, {"r": 5, "target_modules": ["conv2d"], "coft": True, "block_share": True}),
     ########
     # HRA #
     ########
@@ -1419,7 +1420,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert "default" in model.base_model.classifier.modules_to_save
         assert "other" in model.base_model.classifier.modules_to_save
 
-    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig, HRAConfig])
+    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig])
     def test_multiple_adapters_mixed_modules_to_save(self, config_cls):
         # See issue 1574
         # Check that we can have a model where one adapter has modules_to_save and the other doesn't. It should be
@@ -1444,7 +1445,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model.set_adapter("other")
         model(**inputs)
 
-    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig, HRAConfig])
+    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig])
     def test_multiple_adapters_mixed_modules_to_save_order_switched(self, config_cls):
         # See issue 1574
         # Same test as test_multiple_adapters_mixed_modules_to_save, but this time the 2nd adapter has modules_to_save.
@@ -1647,7 +1648,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             LoHaConfig(target_modules=["lin0"], init_weights=False),
             AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
             IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
-            OFTConfig(target_modules=["lin0"], init_weights=False),
+            OFTConfig(target_modules=["lin0"], init_weights=False, r=2),
             BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
             HRAConfig(target_modules=["lin0"], init_weights=False),
         ]
@@ -2726,16 +2727,17 @@ class RequiresGradTester(unittest.TestCase):
 
     def test_requires_grad_oft_different_targets(self):
         # test two different OFT adapters that target different modules
-        config0 = OFTConfig(target_modules=["lin0"])
+        config0 = OFTConfig(target_modules=["lin0"], r=2)
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = OFTConfig(target_modules=["lin1"], inference_mode=True)
+        config1 = OFTConfig(target_modules=["lin1"], r=2, inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.oft_r.default",
+            "base_model.model.lin0.oft_s.default",
         )
 
         # set config0 as active, should not change anything
@@ -2743,6 +2745,7 @@ class RequiresGradTester(unittest.TestCase):
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.oft_r.default",
+            "base_model.model.lin0.oft_s.default",
         )
 
         # change activate pter to pter1
@@ -2750,6 +2753,7 @@ class RequiresGradTester(unittest.TestCase):
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin1.oft_r.adapter1",
+            "base_model.model.lin1.oft_s.adapter1",
         )
 
         # disable all pters
@@ -2760,20 +2764,22 @@ class RequiresGradTester(unittest.TestCase):
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin1.oft_r.adapter1",
+            "base_model.model.lin1.oft_s.adapter1",
         )
 
     def test_requires_grad_oft_same_targets(self):
         # same as previous test, except that OFT adapters target the same layer
-        config0 = OFTConfig(target_modules=["lin0"])
+        config0 = OFTConfig(target_modules=["lin0"], r=2)
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = OFTConfig(target_modules=["lin0"], inference_mode=True)
+        config1 = OFTConfig(target_modules=["lin0"], r=2, inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.oft_r.default",
+            "base_model.model.lin0.oft_s.default",
         )
 
         # set config0 as active, should not change anything
@@ -2781,6 +2787,7 @@ class RequiresGradTester(unittest.TestCase):
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.oft_r.default",
+            "base_model.model.lin0.oft_s.default",
         )
 
         # change activate adapter to adapter1
@@ -2788,6 +2795,7 @@ class RequiresGradTester(unittest.TestCase):
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.oft_r.adapter1",
+            "base_model.model.lin0.oft_s.adapter1",
         )
 
         # disable all adapters
@@ -2799,6 +2807,7 @@ class RequiresGradTester(unittest.TestCase):
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.oft_r.adapter1",
+            "base_model.model.lin0.oft_s.adapter1",
         )
 
     def test_requires_grad_hra_different_targets(self):
@@ -3527,12 +3536,39 @@ class TestMixedAdapterBatches:
         # When there are merged adapters, passing adapter names should raise an error
         inputs = {
             "X": torch.arange(90).view(-1, 10).to(self.torch_device),
-            "adapter_names": ["default"] * 9,
+            "adapter_names": ["adapter0"] * 9,
         }
         mlp_lora.merge_adapter(["adapter0"])
         msg = r"Cannot pass `adapter_names` when there are merged adapters, please call `unmerge_adapter` first."
         with pytest.raises(ValueError, match=msg):
             mlp_lora.forward(**inputs)
+
+    def test_mixed_adapter_batches_lora_wrong_adapter_name_raises(self):
+        # Ensure that all of the adapter names that are being passed actually exist
+        torch.manual_seed(0)
+        x = torch.arange(90).view(-1, 10).to(self.torch_device)
+
+        base_model = MLP().to(self.torch_device).eval()
+        config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+        peft_model = get_peft_model(base_model, config).eval()
+        peft_model.add_adapter(adapter_name="other", peft_config=config)
+
+        # sanity check: this works
+        peft_model.forward(x, adapter_names=["default"] * 5 + ["other"] * 4)
+
+        # check one correct and one incorrect adapter
+        msg = re.escape("Trying to infer with non-existing adapter(s): does-not-exist")
+        with pytest.raises(ValueError, match=msg):
+            peft_model.forward(x, adapter_names=["default"] * 5 + ["does-not-exist"] * 4)
+
+        # check two correct adapters and one incorrect adapter
+        with pytest.raises(ValueError, match=msg):
+            peft_model.forward(x, adapter_names=["default"] * 3 + ["does-not-exist"] * 4 + ["other"] * 2)
+
+        # check only incorrect adapters
+        msg = re.escape("Trying to infer with non-existing adapter(s): does-not-exist, other-does-not-exist")
+        with pytest.raises(ValueError, match=msg):
+            peft_model.forward(x, adapter_names=["does-not-exist"] * 5 + ["other-does-not-exist"] * 4)
 
     def test_mixed_adapter_batches_lora_with_dora_raises(self):
         # When there are DoRA adapters, passing adapter names should raise an error

@@ -583,7 +583,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 low_cpu_mem_usage=low_cpu_mem_usage,
             )
 
-        model.load_adapter(
+        load_result = model.load_adapter(
             model_id,
             adapter_name,
             is_trainable=is_trainable,
@@ -591,6 +591,17 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             low_cpu_mem_usage=low_cpu_mem_usage,
             **kwargs,
         )
+
+        # 1. Remove VB-LoRA vector bank, since it's a shared parameter set via the VBLoRAModel
+        # 2. Remove the prompt encoder, as it does not need to be part of the checkpoint
+        missing_keys = [
+            k for k in load_result.missing_keys if "vblora_vector_bank" not in k and "prompt_encoder" not in k
+        ]
+        if missing_keys:
+            # Let's warn here since (in contrast to load_adapter) we don't return the load result, so it could be quite
+            # difficult for users to even notice that something might have gone wrong here. As we filter out non PEFT
+            # keys from the missing keys, this gives no false positives.
+            warnings.warn(f"Found missing adapter keys while loading the checkpoint: {missing_keys}")
 
         return model
 
@@ -1745,7 +1756,7 @@ class PeftModelForCausalLM(PeftModel):
         if peft_config.peft_type == PeftType.POLY:
             model_kwargs["task_ids"] = task_ids
         if peft_config.is_prompt_learning:
-            if uses_cache and (model_kwargs["past_key_values"] is not None):
+            if uses_cache and (model_kwargs.get("past_key_values", None) is not None):
                 # change in the logic of `prepare_inputs_for_generation` makes the below code necessary
                 # In prompt learning methods, past key values are longer when compared to the `input_ids`.
                 # As such only consider the last input ids in the autogressive generation phase.
@@ -1775,7 +1786,7 @@ class PeftModelForCausalLM(PeftModel):
                 kwargs["token_type_ids"] = None
 
             # no past_key_values or past_key_values empty cache
-            requires_prompt_injection = (model_kwargs["past_key_values"] is None) or (
+            requires_prompt_injection = (model_kwargs.get("past_key_values", None) is None) or (
                 isinstance(model_kwargs["past_key_values"], transformers.Cache)
                 and not model_kwargs["past_key_values"].get_seq_length()
             )
@@ -2051,7 +2062,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
         model_kwargs = self.base_model_prepare_inputs_for_generation(*args, **kwargs)
         if peft_config.peft_type == PeftType.POLY:
             model_kwargs["task_ids"] = task_ids
-        if model_kwargs["past_key_values"] is None and peft_config.peft_type == PeftType.PREFIX_TUNING:
+        if model_kwargs.get("past_key_values", None) is None and peft_config.peft_type == PeftType.PREFIX_TUNING:
             batch_size = model_kwargs["decoder_input_ids"].shape[0]
             past_key_values = self.get_prompt(batch_size)
             model_kwargs["past_key_values"] = past_key_values
