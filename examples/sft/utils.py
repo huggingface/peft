@@ -3,7 +3,6 @@ from enum import Enum
 
 import packaging.version
 import torch
-import torch.distributed as dist
 import transformers
 from datasets import DatasetDict, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
