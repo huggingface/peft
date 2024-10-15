@@ -138,9 +138,20 @@ from peft import PeftModel
 model = PeftModel.from_pretrained(base_model, peft_model_id, ephemeral_gpu_offload=True)
 ```
 
+DoRA is optimized (computes faster and takes less memory) for models in the evaluation mode, or when dropout is set to 0. We reuse the
+base result at those times to get the speedup. Running [dora finetuning](https://github.com/huggingface/peft/blob/main/examples/dora_finetuning/dora_finetuning.py) with `CUDA_VISIBLE_DEVICES=0 time python dora_finetuning.py --quantize --lora_dropout 0 --use_dora` these were the observations:
+
+| | Without Optimization | With Optimization |
+| :--: | :--: | :--: |
+| train_runtime | 14.0129 | 11.8011 |
+| train_samples_per_second | 0.714 | 0.847 |
+| train_steps_per_second |0.357 | 0.424 |
+| train_loss | 10.531291198730468 | 10.531893920898437 |
+| memory utilization | 755MiB | 732MiB |
+
 #### Caveats
 
-- DoRA only supports linear and Conv2d layers at the moment.
+- DoRA only supports embedding, linear, and Conv2d layers at the moment.
 - DoRA introduces a bigger overhead than pure LoRA, so it is recommended to merge weights for inference, see [`LoraModel.merge_and_unload`]. 
 - DoRA should work with weights quantized with bitsandbytes ("QDoRA"). However, issues have been reported when using QDoRA with DeepSpeed Zero2.
 
