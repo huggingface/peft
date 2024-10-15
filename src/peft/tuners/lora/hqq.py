@@ -218,13 +218,24 @@ if is_hqq_available():
                             x = x.to(compute_dtype)
 
                     if not self.use_dora[active_adapter]:
-                        output = lora_B(lora_A(dropout(x))) * scaling
+                        result = result + lora_B(lora_A(dropout(x))) * scaling
                     else:
-                        output = self._apply_dora(x, lora_A, lora_B, scaling, active_adapter)
-                    if requires_conversion:
-                        output = output.to(expected_dtype)
+                        if isinstance(dropout, nn.Identity) or not self.training:
+                            base_result = result
+                        else:
+                            x = dropout(x)
+                            base_result = None
 
-                    result = result + output
+                        result = result + self.lora_magnitude_vector[active_adapter](
+                            x,
+                            lora_A=lora_A,
+                            lora_B=lora_B,
+                            scaling=scaling,
+                            base_layer=self.get_base_layer(),
+                            base_result=base_result,
+                        )
+                    if requires_conversion:
+                        result = result.to(expected_dtype)
 
             return result
 
