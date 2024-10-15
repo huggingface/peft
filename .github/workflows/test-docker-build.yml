@@ -4,7 +4,7 @@ on:
   pull_request:
     paths:
       # Run only when DockerFile files are modified
-      - "docker/**"
+      - "docker/*/Dockerfile"
 jobs:
   get_changed_files:
     name: "Build all modified docker images"
@@ -18,7 +18,7 @@ jobs:
         id: changed-files
         uses: tj-actions/changed-files@1c8e6069583811afb28f97afeaf8e7da80c6be5c #v42
         with:
-          files: docker/**
+          files: docker/*/Dockerfile
           json: "true"
       - name: Run step if only the files listed above change
         if: steps.changed-files.outputs.any_changed == 'true'
