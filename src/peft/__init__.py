@@ -17,7 +17,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.13.2.dev0"
+__version__ = "0.13.3.dev0"
 
 from .auto import (
     AutoPeftModel,
@@ -104,6 +104,6 @@ from .utils import (
     set_peft_model_state_dict,
     shift_tokens_right,
     load_peft_weights,
-    cast_mixed_precision_params,
+    cast_mixed_precision_params
 )
 from .config import PeftConfig, PromptLearningConfig
