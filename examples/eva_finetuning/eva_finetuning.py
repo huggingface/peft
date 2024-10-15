@@ -1,5 +1,7 @@
 import torch
 from peft import LoraConfig, EvaConfig, get_peft_model
+from peft.tuners.lora.eva import initialize_lora_eva_weights
+from peft.tuners.lora import LoraLayer
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import load_dataset
 from torch.utils.data import DataLoader
@@ -42,7 +44,6 @@ dataloader = DataLoader(
 
 # get eva model
 eva_config = EvaConfig(
-    dataloader = dataloader,
     rho = rho,
     use_label_mask = use_label_mask,
     whiten = whiten,
@@ -53,6 +54,8 @@ peft_config = LoraConfig(
     lora_alpha = alpha,
     target_modules = target_modules,
     init_lora_weights = "eva",
-    eva_config = eva_config,
+    eva_config = eva_config
 )
-peft_model = get_peft_model(model, peft_config)
+peft_model = get_peft_model(model, peft_config, low_cpu_mem_usage=True)
+
+initialize_lora_eva_weights(peft_model, peft_config, dataloader, device="cuda")

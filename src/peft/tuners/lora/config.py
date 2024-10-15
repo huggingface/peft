@@ -17,7 +17,6 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
-from collections.abc import Iterable
 
 from torch import nn
 
@@ -76,7 +75,6 @@ class EvaConfig:
     This is the sub-configuration class to store the configuration for a data-drive initialization via EVA.
 
     Args:
-        dataloader (`Iterable`): Dataloader used for EVA initialization. Needs to contain column 'input_ids'.
         rho (`float`): Rho value for EVA redistribution. Default is 1.0.
         tau (`float`): Cosine similarity threshold for early stopping. Default is 0.99.
         use_label_mask (`bool`): Use label mask for EVA initialization. Default is False.
@@ -85,13 +83,15 @@ class EvaConfig:
         device (`str`): Device to use for EVA initialization. Default is 'cuda'.
     """
 
-    dataloader: Iterable = field(metadata={"help": "Dataloader used for EVA initialization. Needs to contain column 'input_ids'"})
     rho: float = field(default=1.0, metadata={"help": "Rho value for EVA redistribution"})
     tau: float = field(default=0.99, metadata={"help": "Cosine similarity threshold for early stopping"})
     use_label_mask: bool = field(default=False, metadata={"help": "Use label mask for EVA initialization"})
     label_mask_value: int = field(default=-100, metadata={"help": "if use_label_mask=True the value to look for to mask out ignored tokens"})
     whiten: bool = field(default=False, metadata={"help": "Apply whitening to singular vectors"})
     device: str = field(default="cuda", metadata={"help": "Device to use for EVA initialization"})
+
+    def __post_init__(self):
+        assert self.rho >= 1.0, "early_stop_rho must be >= 1"
 
 
 @dataclass
