@@ -143,11 +143,9 @@ base result at those times to get the speedup. Running [dora finetuning](https:/
 
 | | Without Optimization | With Optimization |
 | :--: | :--: | :--: |
-| train_runtime | 14.0129 | 11.8011 |
-| train_samples_per_second | 0.714 | 0.847 |
-| train_steps_per_second |0.357 | 0.424 |
-| train_loss | 10.531291198730468 | 10.531893920898437 |
-| memory utilization | 755MiB | 732MiB |
+| train_runtime | 359.7298 | **279.2676** |
+| train_samples_per_second | 1.779 | **2.292** |
+| train_steps_per_second | 0.056 | **0.072** |
 
 #### Caveats
 
