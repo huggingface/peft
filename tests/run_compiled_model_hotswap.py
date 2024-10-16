@@ -41,7 +41,7 @@ def check_hotswap(do_hotswap=True):
 
         model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM").to(torch_device)
         model = PeftModel.from_pretrained(model, os.path.join(tmp_dirname, "adapter0")).eval()
-        model = torch.compile(model)
+        model = torch.compile(model, mode="reduce-overhead")
         model(inputs).logits
 
         # swap and check that we get the output from adapter1
