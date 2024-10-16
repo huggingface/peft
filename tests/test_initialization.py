@@ -1769,6 +1769,8 @@ class TestHotSwapping:
         exit_code = process.returncode
 
         # sanity check:
+        # FIXME
+        print(stderr.decode())
         assert exit_code == 0
 
         # check that the recompilation message is not present
