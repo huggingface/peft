@@ -1770,9 +1770,6 @@ class TestHotSwapping:
         exit_code = process.returncode
 
         # sanity check:
-        # FIXME
-        if exit_code == 1:
-            assert stderr.decode() == "foo"
         assert exit_code == 0
 
         # check that the recompilation message is not present
