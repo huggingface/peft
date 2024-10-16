@@ -35,7 +35,7 @@ from .layer import BoneLayer, BoneLinear
 class BoneModel(BaseTuner):
     """
     Creates Householder reflection adaptation (Bone) model from a pretrained model. The method is described in
-    https://arxiv.org/abs/2405.17484
+    https://arxiv.org/abs/2409.15371
 
     Args:
         model (`torch.nn.Module`): The model to which the adapter tuner layers will be attached.
@@ -195,12 +195,9 @@ class BoneModel(BaseTuner):
 
         if isinstance(target_base_layer, torch.nn.Linear):
             new_module = BoneLinear(target, adapter_name, **kwargs)
-        # elif isinstance(target_base_layer, torch.nn.Conv2d):
-        #     new_module = BoneConv2d(target, adapter_name, **kwargs)
         else:
             raise ValueError(
-                f"Target module {target} is not supported. "
-                "Currently, only `torch.nn.Linear` and `torch.nn.Conv2d` are supported."
+                f"Target module {target} is not supported. " "Currently, only `torch.nn.Linear` is supported."
             )
 
         return new_module

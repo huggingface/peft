@@ -30,8 +30,6 @@ class BoneConfig(PeftConfig):
         r (`int`):
             The rank of Bone across different layers. It is best to set 'r' to an even number; otherwise, the default
             initialization method will not work.
-        apply_GS (`bool`):
-            Whether to apply Gram-Schmidt orthogonalization.
         target_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
             names will be replaced. When passing a string, a regex match will be performed. When passing a list of

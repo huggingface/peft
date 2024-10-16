@@ -46,6 +46,7 @@ from .tuners import (
     AdaLoraModel,
     AdaptionPromptModel,
     BOFTModel,
+    BoneModel,
     FourierFTModel,
     HRAModel,
     IA3Model,
@@ -63,7 +64,6 @@ from .tuners import (
     VeraModel,
     XLoraConfig,
     XLoraModel,
-    BoneModel,
 )
 from .tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from .utils import (

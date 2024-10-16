@@ -38,6 +38,8 @@ from .tuners import (
     AdaptionPromptConfig,
     BOFTConfig,
     BOFTModel,
+    BoneConfig,
+    BoneModel,
     FourierFTConfig,
     FourierFTModel,
     HRAConfig,
@@ -65,8 +67,6 @@ from .tuners import (
     VeraConfig,
     VeraModel,
     XLoraConfig,
-    BoneConfig,
-    BoneModel,
 )
 from .tuners.tuners_utils import BaseTuner
 from .utils import _prepare_prompt_learning_config

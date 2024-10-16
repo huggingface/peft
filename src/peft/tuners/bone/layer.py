@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import math
 import warnings
 from typing import Any, List, Optional, Union
 
@@ -22,14 +21,12 @@ import torch.nn.functional as F
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
-from einops import rearrange
-
 
 class BoneLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names = ("bone_block",)
     # All names of other parameters that may contain adapter-related parameters
-    other_param_names = ("bone_r")
+    other_param_names = ("bone_r",)
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         self.base_layer = base_layer
@@ -61,26 +58,24 @@ class BoneLayer(BaseTunerLayer):
             adapter_name (`str`): Name for the adapter to add.
             r (`int`): Rank for the added adapter.
             init_weights (`bool`): Whether to initialize weights.
-            apply_GS (`bool`): Whether to apply Gram-Schmidt orthogonalization or not.
         """
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+        if self.in_features % r != 0 or self.out_features % r != 0:
+            raise ValueError("The weight matrix must be fully divisible into [r, r] blocks.")
 
         self.bone_r[adapter_name] = r
 
         # Determine shape of Bone weights
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
-            self.bone_block[adapter_name] = nn.Parameter(torch.zeros(self.out_features//r, r, r), requires_grad=True)
-        # elif isinstance(base_layer, nn.Conv2d):
-        #     self.bone_block[adapter_name] = nn.Parameter(
-        #         torch.empty(self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0], r),
-        #         requires_grad=True,
-        #     )
+            self.bone_block[adapter_name] = nn.Parameter(torch.zeros(self.out_features // r, r, r), requires_grad=True)
+
         else:
             raise TypeError(f"Bone is not implemented for base layers of type {type(base_layer).__name__}")
 
         # Initialize weights
+
     #     if init_weights:
     #         self.reset_bone_parameters(adapter_name)
     #     else:
@@ -92,7 +87,6 @@ class BoneLayer(BaseTunerLayer):
 
     # def reset_bone_parameters(self, adapter_name: str):
     #     self.bone_block[adapter_name] = nn.Parameter(torch.zeros(self.in_features, r), requires_grad=True)
-
 
     # def reset_bone_parameters_random(self, adapter_name: str):
     #     nn.init.kaiming_uniform_(self.bone_block[adapter_name], a=math.sqrt(5))
@@ -202,13 +196,23 @@ class BoneLinear(nn.Module, BoneLayer):
         cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
 
         weight_bone = self.bone_block[adapter]
-        
+
         if cast_to_fp32:
             weight_bone = weight_bone.float()
-        
-        #weight_bone = weight_bone.to(orig_weight.dtype)
-        w =  rearrange(orig_weight, '(a r1) (b r2) -> b a r1 r2', r1 = weight_bone.size(-1), r2 = weight_bone.size(-1))@weight_bone+weight_bone
-        output_tensor = rearrange(w, 'b a r1 r2 ->(a r1) (b r2) ')
+
+        # w = (
+        #     rearrange(orig_weight, "(a r1) (b r2) -> b a r1 r2", r1=weight_bone.size(-1), r2=weight_bone.size(-1))
+        #     @ weight_bone
+        #     + weight_bone
+        # )
+        # output_tensor = rearrange(w, "b a r1 r2 ->(a r1) (b r2) ")
+        r = weight_bone.size(-1)
+        w = (
+            orig_weight.reshape(self.orig_weight.size(0) // r, r, self.orig_weight.size(1) // r, r).transpose(1, 2)
+            @ weight_bone
+            + weight_bone
+        )
+        output_tensor = w.reshape(*orig_weight.shape)
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
@@ -228,7 +232,6 @@ class BoneLinear(nn.Module, BoneLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.bone_block.keys():
                     continue
@@ -238,23 +241,9 @@ class BoneLinear(nn.Module, BoneLayer):
 
             result = F.linear(input=x, weight=orig_weight, bias=self.base_layer.bias)
 
-            # def fn_bone(weight, b, x, bias):
-            #     for active_adapter in b:
-            #         if active_adapter not in self.bone_block.keys():
-            #             continue
-            #         orig_weight = weight.clone()
-            #         delta_weight = self.get_delta_weight(active_adapter, orig_weight)
-            #         orig_weight += delta_weight
-
-            #     return F.linear(input=x, weight=orig_weight, bias=bias)
-            # return torch_checkpoint(fn_bone, self.base_layer.weight.data, self.active_adapters, x, self.base_layer.bias)
         result = result.to(previous_dtype)
         return result
-
-
 
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "bone." + rep
-
-
