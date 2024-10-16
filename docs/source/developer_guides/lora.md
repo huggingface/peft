@@ -139,7 +139,10 @@ model = PeftModel.from_pretrained(base_model, peft_model_id, ephemeral_gpu_offlo
 ```
 
 DoRA is optimized (computes faster and takes less memory) for models in the evaluation mode, or when dropout is set to 0. We reuse the
-base result at those times to get the speedup. Running [dora finetuning](https://github.com/huggingface/peft/blob/main/examples/dora_finetuning/dora_finetuning.py) with `CUDA_VISIBLE_DEVICES=0 time python dora_finetuning.py --quantize --lora_dropout 0 --use_dora` these were the observations:
+base result at those times to get the speedup. 
+Running [dora finetuning](https://github.com/huggingface/peft/blob/main/examples/dora_finetuning/dora_finetuning.py)
+with `CUDA_VISIBLE_DEVICES=0 time python examples/dora_finetuning/dora_finetuning.py --quantize --lora_dropout 0 --batch_size 16 --eval_step 2 --use_dora`
+on a 4090 with gradient accumulation set to 2 and max step to 20 resulted with the following observations:
 
 | | Without Optimization | With Optimization |
 | :--: | :--: | :--: |
