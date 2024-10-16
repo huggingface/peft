@@ -12,7 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 from contextlib import contextmanager
+from typing import Literal
 
 import packaging.version
 import torch
@@ -48,6 +51,10 @@ def dequantize_module_weight(module: torch.nn.Module) -> torch.nn.Parameter:
     """
     if hasattr(module, "W_q"):  # For handling HQQ quantized weight
         weight = module.dequantize()
+        return weight
+    elif type(module.weight).__module__.startswith("torchao."):
+        # check for torchao without requiring any torchao imports
+        weight = module.weight.dequantize()
         return weight
 
     weight = module.weight
@@ -104,3 +111,12 @@ def dequantize_bnb_weight(weight: torch.nn.Parameter, state=None):
     if is_cpu:
         dequantized = dequantized.to(device)
     return dequantized
+
+
+def get_bnb_param_type(param: torch.nn.Parameter) -> Literal[False, "4bit", "8bit"]:
+    """Returns '4bit' or '8bit' if bitsandbytes parameter, else False"""
+    if param.__class__.__name__ == "Params4bit":
+        return "4bit"
+    if param.__class__.__name__ == "Int8Params":
+        return "8bit"
+    return False

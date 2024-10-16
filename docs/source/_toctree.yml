@@ -45,8 +45,6 @@
     title: Troubleshooting
   - local: developer_guides/checkpoint
     title: PEFT checkpoint format
-  - local: package_reference/helpers
-    title: Helpers
 
 - title: 🤗 Accelerate integrations
   sections:
@@ -92,6 +90,8 @@
       title: LoKr
     - local: package_reference/lora
       title: LoRA
+    - local: package_reference/xlora
+      title: X-LoRA
     - local: package_reference/adapter_utils
       title: LyCORIS
     - local: package_reference/multitask_prompt_tuning
@@ -114,11 +114,14 @@
       title: VeRA
     - local: package_reference/fourierft
       title: FourierFT
-      
+    - local: package_reference/vblora
+      title: VB-LoRA
+
     title: Adapters
   - sections:
     - local: package_reference/merge_utils
       title: Model merge
+    - local: package_reference/helpers
+      title: Helpers
     title: Utilities
   title: API reference
-

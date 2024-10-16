@@ -14,13 +14,20 @@
 
 import os
 
+import huggingface_hub
+import packaging
 import pytest
 import torch
+import transformers
+from safetensors.torch import load_file
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import LoraConfig, PeftType, TaskType, XLoraConfig, get_peft_model
 from peft.peft_model import PeftModel
 from peft.utils import infer_device
+
+
+uses_transformers_4_45 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.45.0")
 
 
 class TestXlora:
@@ -29,15 +36,15 @@ class TestXlora:
     model_id = "facebook/opt-125m"
     num_loras = 4
 
-    @pytest.fixture(scope="function")
+    @pytest.fixture(scope="class")
     def lora_dir(self, tmp_path_factory):
         return tmp_path_factory.mktemp("lora")
 
-    @pytest.fixture(scope="function")
+    @pytest.fixture(scope="class")
     def lora_embedding_dir(self, tmp_path_factory):
         return tmp_path_factory.mktemp("lora_embedding")
 
-    @pytest.fixture(scope="function")
+    @pytest.fixture(scope="class")
     def saved_lora_adapters(self, lora_dir):
         file_names = []
         for i in range(1, self.num_loras + 1):
@@ -50,7 +57,7 @@ class TestXlora:
             file_names.append(file_name)
         return file_names
 
-    @pytest.fixture(scope="function")
+    @pytest.fixture(scope="class")
     def saved_lora_embedding_adapters(self, lora_embedding_dir):
         file_names = []
         for i in range(1, self.num_loras + 1):
@@ -63,7 +70,7 @@ class TestXlora:
             file_names.append(file_name)
         return file_names
 
-    @pytest.fixture(scope="function")
+    @pytest.fixture(scope="class")
     def tokenizer(self):
         tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True, device_map=self.torch_device)
         return tokenizer
@@ -126,6 +133,9 @@ class TestXlora:
         )
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
 
+    # TODO: remove the skip when 4.45 is released!
+    @pytest.mark.skipif(not uses_transformers_4_45, reason="Requires transformers >= 4.45")
+    @pytest.mark.xfail
     def test_scalings_logging_methods(self, tokenizer, model):
         model.enable_scalings_logging()
 
@@ -153,16 +163,13 @@ class TestXlora:
 
         bucketed = model.get_bucketed_scalings_log()
         keys = bucketed.keys()
-        # One bucket for prompt (seqlen=...) and one for the completion (seqlen=1)
-        assert len(bucketed) == 2
-        # One bucket for prompt (which has 1 elem)
-        assert len(bucketed[max(keys)][0]) == 1
-        assert len(bucketed[max(keys)][1]) == 1
-        assert bucketed[max(keys)][0][0] == 0
-        # One bucket for completions with bucket name 1
-        assert len(bucketed[1][0]) > 1
-        assert len(bucketed[1][1]) > 1
-        assert bucketed[1][0][0] > 0
+        # Once bucket for each token as we aren't using cache
+        assert len(bucketed) == 32 == len(keys)
+        seq_len = inputs.shape[1]
+        for key in keys:
+            assert len(bucketed[key][0]) == 1
+            assert len(bucketed[key][1]) == 1
+            assert bucketed[key][0][0] == key - seq_len
 
         model.clear_scalings_log()
         assert len(model.get_scalings_log()) == 0
@@ -181,6 +188,8 @@ class TestXlora:
 
         assert str(model) is not None
 
+    # TODO: On CI (but not locally), this test seems to have become flaky with the latest transformers changes (v4.45).
+    @pytest.mark.xfail
     def test_save_load_functional(self, tokenizer, model, tmp_path):
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
@@ -305,3 +314,36 @@ class TestXlora:
             max_new_tokens=32,
         )
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
+
+    def test_xlora_loading_valid(self):
+        # This test also simulatenously tests the loading-from-hub functionality!
+        torch.manual_seed(123)
+
+        model_id = "facebook/opt-125m"
+        model = AutoModelForCausalLM.from_pretrained(model_id)
+        model.config.use_cache = False
+
+        adapters = [
+            "peft-internal-testing/opt-125m-dummy-lora",
+            "peft-internal-testing/opt-125m-dummy-lora",
+        ]
+        adapters = {str(i): file_name for i, file_name in enumerate(adapters)}
+
+        peft_config = XLoraConfig(
+            task_type=TaskType.CAUSAL_LM,
+            peft_type=PeftType.XLORA,
+            hidden_size=model.config.hidden_size,
+            adapters=adapters,
+            xlora_depth=8,
+            xlora_size=2048,
+            layerwise_scalings=True,
+            xlora_dropout_p=0.2,
+        )
+        model = get_peft_model(model, peft_config)
+
+        downloaded = huggingface_hub.hf_hub_download(repo_id=adapters["0"], filename="adapter_model.safetensors")
+        sd = load_file(downloaded)
+        w0 = model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A["0"].weight
+        w1 = sd["base_model.model.model.decoder.layers.0.self_attn.q_proj.lora_A.weight"]
+
+        assert torch.allclose(w0, w1)

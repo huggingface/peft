@@ -50,6 +50,18 @@ In principle, LoRA can be applied to any subset of weight matrices in a neural n
 </div>
 <small><a href="https://hf.co/papers/2103.10385">Navigating Text-To-Image Customization: From LyCORIS Fine-Tuning to Model Evaluation</a></small>
 
+## Mixture of LoRA Experts (X-LoRA)
+
+[X-LoRA](https://arxiv.org/abs/2402.07148) is a mixture of experts method for LoRA which works by using dense or sparse gating to dynamically activate LoRA experts. The LoRA experts as well as the base model are frozen during training, resulting in a low parameter count as only the gating layers must be trained. In particular, the gating layers output scalings which (depending on config) are granular on the layer and token level. Additionally, during inference, X-LoRA dynamically activates LoRA adapters to recall knowledge and effectively mix them:
+
+The below graphic demonstrates how the scalings change for different prompts for each token. This highlights the activation of different adapters as the generation progresses and the sequence creates new context.
+
+![Token-by-token scalings](https://github.com/EricLBuehler/xlora/raw/master/res/token_by_token_scalings.gif)
+
+For each step, X-LoRA requires the base model to be run twice: first, to get hidden states without any LoRA adapters, and secondly, the hidden states are used to calculate scalings which are applied to the LoRA adapters and the model is run a second time. The output of the second run is the result of the model step.
+
+Ultimately, X-LoRA allows the model to reflect upon it's knowledge because of the dual forward pass scheme, and dynamically reconfigure the architecture.
+
 ## Low-Rank Hadamard Product (LoHa)
 
 Low-rank decomposition can impact performance because the weight updates are limited to the low-rank space, which can constrain a model's expressiveness. However, you don't necessarily want to use a larger rank because it increases the number of trainable parameters. To address this, [LoHa](https://huggingface.co/papers/2108.06098) (a method originally developed for computer vision) was applied to diffusion models where the ability to generate diverse images is an important consideration. LoHa should also work with general model types, but the embedding layers aren't currently implemented in PEFT.

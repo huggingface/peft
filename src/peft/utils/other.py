@@ -11,12 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
+
 import copy
 import inspect
 import os
 import warnings
 from contextlib import nullcontext
-from typing import Optional, Tuple
+from typing import Any, Optional
 
 import accelerate
 import torch
@@ -40,6 +42,7 @@ from .constants import (
     TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
+    TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
     WEIGHTS_NAME,
     bloom_model_postprocess_past_key_value,
@@ -65,6 +68,7 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
     "TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING",
     "WEIGHTS_NAME",
     "INCLUDE_LINEAR_LAYERS_SHORTHAND",
@@ -110,6 +114,7 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
     is_gptq_quantized = getattr(model, "quantization_method", None) == "gptq"
     is_aqlm_quantized = getattr(model, "quantization_method", None) == "aqlm"
     is_eetq_quantized = getattr(model, "quantization_method", None) == "eetq"
+    is_torchao_quantized = getattr(model, "quantization_method", None) == "torchao"
     is_hqq_quantized = getattr(model, "quantization_method", None) == "hqq" or getattr(model, "hqq_quantized", False)
 
     if gradient_checkpointing_kwargs is None:
@@ -119,7 +124,13 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
         # freeze base model's layers
         param.requires_grad = False
 
-    if not is_gptq_quantized and not is_aqlm_quantized and not is_eetq_quantized and not is_hqq_quantized:
+    if (
+        not is_gptq_quantized
+        and not is_aqlm_quantized
+        and not is_eetq_quantized
+        and not is_hqq_quantized
+        and not is_torchao_quantized
+    ):
         # cast all non INT8 parameters to fp32
         for param in model.parameters():
             if (
@@ -128,7 +139,12 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
                 param.data = param.data.to(torch.float32)
 
     if (
-        loaded_in_kbit or is_gptq_quantized or is_aqlm_quantized or is_eetq_quantized or is_hqq_quantized
+        loaded_in_kbit
+        or is_gptq_quantized
+        or is_aqlm_quantized
+        or is_eetq_quantized
+        or is_hqq_quantized
+        or is_torchao_quantized
     ) and use_gradient_checkpointing:
         # When having `use_reentrant=False` + gradient_checkpointing, there is no need for this hack
         if "use_reentrant" not in gradient_checkpointing_kwargs or gradient_checkpointing_kwargs["use_reentrant"]:
@@ -202,7 +218,15 @@ class ModulesToSaveWrapper(torch.nn.Module):
         # ModuleList, even though their forward methods cannot be called
         forbidden_classes = (torch.nn.ModuleDict, torch.nn.ModuleList, torch.nn.ParameterDict, torch.nn.ParameterList)
         if isinstance(self.original_module, forbidden_classes):
-            cls_name = self.original_module.__class__.__name__
+            cls_name = self.original_module.__class__
+            raise TypeError(f"modules_to_save cannot be applied to modules of type {cls_name}")
+
+        # local import to avoid circular import
+        from peft.tuners.tuners_utils import BaseTunerLayer
+
+        if isinstance(self.original_module, BaseTunerLayer):
+            # e.g. applying modules_to_save to a lora layer makes no sense
+            cls_name = self.original_module.__class__
             raise TypeError(f"modules_to_save cannot be applied to modules of type {cls_name}")
 
     @property
@@ -215,11 +239,29 @@ class ModulesToSaveWrapper(torch.nn.Module):
         # use a property to ensure that active_adapter is not set directly, instead use the set_adapter method
         return self._active_adapter
 
-    @property
-    def weight(self):
-        if self.active_adapter not in self.modules_to_save:
-            return self.original_module.weight
-        return self.modules_to_save[self.active_adapter].weight
+    def __getattr__(self, name: str):
+        # Note: This whole method may seem overly complex at first but PyTorch messes with __getattr__ in a way that
+        # requires very careful handling to avoid infinite recursion.
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            pass
+
+        if "_modules" not in self.__dict__:
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
+        # Could not find the attribute the PyTorch way. So let's check if it's an attribute on the
+        # original_module/modules_to_save.
+        modules = self.__dict__["_modules"]
+        if self.disable_adapters:
+            module = modules["original_module"]
+        elif self.active_adapter in modules["modules_to_save"]:
+            module = modules["modules_to_save"][self.active_adapter]
+        else:
+            # For some reason, there is no module corresponding to the active adapter; this should normally not be
+            # reached and exists as a failsafe (otherwise, a KeyError would be raised)
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+        return getattr(module, name)
 
     def update(self, adapter_name):
         context_manager = nullcontext()
@@ -258,10 +300,62 @@ class ModulesToSaveWrapper(torch.nn.Module):
         new_hook = old_hook_cls(**filtered_old_hook_attr)
         return new_hook
 
-    def forward(self, *args, **kwargs):
+    def _check_forward_args(self, x, *args, **kwargs):
+        """Check if the arguments are compatible with the configs and state of the model"""
+        adapter_names = kwargs.get("adapter_names", None)
+        if adapter_names is None:
+            return
+
+        if len(x) != len(adapter_names):
+            msg = (
+                "Length of `adapter_names` should be the same as the number of inputs, but got "
+                f"{len(adapter_names)} and {len(x)} respectively."
+            )
+            raise ValueError(msg)
+
+    def _mixed_batch_forward(
+        self, input: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
+    ) -> torch.Tensor:
+        # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
+        # extra argument that allows mixing different adapters in the same batch at inference time.
+
+        SUPPORTED_MODULES = (torch.nn.Linear, torch.nn.Embedding, torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d)
+
+        module_names = ", ".join([module.__name__ for module in SUPPORTED_MODULES])
+
+        if not isinstance(self.original_module, SUPPORTED_MODULES):
+            raise TypeError(f"Mixed batching is only supported for the following modules: {module_names}.")
+
+        unique_adapters = set(adapter_names)
+        sub_batch_indices_list = []
+
+        for adapter in unique_adapters:
+            sub_batch_indices_list.append([index for index, item in enumerate(adapter_names) if item == adapter])
+
+        results = [0 for _ in range(len(input))]
+
+        for i, active_adapter in enumerate(unique_adapters):
+            sub_batch = input[sub_batch_indices_list[i]]
+
+            if active_adapter == "__base__":
+                output = self.original_module(sub_batch, *args, **kwargs)
+            else:
+                output = self.modules_to_save[active_adapter](sub_batch, *args, **kwargs)
+
+            for index, j in enumerate(sub_batch_indices_list[i]):
+                results[j] = output[index]
+
+        return torch.stack(results)
+
+    def forward(self, x: torch.Tensor, *args, **kwargs):
+        self._check_forward_args(x, *args, **kwargs)
+        adapter_names = kwargs.pop("adapter_names", None)
+
         if self.disable_adapters or (self.active_adapter not in self.modules_to_save):
-            return self.original_module(*args, **kwargs)
-        return self.modules_to_save[self.active_adapter](*args, **kwargs)
+            return self.original_module(x, *args, **kwargs)
+        if adapter_names is None:
+            return self.modules_to_save[self.active_adapter](x, *args, **kwargs)
+        return self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
 
     def enable_adapters(self, enabled: bool):
         """Toggle the enabling and disabling of adapters
@@ -536,7 +630,7 @@ def get_auto_gptq_quant_linear(gptq_quantization_config):
     return None
 
 
-def id_tensor_storage(tensor: torch.Tensor) -> Tuple[torch.device, int, int]:
+def id_tensor_storage(tensor: torch.Tensor) -> tuple[torch.device, int, int]:
     """
     Unique identifier to a tensor storage. Multiple different tensors can share the same underlying storage. For
     example, "meta" tensors all share the same storage, and thus their identifier will all be equal. This identifier is

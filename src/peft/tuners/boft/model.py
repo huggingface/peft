@@ -24,7 +24,12 @@ import torch
 from torch import nn
 from tqdm import tqdm
 
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
+from peft.tuners.tuners_utils import (
+    BaseTuner,
+    BaseTunerLayer,
+    check_target_module_exists,
+    onload_layer,
+)
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
@@ -44,6 +49,8 @@ class BOFTModel(BaseTuner):
         model ([`transformers.PreTrainedModel`]): The model to be adapted.
         config ([`BOFTConfig`]): The configuration of the BOFT model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
+        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+            Create empty adapter weights on meta device. Useful to speed up the loading process.
 
     Returns:
         `torch.nn.Module`: The BOFT model.
@@ -67,8 +74,8 @@ class BOFTModel(BaseTuner):
 
     prefix: str = "boft_"
 
-    def __init__(self, model, config, adapter_name) -> None:
-        super().__init__(model, config, adapter_name)
+    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
+        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
     def _check_new_adapter_config(self, config: BOFTConfig) -> None:
         """
@@ -151,10 +158,12 @@ class BOFTModel(BaseTuner):
                 new_module.state = child.state
             new_module.to(child.weight.device)
 
+        meta = torch.device("meta")
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if self.prefix in name:
-                module.to(child.weight.device)
+                if not any(p.device == meta for p in module.parameters()):
+                    module.to(child.weight.device)
 
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
         for n, p in model.named_parameters():
@@ -265,7 +274,9 @@ class BOFTModel(BaseTuner):
         safe_merge: bool = False,
         adapter_names: Optional[List[str]] = None,
     ):
-        self._unloading_checks(adapter_names)
+        if merge:
+            self._check_merge_allowed()
+
         key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for key in tqdm(key_list, disable=not progressbar, desc=desc):
@@ -273,14 +284,20 @@ class BOFTModel(BaseTuner):
                 parent, target, target_name = _get_submodules(self.model, key)
             except AttributeError:
                 continue
-
-            if hasattr(target, "base_layer"):
-                if merge:
-                    target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
-                self._replace_module(parent, target_name, target.get_base_layer(), target)
-            elif isinstance(target, ModulesToSaveWrapper):
-                # save any additional trainable modules part of `modules_to_save`
-                setattr(parent, target_name, target.modules_to_save[target.active_adapter])
+            with onload_layer(target):
+                if hasattr(target, "base_layer"):
+                    if merge:
+                        target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
+                    self._replace_module(parent, target_name, target.get_base_layer(), target)
+                elif isinstance(target, ModulesToSaveWrapper):
+                    # save any additional trainable modules part of `modules_to_save`
+                    new_module = target.modules_to_save[target.active_adapter]
+                    if hasattr(new_module, "base_layer"):
+                        # check if the module is itself a tuner layer
+                        if merge:
+                            new_module.merge(safe_merge=safe_merge, adapter_names=adapter_names)
+                        new_module = new_module.get_base_layer()
+                    setattr(parent, target_name, new_module)
 
         return self.model
 

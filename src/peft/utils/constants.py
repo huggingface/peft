@@ -11,7 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 import torch
+from transformers import BloomPreTrainedModel
+
+from .peft_types import PeftType
 
 
 # needed for prefix-tuning of bloom model
@@ -40,9 +44,14 @@ def starcoder_model_postprocess_past_key_value(past_key_values):
 
 
 TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {
-    "bloom": bloom_model_postprocess_past_key_value,
     "gpt_bigcode": starcoder_model_postprocess_past_key_value,
 }
+
+if hasattr(BloomPreTrainedModel, "_convert_to_standard_cache"):
+    # special handling for bloom architecture was fixed in:
+    # https://github.com/huggingface/transformers/pull/31445
+    # the _convert_to_standard_cache method is removed in the PR and thus serves as an indicator
+    TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING["bloom"] = bloom_model_postprocess_past_key_value
 
 TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING = {
     "llama": ["input_layernorm", "post_attention_layernorm", "norm"],
@@ -65,6 +74,13 @@ TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING = {
     "mistral": ["input_layernorm", "post_attention_layernorm", "norm"],
     "phi": ["input_layernorm", "final_layernorm"],
     "gemma": ["input_layernorm", "post_attention_layernorm", "norm"],
+    "gemma2": [
+        "input_layernorm",
+        "post_attention_layernorm",
+        "pre_feedforward_layernorm",
+        "post_feedforward_layernorm",
+        "norm",
+    ],
     "qwen2": ["post_attention_layernorm"],
 }
 
@@ -100,6 +116,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "stablelm": ["q_proj", "v_proj"],
     "phi": ["q_proj", "v_proj", "fc1", "fc2"],
     "gemma": ["q_proj", "v_proj"],
+    "gemma2": ["q_proj", "v_proj"],
     "qwen2": ["q_proj", "v_proj"],
 }
 
@@ -126,6 +143,7 @@ TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
     "falcon": ["query_key_value", "dense_4h_to_h"],
     "phi": ["q_proj", "v_proj", "fc2"],
     "gemma": ["q_proj", "v_proj", "down_proj"],
+    "gemma2": ["q_proj", "v_proj", "down_proj"],
     "qwen2": ["q_proj", "v_proj", "down_proj"],
 }
 
@@ -152,6 +170,7 @@ TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
     "falcon": ["dense_4h_to_h"],
     "phi": ["fc2"],
     "gemma": ["down_proj"],
+    "gemma2": ["down_proj"],
     "qwen2": ["down_proj"],
 }
 
@@ -202,14 +221,14 @@ TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING = {
     "RefinedWebModel": ["query_key_value"],
     "RefinedWeb": ["query_key_value"],
     "falcon": ["query_key_value"],
-    # "btlm": ["c_proj", "c_attn"],  # tested, does not work because of different shapes
+    "btlm": ["c_proj", "c_attn"],
     "codegen": ["qkv_proj"],
-    # "mistral": ["q_proj", "v_proj"],  # tested, does not work because of different shapes
-    # "mixtral": ["q_proj", "v_proj"],  # tested, does not work because of different shapes
+    "mistral": ["q_proj", "v_proj"],
+    "mixtral": ["q_proj", "v_proj"],
     "stablelm": ["q_proj", "v_proj"],
-    # "phi": ["q_proj", "v_proj", "fc1", "fc2"],  # tested, does not work because of different shapes
     "phi": ["q_proj", "v_proj"],
-    # "gemma": ["q_proj", "v_proj"],  # tested, does not work because of different shapes
+    "gemma": ["q_proj", "v_proj"],
+    "gemma2": ["q_proj", "v_proj"],
     "qwen2": ["q_proj", "v_proj"],
 }
 
@@ -244,13 +263,57 @@ TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING = {
     "stablelm": ["q_proj", "v_proj"],
     "phi": ["q_proj", "v_proj", "fc1", "fc2"],
     "gemma": ["q_proj", "v_proj"],
+    "gemma2": ["q_proj", "v_proj"],
     "qwen2": ["q_proj", "v_proj"],
+}
+
+TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING = {
+    "t5": ["q", "k", "v", "o", "wi", "wo"],
+    "mt5": ["q", "k", "v", "o", "wi_0", "wi_1", "wo"],
+    "bart": ["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"],
+    "gpt2": ["c_attn"],
+    "bloom": ["query_key_value"],
+    "opt": ["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"],
+    "gptj": ["q_proj", "v_proj"],
+    "gpt_neox": ["query_key_value"],
+    "gpt_neo": ["q_proj", "v_proj"],
+    "llama": ["q_proj", "v_proj"],
+    "bert": ["query", "value"],
+    "roberta": ["query", "value"],
+    "deberta-v2": ["query_proj", "key_proj", "value_proj", "dense"],
+    "gpt_bigcode": ["c_attn"],
+    "deberta": ["in_proj"],
+    "qwen2": ["q_proj", "v_proj"],
+}
+
+PEFT_TYPE_TO_PREFIX_MAPPING = {
+    PeftType.IA3: "ia3_",
+    PeftType.LORA: "lora_",
+    PeftType.ADALORA: "lora_",
+    PeftType.LOHA: "hada_",
+    PeftType.LOKR: "lokr_",
+    PeftType.OFT: "oft_",
+    PeftType.POLY: "poly_",
+    PeftType.BOFT: "boft_",
+    PeftType.LN_TUNING: "ln_tuning_",
+    PeftType.VERA: "vera_lambda_",
+    PeftType.FOURIERFT: "fourierft_",
+    PeftType.HRA: "hra_",
+    PeftType.VBLORA: "vblora_",
 }
 
 WEIGHTS_NAME = "adapter_model.bin"
 SAFETENSORS_WEIGHTS_NAME = "adapter_model.safetensors"
 CONFIG_NAME = "adapter_config.json"
 EMBEDDING_LAYER_NAMES = ["embed_tokens", "lm_head"]
+SEQ_CLS_HEAD_NAMES = ["score", "classifier"]
 INCLUDE_LINEAR_LAYERS_SHORTHAND = "all-linear"
 TOKENIZER_CONFIG_NAME = "tokenizer_config.json"
 DUMMY_TARGET_MODULES = "dummy-target-modules"
+DUMMY_MODEL_CONFIG = {"model_type": "custom"}
+
+# If users specify more than this number of target modules, we apply an optimization to try to reduce the target modules
+# to a minimal set of suffixes, which makes loading faster. We only apply this when exceeding a certain size since
+# otherwise there is no point in optimizing and there is a small chance of bugs in the optimization algorithm, so no
+# point in taking unnecessary risks. See #2045 for more context.
+MIN_TARGET_MODULES_FOR_OPTIMIZATION = 20

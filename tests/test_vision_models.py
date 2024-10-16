@@ -16,20 +16,35 @@
 # and on stable diffusion models. Instead, this file contains specific tests for bugs that have been found in the past.
 import gc
 
+import numpy as np
 import pytest
 import torch
 from datasets import load_dataset
 from safetensors.torch import load_file
-from transformers import AutoImageProcessor, AutoModelForImageClassification
+from transformers import (
+    AutoImageProcessor,
+    AutoModelForImageClassification,
+    AutoProcessor,
+    LlavaForConditionalGeneration,
+)
 
-from peft import HRAConfig, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig, PeftModel, get_peft_model
+from peft import (
+    HRAConfig,
+    LoHaConfig,
+    LoKrConfig,
+    LoraConfig,
+    OFTConfig,
+    PeftModel,
+    PrefixTuningConfig,
+    get_peft_model,
+)
 
 
 CONFIGS = {
     "lora": LoraConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
     "loha": LoHaConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
     "lokr": LoKrConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
-    "oft": OFTConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
+    "oft": OFTConfig(r=1, target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
     "hra": HRAConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
     # TODO: cannot use BOFT because some convolutional kernel dimensions are even (64) and others odd (147). There is no
     # common denominator for the boft_block_size except 1, but using 1 results in an error in the fbd_cuda kernel:
@@ -38,8 +53,30 @@ CONFIGS = {
 }
 
 
+# Ensure that models like Llava that pass past_key_values automatically do not fail, see #1938
+class TestPastKV:
+    def test_past_kv(self):
+        model_id = "trl-internal-testing/tiny-random-LlavaForConditionalGeneration"
+        prompt = "USER: <image>\nWhat are these?\nASSISTANT:"
+
+        # prepare model and inputs
+        model = LlavaForConditionalGeneration.from_pretrained(
+            model_id,
+            low_cpu_mem_usage=True,
+        )
+        processor = AutoProcessor.from_pretrained(model_id)
+        raw_image = np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8)
+        inputs = processor(prompt, raw_image, return_tensors="pt")
+
+        # get peft model
+        peft_config = PrefixTuningConfig(task_type="CAUSAL_LM", num_virtual_tokens=20)
+        model.language_model = get_peft_model(model.language_model, peft_config)
+        # check that this does not raise
+        model(**inputs, output_hidden_states=True)
+
+
 class TestResnet:
-    model_id = "microsoft/resnet-18"
+    model_id = "hf-internal-testing/tiny-random-ResNetForImageClassification"
 
     @pytest.fixture(autouse=True)
     def teardown(self):
@@ -80,8 +117,8 @@ class TestResnet:
         optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
         batch_size = 4
         max_steps = 5 * batch_size
-        labels = torch.zeros(1, 1000)
-        labels[0, 283] = 1
+        labels = torch.zeros(1, 3)
+        labels[0, 1] = 1
         for i in range(0, max_steps, batch_size):
             optimizer.zero_grad()
             outputs = model(**data, labels=labels)

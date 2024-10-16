@@ -13,12 +13,17 @@
 # limitations under the License.
 
 import re
+from contextlib import contextmanager
 from copy import deepcopy
+from unittest.mock import patch
 
 import pytest
 import torch
+from huggingface_hub.utils import reset_sessions
+from safetensors.torch import load_file
 from scipy import stats
 from torch import nn
+from transformers import AutoModelForCausalLM
 
 from peft import (
     AdaLoraConfig,
@@ -32,8 +37,11 @@ from peft import (
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
     PromptTuningConfig,
+    VBLoRAConfig,
     VeraConfig,
     get_peft_model,
+    inject_adapter_in_model,
+    set_peft_model_state_dict,
 )
 from peft.utils import infer_device
 
@@ -324,11 +332,14 @@ class TestLoraInitialization:
 
         # save the model with conversion
         peft_config_keys_before = list(peft_model.peft_config.keys())
+        peft_config_dict_before = peft_model.peft_config["default"].to_dict()
         peft_model.save_pretrained(
             tmp_path / "pissa-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
         )
         peft_config_keys_after = list(peft_model.peft_config.keys())
+        peft_config_dict_after = peft_model.peft_config["default"].to_dict()
         assert peft_config_keys_before == peft_config_keys_after
+        assert peft_config_dict_before == peft_config_dict_after
 
         model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "pissa-model-converted")
         output_converted = model_converted(data)[0]
@@ -602,11 +613,14 @@ class TestLoraInitialization:
 
         # save the model with conversion
         peft_config_keys_before = list(peft_model.peft_config.keys())
+        peft_config_dict_before = peft_model.peft_config["default"].to_dict()
         peft_model.save_pretrained(
             tmp_path / "olora-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
         )
         peft_config_keys_after = list(peft_model.peft_config.keys())
+        peft_config_dict_after = peft_model.peft_config["default"].to_dict()
         assert peft_config_keys_before == peft_config_keys_after
+        assert peft_config_dict_before == peft_config_dict_after
 
         model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "olora-model-converted")
         output_converted = model_converted(data)[0]
@@ -1166,6 +1180,40 @@ class TestVeraInitialization:
             model.add_adapter("other", config1)
 
 
+class TestVBLoraInitialization:
+    torch_device = infer_device()
+
+    def get_model(self):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 30, bias=bias)
+                self.lin1 = nn.Linear(30, 2, bias=bias)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                return X
+
+        return MLP().to(self.torch_device)
+
+    def test_vblora_with_incompatible_vector_length_with_in_features(self):
+        vector_length = 3
+        model = self.get_model()
+        config = VBLoRAConfig(target_modules=["lin0"], vector_length=vector_length)
+        msg = f"`in_features` {model.lin0.in_features} must be divisible by `vector_length` {vector_length}"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+    def test_vblora_with_incompatible_vector_length_with_out_features(self):
+        vector_length = 3
+        model = self.get_model()
+        config = VBLoRAConfig(target_modules=["lin1"], vector_length=vector_length)
+        msg = f"`out_features` {model.lin1.out_features} must be divisible by `vector_length` {vector_length}"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+
 class TestNoInfiniteRecursionDeepspeed:
     # see #1892 for details
     classes = [
@@ -1216,3 +1264,283 @@ class TestNoInfiniteRecursionDeepspeed:
         finally:
             # ensure there are no side effects of this test
             cls.__init__ = original_init
+
+
+class TestLoadAdapterOfflineMode:
+    # make sure that PEFT honors offline mode
+
+    @contextmanager
+    def hub_offline_ctx(self):
+        # this is required to simulate offline mode, setting the env var dynamically inside the test does not work
+        # because the value is checked only once at the start of the session
+        with patch("huggingface_hub.constants.HF_HUB_OFFLINE", True):
+            reset_sessions()
+            yield
+        reset_sessions()
+
+    def test_load_from_hub_then_offline_model(self):
+        # this uses LoRA but it's the same mechanism for other methods
+        peft_model_id = "peft-internal-testing/gpt2-lora-random"
+        base_model = AutoModelForCausalLM.from_pretrained("gpt2")
+
+        # first ensure that the adapter model has been downloaded
+        PeftModel.from_pretrained(base_model, peft_model_id)
+
+        del base_model
+
+        base_model = AutoModelForCausalLM.from_pretrained("gpt2")
+        with self.hub_offline_ctx():
+            # does not raise
+            PeftModel.from_pretrained(base_model, peft_model_id)
+
+
+class TestCustomModelConfigWarning:
+    # Check potential warnings when the user provided base_model_name_or_path is overridden by PEFT. See #2001 for
+    # context. We use LoRA for this test but the same applies to other methods
+    @pytest.fixture
+    def custom_module(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = nn.Linear(10, 10)
+
+        return MyModule()
+
+    def test_no_warning_by_default_transformers_model(self, recwarn):
+        # first a sanity test that there is no warning by default when using a model from transformers
+        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+        get_peft_model(model, LoraConfig())
+        for warning in recwarn.list:
+            assert "renamed" not in str(warning.message)
+
+    def test_no_warning_by_default_custom_model(self, custom_module, recwarn):
+        # same as above but with a custom model
+        get_peft_model(custom_module, LoraConfig(target_modules=["lin"]))
+        for warning in recwarn.list:
+            assert "renamed" not in str(warning.message)
+
+    def test_warning_name_transformers_model(self, recwarn):
+        # The base_model_name_or_path provided by the user is overridden.
+        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+        custom_name = "custom_name"
+        get_peft_model(model, LoraConfig(base_model_name_or_path=custom_name))
+        msg = f"was renamed from '{custom_name}' to 'hf-internal-testing/tiny-random-OPTForCausalLM'"
+        assert any(msg in str(warning.message) for warning in recwarn.list)
+
+    def test_warning_name_custom_model(self, custom_module, recwarn):
+        custom_name = "custom_name"
+        get_peft_model(custom_module, LoraConfig(target_modules=["lin"], base_model_name_or_path=custom_name))
+        msg = f"was renamed from '{custom_name}' to 'None'"
+        assert any(msg in str(warning.message) for warning in recwarn.list)
+
+    def test_warning_name_custom_model_with_custom_name(self, custom_module, recwarn):
+        custom_name = "custom_name"
+        custom_module.name_or_path = "foobar"
+        get_peft_model(custom_module, LoraConfig(target_modules=["lin"], base_model_name_or_path=custom_name))
+        msg = f"was renamed from '{custom_name}' to 'foobar'"
+        assert any(msg in str(warning.message) for warning in recwarn.list)
+
+
+class TestLowCpuMemUsage:
+    """Test for the low CPU memory usage option for loading PEFT models.
+
+    Note that we have `test_load_model_low_cpu_mem_usage` in the custom model and stable diffusion tests. Those are
+    broad tests (i.e. testing all the supported PEFT methods) but not very deep (only testing if loading works and the
+    device is correctly set). The test class here goes deeper but only tests LoRA, as checking all PEFT methods would
+    be too much.
+
+    """
+
+    # test on CPU and optionally on accelerator device
+    devices = ["cpu"]
+    _device = infer_device()
+    if _device != "cpu":
+        devices.append(_device)
+
+    model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+
+    def get_model(self):
+        return AutoModelForCausalLM.from_pretrained(self.model_id)
+
+    @pytest.fixture(scope="class")
+    def lora_config(self):
+        return LoraConfig(init_lora_weights=False, target_modules="all-linear")
+
+    @pytest.fixture(scope="class")
+    def lora_path(self, tmp_path_factory, lora_config):
+        torch.manual_seed(0)
+        tmp_path = tmp_path_factory.mktemp("lora")
+        model = self.get_model()
+        model = get_peft_model(model, lora_config)
+        model.save_pretrained(tmp_path)
+        return tmp_path
+
+    @pytest.fixture(scope="class")
+    def inputs(self):
+        return {"input_ids": torch.randint(0, 100, (1, 10)), "attention_mask": torch.ones(1, 10)}
+
+    @pytest.mark.parametrize("device", devices)
+    def test_from_pretrained_low_cpu_mem_usage_works(self, device, inputs, lora_path):
+        model = self.get_model().to(device)
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+        model = PeftModel.from_pretrained(model, lora_path, torch_device=device).eval()
+        device_set_not_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_not_low_cpu_mem = model(**inputs).logits
+
+        del model
+
+        model = self.get_model().to(device)
+        model = PeftModel.from_pretrained(model, lora_path, low_cpu_mem_usage=True, torch_device=device).eval()
+        device_set_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_low_cpu_mem = model(**inputs).logits
+
+        assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+
+    @pytest.mark.parametrize("device", devices)
+    def test_load_adapter_low_cpu_mem_usage_works(self, device, inputs, lora_path, lora_config):
+        model = self.get_model().to(device)
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+
+        torch.manual_seed(0)
+        model = get_peft_model(model, lora_config)
+        model.load_adapter(lora_path, adapter_name="other", torch_device=device)
+        model.set_adapter("other")
+        model.eval()
+        device_set_not_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_not_low_cpu_mem = model(**inputs).logits
+
+        del model
+
+        model = self.get_model().to(device)
+        torch.manual_seed(0)
+        model = get_peft_model(model, lora_config)
+        model.load_adapter(lora_path, adapter_name="other", low_cpu_mem_usage=True, torch_device=device)
+        model.set_adapter("other")
+        model.eval()
+        device_set_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_low_cpu_mem = model(**inputs).logits
+
+        assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+
+    @pytest.mark.parametrize("device", devices)
+    def test_inject_adapter_low_cpu_mem_usage_works(self, device, inputs, lora_path, lora_config):
+        # external libs like transformers and diffusers use inject_adapter_in_model, let's check that this also works
+        model = self.get_model().to(device)
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+
+        torch.manual_seed(0)
+        model = get_peft_model(model, lora_config)
+        model.load_adapter(lora_path, adapter_name="other", torch_device=device)
+        model.set_adapter("other")
+        model.eval()
+        device_set_not_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_not_low_cpu_mem = model(**inputs).logits
+
+        del model
+
+        torch.manual_seed(0)
+        model = self.get_model().to(device)
+        inject_adapter_in_model(lora_config, model, low_cpu_mem_usage=True)
+        device_set_before_loading = {p.device.type for p in model.parameters()}
+        # at this stage, lora weights are still on meta device
+        assert device_set_before_loading == {"meta", device}
+
+        state_dict = load_file(lora_path / "adapter_model.safetensors")
+        remapped_dict = {}
+        prefix = "base_model.model."
+        for key, val in state_dict.items():
+            new_key = key[len(prefix) :]
+            remapped_dict[new_key] = val.to(device)
+        errors = set_peft_model_state_dict(model, remapped_dict, low_cpu_mem_usage=True)
+        # sanity check: no unexpected keys
+        assert not errors.unexpected_keys
+
+        model.eval()
+        device_set_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_low_cpu_mem = model(**inputs).logits
+
+        assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+
+    ############################
+    # tests for PeftMixedModel #
+    ############################
+
+    @pytest.mark.parametrize("device", devices)
+    def test_mixed_model_from_pretrained_low_cpu_mem_usage_works(self, device, inputs, lora_path):
+        model = self.get_model().to(device)
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+        model = PeftMixedModel.from_pretrained(model, lora_path, torch_device=device).eval()
+        device_set_not_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_not_low_cpu_mem = model(**inputs).logits
+
+        del model
+
+        model = self.get_model().to(device)
+        model = PeftMixedModel.from_pretrained(model, lora_path, low_cpu_mem_usage=True, torch_device=device).eval()
+        device_set_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_low_cpu_mem = model(**inputs).logits
+
+        assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+
+    @pytest.mark.parametrize("device", devices)
+    def test_mixed_model_load_adapter_low_cpu_mem_usage_works(self, device, inputs, lora_path, lora_config):
+        model = self.get_model().to(device)
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+
+        torch.manual_seed(0)
+        model = PeftModel.from_pretrained(model, lora_path)
+        model.load_adapter(lora_path, adapter_name="other", torch_device=device)
+        model.set_adapter("other")
+        model.eval()
+        device_set_not_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_not_low_cpu_mem = model(**inputs).logits
+
+        del model
+
+        model = self.get_model().to(device)
+        torch.manual_seed(0)
+        model = PeftModel.from_pretrained(model, lora_path)
+        model.load_adapter(lora_path, adapter_name="other", low_cpu_mem_usage=True, torch_device=device)
+        model.set_adapter("other")
+        model.eval()
+        device_set_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_low_cpu_mem = model(**inputs).logits
+
+        assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+
+
+def test_from_pretrained_missing_keys_warning(recwarn, tmp_path):
+    # For more context, see issue 2115
+    # When loading a PEFT adapter and we're missing a PEFT-specific weight, there should be a warning.
+    model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+    config = LoraConfig()
+    model = get_peft_model(model, config)
+    state_dict = model.state_dict()
+
+    # first, sanity check that there are no warnings if no key is missing
+    model.save_pretrained(tmp_path)
+    del model
+    model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+    model = PeftModel.from_pretrained(model, tmp_path)
+    msg = "Found missing adapter keys"
+    assert not any(msg in str(w.message) for w in recwarn.list)
+
+    # remove a key from the state_dict
+    missing_key = "base_model.model.model.decoder.layers.0.self_attn.v_proj.lora_A.default.weight"
+
+    def new_state_dict():
+        return {k: v for k, v in state_dict.items() if k != missing_key}
+
+    model.state_dict = new_state_dict
+    model.save_pretrained(tmp_path)
+    del model
+
+    model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+    model = PeftModel.from_pretrained(model, tmp_path)
+    assert any(msg in str(w.message) for w in recwarn.list)
+    assert any(missing_key in str(w.message) for w in recwarn.list)

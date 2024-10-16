@@ -13,11 +13,13 @@
 # limitations under the License.
 
 import inspect
+from contextlib import contextmanager
 from copy import deepcopy
 from functools import update_wrapper
 from types import MethodType
 
 from .peft_model import PeftConfig, PeftModel
+from .tuners.lora.layer import LoraLayer
 
 
 def update_forward_signature(model: PeftModel) -> None:
@@ -146,3 +148,64 @@ def check_if_peft_model(model_name_or_path: str) -> bool:
         is_peft_model = False
 
     return is_peft_model
+
+
+@contextmanager
+def rescale_adapter_scale(model, multiplier):
+    """
+    Context manager to temporarily rescale the scaling of the LoRA adapter in a model.
+
+    The original scaling values are restored when the context manager exits. This context manager works with the
+    transformers and diffusers models that have directly loaded LoRA adapters.
+
+    For LoRA, applying this context manager with multiplier in [0, 1] is strictly equivalent to applying
+    [wise-ft](https://arxiv.org/abs/2109.01903) (see [#1940](https://github.com/huggingface/peft/issues/1940) for
+    details). It can improve the performances of the model if there is a distribution shiftbetween the training data
+    used for fine-tuning, and the test data used during inference.
+
+    Warning: It has been reported that when using Apple's MPS backend for PyTorch, it is necessary to add a short sleep
+        time after exiting the context before the scales are fully restored.
+
+    Args:
+        model: The model containing `LoraLayer` modules whose scaling is to be adjusted.
+        multiplier (float or int):
+            The multiplier that rescales the `scaling` attribute. Must be of type float or int.
+
+    Raises:
+        ValueError: If the model does not contain any `LoraLayer`
+            instances, indicating that the model does not support scaling.
+
+    Example:
+
+    ```python
+    >>> model = ModelWithLoraLayer()
+    >>> multiplier = 0.5
+    >>> with rescale_adapter_scale(model, multiplier):
+    ...     outputs = model(**inputs)  # Perform operations with the scaled model
+    >>> outputs = model(**inputs)  # The original scaling values are restored here
+    ```
+    """
+    # check if multiplier has a valid data type
+    if not isinstance(multiplier, (float, int)):
+        raise TypeError(f"Argument multiplier should be of type float, got {type(multiplier)}")
+
+    # iterate on the model's modules and grab the original scaling attribute
+    # from the lora layers if present
+    original_scaling = {}
+    for module in model.modules():
+        if isinstance(module, LoraLayer):
+            original_scaling[module] = module.scaling.copy()
+            module.scaling = {k: v * multiplier for k, v in module.scaling.items()}
+
+    # check whether scaling is prohibited on model
+    # the original scaling dictionary should be empty
+    # if there were no lora layers
+    if not original_scaling:
+        raise ValueError("scaling is only supported for models with `LoraLayer`s")
+    try:
+        yield
+
+    finally:
+        # restore original scaling values after exiting the context
+        for module, scaling in original_scaling.items():
+            module.scaling = scaling

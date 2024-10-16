@@ -73,6 +73,7 @@ from peft import (
     LoKrConfig,
     LoraConfig,
     PeftModel,
+    VBLoRAConfig,
     VeraConfig,
     get_peft_model,
 )
@@ -187,7 +188,7 @@ def save_model(model, name, force=False):
 
 def load_output(name):
     filename = os.path.join(REGRESSION_DIR, name, "output.pt")
-    return torch.load(filename)
+    return torch.load(filename, map_location=infer_device())
 
 
 @pytest.mark.regression
@@ -406,6 +407,16 @@ class TestMlp(RegressionTester):
         model = get_peft_model(base_model, config)
         self.assert_results_equal_or_store(model, "vera_tuning_mlp")
 
+    def test_vblora_tuning(self):
+        base_model = self.load_base_model()
+        config = VBLoRAConfig(
+            vector_length=1,
+            num_vectors=2,
+            target_modules=["lin0"],
+        )
+        model = get_peft_model(base_model, config)
+        self.assert_results_equal_or_store(model, "vblora_tuning_mlp")
+
 
 class TestLoraEmbConv1D(RegressionTester):
     def get_output(self, model):
@@ -585,6 +596,9 @@ class TestOpt8bitBnb(RegressionTester):
         return model
 
     def test_lora_8bit(self):
+        # Warning: bnb results can vary significantly depending on the GPU. Therefore, if there is a change in GPU used
+        # in the CI, the test can fail without any code change. In that case, delete the regression artifact and create
+        # a new one using the new GPU.
         base_model = self.load_base_model()
         config = LoraConfig(
             r=8,
@@ -598,6 +612,9 @@ class TestOpt8bitBnb(RegressionTester):
         self.skipTest(
             "Skipping AdaLora for now, getting TypeError: unsupported operand type(s) for +=: 'dict' and 'Tensor'"
         )
+        # Warning: bnb results can vary significantly depending on the GPU. Therefore, if there is a change in GPU used
+        # in the CI, the test can fail without any code change. In that case, delete the regression artifact and create
+        # a new one using the new GPU.
         base_model = self.load_base_model()
         config = AdaLoraConfig(
             init_r=6,
@@ -641,6 +658,9 @@ class TestOpt4bitBnb(RegressionTester):
         return model
 
     def test_lora_4bit(self):
+        # Warning: bnb results can vary significantly depending on the GPU. Therefore, if there is a change in GPU used
+        # in the CI, the test can fail without any code change. In that case, delete the regression artifact and create
+        # a new one using the new GPU.
         base_model = self.load_base_model()
         config = LoraConfig(
             r=8,
@@ -652,6 +672,9 @@ class TestOpt4bitBnb(RegressionTester):
     def test_adalora(self):
         # TODO
         self.skipTest("Skipping AdaLora for now because of a bug, see #1113")
+        # Warning: bnb results can vary significantly depending on the GPU. Therefore, if there is a change in GPU used
+        # in the CI, the test can fail without any code change. In that case, delete the regression artifact and create
+        # a new one using the new GPU.
         base_model = self.load_base_model()
         config = AdaLoraConfig(
             init_r=6,
