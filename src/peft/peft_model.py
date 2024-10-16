@@ -52,6 +52,7 @@ from .tuners import (
     LNTuningModel,
     LoHaModel,
     LoKrModel,
+    LoKrModelv2,
     LoraModel,
     MultitaskPromptEmbedding,
     OFTModel,
@@ -103,6 +104,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.XLORA: XLoraModel,
     PeftType.HRA: HRAModel,
     PeftType.VBLORA: VBLoRAModel,
+    PeftType.LOKRv2: LoKrModelv2,
 }
 
 

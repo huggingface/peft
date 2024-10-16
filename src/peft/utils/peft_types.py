@@ -35,6 +35,7 @@ class PeftType(str, enum.Enum):
     - IA3
     - LOHA
     - LOKR
+    - LOKRv2
     - OFT
     - XLORA
     - POLY
@@ -63,6 +64,7 @@ class PeftType(str, enum.Enum):
     XLORA = "XLORA"
     HRA = "HRA"
     VBLORA = "VBLORA"
+    LOKRv2 = "LOKRv2"
 
 
 class TaskType(str, enum.Enum):
