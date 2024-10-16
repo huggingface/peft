@@ -1770,7 +1770,7 @@ class TestHotSwapping:
 
         # sanity check:
         # FIXME
-        print(stderr.decode())
+        assert stderr.decode() == "foo"
         assert exit_code == 0
 
         # check that the recompilation message is not present
