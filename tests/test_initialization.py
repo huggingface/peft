@@ -1778,7 +1778,6 @@ class TestHotSwapping:
             hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
 
     def test_hotswapping_compiled_model_does_not_trigger_recompilation(self):
-        # FIXME not yet working correctly, there is never a __recompiles in the output, even if trying to force it.
         env = os.environ.copy()
         env["TORCH_LOGS"] = "guards,recompiles"
         here = os.path.dirname(__file__)
