@@ -135,6 +135,31 @@ def hotswap_adapter(model, model_name_or_path, adapter_name, torch_device=None, 
     If the adapters are incomptabile, e.g. targeting different layers or having different alpha values, an error will
     be raised.
 
+    Example:
+
+    ```py
+    >>> import torch
+    >>> from transformers import AutoModelForCausalLM
+    >>> from peft import PeftModel
+    >>> from peft.utils.hotswap import hotswap_adapter
+
+    >>> model_id = ...
+    >>> inputs = ...
+    >>> device = ...
+    >>> model = AutoModelForCausalLM.from_pretrained(model_id).to(device)
+
+    >>> # load lora 0
+    >>> model = PeftModel.from_pretrained(model, <path-adapter-0>)
+    >>> model = torch.compile(model)  # optionally compile the model
+    >>> with torch.inference_mode():
+    ...     output_adapter_0 = model(inputs)
+
+    >>> # replace the "default" lora adapter with the new one
+    >>> hotswap_adapter(model, <path-adapter-1>, adapter_name="default", torch_device=device)
+    >>> with torch.inference_mode():
+    ...     output_adapter_1 = model(inputs).logits
+    ```
+
     Args:
         model ([`~PeftModel`]):
             The PEFT model with the loaded adapter.
