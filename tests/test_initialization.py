@@ -1588,8 +1588,8 @@ class TestHotSwapping:
     @pytest.mark.parametrize(
         "config",
         [
+            LoraConfig(init_lora_weights=0, target_modules=["lin0"]),
             LoraConfig(init_lora_weights=0, target_modules=["lin0", "lin1"]),
-            IA3Config(init_ia3_weights=False, target_modules=["lin0", "lin1"], feedforward_modules=["lin0"]),
         ],
     )
     @pytest.mark.parametrize("do_compile", [False, True])
