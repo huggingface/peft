@@ -208,11 +208,11 @@ class BoneLinear(nn.Module, BoneLayer):
         # output_tensor = rearrange(w, "b a r1 r2 ->(a r1) (b r2) ")
         r = weight_bone.size(-1)
         w = (
-            orig_weight.reshape(orig_weight.size(0) // r, r, orig_weight.size(1) // r, r).permute(2,0,1,3)
+            orig_weight.reshape(orig_weight.size(0) // r, r, orig_weight.size(1) // r, r).permute(2, 0, 1, 3)
             @ weight_bone
             + weight_bone
         )
-        output_tensor = w.permute(1,2,0,3).reshape(*orig_weight.shape)
+        output_tensor = w.permute(1, 2, 0, 3).reshape(*orig_weight.shape)
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)

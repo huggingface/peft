@@ -35,6 +35,7 @@ from transformers.pytorch_utils import Conv1D
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
+    BoneConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -47,7 +48,6 @@ from peft import (
     TaskType,
     VBLoRAConfig,
     VeraConfig,
-    BoneConfig,
     get_peft_model,
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
@@ -566,7 +566,7 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_weights": False},
         {"target_modules": ["lin1"], "init_weights": False},
     ),
-        (
+    (
         "Bone Same",
         "bone",
         BoneConfig,
