@@ -208,6 +208,8 @@ def get_peft_model_state_dict(
         to_return["base_model.vblora_vector_bank." + adapter_name] = state_dict[
             "base_model.vblora_vector_bank." + adapter_name
         ]
+    elif config.peft_type == PeftType.BONE:
+        to_return = {k: state_dict[k] for k in state_dict if "bone_" in k}
     else:
         raise ValueError(f"Unknown PEFT type passed: {config.peft_type}")
 
@@ -356,6 +358,7 @@ def set_peft_model_state_dict(
         PeftType.FOURIERFT,
         PeftType.HRA,
         PeftType.VBLORA,
+        PeftType.BONE,
     ):
         peft_model_state_dict = {}
         parameter_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
