@@ -1698,6 +1698,29 @@ class TestHotSwapping:
         with pytest.raises(ValueError, match=msg):
             hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
 
+    def test_hotswap_wrong_peft_types_raises(self, tmp_path):
+        # Only LoRA is supported at the moment
+        config0 = IA3Config(target_modules=["lin0"], feedforward_modules=[])
+        config1 = IA3Config(target_modules=["lin0"], feedforward_modules=[])
+
+        model = self.get_model()
+        model = get_peft_model(model, config0)
+        model.save_pretrained(tmp_path / "adapter0")
+        del model
+
+        model = self.get_model()
+        model = get_peft_model(model, config1)
+        model.save_pretrained(tmp_path / "adapter1")
+        del model
+
+        # load adapter 0
+        model = self.get_model()
+        model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
+
+        msg = r"Hotswapping only supports LORA but IA3 was passed"
+        with pytest.raises(ValueError, match=msg):
+            hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+
     def test_hotswap_missing_key_raises(self, tmp_path):
         # When a key is missing, raise
         config = LoraConfig(target_modules=["lin0", "lin1"])

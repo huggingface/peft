@@ -22,7 +22,14 @@ from peft.mapping import PEFT_TYPE_TO_CONFIG_MAPPING
 
 from .constants import PEFT_TYPE_TO_PREFIX_MAPPING
 from .other import infer_device
+from .peft_types import PeftType
 from .save_and_load import _insert_adapter_name_into_state_dict, load_peft_weights
+
+
+# so far only LoRA is supported
+CONFIG_KEYS_TO_CHECK = {
+    PeftType.LORA: ["lora_alpha", "use_rslora", "lora_dropout", "alpha_pattern", "use_dora"]
+}
 
 
 def hotswap_adapter_from_state_dict(model, state_dict, adapter_name, parameter_prefix="lora_"):
@@ -111,9 +118,16 @@ def _check_hotswap_configs_compatible(config0: PeftConfig, config1: PeftConfig) 
         msg = f"Incompatible PEFT types found: {config0.peft_type.value} and {config1.peft_type.value}"
         raise ValueError(msg)
 
+    if config0.peft_type not in CONFIG_KEYS_TO_CHECK:
+        msg = (
+            f"Hotswapping only supports {', '.join(CONFIG_KEYS_TO_CHECK.keys())} but "
+            f"{config0.peft_type.value} was passed."
+        )
+        raise ValueError(msg)
+    config_keys_to_check = CONFIG_KEYS_TO_CHECK[config0.peft_type]
+
     # TODO: This is a very rough check only for LoRA at the moment. Also, there might be some options that don't
     # necessarily require an error.
-    config_keys_to_check = ["lora_alpha", "use_rslora", "lora_dropout", "alpha_pattern", "use_dora"]
     config0 = config0.to_dict()
     config1 = config1.to_dict()
     sentinel = object()
