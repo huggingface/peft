@@ -82,6 +82,9 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
     def test_save_pretrained_selected_adapters_pickle(self, test_name, model_id, config_cls, config_kwargs):
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs, safe_serialization=False)
 
+    def test_load_model_low_cpu_mem_usage(self):
+        self._test_load_model_low_cpu_mem_usage(PEFT_ENCODER_DECODER_MODELS_TO_TEST[0], LoraConfig, {})
+
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_from_pretrained_config_construction(self, test_name, model_id, config_cls, config_kwargs):
         self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs)
