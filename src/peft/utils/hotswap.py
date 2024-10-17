@@ -27,9 +27,7 @@ from .save_and_load import _insert_adapter_name_into_state_dict, load_peft_weigh
 
 
 # so far only LoRA is supported
-CONFIG_KEYS_TO_CHECK = {
-    PeftType.LORA: ["lora_alpha", "use_rslora", "lora_dropout", "alpha_pattern", "use_dora"]
-}
+CONFIG_KEYS_TO_CHECK = {PeftType.LORA: ["lora_alpha", "use_rslora", "lora_dropout", "alpha_pattern", "use_dora"]}
 
 
 def hotswap_adapter_from_state_dict(model, state_dict, adapter_name, parameter_prefix="lora_"):
@@ -163,13 +161,13 @@ def hotswap_adapter(model, model_name_or_path, adapter_name, torch_device=None, 
     >>> model = AutoModelForCausalLM.from_pretrained(model_id).to(device)
 
     >>> # load lora 0
-    >>> model = PeftModel.from_pretrained(model, <path-adapter-0>)
+    >>> model = PeftModel.from_pretrained(model, "path-adapter-0")
     >>> model = torch.compile(model)  # optionally compile the model
     >>> with torch.inference_mode():
     ...     output_adapter_0 = model(inputs)
 
     >>> # replace the "default" lora adapter with the new one
-    >>> hotswap_adapter(model, <path-adapter-1>, adapter_name="default", torch_device=device)
+    >>> hotswap_adapter(model, "path-adapter-1", adapter_name="default", torch_device=device)
     >>> with torch.inference_mode():
     ...     output_adapter_1 = model(inputs).logits
     ```
