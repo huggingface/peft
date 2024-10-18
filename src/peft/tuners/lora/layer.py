@@ -909,7 +909,14 @@ class _ConvNd(nn.Module, LoraLayer):
         conv_layer = type(base_layer)
         out_kernel = out_stride = (1,) * (self._kernel_dim - 2)
         self.lora_A[adapter_name] = conv_layer(self.in_features, r, kernel_size, stride, padding, bias=False)
-        self.lora_B[adapter_name] = conv_layer(r, self.out_features, out_kernel, out_stride, bias=False)
+
+        if use_dora:
+            # this ensures correct dimensions for layers using the groups argument
+            self.lora_B[adapter_name] = conv_layer(r, int(self.out_features / self.base_layer.groups), out_kernel, 
+                                                   out_stride,bias=False)
+        else:
+            self.lora_B[adapter_name] = conv_layer(r, self.out_features, out_kernel, out_stride, bias=False)
+
         if use_rslora:
             self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
         else:
@@ -1126,6 +1133,7 @@ class _ConvNd(nn.Module, LoraLayer):
                         lora_B=lora_B,
                         scaling=scaling,
                         base_layer=self.get_base_layer(),
+                        base_layer_result=result
                     )
 
             result = result.to(torch_result_dtype)
