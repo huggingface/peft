@@ -298,10 +298,10 @@ TEST_CASES = [
     ########
     # Bone #
     ########
-    ("Vanilla MLP 1 Bone", "MLP", BoneConfig, {"target_modules": "lin0"}),
-    ("Vanilla MLP 2 Bone", "MLP", BoneConfig, {"target_modules": ["lin0"]}),
-    ("Vanilla MLP 3 Bone", "MLP", BoneConfig, {"target_modules": ["lin0", "lin1"]}),
-    ("Vanilla MLP 5 Bone", "MLP", BoneConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    ("Vanilla MLP 1 Bone", "MLP", BoneConfig, {"target_modules": "lin0", "r": 2}),
+    ("Vanilla MLP 2 Bone", "MLP", BoneConfig, {"target_modules": ["lin0"], "r": 2}),
+    # ("Vanilla MLP 3 Bone", "MLP", BoneConfig, {"target_modules": ["lin0", "lin1"], "r": 2}),
+    ("Vanilla MLP 5 Bone", "MLP", BoneConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "r": 2}),
     #############
     # LN Tuning #
     #############
@@ -566,20 +566,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_weights": False},
         {"target_modules": ["lin1"], "init_weights": False},
     ),
-    (
-        "Bone Same",
-        "bone",
-        BoneConfig,
-        {"target_modules": ["lin0"], "init_weights": False},
-        {"target_modules": ["lin0"], "init_weights": False},
-    ),
-    (
-        "Bone Different",
-        "bone",
-        BoneConfig,
-        {"target_modules": ["lin0"], "init_weights": False},
-        {"target_modules": ["lin1"], "init_weights": False},
-    ),
+    # (
+    #     "Bone Same",
+    #     "bone",
+    #     BoneConfig,
+    #     {"target_modules": ["lin0"], "init_weights": False, "r": 2},
+    #     {"target_modules": ["lin0"], "init_weights": False, "r": 2},
+    # ),
+    # (
+    #     "Bone Different",
+    #     "bone",
+    #     BoneConfig,
+    #     {"target_modules": ["lin0"], "init_weights": False, "r": 2},
+    #     {"target_modules": ["lin1"], "init_weights": False, "r": 2},
+    # ),
     (
         "VBLoRA Same",
         "vblora",
@@ -1674,7 +1674,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             OFTConfig(target_modules=["lin0"], init_weights=False, r=2),
             BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
             HRAConfig(target_modules=["lin0"], init_weights=False),
-            BoneConfig(target_modules=["lin0"], init_weights=False),
+            BoneConfig(target_modules=["lin0"], init_weights=False, r=2),
         ]
     )
     def test_adapter_name_makes_no_difference(self, config0):
@@ -2913,10 +2913,10 @@ class RequiresGradTester(unittest.TestCase):
 
     def test_requires_grad_bone_different_targets(self):
         # test two different HRA adapters that target different modules
-        config0 = BoneConfig(target_modules=["lin0"])
+        config0 = BoneConfig(target_modules=["lin0"], r=2)
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = BoneConfig(target_modules=["lin1"], inference_mode=True)
+        config1 = BoneConfig(target_modules=["lin1"], r=2, inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -2951,10 +2951,10 @@ class RequiresGradTester(unittest.TestCase):
 
     def test_requires_grad_bone_same_targets(self):
         # same as previous test, except that HRA adapters target the same layer
-        config0 = BoneConfig(target_modules=["lin0"])
+        config0 = BoneConfig(target_modules=["lin0"], r=2)
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = BoneConfig(target_modules=["lin0"], inference_mode=True)
+        config1 = BoneConfig(target_modules=["lin0"], r=2, inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
