@@ -53,9 +53,10 @@ class BOFTConfig(PeftConfig):
             The layer indexes to transform, if this argument is specified, it will apply the BOFT transformations on
             the layer indexes that are specified in this list. If a single integer is passed, it will apply the BOFT
             transformations on the layer at this index.
-        layers_pattern (`str`):
+        layers_pattern (`Optional[Union[List[str], str]]`):
             The layer pattern name, used only if `layers_to_transform` is different from `None` and if the layer
-            pattern is not in the common layers pattern.
+            pattern is not in the common layers pattern. This should target the `nn.ModuleList` of the model, which is
+            often called `'layers'` or `'h'`.
     """
 
     boft_block_size: int = field(
@@ -129,10 +130,11 @@ class BOFTConfig(PeftConfig):
             "help": "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at this index."
         },
     )
-    layers_pattern: Optional[str] = field(
+    layers_pattern: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
-            "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
+            "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern. "
+            "This should target the `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`."
         },
     )
 
