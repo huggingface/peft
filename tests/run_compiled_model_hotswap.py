@@ -11,6 +11,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""This is a standalone script that checks that we can hotswap a LoRA adapter on a compiled model
+
+By itself, this script is not super interesting but when we collect the compile logs, we can check that hotswapping
+does not trigger recompilation. This is done in the TestLoraHotSwapping class in test_pipelines.py.
+
+Running this script with `check_hotswap(False)` will load the LoRA adapter without hotswapping, which will result in
+recompilation.
+
+"""
 
 import os
 import sys
