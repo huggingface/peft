@@ -979,18 +979,21 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
             # TODO: It's still unclear how empty layers_pattern (None, [], or "") should behave
             # For now, empty layers_pattern means any layer pattern is ok
             if layers_pattern is None or len(layers_pattern) == 0:
-                layer_index = re.match(r".*\.[^.]*\.(\d+)\.", key)
+                match = re.match(r".*\.[^.]*\.(?P<idx>\d+)\.", key)
             else:
                 layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
                 for pattern in layers_pattern:
-                    layer_index = re.match(rf".*\.{pattern}\.(\d+)\.", key)
-                    if layer_index is not None:
+                    match = re.match(rf"(.*\.)?{pattern}\.(?P<idx>\d+)\.", key)
+                    if match is not None:
                         break
+
+            if match:
+                layer_index = match.groupdict().get("idx")
 
             if layer_index is None:
                 target_module_found = False
             else:
-                layer_index = int(layer_index.group(1))
+                layer_index = int(layer_index)
                 if isinstance(layer_indexes, int):
                     target_module_found = layer_index == layer_indexes
                 else:
