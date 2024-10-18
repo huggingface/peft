@@ -1827,6 +1827,8 @@ class TestHotSwapping:
         exit_code = process.returncode
 
         # sanity check:
+        if exit_code != 0:
+            assert stderr.decode() == "foo"
         assert exit_code == 0
 
         # check that the recompilation message is not present
@@ -1842,6 +1844,8 @@ class TestHotSwapping:
         exit_code = process.returncode
 
         # sanity check:
+        if exit_code != 0:
+            assert stderr.decode() == "foo"
         assert exit_code == 0
 
         # check that the recompilation message is not present
