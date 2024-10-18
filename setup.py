@@ -27,7 +27,7 @@ extras["docs_specific"] = [
     "black",  # doc-builder has an implicit dependency on Black, see huggingface/doc-builder#434
     "hf-doc-builder",
 ]
-extras["dev"] = extras["quality"] + extras["docs_specific"]
+extras["dev"] = extras["quality"] + extras["docs_specific"] + ["lycoris-lora"]
 extras["test"] = extras["dev"] + [
     "pytest",
     "pytest-cov",
