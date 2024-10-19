@@ -351,3 +351,33 @@ class TestPeftConfig:
         msg = f"The config that is trying to be loaded is not a valid {config_class.__name__} config"
         with pytest.raises(TypeError, match=msg):
             config_class.from_pretrained(tmp_path)
+    
+    def test_lora_config_layers_to_transform_validation(self):
+        """Test that specifying layers_to_transform without layers_pattern raises an error"""
+        with pytest.raises(ValueError, match="When `layers_to_transform` is specified, `layers_pattern` must also be specified."):
+            LoraConfig(
+                r=8,
+                lora_alpha=16,
+                target_modules=["query", "value"],
+                layers_to_transform=[0, 1, 2],
+            )
+
+        # Test that specifying both layers_to_transform and layers_pattern works fine
+        config = LoraConfig(
+            r=8,
+            lora_alpha=16,
+            target_modules=["query", "value"],
+            layers_to_transform=[0, 1, 2],
+            layers_pattern="model.layers"
+        )
+        assert config.layers_to_transform == [0, 1, 2]
+        assert config.layers_pattern == "model.layers"
+
+        # Test that not specifying either works fine
+        config = LoraConfig(
+            r=8,
+            lora_alpha=16,
+            target_modules=["query", "value"],
+        )
+        assert config.layers_to_transform is None
+        assert config.layers_pattern is None
