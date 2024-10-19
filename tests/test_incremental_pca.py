@@ -170,3 +170,18 @@ def test_incremental_pca_partial_fit():
     for i, j in zip(batch_itr[:-1], batch_itr[1:]):
         pipca.partial_fit(X[i:j, :])
     assert_close(ipca.components_, pipca.components_, rtol=1e-3, atol=1e-3)
+
+
+def test_incremental_pca_lowrank():
+    # Test that lowrank mode is equivalent to non-lowrank mode.
+    n_components = 2
+    X = torch.tensor([iris["SepalLengthCm"], iris["SepalWidthCm"], iris["PetalLengthCm"], iris["PetalWidthCm"]]).T
+    batch_size = X.shape[0] // 3
+    
+    ipca = IncrementalPCA(n_components=n_components, batch_size=batch_size)
+    ipca.fit(X)
+
+    ipcalr = IncrementalPCA(n_components=n_components, batch_size=batch_size, lowrank=True)
+    ipcalr.fit(X)
+
+    assert_close(ipca.components_, ipcalr.components_, rtol=1e-7, atol=1e-7)

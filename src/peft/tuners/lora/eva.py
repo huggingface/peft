@@ -159,7 +159,7 @@ def collate_fn_language_modeling(inputs: dict, config: LoraConfig, device: Union
     if config.eva_config.use_label_mask and hasattr(inputs, "labels"):
         mask = torch.logical_and(mask, inputs["labels"] != config.eva_config.label_mask_value)
     indices = torch.nonzero(mask)
-    indices = indices[:,0] * mask.size(1) + indices[:,1] # indices do not need to be moved to device
+    indices = indices[:,0] * mask.size(1) + indices[:,1]
     inputs = {k: v.to(device) for k, v in inputs.items() if k != "labels"}
     return inputs, indices
 
