@@ -140,3 +140,8 @@ class LoKrConfig(LycorisConfig):
         self.exclude_modules = (
             set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
+        # check for layers_to_transform and layers_pattern
+        if self.layers_to_transform is not None and self.layers_pattern is None:
+            raise ValueError(
+                "When `layers_to_transform` is specified, `layers_pattern` must also be specified. "
+            )
