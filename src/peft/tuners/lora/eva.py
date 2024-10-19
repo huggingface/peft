@@ -1,15 +1,16 @@
 import torch
+import warnings
 from tqdm import tqdm
-from functools import reduce, partial
+from functools import reduce
 from itertools import cycle
 from collections import Counter, defaultdict
 
+from typing import Union
+
 from peft.utils.incremental_pca import IncrementalPCA
-from peft.tuners import lora
-from peft.tuners.lora.config import EvaConfig, LoraConfig
 
-from typing import Optional, Union, Tuple
-
+from .config import EvaConfig, LoraConfig
+from .layer import LoraLayer, Linear
 
 
 class SVDHook:
@@ -54,14 +55,20 @@ class SVDHook:
         if hasattr(self.svd, "components_"):
             previous_components = self.svd.components_.clone().detach()
 
+        # check if input is a tuple
         try:
             states = input.detach()
         except AttributeError:
             states = input[0].detach()
-        states = states[self.indices[:, 0], self.indices[:, 1], :] # TODO might not work for all use cases
 
+        # merging all but last dimension
+        states = states.view(-1, states.size(-1))
+        if self.indices is not None:
+            states = states[self.indices]
+
+        # check if batch sizes is more than the number of components
         if states.size(0) < self.n_components:
-            print(f"skipping SVD for {self.name} because there are less than {self.n_components} tokens")
+            print(f"skipping SVD for {self.name} because there are less than {self.n_components} examples")
             return
 
         self.svd.partial_fit(states.to(torch.float32))
@@ -105,7 +112,7 @@ class HashHook:
         self.hashed_inputs.append(self.hash_fn(x))
 
 
-def find_equal_values(dictionary):
+def find_equal_values(dictionary: dict) -> dict:
     """
     Find keys in a dictionary that have the same value.
 
@@ -119,25 +126,25 @@ def find_equal_values(dictionary):
     return {k: v for k, v in value_dict.items() if len(v) > 1}
 
 
-def recursive_apply(module, device):
+def recursive_apply(module: torch.nn.Module, device: Union[str, torch.device]):
     """
     Recursively apply a function to the module and its submodules.
 
-    If the module is a LoraLinear, the base layer is moved to the specified device.
-    If the module has any LoraLinear submodules, the function is applied recursively to each submodule.
+    If the module is a LoraLayer, the base layer is moved to the specified device.
+    If the module has any LoraLayer submodules, the function is applied recursively to each submodule.
     Otherwise, the module is moved to the specified device.
     """
-    if isinstance(module, lora.LoraLayer):
+    if isinstance(module, LoraLayer):
         module.base_layer.to(device)
         return
-    if any(isinstance(submodule, lora.LoraLayer) for submodule in module.modules()):
+    if any(isinstance(submodule, LoraLayer) for submodule in module.modules()):
         for child in module.children():
             recursive_apply(child, device)
     else:
         module.to(device)
 
 
-def get_device_with_meta_params(model):
+def get_device_with_meta_params(model: torch.nn.Module) -> torch.device:
     """
     Get the device of the model's parameters. Useful if some parameters are on meta device.
     """
@@ -146,8 +153,24 @@ def get_device_with_meta_params(model):
     return devices[0]
 
 
+def collate_fn_language_modeling(inputs: dict, config: LoraConfig, device: Union[str, torch.device]):
+    "default collate_fn for autregressive language model"
+    mask = inputs.get("attention_mask", torch.ones_like(inputs["input_ids"])).bool()
+    if config.eva_config.use_label_mask and hasattr(inputs, "labels"):
+        mask = torch.logical_and(mask, inputs["labels"] != config.eva_config.label_mask_value)
+    indices = torch.nonzero(mask)
+    indices = indices[:,0] * mask.size(1) + indices[:,1] # indices do not need to be moved to device
+    inputs = {k: v.to(device) for k, v in inputs.items() if k != "labels"}
+    return inputs, indices
+
+
+def forward_fn_language_modeling(model, inputs: dict):
+    "default forward_fn for autregressive language model"
+    return model(**inputs)
+
+
 @torch.no_grad()
-def compute_svd(
+def get_eva_state_dict(
     model: torch.nn.Module,
     peft_config: LoraConfig,
     dataloader: torch.utils.data.DataLoader,
@@ -184,7 +207,8 @@ def compute_svd(
 
     hooks = {}
     for name, module in model.named_modules():
-        if isinstance(module, lora.LoraLayer):
+        # currently only linear layers are supported
+        if isinstance(module, Linear):
             hook = HashHook(name)
             module.register_forward_hook(hook)
             hooks[name] = hook
@@ -236,7 +260,7 @@ def compute_svd(
         layer_converged = list(convergence_dict.values()) + [convergence_dict[v] for v in equal_inputs_map.values()]
         pbar.set_description(f"{sum(layer_converged)}/{len(layer_converged)} layers have converged")
 
-    svd_dict = {}
+    eva_state_dict = {}
     for name, rank in rank_dist.items():
         if rank == 0:
             continue
@@ -245,32 +269,15 @@ def compute_svd(
         u = hook.svd.components_[:rank]
         if peft_config.eva_config.whiten:
             u /= hook.svd.singular_values_[:rank].sqrt().reshape(-1, 1)
-        svd_dict[name] = u
+        eva_state_dict[name] = u
 
     # objects are torch tensors on the model device
-    svd_dict = {k: v.to(device) for k, v in svd_dict.items()}
+    eva_state_dict = {k: v.to(device) for k, v in eva_state_dict.items()}
 
     # restore model state
     model.train(training)
 
-    return svd_dict
-
-
-def collate_fn_language_modeling(inputs: dict, config: LoraConfig, device: Union[str, torch.device]):
-    "default collate_fn for autregressive language model"
-    mask = torch.ones_like(inputs["input_ids"], dtype=torch.bool)
-    if hasattr(inputs, "attention_mask"):
-        mask = inputs["attention_mask"].bool()
-    if config.eva_config.use_label_mask and hasattr(inputs, "labels"):
-        mask = torch.logical_and(mask, inputs["labels"] != config.eva_config.label_mask_value)
-    indices = torch.nonzero(mask)
-    inputs = {k: v.to(device) for k, v in inputs.items() if k != "labels"}
-    return inputs, indices
-
-
-def forward_fn_language_modeling(model, inputs: dict):
-    "default forward_fn for autregressive language model"
-    return model(**inputs)
+    return eva_state_dict
 
 
 @torch.no_grad()
@@ -281,31 +288,62 @@ def initialize_lora_eva_weights(
     collate_fn = None,
     forward_fn = None,
     device = None,
-    adapter_name = "default", # TODO
+    adapter_name = "default"
 ):
+    """
+    Initialize the weights of the LoRA layers using the EVA method.
+
+    This function initializes the weights of the LoRA layers using the EVA method.
+    It computes the SVD for each adapter layer and updates the weights accordingly.
+    """
     orig_device = get_device_with_meta_params(model)
     if device is not None:
         recursive_apply(model, device)
+    
     model.disable_adapter()
+    
+    # assign defaults
     if collate_fn is None:
         collate_fn = collate_fn_language_modeling
     if forward_fn is None:
         forward_fn = forward_fn_language_modeling
     if config.eva_config is None:
         config.eva_config = EvaConfig()
+    
+    # compute svd
     with model.disable_adapter():
-        svd_dict = compute_svd(model, config, dataloader, collate_fn, forward_fn)
-    for k in list(svd_dict.keys()):
-        w = svd_dict.pop(k)
-        layer = model.get_submodule(k)
-        layer.update_layer(
-            adapter_name,
-            w.size(0),
-            config.lora_alpha,
-            config.lora_dropout,
-            config.init_lora_weights,
-            config.use_rslora,
-            config.use_dora
-        )
-        layer.lora_A[adapter_name].weight.copy_(w)
+        eva_state_dict = get_eva_state_dict(model, config, dataloader, collate_fn, forward_fn)
+
+    # assert all lora layers are contained in eva_state_dict
+    missing_eva_inits = []
+    for name, module in model.named_modules():
+        if not isinstance(module, LoraLayer):
+            continue
+        if name in eva_state_dict:
+            w = eva_state_dict.pop(name)
+            module.update_layer(
+                adapter_name,
+                w.size(0),
+                config.lora_alpha,
+                config.lora_dropout,
+                config.init_lora_weights,
+                config.use_rslora,
+                config.use_dora
+            )
+            module.lora_A[adapter_name].weight.copy_(w)
+        else:
+            module.update_layer(
+                adapter_name,
+                config.r,
+                config.lora_alpha,
+                config.lora_dropout,
+                True,
+                config.use_rslora,
+                config.use_dora
+            )
+            missing_eva_inits.append(name)
+            print(name, type(module))
+    
+    if missing_eva_inits:
+        warnings.warn(f"the following layers were initialized with init_lora_weights=True because they were not found in the eva state_dict: {missing_eva_inits}")
     return model.to(orig_device)

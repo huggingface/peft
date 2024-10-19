@@ -18,6 +18,7 @@ from .config import LoftQConfig, EvaConfig, LoraConfig, LoraRuntimeConfig
 from .gptq import QuantLinear
 from .layer import Conv2d, Conv3d, Embedding, Linear, LoraLayer
 from .model import LoraModel
+from .eva import get_eva_state_dict, initialize_lora_eva_weights
 
 
 __all__ = [
@@ -32,6 +33,8 @@ __all__ = [
     "Linear",
     "LoraModel",
     "QuantLinear",
+    "get_eva_state_dict",
+    "initialize_lora_eva_weights",
 ]
 
 

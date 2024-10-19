@@ -1,7 +1,5 @@
 import torch
-from peft import LoraConfig, EvaConfig, get_peft_model
-from peft.tuners.lora.eva import initialize_lora_eva_weights
-from peft.tuners.lora import LoraLayer
+from peft import LoraConfig, EvaConfig, get_peft_model, initialize_lora_eva_weights
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import load_dataset
 from torch.utils.data import DataLoader

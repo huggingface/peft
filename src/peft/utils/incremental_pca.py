@@ -43,6 +43,7 @@ class IncrementalPCA:
         self.n_components_ = n_components
         self.copy = copy
         self.batch_size = batch_size
+        self.n_features_ = None
 
         if lowrank:
             if lowrank_q is None:
@@ -58,24 +59,38 @@ class IncrementalPCA:
             self._svd_fn = partial(torch.linalg.svd, full_matrices=False, driver=svd_driver)
         
 
-    def _validate_data(self, X, dtype=torch.float32) -> torch.Tensor:
+    def _validate_data(self, X) -> torch.Tensor:
         """
         Validates and converts the input data `X` to the appropriate tensor format.
 
         Args:
             X (torch.Tensor): Input data.
-            dtype (torch.dtype, optional): Desired data type for the tensor. Defaults to torch.float32.
 
         Returns:
             torch.Tensor: Converted to appropriate format.
         """
+        valid_dtypes = [torch.float32, torch.float64]
+        
         if not isinstance(X, torch.Tensor):
-            X = torch.tensor(X, dtype=dtype)
+            X = torch.tensor(X, dtype=torch.float32)
         elif self.copy:
             X = X.clone()
 
-        if X.dtype != dtype:
-            X = X.to(dtype)
+        n_samples, n_features = X.shape
+        if self.n_components_ is None:
+            pass
+        elif self.n_components_ > n_features:
+            raise ValueError(
+                f"n_components={self.n_components_} invalid for n_features={n_features}, "
+                "need more rows than columns for IncrementalPCA processing."
+            )
+        elif self.n_components_ > n_samples:
+            raise ValueError(
+                f"n_components={self.n_components_} must be less or equal to the batch number of samples {n_samples}"
+            )
+
+        if X.dtype not in valid_dtypes:
+            X = X.to(torch.float32)
 
         return X
 
@@ -178,14 +193,10 @@ class IncrementalPCA:
             X = self._validate_data(X)
         n_samples, n_features = X.shape
         if self.batch_size is None:
-            self.batch_size_ = 5 * n_features
-        else:
-            self.batch_size_ = self.batch_size
+            self.batch_size = 5 * n_features
 
-        for start in range(0, n_samples, self.batch_size_):
-            end = min(start + self.batch_size_, n_samples)
-            X_batch = X[start:end]
-            self.partial_fit(X_batch, check_input=False)
+        for batch in self.gen_batches(n_samples, self.batch_size, min_batch_size=self.n_components_ or 0):
+            self.partial_fit(X[batch], check_input=False)
 
         return self
 
@@ -211,8 +222,12 @@ class IncrementalPCA:
             self.mean_ = None  # Will be initialized properly in _incremental_mean_and_var based on data dimensions
             self.var_ = None  # Will be initialized properly in _incremental_mean_and_var based on data dimensions
             self.n_samples_seen_ = torch.tensor([0], device=X.device)
+            self.n_features_ = n_features
             if not self.n_components_:
                 self.n_components_ = min(n_samples, n_features)
+
+        if n_features != self.n_features_:
+            raise ValueError("Number of features of the new batch does not match the number of features of the first batch.")
 
         col_mean, col_var, n_total_samples = self._incremental_mean_and_var(
             X, self.mean_, self.var_, self.n_samples_seen_
@@ -265,5 +280,30 @@ class IncrementalPCA:
         Returns:
             torch.Tensor: Transformed data tensor with shape (n_samples, n_components).
         """
-        X -= self.mean_
-        return torch.mm(X, self.components_.T)
+        X = X - self.mean_
+        return torch.mm(X.double(), self.components_.T).to(X.dtype)
+    
+    @staticmethod
+    def gen_batches(n: int, batch_size: int, min_batch_size: int = 0):
+        """Generator to create slices containing `batch_size` elements from 0 to `n`.
+
+        The last slice may contain less than `batch_size` elements, when
+        `batch_size` does not divide `n`.
+
+        Args:
+            n (int): Size of the sequence.
+            batch_size (int): Number of elements in each batch.
+            min_batch_size (int, optional): Minimum number of elements in each batch. Defaults to 0.
+
+        Yields:
+            slice: A slice of `batch_size` elements.
+        """
+        start = 0
+        for _ in range(int(n // batch_size)):
+            end = start + batch_size
+            if end + min_batch_size > n:
+                continue
+            yield slice(start, end)
+            start = end
+        if start < n:
+            yield slice(start, n)
