@@ -18,7 +18,6 @@ target_modules = ['q_proj', 'k_proj', 'v_proj', 'o_proj']
 svd_batch_size = 4 # can be different from the batch size used in finetuning
 svd_device = "cuda"
 
-
 # load model and tokenizer
 model = AutoModelForCausalLM.from_pretrained(model_name)
 tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -56,4 +55,4 @@ peft_config = LoraConfig(
 )
 peft_model = get_peft_model(model, peft_config, low_cpu_mem_usage=True)
 
-initialize_lora_eva_weights(peft_model, peft_config, dataloader, device="cuda")
+initialize_lora_eva_weights(peft_model, peft_config, dataloader, device=svd_device)

@@ -5,7 +5,7 @@ from functools import reduce
 from itertools import cycle
 from collections import Counter, defaultdict
 
-from typing import Union
+from typing import Union, Optional
 
 from peft.utils.incremental_pca import IncrementalPCA
 
@@ -153,15 +153,27 @@ def get_device_with_meta_params(model: torch.nn.Module) -> torch.device:
     return devices[0]
 
 
-def collate_fn_language_modeling(inputs: dict, config: LoraConfig, device: Union[str, torch.device]):
-    "default collate_fn for autregressive language model"
+def move_inputs_to_device(inputs, device: Union[str, torch.device]):
+    "move all items in the input to the specified device"
+    if isinstance(inputs, torch.Tensor):
+        return inputs.to(device)
+    if isinstance(inputs, dict):
+        return {k: v.to(device) for k, v in inputs.items()}
+    if isinstance(inputs, list):
+        return [i.to(device) for i in inputs]
+    if isinstance(inputs, tuple):
+        return tuple(i.to(device) for i in inputs)
+    raise ValueError(f"unsupported input type: {type(inputs)}")
+
+
+def get_indices_fn_language_modeling(inputs: dict, config: LoraConfig):
+    "if not all items in the input should be used for SVD, this function can be used to get the indices of the items that should be used"
     mask = inputs.get("attention_mask", torch.ones_like(inputs["input_ids"])).bool()
     if config.eva_config.use_label_mask and hasattr(inputs, "labels"):
         mask = torch.logical_and(mask, inputs["labels"] != config.eva_config.label_mask_value)
     indices = torch.nonzero(mask)
     indices = indices[:,0] * mask.size(1) + indices[:,1]
-    inputs = {k: v.to(device) for k, v in inputs.items() if k != "labels"}
-    return inputs, indices
+    return indices
 
 
 def forward_fn_language_modeling(model, inputs: dict):
@@ -174,8 +186,8 @@ def get_eva_state_dict(
     model: torch.nn.Module,
     peft_config: LoraConfig,
     dataloader: torch.utils.data.DataLoader,
-    collate_fn: callable,
-    forward_fn: callable
+    forward_fn: callable,
+    get_indices_fn: Optional[callable] = None,
 ) -> dict:
     """
     Compute the SVD for each layer in the model.
@@ -201,6 +213,12 @@ def get_eva_state_dict(
             counts[k_hook], counts[k] = rank, rank_hook
         return counts
 
+    # set function to check if modules should be added to hooks
+    if hasattr(model, "peft_config"):
+        _check_fn = lambda name, module: isinstance(module, Linear)
+    else:
+        _check_fn = lambda name, module: any([name.endswith(t) for t in peft_config.target_modules])
+
     training = model.training
     device = get_device_with_meta_params(model)
     model.eval()
@@ -208,16 +226,17 @@ def get_eva_state_dict(
     hooks = {}
     for name, module in model.named_modules():
         # currently only linear layers are supported
-        if isinstance(module, Linear):
-            hook = HashHook(name)
-            module.register_forward_hook(hook)
-            hooks[name] = hook
+        if not _check_fn(name, module):
+            continue
+        hook = HashHook(name)
+        module.register_forward_hook(hook)
+        hooks[name] = hook
     rank_budget = peft_config.r * len(hooks)
     max_components = round(peft_config.r * peft_config.eva_config.rho)
 
     # forward for one batch to check which layer inputs are equal to avoid unneeded svd calculations
-    inputs, _ = collate_fn(next(iter(dataloader)), peft_config, device)
-    forward_fn(model, inputs)
+    inputs = next(iter(dataloader))
+    forward_fn(model, move_inputs_to_device(inputs, device))
     hash_dict = {k: h.hashed_inputs[0] for k, h in hooks.items()}
     equal_inputs_map = {vv: v[0] for v in find_equal_values(hash_dict).values() for vv in v[1:]}
     hooks = {k: SVDHook(k, max_components, peft_config.eva_config.tau) for k in hooks.keys() if k not in equal_inputs_map}
@@ -232,7 +251,9 @@ def get_eva_state_dict(
     rank_dist = {k: max_components for k in layer_hook_map.keys()}
     for inputs in pbar:
 
-        inputs, indices = collate_fn(inputs, peft_config, device)
+        indices = None
+        if get_indices_fn is not None:
+            indices = get_indices_fn(inputs, peft_config)
 
         for name, hook in hooks.items():
             module = reduce(getattr, name.split("."), model) # TODO: replace with model.get_submodule(name)
@@ -245,20 +266,20 @@ def get_eva_state_dict(
             hook.indices = indices
             module.register_forward_hook(hook)
 
+        layer_converged = list(convergence_dict.values()) + [convergence_dict[v] for v in equal_inputs_map.values()]
+        pbar.set_description(f"{sum(layer_converged)}/{len(layer_converged)} layers have converged")
+        
         if all(convergence_dict.values()):
             print("exiting - all SVD components have converged.")
             break
 
-        forward_fn(model, inputs)
+        forward_fn(model, move_inputs_to_device(inputs, device))
 
         # in case some hooks have to skip the svd calculation because the number of tokens is less than the number of components
         if not all([hasattr(h.svd, "components_") for h in hooks.values()]):
             continue
 
         rank_dist = _get_rank_distribution(hooks, layer_hook_map, equal_inputs_map, rank_budget, max_components)
-
-        layer_converged = list(convergence_dict.values()) + [convergence_dict[v] for v in equal_inputs_map.values()]
-        pbar.set_description(f"{sum(layer_converged)}/{len(layer_converged)} layers have converged")
 
     eva_state_dict = {}
     for name, rank in rank_dist.items():
@@ -285,8 +306,8 @@ def initialize_lora_eva_weights(
     model,
     config,
     dataloader,
-    collate_fn = None,
     forward_fn = None,
+    get_indices_fn = None,
     device = None,
     adapter_name = "default"
 ):
@@ -303,8 +324,6 @@ def initialize_lora_eva_weights(
     model.disable_adapter()
     
     # assign defaults
-    if collate_fn is None:
-        collate_fn = collate_fn_language_modeling
     if forward_fn is None:
         forward_fn = forward_fn_language_modeling
     if config.eva_config is None:
@@ -312,7 +331,7 @@ def initialize_lora_eva_weights(
     
     # compute svd
     with model.disable_adapter():
-        eva_state_dict = get_eva_state_dict(model, config, dataloader, collate_fn, forward_fn)
+        eva_state_dict = get_eva_state_dict(model, config, dataloader, forward_fn, get_indices_fn)
 
     # assert all lora layers are contained in eva_state_dict
     missing_eva_inits = []
