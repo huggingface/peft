@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# weight decompose, fullm atrix and rslora remaining
-
 import math
 import warnings
 from typing import Optional, Set, Tuple
@@ -38,7 +36,7 @@ class LoKrLayerv2(BaseTunerLayer):
         "lokr_t2",
     )
     # Other params which may contain adapter related keys
-    other_param_names = ("r", "alpha", "scaling", "rank_dropout", "module_dropout")
+    other_param_names = ("r", "alpha", "scale", "rank_dropout", "module_dropout")
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         super().__init__()
@@ -46,7 +44,6 @@ class LoKrLayerv2(BaseTunerLayer):
         self.r = {}
         self.alpha = {}
         self.scale = {}
-        self.scaling = {}
         self.rank_dropout = {}
         self.module_dropout = {}
 
@@ -106,8 +103,8 @@ class LoKrLayerv2(BaseTunerLayer):
         use_effective_conv2d: bool,
         decompose_both: bool,
         decompose_factor: int,
+        full_matrix: bool,
         use_upstream: bool = False,
-        **kwargs,
     ) -> None:
         """Internal function to create lokr adapter
 
@@ -121,13 +118,13 @@ class LoKrLayerv2(BaseTunerLayer):
             use_effective_conv2d (`bool`): Use parameter effective decomposition for Conv2d with ksize > 1.
             decompose_both (`bool`): Perform rank decomposition of left kronecker product matrix.
             decompose_factor (`int`): Kronecker product decomposition factor.
+            full_matrix (`bool`): Use full matrix instead of Low-Rank Decomposition.
+            use_upstream: Use the weight initializaition from Lycoris library.
         """
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
         self.r[adapter_name] = r
-        self.alpha[adapter_name] = alpha
-        self.scaling[adapter_name] = alpha / r
         self.rank_dropout[adapter_name] = rank_dropout
         self.module_dropout[adapter_name] = module_dropout
         base_layer = self.get_base_layer()
@@ -137,21 +134,34 @@ class LoKrLayerv2(BaseTunerLayer):
 
         if isinstance(base_layer, nn.Conv2d):  # For Conv2d
             shape = ((out_l, out_k), (in_m, in_n), *self.kernel_size)
-            use_w2 = r >= max(shape[0][1], shape[1][1]) / 2
+            use_w2 = r >= max(shape[0][1], shape[1][1]) / 2 or full_matrix
             use_effective_conv2d = use_effective_conv2d and self.kernel_size != (1, 1)
         else:
             shape = ((out_l, out_k), (in_m, in_n))
-            use_w2 = not (r < max(shape[0][1], shape[1][1]) / 2)
+            use_w2 = not (r < max(shape[0][1], shape[1][1]) / 2 and not full_matrix)
 
-        use_w1 = not (decompose_both and r < max(shape[0][0], shape[1][0]) / 2)
+        if use_w2 and not full_matrix:
+            warnings.warn(
+                f"Lora dim {r} is too large for dim={max(self.in_features,self.out_features)} and factor={decompose_factor}."
+                "Hence using full matrix mode."
+            )
+
+        use_w1 = not (decompose_both and r < max(shape[0][0], shape[1][0]) / 2 and not full_matrix)
+
+        if (use_w1 and use_w2) or alpha is None or alpha == 0:
+            alpha = r
+
+        self.alpha[adapter_name] = alpha
+        self.scale[adapter_name] = alpha / r
 
         if use_upstream:
+            # Creating dummy weights of required shape, as it is a argument for weight_gen function.
             if self.kernel_size:
                 dummy_weights = torch.rand((self.in_features, self.out_features, *self.kernel_size))
             else:
                 dummy_weights = torch.rand((self.in_features, self.out_features))
 
-            weights = lokr.weight_gen(dummy_weights, rank=r, decompose_both=decompose_both, **kwargs)
+            weights = lokr.weight_gen(dummy_weights, rank=r, factor=decompose_factor,decompose_both=decompose_both, tucker=use_effective_conv2d, full_matrix=full_matrix)
             attributes = [
                 "lokr_w1",
                 "lokr_w1_a",
@@ -312,9 +322,17 @@ class Linear(nn.Linear, LoKrLayerv2):
         LoKrLayerv2.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = fan_in_fan_out
 
+        update_layer_kwargs = {
+            'use_effective_conv2d':kwargs.get('use_effective_conv2d',False),
+            'decompose_both': kwargs.get('decompose_both', False),
+            'decompose_factor': kwargs.get('decompose_factor', 1),
+            'full_matrix': kwargs.get('full_matrix', False),
+            'use_upstream': kwargs.get('use_upstream', False),
+        }
+
         # Create adapter and set it active
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, **kwargs)
+        self.update_layer(adapter_name, r, alpha, rank_dropout, module_dropout, init_weights,**update_layer_kwargs)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -399,7 +417,7 @@ class Linear(nn.Linear, LoKrLayerv2):
             w2 = w2.float()
 
         # Make weights with Kronecker product
-        weight = self.make_kron(w1, w2)
+        weight = self.make_kron(w1, w2, self.scale[adapter_name])
         weight = weight.reshape(self.get_base_layer().weight.shape)
 
         # Perform rank dropout during training - drop rows of addition weights
@@ -407,9 +425,8 @@ class Linear(nn.Linear, LoKrLayerv2):
         if self.training and rank_dropout:
             drop = (torch.rand(weight.size(0)) > rank_dropout).float()
             drop = drop.view(-1, *[1] * len(weight.shape[1:])).to(weight.device)
-            # consider adapter name check
-            # if self.kwargs["rank_dropout_scale"]:
-            drop /= drop.mean()
+            if self.kwargs["rank_dropout_scale"]:
+                drop /= drop.mean()
             weight *= drop
 
         if cast_to_fp32:
@@ -467,10 +484,18 @@ class Conv2d(nn.Module, LoKrLayerv2):
         LoKrLayerv2.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = fan_in_fan_out
 
+        update_layer_kwargs = {
+            'use_effective_conv2d':kwargs.get('use_effective_conv2d',False),
+            'decompose_both': kwargs.get('decompose_both', False),
+            'decompose_factor': kwargs.get('decompose_factor', 1),
+            'full_matrix': kwargs.get('full_matrix', False),
+            'use_upstream': kwargs.get('use_upstream', False),
+        }
+
         # Create adapter and set it active
         self._active_adapter = adapter_name
         self.update_layer(
-            adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, use_effective_conv2d, **kwargs
+            adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, **update_layer_kwargs
         )
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -555,7 +580,7 @@ class Conv2d(nn.Module, LoKrLayerv2):
             w2 = w2.float()
 
         # Make weights with Kronecker product
-        weight = self.make_kron(w1, w2)
+        weight = self.make_kron(w1, w2, self.scale[adapter_name])
         weight = weight.reshape(self.get_base_layer().weight.shape)
 
         # Perform rank dropout during training - drop rows of addition weights
@@ -563,8 +588,8 @@ class Conv2d(nn.Module, LoKrLayerv2):
         if self.training and rank_dropout:
             drop = (torch.rand(weight.size(0)) > rank_dropout).float()
             drop = drop.view(-1, *[1] * len(weight.shape[1:])).to(weight.device)
-            # if self.kwargs["rank_dropout_scale"]:
-            drop /= drop.mean()
+            if self.kwargs["rank_dropout_scale"]:
+                drop /= drop.mean()
             weight *= drop
 
         if cast_to_fp32:

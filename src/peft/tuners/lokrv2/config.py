@@ -41,6 +41,8 @@ class LoKrV2Config(PeftConfig):
             Perform rank decomposition of left kronecker product matrix.
         decompose_factor (`int`):
             Kronecker product decomposition factor.
+        rank_dropout_scale ('bool)
+            Scale the rank dropout while training.
         target_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
             names will be replaced. When passing a string, a regex match will be performed. When passing a list of
@@ -49,6 +51,10 @@ class LoKrV2Config(PeftConfig):
             excluding the output layer. If this is not specified, modules will be chosen according to the model
             architecture. If the architecture is not known, an error will be raised -- in this case, you should specify
             the target modules manually.
+        bias (`str`):
+            Bias type for LoKr. Can be 'none', 'all' or 'lokr_only'. If 'all' or 'lora_only', the corresponding biases
+            will be updated during training. Be aware that this means that, even when disabling the adapters, the model
+            will not produce the same output as the base model would have without adaptation.
         init_weights (`bool`):
             Whether to perform initialization of adapter weights. This defaults to `True`, passing `False` is
             discouraged.
@@ -66,8 +72,13 @@ class LoKrV2Config(PeftConfig):
             specified by `alpha`.
         modules_to_save (`Optional[List[str]]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
-        use_upstream ('bool'):
-            Use the latest version of LoKr from Lycoris Implementation.
+        use_scalar (`Optional[bool]`):
+            Whether to use scalar multiplication for LoKR. If `True`, a scalar value will be learned and multiplied
+            with the adapter weights.
+        use_full_matrix (`Optional[bool]`):
+            Whether to use the full matrix instead of performing Low-Rank Decomposition for the LoKR layers.
+        use_upstream (`Optional[bool]`):
+            Whether to use the latest version of the LoKR module from the `Lycoris` repository.
     """
 
     r: int = field(default=8, metadata={"help": "LoKr rank"})
@@ -93,6 +104,7 @@ class LoKrV2Config(PeftConfig):
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
     )
     decompose_factor: int = field(default=-1, metadata={"help": "Kronecker product decomposition factor."})
+    rank_dropout_scale: bool = field(default=False, metadata={"help": "Rank dropout scale"})
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
@@ -101,7 +113,7 @@ class LoKrV2Config(PeftConfig):
             "This can also be a wildcard 'all-linear' which matches all linear/Conv1D layers except the output layer."
         },
     )
-    bias: str = field(default="none", metadata={"help": "Bias type for Vera. Can be 'none', 'all' or 'lokr_only'"})
+    bias: str = field(default="none", metadata={"help": "Bias type for LoKr. Can be 'none', 'all' or 'lokr_only'"})
     init_weights: bool = field(
         default=True,
         metadata={
@@ -153,19 +165,15 @@ class LoKrV2Config(PeftConfig):
     )
     use_scalar: Optional[bool] = field(
         default=False,
-        metadata={"help": "Use scalar for multiplication instead of vector for LoKR."},
-    )
-    weight_decompose: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Weight decompositon for LoKr matrices."},
+        metadata={"help": "Use scalar multiplication for LoKR."},
     )
     use_full_matrix: Optional[bool] = field(
         default=False,
-        metadata={"help": "Use full matrix decompositon for full matrix."},
+        metadata={"help": "Use full matrix instead of Low-Rank Decomposition."},
     )
     use_upstream: Optional[bool] = field(
         default=False,
-        metadata={"help": "Whether to use latest version of LoKr module or not."},
+        metadata={"help": "Use the latest version of LoKr module from `Lycoris` repository."},
     )
 
     def __post_init__(self):
