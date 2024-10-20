@@ -22,7 +22,7 @@ from peft.utils import PeftType
 
 
 @dataclass
-class LoKrV2Config(PeftConfig):
+class LycorisLoKrConfig(PeftConfig):
     """
     Configuration class of [`LoKrModel`].
 

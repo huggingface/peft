@@ -41,8 +41,8 @@ from peft import (
     LNTuningConfig,
     LoHaConfig,
     LoKrConfig,
-    LoKrV2Config,
     LoraConfig,
+    LycorisLoKrConfig,
     OFTConfig,
     PeftModel,
     TaskType,
@@ -269,11 +269,11 @@ TEST_CASES = [
     ##########
     # LoKrv2 #
     ##########
-    ("Vanilla MLP 1 LOKRv2", "MLP", LoKrV2Config, {"target_modules": "lin0"}),
-    ("Vanilla MLP 2 LOKRv2", "MLP", LoKrV2Config, {"target_modules": ["lin0"]}),
-    ("Vanilla MLP 3 LOKRv2", "MLP", LoKrV2Config, {"target_modules": ["lin1"]}),
-    ("Vanilla MLP 4 LOKRv2", "MLP", LoKrV2Config, {"target_modules": ["lin0", "lin1"]}),
-    ("Vanilla MLP 5 LOKRv2", "MLP", LoKrV2Config, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    ("Vanilla MLP 1 LOKRv2", "MLP", LycorisLoKrConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 LOKRv2", "MLP", LycorisLoKrConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 LOKRv2", "MLP", LycorisLoKrConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 LOKRv2", "MLP", LycorisLoKrConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 5 LOKRv2", "MLP", LycorisLoKrConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
     (
         "Vanilla MLP 6 LOKRv2",
         "MLP",
@@ -284,39 +284,44 @@ TEST_CASES = [
             "module_dropout": 0.1,
         },
     ),
-    ("Vanilla MLP 7 LOKRv2", "MLP", LoKrV2Config, {"target_modules": "lin0", "rank_dropout": 0.5}),
+    ("Vanilla MLP 7 LOKRv2", "MLP", LycorisLoKrConfig, {"target_modules": "lin0", "rank_dropout": 0.5}),
     (
         "Vanilla MLP 8 LOKRv2",
         "MLP",
-        LoKrV2Config,
+        LycorisLoKrConfig,
         {"target_modules": "lin0", "decompose_both": True, "r": 1, "alpha": 1},
     ),
     (
         "Vanilla MLP 10 LOKRv2",
         "MLP",
-        LoKrV2Config,
+        LycorisLoKrConfig,
         {"target_modules": "lin0", "decompose_both": True, "r": 8, "alpha": 1, "use_upstream": True},
     ),
-    ("Conv2d 1 LOKRv2", "Conv2d", LoKrV2Config, {"target_modules": ["conv2d"]}),
-    ("Conv2d 2 LOKRv2", "Conv2d", LoKrV2Config, {"target_modules": ["conv2d", "lin0"]}),
-    ("Conv2d 3 LOKRv2", "Conv2d", LoKrV2Config, {"target_modules": ["conv2d"], "use_effective_conv2d": True}),
-    ("Conv2d 4 LOKRv2", "Conv2d", LoKrV2Config, {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True}),
+    ("Conv2d 1 LOKRv2", "Conv2d", LycorisLoKrConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d 2 LOKRv2", "Conv2d", LycorisLoKrConfig, {"target_modules": ["conv2d", "lin0"]}),
+    ("Conv2d 3 LOKRv2", "Conv2d", LycorisLoKrConfig, {"target_modules": ["conv2d"], "use_effective_conv2d": True}),
+    (
+        "Conv2d 4 LOKRv2",
+        "Conv2d",
+        LycorisLoKrConfig,
+        {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True},
+    ),
     (
         "Conv2d 5 LOKRv2",
         "Conv2d",
-        LoKrV2Config,
+        LycorisLoKrConfig,
         {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True, "decompose_both": True},
     ),
     (
         "Conv2d 6 LOKRv2",
         "Conv2d",
-        LoKrV2Config,
+        LycorisLoKrConfig,
         {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True, "decompose_factor": 4},
     ),
     (
         "Conv2d 7 LOKRv2",
         "Conv2d",
-        LoKrV2Config,
+        LycorisLoKrConfig,
         {
             "target_modules": ["conv2d", "lin0"],
             "use_effective_conv2d": True,
@@ -327,13 +332,13 @@ TEST_CASES = [
     (
         "Conv2d 8 LOKRv2",
         "Conv2d",
-        LoKrV2Config,
+        LycorisLoKrConfig,
         {"target_modules": ["conv2d"], "use_effective_conv2d": True, "use_upstream": True},
     ),
     (
         "Conv2d 9 LOKRv2",
         "Conv2d",
-        LoKrV2Config,
+        LycorisLoKrConfig,
         {
             "target_modules": ["conv2d", "lin0"],
             "use_effective_conv2d": True,
@@ -672,7 +677,7 @@ PREFIXES = {
     LoraConfig: "lora_",
     LoHaConfig: "hada_",
     LoKrConfig: "lokr_",
-    LoKrV2Config: "lokr_",
+    LycorisLoKrConfig: "lokr_",
     OFTConfig: "oft_",
     BOFTConfig: "boft_",
     LNTuningConfig: "ln_tuning_",
@@ -1500,7 +1505,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert "default" in model.base_model.classifier.modules_to_save
         assert "other" in model.base_model.classifier.modules_to_save
 
-    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoKrV2Config, LoraConfig, OFTConfig, HRAConfig])
+    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LycorisLoKrConfig, LoraConfig, OFTConfig, HRAConfig])
     def test_multiple_adapters_mixed_modules_to_save(self, config_cls):
         # See issue 1574
         # Check that we can have a model where one adapter has modules_to_save and the other doesn't. It should be
@@ -1525,7 +1530,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model.set_adapter("other")
         model(**inputs)
 
-    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoKrV2Config, LoraConfig, OFTConfig, HRAConfig])
+    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LycorisLoKrConfig, LoraConfig, OFTConfig, HRAConfig])
     def test_multiple_adapters_mixed_modules_to_save_order_switched(self, config_cls):
         # See issue 1574
         # Same test as test_multiple_adapters_mixed_modules_to_save, but this time the 2nd adapter has modules_to_save.
@@ -1725,7 +1730,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         [
             LoraConfig(target_modules=["lin0"], init_lora_weights=False),
             LoKrConfig(target_modules=["lin0"], init_weights=False),
-            LoKrV2Config(target_modules=["lin0"], init_weights=False),
+            LycorisLoKrConfig(target_modules=["lin0"], init_weights=False),
             LoHaConfig(target_modules=["lin0"], init_weights=False),
             AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
             IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
@@ -2808,10 +2813,10 @@ class RequiresGradTester(unittest.TestCase):
 
     def test_requires_grad_lokrv2_different_targets(self):
         # test two different LoKr adapters that target different modules
-        config0 = LoKrV2Config(target_modules=["lin0"])
+        config0 = LycorisLoKrConfig(target_modules=["lin0"])
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = LoKrV2Config(target_modules=["lin1"], inference_mode=True)
+        config1 = LycorisLoKrConfig(target_modules=["lin1"], inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -2850,10 +2855,10 @@ class RequiresGradTester(unittest.TestCase):
 
     def test_requires_grad_lokrv2_same_targets(self):
         # same as previous test, except that LoKr adapters target the same layer
-        config0 = LoKrV2Config(target_modules=["lin0"])
+        config0 = LycorisLoKrConfig(target_modules=["lin0"])
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = LoKrV2Config(target_modules=["lin0"], inference_mode=True)
+        config1 = LycorisLoKrConfig(target_modules=["lin0"], inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"

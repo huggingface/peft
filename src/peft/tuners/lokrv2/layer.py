@@ -24,7 +24,7 @@ from lycoris.functional import lokr
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
 
-class LoKrLayerv2(BaseTunerLayer):
+class LycorisLoKr(BaseTunerLayer):
     # All names of layers that may contain adapter weights
     adapter_layer_names = (
         "lokr_w1",
@@ -161,7 +161,14 @@ class LoKrLayerv2(BaseTunerLayer):
             else:
                 dummy_weights = torch.rand((self.in_features, self.out_features))
 
-            weights = lokr.weight_gen(dummy_weights, rank=r, factor=decompose_factor,decompose_both=decompose_both, tucker=use_effective_conv2d, full_matrix=full_matrix)
+            weights = lokr.weight_gen(
+                dummy_weights,
+                rank=r,
+                factor=decompose_factor,
+                decompose_both=decompose_both,
+                tucker=use_effective_conv2d,
+                full_matrix=full_matrix,
+            )
             attributes = [
                 "lokr_w1",
                 "lokr_w1_a",
@@ -303,7 +310,7 @@ class LoKrLayerv2(BaseTunerLayer):
         return rebuild * scale
 
 
-class Linear(nn.Linear, LoKrLayerv2):
+class Linear(nn.Linear, LycorisLoKr):
     """LoKr implemented in Linear layer"""
 
     def __init__(
@@ -319,20 +326,20 @@ class Linear(nn.Linear, LoKrLayerv2):
         **kwargs,
     ):
         super(nn.Linear, self).__init__()
-        LoKrLayerv2.__init__(self, base_layer, **kwargs)
+        LycorisLoKr.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = fan_in_fan_out
 
         update_layer_kwargs = {
-            'use_effective_conv2d':kwargs.get('use_effective_conv2d',False),
-            'decompose_both': kwargs.get('decompose_both', False),
-            'decompose_factor': kwargs.get('decompose_factor', 1),
-            'full_matrix': kwargs.get('full_matrix', False),
-            'use_upstream': kwargs.get('use_upstream', False),
+            "use_effective_conv2d": kwargs.get("use_effective_conv2d", False),
+            "decompose_both": kwargs.get("decompose_both", False),
+            "decompose_factor": kwargs.get("decompose_factor", 1),
+            "full_matrix": kwargs.get("full_matrix", False),
+            "use_upstream": kwargs.get("use_upstream", False),
         }
 
         # Create adapter and set it active
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, alpha, rank_dropout, module_dropout, init_weights,**update_layer_kwargs)
+        self.update_layer(adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, **update_layer_kwargs)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -393,7 +400,7 @@ class Linear(nn.Linear, LoKrLayerv2):
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
-        # https://github.com/KohakuBlueleaf/LyCORIS/blob/e4259b870d3354a9615a96be61cb5d07455c58ea/lycoris/modules/lokr.py#L224
+        # https://github.com/KohakuBlueleaf/LyCORIS/blob/258387f586beabfca71646a9671027f75ed34597/lycoris/modules/lokr.py#L347
         if adapter_name in self.lokr_w1:
             w1 = self.lokr_w1[adapter_name]
         else:
@@ -464,7 +471,7 @@ class Linear(nn.Linear, LoKrLayerv2):
         return "lokr." + rep
 
 
-class Conv2d(nn.Module, LoKrLayerv2):
+class Conv2d(nn.Module, LycorisLoKr):
     """LoKr implemented in Conv2d layer"""
 
     def __init__(
@@ -481,22 +488,20 @@ class Conv2d(nn.Module, LoKrLayerv2):
         **kwargs,
     ):
         super().__init__()
-        LoKrLayerv2.__init__(self, base_layer, **kwargs)
+        LycorisLoKr.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = fan_in_fan_out
 
         update_layer_kwargs = {
-            'use_effective_conv2d':kwargs.get('use_effective_conv2d',False),
-            'decompose_both': kwargs.get('decompose_both', False),
-            'decompose_factor': kwargs.get('decompose_factor', 1),
-            'full_matrix': kwargs.get('full_matrix', False),
-            'use_upstream': kwargs.get('use_upstream', False),
+            "use_effective_conv2d": kwargs.get("use_effective_conv2d", False),
+            "decompose_both": kwargs.get("decompose_both", False),
+            "decompose_factor": kwargs.get("decompose_factor", 1),
+            "full_matrix": kwargs.get("full_matrix", False),
+            "use_upstream": kwargs.get("use_upstream", False),
         }
 
         # Create adapter and set it active
         self._active_adapter = adapter_name
-        self.update_layer(
-            adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, **update_layer_kwargs
-        )
+        self.update_layer(adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, **update_layer_kwargs)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """

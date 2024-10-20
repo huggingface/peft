@@ -35,16 +35,15 @@ from peft.utils import (
     _get_submodules,
 )
 
-from .config import LoKrV2Config
-from .layer import Conv2d, Linear, LoKrLayerv2
+from .config import LycorisLoKrConfig
+from .layer import Conv2d, Linear, LycorisLoKr
 
 
-class LoKrModelv2(BaseTuner):
+class LycorisLoKrModel(BaseTuner):
     """
     Creates Low-Rank Kronecker Product model from a pretrained model. The original method is partially described in
     https://arxiv.org/abs/2108.06098 and in https://arxiv.org/abs/2309.14859 Current implementation heavily borrows
-    from
-    https://github.com/KohakuBlueleaf/LyCORIS/blob/eb460098187f752a5d66406d3affade6f0a07ece/lycoris/modules/lokr.py
+    from https://github.com/KohakuBlueleaf/LyCORIS/blob/dev/lycoris/modules/lokr.py
 
     Args:
         model (`torch.nn.Module`): The model to which the adapter tuner layers will be attached.
@@ -103,7 +102,7 @@ class LoKrModelv2(BaseTuner):
     def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
         super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
-    def _check_new_adapter_config(self, config: LoKrV2Config) -> None:
+    def _check_new_adapter_config(self, config: LycorisLoKrConfig) -> None:
         """
         A helper method to check the config when a new adapter is being added.
 
@@ -119,12 +118,12 @@ class LoKrModelv2(BaseTuner):
             )
 
     @staticmethod
-    def _check_target_module_exists(LoKrV2Config, key):
-        return check_target_module_exists(LoKrV2Config, key)
+    def _check_target_module_exists(LycorisLoKrConfig, key):
+        return check_target_module_exists(LycorisLoKrConfig, key)
 
     def _create_and_replace(
         self,
-        lokr_config: LoKrV2Config,
+        lokr_config: LycorisLoKrConfig,
         adapter_name,
         target,
         target_name,
@@ -150,7 +149,7 @@ class LoKrModelv2(BaseTuner):
         }
         kwargs["bias"] = bias
 
-        if isinstance(target, LoKrLayerv2):
+        if isinstance(target, LycorisLoKr):
             target.update_layer(
                 adapter_name,
                 r=lokr_config.r,
@@ -187,7 +186,7 @@ class LoKrModelv2(BaseTuner):
                         p.requires_grad = True
             elif bias == "lokr_only":
                 for name, m in model.named_modules():
-                    if isinstance(m, LoKrLayerv2) and hasattr(m, "bias") and m.bias is not None:
+                    if isinstance(m, LycorisLoKr) and hasattr(m, "bias") and m.bias is not None:
                         m.bias.requires_grad = True
             else:
                 raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
@@ -280,7 +279,7 @@ class LoKrModelv2(BaseTuner):
 
     def set_adapter(self, adapter_name):
         for module in self.model.modules():
-            if isinstance(module, LoKrLayerv2):
+            if isinstance(module, LycorisLoKr):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
@@ -346,7 +345,7 @@ class LoKrModelv2(BaseTuner):
         new_adapter = None
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
-            if isinstance(target, LoKrLayerv2):
+            if isinstance(target, LycorisLoKr):
                 target.delete_adapter(adapter_name)
                 if new_adapter is None:
                     new_adapter = target.active_adapters[:]
