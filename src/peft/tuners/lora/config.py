@@ -399,9 +399,10 @@ class LoraConfig(PeftConfig):
             if self.loftq_config is None:
                 raise ValueError("`loftq_config` must be specified when `init_lora_weights` is 'loftq'.")
             
-        elif self.init_lora_weights == "eva":
-            if self.eva_config is None:
-                raise ValueError("`eva_config` must be specified when `init_lora_weights` is 'eva'.")
+        elif self.init_lora_weights == "eva" and self.eva_config is None:
+            raise ValueError("`eva_config` must be specified when `init_lora_weights` is 'eva'.")
+        elif self.init_lora_weights != "eva" and self.eva_config is not None:
+            warnings.warn("`eva_config` specified but will be ignored when `init_lora_weights` is not 'eva'.")
 
         # Using post training conversion of modified base weights to restore their initial values (PiSSA, OLoRA) cannot
         # be correctly done when using rslora + rank_pattern/alpha_pattern. We can't really know if the user intends
