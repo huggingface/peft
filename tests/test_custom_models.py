@@ -1747,6 +1747,14 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # should not raise an error
         model.merge_and_unload(safe_merge=True)
 
+    def test_unload_adapter_multihead_attention(self):
+        # MultiheadAttention has special logic for unloading, that logic is covered by this test
+        self._test_unload_adapter(
+            model_id="MHA",
+            config_cls=LoraConfig,
+            config_kwargs={"target_modules": ["mha"], "init_lora_weights": False},
+        )
+
     def test_dora_save_and_load_remapping(self):
         # Here we test the refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a ModuleDict
         # with a DoraLayer instance. The old parameter is now the "weight" attribute of that layer. Since we want the

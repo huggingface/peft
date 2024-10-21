@@ -1319,6 +1319,21 @@ class MultiheadAttention(nn.Module, LoraLayer):
 
         self.get_base_layer().out_proj.unmerge()
 
+    def unload_and_optionally_merge_module(
+        self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]
+    ) -> nn.MultiheadAttention:
+        """
+        Merging and unloading of the MultiheadAttention module
+
+        This requires an extra step for MultiheadAttention, which is why there is this special method instead of
+        relying on the normal merge_and_unload code path.
+        """
+        if merge:
+            self.merge(safe_merge=safe_merge, adapter_names=adapter_names)
+        base_layer = self.get_base_layer()
+        base_layer.out_proj = base_layer.out_proj.base_layer  # extra step
+        return base_layer
+
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
         Compute the delta weight for the given adapter.

@@ -54,6 +54,7 @@ from peft import (
     prepare_model_for_kbit_training,
 )
 from peft.tuners.lora import LoraLayer
+from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import _get_submodules, infer_device
 
 from .testing_utils import get_state_dict
@@ -679,6 +680,9 @@ class PeftCommonTester:
         logits_unmerged = model(**dummy_input)[0]
 
         model = model.merge_and_unload()
+
+        # check that PEFT layers are completely removed
+        assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
         logits_merged_unloaded = model(**dummy_input)[0]
 
         conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
@@ -1311,6 +1315,8 @@ class PeftCommonTester:
             model = model.unload()
             logits_unload = model(**dummy_input)[0]
 
+            # check that PEFT layers are completely removed
+            assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
             assert not torch.allclose(logits_with_adapter, logits_unload, atol=1e-10, rtol=1e-10)
             assert torch.allclose(logits_transformers, logits_unload, atol=1e-4, rtol=1e-4)
 
