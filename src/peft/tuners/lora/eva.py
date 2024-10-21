@@ -329,7 +329,7 @@ def get_eva_state_dict(
         pbar = iter(cycle(dataloader))
     convergence_dict = {k: False for k in hooks.keys()}
     rank_dist = {k: max_components for k in layer_hook_map.keys()}
-    for i, inputs in enumerate(pbar):
+    for inputs in pbar:
 
         indices = None
         if get_indices_fn is not None:
@@ -358,8 +358,6 @@ def get_eva_state_dict(
             pbar.set_description(f"{sum(layer_converged)}/{len(layer_converged)} layers have converged")
         
         if all(convergence_dict.values()):
-            for _, handle in hooks.values():
-                handle.remove()
             break
 
         forward_fn(model, move_inputs_to_device(inputs, device))
@@ -369,6 +367,11 @@ def get_eva_state_dict(
             continue
 
         rank_dist = _get_rank_distribution(hooks, layer_hook_map, equal_inputs_map, rank_budget, max_components)
+
+    # check all svd hooks have been removed
+    remaining_svd_hooks = {n for n, m in model.named_modules() for v in m._forward_hooks.values() if isinstance(v, SVDHook)}
+    if len(remaining_svd_hooks) > 0:
+        raise ValueError(f"All SVD hooks should have been removed but the following layers still have active hooks: {remaining_svd_hooks}")
 
     eva_state_dict = {}
     for name, rank in rank_dist.items():
