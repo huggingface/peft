@@ -62,7 +62,6 @@ class SVDHook:
         states = self.prepare_activations_fn(input).detach()
 
         # merging all but last dimension
-        states = states.view(-1, states.size(-1))
         if self.indices is not None:
             states = states[self.indices]
 
@@ -188,9 +187,7 @@ def get_indices_fn_causal_lm(inputs: dict, config: LoraConfig):
     mask = inputs.get("attention_mask", torch.ones_like(inputs["input_ids"])).bool()
     if config.eva_config.use_label_mask and hasattr(inputs, "labels"):
         mask = torch.logical_and(mask, inputs["labels"] != config.eva_config.label_mask_value)
-    indices = torch.nonzero(mask)
-    indices = indices[:,0] * mask.size(1) + indices[:,1]
-    return indices
+    return mask.nonzero()
 
 
 @torch.no_grad()
@@ -225,6 +222,7 @@ def get_eva_state_dict(
         The function to use if not all positions in the input tensor should be used for SVD 
         (e.g. for causal language modeling). Can be set to None if all positions should be used.
         `peft.tuners.lora.eva.get_indices_fn_causal_lm` is used by default.
+        Should always return a tensor of shape (n_indices, layer_input.ndim-1).
     prepare_activations_fn: (Union[callable, Dict[str, callable], None])
         If a layer recieves multiple inputs as a list, per default the first input is used.
         This function can be used to modify this behaviour. Accepts a dictionary with layer names as keys.
@@ -319,14 +317,13 @@ def get_eva_state_dict(
                 convergence_dict[name] = True
                 continue
             convergence_dict[name] = False
-            hook.indices = indices
+            hook.indices = indices.T.unbind()
             module.register_forward_hook(hook)
 
         layer_converged = list(convergence_dict.values()) + [convergence_dict[v] for v in equal_inputs_map.values()]
         pbar.set_description(f"{sum(layer_converged)}/{len(layer_converged)} layers have converged")
         
         if all(convergence_dict.values()):
-            print("exiting - all SVD components have converged.")
             break
 
         forward_fn(model, move_inputs_to_device(inputs, device))
@@ -389,7 +386,7 @@ def initialize_lora_eva_weights(
         The function to use if not all positions in the input tensor should be used for SVD 
         (e.g. for causal language modeling). Can be set to None if all positions should be used.
         `peft.tuners.lora.eva.get_indices_fn_causal_lm` is used by default
-        (causal lm objective assumed).
+        Should always return a tensor of shape (n_indices, layer_input.ndim-1).
     device: (Optional[Union[str, torch.device]])
         The device to move the model to. If None, the model is not moved.
     adapter_name: (str)
