@@ -1,3 +1,17 @@
+# Copyright 2024-present the HuggingFace Inc. team.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import torch
 from peft import LoraConfig, EvaConfig, get_peft_model, initialize_lora_eva_weights
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -43,8 +57,7 @@ dataloader = DataLoader(
 eva_config = EvaConfig(
     rho = rho,
     use_label_mask = use_label_mask,
-    whiten = whiten,
-    device = svd_device,
+    whiten = whiten
 )
 peft_config = LoraConfig(
     r = rank,
@@ -53,6 +66,9 @@ peft_config = LoraConfig(
     init_lora_weights = "eva",
     eva_config = eva_config
 )
+# to optimize memory usage during eva initialization, set low_cpu_mem_usage=True
 peft_model = get_peft_model(model, peft_config, low_cpu_mem_usage=True)
 
 initialize_lora_eva_weights(peft_model, peft_config, dataloader, device=svd_device)
+
+# from this point on, you can use the model as you would use a normal LoRA model

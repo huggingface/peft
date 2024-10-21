@@ -73,14 +73,17 @@ class LoftQConfig:
 class EvaConfig:
     """
     This is the sub-configuration class to store the configuration for a data-drive initialization via EVA.
+    EVA was introduced in <ahref='https://arxiv.org/abs/2410.07170'>Explained Variance Adaptation</a>.
 
     Args:
-        rho (`float`): Rho value for EVA redistribution. Default is 1.0.
+        rho (`float`): Rho value for EVA redistribution. Default is 1.0 meaning no redistribution.
+            Increasing rho will allow for a higher degree of redistribution of lora ranks across layers.
         tau (`float`): Cosine similarity threshold for early stopping. Default is 0.99.
         use_label_mask (`bool`): Use label mask for EVA initialization. Default is False.
+            Setting use_label_mask=True can be especially beneficial for multi-turn conversations.
         label_mask_value (`int`): If use_label_mask=True the value to look for to mask out ignored tokens. Default is -100.
         whiten (`bool`): Apply whitening to singular vectors. Default is False.
-        device (`str`): Device to use for EVA initialization. Default is 'cuda'.
+            Whitening has been shown to be beneficial for EVA in the vision domain.
     """
 
     rho: float = field(default=1.0, metadata={"help": "Rho value for EVA redistribution"})
@@ -88,10 +91,10 @@ class EvaConfig:
     use_label_mask: bool = field(default=False, metadata={"help": "Use label mask for EVA initialization"})
     label_mask_value: int = field(default=-100, metadata={"help": "if use_label_mask=True the value to look for to mask out ignored tokens"})
     whiten: bool = field(default=False, metadata={"help": "Apply whitening to singular vectors"})
-    device: str = field(default="cuda", metadata={"help": "Device to use for EVA initialization"})
 
     def __post_init__(self):
-        assert self.rho >= 1.0, "early_stop_rho must be >= 1"
+        if self.rho < 1.0:
+            raise ValueError("rho must be >= 1")
 
 
 @dataclass

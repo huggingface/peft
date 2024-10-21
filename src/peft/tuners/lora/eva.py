@@ -1,3 +1,17 @@
+# Copyright 2024-present the HuggingFace Inc. team.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import torch
 import warnings
 from tqdm import tqdm
@@ -47,7 +61,8 @@ class SVDHook:
         if isinstance(sim_thresh, torch.Tensor) and len(sim_thresh.shape) > 0:
             check1 = sim_thresh.size(0) == n_components or sim_thresh.size(0) == 1
             check2 = len(sim_thresh.shape) == 1
-            assert check1 and check2, "if sim_thresh is a tensor with more than 0 dimensions it must have shape (n_components,) or (1,)"
+            if not (check1 and check2):
+                raise ValueError("if sim_thresh is a tensor with more than 0 dimensions it must have shape (n_components,) or (1,)")
 
         self.svd = IncrementalPCA(n_components=n_components, copy=True, lowrank=True)
 
@@ -161,8 +176,9 @@ def get_device_with_meta_params(model: torch.nn.Module) -> torch.device:
     """
     Get the device of the model's parameters. Useful if some parameters are on meta device.
     """
-    devices = list(set([p.device for p in model.parameters() if str(p.device) != "meta"]))
-    assert len(devices) == 1, "model has multiple devices"
+    devices = list({p.device for p in model.parameters() if str(p.device) != "meta"})
+    if len(devices) > 1:
+        raise ValueError("model has multiple devices")
     return devices[0]
 
 
@@ -190,14 +206,19 @@ def get_indices_fn_causal_lm(inputs: dict, config: LoraConfig):
     return mask.nonzero()
 
 
+def forward_fn_dict(model, inputs):
+    return model(**inputs)
+
+
 @torch.no_grad()
 def get_eva_state_dict(
     model: torch.nn.Module,
     peft_config: LoraConfig,
     dataloader: torch.utils.data.DataLoader,
-    forward_fn: callable = lambda model, inputs: model(**inputs),
+    forward_fn: Optional[callable] = forward_fn_dict,
     get_indices_fn: Optional[callable] = get_indices_fn_causal_lm,
-    prepare_activations_fn: Union[callable, Dict[str, callable], None] = None
+    prepare_activations_fn: Union[callable, Dict[str, callable], None] = None,
+    show_progress_bar: bool = True
 ) -> dict:
     """
     Compute the SVD for each layer in the model.
@@ -224,7 +245,7 @@ def get_eva_state_dict(
         `peft.tuners.lora.eva.get_indices_fn_causal_lm` is used by default.
         Should always return a tensor of shape (n_indices, layer_input.ndim-1).
     prepare_activations_fn: (Union[callable, Dict[str, callable], None])
-        If a layer recieves multiple inputs as a list, per default the first input is used.
+        If a layer receives multiple inputs as a list, per default the first input is used.
         This function can be used to modify this behaviour. Accepts a dictionary with layer names as keys.
         Default logic:
         ```
@@ -241,12 +262,12 @@ def get_eva_state_dict(
     """
     
     # Computes the rank distribution for each layer based on the explained variance ratio.
-    def _get_rank_distribution(hooks, hook_layer_map, equal_inputs_map, rank_budget, max_components):
-        exp_vars = {k: h.svd.explained_variance_ratio_[:max_components] for k, h in hooks.items()}
-        keys, values = zip(*[(k, c) for k, name in hook_layer_map.items() for c in exp_vars[name]])
+    def _get_rank_distribution(hooks, layer_hook_map, equal_inputs_map, rank_budget, max_components):
+        exp_vars = {k: h[0].svd.explained_variance_ratio_[:max_components] for k, h in hooks.items()}
+        keys, values = zip(*[(k, c) for k, name in layer_hook_map.items() for c in exp_vars[name]])
         idx = torch.stack(values).argsort(descending=True)
         counts = Counter([keys[i] for i in idx[:rank_budget]])
-        counts = {k: counts.get(k, 0) for k in hook_layer_map.keys()} # add layers with 0 rank
+        counts = {k: counts.get(k, 0) for k in layer_hook_map.keys()} # add layers with 0 rank
         for k, k_hook in equal_inputs_map.items():
             # ensure hook layers have the highest rank if they are equal to another layer
             rank, rank_hook = counts[k], counts[k_hook]
@@ -271,65 +292,80 @@ def get_eva_state_dict(
         if not _check_fn(name, module):
             continue
         hook = HashHook(name)
-        module.register_forward_hook(hook)
-        hooks[name] = hook
+        handle = module.register_forward_hook(hook)
+        hooks[name] = (hook, handle)
     rank_budget = peft_config.r * len(hooks)
     max_components = round(peft_config.r * peft_config.eva_config.rho)
 
     # forward for one batch to check which layer inputs are equal to avoid unneeded svd calculations
     inputs = next(iter(dataloader))
     forward_fn(model, move_inputs_to_device(inputs, device))
-    hash_dict = {k: h.hashed_inputs[0] for k, h in hooks.items()}
+    hash_dict = {k: h[0].hashed_inputs[0] for k, h in hooks.items()}
     equal_inputs_map = {vv: v[0] for v in find_equal_values(hash_dict).values() for vv in v[1:]}
     
     # initialize svd hooks
-    for k in list(hooks.keys()):
-        module = model.get_submodule(k)
-        module._forward_hooks.clear()
-        _ = hooks.pop(k)
-        if k in equal_inputs_map:
+    for name in list(hooks.keys()):
+        _, handle = hooks.pop(name)
+        handle.remove()
+        if name in equal_inputs_map:
             continue
         if isinstance(prepare_activations_fn, Mapping):
             try:
-                fn = prepare_activations_fn[k]
+                fn = prepare_activations_fn[name]
             except KeyError:
-                raise ValueError(f"if prepare_activations_fn is a mapping it must contain adapter module name {k}")
+                raise ValueError(f"if prepare_activations_fn is a mapping it must contain adapter module name {name}")
         else:
             fn = prepare_activations_fn
-        hooks[k] = SVDHook(k, max_components, peft_config.eva_config.tau, fn)
+        hook = SVDHook(name, max_components, peft_config.eva_config.tau, fn)
+        module = model.get_submodule(name)
+        handle = module.register_forward_hook(hook)
+        hooks[name] = (hook, handle) # adding the old handle here so we dont get errors in the first forward pass
     layer_hook_map = {**dict(zip(hooks.keys(), hooks.keys())), **equal_inputs_map}
 
     # start svd calculation
-    pbar = tqdm(iter(cycle(dataloader)), position=0, leave=False)
+    if show_progress_bar:
+        pbar = tqdm(iter(cycle(dataloader)), position=0, leave=False)
+    else:
+        pbar = iter(cycle(dataloader))
     convergence_dict = {k: False for k in hooks.keys()}
     rank_dist = {k: max_components for k in layer_hook_map.keys()}
-    for inputs in pbar:
+    for i, inputs in enumerate(pbar):
 
         indices = None
         if get_indices_fn is not None:
             indices = get_indices_fn(inputs, peft_config)
 
-        for name, hook in hooks.items():
-            module = model.get_submodule(name)
-            module._forward_hooks.clear()
+        for name in list(hooks.keys()):
+            hook, handle = hooks.get(name)
             # check if all components that are needed for the rank distribution have converged
-            if torch.all(hook.converged[:rank_dist[name]]):
+            converged = torch.all(hook.converged[:rank_dist[name]])
+            # if a layer has switched from not converged to converged in the current step
+            if (not convergence_dict[name]) and converged and handle:
+                handle.remove()
+                handle = None
                 convergence_dict[name] = True
                 continue
-            convergence_dict[name] = False
+            # if a layer has switched from converged to not converged in the current step
+            elif convergence_dict[name] and not converged:
+                module = model.get_submodule(name)
+                handle = module.register_forward_hook(hook)
+                convergence_dict[name] = False
             hook.indices = indices.T.unbind()
-            module.register_forward_hook(hook)
+            hooks[name] = (hook, handle)
 
-        layer_converged = list(convergence_dict.values()) + [convergence_dict[v] for v in equal_inputs_map.values()]
-        pbar.set_description(f"{sum(layer_converged)}/{len(layer_converged)} layers have converged")
+        if show_progress_bar:
+            layer_converged = list(convergence_dict.values()) + [convergence_dict[v] for v in equal_inputs_map.values()]
+            pbar.set_description(f"{sum(layer_converged)}/{len(layer_converged)} layers have converged")
         
         if all(convergence_dict.values()):
+            for _, handle in hooks.values():
+                handle.remove()
             break
 
         forward_fn(model, move_inputs_to_device(inputs, device))
 
         # in case some hooks have to skip the svd calculation because the number of tokens is less than the number of components
-        if not all([hasattr(h.svd, "components_") for h in hooks.values()]):
+        if not all([hasattr(h[0].svd, "components_") for h in hooks.values()]):
             continue
 
         rank_dist = _get_rank_distribution(hooks, layer_hook_map, equal_inputs_map, rank_budget, max_components)
@@ -338,7 +374,7 @@ def get_eva_state_dict(
     for name, rank in rank_dist.items():
         if rank == 0:
             continue
-        hook = hooks[layer_hook_map[name]]
+        hook = hooks[layer_hook_map[name]][0]
         assert torch.all(hook.converged[:rank]) # this should never happen because we check for convergence
         u = hook.svd.components_[:rank]
         if peft_config.eva_config.whiten:
@@ -359,7 +395,7 @@ def initialize_lora_eva_weights(
     model,
     peft_config,
     dataloader,
-    forward_fn: callable = lambda model, inputs: model(**inputs),
+    forward_fn: Optional[callable] = forward_fn_dict,
     get_indices_fn: Optional[callable] = get_indices_fn_causal_lm,
     prepare_activations_fn: Union[callable, Dict[str, callable], None] = None,
     device: Optional[Union[str, torch.device]] = None,
@@ -392,7 +428,7 @@ def initialize_lora_eva_weights(
     adapter_name: (str)
         The name of the adapter to initialize the weights for.
     prepare_activations_fn: (Union[callable, Dict[str, callable], None])
-        If a layer recieves multiple inputs as a list, per default the first input is used.
+        If a layer receives multiple inputs as a list, per default the first input is used.
         This function can be used to modify this behaviour. Accepts a dictionary with layer names as keys.
         Default logic:
         ```
@@ -410,8 +446,6 @@ def initialize_lora_eva_weights(
     orig_device = get_device_with_meta_params(model)
     if device is not None:
         recursive_apply(model, device)
-    
-    model.disable_adapter()
     
     # assign default eva config
     if peft_config.eva_config is None:
