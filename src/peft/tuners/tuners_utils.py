@@ -518,7 +518,7 @@ class BaseTuner(nn.Module, ABC):
                 if peft_config.layers_pattern is not None:
                     error_msg += f" You also specified 'layers_pattern': {peft_config.layers_pattern}."
                 raise ValueError(error_msg)
-                
+
             else:
                 # Some modules did not match and some matched but were excluded
                 error_msg = (
