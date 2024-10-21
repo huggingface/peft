@@ -381,7 +381,7 @@ def initialize_lora_eva_weights(
         The dataloader to use for the forward pass.
     forward_fn: callable
         The forward function to use for the forward pass.
-        ```model(**inputs)``` is used if forward_fn is not provided.
+        `model(**inputs)` is used if forward_fn is not provided.
     get_indices_fn: (Optional[callable])
         The function to use if not all positions in the input tensor should be used for SVD 
         (e.g. for causal language modeling). Can be set to None if all positions should be used.
