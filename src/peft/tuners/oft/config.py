@@ -176,9 +176,7 @@ class OFTConfig(PeftConfig):
         )
         # check for layers_to_transform and layers_pattern
         if self.layers_to_transform is not None and self.layers_pattern is None:
-            raise ValueError(
-                "When `layers_to_transform` is specified, `layers_pattern` must also be specified. "
-            )
+            raise ValueError("When `layers_to_transform` is specified, `layers_pattern` must also be specified. ")
         if self.r == 0 and self.oft_block_size == 0:
             raise ValueError(
                 f"Either `r` or `oft_block_size` must be non-zero. Currently, r = {self.r} and oft_block_size = {self.oft_block_size}."
