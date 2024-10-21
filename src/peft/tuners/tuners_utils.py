@@ -978,23 +978,25 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
             layer_index = None
             # TODO: It's still unclear how empty layers_pattern (None, [], or "") should behave
             # For now, empty layers_pattern means any layer pattern is ok
-            if layers_pattern is None or len(layers_pattern) == 0:
-                layer_index = re.match(r".*\.[^.]*\.(\d+)\.", key)
-            else:
-                layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
-                for pattern in layers_pattern:
-                    layer_index = re.match(rf".*\.{pattern}\.(\d+)\.", key)
-                    if layer_index is not None:
-                        break
-
-            if layer_index is None:
-                target_module_found = False
-            else:
-                layer_index = int(layer_index.group(1))
-                if isinstance(layer_indexes, int):
-                    target_module_found = layer_index == layer_indexes
+            # Only consider layers_pattern if layers_to_transform is not None
+            if layer_indexes is not None:
+                if layers_pattern is None or len(layers_pattern) == 0:
+                    layer_index = re.match(r".*\.[^.]*\.(\d+)\.", key)
                 else:
-                    target_module_found = layer_index in layer_indexes
+                    layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
+                    for pattern in layers_pattern:
+                        layer_index = re.match(rf".*\.{pattern}\.(\d+)\.", key)
+                        if layer_index is not None:
+                            break
+
+                if layer_index is None:
+                    target_module_found = False
+                else:
+                    layer_index = int(layer_index.group(1))
+                    if isinstance(layer_indexes, int):
+                        target_module_found = layer_index == layer_indexes
+                    else:
+                        target_module_found = layer_index in layer_indexes
 
     return target_module_found
 
