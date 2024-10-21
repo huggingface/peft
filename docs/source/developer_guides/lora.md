@@ -69,15 +69,22 @@ For more advanced usage, please refer to our [documentation](https://github.com/
 
 You can use EVA by setting the LoraConfig:
 ```python
+from peft import LoraConfig, EvaConfig
 peft_config = LoraConfig(
-    r = 16,
-    lora_alpha = 1,
-    target_modules = ['q_proj', 'k_proj', 'v_proj', 'o_proj'],
     init_lora_weights = "eva",
+    eva_config = EvaConfig(rho = 1.0),
+    ...
 )
+```
+To optimize the amount of available memory for EVA, you can use the `low_cpu_mem_usage` flag in `get_peft_model`:
+```python
 peft_model = get_peft_model(model, peft_config, low_cpu_mem_usage=True)
+```
+Then, initialize the EVA weights (in most cases the dataloader used for eva initialization can be the same as the one used for finetuning):
+```python
 initialize_lora_eva_weights(peft_model, peft_config, dataloader, device="cuda")
 ```
+For further instructions on using EVA, please refer to our [documentation](https://github.com/huggingface/peft/tree/main/examples/eva_finetuning).
 
 ### LoftQ
 

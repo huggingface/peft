@@ -53,7 +53,7 @@ dataloader = DataLoader(
     collate_fn=lambda examples: {k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()}
 )
 
-# get eva model
+# setup peft config
 eva_config = EvaConfig(
     rho = rho,
     use_label_mask = use_label_mask,
@@ -66,6 +66,7 @@ peft_config = LoraConfig(
     init_lora_weights = "eva",
     eva_config = eva_config
 )
+
 # to optimize memory usage during eva initialization, set low_cpu_mem_usage=True
 peft_model = get_peft_model(model, peft_config, low_cpu_mem_usage=True)
 
