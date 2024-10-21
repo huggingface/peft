@@ -150,9 +150,7 @@ class VeraConfig(PeftConfig):
         )
         # check for layers_to_transform and layers_pattern
         if self.layers_to_transform is not None and self.layers_pattern is None:
-            raise ValueError(
-                "When `layers_to_transform` is specified, `layers_pattern` must also be specified. "
-            )
+            raise ValueError("When `layers_to_transform` is specified, `layers_pattern` must also be specified. ")
         if not self.save_projection:
             warnings.warn(
                 "Specified to not save vera_A and vera_B within the state dictionary, instead they will be restored "

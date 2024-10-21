@@ -133,6 +133,4 @@ class LoHaConfig(LycorisConfig):
         )
         # check for layers_to_transform and layers_pattern
         if self.layers_to_transform is not None and self.layers_pattern is None:
-            raise ValueError(
-                "When `layers_to_transform` is specified, `layers_pattern` must also be specified. "
-            )
+            raise ValueError("When `layers_to_transform` is specified, `layers_pattern` must also be specified. ")
