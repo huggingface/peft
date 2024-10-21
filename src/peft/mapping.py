@@ -184,6 +184,14 @@ def get_peft_model(
             )
         peft_config.revision = revision
 
+    if (isinstance(peft_config, PEFT_TYPE_TO_CONFIG_MAPPING["LORA"])) \
+        and (peft_config.init_lora_weights == "eva") \
+        and not low_cpu_mem_usage:
+        warnings.warn(
+            "lora with eva initialization used with low_cpu_mem_usage=False"
+            "Setting low_cpu_mem_usage=True can improve the maximum batch size possible for eva initialization."
+        )
+
     if mixed:
         # note: PeftMixedModel does not support autocast_adapter_dtype, so don't pass it
         return PeftMixedModel(model, peft_config, adapter_name=adapter_name)
