@@ -1,11 +1,11 @@
 import torch
 import warnings
 from tqdm import tqdm
-from functools import reduce
 from itertools import cycle
 from collections import Counter, defaultdict
+from collections.abc import Mapping
 
-from typing import Union, Optional
+from typing import Union, Optional, Dict
 
 from peft.utils.incremental_pca import IncrementalPCA
 
@@ -16,29 +16,33 @@ from .layer import LoraLayer, Linear
 class SVDHook:
     """
     A forward hook for calculating incremental SVD/PCA on layer input activations.
+    The hook is designed to be registered to a PyTorch module using the `register_forward_hook` method.
 
     This hook performs a step of incremental Singular Value Decomposition (SVD)
     on the input activations of a specified layer during the forward pass of a neural network.
-
     The hook also tracks convergence of the computed components using cosine similarity
     between the current and previous components.
 
     Attributes:
+    -----------
         name (str): Name of the layer to which this hook is attached.
         n_components (int): Number of principal components to compute.
         sim_thresh (Union[float, torch.Tensor]): Similarity threshold for convergence.
-
-    The hook is designed to be registered to a PyTorch module using the `register_forward_hook` method.
     """
     def __init__(
         self,
         name: str,
         n_components: int,
-        sim_thresh: Union[float, torch.Tensor]
+        sim_thresh: Union[float, torch.Tensor],
+        prepare_activations_fn: Optional[callable] = None
     ):
         self.name = name
         self.n_components = n_components
         self.sim_thresh = sim_thresh
+        if prepare_activations_fn is None:
+            self.prepare_activations_fn = self._prepare_activations_fn_default
+        else:
+            self.prepare_activations_fn = prepare_activations_fn
 
         if isinstance(sim_thresh, torch.Tensor) and len(sim_thresh.shape) > 0:
             check1 = sim_thresh.size(0) == n_components or sim_thresh.size(0) == 1
@@ -55,11 +59,7 @@ class SVDHook:
         if hasattr(self.svd, "components_"):
             previous_components = self.svd.components_.clone().detach()
 
-        # check if input is a tuple
-        try:
-            states = input.detach()
-        except AttributeError:
-            states = input[0].detach()
+        states = self.prepare_activations_fn(input).detach()
 
         # merging all but last dimension
         states = states.view(-1, states.size(-1))
@@ -82,17 +82,31 @@ class SVDHook:
             sim = torch.nn.functional.cosine_similarity(components, previous_components)
             self.converged = (sim >= self.sim_thresh)
 
+    @staticmethod
+    def _prepare_activations_fn_default(activations) -> torch.Tensor:
+        if isinstance(activations, torch.Tensor):
+            return activations
+        elif isinstance(activations, (tuple, list)):
+            return activations[0]
+        else:
+            raise ValueError(
+                f"unsupported input type for prepare_activations_fn: {type(activations)}, "
+                "please provide a custom prepare_activations_fn"
+            )
+
 
 # This is used to determine if two input activations are equal. For such cases, SVD
 # needs to be done for only for one of the equal inputs.
 class HashHook:
     """
     A forward hook for hashing layer input activations.
+    The hook is designed to be registered to a PyTorch module using the `register_forward_hook` method.
 
     This hook hashes the input activations of a specified layer during the forward pass
     of a neural network and stores the hash values for later analysis or comparison.
 
     Attributes:
+    -----------
         name (str): Name of the layer to which this hook is attached.
         hashed_inputs (list): List of hashed input activations.
     """
@@ -154,20 +168,23 @@ def get_device_with_meta_params(model: torch.nn.Module) -> torch.device:
 
 
 def move_inputs_to_device(inputs, device: Union[str, torch.device]):
-    "move all items in the input to the specified device"
-    if isinstance(inputs, torch.Tensor):
+    """
+    Move the inputs to the specified device. Adapted from hf.Trainer.
+    """
+    if isinstance(inputs, Mapping):
+        return type(inputs)({k: move_inputs_to_device(v, device) for k, v in inputs.items()})
+    elif isinstance(inputs, (tuple, list)):
+        return type(inputs)(move_inputs_to_device(v, device) for v in inputs)
+    elif isinstance(inputs, torch.Tensor):
         return inputs.to(device)
-    if isinstance(inputs, dict):
-        return {k: v.to(device) for k, v in inputs.items()}
-    if isinstance(inputs, list):
-        return [i.to(device) for i in inputs]
-    if isinstance(inputs, tuple):
-        return tuple(i.to(device) for i in inputs)
-    raise ValueError(f"unsupported input type: {type(inputs)}")
+    else:
+        raise ValueError(f"unsupported input type: {type(inputs)}")
 
 
-def get_indices_fn_language_modeling(inputs: dict, config: LoraConfig):
-    "if not all items in the input should be used for SVD, this function can be used to get the indices of the items that should be used"
+def get_indices_fn_causal_lm(inputs: dict, config: LoraConfig):
+    """
+    if not all items in the input should be used for SVD, this function can be used to get the indices of the items that should be used
+    """
     mask = inputs.get("attention_mask", torch.ones_like(inputs["input_ids"])).bool()
     if config.eva_config.use_label_mask and hasattr(inputs, "labels"):
         mask = torch.logical_and(mask, inputs["labels"] != config.eva_config.label_mask_value)
@@ -176,18 +193,14 @@ def get_indices_fn_language_modeling(inputs: dict, config: LoraConfig):
     return indices
 
 
-def forward_fn_language_modeling(model, inputs: dict):
-    "default forward_fn for autregressive language model"
-    return model(**inputs)
-
-
 @torch.no_grad()
 def get_eva_state_dict(
     model: torch.nn.Module,
     peft_config: LoraConfig,
     dataloader: torch.utils.data.DataLoader,
-    forward_fn: callable,
-    get_indices_fn: Optional[callable] = None,
+    forward_fn: callable = lambda model, inputs: model(**inputs),
+    get_indices_fn: Optional[callable] = get_indices_fn_causal_lm,
+    prepare_activations_fn: Union[callable, Dict[str, callable], None] = None
 ) -> dict:
     """
     Compute the SVD for each layer in the model.
@@ -196,6 +209,37 @@ def get_eva_state_dict(
     It uses the incremental PCA method to compute the SVD components.
     The function also checks for convergence of the computed components using cosine similarity.
     The rank distribution for each layer is determined based on the explained variance ratio.
+
+    Parameters:
+    -----------
+    model: (torch.nn.Module)
+        The model to compute the SVD for.
+    peft_config: (LoraConfig)
+        The configuration for the LoRA layers.
+    dataloader: (torch.utils.data.DataLoader)
+        The dataloader to use for the forward pass.
+    forward_fn: callable
+        The forward function to use for the forward pass.
+        `model(**inputs)` is used if forward_fn is not provided.
+    get_indices_fn: (Optional[callable])
+        The function to use if not all positions in the input tensor should be used for SVD 
+        (e.g. for causal language modeling). Can be set to None if all positions should be used.
+        `peft.tuners.lora.eva.get_indices_fn_causal_lm` is used by default.
+    prepare_activations_fn: (Union[callable, Dict[str, callable], None])
+        If a layer recieves multiple inputs as a list, per default the first input is used.
+        This function can be used to modify this behaviour. Accepts a dictionary with layer names as keys.
+        Default logic:
+        ```
+        try:
+            svd_input = activations.detach()
+        except AttributeError:
+            svd_input = activations[0].detach()
+        ```
+        
+    Returns:
+    --------
+    eva_state_dict: (dict)
+        The state dictionary containing the SVD components for each layer.
     """
     
     # Computes the rank distribution for each layer based on the explained variance ratio.
@@ -239,12 +283,24 @@ def get_eva_state_dict(
     forward_fn(model, move_inputs_to_device(inputs, device))
     hash_dict = {k: h.hashed_inputs[0] for k, h in hooks.items()}
     equal_inputs_map = {vv: v[0] for v in find_equal_values(hash_dict).values() for vv in v[1:]}
-    hooks = {k: SVDHook(k, max_components, peft_config.eva_config.tau) for k in hooks.keys() if k not in equal_inputs_map}
-    layer_hook_map = {**dict(zip(hooks.keys(), hooks.keys())), **equal_inputs_map}
-    for name in layer_hook_map.keys():
-        module = reduce(getattr, name.split("."), model) # TODO: replace with model.get_submodule(name)
-        module._forward_hooks.clear()
     
+    # initialize svd hooks
+    for k in list(hooks.keys()):
+        module = model.get_submodule(k)
+        module._forward_hooks.clear()
+        _ = hooks.pop(k)
+        if k in equal_inputs_map:
+            continue
+        if isinstance(prepare_activations_fn, Mapping):
+            try:
+                fn = prepare_activations_fn[k]
+            except KeyError:
+                raise ValueError(f"if prepare_activations_fn is a mapping it must contain adapter module name {k}")
+        else:
+            fn = prepare_activations_fn
+        hooks[k] = SVDHook(k, max_components, peft_config.eva_config.tau, fn)
+    layer_hook_map = {**dict(zip(hooks.keys(), hooks.keys())), **equal_inputs_map}
+
     # start svd calculation
     pbar = tqdm(iter(cycle(dataloader)), position=0, leave=False)
     convergence_dict = {k: False for k in hooks.keys()}
@@ -256,7 +312,7 @@ def get_eva_state_dict(
             indices = get_indices_fn(inputs, peft_config)
 
         for name, hook in hooks.items():
-            module = reduce(getattr, name.split("."), model) # TODO: replace with model.get_submodule(name)
+            module = model.get_submodule(name)
             module._forward_hooks.clear()
             # check if all components that are needed for the rank distribution have converged
             if torch.all(hook.converged[:rank_dist[name]]):
@@ -304,18 +360,55 @@ def get_eva_state_dict(
 @torch.no_grad()
 def initialize_lora_eva_weights(
     model,
-    config,
+    peft_config,
     dataloader,
-    forward_fn = None,
-    get_indices_fn = None,
-    device = None,
-    adapter_name = "default"
+    forward_fn: callable = lambda model, inputs: model(**inputs),
+    get_indices_fn: Optional[callable] = get_indices_fn_causal_lm,
+    prepare_activations_fn: Union[callable, Dict[str, callable], None] = None,
+    device: Optional[Union[str, torch.device]] = None,
+    adapter_name: str = "default",
 ):
     """
     Initialize the weights of the LoRA layers using the EVA method.
 
     This function initializes the weights of the LoRA layers using the EVA method.
     It computes the SVD for each adapter layer and updates the weights accordingly.
+
+    Parameters:
+    -----------
+    model: (torch.nn.Module)
+        The model to compute the SVD for.
+    peft_config: (LoraConfig)
+        The configuration for the LoRA layers.
+    dataloader: (torch.utils.data.DataLoader)
+        The dataloader to use for the forward pass.
+    forward_fn: callable
+        The forward function to use for the forward pass.
+        ```model(**inputs)``` is used if forward_fn is not provided.
+    get_indices_fn: (Optional[callable])
+        The function to use if not all positions in the input tensor should be used for SVD 
+        (e.g. for causal language modeling). Can be set to None if all positions should be used.
+        `peft.tuners.lora.eva.get_indices_fn_causal_lm` is used by default
+        (causal lm objective assumed).
+    device: (Optional[Union[str, torch.device]])
+        The device to move the model to. If None, the model is not moved.
+    adapter_name: (str)
+        The name of the adapter to initialize the weights for.
+    prepare_activations_fn: (Union[callable, Dict[str, callable], None])
+        If a layer recieves multiple inputs as a list, per default the first input is used.
+        This function can be used to modify this behaviour. Accepts a dictionary with layer names as keys.
+        Default logic:
+        ```
+        try:
+            svd_input = activations.detach()
+        except AttributeError:
+            svd_input = activations[0].detach()
+        ```
+
+    Returns:
+    --------
+    model: (torch.nn.Module)
+        The model with the initialized LoRA weights.
     """
     orig_device = get_device_with_meta_params(model)
     if device is not None:
@@ -323,15 +416,20 @@ def initialize_lora_eva_weights(
     
     model.disable_adapter()
     
-    # assign defaults
-    if forward_fn is None:
-        forward_fn = forward_fn_language_modeling
-    if config.eva_config is None:
-        config.eva_config = EvaConfig()
+    # assign default eva config
+    if peft_config.eva_config is None:
+        peft_config.eva_config = EvaConfig()
     
     # compute svd
     with model.disable_adapter():
-        eva_state_dict = get_eva_state_dict(model, config, dataloader, forward_fn, get_indices_fn)
+        eva_state_dict = get_eva_state_dict(
+            model=model,
+            peft_config=peft_config,
+            dataloader=dataloader,
+            forward_fn=forward_fn,
+            get_indices_fn=get_indices_fn,
+            prepare_activations_fn=prepare_activations_fn
+        )
 
     # assert all lora layers are contained in eva_state_dict
     missing_eva_inits = []
@@ -343,22 +441,22 @@ def initialize_lora_eva_weights(
             module.update_layer(
                 adapter_name,
                 w.size(0),
-                config.lora_alpha,
-                config.lora_dropout,
-                config.init_lora_weights,
-                config.use_rslora,
-                config.use_dora
+                peft_config.lora_alpha,
+                peft_config.lora_dropout,
+                peft_config.init_lora_weights,
+                peft_config.use_rslora,
+                peft_config.use_dora
             )
             module.lora_A[adapter_name].weight.copy_(w)
         else:
             module.update_layer(
                 adapter_name,
-                config.r,
-                config.lora_alpha,
-                config.lora_dropout,
+                peft_config.r,
+                peft_config.lora_alpha,
+                peft_config.lora_dropout,
                 True,
-                config.use_rslora,
-                config.use_dora
+                peft_config.use_rslora,
+                peft_config.use_dora
             )
             missing_eva_inits.append(name)
             print(name, type(module))
