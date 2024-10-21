@@ -1,8 +1,7 @@
-import torch
 from functools import partial
-
 from typing import Optional, Tuple
 
+import torch
 
 
 class IncrementalPCA:
@@ -10,8 +9,8 @@ class IncrementalPCA:
     An implementation of Incremental Principal Components Analysis (IPCA) that leverages PyTorch for GPU acceleration.
     Adapted from https://github.com/scikit-learn/scikit-learn/blob/main/sklearn/decomposition/_incremental_pca.py
 
-    This class provides methods to fit the model on data incrementally in batches, and to transform new data
-    based on the principal components learned during the fitting process.
+    This class provides methods to fit the model on data incrementally in batches, and to transform new data based on
+    the principal components learned during the fitting process.
 
     Attributes:
         n_components (int, optional): Number of components to keep. If `None`, it's set to the minimum of the
@@ -19,15 +18,15 @@ class IncrementalPCA:
         copy (bool): If False, input data will be overwritten. Defaults to True.
         batch_size (int, optional): The number of samples to use for each batch. Only needed if self.fit is called.
                                 If `None`, it's inferred from the data and set to `5 * n_features`. Defaults to None.
-        svd_driver (str, optional): name of the cuSOLVER method to be used for torch.linalg.svd. This keyword 
-                                argument only works on CUDA inputs. Available options are: None, gesvd, gesvdj,
-                                and gesvda. Defaults to None.
+        svd_driver (str, optional): name of the cuSOLVER method to be used for torch.linalg.svd. This keyword
+                                argument only works on CUDA inputs. Available options are: None, gesvd, gesvdj, and
+                                gesvda. Defaults to None.
         lowrank (bool, optional): Whether to use torch.svd_lowrank instead of torch.linalg.svd which can be faster.
                                 Defaults to False.
-        lowrank_q (int, optional): For an adequate approximation of n_components, this parameter defaults to 
+        lowrank_q (int, optional): For an adequate approximation of n_components, this parameter defaults to
                                 n_components * 2.
         lowrank_niter (int, optional): Number of subspace iterations to conduct for torch.svd_lowrank.
-                                Defaults to 4. 
+                                Defaults to 4.
     """
 
     def __init__(
@@ -38,7 +37,7 @@ class IncrementalPCA:
         svd_driver: Optional[str] = None,
         lowrank: bool = False,
         lowrank_q: Optional[int] = None,
-        lowrank_niter: int = 4
+        lowrank_niter: int = 4,
     ):
         self.n_components_ = n_components
         self.copy = copy
@@ -47,17 +46,20 @@ class IncrementalPCA:
 
         if lowrank:
             if lowrank_q is None:
-                assert n_components is not None, "n_components must be specified when using lowrank mode with lowrank_q=None."
+                assert (
+                    n_components is not None
+                ), "n_components must be specified when using lowrank mode with lowrank_q=None."
                 lowrank_q = n_components * 2
             assert lowrank_q >= n_components, "lowrank_q must be greater than or equal to n_components."
+
             def svd_fn(X):
                 U, S, V = torch.svd_lowrank(X, q=lowrank_q, niter=lowrank_niter)
-                return U, S, V.mH # V is returned as a conjugate transpose
+                return U, S, V.mH  # V is returned as a conjugate transpose
+
             self._svd_fn = svd_fn
 
         else:
             self._svd_fn = partial(torch.linalg.svd, full_matrices=False, driver=svd_driver)
-        
 
     def _validate_data(self, X) -> torch.Tensor:
         """
@@ -70,7 +72,7 @@ class IncrementalPCA:
             torch.Tensor: Converted to appropriate format.
         """
         valid_dtypes = [torch.float32, torch.float64]
-        
+
         if not isinstance(X, torch.Tensor):
             X = torch.tensor(X, dtype=torch.float32)
         elif self.copy:
@@ -95,7 +97,9 @@ class IncrementalPCA:
         return X
 
     @staticmethod
-    def _incremental_mean_and_var(X, last_mean, last_variance, last_sample_count) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def _incremental_mean_and_var(
+        X, last_mean, last_variance, last_sample_count
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Computes the incremental mean and variance for the data `X`.
 
@@ -112,12 +116,8 @@ class IncrementalPCA:
             return last_mean, last_variance, last_sample_count
 
         if last_sample_count > 0:
-            assert (
-                last_mean is not None
-            ), "last_mean should not be None if last_sample_count > 0."
-            assert (
-                last_variance is not None
-            ), "last_variance should not be None if last_sample_count > 0."
+            assert last_mean is not None, "last_mean should not be None if last_sample_count > 0."
+            assert last_variance is not None, "last_variance should not be None if last_sample_count > 0."
 
         new_sample_count = torch.tensor([X.shape[0]], device=X.device)
         updated_sample_count = last_sample_count + new_sample_count
@@ -145,9 +145,7 @@ class IncrementalPCA:
             updated_unnormalized_variance = (
                 last_unnormalized_variance
                 + new_unnormalized_variance
-                + last_over_new_count
-                / updated_sample_count
-                * (last_sum / last_over_new_count - new_sum).square()
+                + last_over_new_count / updated_sample_count * (last_sum / last_over_new_count - new_sum).square()
             )
             updated_variance = updated_unnormalized_variance / updated_sample_count
 
@@ -163,7 +161,8 @@ class IncrementalPCA:
         Args:
             u (torch.Tensor): Left singular vectors tensor.
             v (torch.Tensor): Right singular vectors tensor.
-            u_based_decision (bool, optional): If True, uses the left singular vectors to determine the sign flipping. Defaults to True.
+            u_based_decision (bool, optional):
+                If True, uses the left singular vectors to determine the sign flipping. Defaults to True.
 
         Returns:
             Tuple[torch.Tensor, torch.Tensor]: Adjusted left and right singular vectors tensors.
@@ -174,7 +173,7 @@ class IncrementalPCA:
         else:
             max_abs_rows = torch.argmax(torch.abs(v), dim=1)
             signs = torch.sign(v[range(v.shape[0]), max_abs_rows])
-        u *= signs[:u.shape[1]].view(1, -1)
+        u *= signs[: u.shape[1]].view(1, -1)
         v *= signs.view(-1, 1)
         return u, v
 
@@ -227,7 +226,9 @@ class IncrementalPCA:
                 self.n_components_ = min(n_samples, n_features)
 
         if n_features != self.n_features_:
-            raise ValueError("Number of features of the new batch does not match the number of features of the first batch.")
+            raise ValueError(
+                "Number of features of the new batch does not match the number of features of the first batch."
+            )
 
         col_mean, col_var, n_total_samples = self._incremental_mean_and_var(
             X, self.mean_, self.var_, self.n_samples_seen_
@@ -238,9 +239,7 @@ class IncrementalPCA:
         else:
             col_batch_mean = torch.mean(X, dim=0)
             X -= col_batch_mean
-            mean_correction_factor = torch.sqrt(
-                (self.n_samples_seen_.double() / n_total_samples) * n_samples
-            )
+            mean_correction_factor = torch.sqrt((self.n_samples_seen_.double() / n_total_samples) * n_samples)
             mean_correction = mean_correction_factor * (self.mean_ - col_batch_mean)
             X = torch.vstack(
                 (
@@ -256,14 +255,14 @@ class IncrementalPCA:
         explained_variance_ratio = S**2 / torch.sum(col_var * n_total_samples)
 
         self.n_samples_seen_ = n_total_samples
-        self.components_ = Vt[:self.n_components_]
-        self.singular_values_ = S[:self.n_components_]
+        self.components_ = Vt[: self.n_components_]
+        self.singular_values_ = S[: self.n_components_]
         self.mean_ = col_mean
         self.var_ = col_var
-        self.explained_variance_ = explained_variance[:self.n_components_]
-        self.explained_variance_ratio_ = explained_variance_ratio[:self.n_components_]
+        self.explained_variance_ = explained_variance[: self.n_components_]
+        self.explained_variance_ratio_ = explained_variance_ratio[: self.n_components_]
         if self.n_components_ not in (n_samples, n_features):
-            self.noise_variance_ = explained_variance[self.n_components_:].mean()
+            self.noise_variance_ = explained_variance[self.n_components_ :].mean()
         else:
             self.noise_variance_ = torch.tensor(0.0, device=X.device)
         return self
@@ -282,13 +281,12 @@ class IncrementalPCA:
         """
         X = X - self.mean_
         return torch.mm(X.double(), self.components_.T).to(X.dtype)
-    
+
     @staticmethod
     def gen_batches(n: int, batch_size: int, min_batch_size: int = 0):
         """Generator to create slices containing `batch_size` elements from 0 to `n`.
 
-        The last slice may contain less than `batch_size` elements, when
-        `batch_size` does not divide `n`.
+        The last slice may contain less than `batch_size` elements, when `batch_size` does not divide `n`.
 
         Args:
             n (int): Size of the sequence.

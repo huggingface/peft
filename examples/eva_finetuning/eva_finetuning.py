@@ -13,10 +13,11 @@
 # limitations under the License.
 
 import torch
-from peft import LoraConfig, EvaConfig, get_peft_model, initialize_lora_eva_weights
-from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import load_dataset
 from torch.utils.data import DataLoader
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from peft import EvaConfig, LoraConfig, get_peft_model, initialize_lora_eva_weights
 
 
 # config
@@ -28,8 +29,8 @@ alpha = 1
 rho = 2.0
 use_label_mask = False
 whiten = False
-target_modules = ['q_proj', 'k_proj', 'v_proj', 'o_proj']
-svd_batch_size = 4 # can be different from the batch size used in finetuning
+target_modules = ["q_proj", "k_proj", "v_proj", "o_proj"]
+svd_batch_size = 4  # can be different from the batch size used in finetuning
 svd_device = "cuda"
 
 # load model and tokenizer
@@ -40,31 +41,23 @@ tokenizer.pad_token = tokenizer.eos_token
 # load dataset
 dataset = load_dataset(dataset_name)
 dataset = dataset.map(
-    lambda x: tokenizer(x['ctx'], padding='max_length', truncation=True, max_length=max_seq_len),
+    lambda x: tokenizer(x["ctx"], padding="max_length", truncation=True, max_length=max_seq_len),
     batched=True,
     remove_columns=dataset["train"].column_names,
 )
-dataset.set_format(type='torch')
+dataset.set_format(type="torch")
 
 # create dataloader for SVD
 dataloader = DataLoader(
-    dataset['train'],
+    dataset["train"],
     batch_size=svd_batch_size,
-    collate_fn=lambda examples: {k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()}
+    collate_fn=lambda examples: {k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()},
 )
 
 # setup peft config
-eva_config = EvaConfig(
-    rho = rho,
-    use_label_mask = use_label_mask,
-    whiten = whiten
-)
+eva_config = EvaConfig(rho=rho, use_label_mask=use_label_mask, whiten=whiten)
 peft_config = LoraConfig(
-    r = rank,
-    lora_alpha = alpha,
-    target_modules = target_modules,
-    init_lora_weights = "eva",
-    eva_config = eva_config
+    r=rank, lora_alpha=alpha, target_modules=target_modules, init_lora_weights="eva", eva_config=eva_config
 )
 
 # to optimize memory usage during eva initialization, set low_cpu_mem_usage=True

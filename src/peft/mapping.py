@@ -142,7 +142,7 @@ def get_peft_model(
     mixed: bool = False,
     autocast_adapter_dtype: bool = True,
     revision: Optional[str] = None,
-    low_cpu_mem_usage: bool = False
+    low_cpu_mem_usage: bool = False,
 ) -> PeftModel | PeftMixedModel:
     """
     Returns a Peft model object from a model and a config.
@@ -184,9 +184,11 @@ def get_peft_model(
             )
         peft_config.revision = revision
 
-    if (isinstance(peft_config, PEFT_TYPE_TO_CONFIG_MAPPING["LORA"])) \
-        and (peft_config.init_lora_weights == "eva") \
-        and not low_cpu_mem_usage:
+    if (
+        (isinstance(peft_config, PEFT_TYPE_TO_CONFIG_MAPPING["LORA"]))
+        and (peft_config.init_lora_weights == "eva")
+        and not low_cpu_mem_usage
+    ):
         warnings.warn(
             "lora with eva initialization used with low_cpu_mem_usage=False"
             "Setting low_cpu_mem_usage=True can improve the maximum batch size possible for eva initialization."
@@ -202,7 +204,7 @@ def get_peft_model(
             peft_config,
             adapter_name=adapter_name,
             autocast_adapter_dtype=autocast_adapter_dtype,
-            low_cpu_mem_usage=low_cpu_mem_usage
+            low_cpu_mem_usage=low_cpu_mem_usage,
         )
 
     if peft_config.is_prompt_learning:

@@ -13,10 +13,10 @@
 # limitations under the License.
 
 
-import torch
-from torch.testing import assert_close
-from datasets import load_dataset
 import pytest
+import torch
+from datasets import load_dataset
+from torch.testing import assert_close
 
 from peft.utils.incremental_pca import IncrementalPCA
 
@@ -47,7 +47,8 @@ def test_incremental_pca():
     assert_close(
         ipca.explained_variance_ratio_.sum().item(),
         explained_variance_ratio[:n_components].sum().item(),
-        rtol=1e-3, atol=1e-3
+        rtol=1e-3,
+        atol=1e-3,
     )
 
 
@@ -79,10 +80,10 @@ def test_incremental_pca_validation():
     with pytest.raises(
         ValueError,
         match=(
-            "n_components={} invalid"
-            " for n_features={}, need more rows than"
+            f"n_components={n_components} invalid"
+            f" for n_features={n_features}, need more rows than"
             " columns for IncrementalPCA"
-            " processing".format(n_components, n_features)
+            " processing"
         ),
     ):
         IncrementalPCA(n_components, batch_size=10).fit(X)
@@ -91,11 +92,7 @@ def test_incremental_pca_validation():
     n_components = 3
     with pytest.raises(
         ValueError,
-        match=(
-            "n_components={} must be"
-            " less or equal to the batch number of"
-            " samples {}".format(n_components, n_samples)
-        ),
+        match=(f"n_components={n_components} must be" " less or equal to the batch number of" f" samples {n_samples}"),
     ):
         IncrementalPCA(n_components=n_components).partial_fit(X)
 
@@ -157,7 +154,7 @@ def test_incremental_pca_partial_fit():
     # Test that fit and partial_fit get equivalent results.
     n, p = 50, 3
     X = torch.randn(n, p)  # spherical data
-    X[:, 1] *= 0.00001  # make middle component relatively small 
+    X[:, 1] *= 0.00001  # make middle component relatively small
     X += torch.tensor([5, 4, 3])  # make a large mean
 
     # same check that we can find the original data from the transformed
@@ -177,7 +174,7 @@ def test_incremental_pca_lowrank():
     n_components = 2
     X = torch.tensor([iris["SepalLengthCm"], iris["SepalWidthCm"], iris["PetalLengthCm"], iris["PetalWidthCm"]]).T
     batch_size = X.shape[0] // 3
-    
+
     ipca = IncrementalPCA(n_components=n_components, batch_size=batch_size)
     ipca.fit(X)
 
