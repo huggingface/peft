@@ -62,13 +62,11 @@ class DoraLinearLayer(nn.Module):
             weight_norm = weight_norm.to("cpu")
         self.weight = nn.Parameter(weight_norm, requires_grad=True)
 
-    def forward(self, x, *, lora_A, lora_B, scaling, base_layer):
+    def forward(self, x, *, lora_A, lora_B, scaling, base_layer, base_result=None):
         """
         For DoRA, calculate the extra output from LoRA with DoRA applied. This should be added on top of the base layer
         output.
         """
-        lora_result = lora_B(lora_A(x))
-
         # Don't use `lora_weight = lora_B.weight @ lora_A.weight` because this causes errors with FSDP. Instead,
         # calculate the same but using forward.
         x_eye = torch.eye(lora_A.weight.shape[1], device=lora_A.weight.device, dtype=x.dtype)
@@ -86,19 +84,18 @@ class DoraLinearLayer(nn.Module):
         # during backpropagation"
         weight_norm = weight_norm.detach()
         mag_norm_scale = (magnitude / weight_norm).view(1, -1)
-        result_dora = (mag_norm_scale - 1) * (
-            F.linear(x, transpose(weight, self.fan_in_fan_out))
-        ) + mag_norm_scale * lora_result * scaling
 
-        # Note: Computation could potentially be accelerated by using the code below instead of calculating X@W again.
-        # This is only correct if dropout=0, otherwise results will differ:
-        # https://github.com/huggingface/peft/pull/1474#issuecomment-1964682771
-        # bias = self.get_base_layer().bias
-        # if bias is not None:
-        #     result = result - bias
-        # result = mag_norm_scale * result + mag_norm_scale * lora_B(lora_A(x)) * scaling
-        # if bias is not None:
-        #     result = result + bias
+        lora_result = lora_B(lora_A(x))
+
+        bias = None
+        if base_result is not None:
+            bias = base_layer.bias
+            if bias is not None:
+                base_result = base_result - bias
+        else:
+            base_result = F.linear(x, transpose(weight, self.fan_in_fan_out))
+
+        result_dora = (mag_norm_scale - 1) * base_result + mag_norm_scale * lora_result * scaling
 
         return result_dora
 

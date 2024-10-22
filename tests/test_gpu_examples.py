@@ -3774,6 +3774,11 @@ class TestFSDPWrap:
         # check that this does not raise:
         FSDP(model, auto_wrap_policy=fsdp_auto_wrap_policy(model), use_orig_params=False, sync_module_states=True)
 
+    def test_fsdp_auto_wrap_policy_does_not_raise_on_custom_model(self):
+        # See #2167
+        # Avoid raising on custom models since Trainer uses fsdp_auto_wrap_policy automatically for PEFT + FSDP
+        fsdp_auto_wrap_policy(SimpleModel())  # does not raise
+
 
 class TestBOFT:
     """

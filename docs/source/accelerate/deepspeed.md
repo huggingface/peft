@@ -168,7 +168,7 @@ You can also refer this blog post [Falcon 180B Finetuning using 🤗 PEFT and De
 # Use PEFT QLoRA and DeepSpeed with ZeRO3 for finetuning large models on multiple GPUs
 
 In this section, we will look at how to use QLoRA and DeepSpeed Stage-3 for finetuning 70B llama model on 2X40GB GPUs.
-For this, we first need `bitsandbytes>=0.43.0`, `accelerate>=0.28.0`, `transformers>4.38.2`, `trl>0.7.11` and `peft>0.9.0`. We need to set `zero3_init_flag` to true when using Accelerate config. Below is the config which can be found at [deepspeed_config_z3_qlora.yaml](https://github.com/huggingface/peft/blob/main/examples/sft/configs/deepspeed_config_z3_qlora.yaml):
+For this, we first need `bitsandbytes>=0.43.3`, `accelerate>=1.0.1`, `transformers>4.44.2`, `trl>0.11.4` and `peft>0.13.0`. We need to set `zero3_init_flag` to true when using Accelerate config. Below is the config which can be found at [deepspeed_config_z3_qlora.yaml](https://github.com/huggingface/peft/blob/main/examples/sft/configs/deepspeed_config_z3_qlora.yaml):
 
 ```yml
 compute_environment: LOCAL_MACHINE                                                                                                                                           

@@ -34,7 +34,7 @@ extras["test"] = extras["dev"] + [
     "pytest-xdist",
     "parameterized",
     "datasets",
-    "diffusers<0.21.0",
+    "diffusers",
     "scipy",
 ]
 

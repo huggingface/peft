@@ -55,8 +55,9 @@ class LoHaConfig(LycorisConfig):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
             layer at this index.
-        layers_pattern (`str`):
-            The layer pattern name, used only if `layers_to_transform` is different from `None`.
+        layers_pattern (`Optional[Union[List[str], str]]`):
+            The layer pattern name, used only if `layers_to_transform` is different from `None`. This should target the
+            `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
         rank_pattern (`dict`):
             The mapping from layer names or regexp expression to ranks which are different from the default rank
             specified by `r`.
@@ -108,10 +109,11 @@ class LoHaConfig(LycorisConfig):
             "help": "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at this index."
         },
     )
-    layers_pattern: Optional[str] = field(
+    layers_pattern: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
-            "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
+            "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern. "
+            "This should target the `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`."
         },
     )
     modules_to_save: Optional[list[str]] = field(

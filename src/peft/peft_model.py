@@ -1435,7 +1435,7 @@ class PeftModelForSequenceClassification(PeftModel):
         # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
         _set_trainable(self, adapter_name)
 
-    def add_adapter(self, adapter_name: str, peft_config: PeftConfig) -> None:
+    def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """
         Add an adapter to the model based on the passed configuration.
 
@@ -1451,6 +1451,10 @@ class PeftModelForSequenceClassification(PeftModel):
                 The name of the adapter to be added.
             peft_config ([`PeftConfig`]):
                 The configuration of the adapter to be added.
+            low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+                Create empty adapter weights on meta device. Useful to speed up the process when loading saved
+                adapters. Don't use this option when creating a new PEFT adapter for training.
+
         """
         # ensure that additional adapters also add the classifier layer to modules_to_save
         if hasattr(peft_config, "modules_to_save"):
@@ -1460,7 +1464,7 @@ class PeftModelForSequenceClassification(PeftModel):
             else:
                 peft_config.modules_to_save.extend(classifier_module_names)
 
-        return super().add_adapter(adapter_name, peft_config)
+        return super().add_adapter(adapter_name, peft_config, low_cpu_mem_usage=low_cpu_mem_usage)
 
     def forward(
         self,
@@ -2154,7 +2158,7 @@ class PeftModelForTokenClassification(PeftModel):
         # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
         _set_trainable(self, adapter_name)
 
-    def add_adapter(self, adapter_name: str, peft_config: PeftConfig) -> None:
+    def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """
         Add an adapter to the model based on the passed configuration.
 
@@ -2170,6 +2174,10 @@ class PeftModelForTokenClassification(PeftModel):
                 The name of the adapter to be added.
             peft_config ([`PeftConfig`]):
                 The configuration of the adapter to be added.
+            low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+                Create empty adapter weights on meta device. Useful to speed up the process when loading saved
+                adapters. Don't use this option when creating a new PEFT adapter for training.
+
         """
         # ensure that additional adapters also add the classifier layer to modules_to_save
         if hasattr(peft_config, "modules_to_save"):
@@ -2179,7 +2187,7 @@ class PeftModelForTokenClassification(PeftModel):
             else:
                 peft_config.modules_to_save.extend(classifier_module_names)
 
-        return super().add_adapter(adapter_name, peft_config)
+        return super().add_adapter(adapter_name, peft_config, low_cpu_mem_usage=low_cpu_mem_usage)
 
     def forward(
         self,
@@ -2371,7 +2379,7 @@ class PeftModelForQuestionAnswering(PeftModel):
         # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
         _set_trainable(self, adapter_name)
 
-    def add_adapter(self, adapter_name: str, peft_config: PeftConfig) -> None:
+    def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """
         Add an adapter to the model based on the passed configuration.
 
@@ -2387,6 +2395,10 @@ class PeftModelForQuestionAnswering(PeftModel):
                 The name of the adapter to be added.
             peft_config ([`PeftConfig`]):
                 The configuration of the adapter to be added.
+            low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+                Create empty adapter weights on meta device. Useful to speed up the process when loading saved
+                adapters. Don't use this option when creating a new PEFT adapter for training.
+
         """
         # ensure that additional adapters also add the classifier layer to modules_to_save
         if hasattr(peft_config, "modules_to_save"):
@@ -2396,7 +2408,7 @@ class PeftModelForQuestionAnswering(PeftModel):
             else:
                 peft_config.modules_to_save.extend(qa_module_names)
 
-        return super().add_adapter(adapter_name, peft_config)
+        return super().add_adapter(adapter_name, peft_config, low_cpu_mem_usage=low_cpu_mem_usage)
 
     def forward(
         self,
