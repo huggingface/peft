@@ -742,7 +742,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 from transformers import EncoderDecoderCache
 
                 past_key_values = EncoderDecoderCache.from_legacy_cache(past_key_values)
-                past_key_values.is_updated = {layer_idx: False for layer_idx in range(len(past_key_values.cross_attention_cache.key_cache))}
+                past_key_values.is_updated = {
+                    layer_idx: False for layer_idx in range(len(past_key_values.cross_attention_cache.key_cache))
+                }
         else:
             if peft_config.peft_type == PeftType.MULTITASK_PROMPT_TUNING:
                 prompts = prompt_encoder(prompt_tokens, task_ids)
