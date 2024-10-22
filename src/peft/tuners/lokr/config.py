@@ -11,9 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from typing import Optional, Union
 
 from peft.tuners.lycoris_utils import LycorisConfig
 from peft.utils import PeftType
@@ -47,6 +48,10 @@ class LoKrConfig(LycorisConfig):
             excluding the output layer. If this is not specified, modules will be chosen according to the model
             architecture. If the architecture is not known, an error will be raised -- in this case, you should specify
             the target modules manually.
+        exclude_modules (`Optional[Union[List[str], str]]`):
+            The names of the modules to not apply the adapter. When passing a string, a regex match will be performed.
+            When passing a list of strings, either an exact match will be performed or it is checked if the name of the
+            module ends with any of the passed strings.
         init_weights (`bool`):
             Whether to perform initialization of adapter weights. This defaults to `True`, passing `False` is
             discouraged.
@@ -54,8 +59,9 @@ class LoKrConfig(LycorisConfig):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
             layer at this index.
-        layers_pattern (`str`):
-            The layer pattern name, used only if `layers_to_transform` is different from `None`.
+        layers_pattern (`Optional[Union[List[str], str]]`):
+            The layer pattern name, used only if `layers_to_transform` is different from `None`. This should target the
+            `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
         rank_pattern (`dict`):
             The mapping from layer names or regexp expression to ranks which are different from the default rank
             specified by `r`.
@@ -85,13 +91,17 @@ class LoKrConfig(LycorisConfig):
         metadata={"help": "Perform rank decomposition of left kronecker product matrix."},
     )
     decompose_factor: int = field(default=-1, metadata={"help": "Kronecker product decomposition factor."})
-    target_modules: Optional[Union[List[str], str]] = field(
+    target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
             "help": "List of module names or regex expression of the module names to replace with LoKr."
             "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
             "This can also be a wildcard 'all-linear' which matches all linear/Conv1D layers except the output layer."
         },
+    )
+    exclude_modules: Optional[Union[list[str], str]] = field(
+        default=None,
+        metadata={"help": "List of module names or regex expression of the module names to exclude from LoKr."},
     )
     init_weights: bool = field(
         default=True,
@@ -102,19 +112,20 @@ class LoKrConfig(LycorisConfig):
             ),
         },
     )
-    layers_to_transform: Optional[Union[List[int], int]] = field(
+    layers_to_transform: Optional[Union[list[int], int]] = field(
         default=None,
         metadata={
             "help": "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at this index."
         },
     )
-    layers_pattern: Optional[str] = field(
+    layers_pattern: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
-            "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
+            "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern. "
+            "This should target the `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`."
         },
     )
-    modules_to_save: Optional[List[str]] = field(
+    modules_to_save: Optional[list[str]] = field(
         default=None,
         metadata={
             "help": "List of modules apart from LoKr layers to be set as trainable and saved in the final checkpoint. "
@@ -125,3 +136,9 @@ class LoKrConfig(LycorisConfig):
 
     def __post_init__(self):
         self.peft_type = PeftType.LOKR
+        self.target_modules = (
+            set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
+        )
+        self.exclude_modules = (
+            set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
+        )

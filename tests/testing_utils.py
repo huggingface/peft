@@ -26,6 +26,7 @@ from peft.import_utils import (
     is_eetq_available,
     is_hqq_available,
     is_optimum_available,
+    is_torchao_available,
 )
 
 
@@ -38,6 +39,13 @@ def require_non_cpu(test_case):
     hardware accelerator available.
     """
     return unittest.skipUnless(torch_device != "cpu", "test requires a hardware accelerator")(test_case)
+
+
+def require_non_xpu(test_case):
+    """
+    Decorator marking a test that should be skipped for XPU.
+    """
+    return unittest.skipUnless(torch_device != "xpu", "test requires a non-XPU")(test_case)
 
 
 def require_torch_gpu(test_case):
@@ -123,6 +131,13 @@ def require_optimum(test_case):
     Decorator marking a test that requires optimum. These tests are skipped when optimum isn't installed.
     """
     return unittest.skipUnless(is_optimum_available(), "test requires optimum")(test_case)
+
+
+def require_torchao(test_case):
+    """
+    Decorator marking a test that requires torchao. These tests are skipped when torchao isn't installed.
+    """
+    return unittest.skipUnless(is_torchao_available(), "test requires torchao")(test_case)
 
 
 @contextmanager

@@ -17,7 +17,7 @@ import torch
 from parameterized import parameterized
 from transformers import AutoModel
 
-from peft import PrefixTuningConfig, PromptLearningConfig
+from peft import LoraConfig, PrefixTuningConfig, PromptLearningConfig
 
 from .testing_common import PeftCommonTester, PeftTestConfigManager
 
@@ -99,6 +99,9 @@ class PeftFeatureExtractionModelTester(unittest.TestCase, PeftCommonTester):
     def test_save_pretrained_selected_adapters(self, test_name, model_id, config_cls, config_kwargs):
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs)
 
+    def test_load_model_low_cpu_mem_usage(self):
+        self._test_load_model_low_cpu_mem_usage(PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST[0], LoraConfig, {})
+
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_from_pretrained_config_construction(self, test_name, model_id, config_cls, config_kwargs):
         self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs)
@@ -111,6 +114,7 @@ class PeftFeatureExtractionModelTester(unittest.TestCase, PeftCommonTester):
                 "adalora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
+                "oft_kwargs": {"init_weights": [False]},
                 "vera_kwargs": {"init_weights": [False]},
                 "hra_kwargs": {"init_weights": [False]},
                 "task_type": "FEATURE_EXTRACTION",
@@ -164,6 +168,7 @@ class PeftFeatureExtractionModelTester(unittest.TestCase, PeftCommonTester):
                 "adalora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
+                "oft_kwargs": {"init_weights": [False]},
                 "vera_kwargs": {"init_weights": [False]},
                 "hra_kwargs": {"init_weights": [False]},
                 "task_type": "FEATURE_EXTRACTION",
@@ -180,6 +185,7 @@ class PeftFeatureExtractionModelTester(unittest.TestCase, PeftCommonTester):
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
+                "oft_kwargs": {"init_weights": [False]},
                 "hra_kwargs": {"init_weights": [False]},
                 "task_type": "FEATURE_EXTRACTION",
             },

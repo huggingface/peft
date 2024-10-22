@@ -264,6 +264,14 @@ class BOFTLayer(BaseTunerLayer):
         """
         Update the linear layer with trainable BOFT weights. Override for other layer types.
         """
+        # Attempt to load the CUDA extension during model initialization
+        if not get_fbd_cuda():
+            self.fbd_cuda_available = False
+            # If the CUDA extension is not available, set the butterfly factor to 1 to speed up the finetuning process
+            boft_n_butterfly_factor = 1
+        else:
+            self.fbd_cuda_available = True
+
         # to be consistent with the paper notation
         boft_n_butterfly_factor = boft_n_butterfly_factor - 1
         if boft_n_butterfly_factor < 0:
@@ -316,8 +324,7 @@ class BOFTLayer(BaseTunerLayer):
 
         else:
             raise ValueError(
-                f"You can only specify either boft_block_size ({boft_block_size}) or boft_block_num ({boft_block_num}), but not both simultaneously or setting both"
-                "to be 0, because boft_block_size x boft_block_num != in_features."
+                "Something went wrong, please report this error: https://github.com/huggingface/peft/issues"
             )
 
         # In OFT you can specify the number of blocks to be 1
@@ -469,14 +476,6 @@ class Linear(nn.Module, BOFTLayer):
         self.fan_in_fan_out = fan_in_fan_out
 
         self._active_adapter = adapter_name
-
-        # Attempt to load the CUDA extension during model initialization
-        if not get_fbd_cuda():
-            self.fbd_cuda_available = False
-            # If the CUDA extension is not available, set the butterfly factor to 1 to speed up the finetuning process
-            boft_n_butterfly_factor = 1
-        else:
-            self.fbd_cuda_available = True
 
         self.update_layer(
             adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
@@ -672,15 +671,6 @@ class Conv2d(nn.Module, BOFTLayer):
         BOFTLayer.__init__(self, base_layer)
 
         self._active_adapter = adapter_name
-
-        # Attempt to load the CUDA extension during model initialization
-        if not get_fbd_cuda():
-            self.fbd_cuda_available = False
-            # If the CUDA extension is not available, set the butterfly factor to 1 to speed up the finetuning process
-            boft_n_butterfly_factor = 1
-        else:
-            self.fbd_cuda_available = True
-
         self.update_layer(
             adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
         )
@@ -691,6 +681,15 @@ class Conv2d(nn.Module, BOFTLayer):
         """
         Update the conv2d layer with trainable BOFT weights.
         """
+
+        # Attempt to load the CUDA extension during model initialization
+        if not get_fbd_cuda():
+            self.fbd_cuda_available = False
+            # If the CUDA extension is not available, set the butterfly factor to 1 to speed up the finetuning process
+            boft_n_butterfly_factor = 1
+        else:
+            self.fbd_cuda_available = True
+
         # to be consistent with the paper notation
         boft_n_butterfly_factor = boft_n_butterfly_factor - 1
         if boft_n_butterfly_factor < 0:
@@ -710,11 +709,6 @@ class Conv2d(nn.Module, BOFTLayer):
         conv_filter_dim = self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
 
         # Initialize the BOFT parameters.
-        if not (boft_block_size != 0) ^ (boft_block_num != 0):
-            raise ValueError(
-                f"You can only specify either boft_block_size ({boft_block_size}) or boft_block_num ({boft_block_num}), but not both simultaneously, because boft_block_size x boft_block_num != in_features."
-            )
-
         if boft_block_size == 0 and boft_block_num != 0:
             if conv_filter_dim % boft_block_num != 0:
                 raise ValueError(
@@ -752,7 +746,9 @@ class Conv2d(nn.Module, BOFTLayer):
             boft_block_num = int(conv_filter_dim // boft_block_size)
 
         else:
-            raise ValueError("Unknown error!")
+            raise ValueError(
+                "Something went wrong, please report this error: https://github.com/huggingface/peft/issues"
+            )
 
         # In OFT you can specify the number of blocks to be 1
         if boft_n_butterfly_factor != 0:
@@ -815,9 +811,11 @@ class Conv2d(nn.Module, BOFTLayer):
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
 
                     orig_weight = orig_weight.view(
-                        self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0], self.out_features
+                        self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
                     )
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = orig_weight * boft_s
                     orig_weight = orig_weight.view(
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
@@ -829,9 +827,11 @@ class Conv2d(nn.Module, BOFTLayer):
 
                     orig_weight = base_layer.weight.data.clone()
                     orig_weight = orig_weight.view(
-                        self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0], self.out_features
+                        self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
                     )
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = orig_weight * boft_s
                     orig_weight = orig_weight.view(
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
@@ -855,10 +855,12 @@ class Conv2d(nn.Module, BOFTLayer):
 
                 orig_weight = self.get_base_layer().weight.data.clone()
                 orig_weight = orig_weight.view(
-                    self.in_features * self.get_base_layer().kernel_size[0] * self.get_base_layer().kernel_size[0],
                     self.out_features,
+                    self.in_features * self.get_base_layer().kernel_size[0] * self.get_base_layer().kernel_size[0],
                 )
+                orig_weight = torch.transpose(orig_weight, 0, 1)
                 orig_weight = torch.mm(butterfly_oft_mat.t(), orig_weight)
+                orig_weight = torch.transpose(orig_weight, 0, 1)
                 orig_weight = orig_weight * (1 / boft_s)
                 orig_weight = orig_weight.view(
                     self.out_features,
@@ -879,7 +881,7 @@ class Conv2d(nn.Module, BOFTLayer):
         """
 
         boft_R = self.boft_R[adapter]
-        boft_s = self.boft_s[adapter]
+        boft_s = self.boft_s[adapter].transpose(0, 1)
 
         N, D, H, _ = boft_R.shape
         boft_R = boft_R.view(N * D, H, H)
@@ -917,13 +919,13 @@ class Conv2d(nn.Module, BOFTLayer):
                 device=x.device,
                 dtype=x.dtype,
             )
-            boft_scale = torch.ones((1, int(self.out_features)), device=x.device, dtype=x.dtype)
+            boft_scale = torch.ones((int(self.out_features), 1), device=x.device, dtype=x.dtype)
 
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.boft_R.keys():
                     continue
                 boft_R = self.boft_R[active_adapter]
-                boft_s = self.boft_s[active_adapter]
+                boft_s = self.boft_s[active_adapter].transpose(0, 1)
                 dropout = self.boft_dropout[active_adapter]
 
                 N, D, H, _ = boft_R.shape
@@ -954,10 +956,12 @@ class Conv2d(nn.Module, BOFTLayer):
 
             orig_weight = self.base_layer.weight.data
             orig_weight = orig_weight.view(
-                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
                 self.out_features,
+                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
             )
+            orig_weight = torch.transpose(orig_weight, 0, 1)
             rotated_weight = torch.mm(boft_rotation, orig_weight)
+            rotated_weight = torch.transpose(rotated_weight, 0, 1)
 
             scaled_rotated_weight = rotated_weight * boft_scale
 

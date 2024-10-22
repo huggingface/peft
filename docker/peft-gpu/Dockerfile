@@ -62,6 +62,7 @@ RUN source activate peft && \
     librosa \
     "soundfile>=0.12.1" \
     scipy \
+    torchao \
     git+https://github.com/huggingface/transformers \
     git+https://github.com/huggingface/accelerate \
     peft[test]@git+https://github.com/huggingface/peft

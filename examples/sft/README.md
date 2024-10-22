@@ -29,4 +29,6 @@ When you have access to multiple GPUs, it would be better to use normal LoRA wit
 ## Multi-GPU SFT with LoRA and FSDP
 When you have access to multiple GPUs, it would be better to use normal LoRA with DeepSpeed/FSDP. To use LoRA with DeepSpeed, refer the docs at [PEFT with FSDP](https://huggingface.co/docs/peft/accelerate/fsdp).
 
+## Tip
 
+Generally try to upgrade to the latest package versions for best results, especially when it comes to `bitsandbytes`, `accelerate`, `transformers`, `trl`, and `peft`.

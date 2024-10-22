@@ -116,6 +116,8 @@
       title: FourierFT
     - local: package_reference/vblora
       title: VB-LoRA
+    - local: package_reference/hra
+      title: HRA
 
     title: Adapters
   - sections:

@@ -85,6 +85,10 @@ class LoraConfig(PeftConfig):
             excluding the output layer. If this is not specified, modules will be chosen according to the model
             architecture. If the architecture is not known, an error will be raised -- in this case, you should specify
             the target modules manually.
+        exclude_modules (`Optional[Union[List[str], str]]`):
+            The names of the modules to not apply the adapter. When passing a string, a regex match will be performed.
+            When passing a list of strings, either an exact match will be performed or it is checked if the name of the
+            module ends with any of the passed strings.
         lora_alpha (`int`):
             The alpha parameter for Lora scaling.
         lora_dropout (`float`):
@@ -119,8 +123,9 @@ class LoraConfig(PeftConfig):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
             layer at this index.
-        layers_pattern (`str`):
-            The layer pattern name, used only if `layers_to_transform` is different from `None`.
+        layers_pattern (`Optional[Union[List[str], str]]`):
+            The layer pattern name, used only if `layers_to_transform` is different from `None`. This should target the
+            `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
         rank_pattern (`dict`):
             The mapping from layer names or regexp expression to ranks which are different from the default rank
             specified by `r`.
@@ -165,6 +170,10 @@ class LoraConfig(PeftConfig):
                 "not known, an error will be raised -- in this case, you should specify the target modules manually."
             ),
         },
+    )
+    exclude_modules: Optional[Union[list[str], str]] = field(
+        default=None,
+        metadata={"help": "List of module names or regex expression of the module names to exclude from Lora."},
     )
     lora_alpha: int = field(default=8, metadata={"help": "Lora alpha"})
     lora_dropout: float = field(default=0.0, metadata={"help": "Lora dropout"})
@@ -221,7 +230,8 @@ class LoraConfig(PeftConfig):
         default=None,
         metadata={
             "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
-            "This only works when target_modules is a list of str."
+            "This only works when target_modules is a list of str. This should target the `nn.ModuleList` of the "
+            "model, which is often called `'layers'` or `'h'`."
         },
     )
     rank_pattern: Optional[dict] = field(
@@ -326,6 +336,9 @@ class LoraConfig(PeftConfig):
         self.peft_type = PeftType.LORA
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
+        )
+        self.exclude_modules = (
+            set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
         # if target_modules is a regex expression, then layers_to_transform should be None
         if isinstance(self.target_modules, str) and self.layers_to_transform is not None:
