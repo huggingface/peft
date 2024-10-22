@@ -327,8 +327,8 @@ class LoraConfig(PeftConfig):
             )
         },
     )
-    eva_config: Union[EvaConfig, dict] = field(
-        default_factory=dict,
+    eva_config: Optional[EvaConfig] = field(
+        default=None,
         metadata={
             "help": (
                 "The configuration of EVA. If this is passed, then EVA will be used to intialize the LoRA layers. "

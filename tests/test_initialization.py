@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import itertools
 import re
 from contextlib import contextmanager
 from copy import deepcopy
@@ -19,14 +20,17 @@ from unittest.mock import patch
 
 import pytest
 import torch
+from datasets import load_dataset
 from huggingface_hub.utils import reset_sessions
 from safetensors.torch import load_file
 from scipy import stats
 from torch import nn
-from transformers import AutoModelForCausalLM
+from torch.utils.data import DataLoader
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import (
     AdaLoraConfig,
+    EvaConfig,
     LoraConfig,
     PeftMixedModel,
     PeftModel,
@@ -39,7 +43,9 @@ from peft import (
     PromptTuningConfig,
     VBLoRAConfig,
     VeraConfig,
+    get_eva_state_dict,
     get_peft_model,
+    initialize_lora_eva_weights,
     inject_adapter_in_model,
     set_peft_model_state_dict,
 )
@@ -1544,3 +1550,100 @@ def test_from_pretrained_missing_keys_warning(recwarn, tmp_path):
     model = PeftModel.from_pretrained(model, tmp_path)
     assert any(msg in str(w.message) for w in recwarn.list)
     assert any(missing_key in str(w.message) for w in recwarn.list)
+
+
+class TestEvaInitialization:
+    # Constants for test configuration
+    COSINE_SIMILARITY_THRESHOLD = 0.75
+    NUM_SEEDS = 3
+    BATCH_SIZE = 4
+    MAX_LENGTH = 512
+
+    @pytest.fixture
+    def tokenizer(self):
+        tokenizer = AutoTokenizer.from_pretrained("openai-community/gpt2")
+        tokenizer.pad_token = tokenizer.eos_token
+        return tokenizer
+
+    @pytest.fixture
+    def dataset(self, tokenizer):
+        dataset = load_dataset("Rowan/hellaswag", split="train")
+        dataset = dataset.map(
+            lambda x: tokenizer(x["ctx"], padding="max_length", truncation=True, max_length=self.MAX_LENGTH),
+            batched=True,
+            remove_columns=dataset.column_names,
+        )
+        dataset.set_format(type="torch")
+        return dataset
+
+    @pytest.fixture
+    def model(self):
+        model = AutoModelForCausalLM.from_pretrained("openai-community/gpt2")
+        model.transformer.h = torch.nn.ModuleList([model.transformer.h[0]])  # truncate to 1 layer
+        return model
+
+    @pytest.fixture
+    def peft_config(self):
+        return LoraConfig(
+            r=16, lora_alpha=1, target_modules=["c_attn"], init_lora_weights="eva", eva_config=EvaConfig(rho=2)
+        )
+
+    @pytest.fixture
+    def peft_model(self, model, peft_config):
+        return get_peft_model(deepcopy(model), peft_config, low_cpu_mem_usage=True)
+
+    def test_eva_state_dict_consistency(self, model, dataset, peft_config):
+        state_dicts = []
+        for seed in range(3):
+            shuffled_dataset = dataset.shuffle(seed=seed)
+            dataloader = DataLoader(
+                shuffled_dataset,
+                batch_size=self.BATCH_SIZE,
+                collate_fn=lambda examples: {
+                    k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()
+                },
+                shuffle=False,
+            )
+            sd = get_eva_state_dict(model, peft_config, dataloader)
+            state_dicts.append(sd["transformer.h.0.attn.c_attn"])
+
+        cos_sims = []
+        for i, j in itertools.combinations(range(self.NUM_SEEDS), 2):
+            cos_sims.append(torch.cosine_similarity(state_dicts[i], state_dicts[j], dim=1).abs())
+
+        mean_cosine_similarity = torch.cat(cos_sims).mean()
+        assert mean_cosine_similarity > self.COSINE_SIMILARITY_THRESHOLD, (
+            f"Mean absolute cosine similarity {mean_cosine_similarity:.4f} "
+            f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
+        )
+
+    def test_eva_initialization_consistency(self, peft_model, dataset, peft_config):
+        state_dicts = []
+        for seed in range(3):
+            shuffled_dataset = dataset.shuffle(seed=seed)
+            dataloader = DataLoader(
+                shuffled_dataset,
+                batch_size=self.BATCH_SIZE,
+                collate_fn=lambda examples: {
+                    k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()
+                },
+                shuffle=False,
+            )
+            initialize_lora_eva_weights(peft_model, peft_config, dataloader)
+            state_dicts.append(peft_model.model.transformer.h[0].attn.c_attn.lora_A["default"].weight)
+
+        cos_sims = []
+        for i, j in itertools.combinations(range(self.NUM_SEEDS), 2):
+            cos_sims.append(torch.cosine_similarity(state_dicts[i], state_dicts[j], dim=1).abs())
+
+        mean_cosine_similarity = torch.cat(cos_sims).mean()
+        assert mean_cosine_similarity > self.COSINE_SIMILARITY_THRESHOLD, (
+            f"Mean absolute cosine similarity {mean_cosine_similarity:.4f} "
+            f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
+        )
+
+    def test_eva_config_validation(self, model, peft_config):
+        """Test validation of EVA configuration."""
+        with pytest.raises(ValueError):
+            invalid_config = deepcopy(peft_config)
+            invalid_config.eva_config = EvaConfig(rho=-1)

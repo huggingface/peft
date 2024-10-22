@@ -38,7 +38,7 @@ class SVDHook:
 
     Attributes:
     -----------
-        name (str): Name of the layer to which this hook is attached. n_components (int): Number of principal
+    name (str): Name of the layer to which this hook is attached. n_components (int): Number of principal
         components to compute. sim_thresh (Union[float, torch.Tensor]): Similarity threshold for convergence.
     """
 
@@ -122,7 +122,7 @@ class HashHook:
 
     Attributes:
     -----------
-        name (str): Name of the layer to which this hook is attached. hashed_inputs (list): List of hashed input
+    name (str): Name of the layer to which this hook is attached. hashed_inputs (list): List of hashed input
         activations.
     """
 
