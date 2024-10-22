@@ -1294,6 +1294,8 @@ class PeftCommonTester:
 
     def _test_unload_adapter(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
+        num_params_base = len(model.state_dict())
+
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -1314,11 +1316,13 @@ class PeftCommonTester:
             model.eval()
             model = model.unload()
             logits_unload = model(**dummy_input)[0]
+            num_params_unloaded = len(model.state_dict())
 
             # check that PEFT layers are completely removed
             assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
             assert not torch.allclose(logits_with_adapter, logits_unload, atol=1e-10, rtol=1e-10)
             assert torch.allclose(logits_transformers, logits_unload, atol=1e-4, rtol=1e-4)
+            assert num_params_base == num_params_unloaded
 
     def _test_weighted_combination_of_adapters_lora(self, model, config, adapter_list, weight_list):
         model.add_adapter(adapter_list[1], config)

@@ -1331,7 +1331,20 @@ class MultiheadAttention(nn.Module, LoraLayer):
         if merge:
             self.merge(safe_merge=safe_merge, adapter_names=adapter_names)
         base_layer = self.get_base_layer()
-        base_layer.out_proj = base_layer.out_proj.base_layer  # extra step
+
+        # extra steps: re-register weights, take care of out_proj layer
+        # in_proj
+        weight = base_layer.in_proj_weight
+        del base_layer.in_proj_weight
+        base_layer.register_parameter("in_proj_weight", nn.Parameter(weight.data, requires_grad=weight.requires_grad))
+
+        # out_proj
+        out_proj_layer = base_layer.out_proj.get_base_layer()
+        weight = out_proj_layer.weight
+        del out_proj_layer.weight
+        out_proj_layer.register_parameter("weight", nn.Parameter(weight.data, requires_grad=weight.requires_grad))
+
+        base_layer.out_proj = out_proj_layer
         return base_layer
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
