@@ -120,9 +120,6 @@ class HRAConfig(PeftConfig):
         self.exclude_modules = (
             set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
-        # check for layers_to_transform and layers_pattern
-        if self.layers_to_transform is not None and self.layers_pattern is None:
-            raise ValueError("When `layers_to_transform` is specified, `layers_pattern` must also be specified. ")
         # if target_modules is a regex expression, then layers_to_transform should be None
         if isinstance(self.target_modules, str) and self.layers_to_transform is not None:
             raise ValueError("`layers_to_transform` cannot be used when `target_modules` is a str.")
@@ -130,3 +127,7 @@ class HRAConfig(PeftConfig):
         # if target_modules is a regex expression, then layers_pattern should be None
         if isinstance(self.target_modules, str) and self.layers_pattern is not None:
             raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
+        
+        # check for layers_to_transform and layers_pattern
+        if (self.layers_pattern is not None) and (self.layers_to_transform is None):
+            raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")

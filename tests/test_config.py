@@ -353,17 +353,18 @@ class TestPeftConfig:
             config_class.from_pretrained(tmp_path)
 
     def test_lora_config_layers_to_transform_validation(self):
-        """Test that specifying layers_to_transform without layers_pattern raises an error"""
+        """Test that specifying layers_pattern without layers_to_transform raises an error"""
         with pytest.raises(
-            ValueError, match="When `layers_to_transform` is specified, `layers_pattern` must also be specified."
+            ValueError, match="When `layers_pattern` is specified, `layers_to_transform` must also be specified."
         ):
             LoraConfig(
                 r=8,
                 lora_alpha=16,
                 target_modules=["query", "value"],
-                layers_to_transform=[0, 1, 2],
+                layers_pattern="model.layers"
             )
 
+        # The rest of the test case remains the same
         # Test that specifying both layers_to_transform and layers_pattern works fine
         config = LoraConfig(
             r=8,
