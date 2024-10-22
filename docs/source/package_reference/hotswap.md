@@ -31,12 +31,12 @@ with torch.inference_mode():
     output_adapter_1 = model(inputs).logits
 ```
 
-
-There are some caveats for hotswapping:
+Hotswapping works with transformers models and diffusers models. However, there are some caveats:
 
 - It only works for the same PEFT method, so no swapping LoRA and LoHa, for example.
 - Right now, only LoRA is properly supported.
 - The adapters must be compatible (e.g. same LoRA alpha, same target modules).
+- If you use `torch.compile` and want to avoid recompilation, the LoRA rank must be the same.
 
 [[autodoc]] utils.hotswap.hotswap_adapter
     - all

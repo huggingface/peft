@@ -40,6 +40,8 @@ torch_device = "cuda" if torch.cuda.is_available() else "cpu"
 
 def get_small_unet():
     # from diffusers UNet2DConditionModelTests
+    # TODO: This appears not to work yet in full pipeline context, see:
+    # https://github.com/huggingface/diffusers/pull/9453#issuecomment-2418508871
     torch.manual_seed(0)
     init_dict = {
         "block_out_channels": (4, 8),
