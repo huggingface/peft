@@ -725,7 +725,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 from transformers import DynamicCache
 
                 past_key_values = DynamicCache.from_legacy_cache(past_key_values)
-            return past_key_values
+            elif peft_config.num_transformer_submodules == 2 and self.base_model._supports_cache_class:
+                # Dont' apply this to encoder-decoder models that don't support new Cachc format yet
+                # If we don't apply this, prefix-tuning fails to update cross-attn cache
+                from transformers import EncoderDecoderCache
+
+                past_key_values = EncoderDecoderCache.from_legacy_cache(past_key_values)
+                past_key_values.is_updated = {layer_idx: False for layer_idx in range(len(past_key_values.cross_attention_cache.key_cache))}
         else:
             if peft_config.peft_type == PeftType.MULTITASK_PROMPT_TUNING:
                 prompts = prompt_encoder(prompt_tokens, task_ids)
