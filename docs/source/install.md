@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # Installation
 
-Before you start, you will need to setup your environment, install the appropriate packages, and configure 🤗 PEFT. 🤗 PEFT is tested on **Python 3.8+**.
+Before you start, you will need to setup your environment, install the appropriate packages, and configure 🤗 PEFT. 🤗 PEFT is tested on **Python 3.9+**.
 
 🤗 PEFT is available on PyPI, as well as GitHub:
 

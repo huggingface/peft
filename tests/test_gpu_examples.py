@@ -2963,10 +2963,8 @@ class PeftHqqGPUTests(unittest.TestCase):
         assert cc_matrix.min() > 0.97
 
 
-# TODO: unskip the tests once https://github.com/casper-hansen/AutoAWQ/issues/466 is fixed
 @require_torch_gpu
 @require_auto_awq
-@pytest.mark.skip(reason="Needs https://github.com/casper-hansen/AutoAWQ/issues/466 to be fixed first")
 class PeftAwqGPUTests(unittest.TestCase):
     r"""
     Awq + peft tests
