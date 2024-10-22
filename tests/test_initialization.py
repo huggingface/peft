@@ -1642,8 +1642,20 @@ class TestEvaInitialization:
             f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
         )
 
-    def test_eva_config_validation(self, model, peft_config):
-        """Test validation of EVA configuration."""
-        with pytest.raises(ValueError):
+    def test_eva_config_validation(self, peft_config):
+        """Test that EvaConfig.__init__ raises a ValueError when rho is negative."""
+        with pytest.raises(ValueError, match="`rho` must be >= 1."):
             invalid_config = deepcopy(peft_config)
             invalid_config.eva_config = EvaConfig(rho=-1)
+
+    def test_lora_config_raises_error_without_eva_config_but_eva_init(self):
+        """Test that LoraConfig.__init__ raises a ValueError when init_lora_weights is 'eva' but eva_config is not set."""
+        with pytest.raises(ValueError, match="`eva_config` must be specified when `init_lora_weights` is 'eva'."):
+            LoraConfig(init_lora_weights="eva")
+
+    def test_lora_config_raises_warning_with_eva_config_but_not_eva_init(self):
+        """Test that LoraConfig.__init__ raises a warning when init_lora_weights is not 'eva' but eva_config is set."""
+        with pytest.warns(
+            UserWarning, match="`eva_config` specified but will be ignored when `init_lora_weights` is not 'eva'."
+        ):
+            LoraConfig(init_lora_weights=True, eva_config=EvaConfig())

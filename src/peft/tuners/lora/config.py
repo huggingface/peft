@@ -97,7 +97,7 @@ class EvaConfig:
 
     def __post_init__(self):
         if self.rho < 1.0:
-            raise ValueError("rho must be >= 1")
+            raise ValueError("`rho` must be >= 1.")
 
 
 @dataclass
