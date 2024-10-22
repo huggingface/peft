@@ -63,6 +63,29 @@ from peft import LoraConfig
 config = LoraConfig(init_lora_weights="olora", ...)
 ```
 For more advanced usage, please refer to our [documentation](https://github.com/huggingface/peft/tree/main/examples/olora_finetuning).
+
+### EVA
+[EVA](https://arxiv.org/pdf/2410.07170) initializes LoRA in a data-driven manner based on information of the downstream data. It achieves this by performing SVD on the input activations of each layer. It also adaptively allocates ranks throughout the model based on metric retrieved from SVD called "explained variance ratio"
+
+You can use EVA by setting the LoraConfig:
+```python
+from peft import LoraConfig, EvaConfig
+peft_config = LoraConfig(
+    init_lora_weights = "eva",
+    eva_config = EvaConfig(rho = 1.0),
+    ...
+)
+```
+To optimize the amount of available memory for EVA, you can use the `low_cpu_mem_usage` flag in `get_peft_model`:
+```python
+peft_model = get_peft_model(model, peft_config, low_cpu_mem_usage=True)
+```
+Then, initialize the EVA weights (in most cases the dataloader used for eva initialization can be the same as the one used for finetuning):
+```python
+initialize_lora_eva_weights(peft_model, peft_config, dataloader, device="cuda")
+```
+For further instructions on using EVA, please refer to our [documentation](https://github.com/huggingface/peft/tree/main/examples/eva_finetuning).
+
 ### LoftQ
 
 #### Standard approach
