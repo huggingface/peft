@@ -17,7 +17,7 @@ import torch
 from parameterized import parameterized
 from transformers import AutoModel
 
-from peft import PrefixTuningConfig, PromptLearningConfig
+from peft import LoraConfig, PrefixTuningConfig, PromptLearningConfig
 
 from .testing_common import PeftCommonTester, PeftTestConfigManager
 
@@ -98,6 +98,9 @@ class PeftFeatureExtractionModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_save_pretrained_selected_adapters(self, test_name, model_id, config_cls, config_kwargs):
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs)
+
+    def test_load_model_low_cpu_mem_usage(self):
+        self._test_load_model_low_cpu_mem_usage(PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST[0], LoraConfig, {})
 
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_from_pretrained_config_construction(self, test_name, model_id, config_cls, config_kwargs):

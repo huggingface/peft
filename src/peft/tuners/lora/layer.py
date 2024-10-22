@@ -221,7 +221,7 @@ class LoraLayer(BaseTunerLayer):
                 "Please initialize PiSSA under float32, float16, or bfloat16. "
                 "Subsequently, re-quantize the residual model to help minimize quantization errors."
             )
-        weight = weight.to(torch.float32)
+        weight = transpose(weight.to(torch.float32), self.fan_in_fan_out)
         if init_lora_weights == "pissa":
             # USV^T = W <-> VSU^T = W^T, where W^T = weight.data in R^{out_channel, in_channel},
             V, S, Uh = torch.linalg.svd(weight.data, full_matrices=False)
@@ -245,7 +245,7 @@ class LoraLayer(BaseTunerLayer):
         self.lora_A[adapter_name].weight.data = lora_A
         self.lora_B[adapter_name].weight.data = lora_B
         weight = weight.data - self.scaling[adapter_name] * lora_B @ lora_A
-        weight = weight.to(dtype)
+        weight = transpose(weight.to(dtype), self.fan_in_fan_out)
         self.get_base_layer().weight.data = weight
 
     def loftq_init(self, adapter_name):
@@ -585,13 +585,19 @@ class Linear(nn.Module, LoraLayer):
                 if not self.use_dora[active_adapter]:
                     result = result + lora_B(lora_A(dropout(x))) * scaling
                 else:
-                    x = dropout(x)
+                    if isinstance(dropout, nn.Identity) or not self.training:
+                        base_result = result
+                    else:
+                        x = dropout(x)
+                        base_result = None
+
                     result = result + self.lora_magnitude_vector[active_adapter](
                         x,
                         lora_A=lora_A,
                         lora_B=lora_B,
                         scaling=scaling,
                         base_layer=self.get_base_layer(),
+                        base_result=base_result,
                     )
 
             result = result.to(torch_result_dtype)

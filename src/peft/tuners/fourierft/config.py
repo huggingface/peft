@@ -68,9 +68,10 @@ class FourierFTConfig(PeftConfig):
             The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes
             that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at
             this index.
-        layers_pattern (`str`):
+        layers_pattern (`Optional[Union[List[str], str]]`):
             The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is
-            not in the common layers pattern.
+            not in the common layers pattern. This should target the `nn.ModuleList` of the model, which is often
+            called `'layers'` or `'h'`.
         n_frequency_pattern (`dict`):
             The mapping from layer names or regexp expression to n_frequency which are different from the default
             specified. For example, `{model.decoder.layers.0.encoder_attn.k_proj: 1000`}.
@@ -154,12 +155,13 @@ class FourierFTConfig(PeftConfig):
             )
         },
     )
-    layers_pattern: Optional[str] = field(
+    layers_pattern: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
             "help": (
                 "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer"
-                " pattern is not in the common layers pattern."
+                " pattern is not in the common layers pattern. This should target the `nn.ModuleList` of the "
+                "model, which is often called `'layers'` or `'h'`."
             )
         },
     )

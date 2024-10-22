@@ -15,7 +15,7 @@
 from setuptools import find_packages, setup
 
 
-VERSION = "0.13.1.dev0"
+VERSION = "0.13.3.dev0"
 
 extras = {}
 extras["quality"] = [
@@ -34,7 +34,7 @@ extras["test"] = extras["dev"] + [
     "pytest-xdist",
     "parameterized",
     "datasets",
-    "diffusers<0.21.0",
+    "diffusers",
     "scipy",
 ]
 

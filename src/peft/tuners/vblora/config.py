@@ -79,8 +79,9 @@ class VBLoRAConfig(PeftConfig):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
             layer at this index.
-        layers_pattern (`str`):
-            The layer pattern name, used only if `layers_to_transform` is different from `None`.
+        layers_pattern (`Optional[Union[List[str], str]]`):
+            The layer pattern name, used only if `layers_to_transform` is different from `None`. This should target the
+            `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
     """
 
     r: int = field(default=4, metadata={"help": "The rank of incremental matrices."})
@@ -169,7 +170,8 @@ class VBLoRAConfig(PeftConfig):
         default=None,
         metadata={
             "help": "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at this index. "
-            "This only works when target_modules is a list of str."
+            "This only works when target_modules is a list of str. This should target the `nn.ModuleList` of the "
+            "model, which is often called `'layers'` or `'h'`."
         },
     )
     layers_pattern: Optional[Union[list[str], str]] = field(
