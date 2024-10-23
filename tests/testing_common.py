@@ -39,6 +39,7 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
+    LycorisLoKrConfig,
     OFTConfig,
     PeftModel,
     PeftType,
@@ -554,7 +555,15 @@ class PeftCommonTester:
                 assert load_result2.missing_keys == []
 
     def _test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig, VBLoRAConfig):
+        if config_cls not in (
+            LoraConfig,
+            IA3Config,
+            AdaLoraConfig,
+            LoHaConfig,
+            LoKrConfig,
+            LycorisLoKrConfig,
+            VBLoRAConfig,
+        ):
             # Merge layers only supported for LoRA and IA³
             return pytest.skip(f"Test not applicable for {config_cls}")
 
@@ -584,6 +593,7 @@ class PeftCommonTester:
             AdaLoraConfig,
             LoHaConfig,
             LoKrConfig,
+            LycorisLoKrConfig,
             VeraConfig,
             FourierFTConfig,
         ):
@@ -728,6 +738,7 @@ class PeftCommonTester:
             PeftType.LORA,
             PeftType.LOHA,
             PeftType.LOKR,
+            PeftType.LOKRv2,
             PeftType.IA3,
             PeftType.OFT,
             PeftType.BOFT,
@@ -1198,6 +1209,7 @@ class PeftCommonTester:
             PeftType.LORA,
             PeftType.LOHA,
             PeftType.LOKR,
+            PeftType.LOKRv2,
             PeftType.IA3,
             PeftType.OFT,
             PeftType.BOFT,
@@ -1247,6 +1259,7 @@ class PeftCommonTester:
             PeftType.LORA,
             PeftType.LOHA,
             PeftType.LOKR,
+            PeftType.LOKRv2,
             PeftType.IA3,
             PeftType.OFT,
             PeftType.BOFT,
