@@ -24,8 +24,8 @@ Low-Rank Adaptation (LoRA) has achieved remarkable training results by freezing 
 
 ## BoneConfig
 
-[[autodoc]] tuners.Bone.config.BoneConfig
+[[autodoc]] tuners.bone.config.BoneConfig
 
 ## BoneModel
 
-[[autodoc]] tuners.Bone.model.BoneModel
+[[autodoc]] tuners.bone.model.BoneModel
