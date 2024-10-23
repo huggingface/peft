@@ -34,7 +34,7 @@ from huggingface_hub import HfFileSystem, ModelCard, ModelCardData, hf_hub_downl
 from safetensors import safe_open
 from safetensors.torch import save_file as safe_save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
-from transformers import PreTrainedModel
+from transformers import DynamicCache, EncoderDecoderCache, PreTrainedModel
 from transformers.modeling_outputs import QuestionAnsweringModelOutput, SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
 
@@ -733,18 +733,16 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             elif peft_config.num_transformer_submodules == 1:
                 # Dont' apply this to encoder-decoder models and not to models requiring special processing.
                 # local import in case users use a very old transformers version
-                from transformers import DynamicCache
-
                 past_key_values = DynamicCache.from_legacy_cache(past_key_values)
             elif peft_config.num_transformer_submodules == 2 and self.base_model._supports_cache_class:
                 # Dont' apply this to encoder-decoder models that don't support new Cachc format yet
                 # If we don't apply this, prefix-tuning fails to update cross-attn cache
-                from transformers import EncoderDecoderCache
-
                 past_key_values = EncoderDecoderCache.from_legacy_cache(past_key_values)
+                past_key_values.cross_attention_cache = DynamicCache()
                 past_key_values.is_updated = {
                     layer_idx: False for layer_idx in range(len(past_key_values.cross_attention_cache.key_cache))
                 }
+            return past_key_values
         else:
             if peft_config.peft_type == PeftType.MULTITASK_PROMPT_TUNING:
                 prompts = prompt_encoder(prompt_tokens, task_ids)

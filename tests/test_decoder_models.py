@@ -475,8 +475,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         # does not raise
         model(x)
 
-    def test_prefix_tuning_foobar(self):
-        # TODO
+    def test_prefix_tuning_mistral(self):
         # See issue 869, 1962
         model_id = "hf-internal-testing/tiny-random-MistralForCausalLM"
         base_model = AutoModelForCausalLM.from_pretrained(model_id)
