@@ -12,7 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+import platform
 import re
+import subprocess
+import sys
 from contextlib import contextmanager
 from copy import deepcopy
 from unittest.mock import patch
@@ -27,6 +31,7 @@ from transformers import AutoModelForCausalLM
 
 from peft import (
     AdaLoraConfig,
+    IA3Config,
     LoraConfig,
     PeftMixedModel,
     PeftModel,
@@ -44,6 +49,7 @@ from peft import (
     set_peft_model_state_dict,
 )
 from peft.utils import infer_device
+from peft.utils.hotswap import hotswap_adapter
 
 
 class TestLoraInitialization:
@@ -1544,3 +1550,300 @@ def test_from_pretrained_missing_keys_warning(recwarn, tmp_path):
     model = PeftModel.from_pretrained(model, tmp_path)
     assert any(msg in str(w.message) for w in recwarn.list)
     assert any(missing_key in str(w.message) for w in recwarn.list)
+
+
+@pytest.mark.skipif(
+    platform.system() != "Linux", reason="Out of the box, torch.compile does not work on Windows or MacOS"
+)
+class TestHotSwapping:
+    """Tests for the hotswapping function"""
+
+    torch_device = infer_device()
+
+    def compile(self, model, do_compile):
+        if not do_compile:
+            return model
+        return torch.compile(model)
+
+    def get_model(self):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 20, bias=True)
+                self.relu = nn.ReLU()
+                self.lin1 = nn.Linear(20, 5, bias=False)
+
+            def forward(self, X):
+                X = X.float()
+                X = self.lin0(X)
+                X = self.relu(X)
+                X = self.lin1(X)
+                return X
+
+        torch.manual_seed(0)
+        return MLP().to(self.torch_device)
+
+    # this works with all adapters except prompt learning, but we don't test all
+    # as it is unnecessary and would be slow
+    @pytest.mark.parametrize(
+        "config",
+        [
+            LoraConfig(init_lora_weights=0, target_modules=["lin0"]),
+            LoraConfig(init_lora_weights=0, target_modules=["lin0", "lin1"]),
+        ],
+    )
+    @pytest.mark.parametrize("do_compile", [False, True])
+    def test_hotswap_works(self, config, do_compile, tmp_path):
+        # Load 2 different adapters and check that we can hotswap between them, with the model optionally being
+        # compiled.
+        atol, rtol = 1e-4, 1e-4
+        inputs = torch.rand(3, 10).to(self.torch_device)
+
+        # create adapter 0
+        model = self.get_model()
+        torch.manual_seed(0)
+        model = get_peft_model(model, config)
+        model = self.compile(model, do_compile=do_compile)
+        model.eval()
+        with torch.inference_mode():
+            output0 = model(inputs)
+        model.save_pretrained(tmp_path / "adapter0")
+
+        del model
+
+        # create adapter 1
+        model = self.get_model()
+        torch.manual_seed(1)
+        model = get_peft_model(model, config)
+        model = self.compile(model, do_compile=do_compile)
+        model.eval()
+        with torch.inference_mode():
+            output1 = model(inputs)
+        model.save_pretrained(tmp_path / "adapter1")
+
+        # sanity check: they're not the same
+        assert not torch.allclose(output0, output1, atol=atol, rtol=rtol)
+
+        del model
+
+        # load adapter 0
+        model = self.get_model()
+        model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
+        model = self.compile(model, do_compile=do_compile)
+        with torch.inference_mode():
+            output_loaded0 = model(inputs)
+
+        # sanity check: same output after loading for adapter 0
+        assert torch.allclose(output0, output_loaded0, atol=atol, rtol=rtol)
+
+        # hotswap with adapter 1
+        hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+        with torch.inference_mode():
+            output_loaded1 = model(inputs)
+
+        # real check: model now behaves like adapter 1
+        assert torch.allclose(output1, output_loaded1, atol=atol, rtol=rtol)
+
+        # hotswap back to adapter 0
+        hotswap_adapter(model, tmp_path / "adapter0", adapter_name="default")
+        with torch.inference_mode():
+            output_loaded_back0 = model(inputs)
+
+        # real check: model now behaves again like adapter 0
+        assert torch.allclose(output0, output_loaded_back0, atol=atol, rtol=rtol)
+
+    def test_hotswap_incompatible_config_params_raises(self, tmp_path):
+        # When the configs of the two adapters are incompatible, an error is raised
+        config0 = LoraConfig(target_modules=["lin0"], lora_alpha=1.0)
+        config1 = LoraConfig(target_modules=["lin0"], lora_alpha=2.0)
+
+        model = self.get_model()
+        model = get_peft_model(model, config0)
+        model.save_pretrained(tmp_path / "adapter0")
+        del model
+
+        model = self.get_model()
+        model = get_peft_model(model, config1)
+        model.save_pretrained(tmp_path / "adapter1")
+        del model
+
+        # load adapter 0
+        model = self.get_model()
+        model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
+
+        msg = r"Configs are incompatible: for lora_alpha, 1.0 != 2.0"
+        with pytest.raises(ValueError, match=msg):
+            hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+
+    def test_hotswap_different_peft_types_raises(self, tmp_path):
+        # When the configs of the two adapters are different PEFT methods, raise
+        config0 = LoraConfig(target_modules=["lin0"])
+        config1 = IA3Config(target_modules=["lin0"], feedforward_modules=[])
+
+        model = self.get_model()
+        model = get_peft_model(model, config0)
+        model.save_pretrained(tmp_path / "adapter0")
+        del model
+
+        model = self.get_model()
+        model = get_peft_model(model, config1)
+        model.save_pretrained(tmp_path / "adapter1")
+        del model
+
+        # load adapter 0
+        model = self.get_model()
+        model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
+
+        msg = r"Incompatible PEFT types found: LORA and IA3"
+        with pytest.raises(ValueError, match=msg):
+            hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+
+    def test_hotswap_wrong_peft_types_raises(self, tmp_path):
+        # Only LoRA is supported at the moment
+        config0 = IA3Config(target_modules=["lin0"], feedforward_modules=[])
+        config1 = IA3Config(target_modules=["lin0"], feedforward_modules=[])
+
+        model = self.get_model()
+        model = get_peft_model(model, config0)
+        model.save_pretrained(tmp_path / "adapter0")
+        del model
+
+        model = self.get_model()
+        model = get_peft_model(model, config1)
+        model.save_pretrained(tmp_path / "adapter1")
+        del model
+
+        # load adapter 0
+        model = self.get_model()
+        model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
+
+        msg = r"Hotswapping only supports LORA but IA3 was passed"
+        with pytest.raises(ValueError, match=msg):
+            hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+
+    def test_hotswap_missing_key_raises(self, tmp_path):
+        # When a key is missing, raise
+        config = LoraConfig(target_modules=["lin0", "lin1"])
+
+        model = self.get_model()
+        model = get_peft_model(model, config)
+        model.save_pretrained(tmp_path / "adapter0")
+        del model
+
+        model = self.get_model()
+        model = get_peft_model(model, config)
+
+        # remove one key from the state_dict
+        key = "base_model.model.lin1.lora_A.default.weight"
+        state_dict = model.state_dict()
+        del state_dict[key]
+        model.state_dict = lambda: state_dict
+        model.save_pretrained(tmp_path / "adapter1")
+        del model
+
+        # load adapter 0
+        model = self.get_model()
+        model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
+
+        msg = f"Hot swapping the adapter did not succeed. Missing keys: {key}"
+        with pytest.raises(RuntimeError, match=msg):
+            hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+
+    def test_hotswap_extra_key_raises(self, tmp_path):
+        # When there is an extra key, raise
+        config = LoraConfig(target_modules=["lin0"])
+
+        model = self.get_model()
+        model = get_peft_model(model, config)
+        model.save_pretrained(tmp_path / "adapter0")
+        del model
+
+        model = self.get_model()
+        model = get_peft_model(model, config)
+
+        # add an unexpected key
+        state_dict = model.state_dict()
+        new_key = "base_model.model.lin1.lora_A.default.weight"
+        state_dict[new_key] = torch.zeros(8, 20)
+        model.state_dict = lambda: state_dict
+        model.save_pretrained(tmp_path / "adapter1")
+        del model
+
+        # load adapter 0
+        model = self.get_model()
+        model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
+
+        msg = f"Hot swapping the adapter did not succeed. Unexpected keys: {new_key}"
+        with pytest.raises(RuntimeError, match=msg):
+            hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+
+    def test_hotswapping_compiled_model_does_not_trigger_recompilation(self):
+        env = os.environ.copy()
+        env["TORCH_LOGS"] = "guards,recompiles"
+        here = os.path.dirname(__file__)
+        file_name = os.path.join(here, "run_compiled_model_hotswap.py")
+
+        process = subprocess.Popen(
+            [sys.executable, file_name, "1"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
+        # Communicate will read the output and error streams, preventing deadlock
+        stdout, stderr = process.communicate()
+        exit_code = process.returncode
+
+        # sanity check:
+        assert exit_code == 0
+
+        # check that the recompilation message is not present
+        assert "__recompiles" not in stderr.decode()
+
+        # contingency check: without hotswapping, we *do* get recompilation
+        process = subprocess.Popen(
+            [sys.executable, file_name, "0"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
+        # Communicate will read the output and error streams, preventing deadlock
+        stdout, stderr = process.communicate()
+        exit_code = process.returncode
+
+        # sanity check:
+        assert exit_code == 0
+
+        # check that the recompilation message is not present
+        assert "__recompiles" in stderr.decode()
+
+    @pytest.mark.xfail(strict=True, reason="Requires hotswap to be implemented in diffusers")
+    def test_hotswapping_compiled_diffusion_model_does_not_trigger_recompilation(self):
+        env = os.environ.copy()
+        env["TORCH_LOGS"] = "guards,recompiles"
+        here = os.path.dirname(__file__)
+        file_name = os.path.join(here, "run_compiled_diffusion_model_hotswap.py")
+
+        process = subprocess.Popen(
+            [sys.executable, file_name, "1"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
+        # Communicate will read the output and error streams, preventing deadlock
+        stdout, stderr = process.communicate()
+        exit_code = process.returncode
+
+        # sanity check:
+        assert exit_code == 0
+
+        # check that the recompilation message is not present
+        assert "__recompiles" not in stderr.decode()
+
+        # contingency check: without hotswapping, we *do* get recompilation
+        process = subprocess.Popen(
+            [sys.executable, file_name, "0"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
+        # Communicate will read the output and error streams, preventing deadlock
+        stdout, stderr = process.communicate()
+        exit_code = process.returncode
+
+        # sanity check:
+        assert exit_code == 0
+
+        # check that the recompilation message is not present
+        assert "__recompiles" in stderr.decode()

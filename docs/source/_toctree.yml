@@ -125,5 +125,7 @@
       title: Model merge
     - local: package_reference/helpers
       title: Helpers
+    - local: package_reference/hotswap
+      title: Hotswapping adapters
     title: Utilities
   title: API reference
