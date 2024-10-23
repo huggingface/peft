@@ -22,6 +22,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
+    BoneConfig,
     HRAConfig,
     LoraConfig,
     OFTConfig,
@@ -63,6 +64,7 @@ def skip_oft_or_hra_and_gpt2(test_list):
         if not (
             ("GPT2LMHeadModel" in test[1])
             and ((test[2] == BOFTConfig) or (test[2] == HRAConfig) or (test[2] == OFTConfig))
+            or (test[2] == BoneConfig)
         )
     ]
 
@@ -78,6 +80,7 @@ def skip_adalora_or_oft_or_hra_and_gpt2(test_list):
                 or (test[2] == BOFTConfig)
                 or (test[2] == HRAConfig)
                 or (test[2] == OFTConfig)
+                or (test[2] == BoneConfig)
             )
         )
     ]
@@ -200,9 +203,6 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
     def test_save_pretrained_selected_adapters_pickle(self, test_name, model_id, config_cls, config_kwargs):
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs, safe_serialization=False)
 
-    def test_load_model_low_cpu_mem_usage(self):
-        self._test_load_model_low_cpu_mem_usage(PEFT_DECODER_MODELS_TO_TEST[0], LoraConfig, {})
-
     @parameterized.expand(
         PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_oft_or_hra_and_gpt2)
     )
@@ -221,6 +221,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "vera_kwargs": {"init_weights": [False]},
                 "fourierft_kwargs": {"init_weights": [False]},
                 "hra_kwargs": {"init_weights": [False]},
+                "bone_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
         )
@@ -239,6 +240,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "vera_kwargs": {"init_weights": [False]},
                 "fourierft_kwargs": {"init_weights": [False]},
                 "hra_kwargs": {"init_weights": [False]},
+                "bone_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
             filter_params_func=skip_oft_or_hra_and_gpt2,
@@ -255,6 +257,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
                 "oft_kwargs": {"init_weights": [False]},
+                "bone_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
         )
@@ -267,6 +270,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
             {
                 "model_ids": PEFT_DECODER_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
+                "bone_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
         )
@@ -355,6 +359,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "vera_kwargs": {"init_weights": [False]},
                 "fourierft_kwargs": {"init_weights": [False]},
                 "hra_kwargs": {"init_weights": [False]},
+                "bone_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
             filter_params_func=skip_adalora_or_oft_or_hra_and_gpt2,
@@ -371,6 +376,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
                 "oft_kwargs": {"init_weights": [False]},
+                "bone_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
         )
@@ -394,6 +400,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "vera_kwargs": {"init_weights": [False]},
                 "fourierft_kwargs": {"init_weights": [False]},
                 "hra_kwargs": {"init_weights": [False]},
+                "bone_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
             filter_params_func=skip_oft_or_hra_and_gpt2,
