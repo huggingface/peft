@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2024-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ from typing import Optional, Set, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from lycoris.functional import lokr
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
@@ -75,6 +74,12 @@ class LycorisLoKr(BaseTunerLayer):
         self._disable_adapters = False
         self.merged_adapters = []
         self.kwargs = kwargs
+
+        self.use_scalar = kwargs['use_scalar']
+        if self.use_scalar:
+            self.scalar = nn.Parameter(torch.tensor(0.0))
+        else:
+            self.register_buffer("scalar", torch.tensor(1.0), persistent=False)
 
     @property
     def merged(self) -> bool:
@@ -155,6 +160,9 @@ class LycorisLoKr(BaseTunerLayer):
         self.scale[adapter_name] = alpha / r
 
         if use_upstream:
+
+            from lycoris.functional import lokr
+
             # Creating dummy weights of required shape, as it is a argument for weight_gen function.
             if self.kernel_size:
                 dummy_weights = torch.rand((self.in_features, self.out_features, *self.kernel_size))
@@ -184,7 +192,7 @@ class LycorisLoKr(BaseTunerLayer):
                     setattr(self, f"{attr}[{adapter_name}]", weight)
         else:
             self.create_adapter_parameters(adapter_name, r, shape, use_w1, use_w2, use_effective_conv2d)
-            self.reset_lokr_parameters(adapter_name, init_weights)
+            self.reset_lokr_parameters(adapter_name)
 
         # Move new weights to device
         self._move_adapter_to_device_of_base_layer(adapter_name)
@@ -224,25 +232,24 @@ class LycorisLoKr(BaseTunerLayer):
                 self.lokr_w2_a[adapter_name] = nn.Parameter(torch.empty(shape[0][1], r))
                 self.lokr_w2_b[adapter_name] = nn.Parameter(torch.empty(r, shape[1][1]))
 
-    def reset_lokr_parameters(self, adapter_name: str, init_weights: bool):
-        if init_weights:
-            if adapter_name in self.lokr_w1:
-                nn.init.zeros_(self.lokr_w1[adapter_name])
-            else:
-                nn.init.zeros_(self.lokr_w1_a[adapter_name])
-                nn.init.kaiming_uniform_(self.lokr_w1_b[adapter_name], a=math.sqrt(5))
+    def reset_lokr_parameters(self, adapter_name: str):
+        if adapter_name in self.lokr_w1:
+            nn.init.kaiming_uniform_(self.lokr_w1[adapter_name], a=math.sqrt(5))
         else:
-            if adapter_name in self.lokr_w1:
-                nn.init.kaiming_uniform_(self.lokr_w1[adapter_name], a=math.sqrt(5))
-            else:
-                nn.init.kaiming_uniform_(self.lokr_w1_a[adapter_name], a=math.sqrt(5))
-                nn.init.kaiming_uniform_(self.lokr_w1_b[adapter_name], a=math.sqrt(5))
+            nn.init.kaiming_uniform_(self.lokr_w1_a[adapter_name], a=math.sqrt(5))
+            nn.init.kaiming_uniform_(self.lokr_w1_b[adapter_name], a=math.sqrt(5))
 
         if adapter_name in self.lokr_w2:
-            nn.init.kaiming_uniform_(self.lokr_w2[adapter_name], a=math.sqrt(5))
+            if self.use_scalar:
+                nn.init.kaiming_uniform_(self.lokr_w2[adapter_name], a=math.sqrt(5))
+            else:
+                nn.init.zeros_(self.lokr_w2[adapter_name])
         else:
+            if self.use_scalar:
+                nn.init.kaiming_uniform_(self.lokr_w2_b[adapter_name], a=math.sqrt(5))
+            else:
+                nn.init.zeros_(self.lokr_w2_b[adapter_name])
             nn.init.kaiming_uniform_(self.lokr_w2_a[adapter_name], a=math.sqrt(5))
-            nn.init.kaiming_uniform_(self.lokr_w2_b[adapter_name], a=math.sqrt(5))
 
         if adapter_name in self.lokr_t2:
             nn.init.kaiming_uniform_(self.lokr_t2[adapter_name], a=math.sqrt(5))
@@ -439,7 +446,7 @@ class Linear(nn.Linear, LycorisLoKr):
         if cast_to_fp32:
             weight = weight.to(dtype=dtype)
 
-        return weight
+        return weight * self.scalar
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
@@ -483,7 +490,6 @@ class Conv2d(nn.Module, LycorisLoKr):
         rank_dropout: float = 0.0,
         module_dropout: float = 0.0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
-        use_effective_conv2d: bool = False,
         init_weights: bool = True,
         **kwargs,
     ):
@@ -600,7 +606,7 @@ class Conv2d(nn.Module, LycorisLoKr):
         if cast_to_fp32:
             weight = weight.to(dtype=dtype)
 
-        return weight
+        return weight * self.scalar
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
