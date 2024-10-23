@@ -344,22 +344,7 @@ def set_peft_model_state_dict(
     else:
         state_dict = peft_model_state_dict
 
-    if config.peft_type in (
-        PeftType.LORA,
-        PeftType.LOHA,
-        PeftType.LOKR,
-        PeftType.ADALORA,
-        PeftType.IA3,
-        PeftType.OFT,
-        PeftType.POLY,
-        PeftType.LN_TUNING,
-        PeftType.BOFT,
-        PeftType.VERA,
-        PeftType.FOURIERFT,
-        PeftType.HRA,
-        PeftType.VBLORA,
-        PeftType.BONE,
-    ):
+    if config.peft_type in PEFT_TYPE_TO_PREFIX_MAPPING:
         peft_model_state_dict = {}
         parameter_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
         if config.peft_type == PeftType.VBLORA and config.save_only_topk_weights:
