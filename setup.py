@@ -36,6 +36,7 @@ extras["test"] = extras["dev"] + [
     "datasets",
     "diffusers",
     "scipy",
+    "protobuf",
 ]
 
 setup(
