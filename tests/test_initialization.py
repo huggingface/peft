@@ -1791,8 +1791,6 @@ class TestHotSwapping:
         stdout, stderr = process.communicate()
         exit_code = process.returncode
 
-        if exit_code != 0:
-            assert stderr.decode() == "foo"
         # sanity check:
         assert exit_code == 0
 
@@ -1808,8 +1806,6 @@ class TestHotSwapping:
         stdout, stderr = process.communicate()
         exit_code = process.returncode
 
-        if exit_code != 0:
-            assert stderr.decode() == "foo"
         # sanity check:
         assert exit_code == 0
 
@@ -1831,8 +1827,6 @@ class TestHotSwapping:
         stdout, stderr = process.communicate()
         exit_code = process.returncode
 
-        if exit_code != 0:
-            assert stderr.decode() == "foo"
         # sanity check:
         assert exit_code == 0
 
@@ -1848,8 +1842,6 @@ class TestHotSwapping:
         stdout, stderr = process.communicate()
         exit_code = process.returncode
 
-        if exit_code != 0:
-            assert stderr.decode() == "foo"
         # sanity check:
         assert exit_code == 0
 
