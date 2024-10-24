@@ -32,6 +32,7 @@ from safetensors.torch import save_file
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
+    BoneConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -119,6 +120,11 @@ CONFIG_TESTING_KWARGS = (
     {
         "target_modules": None,
     },
+    # Bone
+    {
+        "target_modules": None,
+        "r": 2,
+    },
 )
 
 CLASSES_MAPPING = {
@@ -134,6 +140,7 @@ CLASSES_MAPPING = {
     "hra": (HRAConfig, CONFIG_TESTING_KWARGS[9]),
     "vblora": (VBLoRAConfig, CONFIG_TESTING_KWARGS[10]),
     "oft": (OFTConfig, CONFIG_TESTING_KWARGS[11]),
+    "bone": (BoneConfig, CONFIG_TESTING_KWARGS[12]),
 }
 
 
@@ -732,6 +739,7 @@ class PeftCommonTester:
             PeftType.OFT,
             PeftType.BOFT,
             PeftType.HRA,
+            PeftType.BONE,
         ]
 
         if ("gpt2" in model_id.lower()) and (config_cls == IA3Config):
@@ -1205,6 +1213,7 @@ class PeftCommonTester:
             PeftType.FOURIERFT,
             PeftType.HRA,
             PeftType.VBLORA,
+            PeftType.BONE,
         ]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
@@ -1253,6 +1262,7 @@ class PeftCommonTester:
             PeftType.FOURIERFT,
             PeftType.HRA,
             PeftType.VBLORA,
+            PeftType.BONE,
         ]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
@@ -1298,7 +1308,18 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        if config.peft_type not in ("LORA", "ADALORA", "IA3", "BOFT", "OFT", "VERA", "FOURIERFT", "HRA", "VBLORA"):
+        if config.peft_type not in (
+            "LORA",
+            "ADALORA",
+            "IA3",
+            "BOFT",
+            "OFT",
+            "VERA",
+            "FOURIERFT",
+            "HRA",
+            "VBLORA",
+            "BONE",
+        ):
             with pytest.raises(AttributeError):
                 model = model.unload()
         else:
