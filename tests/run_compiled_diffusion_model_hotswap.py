@@ -59,12 +59,12 @@ def get_small_unet():
     return model.to(torch_device)
 
 
-def get_unet_lora_config():
+def get_unet_lora_config(lora_alpha):
     # from diffusers test_models_unet_2d_condition.py
     rank = 4
     unet_lora_config = LoraConfig(
         r=rank,
-        lora_alpha=rank,
+        lora_alpha=lora_alpha,
         target_modules=["to_q", "to_k", "to_v", "to_out.0"],
         init_lora_weights=False,
         use_dora=False,
@@ -85,11 +85,11 @@ def get_dummy_input():
     return {"sample": noise, "timestep": time_step, "encoder_hidden_states": encoder_hidden_states}
 
 
-def get_lora_state_dicts(modules_to_save):
+def get_lora_state_dicts(modules_to_save, adapter_name):
     state_dicts = {}
     for module_name, module in modules_to_save.items():
         if module is not None:
-            state_dicts[f"{module_name}_lora_layers"] = get_peft_model_state_dict(module)
+            state_dicts[f"{module_name}_lora_layers"] = get_peft_model_state_dict(module, adapter_name=adapter_name)
     return state_dicts
 
 
@@ -108,31 +108,39 @@ def set_lora_device(model, adapter_names, device):
                         )
 
 
-def check_hotswap(do_hotswap):
+def check_hotswap(do_hotswap, alpha_scalings=(16, 16)):
     dummy_input = get_dummy_input()
     unet = get_small_unet()
-    lora_config = get_unet_lora_config()
-    unet.add_adapter(lora_config)
+    alpha0, alpha1 = alpha_scalings
+    lora_config0 = get_unet_lora_config(alpha0)
+    lora_config1 = get_unet_lora_config(alpha1)
+    unet.add_adapter(lora_config0, adapter_name="adapter0")
+    unet.add_adapter(lora_config1, adapter_name="adapter1")
 
     with tempfile.TemporaryDirectory() as tmp_dirname:
-        lora_state_dicts = get_lora_state_dicts({"unet": unet})
+        lora_state_dicts0 = get_lora_state_dicts({"unet": unet}, adapter_name="adapter0")
+        lora_state_dicts1 = get_lora_state_dicts({"unet": unet}, adapter_name="adapter1")
         StableDiffusionPipeline.save_lora_weights(
-            save_directory=tmp_dirname, safe_serialization=True, **lora_state_dicts
+            save_directory=os.path.join(tmp_dirname, "adapter0"), safe_serialization=True, **lora_state_dicts0
+        )
+        StableDiffusionPipeline.save_lora_weights(
+            save_directory=os.path.join(tmp_dirname, "adapter1"), safe_serialization=True, **lora_state_dicts1
         )
         del unet
 
         unet = get_small_unet()
-        file_name = os.path.join(tmp_dirname, "pytorch_lora_weights.safetensors")
-        unet.load_attn_procs(file_name)
+        file_name0 = os.path.join(os.path.join(tmp_dirname, "adapter0"), "pytorch_lora_weights.safetensors")
+        file_name1 = os.path.join(os.path.join(tmp_dirname, "adapter1"), "pytorch_lora_weights.safetensors")
+        unet.load_attn_procs(file_name0)
         unet = torch.compile(unet, mode="reduce-overhead")
         unet(**dummy_input)["sample"]
 
         if do_hotswap:
-            unet.load_attn_procs(file_name, adapter_name="default_0", hotswap=True)
+            unet.load_attn_procs(file_name1, adapter_name="default_0", hotswap=True)
         else:
             # offloading the old and loading the new adapter will result in recompilation
             set_lora_device(unet, adapter_names=["default_0"], device="cpu")
-            unet.load_attn_procs(file_name, adapter_name="other_name", hotswap=False)
+            unet.load_attn_procs(file_name1, adapter_name="other_name", hotswap=False)
 
         # we need to call forward to potentially trigger recompilation
         unet(**dummy_input)["sample"]
@@ -140,4 +148,4 @@ def check_hotswap(do_hotswap):
 
 if __name__ == "__main__":
     # check_hotswap(False) will trigger recompilation
-    check_hotswap(do_hotswap=sys.argv[1] == "1")
+    check_hotswap(do_hotswap=sys.argv[1] == "1", alpha_scalings=(8, 16))

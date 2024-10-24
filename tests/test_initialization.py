@@ -1812,7 +1812,6 @@ class TestHotSwapping:
         # check that the recompilation message is not present
         assert "__recompiles" in stderr.decode()
 
-    @pytest.mark.xfail(strict=True, reason="Requires hotswap to be implemented in diffusers")
     def test_hotswapping_compiled_diffusion_model_does_not_trigger_recompilation(self):
         env = os.environ.copy()
         env["TORCH_LOGS"] = "guards,recompiles"

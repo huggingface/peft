@@ -27,7 +27,7 @@ from .save_and_load import _insert_adapter_name_into_state_dict, load_peft_weigh
 
 
 # so far only LoRA is supported
-CONFIG_KEYS_TO_CHECK = {PeftType.LORA: ["lora_alpha", "use_rslora", "lora_dropout", "alpha_pattern", "use_dora"]}
+CONFIG_KEYS_TO_CHECK = {PeftType.LORA: ["use_rslora", "lora_dropout", "alpha_pattern", "use_dora"]}
 
 
 def hotswap_adapter_from_state_dict(model, state_dict, adapter_name, parameter_prefix="lora_"):
