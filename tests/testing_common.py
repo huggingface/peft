@@ -1601,8 +1601,8 @@ class PeftCommonTester:
 
         output_peft = get_output(peft_model)
 
-        # first check trivial case is not true that peft does not affect the output; for this to work, init_lora_weight
-        # must be False
+        # first check trivial case is not true that peft does not affect the output; for this to work, init_weight
+        # must be False (if the config supports it)
         if isinstance(peft_model, StableDiffusionPipeline):
             # for SD, check that most pixels have different values
             assert (output_before != output_peft).float().mean() > 0.8
