@@ -11,13 +11,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import tempfile
 import unittest
 from unittest.mock import Mock, call, patch
 
 import pytest
 import torch
+from datasets import load_dataset
 from parameterized import parameterized
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    DataCollatorForLanguageModeling,
+    Trainer,
+    TrainingArguments,
+)
 
 from peft import (
     AdaLoraConfig,
@@ -466,3 +474,34 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         x = torch.tensor([[1, 2, 3]])
         # does not raise
         model(x)
+
+    def test_prefix_tuning_mistral(self):
+        # See issue 869, 1962
+        model_id = "hf-internal-testing/tiny-random-MistralForCausalLM"
+        base_model = AutoModelForCausalLM.from_pretrained(model_id)
+        peft_config = PrefixTuningConfig(num_virtual_tokens=10, task_type="CAUSAL_LM")
+        model = get_peft_model(base_model, peft_config)
+
+        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        tokenizer.pad_token = tokenizer.eos_token
+
+        def process(samples):
+            tokenized = tokenizer(samples["quote"], truncation=True, max_length=128)
+            return tokenized
+
+        data = load_dataset("ybelkada/english_quotes_copy")
+        data = data.map(process, batched=True)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    num_train_epochs=1,
+                    max_steps=5,
+                    per_device_train_batch_size=4,
+                    output_dir=tmp_dirname,
+                ),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            )
+            trainer.train()
