@@ -13,6 +13,7 @@
 # limitations under the License.
 from __future__ import annotations
 
+import math
 from operator import attrgetter
 
 import torch
@@ -30,7 +31,7 @@ from .save_and_load import _insert_adapter_name_into_state_dict, load_peft_weigh
 CONFIG_KEYS_TO_CHECK = {PeftType.LORA: ["use_rslora", "lora_dropout", "alpha_pattern", "use_dora"]}
 
 
-def hotswap_adapter_from_state_dict(model, state_dict, adapter_name, parameter_prefix="lora_"):
+def hotswap_adapter_from_state_dict(model, state_dict, adapter_name, config, parameter_prefix="lora_"):
     """
     Swap out the adapter weights from the model with the weights from state_dict.
 
@@ -48,6 +49,7 @@ def hotswap_adapter_from_state_dict(model, state_dict, adapter_name, parameter_p
         adapter_name (`str`):
             The name of the adapter that should be hot-swapped, e.g. `"default"`. The name will remain the same after
             swapping.
+        config TODO
         parameter_prefix (`str`, *optional*, defaults to `"lora_"`)
             The prefix used to identify the adapter's keys in the state dict. For LoRA, this would be `"lora_"` (the
             default).
@@ -88,6 +90,15 @@ def hotswap_adapter_from_state_dict(model, state_dict, adapter_name, parameter_p
 
     # actual swapping
     for key, new_val in state_dict.items():
+        # adjust alpha/scaling
+        module_name = ".".join(key.split(".")[:-3])
+        module = model.get_submodule(module_name)
+        module.lora_alpha[adapter_name] = config.lora_alpha
+        if config.use_rslora:
+            module.scaling[adapter_name] = config.lora_alpha / math.sqrt(config.r)
+        else:
+            module.scaling[adapter_name] = config.lora_alpha / config.r
+
         # no need to account for potential _orig_mod in key here, as torch handles that
         old_val = attrgetter(key)(model)
         if is_compiled:
@@ -222,4 +233,5 @@ def hotswap_adapter(model, model_name_or_path, adapter_name, torch_device=None, 
         state_dict=peft_model_state_dict,
         adapter_name=adapter_name,
         parameter_prefix=parameter_prefix,
+        config=config,
     )
