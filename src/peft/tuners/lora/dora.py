@@ -62,12 +62,12 @@ class DoraLinearLayer(nn.Module):
             weight_norm = weight_norm.to("cpu")
         self.weight = nn.Parameter(weight_norm, requires_grad=True)
 
-    def forward(self, x, *, lora_A, lora_B, scaling, base_layer):
+    def forward(self, x, *, lora_A, lora_B, scaling, base_layer, base_layer_result, dropout):
         """
         For DoRA, calculate the extra output from LoRA with DoRA applied. This should be added on top of the base layer
         output.
         """
-        lora_result = lora_B(lora_A(x))
+        lora_result = lora_B(lora_A(dropout(x)))
 
         # Don't use `lora_weight = lora_B.weight @ lora_A.weight` because this causes errors with FSDP. Instead,
         # calculate the same but using forward.
@@ -86,9 +86,7 @@ class DoraLinearLayer(nn.Module):
         # during backpropagation"
         weight_norm = weight_norm.detach()
         mag_norm_scale = (magnitude / weight_norm).view(1, -1)
-        result_dora = (mag_norm_scale - 1) * (
-            F.linear(x, transpose(weight, self.fan_in_fan_out))
-        ) + mag_norm_scale * lora_result * scaling
+        result_dora = (mag_norm_scale - 1) * base_layer_result + mag_norm_scale * lora_result * scaling
 
         # Note: Computation could potentially be accelerated by using the code below instead of calculating X@W again.
         # This is only correct if dropout=0, otherwise results will differ:
@@ -142,7 +140,7 @@ class _DoraConvNdLayer(DoraLinearLayer):
         weight_norm = weight.norm(p=2, dim=dim, keepdim=True).transpose(1, 0)
         return weight_norm
 
-    def forward(self, x, *, lora_A, lora_B, scaling, base_layer, base_layer_result=None):
+    def forward(self, x, *, lora_A, lora_B, scaling, base_layer, base_layer_result, dropout):
         """
         For DoRA, calculate the extra output from LoRA with DoRA applied. This should be added on top of the base layer
         output.
@@ -161,21 +159,8 @@ class _DoraConvNdLayer(DoraLinearLayer):
         weight_norm = weight_norm.detach()
         mag_norm_scale = magnitude / weight_norm
 
-        if isinstance(base_layer_result, torch.Tensor):
-            # the base layer has already computed the convolution, we do not need to compute it again.
-            result_dora = (mag_norm_scale - 1) * base_layer_result + mag_norm_scale * lora_B(lora_A(x)) * scaling
-        else:
-            result_dora = (mag_norm_scale - 1) * (
-                F.conv2d(
-                    x,
-                    weight,
-                    bias=None,
-                    stride=base_layer.stride,
-                    padding=base_layer.padding,
-                    dilation=base_layer.dilation,
-                    groups=base_layer.groups,
-                )
-            ) + mag_norm_scale * lora_B(lora_A(x)) * scaling
+        # the base layer has already computed the convolution, we do not need to compute it again.
+        result_dora = (mag_norm_scale - 1) * base_layer_result + mag_norm_scale * lora_B(lora_A(dropout(x))) * scaling
 
         return result_dora
 

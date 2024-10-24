@@ -585,13 +585,14 @@ class Linear(nn.Module, LoraLayer):
                 if not self.use_dora[active_adapter]:
                     result = result + lora_B(lora_A(dropout(x))) * scaling
                 else:
-                    x = dropout(x)
                     result = result + self.lora_magnitude_vector[active_adapter](
                         x,
                         lora_A=lora_A,
                         lora_B=lora_B,
                         scaling=scaling,
                         base_layer=self.get_base_layer(),
+                        base_layer_result=result,
+                        dropout=dropout
                     )
 
             result = result.to(torch_result_dtype)
@@ -1120,14 +1121,14 @@ class _ConvNd(nn.Module, LoraLayer):
                 if not self.use_dora[active_adapter]:
                     result = result + lora_B(lora_A(dropout(x))) * scaling
                 else:
-                    x = dropout(x)
                     result = result + self.lora_magnitude_vector[active_adapter](
                         x,
                         lora_A=lora_A,
                         lora_B=lora_B,
                         scaling=scaling,
                         base_layer=self.get_base_layer(),
-                        base_layer_result=result
+                        base_layer_result=result,
+                        dropout=dropout
                     )
 
             result = result.to(torch_result_dtype)
