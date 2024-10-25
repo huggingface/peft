@@ -52,6 +52,7 @@ from peft import (
     get_peft_model_state_dict,
     inject_adapter_in_model,
     prepare_model_for_kbit_training,
+    CPTConfig
 )
 from peft.tuners.lora import LoraLayer
 from peft.utils import _get_submodules, infer_device
@@ -119,6 +120,11 @@ CONFIG_TESTING_KWARGS = (
     {
         "target_modules": None,
     },
+    # CPT tuninig
+    {
+        "num_virtual_tokens": 8,
+    },
+
 )
 
 CLASSES_MAPPING = {
@@ -134,6 +140,7 @@ CLASSES_MAPPING = {
     "hra": (HRAConfig, CONFIG_TESTING_KWARGS[9]),
     "vblora": (VBLoRAConfig, CONFIG_TESTING_KWARGS[10]),
     "oft": (OFTConfig, CONFIG_TESTING_KWARGS[11]),
+    "cpt": (CPTConfig, CONFIG_TESTING_KWARGS[12]),
 }
 
 

@@ -1,3 +1,17 @@
+# Copyright 2024-present the HuggingFace Inc. team.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import copy
 
 import torch
@@ -5,7 +19,7 @@ from torch.nn import CrossEntropyLoss
 
 from peft.utils.integrations import gather_params_ctx
 
-from .config import PromptTuningInit
+from .config import CPTPromptInit
 
 
 class CPTEmbedding(torch.nn.Module):
@@ -31,10 +45,10 @@ class CPTEmbedding(torch.nn.Module):
         self.embedding = torch.nn.Embedding(num_virtual_tokens, config.token_dim)
 
         # Initialize embeddings using text-based prompt tuning, if configured
-        if config.CPT_prompt_tuning_init == PromptTuningInit.TEXT and not config.inference_mode:
-            assert config.num_virtual_tokens == len(config.CPT_token_ids)
+        if config.cpt_prompt_tuning_init == CPTPromptInit.TEXT and not config.inference_mode:
+            assert config.num_virtual_tokens == len(config.cpt_token_ids)
 
-            init_token_ids = torch.LongTensor(config.CPT_token_ids).to(word_embeddings.weight.device)
+            init_token_ids = torch.LongTensor(config.cpt_token_ids).to(word_embeddings.weight.device)
             with gather_params_ctx(word_embeddings.parameters()):
                 word_embedding_weights = word_embeddings(init_token_ids).detach().clone()
             word_embedding_weights = word_embedding_weights.to(torch.float32)
@@ -69,14 +83,14 @@ class CPTEmbedding(torch.nn.Module):
         """
         Sets up a backward hook to selectively update token gradients based on the CPT token type mask.
         """
-        if self.config.CPT_prompt_tuning_init == PromptTuningInit.TEXT:
-            tensor_ICL_mask = torch.Tensor(self.config.CPT_tokens_type_mask).long()
+        if self.config.cpt_prompt_tuning_init == CPTPromptInit.TEXT:
+            tensor_ICL_mask = torch.Tensor(self.config.cpt_tokens_type_mask).long()
             mask_input_template = torch.remainder(tensor_ICL_mask, 4) == 1
             mask_input = torch.remainder(tensor_ICL_mask, 4) == 2
             mask_output_template = torch.remainder(tensor_ICL_mask, 4) == 3
             mask = mask_input_template | mask_input | mask_output_template
             mask = mask.view(-1, 1)
-        elif self.config.CPT_prompt_tuning_init == PromptTuningInit.RANDOM:
+        elif self.config.cpt_prompt_tuning_init == CPTPromptInit.RANDOM:
             mask = torch.ones((self.config.num_virtual_tokens, 1)).long()
 
         def backward_hook(grad):
@@ -86,10 +100,10 @@ class CPTEmbedding(torch.nn.Module):
         self.delta_embedding.weight.register_hook(backward_hook)
 
     def get_epsilon(self):
-        if self.config.CPT_prompt_tuning_init == "TEXT":
-            CPT_tokens_type_mask = self.config.CPT_tokens_type_mask
+        if self.config.cpt_prompt_tuning_init == "TEXT":
+            cpt_tokens_type_mask = self.config.cpt_tokens_type_mask
         else:
-            CPT_tokens_type_mask = [2] * self.config.num_virtual_tokens
+            cpt_tokens_type_mask = [2] * self.config.num_virtual_tokens
 
         MIN_VALUE = 1e-10
 
@@ -104,12 +118,12 @@ class CPTEmbedding(torch.nn.Module):
             torch.Tensor([self.config.token_dim / 2048])
         )
 
-        epsilon = torch.ones_like(torch.Tensor(CPT_tokens_type_mask)).to(torch.float32) * MIN_VALUE
-        CPT_tokens_type_mask = torch.Tensor(CPT_tokens_type_mask).long()
+        epsilon = torch.ones_like(torch.Tensor(cpt_tokens_type_mask)).to(torch.float32) * MIN_VALUE
+        cpt_tokens_type_mask = torch.Tensor(cpt_tokens_type_mask).long()
 
-        epsilon[(CPT_tokens_type_mask > 0) & (torch.remainder(CPT_tokens_type_mask, 4) == 1)] = normalized_format_eps
-        epsilon[(CPT_tokens_type_mask > 0) & (torch.remainder(CPT_tokens_type_mask, 4) == 3)] = normalized_format_eps
-        epsilon[(CPT_tokens_type_mask > 0) & (torch.remainder(CPT_tokens_type_mask, 4) == 2)] = normalized_input_eps
+        epsilon[(cpt_tokens_type_mask > 0) & (torch.remainder(cpt_tokens_type_mask, 4) == 1)] = normalized_format_eps
+        epsilon[(cpt_tokens_type_mask > 0) & (torch.remainder(cpt_tokens_type_mask, 4) == 3)] = normalized_format_eps
+        epsilon[(cpt_tokens_type_mask > 0) & (torch.remainder(cpt_tokens_type_mask, 4) == 2)] = normalized_input_eps
 
         return epsilon
 
@@ -132,14 +146,14 @@ class CPTEmbedding(torch.nn.Module):
                 self.delta_embedding.weight.data = new_embeddings_weights
 
     @staticmethod
-    def calculate_loss(base_model_output, labels, CPT_type_mask, config):
+    def calculate_loss(base_model_output, labels, cpt_type_mask, config):
         """
         Computes the loss for CPT models with optional exponential decay.
 
         Args:
             base_model_output (ModelOutput): Output from the base model containing logits.
             labels (torch.Tensor): Ground-truth labels for the input tokens.
-            CPT_type_mask (torch.Tensor): Token type mask used for filtering valid loss terms.
+            cpt_type_mask (torch.Tensor): Token type mask used for filtering valid loss terms.
             config (Namespace): Configuration object containing loss-related hyperparameters.
 
         Returns:
@@ -155,7 +169,7 @@ class CPTEmbedding(torch.nn.Module):
             # Shift logits and labels for token prediction
             shift_logits = lm_logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
-            shift_CPT_type_mask = CPT_type_mask[..., 1:].contiguous()
+            shift_cpt_type_mask = cpt_type_mask[..., 1:].contiguous()
 
             shift_labels_bool = (shift_labels.clone().detach() != -100).bool()
             batch_size, seq_length, vocab_size = shift_logits.shape
@@ -169,13 +183,13 @@ class CPTEmbedding(torch.nn.Module):
             # Apply exponential decay weights to the loss
             shift_labels_weights = shift_labels_bool.clone().detach().float()
             for i in range(batch_size):
-                idx_labels = (shift_CPT_type_mask[i] > 0) & (shift_CPT_type_mask[i] % 4 == 0)
-                labels_ids = shift_CPT_type_mask[i][idx_labels].unique()
+                idx_labels = (shift_cpt_type_mask[i] > 0) & (shift_cpt_type_mask[i] % 4 == 0)
+                labels_ids = shift_cpt_type_mask[i][idx_labels].unique()
 
-                exponential_decay = torch.ones_like(shift_CPT_type_mask[i]).to(device=device).float()
+                exponential_decay = torch.ones_like(shift_cpt_type_mask[i]).to(device=device).float()
                 decay_value = 1
                 for label_mask_idx in torch.flip(labels_ids, [0]):
-                    exponential_decay[shift_CPT_type_mask[i] == label_mask_idx] = decay_value
+                    exponential_decay[shift_cpt_type_mask[i] == label_mask_idx] = decay_value
                     decay_value *= config.opt_loss_decay_factor
                 shift_labels_weights[i] *= exponential_decay
 
@@ -188,20 +202,20 @@ class CPTEmbedding(torch.nn.Module):
         return base_model_output
 
     def check_config(self):
-        if self.config.CPT_prompt_tuning_init == PromptTuningInit.TEXT:
-            assert self.config.CPT_token_ids is not None
-            assert self.config.CPT_mask is not None
-            assert self.config.CPT_tokens_type_mask is not None
+        if self.config.cpt_prompt_tuning_init == CPTPromptInit.TEXT:
+            assert self.config.cpt_token_ids is not None
+            assert self.config.cpt_mask is not None
+            assert self.config.cpt_tokens_type_mask is not None
             assert (
-                len(self.config.CPT_token_ids)
-                == len(self.config.CPT_mask)
-                == len(self.config.CPT_tokens_type_mask)
+                len(self.config.cpt_token_ids)
+                == len(self.config.cpt_mask)
+                == len(self.config.cpt_tokens_type_mask)
                 == self.config.num_virtual_tokens
             )
-        elif self.config.CPT_prompt_tuning_init == PromptTuningInit.RANDOM:
-            assert self.config.CPT_token_ids is None
-            assert self.config.CPT_mask is None
-            assert self.config.CPT_tokens_type_mask is None
+        elif self.config.cpt_prompt_tuning_init == CPTPromptInit.RANDOM:
+            assert self.config.cpt_token_ids is None
+            assert self.config.cpt_mask is None
+            assert self.config.cpt_tokens_type_mask is None
             assert self.config.num_virtual_tokens > 0
         else:
-            raise NotImplementedError(f" was not implemented for {self.config.CPT_prompt_tuning_init}")
+            raise NotImplementedError(f" was not implemented for {self.config.cpt_prompt_tuning_init}")

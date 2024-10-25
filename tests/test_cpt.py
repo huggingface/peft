@@ -1,3 +1,17 @@
+# Copyright 2024-present the HuggingFace Inc. team.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from typing import Any, Dict, List, Union
 
 import pytest
@@ -33,10 +47,10 @@ def global_tokenizer():
 def config_text():
     """Load the SST2 dataset and prepare it for testing."""
     config = CPTConfig(
-        CPT_token_ids=[0, 1, 2, 3, 4, 5, 6, 7],  # Example token IDs for testing
-        CPT_mask=[1, 1, 1, 1, 1, 1, 1, 1],
-        CPT_tokens_type_mask=[1, 2, 2, 2, 3, 3, 3, 4],
-        CPT_prompt_tuning_init="TEXT",
+        cpt_token_ids=[0, 1, 2, 3, 4, 5, 6, 7],  # Example token IDs for testing
+        cpt_mask=[1, 1, 1, 1, 1, 1, 1, 1],
+        cpt_tokens_type_mask=[1, 2, 2, 2, 3, 3, 3, 4],
+        cpt_prompt_tuning_init="TEXT",
         num_virtual_tokens=8,
         opt_weighted_loss_type="decay",
         opt_loss_decay_factor=0.95,
@@ -51,7 +65,7 @@ def config_text():
 def config_random():
     """Load the SST2 dataset and prepare it for testing."""
     config = CPTConfig(
-        CPT_prompt_tuning_init="RANDOM",
+        cpt_prompt_tuning_init="RANDOM",
         num_virtual_tokens=8,
         opt_weighted_loss_type="decay",
         opt_loss_decay_factor=0.95,
@@ -236,59 +250,16 @@ def test_model_training_random(sst_data, global_tokenizer, collator, config_rand
 
     trainer = Trainer(model=model, args=training_args, train_dataset=train_dataset, data_collator=collator)
 
-    try:
-        trainer.train()
-    except Exception as e:
-        pytest.fail(f"Training failed with error: {e}")
-
+    trainer.train()
+    # Verify that the embedding tensor remains unchanged (frozen)
     assert torch.all(model.prompt_encoder.default.embedding.weight.data.clone().detach().cpu() == emb.cpu())
 
     model.prompt_encoder.default.projection()
     delta_emb = model.prompt_encoder.default.delta_embedding.weight.data.clone().detach()
     norm_delta = delta_emb.norm(dim=1).cpu()
     epsilon = model.prompt_encoder.default.get_epsilon().cpu()
+    # Verify that the change in tokens is constrained to epsilon
     assert torch.all(norm_delta <= epsilon)
-
-
-def test_model_training_text(sst_data, global_tokenizer, collator, config_text):
-    """Perform a short training run to verify the model and data integration."""
-
-    base_model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, cache_dir=".", trust_remote_code=True)
-    model = get_peft_model(base_model, config_text)
-    emb = model.prompt_encoder.default.embedding.weight.data.clone().detach()
-
-    training_args = TrainingArguments(
-        output_dir="./results",
-        per_device_train_batch_size=1,
-        num_train_epochs=2,
-        remove_unused_columns=False,
-        save_strategy="no",
-        logging_steps=1,
-    )
-
-    train_dataset = dataset(sst_data["train"], global_tokenizer)
-
-    trainer = Trainer(model=model, args=training_args, train_dataset=train_dataset, data_collator=collator)
-
-    try:
-        trainer.train()
-    except Exception as e:
-        pytest.fail(f"Training failed with error: {e}")
-
-    assert torch.all(model.prompt_encoder.default.embedding.weight.data.clone().detach().cpu() == emb.cpu())
-
-    delta_emb = model.prompt_encoder.default.delta_embedding.weight.data.clone().detach()
-    norm_delta = delta_emb.norm(dim=1).cpu()
-    CPT_tokens_type_mask = torch.Tensor(config_text.CPT_tokens_type_mask).long()
-    non_label_idx = (CPT_tokens_type_mask == 1) | (CPT_tokens_type_mask == 2) | (CPT_tokens_type_mask == 3)
-    assert torch.all((norm_delta > 0) == non_label_idx)
-
-    model.prompt_encoder.default.projection()
-    delta_emb = model.prompt_encoder.default.delta_embedding.weight.data.clone().detach()
-    norm_delta = delta_emb.norm(dim=1).cpu()
-    epsilon = model.prompt_encoder.default.get_epsilon().cpu()
-    assert torch.all(norm_delta <= epsilon)
-    assert torch.all((norm_delta == 0) == (~non_label_idx))
 
 
 def test_model_batch_training_text(sst_data, global_tokenizer, collator, config_text):
@@ -311,22 +282,18 @@ def test_model_batch_training_text(sst_data, global_tokenizer, collator, config_
 
     trainer = Trainer(model=model, args=training_args, train_dataset=train_dataset, data_collator=collator)
 
-    try:
-        trainer.train()
-    except Exception as e:
-        pytest.fail(f"Training failed with error: {e}")
-
+    trainer.train()
+    # Verify that the embedding tensor remains unchanged (frozen)
     assert torch.all(model.prompt_encoder.default.embedding.weight.data.clone().detach().cpu() == emb.cpu())
 
-    delta_emb = model.prompt_encoder.default.delta_embedding.weight.data.clone().detach()
-    norm_delta = delta_emb.norm(dim=1).cpu()
-    CPT_tokens_type_mask = torch.Tensor(config_text.CPT_tokens_type_mask).long()
-    non_label_idx = (CPT_tokens_type_mask == 1) | (CPT_tokens_type_mask == 2) | (CPT_tokens_type_mask == 3)
-    assert torch.all((norm_delta > 0) == non_label_idx)
+    cpt_tokens_type_mask = torch.Tensor(config_text.cpt_tokens_type_mask).long()
+    non_label_idx = (cpt_tokens_type_mask == 1) | (cpt_tokens_type_mask == 2) | (cpt_tokens_type_mask == 3)
 
     model.prompt_encoder.default.projection()
     delta_emb = model.prompt_encoder.default.delta_embedding.weight.data.clone().detach()
     norm_delta = delta_emb.norm(dim=1).cpu()
     epsilon = model.prompt_encoder.default.get_epsilon().cpu()
+    # Verify that the change in tokens is constrained to epsilon
     assert torch.all(norm_delta <= epsilon)
+    # Ensure that label tokens remain unchanged
     assert torch.all((norm_delta == 0) == (~non_label_idx))

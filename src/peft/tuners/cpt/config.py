@@ -1,3 +1,17 @@
+# Copyright 2024-present the HuggingFace Inc. team.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import enum
 from dataclasses import dataclass, field
 from typing import Optional
@@ -8,8 +22,9 @@ from peft.config import PeftConfig
 from peft.utils import PeftType
 
 
-class PromptTuningInit(str, enum.Enum):
-    """Enum for specifying the initialization method for prompt tuning."""
+
+class CPTPromptInit(str, enum.Enum):
+    """Enum for specifying the initialization method for CPT."""
 
     TEXT = "TEXT"  # Initialize using text-based embeddings.
     RANDOM = "RANDOM"  # Initialize randomly.
@@ -20,21 +35,26 @@ class CPTConfig(PeftConfig):
     """
     CPT Configuration class extending PeftConfig for Context-aware Prompt Tuning (CPT).
 
-    This class introduces additional parameters required for CPT, such as token type masks,
-    prompt tuning initialization, loss weighting, and projection settings.
+    This class introduces additional parameters required for CPT, such as:
+    - Token type masks
+    - Prompt tuning initialization
+    - Loss weighting
+    - Projection settings
+
+    For more details, see the paper: https://arxiv.org/abs/2410.17222
     """
 
     # Token-related configurations
-    CPT_token_ids: Optional[torch.Tensor] = field(
+    cpt_token_ids: Optional[list[int]] = field(
         default=None, metadata={"help": "Tensor of token IDs used for CPT prompts."}
     )
-    CPT_mask: Optional[torch.Tensor] = field(default=None, metadata={"help": "Tensor mask applied to CPT tokens."})
-    CPT_tokens_type_mask: Optional[bool] = field(
+    cpt_mask: Optional[list[int]] = field(default=None, metadata={"help": "Tensor mask applied to CPT tokens."})
+    cpt_tokens_type_mask: Optional[list[int]] = field(
         default=None, metadata={"help": "Mask indicating the type of each CPT token."}
     )
 
     # Prompt tuning initialization method
-    CPT_prompt_tuning_init: Optional[str] = field(
+    cpt_prompt_tuning_init: Optional[str] = field(
         default="TEXT", metadata={"help": "Initialization method: 'TEXT' for embedding-based, 'RANDOM' for random."}
     )
 

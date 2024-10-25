@@ -1723,48 +1723,7 @@ class PeftModelForCausalLM(PeftModel):
             kwargs["past_key_values"] = self.get_prompt(batch_size)
             return self.base_model(input_ids=input_ids, inputs_embeds=inputs_embeds, **kwargs)
         elif peft_config.peft_type == PeftType.CPT:
-            if peft_config.CPT_prompt_tuning_init == "TEXT":
-                CPT_token_ids = peft_config.CPT_token_ids
-                CPT_tokens_type_mask = peft_config.CPT_tokens_type_mask
-            else:
-                CPT_token_ids = [0] * peft_config.num_virtual_tokens
-                CPT_tokens_type_mask = [0] * peft_config.num_virtual_tokens
-
-            # Extract input_type_mask from kwargs and move it to the same device as labels
-            input_type_mask = kwargs.pop("input_type_mask").to(labels.device)
-            # Generate embeddings if not provided
-            if inputs_embeds is None:
-                inputs_embeds = self.word_embeddings(input_ids)
-            # Get prompt and concatenate with input embeddings
-            prompts = self.get_prompt(batch_size=batch_size, task_ids=task_ids)
-            prompts = prompts.to(inputs_embeds.dtype)
-            inputs_embeds = torch.cat((prompts, inputs_embeds), dim=1)
-            # If labels are provided, generate prefix labels and type mask
-            if labels is not None:
-                # Generate prefix labels and concatenate with the input labels
-                prefix_labels = torch.Tensor(CPT_token_ids).long().view(1, -1)
-                prefix_labels = prefix_labels.repeat(batch_size, 1).to(labels.device)
-                CPT_labels = torch.cat((prefix_labels, labels), dim=1)
-                # Generate prefix type mask and shift input type mask values to avoid conflicts
-                prefix_type_mask = torch.Tensor(CPT_tokens_type_mask).long().view(1, -1)
-                prefix_type_mask = prefix_type_mask.repeat(batch_size, 1).to(labels.device)
-                adjusted_input_type_mask = input_type_mask
-                adjusted_input_type_mask[adjusted_input_type_mask > 0] += prefix_type_mask.max()
-                # Concatenate prefix and shifted input type masks
-                CPT_type_mask = torch.cat((prefix_type_mask, adjusted_input_type_mask), dim=1)
-                # Identify valid label positions and mask invalid ones with -100
-                labels_idx = (CPT_type_mask > 0) & (CPT_type_mask % 4 == 0)
-                CPT_labels[~labels_idx] = -100
-                # Update kwargs with the modified labels
-                kwargs["labels"] = CPT_labels
-            # Pass the modified inputs to the base model
-            base_model_output = self.base_model(inputs_embeds=inputs_embeds, **kwargs)
-            # Calculate the loss using the custom CPT loss function
-            base_model_output = CPTEmbedding.calculate_loss(
-                base_model_output, CPT_labels, CPT_type_mask, self.peft_config["default"]
-            )
-
-            return base_model_output
+            return self._cpt_forward(input_ids, inputs_embeds, peft_config, task_ids, batch_size, **kwargs)
         else:
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
@@ -1776,6 +1735,54 @@ class PeftModelForCausalLM(PeftModel):
             prompts = prompts.to(inputs_embeds.dtype)
             inputs_embeds = torch.cat((prompts, inputs_embeds), dim=1)
             return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
+
+
+    def _cpt_forward(self, input_ids=None, inputs_embeds=None, peft_config=None, task_ids=None, batch_size=None, **kwargs):
+        # Extract labels from kwargs
+        labels = kwargs.pop("labels")
+        # Extract input_type_mask from kwargs and move it to the same device as labels
+        input_type_mask = kwargs.pop("input_type_mask").to(labels.device)
+
+        if peft_config.cpt_prompt_tuning_init == "TEXT":
+            cpt_token_ids = peft_config.cpt_token_ids
+            cpt_tokens_type_mask = peft_config.cpt_tokens_type_mask
+        else:
+            cpt_token_ids = [0] * peft_config.num_virtual_tokens
+            cpt_tokens_type_mask = [0] * peft_config.num_virtual_tokens
+
+        # Generate embeddings if not provided
+        if inputs_embeds is None:
+            inputs_embeds = self.word_embeddings(input_ids)
+        # Get prompt and concatenate with input embeddings
+        prompts = self.get_prompt(batch_size=batch_size, task_ids=task_ids)
+        prompts = prompts.to(inputs_embeds.dtype)
+        inputs_embeds = torch.cat((prompts, inputs_embeds), dim=1)
+        # If labels are provided, generate prefix labels and type mask
+        if labels is not None:
+            # Generate prefix labels and concatenate with the input labels
+            prefix_labels = torch.Tensor(cpt_token_ids).long().view(1, -1)
+            prefix_labels = prefix_labels.repeat(batch_size, 1).to(labels.device)
+            cpt_labels = torch.cat((prefix_labels, labels), dim=1)
+            # Generate prefix type mask and shift input type mask values to avoid conflicts
+            prefix_type_mask = torch.Tensor(cpt_tokens_type_mask).long().view(1, -1)
+            prefix_type_mask = prefix_type_mask.repeat(batch_size, 1).to(labels.device)
+            adjusted_input_type_mask = input_type_mask
+            adjusted_input_type_mask[adjusted_input_type_mask > 0] += prefix_type_mask.max()
+            # Concatenate prefix and shifted input type masks
+            cpt_type_mask = torch.cat((prefix_type_mask, adjusted_input_type_mask), dim=1)
+            # Identify valid label positions and mask invalid ones with -100
+            labels_idx = (cpt_type_mask > 0) & (cpt_type_mask % 4 == 0)
+            cpt_labels[~labels_idx] = -100
+            # Update kwargs with the modified labels
+            kwargs["labels"] = cpt_labels
+        # Pass the modified inputs to the base model
+        base_model_output = self.base_model(inputs_embeds=inputs_embeds, **kwargs)
+        # Calculate the loss using the custom CPT loss function
+        base_model_output = CPTEmbedding.calculate_loss(
+            base_model_output, cpt_labels, cpt_type_mask, self.peft_config["default"]
+        )
+
+        return base_model_output
 
     def generate(self, *args, **kwargs):
         peft_config = self.active_peft_config
