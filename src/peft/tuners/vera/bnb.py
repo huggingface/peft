@@ -161,8 +161,8 @@ if is_bnb_available():
                 lambda_d = lambda_d.float()
                 lambda_b = lambda_b.float()
 
-            sliced_A = vera_A[:, : self.in_features]
-            sliced_B = vera_B[: self.out_features, :]
+            sliced_A = vera_A[:, : self.in_features].to(lambda_d.device)
+            sliced_B = vera_B[: self.out_features, :].to(lambda_d.device)
             lambda_b = lambda_b.unsqueeze(-1)
             lambda_d = lambda_d.unsqueeze(-1)
 
@@ -219,8 +219,8 @@ if is_bnb_available():
                         if x.dtype != compute_dtype:
                             x = x.to(compute_dtype)
 
-                    sliced_A = vera_A[:, : self.in_features]
-                    sliced_B = vera_B[: self.out_features, :]
+                    sliced_A = vera_A[:, : self.in_features].to(x.device)
+                    sliced_B = vera_B[: self.out_features, :].to(x.device)
 
                     x_temp = dropout(x.to(lambda_d.dtype))
 
@@ -346,8 +346,8 @@ if is_bnb_4bit_available():
                 lambda_d = lambda_d.float()
                 lambda_b = lambda_b.float()
 
-            sliced_A = vera_A[:, : self.in_features]
-            sliced_B = vera_B[: self.out_features, :]
+            sliced_A = vera_A[:, : self.in_features].to(lambda_d.device)
+            sliced_B = vera_B[: self.out_features, :].to(lambda_d.device)
             lambda_b = lambda_b.unsqueeze(-1)
             lambda_d = lambda_d.unsqueeze(-1)
 
@@ -387,8 +387,8 @@ if is_bnb_4bit_available():
                         if x.dtype != compute_dtype:
                             x = x.to(compute_dtype)
 
-                    sliced_A = vera_A[:, : self.in_features]
-                    sliced_B = vera_B[: self.out_features, :]
+                    sliced_A = vera_A[:, : self.in_features].to(x.device)
+                    sliced_B = vera_B[: self.out_features, :].to(x.device)
 
                     x_temp = dropout(x.to(lambda_d.dtype))
 
