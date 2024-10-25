@@ -120,7 +120,7 @@ The mentioned layers should be added to `modules_to_save` in the config to avoid
 
 <Tip>
 
-As an example, when loading a model that is using the DeBERTa architecture for sequence classification, you'll see a warning that the following weights are newly initialized: `['classifier.bias', 'classifier.weight', 'pooler.dense.bias', 'pooler.dense.weight']`. From this, it follows that the `classifier` and `pooler` layers should be added to added: `modules_to_save=["classifier", "pooler"]`.
+As an example, when loading a model that is using the DeBERTa architecture for sequence classification, you'll see a warning that the following weights are newly initialized: `['classifier.bias', 'classifier.weight', 'pooler.dense.bias', 'pooler.dense.weight']`. From this, it follows that the `classifier` and `pooler` layers should be added to: `modules_to_save=["classifier", "pooler"]`.
 
 </Tip>
 
