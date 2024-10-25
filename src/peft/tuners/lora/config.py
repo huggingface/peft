@@ -105,8 +105,8 @@ class EvaConfig:
     def __post_init__(self):
         if self.rho < 1.0:
             raise ValueError("`rho` must be >= 1.0")
-        if self.tau < -1.0 or self.tau > 1.0:
-            raise ValueError("`tau` must be between -1.0 and 1.0.")
+        if self.tau < 0.0 or self.tau > 1.0:
+            raise ValueError("`tau` must be between 0.0 and 1.0.")
 
 
 @dataclass
