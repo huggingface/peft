@@ -1733,10 +1733,10 @@ class TestEvaInitialization:
             EvaConfig(rho=-1)
 
     def test_eva_config_tau(self):
-        """Test that EvaConfig.__init__ raises a ValueError when tau is not between -1.0 and 1.0."""
-        with pytest.raises(ValueError, match="`tau` must be between -1.0 and 1.0."):
-            EvaConfig(tau=-1.1)
-        with pytest.raises(ValueError, match="`tau` must be between -1.0 and 1.0."):
+        """Test that EvaConfig.__init__ raises a ValueError when tau is not between 0.0 and 1.0."""
+        with pytest.raises(ValueError, match="`tau` must be between 0.0 and 1.0."):
+            EvaConfig(tau=-0.1)
+        with pytest.raises(ValueError, match="`tau` must be between 0.0 and 1.0."):
             EvaConfig(tau=1.1)
 
     def test_lora_config_raises_error_without_eva_config_but_eva_init(self):
