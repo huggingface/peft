@@ -14,19 +14,20 @@
 
 import itertools
 import re
+from collections import defaultdict
 from contextlib import contextmanager
 from copy import deepcopy
 from unittest.mock import patch
 
 import pytest
 import torch
-from datasets import load_dataset
+from datasets import Dataset, load_dataset
 from huggingface_hub.utils import reset_sessions
 from safetensors.torch import load_file
 from scipy import stats
 from torch import nn
 from torch.utils.data import DataLoader
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 from peft import (
     AdaLoraConfig,
@@ -47,6 +48,7 @@ from peft import (
     get_peft_model,
     initialize_lora_eva_weights,
     inject_adapter_in_model,
+    prepare_model_for_kbit_training,
     set_peft_model_state_dict,
 )
 from peft.utils import infer_device
@@ -1553,11 +1555,15 @@ def test_from_pretrained_missing_keys_warning(recwarn, tmp_path):
 
 
 class TestEvaInitialization:
+    """Test for the Eva initialization method."""
+
     # Constants for test configuration
     COSINE_SIMILARITY_THRESHOLD = 0.75
     NUM_SEEDS = 3
     BATCH_SIZE = 4
-    MAX_LENGTH = 512
+    MAX_LENGTH = 256
+    LORA_DIM = 8
+    LORA_ALPHA = 1
 
     @pytest.fixture
     def tokenizer(self):
@@ -1567,9 +1573,19 @@ class TestEvaInitialization:
 
     @pytest.fixture
     def dataset(self, tokenizer):
-        dataset = load_dataset("Rowan/hellaswag", split="train")
+        dataset = load_dataset("ybelkada/english_quotes_copy", split="train")
+        # concatenate examples
+        examples = []
+        example = ""
+        for data in dataset:
+            if len(example) >= self.MAX_LENGTH:
+                examples.append(example)
+                example = ""
+            example = example + " " + data["quote"]
+        dataset = Dataset.from_dict({"text": examples})
+        # tokenize
         dataset = dataset.map(
-            lambda x: tokenizer(x["ctx"], padding="max_length", truncation=True, max_length=self.MAX_LENGTH),
+            lambda x: tokenizer(x["text"], padding="max_length", truncation=True, max_length=self.MAX_LENGTH),
             batched=True,
             remove_columns=dataset.column_names,
         )
@@ -1579,22 +1595,63 @@ class TestEvaInitialization:
     @pytest.fixture
     def model(self):
         model = AutoModelForCausalLM.from_pretrained("openai-community/gpt2")
-        model.transformer.h = torch.nn.ModuleList([model.transformer.h[0]])  # truncate to 1 layer
+        model.transformer.h = model.transformer.h[:2]  # truncate to 2 layers
         return model
+
+    @pytest.fixture
+    def model_bnb(self):
+        bnb_config = BitsAndBytesConfig(load_in_4bit=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            "openai-community/gpt2",
+            quantization_config=bnb_config,
+            attn_implementation="eager",  # gpt2 doesnt support flash attention
+        )
+        model.transformer.h = model.transformer.h[:2]  # truncate to 2 layers
+        model = prepare_model_for_kbit_training(model)
+        return model
+
+    @pytest.fixture
+    def model_fixture(self, request):
+        return request.getfixturevalue(request.param)
 
     @pytest.fixture
     def peft_config(self):
         return LoraConfig(
-            r=16, lora_alpha=1, target_modules=["c_attn"], init_lora_weights="eva", eva_config=EvaConfig(rho=2)
+            r=self.LORA_DIM,
+            lora_alpha=self.LORA_ALPHA,
+            target_modules=["c_attn"],
+            init_lora_weights="eva",
+            eva_config=EvaConfig(rho=2),
         )
 
-    @pytest.fixture
-    def peft_model(self, model, peft_config):
-        return get_peft_model(deepcopy(model), peft_config, low_cpu_mem_usage=True)
+    def is_bnb_model(self, model):
+        return hasattr(model.config, "quantization_config")
 
-    def test_eva_state_dict_consistency(self, model, dataset, peft_config):
+    def test_eva_state_dict_prepare_activations_mapping(self, model, dataset, peft_config):
+        shuffled_dataset = dataset.shuffle(seed=0)
+        dataloader = DataLoader(
+            shuffled_dataset,
+            batch_size=self.BATCH_SIZE,
+            collate_fn=lambda examples: {k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()},
+            shuffle=False,
+        )
+        prepare_activations_fn = {
+            "transformer.h.0.attn.c_attn": lambda x: x[0],
+            "transformer.h.1.attn.c_attn": lambda x: x[0],
+        }
+        sd = get_eva_state_dict(model, peft_config, dataloader, prepare_activations_fn=prepare_activations_fn)
+        assert len(sd) == 2
+        assert "transformer.h.0.attn.c_attn" in sd
+        assert "transformer.h.1.attn.c_attn" in sd
+
+    @pytest.mark.parametrize("eva_config", [EvaConfig(rho=2), EvaConfig(rho=1), EvaConfig(rho=1, whiten=True)])
+    def test_eva_state_dict_consistency(self, model, dataset, peft_config, eva_config):
+        """Test that the state dict returned by get_eva_state_dict is consistent across different seeds based on the cosine
+        similarity of the svd components."""
+        current_peft_config = deepcopy(peft_config)
+        current_peft_config.eva_config = eva_config
         state_dicts = []
-        for seed in range(3):
+        for seed in range(self.NUM_SEEDS):
             shuffled_dataset = dataset.shuffle(seed=seed)
             dataloader = DataLoader(
                 shuffled_dataset,
@@ -1604,22 +1661,38 @@ class TestEvaInitialization:
                 },
                 shuffle=False,
             )
-            sd = get_eva_state_dict(model, peft_config, dataloader)
-            state_dicts.append(sd["transformer.h.0.attn.c_attn"])
+            sd = get_eva_state_dict(model, current_peft_config, dataloader)
+            state_dicts.append(sd)
 
-        cos_sims = []
+        cos_sims = defaultdict(list)
         for i, j in itertools.combinations(range(self.NUM_SEEDS), 2):
-            cos_sims.append(torch.cosine_similarity(state_dicts[i], state_dicts[j], dim=1).abs())
+            for k, v1 in state_dicts[i].items():
+                v2 = state_dicts[j][k]
+                min_size = min(v1.size(0), v2.size(0))
+                cos_sims[k].extend(torch.cosine_similarity(v1[:min_size], v2[:min_size], dim=1).abs().tolist())
 
-        mean_cosine_similarity = torch.cat(cos_sims).mean()
-        assert mean_cosine_similarity > self.COSINE_SIMILARITY_THRESHOLD, (
-            f"Mean absolute cosine similarity {mean_cosine_similarity:.4f} "
-            f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
-        )
+        mean_cosine_similarities = {k: torch.tensor(v).mean() for k, v in cos_sims.items()}
+        for layer_name, mean_cosine_similarity in mean_cosine_similarities.items():
+            assert mean_cosine_similarity > self.COSINE_SIMILARITY_THRESHOLD, (
+                f"Mean absolute cosine similarity {mean_cosine_similarity:.4f} "
+                f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
+            )
 
-    def test_eva_initialization_consistency(self, peft_model, dataset, peft_config):
+    @pytest.mark.parametrize(
+        "model_fixture",
+        [
+            "model",
+            pytest.param(
+                "model_bnb", marks=[pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")]
+            ),
+        ],
+        indirect=True,
+    )
+    def test_eva_initialization_consistency(self, model_fixture, dataset, peft_config):
+        """Test that the state dict returned by get_eva_state_dict loaded correctly and is consistent across different seeds based
+        on the cosine similarity of the svd components."""
         state_dicts = []
-        for seed in range(3):
+        for seed in range(self.NUM_SEEDS):
             shuffled_dataset = dataset.shuffle(seed=seed)
             dataloader = DataLoader(
                 shuffled_dataset,
@@ -1629,24 +1702,35 @@ class TestEvaInitialization:
                 },
                 shuffle=False,
             )
-            initialize_lora_eva_weights(peft_model, peft_config, dataloader)
-            state_dicts.append(peft_model.model.transformer.h[0].attn.c_attn.lora_A["default"].weight)
+            model = get_peft_model(deepcopy(model_fixture), peft_config)
+            initialize_lora_eva_weights(model, peft_config, dataloader)
+            state_dicts.append({k: v for k, v in model.state_dict().items() if "lora_A.default.weight" in k})
 
-        cos_sims = []
+        cos_sims = defaultdict(list)
         for i, j in itertools.combinations(range(self.NUM_SEEDS), 2):
-            cos_sims.append(torch.cosine_similarity(state_dicts[i], state_dicts[j], dim=1).abs())
+            for k, v1 in state_dicts[i].items():
+                v2 = state_dicts[j][k]
+                min_size = min(v1.size(0), v2.size(0))
+                cos_sims[k].extend(torch.cosine_similarity(v1[:min_size], v2[:min_size], dim=1).abs().tolist())
 
-        mean_cosine_similarity = torch.cat(cos_sims).mean()
-        assert mean_cosine_similarity > self.COSINE_SIMILARITY_THRESHOLD, (
-            f"Mean absolute cosine similarity {mean_cosine_similarity:.4f} "
-            f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
-        )
+        mean_cosine_similarities = {k: torch.tensor(v).mean() for k, v in cos_sims.items()}
+        for layer_name, mean_cosine_similarity in mean_cosine_similarities.items():
+            assert mean_cosine_similarity > self.COSINE_SIMILARITY_THRESHOLD, (
+                f"Mean absolute cosine similarity {mean_cosine_similarity:.4f} "
+                f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
+            )
 
-    def test_eva_config_validation(self, peft_config):
+    def test_eva_config_rho(self):
         """Test that EvaConfig.__init__ raises a ValueError when rho is negative."""
-        with pytest.raises(ValueError, match="`rho` must be >= 1."):
-            invalid_config = deepcopy(peft_config)
-            invalid_config.eva_config = EvaConfig(rho=-1)
+        with pytest.raises(ValueError, match="`rho` must be >= 1.0"):
+            EvaConfig(rho=-1)
+
+    def test_eva_config_tau(self):
+        """Test that EvaConfig.__init__ raises a ValueError when tau is not between -1.0 and 1.0."""
+        with pytest.raises(ValueError, match="`tau` must be between -1.0 and 1.0."):
+            EvaConfig(tau=-1.1)
+        with pytest.raises(ValueError, match="`tau` must be between -1.0 and 1.0."):
+            EvaConfig(tau=1.1)
 
     def test_lora_config_raises_error_without_eva_config_but_eva_init(self):
         """Test that LoraConfig.__init__ raises a ValueError when init_lora_weights is 'eva' but eva_config is not set."""

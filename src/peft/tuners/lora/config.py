@@ -72,15 +72,22 @@ class LoftQConfig:
 @dataclass
 class EvaConfig:
     """
-    This is the sub-configuration class to store the configuration for a data-drive initialization via EVA. EVA was
+    This is the sub-configuration class to store the configuration for a data-driven initialization via EVA. EVA was
     introduced in <ahref='https://arxiv.org/abs/2410.07170'>Explained Variance Adaptation</a>.
 
     Args:
-        rho (`float`): Rho value for EVA redistribution. Default is 1.0 meaning no redistribution.
-            Increasing rho will allow for a higher degree of redistribution of lora ranks across layers.
-        tau (`float`): Cosine similarity threshold for early stopping. Default is 0.99.
-        use_label_mask (`bool`): Use label mask for EVA initialization. Default is False.
-            Setting use_label_mask=True can be especially beneficial for multi-turn conversations.
+        rho (`float`):
+            Rho value for EVA redistribution (>= 1.0). The maximum rank for a layer is lora_r * rho. Default is 1.0
+            meaning no redistribution. Increasing rho will allow for a higher degree of redistribution of lora ranks
+            across layers.
+        tau (`float`):
+            Cosine similarity threshold for early stopping. Compares the cosine similarity of right-singular vectors
+            between two consecutive SVD steps. If the cosine similarity is above this threshold, the SVD iteration is
+            stopped. Default is 0.99.
+        use_label_mask (`bool`):
+            Use label mask for EVA initialization. This means that positions where labels=label_mask_value are ignored
+            for the SVD computation. Default is False. Setting use_label_mask=True can be especially beneficial for
+            multi-turn conversations.
         label_mask_value (`int`):
             If use_label_mask=True the value to look for to mask out ignored tokens. Default is -100.
         whiten (`bool`): Apply whitening to singular vectors. Default is False.
@@ -97,7 +104,9 @@ class EvaConfig:
 
     def __post_init__(self):
         if self.rho < 1.0:
-            raise ValueError("`rho` must be >= 1.")
+            raise ValueError("`rho` must be >= 1.0")
+        if self.tau < -1.0 or self.tau > 1.0:
+            raise ValueError("`tau` must be between -1.0 and 1.0.")
 
 
 @dataclass

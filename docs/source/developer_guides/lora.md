@@ -65,7 +65,7 @@ config = LoraConfig(init_lora_weights="olora", ...)
 For more advanced usage, please refer to our [documentation](https://github.com/huggingface/peft/tree/main/examples/olora_finetuning).
 
 ### EVA
-[EVA](https://arxiv.org/pdf/2410.07170) initializes LoRA in a data-driven manner based on information of the downstream data. It achieves this by performing SVD on the input activations of each layer. It also adaptively allocates ranks throughout the model based on metric retrieved from SVD called "explained variance ratio"
+[EVA](https://arxiv.org/pdf/2410.07170) performs SVD on the input activations of each layer and uses the right-singular vectors to initialize LoRA weights. It therefore is a data-driven initialization scheme. Furthermore EVA adaptively allocates ranks across layers based on their "explained variance ratio" - a metric derived from the SVD analysis.
 
 You can use EVA by setting the LoraConfig:
 ```python
@@ -76,7 +76,9 @@ peft_config = LoraConfig(
     ...
 )
 ```
-To optimize the amount of available memory for EVA, you can use the `low_cpu_mem_usage` flag in `get_peft_model`:
+rho controls the degree of redistribution possible (>= 1). For lora_r=16 and rho=1.0, it means at most 16 ranks can be used, meaning no redistribution is possible.
+
+It is recommended to run the SVD computation on a GPU as it is much faster. To optimize the amount of available memory for EVA, you can use the `low_cpu_mem_usage` flag in `get_peft_model`:
 ```python
 peft_model = get_peft_model(model, peft_config, low_cpu_mem_usage=True)
 ```
@@ -84,6 +86,7 @@ Then, initialize the EVA weights (in most cases the dataloader used for eva init
 ```python
 initialize_lora_eva_weights(peft_model, peft_config, dataloader, device="cuda")
 ```
+EVA works out of the box with bitsandbytes. Simply initialize the model with `quantization_config` and call `initialize_lora_eva_weights` as usual.
 For further instructions on using EVA, please refer to our [documentation](https://github.com/huggingface/peft/tree/main/examples/eva_finetuning).
 
 ### LoftQ

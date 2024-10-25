@@ -12,57 +12,76 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import torch
 from datasets import load_dataset
 from torch.utils.data import DataLoader
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
+from utils import DataCollator, TokenizerMetaMath
 
 from peft import EvaConfig, LoraConfig, get_peft_model, initialize_lora_eva_weights
 
 
 # config
 model_name = "meta-llama/Llama-3.1-8B"
-dataset_name = "Rowan/hellaswag"
 max_seq_len = 512
 rank = 16
 alpha = 1
-rho = 2.0
-use_label_mask = False
-whiten = False
+rho = 1.0
 target_modules = ["q_proj", "k_proj", "v_proj", "o_proj"]
 svd_batch_size = 4  # can be different from the batch size used in finetuning
-svd_device = "cuda"
+batch_size = 4
+num_epochs = 1
+output_dir = "outputs"
+device = "cuda:0"
 
 # load model and tokenizer
 model = AutoModelForCausalLM.from_pretrained(model_name)
 tokenizer = AutoTokenizer.from_pretrained(model_name)
-tokenizer.pad_token = tokenizer.eos_token
 
 # load dataset
-dataset = load_dataset(dataset_name)
+dataset = load_dataset("meta-math/MetaMathQA")
 dataset = dataset.map(
-    lambda x: tokenizer(x["ctx"], padding="max_length", truncation=True, max_length=max_seq_len),
+    TokenizerMetaMath(model_name),
     batched=True,
     remove_columns=dataset["train"].column_names,
 )
 dataset.set_format(type="torch")
 
-# create dataloader for SVD
+# data collator
+data_collator = DataCollator(tokenizer.eos_token_id, max_length=max_seq_len)
+
+# dataloader
 dataloader = DataLoader(
     dataset["train"],
     batch_size=svd_batch_size,
-    collate_fn=lambda examples: {k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()},
+    collate_fn=data_collator,
 )
 
 # setup peft config
-eva_config = EvaConfig(rho=rho, use_label_mask=use_label_mask, whiten=whiten)
+eva_config = EvaConfig(rho=rho)
 peft_config = LoraConfig(
-    r=rank, lora_alpha=alpha, target_modules=target_modules, init_lora_weights="eva", eva_config=eva_config
+    r=rank, lora_alpha=alpha, target_modules=target_modules, init_lora_weights=True, eva_config=eva_config
 )
+
+# move model to GPU
+model = model.to(device)
 
 # to optimize memory usage during eva initialization, set low_cpu_mem_usage=True
 peft_model = get_peft_model(model, peft_config, low_cpu_mem_usage=True)
+initialize_lora_eva_weights(peft_model, peft_config, dataloader)
 
-initialize_lora_eva_weights(peft_model, peft_config, dataloader, device=svd_device)
+# setup training arguments
+training_args = TrainingArguments(
+    per_device_train_batch_size=batch_size,
+    num_train_epochs=num_epochs,
+    output_dir=output_dir,
+    remove_unused_columns=False,
+)
 
-# from this point on, you can use the model as you would use a normal LoRA model
+# continue with standard finetuning
+trainer = Trainer(
+    model=peft_model,
+    args=training_args,
+    train_dataset=dataset["train"],
+    data_collator=data_collator,
+)
+trainer.train()

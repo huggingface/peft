@@ -26,21 +26,21 @@ class IncrementalPCA:
     This class provides methods to fit the model on data incrementally in batches, and to transform new data based on
     the principal components learned during the fitting process.
 
-    Attributes:
-    --------
-    n_components (int, optional): Number of components to keep. If `None`, it's set to the minimum of the
-        number of samples and features. Defaults to None.
-    copy (bool): If False, input data will be overwritten. Defaults to True.
-    batch_size (int, optional): The number of samples to use for each batch. Only needed if self.fit is called.
-        If `None`, it's inferred from the data and set to `5 * n_features`. Defaults to None.
-    svd_driver (str, optional): name of the cuSOLVER method to be used for torch.linalg.svd. This keyword
-        argument only works on CUDA inputs. Available options are: None, gesvd, gesvdj, and gesvda. Defaults to None.
-    lowrank (bool, optional): Whether to use torch.svd_lowrank instead of torch.linalg.svd which can be faster.
-        Defaults to False.
-    lowrank_q (int, optional): For an adequate approximation of n_components, this parameter defaults to
-        n_components * 2.
-    lowrank_niter (int, optional): Number of subspace iterations to conduct for torch.svd_lowrank.
-        Defaults to 4.
+    Args:
+        n_components (int, optional): Number of components to keep. If `None`, it's set to the minimum of the
+            number of samples and features. Defaults to None.
+        copy (bool): If False, input data will be overwritten. Defaults to True.
+        batch_size (int, optional): The number of samples to use for each batch. Only needed if self.fit is called.
+            If `None`, it's inferred from the data and set to `5 * n_features`. Defaults to None.
+        svd_driver (str, optional): name of the cuSOLVER method to be used for torch.linalg.svd. This keyword
+            argument only works on CUDA inputs. Available options are: None, gesvd, gesvdj, and gesvda. Defaults to
+            None.
+        lowrank (bool, optional): Whether to use torch.svd_lowrank instead of torch.linalg.svd which can be faster.
+            Defaults to False.
+        lowrank_q (int, optional): For an adequate approximation of n_components, this parameter defaults to
+            n_components * 2.
+        lowrank_niter (int, optional): Number of subspace iterations to conduct for torch.svd_lowrank.
+            Defaults to 4.
     """
 
     def __init__(
@@ -79,12 +79,11 @@ class IncrementalPCA:
         """
         Validates and converts the input data `X` to the appropriate tensor format.
 
-        Arguments:
-        ----------
-        X (torch.Tensor): Input data.
+        Args:
+            X (torch.Tensor): Input data.
 
         Returns:
-        -------- torch.Tensor: Converted to appropriate format.
+            torch.Tensor: Converted to appropriate format.
         """
         valid_dtypes = [torch.float32, torch.float64]
 
@@ -118,16 +117,14 @@ class IncrementalPCA:
         """
         Computes the incremental mean and variance for the data `X`.
 
-        Arguments:
-        ----------
-        X (torch.Tensor): The batch input data tensor with shape (n_samples, n_features).
-        last_mean (torch.Tensor): The previous mean tensor with shape (n_features,).
-        last_variance (torch.Tensor): The previous variance tensor with shape (n_features,).
-        last_sample_count (torch.Tensor): The count tensor of samples processed before the current batch.
+        Args:
+            X (torch.Tensor): The batch input data tensor with shape (n_samples, n_features).
+            last_mean (torch.Tensor): The previous mean tensor with shape (n_features,).
+            last_variance (torch.Tensor): The previous variance tensor with shape (n_features,).
+            last_sample_count (torch.Tensor): The count tensor of samples processed before the current batch.
 
         Returns:
-        -------- Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: Updated mean, variance tensors, and total sample
-        count.
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: Updated mean, variance tensors, and total sample count.
         """
         if X.shape[0] == 0:
             return last_mean, last_variance, last_sample_count
@@ -175,15 +172,14 @@ class IncrementalPCA:
 
         This method ensures that the output remains consistent across different runs.
 
-        Arguments:
-        ----------
-        u (torch.Tensor): Left singular vectors tensor.
-        v (torch.Tensor): Right singular vectors tensor.
-        u_based_decision (bool, optional):
-            If True, uses the left singular vectors to determine the sign flipping. Defaults to True.
+        Args:
+            u (torch.Tensor): Left singular vectors tensor.
+            v (torch.Tensor): Right singular vectors tensor.
+            u_based_decision (bool, optional): If True, uses the left singular vectors to determine the sign flipping.
+                Defaults to True.
 
         Returns:
-        -------- Tuple[torch.Tensor, torch.Tensor]: Adjusted left and right singular vectors tensors.
+            Tuple[torch.Tensor, torch.Tensor]: Adjusted left and right singular vectors tensors.
         """
         if u_based_decision:
             max_abs_cols = torch.argmax(torch.abs(u), dim=0)
@@ -199,13 +195,12 @@ class IncrementalPCA:
         """
         Fits the model with data `X` using minibatches of size `batch_size`.
 
-        Arguments:
-        ----------
-        X (torch.Tensor): The input data tensor with shape (n_samples, n_features).
-        check_input (bool, optional): If True, validates the input. Defaults to True.
+        Args:
+            X (torch.Tensor): The input data tensor with shape (n_samples, n_features).
+            check_input (bool, optional): If True, validates the input. Defaults to True.
 
         Returns:
-        -------- IncrementalPCA: The fitted IPCA model.
+            IncrementalPCA: The fitted IPCA model.
         """
         if check_input:
             X = self._validate_data(X)
@@ -222,13 +217,12 @@ class IncrementalPCA:
         """
         Incrementally fits the model with batch data `X`.
 
-        Arguments:
-        ----------
-        X (torch.Tensor): The batch input data tensor with shape (n_samples, n_features).
-        check_input (bool, optional): If True, validates the input. Defaults to True.
+        Args:
+            X (torch.Tensor): The batch input data tensor with shape (n_samples, n_features).
+            check_input (bool, optional): If True, validates the input. Defaults to True.
 
         Returns:
-        -------- IncrementalPCA: The updated IPCA model after processing the batch.
+            IncrementalPCA: The updated IPCA model after processing the batch.
         """
         first_pass = not hasattr(self, "components_")
 
@@ -293,12 +287,11 @@ class IncrementalPCA:
 
         The input data `X` is projected on the first principal components previously extracted from a training set.
 
-        Arguments:
-        ----------
-        X (torch.Tensor): New data tensor with shape (n_samples, n_features) to be transformed.
+        Args:
+            X (torch.Tensor): New data tensor with shape (n_samples, n_features) to be transformed.
 
         Returns:
-        -------- torch.Tensor: Transformed data tensor with shape (n_samples, n_components).
+            torch.Tensor: Transformed data tensor with shape (n_samples, n_components).
         """
         X = X - self.mean_
         return torch.mm(X.double(), self.components_.T).to(X.dtype)
@@ -309,14 +302,13 @@ class IncrementalPCA:
 
         The last slice may contain less than `batch_size` elements, when `batch_size` does not divide `n`.
 
-        Arguments:
-        ----------
-        n (int): Size of the sequence.
-        batch_size (int): Number of elements in each batch.
-        min_batch_size (int, optional): Minimum number of elements in each batch. Defaults to 0.
+        Args:
+            n (int): Size of the sequence.
+            batch_size (int): Number of elements in each batch.
+            min_batch_size (int, optional): Minimum number of elements in each batch. Defaults to 0.
 
         Yields:
-        -------- slice: A slice of `batch_size` elements.
+            slice: A slice of `batch_size` elements.
         """
         start = 0
         for _ in range(int(n // batch_size)):
