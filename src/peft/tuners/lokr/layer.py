@@ -156,10 +156,11 @@ class LoKrLayer(nn.Module, LycorisLayer):
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
         self.r[adapter_name] = r
-        self.alpha[adapter_name] = alpha
-        self.scaling[adapter_name] = alpha / r
+        self.alpha[adapter_name] = alpha or r
+        self.scaling[adapter_name] = self.alpha[adapter_name] / r
         self.rank_dropout[adapter_name] = rank_dropout
         self.module_dropout[adapter_name] = module_dropout
+        self.rank_dropout_scale[adapter_name] = kwargs["rank_dropout_scale"]
         base_layer = self.get_base_layer()
 
         # Determine shape of LoKr weights
@@ -215,7 +216,7 @@ class LoKrLayer(nn.Module, LycorisLayer):
             w2 = self.lokr_w2_a[adapter_name] @ self.lokr_w2_b[adapter_name]
 
         # Make weights with Kronecker product
-        weight = make_kron(w1, w2)
+        weight = make_kron(w1, w2, self.scaling[adapter_name])
         weight = weight.reshape(self.get_base_layer().weight.shape)
 
         # Perform rank dropout during training - drop rows of addition weights
@@ -223,7 +224,8 @@ class LoKrLayer(nn.Module, LycorisLayer):
         if self.training and rank_dropout:
             drop = (torch.rand(weight.size(0)) > rank_dropout).float()
             drop = drop.view(-1, *[1] * len(weight.shape[1:])).to(weight.device)
-            drop /= drop.mean()
+            if self.rank_dropout_scale[adapter_name]:
+                drop /= drop.mean()
             weight *= drop
 
         return weight
