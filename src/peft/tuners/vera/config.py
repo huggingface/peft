@@ -149,7 +149,7 @@ class VeraConfig(PeftConfig):
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
         # check for layers_to_transform and layers_pattern
-        if (self.layers_pattern is not None) and (self.layers_to_transform is None):
+        if self.layers_pattern and not self.layers_to_transform:
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
         if not self.save_projection:
             warnings.warn(

@@ -69,12 +69,9 @@ class AdaLoraConfig(LoraConfig):
             raise ValueError("`layers_to_transform` cannot be used when `target_modules` is a str.")
 
         # check for layers_to_transform and layers_pattern
-        if (self.layers_pattern is not None) and (self.layers_to_transform is None):
+        if self.layers_pattern and not self.layers_to_transform:
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
 
-        # check for layers_to_transform and layers_pattern
-        if (self.layers_to_transform is not None) and (self.layers_pattern is None):
-            raise ValueError("When `layers_to_transform` is specified, `layers_pattern` must also be specified.")
         # Check if 'r' has been set to a non-default value
         if self.r != 8:  # 8 is the default value for 'r' in LoraConfig
             warnings.warn(
