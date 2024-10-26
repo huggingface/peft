@@ -16,7 +16,7 @@ import warnings
 from collections import Counter, defaultdict
 from collections.abc import Mapping
 from itertools import cycle
-from typing import Dict, Optional, Union, Iterable
+from typing import Dict, Iterable, Optional, Union
 
 import torch
 from tqdm import tqdm
