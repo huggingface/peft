@@ -16,7 +16,7 @@ import warnings
 from collections import Counter, defaultdict
 from collections.abc import Mapping
 from itertools import cycle
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Union, Iterable
 
 import torch
 from tqdm import tqdm
@@ -25,7 +25,7 @@ from transformers.pytorch_utils import Conv1D
 from peft.tuners.tuners_utils import check_target_module_exists
 from peft.utils.incremental_pca import IncrementalPCA
 
-from .config import EvaConfig, LoraConfig
+from .config import LoraConfig
 from .layer import Embedding, LoraLayer, _ConvNd
 
 
@@ -223,7 +223,7 @@ def forward_fn_dict(model, inputs):
 def get_eva_state_dict(
     model: torch.nn.Module,
     peft_config: LoraConfig,
-    dataloader: torch.utils.data.DataLoader,
+    dataloader: Iterable,
     forward_fn: Optional[callable] = forward_fn_dict,
     get_indices_fn: Optional[callable] = get_indices_fn_causal_lm,
     prepare_activations_fn: Union[callable, Dict[str, callable], None] = None,
@@ -239,7 +239,7 @@ def get_eva_state_dict(
     Args:
         model (torch.nn.Module): The model to compute the SVD for.
         peft_config (LoraConfig): The configuration for the LoRA layers.
-        dataloader (torch.utils.data.DataLoader): The dataloader to use for the forward pass.
+        dataloader (Iterable): The dataloader to use for the forward pass.
         forward_fn (callable):
             The forward function to use for the forward pass. `model(**inputs)` is used if forward_fn is not provided.
         get_indices_fn (Optional[callable]):
@@ -421,9 +421,8 @@ def get_eva_state_dict(
 
 @torch.no_grad()
 def initialize_lora_eva_weights(
-    model,
-    peft_config,
-    dataloader,
+    model: torch.nn.Module,
+    dataloader: Iterable,
     forward_fn: Optional[callable] = forward_fn_dict,
     get_indices_fn: Optional[callable] = get_indices_fn_causal_lm,
     prepare_activations_fn: Union[callable, Dict[str, callable], None] = None,
@@ -437,9 +436,8 @@ def initialize_lora_eva_weights(
     layer and updates the weights accordingly.
 
     Args:
-        model (torch.nn.Module): The model to compute the SVD for.
-        peft_config (LoraConfig): The configuration for the LoRA layers.
-        dataloader (torch.utils.data.DataLoader): The dataloader to use for the forward pass.
+        model (PeftModel): The model to compute the SVD for.
+        dataloader (Iterable): The dataloader to use for the forward pass.
         forward_fn (callable):
             The forward function to use for the forward pass. `model(**inputs)` is used if forward_fn is not provided.
         get_indices_fn (Optional[callable]):
@@ -462,9 +460,17 @@ def initialize_lora_eva_weights(
     Returns:
         model (torch.nn.Module): The model with the initialized LoRA weights.
     """
-    # assign default eva config
-    if peft_config.eva_config is None:
-        peft_config.eva_config = EvaConfig()
+    if not hasattr(model, "peft_config"):
+        raise ValueError("model must be a PeftModel")
+    peft_config = model.peft_config[adapter_name]
+
+    # eva currently only works with a single active adapter
+    if len(model.active_adapters) > 1:
+        raise ValueError("`initialize_lora_eva_weights` currently only works with a single active adapter")
+
+    # initialize_lora_eva_weights only works with `init_lora_weights='eva'`
+    if peft_config.init_lora_weights != "eva":
+        raise ValueError("`initialize_lora_eva_weights` can only be used with `init_lora_weights='eva'`")
 
     # compute svd
     with model.disable_adapter():

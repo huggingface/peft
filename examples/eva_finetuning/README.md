@@ -62,7 +62,7 @@ model = model.cuda()
 # to optimize memory usage during eva initialization, set low_cpu_mem_usage=True
 peft_model = get_peft_model(model, peft_config, low_cpu_mem_usage=True)
 
-initialize_lora_eva_weights(peft_model, peft_config, dataloader)
+initialize_lora_eva_weights(peft_model, dataloader)
 ```
 `initialize_lora_eva_weights` will compute the SVD and load the components into the model. After this continue with standard LoRA finetuning.
 
@@ -78,7 +78,7 @@ model = AutoModelForCausalLM.from_pretrained(
 )
 model = prepare_model_for_kbit_training(model)
 peft_model = get_peft_model(model, peft_config)
-initialize_lora_eva_weights(peft_model, peft_config, dataloader)
+initialize_lora_eva_weights(peft_model, dataloader)
 ```
 
 ## Getting eva_state_dict without loading the adapter weights

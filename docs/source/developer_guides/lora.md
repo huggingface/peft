@@ -84,7 +84,7 @@ peft_model = get_peft_model(model, peft_config, low_cpu_mem_usage=True)
 ```
 Then, initialize the EVA weights (in most cases the dataloader used for eva initialization can be the same as the one used for finetuning):
 ```python
-initialize_lora_eva_weights(peft_model, peft_config, dataloader, device="cuda")
+initialize_lora_eva_weights(peft_model, dataloader)
 ```
 EVA works out of the box with bitsandbytes. Simply initialize the model with `quantization_config` and call `initialize_lora_eva_weights` as usual.
 For further instructions on using EVA, please refer to our [documentation](https://github.com/huggingface/peft/tree/main/examples/eva_finetuning).

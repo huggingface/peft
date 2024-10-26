@@ -1710,7 +1710,7 @@ class TestEvaInitialization:
                 shuffle=False,
             )
             model = get_peft_model(deepcopy(model_fixture), peft_config)
-            initialize_lora_eva_weights(model, peft_config, dataloader)
+            initialize_lora_eva_weights(model, dataloader)
             state_dicts.append({k: v for k, v in model.state_dict().items() if "lora_A.default.weight" in k})
 
         cos_sims = defaultdict(list)

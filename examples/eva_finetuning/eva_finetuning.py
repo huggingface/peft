@@ -67,7 +67,7 @@ model = model.to(device)
 
 # to optimize memory usage during eva initialization, set low_cpu_mem_usage=True
 peft_model = get_peft_model(model, peft_config, low_cpu_mem_usage=True)
-initialize_lora_eva_weights(peft_model, peft_config, dataloader)
+initialize_lora_eva_weights(peft_model, dataloader)
 
 # setup training arguments
 training_args = TrainingArguments(
