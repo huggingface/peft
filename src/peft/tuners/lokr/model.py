@@ -21,6 +21,7 @@ from torch import nn
 
 from peft.tuners.lycoris_utils import LycorisConfig, LycorisTuner
 
+from .config import LoKrConfig
 from .layer import Conv2d, Linear, LoKrLayer
 
 
@@ -91,7 +92,7 @@ class LoKrModel(LycorisTuner):
 
     def _create_and_replace(
         self,
-        config: LycorisConfig,
+        config: LycorisConfig | LoKrConfig,
         adapter_name: str,
         target: Union[LoKrLayer, nn.Module],
         target_name: str,
@@ -109,6 +110,7 @@ class LoKrModel(LycorisTuner):
         kwargs = config.to_dict()
         kwargs["r"] = config.rank_pattern.get(target_name_key, config.r)
         kwargs["alpha"] = config.alpha_pattern.get(target_name_key, config.alpha)
+        kwargs["rank_dropout_scale"] = config.rank_dropout_scale
 
         if isinstance(target, LoKrLayer):
             target.update_layer(adapter_name, **kwargs)

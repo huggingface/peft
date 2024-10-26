@@ -40,6 +40,8 @@ class LoKrConfig(LycorisConfig):
             Perform rank decomposition of left kronecker product matrix.
         decompose_factor (`int`):
             Kronecker product decomposition factor.
+        rank_dropout_scale ('bool)
+            Scale the rank dropout while training.
         target_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
             names will be replaced. When passing a string, a regex match will be performed. When passing a list of
@@ -91,6 +93,7 @@ class LoKrConfig(LycorisConfig):
         metadata={"help": "Perform rank decomposition of left kronecker product matrix."},
     )
     decompose_factor: int = field(default=-1, metadata={"help": "Kronecker product decomposition factor."})
+    rank_dropout_scale: bool = field(default=False, metadata={"help": "Rank dropout scale"})
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
