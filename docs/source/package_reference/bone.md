@@ -1,4 +1,4 @@
-<!--Copyright 2023 The HuggingFace Team. All rights reserved.
+<!--Copyright 2024 The HuggingFace Team. All rights reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
 the License. You may obtain a copy of the License at
@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # Bone
 
-Block Affine ([Bone](https://huggingface.co/papers/2409.15371)) is a new PEFT technology different from the LoRA series, reducing training resources and requiring no complex initialization.Bone not only enhances the utilization of original weight information but also emphasizes the internal connections between weights, leading to faster convergence and better data fitting.
+Block Affine ([Bone](https://huggingface.co/papers/2409.15371)) is a new PEFT technology different from the LoRA series, reducing training resources and requiring no complex initialization. Bone not only enhances the utilization of original weight information but also emphasizes the internal connections between weights, leading to faster convergence and better data fitting.
 
 The abstract from the paper is:
 

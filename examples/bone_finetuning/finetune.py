@@ -1,3 +1,17 @@
+# Copyright 2024-present the HuggingFace Inc. team.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import copy
 import logging
 import os
@@ -33,13 +47,17 @@ class TrainingArguments(transformers.TrainingArguments):
     # Base model or residual model setting
     model_name_or_path: Optional[str] = field(default="meta-llama/Meta-Llama-3-8B")
     attn_implementation: Optional[str] = field(default="flash_attention_2")
+    # Bone setting
+    use_bone: Optional[bool] = field(default=False)
+    bone_r: Optional[int] = field(default=64)
+    init_bone_weights: Literal[True, False] = field(default=True)
     # Lora or PiSSA setting
     use_lora: Optional[bool] = field(default=False)
     adapter_name_or_path: Optional[str] = field(
         default=None,
         metadata={
             "help": (
-                "Pre-initialized PiSSA adapter path; when this is not None, the following arguments are ignored."
+                "Pre-initialized Bone adapter path; when this is not None, the following arguments are ignored."
             ),
         },
     )
@@ -78,13 +96,10 @@ class TrainingArguments(transformers.TrainingArguments):
     )
     merge: Optional[bool] = field(
         default=False,
-        metadata={"help": "Merge the PiSSA adapter to the residual model or LoRA to the base model"},
+        metadata={"help": "Merge the Bone adapter to the residual model or LoRA to the base model"},
     )
     bf16: Optional[bool] = field(default=True)
     run_name: str = field(default="None", metadata={"help": "Path to the training data."})
-    use_bone: Optional[bool] = field(default=False)
-    bone_r: Optional[int] = field(default=64)
-    init_bone_weights: Literal[True, False] = field(default=True)
 
 
 class SavePeftModelCallback(transformers.TrainerCallback):
@@ -259,16 +274,16 @@ def build_model(script_args, checkpoint_dir):
             )
             model = get_peft_model(model, peft_config)
     if script_args.use_bone:
-        # if checkpoint_dir is not None:
-        #     logger.info(f"Loading adapters from {checkpoint_dir}.")
-        #     # os.path.join(checkpoint_dir, 'adapter_model')
-        #     model = PeftModel.from_pretrained(model, checkpoint_dir, is_trainable=True)
-        # elif script_args.adapter_name_or_path is not None:
-        #     logger.info(f"Initilize adapters from {script_args.model_name_or_path}/{script_args.adapter_name_or_path}.")
-        #     bone_config = BoneConfig.from_pretrained(script_args.model_name_or_path, subfolder = script_args.adapter_name_or_path)
-        #     model = PeftModel.from_pretrained(model, script_args.model_name_or_path, subfolder = script_args.adapter_name_or_path, is_trainable=True, config=bone_config)
-        # else:
-        #     logger.info(f'Init LoRA modules...')
+        if checkpoint_dir is not None:
+            logger.info(f"Loading adapters from {checkpoint_dir}.")
+            # os.path.join(checkpoint_dir, 'adapter_model')
+            model = PeftModel.from_pretrained(model, checkpoint_dir, is_trainable=True)
+        elif script_args.adapter_name_or_path is not None:
+            logger.info(f"Initilize adapters from {script_args.model_name_or_path}/{script_args.adapter_name_or_path}.")
+            bone_config = BoneConfig.from_pretrained(script_args.model_name_or_path, subfolder = script_args.adapter_name_or_path)
+            model = PeftModel.from_pretrained(model, script_args.model_name_or_path, subfolder = script_args.adapter_name_or_path, is_trainable=True, config=bone_config)
+        else:
+            logger.info(f'Init LoRA modules...')
         peft_config = BoneConfig(
             task_type=TaskType.CAUSAL_LM,
             target_modules=script_args.target_modules.split(","),
@@ -276,7 +291,6 @@ def build_model(script_args, checkpoint_dir):
             r=script_args.bone_r,
             init_weights=script_args.init_bone_weights,
         )
-        # model.enable_input_requires_grad()
         model = get_peft_model(model, peft_config, adapter_name="weight")
 
     for name, module in model.named_modules():
