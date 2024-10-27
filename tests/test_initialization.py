@@ -1634,7 +1634,27 @@ class TestEvaInitialization:
     def is_bnb_model(self, model):
         return hasattr(model.config, "quantization_config")
 
-    def test_eva_state_dict_prepare_activations_mapping(self, model, dataset, peft_config):
+    # tests for cases where prepare_layer_inputs_fn is a mapping
+    # checks that if not all target modules are present, the prepare_layer_inputs_fn for the remaining modules is set to None
+    # checks that if more keys than target modules are present, a ValueError is raised
+    @pytest.mark.parametrize(
+        "prepare_layer_inputs_fn, expected_outcome",
+        [
+            (lambda x: x[0], "success"),
+            ({"transformer.h.0.attn.c_attn": lambda x: x[0]}, "success"),
+            (
+                {
+                    "transformer.h.0.attn.c_attn": lambda x: x[0],
+                    "transformer.h.1.attn.c_attn": lambda x: x[0],
+                    "transformer.h.2.attn.c_attn": lambda x: x[0],
+                },
+                "value_error",
+            ),
+        ],
+    )
+    def test_eva_state_dict_prepare_inputs_mapping(
+        self, model, dataset, peft_config, prepare_layer_inputs_fn, expected_outcome
+    ):
         shuffled_dataset = dataset.shuffle(seed=0)
         dataloader = DataLoader(
             shuffled_dataset,
@@ -1642,21 +1662,29 @@ class TestEvaInitialization:
             collate_fn=lambda examples: {k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()},
             shuffle=False,
         )
-        prepare_activations_fn = {
-            "transformer.h.0.attn.c_attn": lambda x: x[0],
-            "transformer.h.1.attn.c_attn": lambda x: x[0],
-        }
-        sd = get_eva_state_dict(model, peft_config, dataloader, prepare_activations_fn=prepare_activations_fn)
-        assert len(sd) == 2
-        assert "transformer.h.0.attn.c_attn" in sd
-        assert "transformer.h.1.attn.c_attn" in sd
 
+        modified_peft_config = deepcopy(peft_config)
+        modified_peft_config.eva_config.tau = 0  # converge immediately
+        if expected_outcome == "success":
+            sd = get_eva_state_dict(
+                model, modified_peft_config, dataloader, prepare_layer_inputs_fn=prepare_layer_inputs_fn
+            )
+            assert len(sd) == 2
+            assert "transformer.h.0.attn.c_attn" in sd
+            assert "transformer.h.1.attn.c_attn" in sd
+        else:
+            with pytest.raises(
+                ValueError, match="prepare_layer_inputs_fn is a mapping but the following module names were not found"
+            ):
+                get_eva_state_dict(
+                    model, modified_peft_config, dataloader, prepare_layer_inputs_fn=prepare_layer_inputs_fn
+                )
+
+    # Test that the state dict returned by get_eva_state_dict is consistent across different seeds based on the cosine similarity of the svd components.
     @pytest.mark.parametrize("eva_config", [EvaConfig(rho=2), EvaConfig(rho=1), EvaConfig(rho=1, whiten=True)])
     def test_eva_state_dict_consistency(self, model, dataset, peft_config, eva_config):
-        """Test that the state dict returned by get_eva_state_dict is consistent across different seeds based on the cosine
-        similarity of the svd components."""
-        current_peft_config = deepcopy(peft_config)
-        current_peft_config.eva_config = eva_config
+        modified_peft_config = deepcopy(peft_config)
+        modified_peft_config.eva_config = eva_config
         state_dicts = []
         for seed in range(self.NUM_SEEDS):
             shuffled_dataset = dataset.shuffle(seed=seed)
@@ -1668,7 +1696,7 @@ class TestEvaInitialization:
                 },
                 shuffle=False,
             )
-            sd = get_eva_state_dict(model, current_peft_config, dataloader)
+            sd = get_eva_state_dict(model, modified_peft_config, dataloader)
             state_dicts.append(sd)
 
         cos_sims = defaultdict(list)
@@ -1685,6 +1713,7 @@ class TestEvaInitialization:
                 f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
             )
 
+    # Test that the state dict returned by get_eva_state_dict loaded correctly and is consistent across different seeds based on the cosine similarity of the svd components.
     @pytest.mark.parametrize(
         "model_fixture",
         [
@@ -1696,8 +1725,6 @@ class TestEvaInitialization:
         indirect=True,
     )
     def test_eva_initialization_consistency(self, model_fixture, dataset, peft_config):
-        """Test that the state dict returned by get_eva_state_dict loaded correctly and is consistent across different seeds based
-        on the cosine similarity of the svd components."""
         state_dicts = []
         for seed in range(self.NUM_SEEDS):
             shuffled_dataset = dataset.shuffle(seed=seed)
@@ -1710,8 +1737,19 @@ class TestEvaInitialization:
                 shuffle=False,
             )
             model = get_peft_model(deepcopy(model_fixture), peft_config)
+            if self.is_bnb_model(model):
+                model = model.to("cuda")
+                dataloader = DataLoader(
+                    shuffled_dataset,
+                    batch_size=self.BATCH_SIZE,
+                    collate_fn=lambda examples: {
+                        k: torch.stack([v[k] for v in examples], dim=0).to("cuda") for k in examples[0].keys()
+                    },
+                    shuffle=False,
+                )
             initialize_lora_eva_weights(model, dataloader)
-            state_dicts.append({k: v for k, v in model.state_dict().items() if "lora_A.default.weight" in k})
+            state_dict = {k: v.cpu() for k, v in model.state_dict().items() if "lora_A.default.weight" in k}
+            state_dicts.append(state_dict)
 
         cos_sims = defaultdict(list)
         for i, j in itertools.combinations(range(self.NUM_SEEDS), 2):
@@ -1727,25 +1765,25 @@ class TestEvaInitialization:
                 f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
             )
 
+    # Test that EvaConfig.__init__ raises a ValueError when rho is negative.
     def test_eva_config_rho(self):
-        """Test that EvaConfig.__init__ raises a ValueError when rho is negative."""
         with pytest.raises(ValueError, match="`rho` must be >= 1.0"):
             EvaConfig(rho=-1)
 
+    # Test that EvaConfig.__init__ raises a ValueError when tau is not between 0.0 and 1.0.
     def test_eva_config_tau(self):
-        """Test that EvaConfig.__init__ raises a ValueError when tau is not between 0.0 and 1.0."""
         with pytest.raises(ValueError, match="`tau` must be between 0.0 and 1.0."):
             EvaConfig(tau=-0.1)
         with pytest.raises(ValueError, match="`tau` must be between 0.0 and 1.0."):
             EvaConfig(tau=1.1)
 
+    # Test that LoraConfig.__init__ raises a ValueError when init_lora_weights is 'eva' but eva_config is not set.
     def test_lora_config_raises_error_without_eva_config_but_eva_init(self):
-        """Test that LoraConfig.__init__ raises a ValueError when init_lora_weights is 'eva' but eva_config is not set."""
         with pytest.raises(ValueError, match="`eva_config` must be specified when `init_lora_weights` is 'eva'."):
             LoraConfig(init_lora_weights="eva")
 
+    # Test that LoraConfig.__init__ raises a warning when init_lora_weights is not 'eva' but eva_config is set.
     def test_lora_config_raises_warning_with_eva_config_but_not_eva_init(self):
-        """Test that LoraConfig.__init__ raises a warning when init_lora_weights is not 'eva' but eva_config is set."""
         with pytest.warns(
             UserWarning, match="`eva_config` specified but will be ignored when `init_lora_weights` is not 'eva'."
         ):

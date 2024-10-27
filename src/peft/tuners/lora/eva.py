@@ -32,19 +32,45 @@ from .layer import Embedding, LoraLayer, _ConvNd
 UNSUPPORTED_LORA_MODULES = [Embedding, _ConvNd]
 
 
-class SVDHook:
+class _Hook:
     """
-    A forward hook for calculating incremental SVD/PCA on layer input activations. The hook is designed to be
-    registered to a PyTorch module using the `register_forward_hook` method.
+    A base class for hooks that prepares layer inputs for EVA.
+    """
 
-    This hook performs a step of incremental Singular Value Decomposition (SVD) on the input activations of a specified
-    layer during the forward pass of a neural network. The hook also tracks convergence of the computed components
-    using cosine similarity between the current and previous components.
+    def __init__(self, name: str, prepare_layer_inputs_fn: Optional[callable] = None):
+        self.name = name
+        if prepare_layer_inputs_fn is None:
+            self.prepare_layer_inputs_fn = self._prepare_layer_inputs_fn_default
+        else:
+            self.prepare_layer_inputs_fn = prepare_layer_inputs_fn
+
+    @staticmethod
+    def _prepare_layer_inputs_fn_default(inputs) -> torch.Tensor:
+        if isinstance(inputs, torch.Tensor):
+            return inputs
+        elif isinstance(inputs, (tuple, list)):
+            return inputs[0]
+        else:
+            raise ValueError(
+                f"unsupported input type for prepare_layer_inputs_fn: {type(inputs)}, "
+                "please provide a custom prepare_layer_inputs_fn"
+            )
+
+
+class SVDHook(_Hook):
+    """
+    A forward hook for calculating incremental SVD on layer inputs. The hook is designed to be registered to a PyTorch
+    module using the `register_forward_hook` method.
+
+    This hook performs a step of incremental Singular Value Decomposition (SVD) on the inputs of a specified layer
+    during the forward pass of a neural network. The hook also tracks convergence of the computed components using
+    cosine similarity between the current and previous components.
 
     Args:
         name (str): Name of the layer to which this hook is attached.
         n_components (int): Number of principal components to compute.
         sim_thresh (Union[float, torch.Tensor]): Similarity threshold for convergence.
+        prepare_layer_inputs_fn (Optional[callable]): Function to prepare layer inputs for SVD.
     """
 
     def __init__(
@@ -52,15 +78,11 @@ class SVDHook:
         name: str,
         n_components: int,
         sim_thresh: Union[float, torch.Tensor],
-        prepare_activations_fn: Optional[callable] = None,
+        prepare_layer_inputs_fn: Optional[callable] = None,
     ):
-        self.name = name
+        super().__init__(name, prepare_layer_inputs_fn)
         self.n_components = n_components
         self.sim_thresh = sim_thresh
-        if prepare_activations_fn is None:
-            self.prepare_activations_fn = self._prepare_activations_fn_default
-        else:
-            self.prepare_activations_fn = prepare_activations_fn
 
         if isinstance(sim_thresh, torch.Tensor) and len(sim_thresh.shape) > 0:
             check1 = sim_thresh.size(0) == n_components or sim_thresh.size(0) == 1
@@ -80,7 +102,7 @@ class SVDHook:
         if hasattr(self.svd, "components_"):
             previous_components = self.svd.components_.clone().detach()
 
-        states = self.prepare_activations_fn(input).detach()
+        states = self.prepare_layer_inputs_fn(input).detach()
 
         # merging all but last dimension
         if self.indices is not None:
@@ -104,36 +126,28 @@ class SVDHook:
         sim = torch.nn.functional.cosine_similarity(components, previous_components)
         self.converged = sim >= self.sim_thresh
 
-    @staticmethod
-    def _prepare_activations_fn_default(activations) -> torch.Tensor:
-        if isinstance(activations, torch.Tensor):
-            return activations
-        elif isinstance(activations, (tuple, list)):
-            return activations[0]
-        else:
-            raise ValueError(
-                f"unsupported input type for prepare_activations_fn: {type(activations)}, "
-                "please provide a custom prepare_activations_fn"
-            )
 
-
-# This is used to determine if two input activations are equal. For such cases, SVD
+# This is used to determine if inputs of two different layers are equal. For such cases, SVD
 # needs to be done for only for one of the equal inputs.
-class HashHook:
+class HashHook(_Hook):
     """
-    A forward hook for hashing layer input activations. The hook is designed to be registered to a PyTorch module using
-    the `register_forward_hook` method.
+    A forward hook for hashing layer inputs. The hook is designed to be registered to a PyTorch module using the
+    `register_forward_hook` method.
 
-    This hook hashes the input activations of a specified layer during the forward pass of a neural network and stores
-    the hash values for later analysis or comparison.
+    This hook hashes the inputs of a specified layer during the forward pass of a neural network and stores the hash
+    values for later analysis or comparison.
 
     Args:
-        name (str): Name of the layer to which this hook is attached. hashed_inputs (list): List of hashed input
-            activations.
+        name (str): Name of the layer to which this hook is attached. hashed_inputs (list): List of hashed inputs.
+        prepare_layer_inputs_fn (Optional[callable]): Function to prepare layer inputs for hashing.
     """
 
-    def __init__(self, name: str):
-        self.name = name
+    def __init__(
+        self,
+        name: str,
+        prepare_layer_inputs_fn: Optional[callable] = None,
+    ):
+        super().__init__(name, prepare_layer_inputs_fn)
         self.hashed_inputs = []
 
     @staticmethod
@@ -141,10 +155,7 @@ class HashHook:
         return hash(tuple(tensor.view(-1).tolist()))
 
     def __call__(self, model, input, output):
-        try:
-            x = input.detach().cpu()
-        except AttributeError:
-            x = input[0].detach().cpu()
+        x = self.prepare_layer_inputs_fn(input).detach().cpu()
         self.hashed_inputs.append(self.hash_fn(x))
 
 
@@ -204,14 +215,16 @@ def move_inputs_to_device(inputs, device: Union[str, torch.device]):
         raise ValueError(f"unsupported input type: {type(inputs)}")
 
 
-def get_indices_fn_causal_lm(inputs: dict, config: LoraConfig):
+def get_indices_fn_causal_lm(inputs: dict, peft_config: LoraConfig):
     """
     if not all items in the input should be used for SVD, this function can be used to get the indices of the items
     that should be used
     """
+    if not isinstance(inputs, dict):
+        raise ValueError("When using `get_indices_fn_causal_lm` inputs must be a dictionary")
     mask = inputs.get("attention_mask", torch.ones_like(inputs["input_ids"])).bool()
-    if config.eva_config.use_label_mask and hasattr(inputs, "labels"):
-        mask = torch.logical_and(mask, inputs["labels"] != config.eva_config.label_mask_value)
+    if peft_config.eva_config.use_label_mask and hasattr(inputs, "labels"):
+        mask = torch.logical_and(mask, inputs["labels"] != peft_config.eva_config.label_mask_value)
     return mask.nonzero()
 
 
@@ -226,7 +239,7 @@ def get_eva_state_dict(
     dataloader: Iterable,
     forward_fn: Optional[callable] = forward_fn_dict,
     get_indices_fn: Optional[callable] = get_indices_fn_causal_lm,
-    prepare_activations_fn: Union[callable, Dict[str, callable], None] = None,
+    prepare_layer_inputs_fn: Union[callable, Dict[str, callable], None] = None,
     show_progress_bar: bool = True,
 ) -> dict:
     """
@@ -241,20 +254,31 @@ def get_eva_state_dict(
         peft_config (LoraConfig): The configuration for the LoRA layers.
         dataloader (Iterable): The dataloader to use for the forward pass.
         forward_fn (callable):
-            The forward function to use for the forward pass. `model(**inputs)` is used if forward_fn is not provided.
+            The forward function to use for the forward pass. Default logic:
+            ```
+            return model(**inputs)
+            ```
         get_indices_fn (Optional[callable]):
             The function to use if not all positions in the input tensor should be used for SVD (e.g. for causal
-            language modeling). Can be set to None if all positions should be used.
-            `peft.tuners.lora.eva.get_indices_fn_causal_lm` is used by default. Should always return a tensor of shape
-            (n_indices, layer_input.ndim-1).
-        prepare_activations_fn: (Union[callable, Dict[str, callable], None])
+            language modeling). Can be set to None if all positions should be used. This function is applied to the
+            model inputs and used for all layers. `peft.tuners.lora.eva.get_indices_fn_causal_lm` is used by default.
+            Should always return a tensor of shape (n_indices, layer_input.ndim-1). Default logic:
+            ```
+            mask = inputs.get("attention_mask", torch.ones_like(inputs["input_ids"])).bool()
+            if peft_config.eva_config.use_label_mask and hasattr(inputs, "labels"):
+                mask = torch.logical_and(mask, inputs["labels"] != peft_config.eva_config.label_mask_value)
+            return mask.nonzero()
+            ```
+        prepare_layer_inputs_fn (Union[callable, Dict[str, callable], None]):
             If a layer receives multiple inputs as a list, per default the first input is used. This function can be
             used to modify this behaviour. Accepts a dictionary with layer names as keys. Default logic:
             ```
-            try:
-                svd_input = activations.detach()
-            except AttributeError:
-                svd_input = activations[0].detach()
+            if isinstance(inputs, torch.Tensor):
+                return inputs
+            elif isinstance(inputs, (tuple, list)):
+                return inputs[0]
+            else:
+                raise ValueError(...)
             ```
         show_progress_bar (bool): Whether to show a progress bar. Default is True.
 
@@ -298,12 +322,21 @@ def get_eva_state_dict(
 
     hooks = {}
     for name, module in model.named_modules():
-        # currently only linear layers are supported
         if not _check_fn(name, module):
             continue
-        hook = HashHook(name)
+        if isinstance(prepare_layer_inputs_fn, Mapping):
+            fn = prepare_layer_inputs_fn.pop(name, None)
+        else:
+            fn = prepare_layer_inputs_fn
+        hook = HashHook(name, fn)
         handle = module.register_forward_hook(hook)
         hooks[name] = (hook, handle)
+
+    if isinstance(prepare_layer_inputs_fn, Mapping) and len(prepare_layer_inputs_fn) > 0:
+        raise ValueError(
+            f"prepare_layer_inputs_fn is a mapping but the following module names were not found: {prepare_layer_inputs_fn.keys()}"
+        )
+
     rank_budget = peft_config.r * len(hooks)
     max_components = round(peft_config.r * peft_config.eva_config.rho)
 
@@ -315,28 +348,16 @@ def get_eva_state_dict(
     equal_inputs_map = {vv: v[0] for v in find_equal_values(hash_dict).values() for vv in v[1:]}
 
     # initialize svd hooks
-    unmapped = []
     for name in list(hooks.keys()):
-        _, handle = hooks.pop(name)
+        hook, handle = hooks.pop(name)
         handle.remove()
         if name in equal_inputs_map:
             continue
-        if isinstance(prepare_activations_fn, Mapping):
-            try:
-                fn = prepare_activations_fn[name]
-            except KeyError:
-                unmapped.append(name)
-                fn = None
-        else:
-            fn = prepare_activations_fn
-        hook = SVDHook(name, max_components, peft_config.eva_config.tau, fn)
+        hook = SVDHook(name, max_components, peft_config.eva_config.tau, hook.prepare_layer_inputs_fn)
         module = model.get_submodule(name)
         handle = module.register_forward_hook(hook)
         hooks[name] = (hook, handle)  # adding the old handle here so we dont get errors in the first forward pass
     layer_hook_map = {**dict(zip(hooks.keys(), hooks.keys())), **equal_inputs_map}
-
-    if unmapped:
-        raise ValueError(f"if prepare_activations_fn is a mapping it must contain module names {unmapped}")
 
     # start svd calculation
     if show_progress_bar:
@@ -425,9 +446,9 @@ def initialize_lora_eva_weights(
     dataloader: Iterable,
     forward_fn: Optional[callable] = forward_fn_dict,
     get_indices_fn: Optional[callable] = get_indices_fn_causal_lm,
-    prepare_activations_fn: Union[callable, Dict[str, callable], None] = None,
-    show_progress_bar: bool = True,
+    prepare_layer_inputs_fn: Union[callable, Dict[str, callable], None] = None,
     adapter_name: str = "default",
+    show_progress_bar: bool = True,
 ):
     """
     Initialize the weights of the LoRA layers using the EVA method.
@@ -439,23 +460,34 @@ def initialize_lora_eva_weights(
         model (PeftModel): The model to compute the SVD for.
         dataloader (Iterable): The dataloader to use for the forward pass.
         forward_fn (callable):
-            The forward function to use for the forward pass. `model(**inputs)` is used if forward_fn is not provided.
+            The forward function to use for the forward pass. Default logic:
+            ```
+            return model(**inputs)
+            ```
         get_indices_fn (Optional[callable]):
             The function to use if not all positions in the input tensor should be used for SVD (e.g. for causal
-            language modeling). Can be set to None if all positions should be used.
-            `peft.tuners.lora.eva.get_indices_fn_causal_lm` is used by default. Should always return a tensor of shape
-            (n_indices, layer_input.ndim-1).
-        prepare_activations_fn (Union[callable, Dict[str, callable], None]):
+            language modeling). Can be set to None if all positions should be used. This function is applied to the
+            model inputs and used for all layers. `peft.tuners.lora.eva.get_indices_fn_causal_lm` is used by default.
+            Should always return a tensor of shape (n_indices, layer_input.ndim-1). Default logic:
+            ```
+            mask = inputs.get("attention_mask", torch.ones_like(inputs["input_ids"])).bool()
+            if peft_config.eva_config.use_label_mask and hasattr(inputs, "labels"):
+                mask = torch.logical_and(mask, inputs["labels"] != peft_config.eva_config.label_mask_value)
+            return mask.nonzero()
+            ```
+        prepare_layer_inputs_fn (Union[callable, Dict[str, callable], None]):
             If a layer receives multiple inputs as a list, per default the first input is used. This function can be
             used to modify this behaviour. Accepts a dictionary with layer names as keys. Default logic:
             ```
-            try:
-                svd_input = activations.detach()
-            except AttributeError:
-                svd_input = activations[0].detach()
+            if isinstance(inputs, torch.Tensor):
+                return inputs
+            elif isinstance(inputs, (tuple, list)):
+                return inputs[0]
+            else:
+                raise ValueError(...)
             ```
-        show_progress_bar (bool): Whether to show a progress bar. Default is True.
         adapter_name (str): The name of the adapter to initialize the weights for.
+        show_progress_bar (bool): Whether to show a progress bar. Default is True.
 
     Returns:
         model (torch.nn.Module): The model with the initialized LoRA weights.
@@ -480,7 +512,7 @@ def initialize_lora_eva_weights(
             dataloader=dataloader,
             forward_fn=forward_fn,
             get_indices_fn=get_indices_fn,
-            prepare_activations_fn=prepare_activations_fn,
+            prepare_layer_inputs_fn=prepare_layer_inputs_fn,
             show_progress_bar=show_progress_bar,
         )
 
