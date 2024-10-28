@@ -57,9 +57,6 @@ FULL_GRID = {
 
 def make_automodel_proxy(weights: str):
     """Instantiate a quanto-quantized transformers model."""
-    # TODO: Can't use `from transformers import QuantoConfig` because it checks for the quanto package, but quanto is
-    # now part of optimum, resulting in the check to fail.
-    # Switch to QuantoConfig once https://github.com/huggingface/transformers/pull/31732 is merged
     from transformers import QuantoConfig
 
     class QuantoModelProxy:
