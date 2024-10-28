@@ -41,7 +41,7 @@ class LoKrConfig(LycorisConfig):
         decompose_factor (`int`):
             Kronecker product decomposition factor.
         rank_dropout_scale ('bool)
-            Scale the rank dropout while training.
+            Whether to scale the rank dropout while training, defaults to `False`.
         target_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
             names will be replaced. When passing a string, a regex match will be performed. When passing a list of

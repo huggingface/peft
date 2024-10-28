@@ -92,7 +92,7 @@ class LoKrModel(LycorisTuner):
 
     def _create_and_replace(
         self,
-        config: LycorisConfig | LoKrConfig,
+        config: LycorisConfig,
         adapter_name: str,
         target: Union[LoKrLayer, nn.Module],
         target_name: str,
