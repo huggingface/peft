@@ -216,23 +216,21 @@ model = get_peft_model(base_model, peft_config)
 PEFT supports models quantized with [optimum-quanto](https://github.com/huggingface/optimum-quanto). This has been tested with 2bit, 4bit, and 8bit int quantization. Optimum-quanto also works on CPU and MPS.
 
 ```python
-from transformers import AutoModelForCausalLM
-from optimum.quanto import QuantizedModelForCausalLM, qint2, qint4, qint8
+from transformers import AutoModelForCausalLM, QuantoConfig
 
 model_id = ...
-base_model = AutoModelForCausalLM.from_pretrained(model_id)
-QuantizedModelForCausalLM.quantize(model, weights=qint4)  # or qint2 or qint8
+quantization_config = QuantoConfig(weights="int4")  # or qint2 or qint8
+base_model = AutoModelForCausalLM.from_pretrained(model_id, quantization_config=quantization_config)
 peft_config = LoraConfig(...)
 model = get_peft_model(base_model, peft_config)
 ```
 
-<!-- TODO: adjust code once correctly supported in transformers, https://github.com/huggingface/transformers/pull/31732 -->
-
 ### Caveats:
 
-- Use a version > 2.4.0, otherwise saving and loading won't work properly.
+- Use optimum-quanto v0.2.5 or above, otherwise saving and loading won't work properly.
+- If you want to use optimum-quanto via transformers, install transformers v4.46.0 or above.
 - Float8 is discouraged as it can easily produce NaNs.
-- There is explicit support for optimum-quanto when used with LoRA. However, when optimum-quanto quantizes a layer, it remains a subclass of the corresponding torch class (e.g., quanto's `QLinear` is a subclass of `nn.Linear`). For this reason, methods will generally also work with optimum-quanto, even if not explicitly supported. Be aware, however, that **merging only works correctly with LoRA**. If you use a method other than LoRA, merging may not raise an error but the results will be incorrect.
+- There is explicit support for optimum-quanto when used with LoRA. However, when optimum-quanto quantizes a layer, it remains a subclass of the corresponding torch class (e.g., quanto's `QLinear` is a subclass of `nn.Linear`). For this reason, non-LoRA methods will generally also work with optimum-quanto, even if not explicitly supported. Be aware, however, that **merging only works correctly with LoRA**. If you use a method other than LoRA, merging may not raise an error but the results will be incorrect.
 
 ## Other Supported PEFT Methods
 

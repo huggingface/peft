@@ -56,42 +56,17 @@ FULL_GRID = {
 
 
 def make_automodel_proxy(weights: str):
-    """Instantiate a quanto-quantized transformers model.
-
-    As quanto is not yet integrated into transformers itself, this is done manually for now but should be replaced once
-    transformers supports it.
-
-    """
+    """Instantiate a quanto-quantized transformers model."""
     # TODO: Can't use `from transformers import QuantoConfig` because it checks for the quanto package, but quanto is
     # now part of optimum, resulting in the check to fail.
     # Switch to QuantoConfig once https://github.com/huggingface/transformers/pull/31732 is merged
-    from optimum.quanto import QuantizedModelForCausalLM, qint2, qint4, qint8
-    from transformers.utils.quantization_config import QuantizationMethod
-
-    # dummy objects to imitate transformers
-    class QuantizationConfig:
-        quant_method = QuantizationMethod.QUANTO
-
-    class HfQuantizer:
-        is_trainable = False
-        quantization_config = QuantizationConfig()
+    from transformers import QuantoConfig
 
     class QuantoModelProxy:
         @classmethod
         def from_pretrained(self, *args, **kwargs):
-            model = AutoModelForCausalLM.from_pretrained(*args, **kwargs)
-            if weights == "int2":
-                QuantizedModelForCausalLM.quantize(model, weights=qint2)
-            elif weights == "int4":
-                QuantizedModelForCausalLM.quantize(model, weights=qint4)
-            elif weights == "int8":
-                QuantizedModelForCausalLM.quantize(model, weights=qint8)
-            else:
-                # float8 was tried but was producing NaNs
-                raise ValueError(f"Invalid quantization dtype for quanto: {weights}")
-
-            model.is_quantized = True
-            model.hf_quantizer = HfQuantizer()
+            quantization_config = QuantoConfig(weights=weights)
+            model = AutoModelForCausalLM.from_pretrained(*args, quantization_config=quantization_config, **kwargs)
             return model
 
     return QuantoModelProxy
@@ -509,10 +484,9 @@ class BasePeftQuantoModelTester:
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
         self._test_merge_layers_fp16(model_id, config_cls, config_kwargs)
 
-    # TODO: segfault
-    # @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    # def test_generate_half_prec(self, test_name, model_id, config_cls, config_kwargs):
-    #     self._test_generate_half_prec(model_id, config_cls, config_kwargs)
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_generate_half_prec(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_generate_half_prec(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     @pytest.mark.skip("Quanto raises an error when trying to convert the dtype, skipping test.")
