@@ -90,5 +90,21 @@ def is_hqq_available():
 
 
 @lru_cache
+def is_torchao_available():
+    if importlib.util.find_spec("torchao") is None:
+        return False
+
+    TORCHAO_MINIMUM_VERSION = packaging.version.parse("0.4.0")
+    torchao_version = packaging.version.parse(importlib_metadata.version("torchao"))
+
+    if torchao_version < TORCHAO_MINIMUM_VERSION:
+        raise ImportError(
+            f"Found an incompatible version of torchao. Found version {torchao_version}, "
+            f"but only versions above {TORCHAO_MINIMUM_VERSION} are supported"
+        )
+    return True
+
+
+@lru_cache
 def is_quanto_available():
     return importlib.util.find_spec("optimum.quanto") is not None

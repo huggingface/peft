@@ -12,7 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+import platform
 import re
+import subprocess
+import sys
 from contextlib import contextmanager
 from copy import deepcopy
 from unittest.mock import patch
@@ -20,12 +24,14 @@ from unittest.mock import patch
 import pytest
 import torch
 from huggingface_hub.utils import reset_sessions
+from safetensors.torch import load_file
 from scipy import stats
 from torch import nn
 from transformers import AutoModelForCausalLM
 
 from peft import (
     AdaLoraConfig,
+    IA3Config,
     LoraConfig,
     PeftMixedModel,
     PeftModel,
@@ -39,8 +45,11 @@ from peft import (
     VBLoRAConfig,
     VeraConfig,
     get_peft_model,
+    inject_adapter_in_model,
+    set_peft_model_state_dict,
 )
 from peft.utils import infer_device
+from peft.utils.hotswap import hotswap_adapter
 
 
 class TestLoraInitialization:
@@ -329,11 +338,14 @@ class TestLoraInitialization:
 
         # save the model with conversion
         peft_config_keys_before = list(peft_model.peft_config.keys())
+        peft_config_dict_before = peft_model.peft_config["default"].to_dict()
         peft_model.save_pretrained(
             tmp_path / "pissa-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
         )
         peft_config_keys_after = list(peft_model.peft_config.keys())
+        peft_config_dict_after = peft_model.peft_config["default"].to_dict()
         assert peft_config_keys_before == peft_config_keys_after
+        assert peft_config_dict_before == peft_config_dict_after
 
         model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "pissa-model-converted")
         output_converted = model_converted(data)[0]
@@ -607,11 +619,14 @@ class TestLoraInitialization:
 
         # save the model with conversion
         peft_config_keys_before = list(peft_model.peft_config.keys())
+        peft_config_dict_before = peft_model.peft_config["default"].to_dict()
         peft_model.save_pretrained(
             tmp_path / "olora-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
         )
         peft_config_keys_after = list(peft_model.peft_config.keys())
+        peft_config_dict_after = peft_model.peft_config["default"].to_dict()
         assert peft_config_keys_before == peft_config_keys_after
+        assert peft_config_dict_before == peft_config_dict_after
 
         model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "olora-model-converted")
         output_converted = model_converted(data)[0]
@@ -1330,3 +1345,505 @@ class TestCustomModelConfigWarning:
         get_peft_model(custom_module, LoraConfig(target_modules=["lin"], base_model_name_or_path=custom_name))
         msg = f"was renamed from '{custom_name}' to 'foobar'"
         assert any(msg in str(warning.message) for warning in recwarn.list)
+
+
+class TestLowCpuMemUsage:
+    """Test for the low CPU memory usage option for loading PEFT models.
+
+    Note that we have `test_load_model_low_cpu_mem_usage` in the custom model and stable diffusion tests. Those are
+    broad tests (i.e. testing all the supported PEFT methods) but not very deep (only testing if loading works and the
+    device is correctly set). The test class here goes deeper but only tests LoRA, as checking all PEFT methods would
+    be too much.
+
+    """
+
+    # test on CPU and optionally on accelerator device
+    devices = ["cpu"]
+    _device = infer_device()
+    if _device != "cpu":
+        devices.append(_device)
+
+    model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+
+    def get_model(self):
+        return AutoModelForCausalLM.from_pretrained(self.model_id)
+
+    @pytest.fixture(scope="class")
+    def lora_config(self):
+        return LoraConfig(init_lora_weights=False, target_modules="all-linear")
+
+    @pytest.fixture(scope="class")
+    def lora_path(self, tmp_path_factory, lora_config):
+        torch.manual_seed(0)
+        tmp_path = tmp_path_factory.mktemp("lora")
+        model = self.get_model()
+        model = get_peft_model(model, lora_config)
+        model.save_pretrained(tmp_path)
+        return tmp_path
+
+    @pytest.fixture(scope="class")
+    def inputs(self):
+        return {"input_ids": torch.randint(0, 100, (1, 10)), "attention_mask": torch.ones(1, 10)}
+
+    @pytest.mark.parametrize("device", devices)
+    def test_from_pretrained_low_cpu_mem_usage_works(self, device, inputs, lora_path):
+        model = self.get_model().to(device)
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+        model = PeftModel.from_pretrained(model, lora_path, torch_device=device).eval()
+        device_set_not_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_not_low_cpu_mem = model(**inputs).logits
+
+        del model
+
+        model = self.get_model().to(device)
+        model = PeftModel.from_pretrained(model, lora_path, low_cpu_mem_usage=True, torch_device=device).eval()
+        device_set_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_low_cpu_mem = model(**inputs).logits
+
+        assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+
+    @pytest.mark.parametrize("device", devices)
+    def test_load_adapter_low_cpu_mem_usage_works(self, device, inputs, lora_path, lora_config):
+        model = self.get_model().to(device)
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+
+        torch.manual_seed(0)
+        model = get_peft_model(model, lora_config)
+        model.load_adapter(lora_path, adapter_name="other", torch_device=device)
+        model.set_adapter("other")
+        model.eval()
+        device_set_not_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_not_low_cpu_mem = model(**inputs).logits
+
+        del model
+
+        model = self.get_model().to(device)
+        torch.manual_seed(0)
+        model = get_peft_model(model, lora_config)
+        model.load_adapter(lora_path, adapter_name="other", low_cpu_mem_usage=True, torch_device=device)
+        model.set_adapter("other")
+        model.eval()
+        device_set_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_low_cpu_mem = model(**inputs).logits
+
+        assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+
+    @pytest.mark.parametrize("device", devices)
+    def test_inject_adapter_low_cpu_mem_usage_works(self, device, inputs, lora_path, lora_config):
+        # external libs like transformers and diffusers use inject_adapter_in_model, let's check that this also works
+        model = self.get_model().to(device)
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+
+        torch.manual_seed(0)
+        model = get_peft_model(model, lora_config)
+        model.load_adapter(lora_path, adapter_name="other", torch_device=device)
+        model.set_adapter("other")
+        model.eval()
+        device_set_not_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_not_low_cpu_mem = model(**inputs).logits
+
+        del model
+
+        torch.manual_seed(0)
+        model = self.get_model().to(device)
+        inject_adapter_in_model(lora_config, model, low_cpu_mem_usage=True)
+        device_set_before_loading = {p.device.type for p in model.parameters()}
+        # at this stage, lora weights are still on meta device
+        assert device_set_before_loading == {"meta", device}
+
+        state_dict = load_file(lora_path / "adapter_model.safetensors")
+        remapped_dict = {}
+        prefix = "base_model.model."
+        for key, val in state_dict.items():
+            new_key = key[len(prefix) :]
+            remapped_dict[new_key] = val.to(device)
+        errors = set_peft_model_state_dict(model, remapped_dict, low_cpu_mem_usage=True)
+        # sanity check: no unexpected keys
+        assert not errors.unexpected_keys
+
+        model.eval()
+        device_set_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_low_cpu_mem = model(**inputs).logits
+
+        assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+
+    ############################
+    # tests for PeftMixedModel #
+    ############################
+
+    @pytest.mark.parametrize("device", devices)
+    def test_mixed_model_from_pretrained_low_cpu_mem_usage_works(self, device, inputs, lora_path):
+        model = self.get_model().to(device)
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+        model = PeftMixedModel.from_pretrained(model, lora_path, torch_device=device).eval()
+        device_set_not_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_not_low_cpu_mem = model(**inputs).logits
+
+        del model
+
+        model = self.get_model().to(device)
+        model = PeftMixedModel.from_pretrained(model, lora_path, low_cpu_mem_usage=True, torch_device=device).eval()
+        device_set_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_low_cpu_mem = model(**inputs).logits
+
+        assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+
+    @pytest.mark.parametrize("device", devices)
+    def test_mixed_model_load_adapter_low_cpu_mem_usage_works(self, device, inputs, lora_path, lora_config):
+        model = self.get_model().to(device)
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+
+        torch.manual_seed(0)
+        model = PeftModel.from_pretrained(model, lora_path)
+        model.load_adapter(lora_path, adapter_name="other", torch_device=device)
+        model.set_adapter("other")
+        model.eval()
+        device_set_not_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_not_low_cpu_mem = model(**inputs).logits
+
+        del model
+
+        model = self.get_model().to(device)
+        torch.manual_seed(0)
+        model = PeftModel.from_pretrained(model, lora_path)
+        model.load_adapter(lora_path, adapter_name="other", low_cpu_mem_usage=True, torch_device=device)
+        model.set_adapter("other")
+        model.eval()
+        device_set_low_cpu_mem = {p.device.type for p in model.parameters()}
+        logits_low_cpu_mem = model(**inputs).logits
+
+        assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+
+
+def test_from_pretrained_missing_keys_warning(recwarn, tmp_path):
+    # For more context, see issue 2115
+    # When loading a PEFT adapter and we're missing a PEFT-specific weight, there should be a warning.
+    model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+    config = LoraConfig()
+    model = get_peft_model(model, config)
+    state_dict = model.state_dict()
+
+    # first, sanity check that there are no warnings if no key is missing
+    model.save_pretrained(tmp_path)
+    del model
+    model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+    model = PeftModel.from_pretrained(model, tmp_path)
+    msg = "Found missing adapter keys"
+    assert not any(msg in str(w.message) for w in recwarn.list)
+
+    # remove a key from the state_dict
+    missing_key = "base_model.model.model.decoder.layers.0.self_attn.v_proj.lora_A.default.weight"
+
+    def new_state_dict():
+        return {k: v for k, v in state_dict.items() if k != missing_key}
+
+    model.state_dict = new_state_dict
+    model.save_pretrained(tmp_path)
+    del model
+
+    model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+    model = PeftModel.from_pretrained(model, tmp_path)
+    assert any(msg in str(w.message) for w in recwarn.list)
+    assert any(missing_key in str(w.message) for w in recwarn.list)
+
+
+@pytest.mark.skipif(
+    platform.system() != "Linux", reason="Out of the box, torch.compile does not work on Windows or MacOS"
+)
+class TestHotSwapping:
+    """Tests for the hotswapping function"""
+
+    torch_device = infer_device()
+
+    def compile(self, model, do_compile):
+        if not do_compile:
+            return model
+        return torch.compile(model)
+
+    def get_model(self):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 20, bias=True)
+                self.relu = nn.ReLU()
+                self.lin1 = nn.Linear(20, 5, bias=False)
+
+            def forward(self, X):
+                X = X.float()
+                X = self.lin0(X)
+                X = self.relu(X)
+                X = self.lin1(X)
+                return X
+
+        torch.manual_seed(0)
+        return MLP().to(self.torch_device)
+
+    # this works with all adapters except prompt learning, but we don't test all
+    # as it is unnecessary and would be slow
+    @pytest.mark.parametrize(
+        "config",
+        [
+            LoraConfig(init_lora_weights=0, target_modules=["lin0"]),
+            LoraConfig(init_lora_weights=0, target_modules=["lin0", "lin1"]),
+        ],
+    )
+    @pytest.mark.parametrize("do_compile", [False, True])
+    def test_hotswap_works(self, config, do_compile, tmp_path):
+        # Load 2 different adapters and check that we can hotswap between them, with the model optionally being
+        # compiled.
+        atol, rtol = 1e-4, 1e-4
+        inputs = torch.rand(3, 10).to(self.torch_device)
+
+        # create adapter 0
+        model = self.get_model()
+        torch.manual_seed(0)
+        model = get_peft_model(model, config)
+        model = self.compile(model, do_compile=do_compile)
+        model.eval()
+        with torch.inference_mode():
+            output0 = model(inputs)
+        model.save_pretrained(tmp_path / "adapter0")
+
+        del model
+
+        # create adapter 1
+        model = self.get_model()
+        torch.manual_seed(1)
+        model = get_peft_model(model, config)
+        model = self.compile(model, do_compile=do_compile)
+        model.eval()
+        with torch.inference_mode():
+            output1 = model(inputs)
+        model.save_pretrained(tmp_path / "adapter1")
+
+        # sanity check: they're not the same
+        assert not torch.allclose(output0, output1, atol=atol, rtol=rtol)
+
+        del model
+
+        # load adapter 0
+        model = self.get_model()
+        model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
+        model = self.compile(model, do_compile=do_compile)
+        with torch.inference_mode():
+            output_loaded0 = model(inputs)
+
+        # sanity check: same output after loading for adapter 0
+        assert torch.allclose(output0, output_loaded0, atol=atol, rtol=rtol)
+
+        # hotswap with adapter 1
+        hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+        with torch.inference_mode():
+            output_loaded1 = model(inputs)
+
+        # real check: model now behaves like adapter 1
+        assert torch.allclose(output1, output_loaded1, atol=atol, rtol=rtol)
+
+        # hotswap back to adapter 0
+        hotswap_adapter(model, tmp_path / "adapter0", adapter_name="default")
+        with torch.inference_mode():
+            output_loaded_back0 = model(inputs)
+
+        # real check: model now behaves again like adapter 0
+        assert torch.allclose(output0, output_loaded_back0, atol=atol, rtol=rtol)
+
+    def test_hotswap_incompatible_config_params_raises(self, tmp_path):
+        # When the configs of the two adapters are incompatible, an error is raised
+        config0 = LoraConfig(target_modules=["lin0"], lora_alpha=1.0)
+        config1 = LoraConfig(target_modules=["lin0"], lora_alpha=2.0)
+
+        model = self.get_model()
+        model = get_peft_model(model, config0)
+        model.save_pretrained(tmp_path / "adapter0")
+        del model
+
+        model = self.get_model()
+        model = get_peft_model(model, config1)
+        model.save_pretrained(tmp_path / "adapter1")
+        del model
+
+        # load adapter 0
+        model = self.get_model()
+        model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
+
+        msg = r"Configs are incompatible: for lora_alpha, 1.0 != 2.0"
+        with pytest.raises(ValueError, match=msg):
+            hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+
+    def test_hotswap_different_peft_types_raises(self, tmp_path):
+        # When the configs of the two adapters are different PEFT methods, raise
+        config0 = LoraConfig(target_modules=["lin0"])
+        config1 = IA3Config(target_modules=["lin0"], feedforward_modules=[])
+
+        model = self.get_model()
+        model = get_peft_model(model, config0)
+        model.save_pretrained(tmp_path / "adapter0")
+        del model
+
+        model = self.get_model()
+        model = get_peft_model(model, config1)
+        model.save_pretrained(tmp_path / "adapter1")
+        del model
+
+        # load adapter 0
+        model = self.get_model()
+        model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
+
+        msg = r"Incompatible PEFT types found: LORA and IA3"
+        with pytest.raises(ValueError, match=msg):
+            hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+
+    def test_hotswap_wrong_peft_types_raises(self, tmp_path):
+        # Only LoRA is supported at the moment
+        config0 = IA3Config(target_modules=["lin0"], feedforward_modules=[])
+        config1 = IA3Config(target_modules=["lin0"], feedforward_modules=[])
+
+        model = self.get_model()
+        model = get_peft_model(model, config0)
+        model.save_pretrained(tmp_path / "adapter0")
+        del model
+
+        model = self.get_model()
+        model = get_peft_model(model, config1)
+        model.save_pretrained(tmp_path / "adapter1")
+        del model
+
+        # load adapter 0
+        model = self.get_model()
+        model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
+
+        msg = r"Hotswapping only supports LORA but IA3 was passed"
+        with pytest.raises(ValueError, match=msg):
+            hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+
+    def test_hotswap_missing_key_raises(self, tmp_path):
+        # When a key is missing, raise
+        config = LoraConfig(target_modules=["lin0", "lin1"])
+
+        model = self.get_model()
+        model = get_peft_model(model, config)
+        model.save_pretrained(tmp_path / "adapter0")
+        del model
+
+        model = self.get_model()
+        model = get_peft_model(model, config)
+
+        # remove one key from the state_dict
+        key = "base_model.model.lin1.lora_A.default.weight"
+        state_dict = model.state_dict()
+        del state_dict[key]
+        model.state_dict = lambda: state_dict
+        model.save_pretrained(tmp_path / "adapter1")
+        del model
+
+        # load adapter 0
+        model = self.get_model()
+        model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
+
+        msg = f"Hot swapping the adapter did not succeed. Missing keys: {key}"
+        with pytest.raises(RuntimeError, match=msg):
+            hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+
+    def test_hotswap_extra_key_raises(self, tmp_path):
+        # When there is an extra key, raise
+        config = LoraConfig(target_modules=["lin0"])
+
+        model = self.get_model()
+        model = get_peft_model(model, config)
+        model.save_pretrained(tmp_path / "adapter0")
+        del model
+
+        model = self.get_model()
+        model = get_peft_model(model, config)
+
+        # add an unexpected key
+        state_dict = model.state_dict()
+        new_key = "base_model.model.lin1.lora_A.default.weight"
+        state_dict[new_key] = torch.zeros(8, 20)
+        model.state_dict = lambda: state_dict
+        model.save_pretrained(tmp_path / "adapter1")
+        del model
+
+        # load adapter 0
+        model = self.get_model()
+        model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
+
+        msg = f"Hot swapping the adapter did not succeed. Unexpected keys: {new_key}"
+        with pytest.raises(RuntimeError, match=msg):
+            hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+
+    def test_hotswapping_compiled_model_does_not_trigger_recompilation(self):
+        env = os.environ.copy()
+        env["TORCH_LOGS"] = "guards,recompiles"
+        here = os.path.dirname(__file__)
+        file_name = os.path.join(here, "run_compiled_model_hotswap.py")
+
+        process = subprocess.Popen(
+            [sys.executable, file_name, "1"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
+        # Communicate will read the output and error streams, preventing deadlock
+        stdout, stderr = process.communicate()
+        exit_code = process.returncode
+
+        # sanity check:
+        assert exit_code == 0
+
+        # check that the recompilation message is not present
+        assert "__recompiles" not in stderr.decode()
+
+        # contingency check: without hotswapping, we *do* get recompilation
+        process = subprocess.Popen(
+            [sys.executable, file_name, "0"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
+        # Communicate will read the output and error streams, preventing deadlock
+        stdout, stderr = process.communicate()
+        exit_code = process.returncode
+
+        # sanity check:
+        assert exit_code == 0
+
+        # check that the recompilation message is not present
+        assert "__recompiles" in stderr.decode()
+
+    @pytest.mark.xfail(strict=True, reason="Requires hotswap to be implemented in diffusers")
+    def test_hotswapping_compiled_diffusion_model_does_not_trigger_recompilation(self):
+        env = os.environ.copy()
+        env["TORCH_LOGS"] = "guards,recompiles"
+        here = os.path.dirname(__file__)
+        file_name = os.path.join(here, "run_compiled_diffusion_model_hotswap.py")
+
+        process = subprocess.Popen(
+            [sys.executable, file_name, "1"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
+        # Communicate will read the output and error streams, preventing deadlock
+        stdout, stderr = process.communicate()
+        exit_code = process.returncode
+
+        # sanity check:
+        assert exit_code == 0
+
+        # check that the recompilation message is not present
+        assert "__recompiles" not in stderr.decode()
+
+        # contingency check: without hotswapping, we *do* get recompilation
+        process = subprocess.Popen(
+            [sys.executable, file_name, "0"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
+        # Communicate will read the output and error streams, preventing deadlock
+        stdout, stderr = process.communicate()
+        exit_code = process.returncode
+
+        # sanity check:
+        assert exit_code == 0
+
+        # check that the recompilation message is not present
+        assert "__recompiles" in stderr.decode()

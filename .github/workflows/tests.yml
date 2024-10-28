@@ -17,7 +17,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.8"
+          python-version: "3.11"
           cache: "pip"
           cache-dependency-path: "setup.py"
       - name: Install dependencies
@@ -34,7 +34,7 @@ jobs:
       # TODO: remove 'fail-fast' line once timeout issue from the Hub is solved
       fail-fast: false
       matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.11"]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
         os: ["ubuntu-latest", "macos-12", "windows-latest"]
     runs-on: ${{ matrix.os }}
     steps:
@@ -48,6 +48,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          pip install setuptools
           # cpu version of pytorch
           pip install -e .[test]
       - name: Downgrade numpy on MacOS and Windows
