@@ -455,18 +455,17 @@ class BasePeftQuantoModelTester:
         logits_merged_from_pretrained = model_from_pretrained(**dummy_input)[0]
         self.check_tensors_approximately_equal(logits, logits_merged_from_pretrained)
 
-    # TODO: enable if/when mixed batch inference is supported
-    # @parameterized.expand(
-    #     PeftTestConfigManager.get_grid_parameters(
-    #         {
-    #             "model_ids": PEFT_DECODER_MODELS_TO_TEST,
-    #             "lora_kwargs": {"init_lora_weights": [False]},
-    #             "task_type": "CAUSAL_LM",
-    #         },
-    #     )
-    # )
-    # def test_mixed_adapter_batches(self, test_name, model_id, config_cls, config_kwargs):
-    #     self._test_mixed_adapter_batches(model_id, config_cls, config_kwargs)
+    @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_DECODER_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False]},
+                "task_type": "CAUSAL_LM",
+            },
+        )
+    )
+    def test_mixed_adapter_batches(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_mixed_adapter_batches(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_generate(self, test_name, model_id, config_cls, config_kwargs):

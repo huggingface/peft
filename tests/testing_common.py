@@ -20,6 +20,7 @@ import shutil
 import tempfile
 import warnings
 from collections import OrderedDict
+from contextlib import nullcontext
 from dataclasses import replace
 
 import pytest
@@ -868,6 +869,8 @@ class PeftCommonTester:
         if config_cls not in (LoraConfig,):
             return pytest.skip(f"Mixed adapter batches not supported for {config_cls}")
 
+        from transformers.quantizers.quantizer_quanto import QuantoHfQuantizer
+
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -883,18 +886,27 @@ class PeftCommonTester:
         # ensure that we have at least 3 samples for this test
         dummy_input = {k: torch.cat([v for _ in range(3)]) for k, v in dummy_input.items()}
 
-        with torch.inference_mode():
+        # Using quanto with inference model raises an error:
+        # > RuntimeError: Cannot set version_counter for inference tensor
+        # https://github.com/huggingface/optimum-quanto/issues/304
+        # TODO: remove when/if this is fixed
+        if isinstance(getattr(model, "hf_quantizer", None), QuantoHfQuantizer):
+            inference_mode = nullcontext
+        else:
+            inference_mode = torch.inference_mode
+
+        with inference_mode():
             with model.disable_adapter():
                 output_base = model(**dummy_input)[0]
                 logits_base = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
 
         model.set_adapter("adapter0")
-        with torch.inference_mode():
+        with inference_mode():
             output_adapter0 = model(**dummy_input)[0]
             logits_adapter0 = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
 
         model.set_adapter("adapter1")
-        with torch.inference_mode():
+        with inference_mode():
             output_adapter1 = model(**dummy_input)[0]
             logits_adapter1 = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
 
@@ -913,7 +925,7 @@ class PeftCommonTester:
         adapters = ["__base__", "adapter0", "adapter1"]
         dummy_input["adapter_names"] = [adapters[i % 3] for i in (range(len(dummy_input["input_ids"])))]
 
-        with torch.inference_mode():
+        with inference_mode():
             output_mixed = model(**dummy_input)[0]
             logits_mixed = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
 
