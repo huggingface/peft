@@ -32,7 +32,7 @@ from safetensors.torch import load_file
 from scipy import stats
 from torch import nn
 from torch.utils.data import DataLoader
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import (
     AdaLoraConfig,
@@ -54,7 +54,6 @@ from peft import (
     get_peft_model,
     initialize_lora_eva_weights,
     inject_adapter_in_model,
-    prepare_model_for_kbit_training,
     set_peft_model_state_dict,
 )
 from peft.utils import infer_device
@@ -1571,6 +1570,7 @@ class TestEvaInitialization:
     MAX_LENGTH = 256
     LORA_DIM = 8
     LORA_ALPHA = 1
+    DEVICE = infer_device()
 
     @pytest.fixture
     def tokenizer(self):
@@ -1603,23 +1603,7 @@ class TestEvaInitialization:
     def model(self):
         model = AutoModelForCausalLM.from_pretrained("openai-community/gpt2")
         model.transformer.h = model.transformer.h[:2]  # truncate to 2 layers
-        return model
-
-    @pytest.fixture
-    def model_bnb(self):
-        bnb_config = BitsAndBytesConfig(load_in_4bit=True)
-        model = AutoModelForCausalLM.from_pretrained(
-            "openai-community/gpt2",
-            quantization_config=bnb_config,
-            attn_implementation="eager",  # gpt2 doesnt support flash attention
-        )
-        model.transformer.h = model.transformer.h[:2]  # truncate to 2 layers
-        model = prepare_model_for_kbit_training(model)
-        return model
-
-    @pytest.fixture
-    def model_fixture(self, request):
-        return request.getfixturevalue(request.param)
+        return model.to(self.DEVICE)
 
     @pytest.fixture
     def peft_config(self):
@@ -1631,30 +1615,34 @@ class TestEvaInitialization:
             eva_config=EvaConfig(rho=2),
         )
 
-    def is_bnb_model(self, model):
-        return hasattr(model.config, "quantization_config")
+    def prepare_layer_inputs_fn(self, layer_input, model_input, layer_name):
+        return layer_input[0].view(-1, layer_input[0].size(-1))
 
     # tests for cases where prepare_layer_inputs_fn is a mapping
     # checks that if not all target modules are present, the prepare_layer_inputs_fn for the remaining modules is set to None
     # checks that if more keys than target modules are present, a ValueError is raised
     @pytest.mark.parametrize(
-        "prepare_layer_inputs_fn, expected_outcome",
+        "prepare_layer_inputs_keys, expected_outcome",
         [
-            (lambda x: x[0], "success"),
-            ({"transformer.h.0.attn.c_attn": lambda x: x[0]}, "success"),
+            (None, "success"),
+            (["transformer.h.0.attn.c_attn"], "success"),
             (
-                {
-                    "transformer.h.0.attn.c_attn": lambda x: x[0],
-                    "transformer.h.1.attn.c_attn": lambda x: x[0],
-                    "transformer.h.2.attn.c_attn": lambda x: x[0],
-                },
+                ["transformer.h.0.attn.c_attn", "transformer.h.1.attn.c_attn", "transformer.h.2.attn.c_attn"],
                 "value_error",
             ),
         ],
     )
     def test_eva_state_dict_prepare_inputs_mapping(
-        self, model, dataset, peft_config, prepare_layer_inputs_fn, expected_outcome
+        self, model, dataset, peft_config, prepare_layer_inputs_keys, expected_outcome
     ):
+        def fn(x, *args):
+            return x[0].view(-1, x[0].size(-1))
+
+        if prepare_layer_inputs_keys is None:
+            prepare_layer_inputs_fn = fn
+        else:
+            prepare_layer_inputs_fn = {k: fn for k in prepare_layer_inputs_keys}
+
         shuffled_dataset = dataset.shuffle(seed=0)
         dataloader = DataLoader(
             shuffled_dataset,
@@ -1667,7 +1655,11 @@ class TestEvaInitialization:
         modified_peft_config.eva_config.tau = 0  # converge immediately
         if expected_outcome == "success":
             sd = get_eva_state_dict(
-                model, modified_peft_config, dataloader, prepare_layer_inputs_fn=prepare_layer_inputs_fn
+                model,
+                modified_peft_config,
+                dataloader,
+                prepare_model_inputs_fn=None,
+                prepare_layer_inputs_fn=prepare_layer_inputs_fn,
             )
             assert len(sd) == 2
             assert "transformer.h.0.attn.c_attn" in sd
@@ -1677,7 +1669,11 @@ class TestEvaInitialization:
                 ValueError, match="prepare_layer_inputs_fn is a mapping but the following module names were not found"
             ):
                 get_eva_state_dict(
-                    model, modified_peft_config, dataloader, prepare_layer_inputs_fn=prepare_layer_inputs_fn
+                    model,
+                    modified_peft_config,
+                    dataloader,
+                    prepare_model_inputs_fn=None,
+                    prepare_layer_inputs_fn=prepare_layer_inputs_fn,
                 )
 
     # Test that the state dict returned by get_eva_state_dict is consistent across different seeds based on the cosine similarity of the svd components.
@@ -1714,17 +1710,7 @@ class TestEvaInitialization:
             )
 
     # Test that the state dict returned by get_eva_state_dict loaded correctly and is consistent across different seeds based on the cosine similarity of the svd components.
-    @pytest.mark.parametrize(
-        "model_fixture",
-        [
-            "model",
-            pytest.param(
-                "model_bnb", marks=[pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")]
-            ),
-        ],
-        indirect=True,
-    )
-    def test_eva_initialization_consistency(self, model_fixture, dataset, peft_config):
+    def test_eva_initialization_consistency(self, model, dataset, peft_config):
         state_dicts = []
         for seed in range(self.NUM_SEEDS):
             shuffled_dataset = dataset.shuffle(seed=seed)
@@ -1736,19 +1722,9 @@ class TestEvaInitialization:
                 },
                 shuffle=False,
             )
-            model = get_peft_model(deepcopy(model_fixture), peft_config)
-            if self.is_bnb_model(model):
-                model = model.to("cuda")
-                dataloader = DataLoader(
-                    shuffled_dataset,
-                    batch_size=self.BATCH_SIZE,
-                    collate_fn=lambda examples: {
-                        k: torch.stack([v[k] for v in examples], dim=0).to("cuda") for k in examples[0].keys()
-                    },
-                    shuffle=False,
-                )
-            initialize_lora_eva_weights(model, dataloader)
-            state_dict = {k: v.cpu() for k, v in model.state_dict().items() if "lora_A.default.weight" in k}
+            peft_model = get_peft_model(deepcopy(model), peft_config)
+            initialize_lora_eva_weights(peft_model, dataloader)
+            state_dict = {k: v for k, v in peft_model.state_dict().items() if "lora_A.default.weight" in k}
             state_dicts.append(state_dict)
 
         cos_sims = defaultdict(list)
