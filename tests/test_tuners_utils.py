@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -92,6 +89,10 @@ REGEX_TEST_CASES = [
     ("foo.bar.1.baz", ["baz"], [0, 1, 2], ["bar"], True),
     ("foo.bar.1.baz", ["baz", "spam"], [1], ["bar"], True),
     ("foo.bar.1.baz", ["baz", "spam"], [0, 1, 2], ["bar"], True),
+    ("bar.1.baz", ["baz"], [0, 2], ["bar"], False),
+    ("bar.1.baz", ["baz"], [0, 1, 2], ["foo"], False),
+    ("bar.1.baz", ["baz"], [0, 2], ["bar"], False),
+    ("bar.1.baz", ["baz"], [0, 1, 2], ["bar"], True),
     # empty layers_to_transform
     ("foo.bar.7.baz", ["baz"], [], ["bar"], True),
     ("foo.bar.7.baz", ["baz"], None, ["bar"], True),
@@ -119,14 +120,11 @@ REGEX_TEST_CASES = [
     # is one of the target nn.modules
     ("foo.bar.1.baz", ["baz"], [1], ["baz"], False),
     # here, layers_pattern is 'bar', but only keys that contain '.bar' are valid.
-    ("bar.1.baz", ["baz"], [1], ["bar"], False),
     ("foo.bar.001.baz", ["baz"], [1], ["bar"], True),
     ("foo.bar.1.spam.2.baz", ["baz"], [1], ["bar"], True),
     ("foo.bar.2.spam.1.baz", ["baz"], [1], ["bar"], False),
     # some realistic examples: module using nn.Sequential
     # for the below test case, key should contain '.blocks' to be valid, because of how layers_pattern is matched
-    ("blocks.1.weight", ["weight"], [1], ["blocks"], False),
-    ("blocks.1.bias", ["weight"], [1], ["blocks"], False),
     ("mlp.blocks.1.weight", ["weight"], [1], ["blocks"], True),
     ("mlp.blocks.1.bias", ["weight"], [1], ["blocks"], False),
 ]
