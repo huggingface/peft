@@ -15,6 +15,7 @@
 import warnings
 from collections import Counter, defaultdict
 from collections.abc import Mapping
+from copy import deepcopy
 from itertools import cycle
 from typing import Dict, Iterable, Optional, Union
 
@@ -40,21 +41,30 @@ class _Hook:
     def __init__(self, name: str, prepare_layer_inputs_fn: Optional[callable] = None):
         self.name = name
         if prepare_layer_inputs_fn is None:
-            self.prepare_layer_inputs_fn = self._prepare_layer_inputs_fn_default
+            self._prepare_layer_inputs_fn = self._prepare_layer_inputs_fn_default
         else:
-            self.prepare_layer_inputs_fn = prepare_layer_inputs_fn
+            self._prepare_layer_inputs_fn = prepare_layer_inputs_fn
+        self.model_input = None
 
     @staticmethod
-    def _prepare_layer_inputs_fn_default(inputs) -> torch.Tensor:
-        if isinstance(inputs, torch.Tensor):
-            return inputs
-        elif isinstance(inputs, (tuple, list)):
-            return inputs[0]
+    def _prepare_layer_inputs_fn_default(layer_input, model_input, layer_name) -> torch.Tensor:
+        if isinstance(layer_input, torch.Tensor):
+            pass
+        elif isinstance(layer_input, (tuple, list)):
+            layer_input = layer_input[0]
         else:
             raise ValueError(
-                f"unsupported input type for prepare_layer_inputs_fn: {type(inputs)}, "
+                f"unsupported input type {type(layer_input)} for prepare_layer_inputs_fn in layer {layer_name}, "
                 "please provide a custom prepare_layer_inputs_fn"
             )
+        # if the input has more than 2 dimensions, we flatten all but the last dimension
+        if layer_input.ndim > 2:
+            layer_input = layer_input.view(-1, layer_input.size(-1))
+        return layer_input
+
+    @torch.no_grad()
+    def prepare_layer_inputs(self, input):
+        return self._prepare_layer_inputs_fn(input, self.model_input, self.name)
 
 
 class SVDHook(_Hook):
@@ -83,7 +93,6 @@ class SVDHook(_Hook):
         super().__init__(name, prepare_layer_inputs_fn)
         self.n_components = n_components
         self.sim_thresh = sim_thresh
-
         if isinstance(sim_thresh, torch.Tensor) and len(sim_thresh.shape) > 0:
             check1 = sim_thresh.size(0) == n_components or sim_thresh.size(0) == 1
             check2 = len(sim_thresh.shape) == 1
@@ -91,30 +100,21 @@ class SVDHook(_Hook):
                 raise ValueError(
                     "if sim_thresh is a tensor with more than 0 dimensions it must have shape (n_components,) or (1,)"
                 )
-
         self.svd = IncrementalPCA(n_components=n_components, copy=True, lowrank=True)
-
-        self.indices = None
+        self.model_input = None
         self.converged = torch.zeros((n_components,), dtype=torch.bool)
 
+    @torch.no_grad()
     def __call__(self, model, input, output):
         previous_components = None
         if hasattr(self.svd, "components_"):
             previous_components = self.svd.components_.clone().detach()
-
-        states = self.prepare_layer_inputs_fn(input).detach()
-
-        # merging all but last dimension
-        if self.indices is not None:
-            states = states[self.indices]
-
+        states = self.prepare_layer_inputs(input)
         # check if batch sizes is more than the number of components
         if states.size(0) < self.n_components:
             print(f"skipping SVD for {self.name} because there are less than {self.n_components} examples")
             return
-
         self.svd.partial_fit(states.to(torch.float32))
-
         # add if statement to check if we are in the first step where previous_components is None
         if previous_components is None:
             return
@@ -154,8 +154,9 @@ class HashHook(_Hook):
     def hash_fn(tensor):
         return hash(tuple(tensor.view(-1).tolist()))
 
+    @torch.no_grad()
     def __call__(self, model, input, output):
-        x = self.prepare_layer_inputs_fn(input).detach().cpu()
+        x = self.prepare_layer_inputs(input).cpu()
         self.hashed_inputs.append(self.hash_fn(x))
 
 
@@ -215,17 +216,48 @@ def move_inputs_to_device(inputs, device: Union[str, torch.device]):
         raise ValueError(f"unsupported input type: {type(inputs)}")
 
 
-def get_indices_fn_causal_lm(inputs: dict, peft_config: LoraConfig):
+def prepare_model_inputs_fn_language_modeling(model_input, peft_config: LoraConfig):
+    """
+    Get the indices of the items that should be used for SVD.
+
+    Attributes:
+        model_input (dict): The model inputs.
+        peft_config (LoraConfig): The configuration for the LoRA layers.
+    """
+    if not isinstance(model_input, dict):
+        raise ValueError("When using `prepare_model_inputs_fn_language_modeling` inputs must be a dictionary")
+    mask = model_input.get("attention_mask", torch.ones_like(model_input["input_ids"])).bool()
+    if peft_config.eva_config.use_label_mask and hasattr(model_input, "labels"):
+        mask = torch.logical_and(mask, model_input["labels"] != peft_config.eva_config.label_mask_value)
+    return mask.nonzero()
+
+
+def prepare_layer_inputs_fn_language_modeling(layer_input, model_input, layer_name) -> torch.Tensor:
     """
     if not all items in the input should be used for SVD, this function can be used to get the indices of the items
-    that should be used
+    that should be used.
+
+    Attributes:
+        layer_input (torch.Tensor): The layer inputs.
+        model_input (torch.Tensor):
+            The model inputs or if `prepare_model_inputs_fn` is not None the output of this function.
+        layer_name (str): The name of the layer.
+
+    Returns:
+        torch.Tensor: The input to the SVD.
     """
-    if not isinstance(inputs, dict):
-        raise ValueError("When using `get_indices_fn_causal_lm` inputs must be a dictionary")
-    mask = inputs.get("attention_mask", torch.ones_like(inputs["input_ids"])).bool()
-    if peft_config.eva_config.use_label_mask and hasattr(inputs, "labels"):
-        mask = torch.logical_and(mask, inputs["labels"] != peft_config.eva_config.label_mask_value)
-    return mask.nonzero()
+    # if layer inputs are not a tensor, we simply get the first item
+    if isinstance(layer_input, torch.Tensor):
+        pass
+    elif isinstance(layer_input, (tuple, list)):
+        layer_input = layer_input[0]
+    else:
+        raise ValueError(
+            f"unsupported input type {type(layer_input)} for prepare_layer_inputs_fn in layer {layer_name}, "
+            "please provide a custom prepare_layer_inputs_fn"
+        )
+    # in this case model_input is the output of `prepare_model_inputs_fn_language_modeling`
+    return layer_input[model_input.T.unbind()]
 
 
 def forward_fn_dict(model, inputs):
@@ -238,8 +270,8 @@ def get_eva_state_dict(
     peft_config: LoraConfig,
     dataloader: Iterable,
     forward_fn: Optional[callable] = forward_fn_dict,
-    get_indices_fn: Optional[callable] = get_indices_fn_causal_lm,
-    prepare_layer_inputs_fn: Union[callable, Dict[str, callable], None] = None,
+    prepare_model_inputs_fn: Optional[callable] = prepare_model_inputs_fn_language_modeling,
+    prepare_layer_inputs_fn: Union[callable, Dict[str, callable], None] = prepare_layer_inputs_fn_language_modeling,
     show_progress_bar: bool = True,
 ) -> dict:
     """
@@ -258,27 +290,35 @@ def get_eva_state_dict(
             ```
             return model(**inputs)
             ```
-        get_indices_fn (Optional[callable]):
-            The function to use if not all positions in the input tensor should be used for SVD (e.g. for causal
-            language modeling). Can be set to None if all positions should be used. This function is applied to the
-            model inputs and used for all layers. `peft.tuners.lora.eva.get_indices_fn_causal_lm` is used by default.
-            Should always return a tensor of shape (n_indices, layer_input.ndim-1). Default logic:
+        prepare_model_inputs_fn (Optional[callable]):
+            This function recieves the model inputs and the peft_config and passes the output to
+            `prepare_layer_inputs_fn`. Can be used to modify the input to the SVD computation based on the original
+            model inputs. For example for language modeling the attention mask is used to determine which indices are
+            padding tokens and should not be used for SVD.
+            `peft.tuners.lora.eva.prepare_model_inputs_fn_language_modeling` is used by default. Any function defined
+            here expects two arguments: `model_input` and `peft_config` and should return a 2d tensor. Default logic:
             ```
-            mask = inputs.get("attention_mask", torch.ones_like(inputs["input_ids"])).bool()
-            if peft_config.eva_config.use_label_mask and hasattr(inputs, "labels"):
-                mask = torch.logical_and(mask, inputs["labels"] != peft_config.eva_config.label_mask_value)
-            return mask.nonzero()
+            def prepare_model_inputs_fn_language_modeling(model_input, peft_config: LoraConfig):
+                mask = model_input.get("attention_mask", torch.ones_like(model_input["input_ids"])).bool()
+                if peft_config.eva_config.use_label_mask and hasattr(model_input, "labels"):
+                    mask = torch.logical_and(mask, model_input["labels"] != peft_config.eva_config.label_mask_value)
+                return mask.nonzero()
             ```
         prepare_layer_inputs_fn (Union[callable, Dict[str, callable], None]):
-            If a layer receives multiple inputs as a list, per default the first input is used. This function can be
-            used to modify this behaviour. Accepts a dictionary with layer names as keys. Default logic:
+            This function recieves the layer inputs, the model inputs (potentially modified by
+            `prepare_model_inputs_fn`) and the name of the layer and returns the inputs that should be used for SVD.
+            When set to None and a layer receives multiple inputs as a list, per default the first input is used. The
+            default settings works for language modeling and model_inputs is the mask used to determine which indices
+            should be used for SVD (created by `prepare_model_inputs_fn_language_modeling`). Default logic:
             ```
-            if isinstance(inputs, torch.Tensor):
-                return inputs
-            elif isinstance(inputs, (tuple, list)):
-                return inputs[0]
-            else:
-                raise ValueError(...)
+            def prepare_layer_inputs_fn_language_modeling(layer_input, model_input, layer_name) -> torch.Tensor:
+                if isinstance(layer_input, torch.Tensor):
+                    return layer_input[model_input.T.unbind()]
+                elif isinstance(layer_input, (tuple, list)):
+                    return layer_input[model_input.T.unbind()][0]
+                else:
+                    raise ValueError(...)
+                return layer_input[model_input.T.unbind()]
             ```
         show_progress_bar (bool): Whether to show a progress bar. Default is True.
 
@@ -306,7 +346,6 @@ def get_eva_state_dict(
 
         def _check_fn(name, module):
             return hasattr(module, "base_layer") and module not in UNSUPPORTED_LORA_MODULES
-
     else:
 
         def _check_fn(name, module):
@@ -320,6 +359,14 @@ def get_eva_state_dict(
     device = get_device_with_meta_params(model)
     model.eval()
 
+    # get model inputs
+    inputs = next(iter(dataloader))
+    inputs = move_inputs_to_device(inputs, device)
+    if prepare_model_inputs_fn is not None:
+        model_inputs_for_hooks = prepare_model_inputs_fn(inputs, peft_config)
+    else:
+        model_inputs_for_hooks = deepcopy(inputs)
+
     hooks = {}
     for name, module in model.named_modules():
         if not _check_fn(name, module):
@@ -329,23 +376,23 @@ def get_eva_state_dict(
         else:
             fn = prepare_layer_inputs_fn
         hook = HashHook(name, fn)
+        hook.model_input = model_inputs_for_hooks
         handle = module.register_forward_hook(hook)
         hooks[name] = (hook, handle)
-
     if isinstance(prepare_layer_inputs_fn, Mapping) and len(prepare_layer_inputs_fn) > 0:
         raise ValueError(
-            f"prepare_layer_inputs_fn is a mapping but the following module names were not found: {prepare_layer_inputs_fn.keys()}"
+            f"prepare_layer_inputs_fn is a mapping but the following module names were not found in the model: {prepare_layer_inputs_fn.keys()}"
         )
 
-    rank_budget = peft_config.r * len(hooks)
-    max_components = round(peft_config.r * peft_config.eva_config.rho)
-
     # forward for one batch to check which layer inputs are equal to avoid unneeded svd calculations
-    inputs = next(iter(dataloader))
-    forward_fn(model, move_inputs_to_device(inputs, device))
+    forward_fn(model, inputs)
     hash_dict = {k: h[0].hashed_inputs[0] for k, h in hooks.items()}
     # equal input maps groups layers which recieve the same input. One layer is defined as the key and recieves an svd hook. For the remaining layers the svd results can be skipped.
     equal_inputs_map = {vv: v[0] for v in find_equal_values(hash_dict).values() for vv in v[1:]}
+
+    # define rank budget and max components
+    rank_budget = peft_config.r * len(hooks)
+    max_components = round(peft_config.r * peft_config.eva_config.rho)
 
     # initialize svd hooks
     for name in list(hooks.keys()):
@@ -353,7 +400,7 @@ def get_eva_state_dict(
         handle.remove()
         if name in equal_inputs_map:
             continue
-        hook = SVDHook(name, max_components, peft_config.eva_config.tau, hook.prepare_layer_inputs_fn)
+        hook = SVDHook(name, max_components, peft_config.eva_config.tau, hook._prepare_layer_inputs_fn)
         module = model.get_submodule(name)
         handle = module.register_forward_hook(hook)
         hooks[name] = (hook, handle)  # adding the old handle here so we dont get errors in the first forward pass
@@ -367,9 +414,11 @@ def get_eva_state_dict(
     convergence_dict = {k: False for k in hooks.keys()}
     rank_dist = {k: max_components for k in layer_hook_map.keys()}
     for inputs in pbar:
-        indices = None
-        if get_indices_fn is not None:
-            indices = get_indices_fn(inputs, peft_config)
+        inputs = move_inputs_to_device(inputs, device)
+        if prepare_model_inputs_fn is not None:
+            model_inputs_for_hooks = prepare_model_inputs_fn(inputs, peft_config)
+        else:
+            model_inputs_for_hooks = deepcopy(inputs)
 
         for name in list(hooks.keys()):
             hook, handle = hooks[name]
@@ -386,7 +435,7 @@ def get_eva_state_dict(
                 module = model.get_submodule(name)
                 handle = module.register_forward_hook(hook)
                 convergence_dict[name] = False
-            hook.indices = indices.T.unbind()
+            hook.model_input = model_inputs_for_hooks
             hooks[name] = (hook, handle)
 
         if show_progress_bar:
@@ -398,7 +447,7 @@ def get_eva_state_dict(
         if all(convergence_dict.values()):
             break
 
-        forward_fn(model, move_inputs_to_device(inputs, device))
+        forward_fn(model, inputs)
 
         # in case some hooks have to skip the svd calculation because the number of tokens is less than the number of components
         if not all(hasattr(h[0].svd, "components_") for h in hooks.values()):
@@ -406,13 +455,11 @@ def get_eva_state_dict(
 
         rank_dist = _get_rank_distribution(hooks, layer_hook_map, equal_inputs_map, rank_budget, max_components)
 
-    # check all svd hooks have been removed
-    remaining_svd_hooks = {
-        n for n, m in model.named_modules() for v in m._forward_hooks.values() if isinstance(v, SVDHook)
-    }
-    if len(remaining_svd_hooks) > 0:
+    # check all custom hooks have been removed
+    remaining_hooks = {n for n, m in model.named_modules() for v in m._forward_hooks.values() if isinstance(v, _Hook)}
+    if len(remaining_hooks) > 0:
         raise ValueError(
-            f"Found active SVD hooks that weren't properly removed: {remaining_svd_hooks}. "
+            f"Found active hooks added by EVA that weren't properly removed: {remaining_hooks}. "
             "Please report this issue at https://github.com/huggingface/peft/issues"
         )
 
@@ -445,8 +492,8 @@ def initialize_lora_eva_weights(
     model: torch.nn.Module,
     dataloader: Iterable,
     forward_fn: Optional[callable] = forward_fn_dict,
-    get_indices_fn: Optional[callable] = get_indices_fn_causal_lm,
-    prepare_layer_inputs_fn: Union[callable, Dict[str, callable], None] = None,
+    prepare_model_inputs_fn: Optional[callable] = prepare_model_inputs_fn_language_modeling,
+    prepare_layer_inputs_fn: Union[callable, Dict[str, callable], None] = prepare_layer_inputs_fn_language_modeling,
     adapter_name: str = "default",
     show_progress_bar: bool = True,
 ):
@@ -464,27 +511,35 @@ def initialize_lora_eva_weights(
             ```
             return model(**inputs)
             ```
-        get_indices_fn (Optional[callable]):
-            The function to use if not all positions in the input tensor should be used for SVD (e.g. for causal
-            language modeling). Can be set to None if all positions should be used. This function is applied to the
-            model inputs and used for all layers. `peft.tuners.lora.eva.get_indices_fn_causal_lm` is used by default.
-            Should always return a tensor of shape (n_indices, layer_input.ndim-1). Default logic:
+        prepare_model_inputs_fn (Optional[callable]):
+            This function recieves the model inputs and the peft_config and passes the output to
+            `prepare_layer_inputs_fn`. Can be used to modify the input to the SVD computation based on the original
+            model inputs. For example for language modeling the attention mask is used to determine which indices are
+            padding tokens and should not be used for SVD.
+            `peft.tuners.lora.eva.prepare_model_inputs_fn_language_modeling` is used by default. Any function defined
+            here expects two arguments: `model_input` and `peft_config` and should return a 2d tensor. Default logic:
             ```
-            mask = inputs.get("attention_mask", torch.ones_like(inputs["input_ids"])).bool()
-            if peft_config.eva_config.use_label_mask and hasattr(inputs, "labels"):
-                mask = torch.logical_and(mask, inputs["labels"] != peft_config.eva_config.label_mask_value)
-            return mask.nonzero()
+            def prepare_model_inputs_fn_language_modeling(model_input, peft_config: LoraConfig):
+                mask = model_input.get("attention_mask", torch.ones_like(model_input["input_ids"])).bool()
+                if peft_config.eva_config.use_label_mask and hasattr(model_input, "labels"):
+                    mask = torch.logical_and(mask, model_input["labels"] != peft_config.eva_config.label_mask_value)
+                return mask.nonzero()
             ```
         prepare_layer_inputs_fn (Union[callable, Dict[str, callable], None]):
-            If a layer receives multiple inputs as a list, per default the first input is used. This function can be
-            used to modify this behaviour. Accepts a dictionary with layer names as keys. Default logic:
+            This function recieves the layer inputs and the model inputs (potentially modified by
+            `prepare_model_inputs_fn`) and returns the inputs that should be used for SVD. When set to None and a layer
+            receives multiple inputs as a list, per default the first input is used. The default settings works for
+            language modeling and model_inputs is the mask used to determine which indices should be used for SVD
+            (created by `prepare_model_inputs_fn_language_modeling`). Default logic:
             ```
-            if isinstance(inputs, torch.Tensor):
-                return inputs
-            elif isinstance(inputs, (tuple, list)):
-                return inputs[0]
-            else:
-                raise ValueError(...)
+            def prepare_layer_inputs_fn_language_modeling(layer_input, model_input, layer_name) -> torch.Tensor:
+                if isinstance(layer_input, torch.Tensor):
+                    return layer_input[model_input.T.unbind()]
+                elif isinstance(layer_input, (tuple, list)):
+                    return layer_input[model_input.T.unbind()][0]
+                else:
+                    raise ValueError(...)
+                return layer_input[model_input.T.unbind()]
             ```
         adapter_name (str): The name of the adapter to initialize the weights for.
         show_progress_bar (bool): Whether to show a progress bar. Default is True.
@@ -511,7 +566,7 @@ def initialize_lora_eva_weights(
             peft_config=peft_config,
             dataloader=dataloader,
             forward_fn=forward_fn,
-            get_indices_fn=get_indices_fn,
+            prepare_model_inputs_fn=prepare_model_inputs_fn,
             prepare_layer_inputs_fn=prepare_layer_inputs_fn,
             show_progress_bar=show_progress_bar,
         )
@@ -535,7 +590,6 @@ def initialize_lora_eva_weights(
         else:
             module.update_layer(r=peft_config.r, init_lora_weights=True, **update_layer_kwargs)
             missing_eva_inits.append(name)
-            print(name, type(module))
 
     if missing_eva_inits:
         warnings.warn(

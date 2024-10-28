@@ -49,12 +49,15 @@ dataloader = DataLoader(
 )
 
 # setup peft config
+eva_config = EvaConfig(
+    rho=rho
+)
 peft_config = LoraConfig(
     r=rank,
     lora_alpha=alpha,
     target_modules=target_modules,
     init_lora_weights="eva",
-    eva_config=EvaConfig(rho=rho)
+    eva_config=eva_config
 )
 
 # move model to GPU
@@ -111,7 +114,7 @@ eva_state_dict = get_eva_state_dict(model, peft_config, dataloader)
 
 By default, EVA is designed to work with standard transformer language models. However we integrated three different paramters which can be used to customize EVA for other types of models.
 1. `forward_fn`: Defines how the forward pass during EVA initialization should be computed.
-2. `get_indices_fn`: Can be passed if not all indices in the input should be used for SVD.
+2. `prepare_model_inputs_fn`: Can be used if it is necessary to use information contained in the original model_input to prepare the input for SVD in individual layers.
 3. `prepare_layer_inputs_fn`: Defines how layer inputs should be prepared for SVD.
 
 All three parameters can be passed to `initialize_lora_eva_weights` and `get_eva_state_dict`.
@@ -120,26 +123,29 @@ All three parameters can be passed to `initialize_lora_eva_weights` and `get_eva
 
 `forward_fn` defines how the forward pass during EVA initialization should be computed. `forward_fn` recieves two arguments: `model` and `inputs`. By default this is set to `forward_fn_dict` which simply returns `model(**inputs)`.
 
-### get_indices_fn
+### prepare_model_inputs_fn
 
-`get_indices_fn` can be used if not all indices in the input should be used for SVD. `get_indices_fn` recieves two arguments: `inputs` and `peft_config`. Inputs in this case are to inputs to the model (not the layer inputs). Therefore indices are only calculted once per batch. If you would like to use different indices for different layers, set `get_indices_fn` to None and implement a custom `prepare_layer_inputs_fn`. By default this parameter is set to `get_indices_fn_causal_lm` which is used for causal language modeling:
+`prepare_model_inputs_fn` can be used if it is necessary to use information contained in the original model_input to prepare the input for SVD in individual layers. `prepare_model_inputs_fn` recieves two arguments: `model_input` and `peft_config`. This component is separate from `prepare_layer_inputs_fn` as the output only needs to be computed once per batch. By default this parameter is set to `prepare_model_inputs_fn_language_modeling` which is used get a subset of indices based on attention and label mask to avoid including padding tokens in the SVD computation. If you would like to not use this component set `prepare_model_inputs_fn` to None. The default logic is:
 ```python
-def get_indices_fn_causal_lm(inputs: dict, peft_config: LoraConfig):
-    mask = inputs.get("attention_mask", torch.ones_like(inputs["input_ids"])).bool()
-    if peft_config.eva_config.use_label_mask and hasattr(inputs, "labels"):
-        mask = torch.logical_and(mask, inputs["labels"] != peft_config.eva_config.label_mask_value)
+def prepare_model_inputs_fn_language_modeling(model_input, peft_config: LoraConfig):
+    mask = model_input.get("attention_mask", torch.ones_like(model_input["input_ids"])).bool()
+    if peft_config.eva_config.use_label_mask and hasattr(model_input, "labels"):
+        mask = torch.logical_and(mask, model_input["labels"] != peft_config.eva_config.label_mask_value)
     return mask.nonzero()
 ```
 
 ### prepare_layer_inputs_fn
 
-`prepare_layer_inputs_fn` can be used to preprocess the layer inputs before passing them to the SVD algorithm. `prepare_layer_inputs_fn` recieves two arguments: `inputs` and `peft_config`. It can either be a callable or a dictionary where the keys are the layer names and the values are callables. By default the following logic is used:
+`prepare_layer_inputs_fn` can be used to preprocess the layer inputs before passing them to the SVD algorithm. `prepare_layer_inputs_fn` recieves three arguments: `layer_input`, `model_input` and `layer_name`. It can either be a callable or a dictionary where the keys are the layer names and the values are callables. If it is a dictionary, functions are assigned to adapter layers based on the layer names. By default a language modeling setting is assumed where model_inputs are the outputs of `prepare_model_inputs_fn_language_modeling` which is a mask of indices. If this parameter is set to None, only two modifications are made to the layer inputs
+- take the first element incase of a tuple or list. 
+- if the input has more than 2 dimensions, we flatten all but the last dimension.
+
+Must always return a tensor. The default logic is:
 ```python
-def prepare_layer_inputs_fn_default(inputs) -> torch.Tensor:
-    if isinstance(inputs, torch.Tensor):
-        return inputs
-    elif isinstance(inputs, (tuple, list)):
-        return inputs[0]
+def prepare_layer_inputs_fn_default(layer_input, model_input, layer_name) -> torch.Tensor:
+    elif isinstance(layer_input, (tuple, list)):
+        layer_input = layer_input[0]
+    return layer_input[model_input.T.unbind()]
 ```
 
 ## Citation

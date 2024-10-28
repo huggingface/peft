@@ -59,7 +59,7 @@ dataloader = DataLoader(
 # setup peft config
 eva_config = EvaConfig(rho=rho)
 peft_config = LoraConfig(
-    r=rank, lora_alpha=alpha, target_modules=target_modules, init_lora_weights=True, eva_config=eva_config
+    r=rank, lora_alpha=alpha, target_modules=target_modules, init_lora_weights="eva", eva_config=eva_config
 )
 
 # move model to GPU
