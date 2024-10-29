@@ -73,7 +73,7 @@ class LoftQConfig:
 class EvaConfig:
     """
     This is the sub-configuration class to store the configuration for a data-driven initialization via EVA. EVA was
-    introduced in <ahref='https://arxiv.org/abs/2410.07170'>Explained Variance Adaptation</a>.
+    introduced in <a href='https://arxiv.org/abs/2410.07170'>Explained Variance Adaptation</a>.
 
     Args:
         rho (`float`):
@@ -421,7 +421,8 @@ class LoraConfig(PeftConfig):
                 raise ValueError("`loftq_config` must be specified when `init_lora_weights` is 'loftq'.")
 
         elif self.init_lora_weights == "eva" and self.eva_config is None:
-            raise ValueError("`eva_config` must be specified when `init_lora_weights` is 'eva'.")
+            warnings.warn("`init_lora_weights` is 'eva' but `eva_config` is not specified. Using default EVA config.")
+            self.eva_config = EvaConfig()
         elif self.init_lora_weights != "eva" and self.eva_config is not None:
             warnings.warn("`eva_config` specified but will be ignored when `init_lora_weights` is not 'eva'.")
 

@@ -1769,9 +1769,11 @@ class TestEvaInitialization:
         with pytest.raises(ValueError, match="`tau` must be between 0.0 and 1.0."):
             EvaConfig(tau=1.1)
 
-    # Test that LoraConfig.__init__ raises a ValueError when init_lora_weights is 'eva' but eva_config is not set.
-    def test_lora_config_raises_error_without_eva_config_but_eva_init(self):
-        with pytest.raises(ValueError, match="`eva_config` must be specified when `init_lora_weights` is 'eva'."):
+    # Test that LoraConfig.__init__ raises a warning when init_lora_weights='eva' but eva_config is not set.
+    def test_lora_config_raises_warning_with_eva_init_but_not_eva_config(self):
+        with pytest.warns(
+            UserWarning, match="`init_lora_weights` is 'eva' but `eva_config` is not specified. Using default EVA config."
+        ):
             LoraConfig(init_lora_weights="eva")
 
     # Test that LoraConfig.__init__ raises a warning when init_lora_weights is not 'eva' but eva_config is set.
