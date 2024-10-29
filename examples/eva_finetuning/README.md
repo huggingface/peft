@@ -131,7 +131,7 @@ def prepare_model_inputs_fn_language_modeling(model_input, peft_config: LoraConf
 Must always return a tensor. The default logic is:
 ```python
 def prepare_layer_inputs_fn_default(layer_input, model_input, layer_name) -> torch.Tensor:
-    elif isinstance(layer_input, (tuple, list)):
+    if isinstance(layer_input, (tuple, list)):
         layer_input = layer_input[0]
     return layer_input[model_input.T.unbind()]
 ```
