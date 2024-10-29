@@ -10,7 +10,7 @@ Steps:
 1. Apply LoftQ to a full-precision pre-trained weight and save.
 2. Load LoftQ initialization and train.
 
-For step 1, we have provided off-the-shelf LoftQ initializations (see [supported model list](#appendix-off-the-shelf-model-table)) 
+For step 1, we have provided off-the-shelf LoftQ initializations (see [supported model list](#appendix-off-the-shelf-model-list)) 
 in [Huggingface Hub LoftQ](https://huggingface.co/LoftQ).
 If you want to do it yourself, jump to [LoftQ DIY](#loftq-diy).
 
