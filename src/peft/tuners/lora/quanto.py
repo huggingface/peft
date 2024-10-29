@@ -142,47 +142,59 @@ class QuantoLoraLinear(torch.nn.Module, LoraLayer):
         )
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
-        from optimum.quanto import quantize_weight
-
         adapter_names = check_adapters_to_merge(self, adapter_names)
         if not adapter_names:
             # no adapter to merge
             return
 
-        base_layer = self.get_base_layer()
-        orig_weight = base_layer.weight
+        with torch.no_grad():
+            new_module = torch.nn.Linear(
+                self.in_features, self.out_features, device=self.lora_A[adapter_names[0]].weight.device
+            )
+            new_module.weight.zero_()
+            new_module.bias.zero_()
 
-        for active_adapter in adapter_names:
-            delta_weight = self.get_delta_weight(active_adapter)
-            # note: no in-place for safe_merge=False
-            new_weight_data = orig_weight + delta_weight
-            if safe_merge and not torch.isfinite(new_weight_data).all():
+            base_layer = self.get_base_layer()
+            orig_weight = base_layer.qweight
+            new_module.weight.data += orig_weight
+            new_module.bias.data += base_layer.bias
+
+            for active_adapter in adapter_names:
+                new_module.weight.data += self.get_delta_weight(active_adapter)
+
+            quantized = base_layer.from_module(new_module, weights=base_layer.weight_qtype).qweight
+            if safe_merge and not torch.isfinite(quantized).all():
                 raise ValueError(
                     f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                 )
-            quantized = quantize_weight(new_weight_data, qtype=base_layer.qweight.qtype, axis=base_layer.qweight.axis)
-            base_layer.weight._data = quantized._data
-            base_layer.weight._scale = quantized._scale
-            self.merged_adapters.append(active_adapter)
+            base_layer.qweight._data = quantized._data
+            base_layer.qweight._scale = quantized._scale
+            self.merged_adapters.extend(adapter_names)
 
     def unmerge(self) -> None:
-        from optimum.quanto import quantize_weight
-
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
 
-        while len(self.merged_adapters) > 0:
-            active_adapter = self.merged_adapters.pop()
-            if active_adapter not in self.lora_A.keys():
-                continue
+        with torch.no_grad():
+            new_module = torch.nn.Linear(
+                self.in_features, self.out_features, device=self.lora_A[self.active_adapters[0]].weight.device
+            )
+            new_module.weight.zero_()
+            new_module.bias.zero_()
 
             base_layer = self.get_base_layer()
-            orig_weight = base_layer.weight
-            new_weight_data = orig_weight - self.get_delta_weight(active_adapter)
-            quantized = quantize_weight(new_weight_data, qtype=base_layer.qweight.qtype, axis=base_layer.qweight.axis)
-            base_layer.weight._data = quantized._data
-            base_layer.weight._scale = quantized._scale
+            orig_weight = base_layer.qweight
+            new_module.weight.data += orig_weight
+            new_module.bias.data += base_layer.bias
+
+            while len(self.merged_adapters) > 0:
+                active_adapter = self.merged_adapters.pop()
+                new_module.weight.data -= self.get_delta_weight(active_adapter)
+
+            quantized = base_layer.from_module(new_module, weights=base_layer.weight_qtype).qweight
+            base_layer.qweight._data = quantized._data
+            base_layer.qweight._scale = quantized._scale
 
     def __repr__(self) -> str:
         rep = super().__repr__()
@@ -344,7 +356,7 @@ class QuantoLoraConv2d(torch.nn.Module, LoraLayer):
             return
 
         base_layer = self.get_base_layer()
-        orig_weight = base_layer.weight
+        orig_weight = base_layer.qweight
 
         for active_adapter in adapter_names:
             delta_weight = self.get_delta_weight(active_adapter)
@@ -356,8 +368,8 @@ class QuantoLoraConv2d(torch.nn.Module, LoraLayer):
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                     )
             quantized = quantize_weight(new_weight_data, qtype=orig_weight.qtype, axis=orig_weight.axis)
-            base_layer.weight._data = quantized._data
-            base_layer.weight._scale = quantized._scale
+            base_layer.qweight._data = quantized._data
+            base_layer.qweight._scale = quantized._scale
             self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
