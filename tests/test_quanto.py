@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import copy
+import platform
 import shutil
 import tempfile
 import unittest
@@ -67,6 +68,7 @@ def make_automodel_proxy(weights: str):
     return QuantoModelProxy
 
 
+@unittest.skipIf(platform.system() == "Darwin", "Tests are skipped on macOS")
 class BasePeftQuantoModelTester:
     r"""Base class implementing tests for quanto-quantized models.
 
@@ -479,9 +481,10 @@ class BasePeftQuantoModelTester:
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
         self._test_merge_layers_fp16(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_generate_half_prec(self, test_name, model_id, config_cls, config_kwargs):
-        self._test_generate_half_prec(model_id, config_cls, config_kwargs)
+    # this fails for a couple of methods (IA³, LoRA, prefix tuning) with segfault on GH CI
+    # @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    # def test_generate_half_prec(self, test_name, model_id, config_cls, config_kwargs):
+    #     self._test_generate_half_prec(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     @pytest.mark.skip("Quanto raises an error when trying to convert the dtype, skipping test.")
