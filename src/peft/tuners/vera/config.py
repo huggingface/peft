@@ -150,7 +150,9 @@ class VeraConfig(PeftConfig):
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
-
+        # check for layers_to_transform and layers_pattern
+        if self.layers_pattern and not self.layers_to_transform:
+            raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
         if not self.save_projection:
             warnings.warn(
                 "Specified to not save vera_A and vera_B within the state dictionary, instead they will be restored "

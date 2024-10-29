@@ -92,9 +92,6 @@ REGEX_TEST_CASES = [
     ("foo.bar.1.baz", ["baz"], [0, 1, 2], ["bar"], True),
     ("foo.bar.1.baz", ["baz", "spam"], [1], ["bar"], True),
     ("foo.bar.1.baz", ["baz", "spam"], [0, 1, 2], ["bar"], True),
-    # empty layers_to_transform
-    ("foo.bar.7.baz", ["baz"], [], ["bar"], True),
-    ("foo.bar.7.baz", ["baz"], None, ["bar"], True),
     # empty layers_pattern
     ("foo.whatever.1.baz", ["baz"], [1], [], True),
     ("foo.whatever.1.baz", ["baz"], [0], [], False),
