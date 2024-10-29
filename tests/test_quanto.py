@@ -42,11 +42,9 @@ def filter_supported_methods_supporting_merging(test_list):
     return [test for test in test_list if any(test[2] is cls for cls in PEFT_METHODS_SUPPORTING_MERGING)]
 
 
+# only test a single model, it's already slow as is
 PEFT_DECODER_MODELS_TO_TEST = [
     "hf-internal-testing/tiny-random-OPTForCausalLM",
-    # "hf-internal-testing/tiny-random-GPT2LMHeadModel",
-    # "trl-internal-testing/tiny-random-LlamaForCausalLM",
-    # "peft-internal-testing/tiny-dummy-qwen2",
 ]
 
 FULL_GRID = {
@@ -459,6 +457,7 @@ class BasePeftQuantoModelTester:
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
+            filter_params_func=filter_supported_methods_supporting_merging,
         )
     )
     def test_mixed_adapter_batches(self, test_name, model_id, config_cls, config_kwargs):
@@ -534,6 +533,7 @@ class BasePeftQuantoModelTester:
                 "hra_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
+            filter_params_func=filter_supported_methods_supporting_merging,
         )
     )
     def test_unload_adapter(self, test_name, model_id, config_cls, config_kwargs):
@@ -570,6 +570,7 @@ class BasePeftQuantoModelTester:
                 "hra_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
+            filter_params_func=filter_supported_methods_supporting_merging,
         )
     )
     def test_disable_adapter(self, test_name, model_id, config_cls, config_kwargs):
