@@ -1561,7 +1561,7 @@ def test_from_pretrained_missing_keys_warning(recwarn, tmp_path):
 
 
 class TestEvaInitialization:
-    """Test for the Eva initialization method."""
+    """Tests for the Eva initialization method."""
 
     # Constants for test configuration
     COSINE_SIMILARITY_THRESHOLD = 0.75
@@ -1615,7 +1615,12 @@ class TestEvaInitialization:
             eva_config=EvaConfig(rho=2),
         )
 
-    def prepare_layer_inputs_fn(self, layer_input, model_input, layer_name):
+    @staticmethod
+    def collate_fn(examples):
+        return {k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()}
+
+    @staticmethod
+    def prepare_layer_inputs_fn(layer_input, model_input, layer_name):
         return layer_input[0].view(-1, layer_input[0].size(-1))
 
     # tests for cases where prepare_layer_inputs_fn is a mapping
@@ -1647,7 +1652,7 @@ class TestEvaInitialization:
         dataloader = DataLoader(
             shuffled_dataset,
             batch_size=self.BATCH_SIZE,
-            collate_fn=lambda examples: {k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()},
+            collate_fn=self.collate_fn,
             shuffle=False,
         )
 
@@ -1687,9 +1692,7 @@ class TestEvaInitialization:
             dataloader = DataLoader(
                 shuffled_dataset,
                 batch_size=self.BATCH_SIZE,
-                collate_fn=lambda examples: {
-                    k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()
-                },
+                collate_fn=self.collate_fn,
                 shuffle=False,
             )
             sd = get_eva_state_dict(model, modified_peft_config, dataloader)
@@ -1717,9 +1720,7 @@ class TestEvaInitialization:
             dataloader = DataLoader(
                 shuffled_dataset,
                 batch_size=self.BATCH_SIZE,
-                collate_fn=lambda examples: {
-                    k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()
-                },
+                collate_fn=self.collate_fn,
                 shuffle=False,
             )
             peft_model = get_peft_model(deepcopy(model), peft_config)
@@ -1740,6 +1741,21 @@ class TestEvaInitialization:
                 f"Mean absolute cosine similarity {mean_cosine_similarity:.4f} "
                 f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
             )
+
+    def test_missing_eva_inits(self, model, dataset, peft_config):
+        modified_peft_config = deepcopy(peft_config)
+        modified_peft_config.target_modules = ["wte"]
+        dataloader = DataLoader(
+            dataset,
+            batch_size=self.BATCH_SIZE,
+            collate_fn=self.collate_fn,
+        )
+        peft_model = get_peft_model(deepcopy(model), modified_peft_config)
+        with pytest.warns(
+            UserWarning,
+            match="the following layers were initialized with init_lora_weights=True because they were not found in the eva state_dict:*",
+        ):
+            initialize_lora_eva_weights(peft_model, dataloader)
 
     # Test that EvaConfig.__init__ raises a ValueError when rho is negative.
     def test_eva_config_rho(self):

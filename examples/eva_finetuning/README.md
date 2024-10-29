@@ -1,4 +1,4 @@
-# EVA: Efficient Vector Adaptation
+# EVA: Explained Variance Adaptation
 ## Introduction ([Paper](https://arxiv.org/abs/2410.07170), [code](https://github.com/ml-jku/EVA))
 Explained Variance Adaptation (EVA) is a novel initialization method for LoRA style adapters which initializes adapter weights in a data driven manner and adaptively allocates ranks according to the variance they explain. EVA improves average performance on a multitude of tasks across various domains, such as Language generation and understanding, Image classification, and Decision Making.
 
@@ -22,7 +22,7 @@ model_name = "meta-llama/Llama-3.1-8B"
 max_seq_len = 512
 rank = 16
 alpha = 1
-rho = 1.0
+rho = 2.0
 target_modules = ["q_proj", "k_proj", "v_proj", "o_proj"]
 svd_batch_size = 4 # can be different from the batch size used in finetuning
 
@@ -98,18 +98,6 @@ from peft import get_eva_state_dict
 eva_state_dict = get_eva_state_dict(model, peft_config, dataloader)
 ```
 
-## EvaConfig
-
-[[autodoc]] tuners.lora.config.EvaConfig
-
-## initialize_lora_eva_weights
-
-[[autodoc]] tuners.lora.eva.initialize_lora_eva_weights
-
-## get_eva_state_dict
-
-[[autodoc]] tuners.lora.eva.get_eva_state_dict
-
 ## Customizing EVA
 
 By default, EVA is designed to work with standard transformer language models. However we integrated three different paramters which can be used to customize EVA for other types of models.
@@ -121,11 +109,11 @@ All three parameters can be passed to `initialize_lora_eva_weights` and `get_eva
 
 ### forward_fn
 
-`forward_fn` defines how the forward pass during EVA initialization should be computed. `forward_fn` recieves two arguments: `model` and `inputs`. By default this is set to `forward_fn_dict` which simply returns `model(**inputs)`.
+`forward_fn` defines how the forward pass during EVA initialization should be computed. `forward_fn` receives two arguments: `model` and `inputs`. By default this is set to `forward_fn_dict` which simply returns `model(**inputs)`.
 
 ### prepare_model_inputs_fn
 
-`prepare_model_inputs_fn` can be used if it is necessary to use information contained in the original model_input to prepare the input for SVD in individual layers. `prepare_model_inputs_fn` recieves two arguments: `model_input` and `peft_config`. This component is separate from `prepare_layer_inputs_fn` as the output only needs to be computed once per batch. By default this parameter is set to `prepare_model_inputs_fn_language_modeling` which is used get a subset of indices based on attention and label mask to avoid including padding tokens in the SVD computation. If you would like to not use this component set `prepare_model_inputs_fn` to None. The default logic is:
+`prepare_model_inputs_fn` can be used if it is necessary to use information contained in the original model_input to prepare the input for SVD in individual layers. `prepare_model_inputs_fn` receives two arguments: `model_input` and `peft_config`. This component is separate from `prepare_layer_inputs_fn` as the output only needs to be computed once per batch. By default this parameter is set to `prepare_model_inputs_fn_language_modeling` which is used get a subset of indices based on attention and label mask to avoid including padding tokens in the SVD computation. If you would like to not use this component set `prepare_model_inputs_fn` to None. The default logic is:
 ```python
 def prepare_model_inputs_fn_language_modeling(model_input, peft_config: LoraConfig):
     mask = model_input.get("attention_mask", torch.ones_like(model_input["input_ids"])).bool()
@@ -136,7 +124,7 @@ def prepare_model_inputs_fn_language_modeling(model_input, peft_config: LoraConf
 
 ### prepare_layer_inputs_fn
 
-`prepare_layer_inputs_fn` can be used to preprocess the layer inputs before passing them to the SVD algorithm. `prepare_layer_inputs_fn` recieves three arguments: `layer_input`, `model_input` and `layer_name`. It can either be a callable or a dictionary where the keys are the layer names and the values are callables. If it is a dictionary, functions are assigned to adapter layers based on the layer names. By default a language modeling setting is assumed where model_inputs are the outputs of `prepare_model_inputs_fn_language_modeling` which is a mask of indices. If this parameter is set to None, only two modifications are made to the layer inputs
+`prepare_layer_inputs_fn` can be used to preprocess the layer inputs before passing them to the SVD algorithm. `prepare_layer_inputs_fn` receives three arguments: `layer_input`, `model_input` and `layer_name`. It can either be a callable or a dictionary where the keys are the layer names and the values are callables. If it is a dictionary, functions are assigned to adapter layers based on the layer names. By default a language modeling setting is assumed where model_inputs are the outputs of `prepare_model_inputs_fn_language_modeling` which is a mask of indices. If this parameter is set to None, only two modifications are made to the layer inputs
 - take the first element incase of a tuple or list. 
 - if the input has more than 2 dimensions, we flatten all but the last dimension.
 

@@ -77,26 +77,29 @@ class EvaConfig:
 
     Args:
         rho (`float`):
-            Rho value for EVA redistribution (>= 1.0). The maximum rank for a layer is lora_r * rho. Default is 1.0
-            meaning no redistribution. Increasing rho will allow for a higher degree of redistribution of lora ranks
-            across layers.
+            Rho value for EVA redistribution (>= 1.0). The maximum rank for a layer is lora_r * rho. Default is 2.0
+            meaning the maximum rank allowed for a layer is 2r. Increasing rho will allow for a higher degree of
+            redistribution of ranks across layers. Some pre-trained models might be more sensitive to a rank
+            redistribution. It can therefore be beneficial to try rho=1.0 if the performance is lower than expected.
         tau (`float`):
             Cosine similarity threshold for early stopping. Compares the cosine similarity of right-singular vectors
             between two consecutive SVD steps. If the cosine similarity is above this threshold, the SVD iteration is
             stopped. Default is 0.99.
         use_label_mask (`bool`):
             Use label mask for EVA initialization. This means that positions where labels=label_mask_value are ignored
-            for the SVD computation. Default is False. Setting use_label_mask=True can be especially beneficial for
-            multi-turn conversations.
+            for the SVD computation. Setting use_label_mask=True is preferred in most cases and can be especially
+            beneficial for multi-turn conversations. The default value is True. Filtering out items based on the label
+            mask can sometimes lead to a small batch size and as a result instabilities in the SVD computation. For
+            cases where a large share of batch items would be filtered out, set use_label_mask=False.
         label_mask_value (`int`):
             If use_label_mask=True the value to look for to mask out ignored tokens. Default is -100.
         whiten (`bool`): Apply whitening to singular vectors. Default is False.
             Whitening has been shown to be beneficial for EVA in the vision domain.
     """
 
-    rho: float = field(default=1.0, metadata={"help": "Rho value for EVA redistribution"})
+    rho: float = field(default=2.0, metadata={"help": "Rho value for EVA redistribution"})
     tau: float = field(default=0.99, metadata={"help": "Cosine similarity threshold for early stopping"})
-    use_label_mask: bool = field(default=False, metadata={"help": "Use label mask for EVA initialization"})
+    use_label_mask: bool = field(default=True, metadata={"help": "Use label mask for EVA initialization"})
     label_mask_value: int = field(
         default=-100, metadata={"help": "if use_label_mask=True the value to look for to mask out ignored tokens"}
     )

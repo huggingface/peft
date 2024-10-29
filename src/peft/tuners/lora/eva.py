@@ -30,7 +30,7 @@ from .config import LoraConfig
 from .layer import Embedding, LoraLayer, _ConvNd
 
 
-UNSUPPORTED_LORA_MODULES = [Embedding, _ConvNd]
+UNSUPPORTED_LORA_MODULES = (Embedding, _ConvNd)
 
 
 class _Hook:
@@ -291,7 +291,7 @@ def get_eva_state_dict(
             return model(**inputs)
             ```
         prepare_model_inputs_fn (Optional[callable]):
-            This function recieves the model inputs and the peft_config and passes the output to
+            This function receives the model inputs and the peft_config and passes the output to
             `prepare_layer_inputs_fn`. Can be used to modify the input to the SVD computation based on the original
             model inputs. For example for language modeling the attention mask is used to determine which indices are
             padding tokens and should not be used for SVD.
@@ -305,7 +305,7 @@ def get_eva_state_dict(
                 return mask.nonzero()
             ```
         prepare_layer_inputs_fn (Union[callable, Dict[str, callable], None]):
-            This function recieves the layer inputs, the model inputs (potentially modified by
+            This function receives the layer inputs, the model inputs (potentially modified by
             `prepare_model_inputs_fn`) and the name of the layer and returns the inputs that should be used for SVD.
             When set to None and a layer receives multiple inputs as a list, per default the first input is used. The
             default settings works for language modeling and model_inputs is the mask used to determine which indices
@@ -345,7 +345,7 @@ def get_eva_state_dict(
     if hasattr(model, "peft_config"):
 
         def _check_fn(name, module):
-            return hasattr(module, "base_layer") and module not in UNSUPPORTED_LORA_MODULES
+            return hasattr(module, "base_layer") and not isinstance(module, UNSUPPORTED_LORA_MODULES)
     else:
 
         def _check_fn(name, module):
@@ -387,7 +387,7 @@ def get_eva_state_dict(
     # forward for one batch to check which layer inputs are equal to avoid unneeded svd calculations
     forward_fn(model, inputs)
     hash_dict = {k: h[0].hashed_inputs[0] for k, h in hooks.items()}
-    # equal input maps groups layers which recieve the same input. One layer is defined as the key and recieves an svd hook. For the remaining layers the svd results can be skipped.
+    # equal input maps groups layers which recieve the same input. One layer is defined as the key and receives an svd hook. For the remaining layers the svd results can be skipped.
     equal_inputs_map = {vv: v[0] for v in find_equal_values(hash_dict).values() for vv in v[1:]}
 
     # define rank budget and max components
@@ -512,7 +512,7 @@ def initialize_lora_eva_weights(
             return model(**inputs)
             ```
         prepare_model_inputs_fn (Optional[callable]):
-            This function recieves the model inputs and the peft_config and passes the output to
+            This function receives the model inputs and the peft_config and passes the output to
             `prepare_layer_inputs_fn`. Can be used to modify the input to the SVD computation based on the original
             model inputs. For example for language modeling the attention mask is used to determine which indices are
             padding tokens and should not be used for SVD.
@@ -526,7 +526,7 @@ def initialize_lora_eva_weights(
                 return mask.nonzero()
             ```
         prepare_layer_inputs_fn (Union[callable, Dict[str, callable], None]):
-            This function recieves the layer inputs and the model inputs (potentially modified by
+            This function receives the layer inputs and the model inputs (potentially modified by
             `prepare_model_inputs_fn`) and returns the inputs that should be used for SVD. When set to None and a layer
             receives multiple inputs as a list, per default the first input is used. The default settings works for
             language modeling and model_inputs is the mask used to determine which indices should be used for SVD
@@ -593,7 +593,7 @@ def initialize_lora_eva_weights(
 
     if missing_eva_inits:
         warnings.warn(
-            f"the following layers were initialized with init_lora_weights=True because they were not found in the eva state_dict: {missing_eva_inits}"
-            "currently only the following lora modules are supported: {SUPPORTED_LORA_MODULES}"
+            f"the following layers were initialized with init_lora_weights=True because they were not found in the eva state_dict: {missing_eva_inits} "
+            f"currently the following lora modules are not supported: {UNSUPPORTED_LORA_MODULES}"
         )
     return model

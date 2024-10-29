@@ -164,7 +164,9 @@ def get_peft_model(
             The revision of the base model. If this isn't set, the saved peft model will load the `main` revision for
             the base model
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
-            Create empty adapter weights on meta device. Useful to speed up the loading process.
+            Create empty adapter weights on meta device. Useful to speed up the loading process. Leave this setting as
+            False if you intend on training the model, unless the adapter weights will be replaced by different weights
+            before training starts.
     """
     model_config = BaseTuner.get_model_config(model)
     old_name = peft_config.base_model_name_or_path
