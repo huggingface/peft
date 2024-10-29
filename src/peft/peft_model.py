@@ -1133,8 +1133,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if peft_config.is_prompt_learning and is_trainable:
             raise ValueError("Cannot set a prompt learning adapter to trainable when loading pretrained adapter.")
 
-        # Since PiSSA/OLoRA modifies the base weights, it should not be combined with other adapters. Check for a
-        # warning.
+        # Since PiSSA/OLoRA modifies the base weights, it should not be combined with other adapters.
         all_configs = [peft_config] + list(self.peft_config.values())
         if (len(all_configs) > 1) and any(getattr(config, "init_lora_weights") == "pissa" for config in all_configs):
             msg = (
