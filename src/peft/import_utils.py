@@ -107,4 +107,6 @@ def is_torchao_available():
 
 @lru_cache
 def is_quanto_available():
-    return importlib.util.find_spec("optimum.quanto") is not None
+    return (importlib.util.find_spec("optimum") is not None) and (
+        importlib.util.find_spec("optimum.quanto") is not None
+    )
