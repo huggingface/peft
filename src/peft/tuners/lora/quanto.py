@@ -27,7 +27,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.other import transpose
 
 
-if is_quanto_available:
+if is_quanto_available():
     # ensure that there are no quanto imports unless optimum.quanto is installed
     from optimum.quanto import QConv2d, QLinear
 else:
