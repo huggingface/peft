@@ -1772,7 +1772,8 @@ class TestEvaInitialization:
     # Test that LoraConfig.__init__ raises a warning when init_lora_weights='eva' but eva_config is not set.
     def test_lora_config_raises_warning_with_eva_init_but_not_eva_config(self):
         with pytest.warns(
-            UserWarning, match="`init_lora_weights` is 'eva' but `eva_config` is not specified. Using default EVA config."
+            UserWarning,
+            match="`init_lora_weights` is 'eva' but `eva_config` is not specified. Using default EVA config.",
         ):
             LoraConfig(init_lora_weights="eva")
 
