@@ -21,7 +21,6 @@ from torch import nn
 
 from peft.tuners.lycoris_utils import LycorisConfig, LycorisTuner
 
-from .config import LoKrConfig
 from .layer import Conv2d, Linear, LoKrLayer
 
 

@@ -126,6 +126,22 @@ class LoKrLayer(nn.Module, LycorisLayer):
         if adapter_name in self.lokr_t2:
             nn.init.kaiming_uniform_(self.lokr_t2[adapter_name], a=math.sqrt(5))
 
+    def reset_adapter_parameters_lycoris_way(self, adapter_name):
+        if adapter_name in self.lokr_w1:
+            nn.init.kaiming_uniform_(self.lokr_w1[adapter_name], a=math.sqrt(5))
+        else:
+            nn.init.kaiming_uniform_(self.lokr_w1_a[adapter_name], a=math.sqrt(5))
+            nn.init.kaiming_uniform_(self.lokr_w1_b[adapter_name], a=math.sqrt(5))
+
+        if adapter_name in self.lokr_w2:
+            nn.init.zeros_(self.lokr_w2[adapter_name])
+        else:
+            nn.init.zeros_(self.lokr_w2_b[adapter_name])
+            nn.init.kaiming_uniform_(self.lokr_w2_a[adapter_name], a=math.sqrt(5))
+
+        if adapter_name in self.lokr_t2:
+            nn.init.kaiming_uniform_(self.lokr_t2[adapter_name], a=math.sqrt(5))
+
     def update_layer(
         self,
         adapter_name: str,
@@ -156,8 +172,8 @@ class LoKrLayer(nn.Module, LycorisLayer):
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
         self.r[adapter_name] = r
-        self.alpha[adapter_name] = alpha or r
-        self.scaling[adapter_name] = self.alpha[adapter_name] / r
+        self.alpha[adapter_name] = alpha
+        self.scaling[adapter_name] = alpha / r
         self.rank_dropout[adapter_name] = rank_dropout
         self.module_dropout[adapter_name] = module_dropout
         self.rank_dropout_scale[adapter_name] = kwargs["rank_dropout_scale"]
@@ -193,7 +209,10 @@ class LoKrLayer(nn.Module, LycorisLayer):
 
         # Initialize weights
         if init_weights:
-            self.reset_adapter_parameters(adapter_name)
+            if init_weights == "lycoris":
+                self.reset_adapter_parameters_lycoris_way(adapter_name)
+            else:
+                self.reset_adapter_parameters(adapter_name)
         else:
             self.reset_adapter_parameters_random(adapter_name)
 
