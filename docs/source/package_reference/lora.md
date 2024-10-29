@@ -32,4 +32,20 @@ The abstract from the paper is:
 
 ## Utility
 
+### LoftQ
+
 [[autodoc]] utils.loftq_utils.replace_lora_weights_loftq
+
+### Eva
+
+#### EvaConfig
+
+[[autodoc]] tuners.lora.config.EvaConfig
+
+#### initialize_lora_eva_weights
+
+[[autodoc]] tuners.lora.eva.initialize_lora_eva_weights
+
+#### get_eva_state_dict
+
+[[autodoc]] tuners.lora.eva.get_eva_state_dict
