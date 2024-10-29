@@ -1135,20 +1135,21 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         # Since PiSSA/OLoRA modifies the base weights, it should not be combined with other adapters.
         all_configs = [peft_config] + list(self.peft_config.values())
-        if (len(all_configs) > 1) and any(getattr(config, "init_lora_weights") == "pissa" for config in all_configs):
-            msg = (
-                "PiSSA changes the base weights of the model and should thus not be used with other adapters. "
-                "Consider converting the PiSSA adapter into a normal LoRA adapter: "
-                "https://github.com/huggingface/peft/tree/main/examples/pissa_finetuning#convert-pissa-to-lora"
-            )
-            warnings.warn(msg)
-        elif (len(all_configs) > 1) and any(getattr(config, "init_lora_weights") == "olora" for config in all_configs):
-            msg = (
-                "OLoRA changes the base weights of the model and should thus not be used with other adapters. "
-                "Consider converting the OLoRA adapter into a normal LoRA adapter: "
-                "https://github.com/huggingface/peft/tree/main/examples/olora_finetuning#olora-and-lora"
-            )
-            warnings.warn(msg)
+        if len(all_configs) > 1:
+            if any(getattr(config, "init_lora_weights", None) == "pissa" for config in all_configs):
+                msg = (
+                    "PiSSA changes the base weights of the model and should thus not be used with other adapters. "
+                    "Consider converting the PiSSA adapter into a normal LoRA adapter: "
+                    "https://github.com/huggingface/peft/tree/main/examples/pissa_finetuning#convert-pissa-to-lora"
+                )
+                warnings.warn(msg)
+            elif any(getattr(config, "init_lora_weights", None) == "olora" for config in all_configs):
+                msg = (
+                    "OLoRA changes the base weights of the model and should thus not be used with other adapters. "
+                    "Consider converting the OLoRA adapter into a normal LoRA adapter: "
+                    "https://github.com/huggingface/peft/tree/main/examples/olora_finetuning#olora-and-lora"
+                )
+                warnings.warn(msg)
 
     def load_adapter(
         self,
