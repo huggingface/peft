@@ -948,6 +948,41 @@ class TestLoraInitialization:
             LoraConfig(**config_kwargs)
             assert not recwarn.list
 
+    @pytest.mark.parametrize("init_method", ["pissa", "olora"])
+    @pytest.mark.parametrize("pissa_olora_loaded_first", [False, True])
+    def test_load_pissa_olora_with_other_adapter_warns(self, init_method, pissa_olora_loaded_first, recwarn, tmp_path):
+        # Since PiSSA/OLoRA modifies the base weights, it should not be combined with other adapters. Check for a
+        # warning. See #2184.
+
+        # create an adapter without PiSSA/OloRA
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model = AutoModelForCausalLM.from_pretrained(model_id)
+        model = get_peft_model(model, LoraConfig(init_lora_weights=True))
+        model.save_pretrained(tmp_path / "adapter0")
+        del model
+
+        # create a model with PiSSA/OLoRA
+        model = AutoModelForCausalLM.from_pretrained(model_id)
+        model = get_peft_model(model, LoraConfig(init_lora_weights=init_method))
+        model.save_pretrained(tmp_path / "adapter1")
+        del model
+
+        # load the model
+        if pissa_olora_loaded_first:
+            path0, path1 = tmp_path / "adapter1", tmp_path / "adapter0"
+        else:
+            path0, path1 = tmp_path / "adapter0", tmp_path / "adapter1"
+
+        model = AutoModelForCausalLM.from_pretrained(model_id)
+        model = PeftModel.from_pretrained(model, path0)
+        model = model.load_adapter(path1, adapter_name="other")
+
+        if init_method == "pissa":
+            msg = "PiSSA changes the base weights of the model and should thus not be used with other adapters"
+        else:
+            msg = "OLoRA changes the base weights of the model and should thus not be used with other adapters"
+        assert any(str(w.message).startswith(msg) for w in recwarn.list)
+
     def test_lora_rslora_scaling(self):
         # default is True
         torch.manual_seed(0)
