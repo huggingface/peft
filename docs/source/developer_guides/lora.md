@@ -52,7 +52,7 @@ Alternatively, execute fast SVD, which takes only a few seconds. The number of i
 ```python
 lora_config = LoraConfig(init_lora_weights="pissa_niter_[number of iters]", ...) 
 ```
-For detailed instruction on using PiSSA, please follow [these instructions](https://github.com/fxmeng/peft/tree/main/examples/pissa_finetuning).
+For detailed instruction on using PiSSA, please follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/pissa_finetuning).
 
 ### OLoRA
 [OLoRA](https://arxiv.org/abs/2406.01775) utilizes QR decomposition to initialize the LoRA adapters. OLoRA translates the base weights of the model by a factor of their QR decompositions, i.e., it mutates the weights before performing any training on them. This approach significantly improves stability, accelerates convergence speed, and ultimately achieves superior performance.
