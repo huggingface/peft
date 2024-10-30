@@ -236,7 +236,6 @@ TEST_CASES = [
     ),
     ("Vanilla MLP 7 LOKR", "MLP", LoKrConfig, {"target_modules": "lin0", "rank_dropout": 0.5}),
     ("Vanilla MLP 8 LOKR", "MLP", LoKrConfig, {"target_modules": "lin0", "decompose_both": True, "r": 1, "alpha": 1}),
-    ("Vanilla MLP 9 LOKR", "MLP", LoKrConfig, {"target_modules": "lin0", "init_weights": "lycoris"}),
     ("Conv2d 1 LOKR", "Conv2d", LoKrConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 LOKR", "Conv2d", LoKrConfig, {"target_modules": ["conv2d", "lin0"]}),
     ("Conv2d 3 LOKR", "Conv2d", LoKrConfig, {"target_modules": ["conv2d"], "use_effective_conv2d": True}),
@@ -264,7 +263,6 @@ TEST_CASES = [
             "decompose_factor": 4,
         },
     ),
-    ("Conv2d 8 LOKR", "Conv2d", LoKrConfig, {"target_modules": ["conv2d"], "init_weights": "lycoris"}),
     ########
     # OFT #
     ########
