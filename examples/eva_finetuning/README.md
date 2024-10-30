@@ -97,6 +97,12 @@ from peft import get_eva_state_dict
 
 eva_state_dict = get_eva_state_dict(model, peft_config, dataloader)
 ```
+Later you can load the state_dict into a model without adapter weights by calling `load_eva_state_dict`:
+```python
+from peft import load_eva_state_dict
+
+load_eva_state_dict(model, eva_state_dict)
+```
 
 ## Customizing EVA
 

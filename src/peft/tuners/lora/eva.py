@@ -23,8 +23,9 @@ import torch
 from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
 
-from peft.tuners.tuners_utils import check_target_module_exists
+from peft.tuners.tuners_utils import _find_minimal_target_modules, check_target_module_exists
 from peft.utils.incremental_pca import IncrementalPCA
+from peft.utils.other import _get_submodules
 
 from .config import LoraConfig
 from .layer import Embedding, LoraLayer, _ConvNd
@@ -174,24 +175,6 @@ def find_equal_values(dictionary: dict) -> dict:
     return {k: v for k, v in value_dict.items() if len(v) > 1}
 
 
-def recursive_apply(module: torch.nn.Module, device: Union[str, torch.device]):
-    """
-    Recursively apply a function to the module and its submodules.
-
-    If the module is a LoraLayer, the base layer is moved to the specified device. If the module has any LoraLayer
-    submodules, the function is applied recursively to each submodule. Otherwise, the module is moved to the specified
-    device.
-    """
-    if isinstance(module, LoraLayer):
-        module.base_layer.to(device)
-        return
-    if any(isinstance(submodule, LoraLayer) for submodule in module.modules()):
-        for child in module.children():
-            recursive_apply(child, device)
-    else:
-        module.to(device)
-
-
 def get_device_with_meta_params(model: torch.nn.Module) -> torch.device:
     """
     Get the device of the model's parameters. Useful if some parameters are on meta device.
@@ -264,6 +247,20 @@ def forward_fn_dict(model, inputs):
     return model(**inputs)
 
 
+def _eva_checks(model, adapter_name):
+    if not hasattr(model, "peft_config"):
+        raise ValueError("model must be a PeftModel")
+
+    # eva currently only works with a single active adapter
+    # Important: when removing this requirement, make sure eva init works correctly if the new rank is 0.
+    if len(model.active_adapters) > 1:
+        raise ValueError("`initialize_lora_eva_weights` currently only works with a single active adapter")
+
+    # initialize_lora_eva_weights only works with `init_lora_weights='eva'`
+    if model.peft_config[adapter_name].init_lora_weights != "eva":
+        raise ValueError("`initialize_lora_eva_weights` can only be used with `init_lora_weights='eva'`")
+
+
 @torch.no_grad()
 def get_eva_state_dict(
     model: torch.nn.Module,
@@ -286,40 +283,23 @@ def get_eva_state_dict(
         peft_config (LoraConfig): The configuration for the LoRA layers.
         dataloader (Iterable): The dataloader to use for the forward pass.
         forward_fn (callable):
-            The forward function to use for the forward pass. Default logic:
-            ```
-            return model(**inputs)
-            ```
+            The forward function to use for the forward pass. Takes two arguments: `model` and `inputs`. Default
+            behavior is `return model(**inputs)`
         prepare_model_inputs_fn (Optional[callable]):
             This function receives the model inputs and the peft_config and passes the output to
             `prepare_layer_inputs_fn`. Can be used to modify the input to the SVD computation based on the original
             model inputs. For example for language modeling the attention mask is used to determine which indices are
-            padding tokens and should not be used for SVD.
-            `peft.tuners.lora.eva.prepare_model_inputs_fn_language_modeling` is used by default. Any function defined
-            here expects two arguments: `model_input` and `peft_config` and should return a 2d tensor. Default logic:
-            ```
-            def prepare_model_inputs_fn_language_modeling(model_input, peft_config: LoraConfig):
-                mask = model_input.get("attention_mask", torch.ones_like(model_input["input_ids"])).bool()
-                if peft_config.eva_config.use_label_mask and hasattr(model_input, "labels"):
-                    mask = torch.logical_and(mask, model_input["labels"] != peft_config.eva_config.label_mask_value)
-                return mask.nonzero()
-            ```
+            padding tokens and should not be used for SVD. Any function defined here expects two arguments:
+            `model_input` and `peft_config`. `peft.tuners.lora.eva.prepare_model_inputs_fn_language_modeling` is used
+            by default.
         prepare_layer_inputs_fn (Union[callable, Dict[str, callable], None]):
             This function receives the layer inputs, the model inputs (potentially modified by
-            `prepare_model_inputs_fn`) and the name of the layer and returns the inputs that should be used for SVD.
-            When set to None and a layer receives multiple inputs as a list, per default the first input is used. The
-            default settings works for language modeling and model_inputs is the mask used to determine which indices
-            should be used for SVD (created by `prepare_model_inputs_fn_language_modeling`). Default logic:
-            ```
-            def prepare_layer_inputs_fn_language_modeling(layer_input, model_input, layer_name) -> torch.Tensor:
-                if isinstance(layer_input, torch.Tensor):
-                    return layer_input[model_input.T.unbind()]
-                elif isinstance(layer_input, (tuple, list)):
-                    return layer_input[model_input.T.unbind()][0]
-                else:
-                    raise ValueError(...)
-                return layer_input[model_input.T.unbind()]
-            ```
+            `prepare_model_inputs_fn`) and the name of the layer and returns the inputs that should be used for SVD for
+            that particular layer. Any custom function defined here expects three arguments: `layer_input`,
+            `model_input`, and `layer_name` and should return a 2d tensor. The default logic can be found in
+            peft.tuners.lora.eva.prepare_layer_inputs_fn_language_modeling and works for language modeling. In this
+            case model_inputs is the mask used to determine which indices should be used for SVD (created by
+            `prepare_model_inputs_fn_language_modeling`).
         show_progress_bar (bool): Whether to show a progress bar. Default is True.
 
     Returns:
@@ -387,7 +367,7 @@ def get_eva_state_dict(
     # forward for one batch to check which layer inputs are equal to avoid unneeded svd calculations
     forward_fn(model, inputs)
     hash_dict = {k: h[0].hashed_inputs[0] for k, h in hooks.items()}
-    # equal input maps groups layers which recieve the same input. One layer is defined as the key and receives an svd hook. For the remaining layers the svd results can be skipped.
+    # equal input maps groups layers which receive the same input. One layer is defined as the key and receives an svd hook. For the remaining layers the svd results can be skipped.
     equal_inputs_map = {vv: v[0] for v in find_equal_values(hash_dict).values() for vv in v[1:]}
 
     # define rank budget and max components
@@ -465,8 +445,6 @@ def get_eva_state_dict(
 
     eva_state_dict = {}
     for name, rank in rank_dist.items():
-        if rank == 0:
-            continue
         hook = hooks[layer_hook_map[name]][0]
         if not torch.all(hook.converged[:rank]):
             raise ValueError(
@@ -485,6 +463,73 @@ def get_eva_state_dict(
     model.train(training)
 
     return eva_state_dict
+
+
+@torch.no_grad()
+def load_eva_state_dict(
+    model: torch.nn.Module,
+    eva_state_dict: dict,
+    adapter_name: str = "default",
+    _check_valid: bool = True,
+):
+    """
+    This function loads a state_dict computed with `get_eva_state_dict` into a peft_model.
+
+    Args:
+        model (torch.nn.Module): The model to load the state_dict into.
+        eva_state_dict (dict): The state_dict to load into the model.
+        adapter_name (str): The name of the adapter to load the state_dict into.
+        _check_valid (bool):
+            Whether to check if the model and peft_config are valid. Only exists for internal use and should never be
+            set to False.
+    """
+    if _check_valid:
+        _eva_checks(model, adapter_name)
+
+    peft_config = model.peft_config[adapter_name]
+    update_layer_kwargs = {
+        "adapter_name": adapter_name,
+        "lora_alpha": peft_config.lora_alpha,
+        "lora_dropout": peft_config.lora_dropout,
+        "use_rslora": peft_config.use_rslora,
+        "use_dora": peft_config.use_dora,
+    }
+    missing_eva_inits = []
+    new_target_modules = []
+    rank_pattern = {}
+    for name, module in model.named_modules():
+        if not isinstance(module, LoraLayer):
+            continue
+        elif name in eva_state_dict:
+            w = eva_state_dict.pop(name)
+            new_rank = w.size(0)
+            if new_rank == 0:
+                parent, _, target_name = _get_submodules(model, name)
+                setattr(parent, target_name, module.base_layer)
+                continue
+            elif new_rank != peft_config.r:
+                module.update_layer(r=new_rank, init_lora_weights="eva", **update_layer_kwargs)
+                rank_pattern[".".join(name.split(".")[2:])] = new_rank
+            module.lora_A[adapter_name].weight.copy_(w)
+            new_target_modules.append(name)
+        else:
+            module.update_layer(r=peft_config.r, init_lora_weights=True, **update_layer_kwargs)
+            missing_eva_inits.append(name)
+
+    # update target modules if some lora layers have been removed due to their EVA rank being 0
+    new_target_modules = new_target_modules + missing_eva_inits
+    other_module_names = [n for n, _ in model.named_modules() if n not in new_target_modules]
+    new_target_modules = _find_minimal_target_modules(new_target_modules, other_module_names)
+    model.peft_config[adapter_name].target_modules = new_target_modules
+
+    # set rank pattern obtained from EVA
+    model.peft_config[adapter_name].rank_pattern = rank_pattern
+
+    if missing_eva_inits:
+        warnings.warn(
+            f"the following layers were initialized with init_lora_weights=True because they were not found in the eva state_dict: {missing_eva_inits} "
+            f"currently the following lora modules are not supported: {UNSUPPORTED_LORA_MODULES}"
+        )
 
 
 @torch.no_grad()
@@ -507,57 +552,32 @@ def initialize_lora_eva_weights(
         model (PeftModel): The model to compute the SVD for.
         dataloader (Iterable): The dataloader to use for the forward pass.
         forward_fn (callable):
-            The forward function to use for the forward pass. Default logic:
-            ```
-            return model(**inputs)
-            ```
+            The forward function to use for the forward pass. Takes two arguments: `model` and `inputs`. Default
+            behavior is `return model(**inputs)`
         prepare_model_inputs_fn (Optional[callable]):
             This function receives the model inputs and the peft_config and passes the output to
             `prepare_layer_inputs_fn`. Can be used to modify the input to the SVD computation based on the original
             model inputs. For example for language modeling the attention mask is used to determine which indices are
-            padding tokens and should not be used for SVD.
-            `peft.tuners.lora.eva.prepare_model_inputs_fn_language_modeling` is used by default. Any function defined
-            here expects two arguments: `model_input` and `peft_config` and should return a 2d tensor. Default logic:
-            ```
-            def prepare_model_inputs_fn_language_modeling(model_input, peft_config: LoraConfig):
-                mask = model_input.get("attention_mask", torch.ones_like(model_input["input_ids"])).bool()
-                if peft_config.eva_config.use_label_mask and hasattr(model_input, "labels"):
-                    mask = torch.logical_and(mask, model_input["labels"] != peft_config.eva_config.label_mask_value)
-                return mask.nonzero()
-            ```
+            padding tokens and should not be used for SVD. Any function defined here expects two arguments:
+            `model_input` and `peft_config`. `peft.tuners.lora.eva.prepare_model_inputs_fn_language_modeling` is used
+            by default.
         prepare_layer_inputs_fn (Union[callable, Dict[str, callable], None]):
-            This function receives the layer inputs and the model inputs (potentially modified by
-            `prepare_model_inputs_fn`) and returns the inputs that should be used for SVD. When set to None and a layer
-            receives multiple inputs as a list, per default the first input is used. The default settings works for
-            language modeling and model_inputs is the mask used to determine which indices should be used for SVD
-            (created by `prepare_model_inputs_fn_language_modeling`). Default logic:
-            ```
-            def prepare_layer_inputs_fn_language_modeling(layer_input, model_input, layer_name) -> torch.Tensor:
-                if isinstance(layer_input, torch.Tensor):
-                    return layer_input[model_input.T.unbind()]
-                elif isinstance(layer_input, (tuple, list)):
-                    return layer_input[model_input.T.unbind()][0]
-                else:
-                    raise ValueError(...)
-                return layer_input[model_input.T.unbind()]
-            ```
+            This function receives the layer inputs, the model inputs (potentially modified by
+            `prepare_model_inputs_fn`) and the name of the layer and returns the inputs that should be used for SVD for
+            that particular layer. Any custom function defined here expects three arguments: `layer_input`,
+            `model_input`, and `layer_name` and should return a 2d tensor. The default logic can be found in
+            peft.tuners.lora.eva.prepare_layer_inputs_fn_language_modeling and works for language modeling. In this
+            case model_inputs is the mask used to determine which indices should be used for SVD (created by
+            `prepare_model_inputs_fn_language_modeling`).
         adapter_name (str): The name of the adapter to initialize the weights for.
         show_progress_bar (bool): Whether to show a progress bar. Default is True.
 
     Returns:
         model (torch.nn.Module): The model with the initialized LoRA weights.
     """
-    if not hasattr(model, "peft_config"):
-        raise ValueError("model must be a PeftModel")
+    _eva_checks(model, adapter_name)
+
     peft_config = model.peft_config[adapter_name]
-
-    # eva currently only works with a single active adapter
-    if len(model.active_adapters) > 1:
-        raise ValueError("`initialize_lora_eva_weights` currently only works with a single active adapter")
-
-    # initialize_lora_eva_weights only works with `init_lora_weights='eva'`
-    if peft_config.init_lora_weights != "eva":
-        raise ValueError("`initialize_lora_eva_weights` can only be used with `init_lora_weights='eva'`")
 
     # compute svd
     with model.disable_adapter():
@@ -571,29 +591,4 @@ def initialize_lora_eva_weights(
             show_progress_bar=show_progress_bar,
         )
 
-    # assert all lora layers are contained in eva_state_dict
-    update_layer_kwargs = {
-        "adapter_name": adapter_name,
-        "lora_alpha": peft_config.lora_alpha,
-        "lora_dropout": peft_config.lora_dropout,
-        "use_rslora": peft_config.use_rslora,
-        "use_dora": peft_config.use_dora,
-    }
-    missing_eva_inits = []
-    for name, module in model.named_modules():
-        if not isinstance(module, LoraLayer):
-            continue
-        if name in eva_state_dict:
-            w = eva_state_dict.pop(name)
-            module.update_layer(r=w.size(0), init_lora_weights=peft_config.init_lora_weights, **update_layer_kwargs)
-            module.lora_A[adapter_name].weight.copy_(w)
-        else:
-            module.update_layer(r=peft_config.r, init_lora_weights=True, **update_layer_kwargs)
-            missing_eva_inits.append(name)
-
-    if missing_eva_inits:
-        warnings.warn(
-            f"the following layers were initialized with init_lora_weights=True because they were not found in the eva state_dict: {missing_eva_inits} "
-            f"currently the following lora modules are not supported: {UNSUPPORTED_LORA_MODULES}"
-        )
-    return model
+    load_eva_state_dict(model, eva_state_dict, adapter_name, _check_valid=False)

@@ -93,6 +93,7 @@ from .tuners import (
     HRAModel,
     VBLoRAConfig,
     get_eva_state_dict,
+    load_eva_state_dict,
     initialize_lora_eva_weights,
 )
 from .utils import (

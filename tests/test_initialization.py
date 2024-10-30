@@ -19,6 +19,7 @@ import platform
 import re
 import subprocess
 import sys
+import tempfile
 from collections import defaultdict
 from contextlib import contextmanager
 from copy import deepcopy
@@ -54,6 +55,7 @@ from peft import (
     get_peft_model,
     initialize_lora_eva_weights,
     inject_adapter_in_model,
+    load_eva_state_dict,
     set_peft_model_state_dict,
 )
 from peft.utils import infer_device
@@ -1681,7 +1683,8 @@ class TestEvaInitialization:
                     prepare_layer_inputs_fn=prepare_layer_inputs_fn,
                 )
 
-    # Test that the state dict returned by get_eva_state_dict is consistent across different seeds based on the cosine similarity of the svd components.
+    # Test that the state dict returned by `get_eva_state_dict` is consistent across different seeds based on the cosine
+    # similarity of the svd components.
     @pytest.mark.parametrize("eva_config", [EvaConfig(rho=2), EvaConfig(rho=1), EvaConfig(rho=1, whiten=True)])
     def test_eva_state_dict_consistency(self, model, dataset, peft_config, eva_config):
         modified_peft_config = deepcopy(peft_config)
@@ -1712,7 +1715,8 @@ class TestEvaInitialization:
                 f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
             )
 
-    # Test that the state dict returned by get_eva_state_dict loaded correctly and is consistent across different seeds based on the cosine similarity of the svd components.
+    # Test that initialized EVA model is consistent across different seeds based on the cosine similarity of the svd
+    # components.
     def test_eva_initialization_consistency(self, model, dataset, peft_config):
         state_dicts = []
         for seed in range(self.NUM_SEEDS):
@@ -1742,6 +1746,28 @@ class TestEvaInitialization:
                 f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
             )
 
+    # Test that the `get_eva_state_dict` function can be used to initialize a model with EVA weights and that the
+    # initialized model can be saved and loaded correctly.
+    @pytest.mark.parametrize("has_rank_zero", [True, False])
+    def test_load_eva_state_dict(self, model, dataset, peft_config, has_rank_zero):
+        tmp_dirname = tempfile.mkdtemp()
+        dataloader = DataLoader(
+            dataset,
+            batch_size=self.BATCH_SIZE,
+            collate_fn=self.collate_fn,
+            shuffle=False,
+        )
+        peft_model = get_peft_model(deepcopy(model), peft_config)
+        sd = get_eva_state_dict(model, peft_config, dataloader)
+        if has_rank_zero:
+            k = "transformer.h.0.attn.c_attn"
+            sd[k] = sd[k][:0]
+        load_eva_state_dict(peft_model, sd)
+        # test that models that initialized `load_eva_state_dict` can be saved and loaded correctly
+        peft_model.save_pretrained(tmp_dirname)
+        peft_model = PeftModel.from_pretrained(model, tmp_dirname, torch_device=self.DEVICE, low_cpu_mem_usage=True)
+
+    # Test that a warning is raised when some adapter modules were not initialized with EVA weights.
     def test_missing_eva_inits(self, model, dataset, peft_config):
         modified_peft_config = deepcopy(peft_config)
         modified_peft_config.target_modules = ["wte"]
@@ -1756,6 +1782,20 @@ class TestEvaInitialization:
             match="the following layers were initialized with init_lora_weights=True because they were not found in the eva state_dict:*",
         ):
             initialize_lora_eva_weights(peft_model, dataloader)
+
+    # Test that a model initialized with EVA weights can be loaded correctly.
+    def test_load_eva_model(self, model, dataset, peft_config):
+        tmp_dirname = tempfile.mkdtemp()
+        dataloader = DataLoader(
+            dataset,
+            batch_size=self.BATCH_SIZE,
+            collate_fn=self.collate_fn,
+            shuffle=False,
+        )
+        peft_model = get_peft_model(deepcopy(model), peft_config)
+        initialize_lora_eva_weights(peft_model, dataloader)
+        peft_model.save_pretrained(tmp_dirname)
+        peft_model = PeftModel.from_pretrained(model, tmp_dirname, torch_device=self.DEVICE, low_cpu_mem_usage=True)
 
     # Test that EvaConfig.__init__ raises a ValueError when rho is negative.
     def test_eva_config_rho(self):

@@ -25,6 +25,7 @@ from .lora import (
     EvaConfig,
     LoraRuntimeConfig,
     get_eva_state_dict,
+    load_eva_state_dict,
     initialize_lora_eva_weights,
 )
 from .loha import LoHaConfig, LoHaModel

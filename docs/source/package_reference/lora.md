@@ -49,3 +49,7 @@ The abstract from the paper is:
 #### get_eva_state_dict
 
 [[autodoc]] tuners.lora.eva.get_eva_state_dict
+
+#### load_eva_state_dict
+
+[[autodoc]] tuners.lora.eva.load_eva_state_dict
