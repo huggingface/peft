@@ -38,14 +38,13 @@ class CPTEmbedding(torch.nn.Module):
         """
         super().__init__()
         self.config = copy.deepcopy(config)
-        self.check_config()
         num_virtual_tokens = config.num_virtual_tokens
 
         # Initialize embeddings with virtual token dimensions
         self.embedding = torch.nn.Embedding(num_virtual_tokens, config.token_dim)
 
         # Initialize embeddings using text-based prompt tuning, if configured
-        if config.cpt_prompt_tuning_init == CPTPromptInit.TEXT and not config.inference_mode:
+        if config.cpt_prompt_init == CPTPromptInit.TEXT and not config.inference_mode:
             assert config.num_virtual_tokens == len(config.cpt_token_ids)
 
             init_token_ids = torch.LongTensor(config.cpt_token_ids).to(word_embeddings.weight.device)
@@ -83,14 +82,14 @@ class CPTEmbedding(torch.nn.Module):
         """
         Sets up a backward hook to selectively update token gradients based on the CPT token type mask.
         """
-        if self.config.cpt_prompt_tuning_init == CPTPromptInit.TEXT:
+        if self.config.cpt_prompt_init == CPTPromptInit.TEXT:
             tensor_ICL_mask = torch.Tensor(self.config.cpt_tokens_type_mask).long()
             mask_input_template = torch.remainder(tensor_ICL_mask, 4) == 1
             mask_input = torch.remainder(tensor_ICL_mask, 4) == 2
             mask_output_template = torch.remainder(tensor_ICL_mask, 4) == 3
             mask = mask_input_template | mask_input | mask_output_template
             mask = mask.view(-1, 1)
-        elif self.config.cpt_prompt_tuning_init == CPTPromptInit.RANDOM:
+        elif self.config.cpt_prompt_init == CPTPromptInit.RANDOM:
             mask = torch.ones((self.config.num_virtual_tokens, 1)).long()
 
         def backward_hook(grad):
@@ -100,7 +99,7 @@ class CPTEmbedding(torch.nn.Module):
         self.delta_embedding.weight.register_hook(backward_hook)
 
     def get_epsilon(self):
-        if self.config.cpt_prompt_tuning_init == "TEXT":
+        if self.config.cpt_prompt_init == "TEXT":
             cpt_tokens_type_mask = self.config.cpt_tokens_type_mask
         else:
             cpt_tokens_type_mask = [2] * self.config.num_virtual_tokens
@@ -201,21 +200,3 @@ class CPTEmbedding(torch.nn.Module):
 
         return base_model_output
 
-    def check_config(self):
-        if self.config.cpt_prompt_tuning_init == CPTPromptInit.TEXT:
-            assert self.config.cpt_token_ids is not None
-            assert self.config.cpt_mask is not None
-            assert self.config.cpt_tokens_type_mask is not None
-            assert (
-                len(self.config.cpt_token_ids)
-                == len(self.config.cpt_mask)
-                == len(self.config.cpt_tokens_type_mask)
-                == self.config.num_virtual_tokens
-            )
-        elif self.config.cpt_prompt_tuning_init == CPTPromptInit.RANDOM:
-            assert self.config.cpt_token_ids is None
-            assert self.config.cpt_mask is None
-            assert self.config.cpt_tokens_type_mask is None
-            assert self.config.num_virtual_tokens > 0
-        else:
-            raise NotImplementedError(f" was not implemented for {self.config.cpt_prompt_tuning_init}")

@@ -50,7 +50,7 @@ def config_text():
         cpt_token_ids=[0, 1, 2, 3, 4, 5, 6, 7],  # Example token IDs for testing
         cpt_mask=[1, 1, 1, 1, 1, 1, 1, 1],
         cpt_tokens_type_mask=[1, 2, 2, 2, 3, 3, 3, 4],
-        cpt_prompt_tuning_init="TEXT",
+        cpt_prompt_init="TEXT",
         num_virtual_tokens=8,
         opt_weighted_loss_type="decay",
         opt_loss_decay_factor=0.95,
@@ -65,7 +65,7 @@ def config_text():
 def config_random():
     """Load the SST2 dataset and prepare it for testing."""
     config = CPTConfig(
-        cpt_prompt_tuning_init="RANDOM",
+        cpt_prompt_init="RANDOM",
         num_virtual_tokens=8,
         opt_weighted_loss_type="decay",
         opt_loss_decay_factor=0.95,

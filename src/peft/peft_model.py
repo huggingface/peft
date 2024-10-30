@@ -1740,10 +1740,19 @@ class PeftModelForCausalLM(PeftModel):
     def _cpt_forward(self, input_ids=None, inputs_embeds=None, peft_config=None, task_ids=None, batch_size=None, **kwargs):
         # Extract labels from kwargs
         labels = kwargs.pop("labels")
+        device = [i.device for i in[input_ids, inputs_embeds, labels] if i is not None][0]
         # Extract input_type_mask from kwargs and move it to the same device as labels
-        input_type_mask = kwargs.pop("input_type_mask").to(labels.device)
+        if 'input_type_mask' in kwargs.keys():
+            input_type_mask = kwargs.pop("input_type_mask").to(device)
+        else:
+            if input_ids is None:
+                N_tokens = inputs_embeds.shape[1]
+            else:
+                N_tokens = input_ids.shape[1]
+            input_type_mask = torch.zeros((batch_size, N_tokens)).to(device)
+            input_type_mask[:, -1] = 4
 
-        if peft_config.cpt_prompt_tuning_init == "TEXT":
+        if peft_config.cpt_prompt_init == "TEXT":
             cpt_token_ids = peft_config.cpt_token_ids
             cpt_tokens_type_mask = peft_config.cpt_tokens_type_mask
         else:
@@ -1777,12 +1786,14 @@ class PeftModelForCausalLM(PeftModel):
             kwargs["labels"] = cpt_labels
         # Pass the modified inputs to the base model
         base_model_output = self.base_model(inputs_embeds=inputs_embeds, **kwargs)
-        # Calculate the loss using the custom CPT loss function
-        base_model_output = CPTEmbedding.calculate_loss(
-            base_model_output, cpt_labels, cpt_type_mask, self.peft_config["default"]
-        )
-
-        return base_model_output
+        if labels is None:
+            return base_model_output
+        else:
+            # Calculate the loss using the custom CPT loss function
+            base_model_output = CPTEmbedding.calculate_loss(
+                base_model_output, cpt_labels, cpt_type_mask, self.peft_config["default"]
+            )
+            return base_model_output
 
     def generate(self, *args, **kwargs):
         peft_config = self.active_peft_config
