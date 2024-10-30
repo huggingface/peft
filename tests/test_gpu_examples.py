@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.#
+# Copyright 2023-present the HuggingFace Inc. team.
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -53,6 +53,7 @@ from peft import (
     LoftQConfig,
     LoraConfig,
     PeftModel,
+    PrefixTuningConfig,
     PromptEncoderConfig,
     TaskType,
     VeraConfig,
@@ -3886,3 +3887,30 @@ class TestLowCpuMemUsageDifferentDevices:
 
         assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
         assert {p.device.type for p in model.parameters()} == {device_model}
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+@pytest.mark.multi_gpu_tests
+class TestPrefixTuning:
+    def test_prefix_tuning_multiple_devices(self):
+        # See issue 2134
+        model_id = "hf-internal-testing/tiny-random-MistralForCausalLM"
+        tokenizer = AutoTokenizer.from_pretrained(model_id, padding="left")
+        inputs = tokenizer(["A list of colors: red, blue"], return_tensors="pt").to("cuda")
+
+        device_map = {
+            "model.embed_tokens": 0,
+            "model.layers.0": 0,
+            "model.layers.1": 1,
+            "model.norm": 1,
+            "lm_head": 1,
+        }
+        model = AutoModelForCausalLM.from_pretrained(model_id, device_map=device_map)
+        # sanity check, as the test passes trivially for a single device
+        assert len({p.device for p in model.parameters()}) > 1
+        # sanity check: this should work without peft
+        model.generate(**inputs)  # does not raise
+
+        peft_config = PrefixTuningConfig(num_virtual_tokens=10, task_type="CAUSAL_LM")
+        model = get_peft_model(model, peft_config)
+        model.generate(**inputs)  # does not raise

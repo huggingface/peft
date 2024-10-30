@@ -120,3 +120,49 @@ def get_bnb_param_type(param: torch.nn.Parameter) -> Literal[False, "4bit", "8bi
     if param.__class__.__name__ == "Int8Params":
         return "8bit"
     return False
+
+
+# adapted from:
+# https://github.com/huggingface/transformers/blob/eab6c491d439e83d5e31c660df6f7e36592eb0a2/src/transformers/generation/utils.py#L1617-L1643
+def get_layer_device_map(model):
+    """
+    Derive the device map for the layers of the model.
+    """
+    main_device = [d for d in model.hf_device_map.values() if d not in ["cpu", "disk"]][0]
+
+    execution_device_map = {
+        name: main_device if device in ["cpu", "disk"] else device for name, device in model.hf_device_map.items()
+    }
+
+    if execution_device_map is None:
+        return None
+
+    if len(execution_device_map) == 1 and "" in execution_device_map:
+        return {idx: execution_device_map[""] for idx in range(model.config.num_hidden_layers)}
+
+    layer_device_map = {}
+    for layer in execution_device_map:
+        for idx in range(model.config.num_hidden_layers):
+            if f".{idx}." in f"{layer}.":
+                layer_device_map[idx] = execution_device_map[layer]
+                break
+    for idx in range(model.config.num_hidden_layers):
+        if idx not in layer_device_map:
+            raise RuntimeError(f"layer {idx} has not been mapped to a device.")
+    return layer_device_map
+
+
+# adapted from:
+# https://github.com/huggingface/transformers/blob/eab6c491d439e83d5e31c660df6f7e36592eb0a2/src/transformers/cache_utils.py#L1159-L1179
+def map_cache_to_layer_device_map(model, cache) -> None:
+    """
+    Ensure that the key and value cache of the model are on the same device as their corresponding layers.
+    """
+    if not (isinstance(cache, transformers.Cache) and hasattr(model, "hf_device_map")):
+        return
+
+    layer_device_map = get_layer_device_map(model)
+    for idx in range(model.config.num_hidden_layers):
+        layer_device = layer_device_map[idx]
+        cache.key_cache[idx] = cache.key_cache[idx].to(layer_device)
+        cache.value_cache[idx] = cache.value_cache[idx].to(layer_device)
