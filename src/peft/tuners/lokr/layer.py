@@ -126,6 +126,7 @@ class LoKrLayer(nn.Module, LycorisLayer):
         if adapter_name in self.lokr_t2:
             nn.init.kaiming_uniform_(self.lokr_t2[adapter_name], a=math.sqrt(5))
 
+    # Initializes weight matrices similar to the way initialized in the LyCORIS repository.
     def reset_adapter_parameters_lycoris_way(self, adapter_name):
         if adapter_name in self.lokr_w1:
             nn.init.kaiming_uniform_(self.lokr_w1[adapter_name], a=math.sqrt(5))

@@ -55,7 +55,7 @@ class LoKrConfig(LycorisConfig):
             When passing a list of strings, either an exact match will be performed or it is checked if the name of the
             module ends with any of the passed strings.
         init_weights (`bool`):
-            Whether to perform initialization of adapter weights. This defaults to `True`,Use "lycoris" to initialize
+            Whether to perform initialization of adapter weights. This defaults to `True`.Use "lycoris" to initialize
             weights in the style of the LYCORIS repository. Passing `False` is discouraged.".
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
