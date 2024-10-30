@@ -133,3 +133,6 @@ class LoHaConfig(LycorisConfig):
         self.exclude_modules = (
             set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
+        # check for layers_to_transform and layers_pattern
+        if self.layers_pattern and not self.layers_to_transform:
+            raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
