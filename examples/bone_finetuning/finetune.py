@@ -210,7 +210,7 @@ def train_tokenize_function(examples, tokenizer, query, response):
 
 
 def build_model(script_args, checkpoint_dir):
-    # if not script_args.use_lora and not script_args.use_bone: assert script_args.bits in [16, 32]
+    if script_args.use_bone: assert script_args.bits in [16, 32]
     compute_dtype = torch.bfloat16 if script_args.bf16 else torch.float32
     model = transformers.AutoModelForCausalLM.from_pretrained(
         script_args.model_name_or_path,
@@ -273,7 +273,7 @@ def build_model(script_args, checkpoint_dir):
                 init_lora_weights=script_args.init_lora_weights,
             )
             model = get_peft_model(model, peft_config)
-    if script_args.use_bone:
+    elif script_args.use_bone:
         if checkpoint_dir is not None:
             logger.info(f"Loading adapters from {checkpoint_dir}.")
             # os.path.join(checkpoint_dir, 'adapter_model')
@@ -369,7 +369,7 @@ def train():
     data_module = {"train_dataset": train_dataset, "eval_dataset": None, "data_collator": data_collator}
 
     trainer = Trainer(model=model, tokenizer=tokenizer, args=script_args, **data_module)
-    if script_args.use_lora:
+    if script_args.use_lora or script_args.use_bone:
         trainer.add_callback(SavePeftModelCallback)
     trainer.train(resume_from_checkpoint=resume_from_checkpoint_dir)
     trainer.save_state()
