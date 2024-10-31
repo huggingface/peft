@@ -489,7 +489,6 @@ def load_eva_state_dict(
     peft_config = model.peft_config[adapter_name]
     update_layer_kwargs = {
         "adapter_name": adapter_name,
-        "lora_alpha": peft_config.lora_alpha,
         "lora_dropout": peft_config.lora_dropout,
         "use_rslora": peft_config.use_rslora,
         "use_dora": peft_config.use_dora,
@@ -497,6 +496,7 @@ def load_eva_state_dict(
     missing_eva_inits = []
     new_target_modules = []
     rank_pattern = {}
+    alpha_pattern = {}
     for name, module in model.named_modules():
         if not isinstance(module, LoraLayer):
             continue
@@ -508,12 +508,19 @@ def load_eva_state_dict(
                 setattr(parent, target_name, module.base_layer)
                 continue
             elif new_rank != peft_config.r:
-                module.update_layer(r=new_rank, init_lora_weights="eva", **update_layer_kwargs)
-                rank_pattern[".".join(name.split(".")[2:])] = new_rank
+                pattern_key = ".".join(name.split(".")[2:])
+                rank_pattern[pattern_key] = new_rank
+                new_alpha = peft_config.lora_alpha
+                if peft_config.eva_config.use_alpha_pattern:
+                    new_alpha = peft_config.lora_alpha * new_rank / peft_config.r
+                    alpha_pattern[pattern_key] = new_alpha
+                module.update_layer(r=new_rank, lora_alpha=new_alpha, init_lora_weights="eva", **update_layer_kwargs)
             module.lora_A[adapter_name].weight.copy_(w)
             new_target_modules.append(name)
         else:
-            module.update_layer(r=peft_config.r, init_lora_weights=True, **update_layer_kwargs)
+            module.update_layer(
+                r=peft_config.r, lora_alpha=peft_config.lora_alpha, init_lora_weights=True, **update_layer_kwargs
+            )
             missing_eva_inits.append(name)
 
     # update target modules if some lora layers have been removed due to their EVA rank being 0
@@ -524,6 +531,10 @@ def load_eva_state_dict(
 
     # set rank pattern obtained from EVA
     model.peft_config[adapter_name].rank_pattern = rank_pattern
+
+    # when use_alpha_pattern is True, lora scaling factors have been adjusted after the rank redistribution
+    if peft_config.eva_config.use_alpha_pattern:
+        model.peft_config[adapter_name].alpha_pattern = alpha_pattern
 
     if missing_eva_inits:
         warnings.warn(

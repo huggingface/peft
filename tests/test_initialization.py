@@ -1685,7 +1685,10 @@ class TestEvaInitialization:
 
     # Test that the state dict returned by `get_eva_state_dict` is consistent across different seeds based on the cosine
     # similarity of the svd components.
-    @pytest.mark.parametrize("eva_config", [EvaConfig(rho=2), EvaConfig(rho=1), EvaConfig(rho=1, whiten=True)])
+    @pytest.mark.parametrize(
+        "eva_config",
+        [EvaConfig(rho=2), EvaConfig(rho=1), EvaConfig(rho=1, whiten=True), EvaConfig(rho=2, use_alpha_pattern=True)],
+    )
     def test_eva_state_dict_consistency(self, model, dataset, peft_config, eva_config):
         modified_peft_config = deepcopy(peft_config)
         modified_peft_config.eva_config = eva_config
