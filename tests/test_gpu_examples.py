@@ -3892,7 +3892,7 @@ class TestLowCpuMemUsageDifferentDevices:
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
 @pytest.mark.multi_gpu_tests
 class TestPrefixTuning:
-    def test_prefix_tuning_multiple_devices(self):
+    def test_prefix_tuning_multiple_devices_decoder_model(self):
         # See issue 2134
         model_id = "hf-internal-testing/tiny-random-MistralForCausalLM"
         tokenizer = AutoTokenizer.from_pretrained(model_id, padding="left")

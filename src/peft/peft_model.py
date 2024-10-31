@@ -735,6 +735,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 # Dont' apply this to encoder-decoder models and not to models requiring special processing.
                 # local import in case users use a very old transformers version
                 past_key_values = DynamicCache.from_legacy_cache(past_key_values)
+                map_cache_to_layer_device_map(self.get_base_model(), past_key_values)  # no-op if not a Cache instance
             elif peft_config.num_transformer_submodules == 2 and self.base_model._supports_cache_class:
                 # Dont' apply this to encoder-decoder models that don't support new Cachc format yet
                 # If we don't apply this, prefix-tuning fails to update cross-attn cache
