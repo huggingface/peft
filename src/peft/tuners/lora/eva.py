@@ -505,7 +505,7 @@ def load_eva_state_dict(
             new_rank = w.size(0)
             if new_rank == 0:
                 parent, _, target_name = _get_submodules(model, name)
-                setattr(parent, target_name, module.base_layer)
+                setattr(parent, target_name, module.get_base_layer())
                 continue
             elif new_rank != peft_config.r:
                 pattern_key = ".".join(name.split(".")[2:])
