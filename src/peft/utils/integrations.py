@@ -161,6 +161,10 @@ def map_cache_to_layer_device_map(model, cache) -> None:
     if not (isinstance(cache, transformers.Cache) and hasattr(model, "hf_device_map")):
         return
 
+    if isinstance(cache, transformers.EncoderDecoderCache):
+        map_cache_to_layer_device_map(model, cache.self_attention_cache)
+        return
+
     layer_device_map = get_layer_device_map(model)
     for idx in range(model.config.num_hidden_layers):
         layer_device = layer_device_map[idx]

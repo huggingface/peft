@@ -3914,3 +3914,36 @@ class TestPrefixTuning:
         peft_config = PrefixTuningConfig(num_virtual_tokens=10, task_type="CAUSAL_LM")
         model = get_peft_model(model, peft_config)
         model.generate(**inputs)  # does not raise
+
+    def test_prefix_tuning_multiple_devices_encoder_decoder_model(self):
+        # See issue 2134
+        model_id = "hf-internal-testing/tiny-random-T5Model"
+        tokenizer = AutoTokenizer.from_pretrained(model_id, padding="left")
+        inputs = tokenizer(["A list of colors: red, blue"], return_tensors="pt").to("cuda")
+        device_map = {
+            "shared": 0,
+            "encoder.embed_tokens": 0,
+            "encoder.block.0": 0,
+            "encoder.block.1": 0,
+            "encoder.block.2": 1,
+            "encoder.block.3": 1,
+            "encoder.block.4": 1,
+            "encoder.final_layer_norm": 1,
+            "decoder.embed_tokens": 0,
+            "decoder.block.0": 0,
+            "decoder.block.1": 0,
+            "decoder.block.2": 1,
+            "decoder.block.3": 1,
+            "decoder.block.4": 1,
+            "decoder.final_layer_norm": 1,
+            "lm_head": 0,
+        }
+        model = AutoModelForSeq2SeqLM.from_pretrained(model_id, device_map=device_map)
+        # sanity check, as the test passes trivially for a single device
+        assert len({p.device for p in model.parameters()}) > 1
+        # sanity check: this should work without peft
+        model.generate(**inputs)  # does not raise
+
+        peft_config = PrefixTuningConfig(num_virtual_tokens=10, task_type="SEQ_2_SEQ_LM")
+        model = get_peft_model(model, peft_config)
+        model.generate(**inputs)  # does not raise
