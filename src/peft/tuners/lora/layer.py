@@ -25,7 +25,7 @@ from torch import svd_lowrank
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
-from peft.utils.integrations import dequantize_module_weight, gather_params_ctx, get_bnb_param_type
+from peft.utils.integrations import dequantize_module_weight, gather_params_ctx, get_bnb_param_type, skip_init_on_device
 from peft.utils.other import transpose
 
 from .config import LoraConfig
@@ -1427,6 +1427,10 @@ class MultiheadAttention(nn.Module, LoraLayer):
         result = (result[0].to(previous_dtype), result[1].to(previous_dtype) if result[1] is not None else result[1])
         return result
 
+    # The decorator is needed in case low_cpu_mem_usage=True is used, as we don't want the base layer weights to be
+    # moved to meta device. This requires the use of PEFT's implementation of init_empty_weight instead of using the one
+    # from accelerate.
+    @skip_init_on_device
     def _restore_weights(self):
         # Restore the weights as registered parameters on the base layer.
         # This is necessary because the way that weights are merged/unmerged (which is necessary for forward to work

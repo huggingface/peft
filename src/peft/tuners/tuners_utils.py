@@ -24,7 +24,6 @@ from contextlib import contextmanager, nullcontext
 from typing import Any, Optional, Union
 
 import torch
-from accelerate import init_empty_weights
 from accelerate.hooks import AlignDevicesHook
 from accelerate.utils import named_module_tensors, offload_state_dict
 from torch import nn
@@ -39,6 +38,7 @@ from peft.utils.constants import (
     MIN_TARGET_MODULES_FOR_OPTIMIZATION,
     SEQ_CLS_HEAD_NAMES,
 )
+from peft.utils.integrations import init_empty_weights
 from peft.utils.peft_types import PeftType, TaskType
 
 from ..config import PeftConfig
