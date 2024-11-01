@@ -18,6 +18,7 @@
 # limitations under the License.
 
 # from .config import PeftConfig, PeftType, PromptLearningConfig, TaskType
+from .integrations import map_cache_to_layer_device_map
 from .loftq_utils import replace_lora_weights_loftq
 from .peft_types import PeftType, TaskType
 from .other import (
