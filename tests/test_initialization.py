@@ -276,6 +276,37 @@ class TestLoraInitialization:
         assert model.embed.scaling["default"] == expected_scaling
         assert model.conv2d.scaling["default"] == expected_scaling
 
+    # bugfix for issue 2194
+    def test_pattern_override(self):
+        torch.manual_seed(0)
+
+        layer = self.get_model()
+        model = nn.Sequential(layer, layer)
+        config = LoraConfig(
+            target_modules=["linear"],
+            lora_alpha=1,
+            r=8,
+            use_rslora=False,
+            rank_pattern={"linear": 8},
+            alpha_pattern={"0.linear": 2}
+        )
+        model = get_peft_model(model, config)
+        scaling_with_rank_pattern = model.model[0].linear.scaling
+        
+        layer = self.get_model()
+        model = nn.Sequential(layer, layer)
+        config = LoraConfig(
+            target_modules=["linear"],
+            lora_alpha=1,
+            r=8,
+            use_rslora=False,
+            alpha_pattern={"0.linear": 2}
+        )
+        model = get_peft_model(model, config)
+        scaling_without_rank_pattern = model.model[0].linear.scaling
+        
+        assert scaling_with_rank_pattern == scaling_without_rank_pattern
+
     def test_lora_pissa_linear_init_default(self, data):
         model = self.get_model()
         output = model(data)[0]
