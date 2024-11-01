@@ -50,8 +50,9 @@ class HRAConfig(PeftConfig):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
             layer at this index.
-        layers_pattern (`str`):
-            The layer pattern name, used only if `layers_to_transform` is different from `None`.
+        layers_pattern (`Optional[Union[List[str], str]]`):
+            The layer pattern name, used only if `layers_to_transform` is different from `None`. This should target the
+            `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
         rank_pattern (`dict`):
             The mapping from layer names or regexp expression to ranks which are different from the default rank
             specified by `r`.
@@ -96,10 +97,11 @@ class HRAConfig(PeftConfig):
             "help": "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at this index."
         },
     )
-    layers_pattern: Optional[str] = field(
+    layers_pattern: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
-            "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
+            "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern. "
+            "This should target the `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`."
         },
     )
     bias: str = field(default="none", metadata={"help": "Bias type for HRA. Can be 'none', 'all' or 'hra_only'"})
@@ -127,3 +129,7 @@ class HRAConfig(PeftConfig):
         # if target_modules is a regex expression, then layers_pattern should be None
         if isinstance(self.target_modules, str) and self.layers_pattern is not None:
             raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
+
+        # check for layers_to_transform and layers_pattern
+        if self.layers_pattern and not self.layers_to_transform:
+            raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")

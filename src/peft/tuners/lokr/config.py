@@ -59,8 +59,9 @@ class LoKrConfig(LycorisConfig):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
             layer at this index.
-        layers_pattern (`str`):
-            The layer pattern name, used only if `layers_to_transform` is different from `None`.
+        layers_pattern (`Optional[Union[List[str], str]]`):
+            The layer pattern name, used only if `layers_to_transform` is different from `None`. This should target the
+            `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
         rank_pattern (`dict`):
             The mapping from layer names or regexp expression to ranks which are different from the default rank
             specified by `r`.
@@ -117,10 +118,11 @@ class LoKrConfig(LycorisConfig):
             "help": "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at this index."
         },
     )
-    layers_pattern: Optional[str] = field(
+    layers_pattern: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
-            "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
+            "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern. "
+            "This should target the `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`."
         },
     )
     modules_to_save: Optional[list[str]] = field(
@@ -140,3 +142,6 @@ class LoKrConfig(LycorisConfig):
         self.exclude_modules = (
             set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
+        # check for layers_to_transform and layers_pattern
+        if self.layers_pattern and not self.layers_to_transform:
+            raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")

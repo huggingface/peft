@@ -509,17 +509,27 @@ class BaseTuner(nn.Module, ABC):
                 )
             elif not excluded_modules and unmatched_modules:
                 # None of the targeted modules matched
-                raise ValueError(
+                error_msg = (
                     f"Target modules {peft_config.target_modules} not found in the base model. "
                     f"Please check the target modules and try again."
                 )
+                if peft_config.layers_to_transform is not None:
+                    error_msg += f" Note: You specified 'layers_to_transform': {peft_config.layers_to_transform}."
+                if peft_config.layers_pattern is not None:
+                    error_msg += f" You also specified 'layers_pattern': {peft_config.layers_pattern}."
+                raise ValueError(error_msg)
             else:
                 # Some modules did not match and some matched but were excluded
-                raise ValueError(
+                error_msg = (
                     "No modules were targeted for adaptation. "
                     "This might be caused by a combination of mismatched target modules and excluded modules. "
                     "Please check your `target_modules` and `exclude_modules` configuration."
                 )
+                if peft_config.layers_to_transform is not None:
+                    error_msg += f" Note: You specified 'layers_to_transform': {peft_config.layers_to_transform}."
+                if peft_config.layers_pattern is not None:
+                    error_msg += f" You also specified 'layers_pattern': {peft_config.layers_pattern}."
+                raise ValueError(error_msg)
 
         elif hasattr(peft_config, "exclude_modules") and peft_config.exclude_modules and not excluded_modules:
             # exclude_modules was passed but was not used

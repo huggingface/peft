@@ -2963,10 +2963,8 @@ class PeftHqqGPUTests(unittest.TestCase):
         assert cc_matrix.min() > 0.97
 
 
-# TODO: unskip the tests once https://github.com/casper-hansen/AutoAWQ/issues/466 is fixed
 @require_torch_gpu
 @require_auto_awq
-@pytest.mark.skip(reason="Needs https://github.com/casper-hansen/AutoAWQ/issues/466 to be fixed first")
 class PeftAwqGPUTests(unittest.TestCase):
     r"""
     Awq + peft tests
@@ -3773,6 +3771,11 @@ class TestFSDPWrap:
         init_process_group(world_size=1, rank=0)
         # check that this does not raise:
         FSDP(model, auto_wrap_policy=fsdp_auto_wrap_policy(model), use_orig_params=False, sync_module_states=True)
+
+    def test_fsdp_auto_wrap_policy_does_not_raise_on_custom_model(self):
+        # See #2167
+        # Avoid raising on custom models since Trainer uses fsdp_auto_wrap_policy automatically for PEFT + FSDP
+        fsdp_auto_wrap_policy(SimpleModel())  # does not raise
 
 
 class TestBOFT:

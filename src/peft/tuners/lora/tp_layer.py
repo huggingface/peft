@@ -201,23 +201,21 @@ class LoraParallelLinear(nn.Module, LoraLayer):
                 x = x.to(lora_A.weight.dtype)
 
                 if not self.use_dora[active_adapter]:
-                    lora_result = lora_A(dropout(x))
-                    if isinstance(lora_result, tuple):
-                        lora_result = lora_result[0]
-                    lora_result = lora_B(lora_result)
-                    if isinstance(lora_result, tuple):
-                        lora_result = lora_result[0]
-                    lora_result = lora_result * scaling
-
-                    result = result + lora_result
+                    result = result + lora_B(lora_A(dropout(x))) * scaling
                 else:
-                    x = dropout(x)
+                    if isinstance(dropout, torch.nn.Identity) or not self.training:
+                        base_result = result
+                    else:
+                        x = dropout(x)
+                        base_result = None
+
                     result = result + self.lora_magnitude_vector[active_adapter](
                         x,
                         lora_A=lora_A,
                         lora_B=lora_B,
                         scaling=scaling,
                         base_layer=self.get_base_layer(),
+                        base_result=base_result,
                     )
 
             result = result.to(torch_result_dtype)
