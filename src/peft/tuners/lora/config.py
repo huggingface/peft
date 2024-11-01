@@ -95,10 +95,9 @@ class EvaConfig:
             If use_label_mask=True the value to look for to mask out ignored tokens. Default is -100.
         whiten (`bool`): Apply whitening to singular vectors. Default is False.
             Whitening has been shown to be beneficial for EVA in the vision domain.
-        use_alpha_pattern (`bool`):
-            Use alpha_pattern to adjust LoRA scaling factors after the rank redistribution. Setting this to True means
-            the scaling factors are adjusted so that all LoRA gradients have the same scale regardless of their rank.
-            Default is False.
+        adjust_scaling_factors (`bool`):
+            Adjust LoRA scaling factors after the rank redistribution. Setting this to True means the scaling factors
+            are adjusted so that all LoRA gradients have the same scale regardless of their rank. Default is True.
     """
 
     rho: float = field(default=2.0, metadata={"help": "Rho value for EVA redistribution"})
@@ -108,9 +107,9 @@ class EvaConfig:
         default=-100, metadata={"help": "if use_label_mask=True the value to look for to mask out ignored tokens"}
     )
     whiten: bool = field(default=False, metadata={"help": "Apply whitening to singular vectors"})
-    use_alpha_pattern: bool = field(
-        default=False,
-        metadata={"help": "Use alpha_pattern to adjust LoRA scaling factors after the rank redistribution"},
+    adjust_scaling_factors: bool = field(
+        default=True,
+        metadata={"help": "Adjust LoRA scaling factors after the rank redistribution"},
     )
 
     def __post_init__(self):

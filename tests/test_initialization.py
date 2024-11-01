@@ -19,7 +19,6 @@ import platform
 import re
 import subprocess
 import sys
-import tempfile
 from collections import defaultdict
 from contextlib import contextmanager
 from copy import deepcopy
@@ -55,9 +54,9 @@ from peft import (
     get_peft_model,
     initialize_lora_eva_weights,
     inject_adapter_in_model,
-    load_eva_state_dict,
     set_peft_model_state_dict,
 )
+from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
 from peft.utils.hotswap import hotswap_adapter
 
@@ -1625,9 +1624,6 @@ class TestEvaInitialization:
     def prepare_layer_inputs_fn(layer_input, model_input, layer_name):
         return layer_input[0].view(-1, layer_input[0].size(-1))
 
-    # tests for cases where prepare_layer_inputs_fn is a mapping
-    # checks that if not all target modules are present, the prepare_layer_inputs_fn for the remaining modules is set to None
-    # checks that if more keys than target modules are present, a ValueError is raised
     @pytest.mark.parametrize(
         "prepare_layer_inputs_keys, expected_outcome",
         [
@@ -1642,6 +1638,12 @@ class TestEvaInitialization:
     def test_eva_state_dict_prepare_inputs_mapping(
         self, model, dataset, peft_config, prepare_layer_inputs_keys, expected_outcome
     ):
+        """
+        Tests for cases where prepare_layer_inputs_fn is a mapping. Checks that if not all target modules are present,
+        the prepare_layer_inputs_fn for the remaining modules is set to None. Also checks that if more keys than target
+        modules are present, a ValueError is raised.
+        """
+
         def fn(x, *args):
             return x[0].view(-1, x[0].size(-1))
 
@@ -1663,8 +1665,8 @@ class TestEvaInitialization:
         if expected_outcome == "success":
             sd = get_eva_state_dict(
                 model,
-                modified_peft_config,
                 dataloader,
+                modified_peft_config,
                 prepare_model_inputs_fn=None,
                 prepare_layer_inputs_fn=prepare_layer_inputs_fn,
             )
@@ -1677,19 +1679,48 @@ class TestEvaInitialization:
             ):
                 get_eva_state_dict(
                     model,
-                    modified_peft_config,
                     dataloader,
+                    modified_peft_config,
                     prepare_model_inputs_fn=None,
                     prepare_layer_inputs_fn=prepare_layer_inputs_fn,
                 )
 
-    # Test that the state dict returned by `get_eva_state_dict` is consistent across different seeds based on the cosine
-    # similarity of the svd components.
     @pytest.mark.parametrize(
         "eva_config",
-        [EvaConfig(rho=2), EvaConfig(rho=1), EvaConfig(rho=1, whiten=True), EvaConfig(rho=2, use_alpha_pattern=True)],
+        [EvaConfig(rho=2, adjust_scaling_factors=True)],
     )
-    def test_eva_state_dict_consistency(self, model, dataset, peft_config, eva_config):
+    def test_eva_state_dict_adjust_scaling_factors(self, model, dataset, peft_config, eva_config):
+        """
+        Tests that the scaling factors are adjusted so that all LoRA gradients have the same scale regardless of their
+        rank.
+        """
+        modified_peft_config = deepcopy(peft_config)
+        modified_peft_config.eva_config = eva_config
+        dataloader = DataLoader(
+            dataset,
+            batch_size=self.BATCH_SIZE,
+            collate_fn=self.collate_fn,
+            shuffle=False,
+        )
+        peft_model = get_peft_model(deepcopy(model), modified_peft_config)
+        scaling_factors_before = {}
+        for n, m in peft_model.named_modules():
+            if isinstance(m, LoraLayer):
+                scaling_factors_before[n] = m.scaling["default"]
+        initialize_lora_eva_weights(peft_model, dataloader)
+        for n, m in peft_model.named_modules():
+            if isinstance(m, LoraLayer):
+                assert m.scaling["default"] == scaling_factors_before[n]
+
+    @pytest.mark.parametrize(
+        "eva_config",
+        [EvaConfig(rho=2), EvaConfig(rho=1), EvaConfig(rho=1, whiten=True)],
+    )
+    def test_eva_initialization_consistency(self, model, dataset, peft_config, eva_config):
+        """
+        Tests that the state dict returned by `get_eva_state_dict` is consistent across different seeds based on the
+        cosine similarity of the svd components.
+        """
         modified_peft_config = deepcopy(peft_config)
         modified_peft_config.eva_config = eva_config
         state_dicts = []
@@ -1701,7 +1732,7 @@ class TestEvaInitialization:
                 collate_fn=self.collate_fn,
                 shuffle=False,
             )
-            sd = get_eva_state_dict(model, modified_peft_config, dataloader)
+            sd = get_eva_state_dict(model, dataloader, modified_peft_config)
             state_dicts.append(sd)
 
         cos_sims = defaultdict(list)
@@ -1718,42 +1749,12 @@ class TestEvaInitialization:
                 f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
             )
 
-    # Test that initialized EVA model is consistent across different seeds based on the cosine similarity of the svd
-    # components.
-    def test_eva_initialization_consistency(self, model, dataset, peft_config):
-        state_dicts = []
-        for seed in range(self.NUM_SEEDS):
-            shuffled_dataset = dataset.shuffle(seed=seed)
-            dataloader = DataLoader(
-                shuffled_dataset,
-                batch_size=self.BATCH_SIZE,
-                collate_fn=self.collate_fn,
-                shuffle=False,
-            )
-            peft_model = get_peft_model(deepcopy(model), peft_config)
-            initialize_lora_eva_weights(peft_model, dataloader)
-            state_dict = {k: v for k, v in peft_model.state_dict().items() if "lora_A.default.weight" in k}
-            state_dicts.append(state_dict)
-
-        cos_sims = defaultdict(list)
-        for i, j in itertools.combinations(range(self.NUM_SEEDS), 2):
-            for k, v1 in state_dicts[i].items():
-                v2 = state_dicts[j][k]
-                min_size = min(v1.size(0), v2.size(0))
-                cos_sims[k].extend(torch.cosine_similarity(v1[:min_size], v2[:min_size], dim=1).abs().tolist())
-
-        mean_cosine_similarities = {k: torch.tensor(v).mean() for k, v in cos_sims.items()}
-        for layer_name, mean_cosine_similarity in mean_cosine_similarities.items():
-            assert mean_cosine_similarity > self.COSINE_SIMILARITY_THRESHOLD, (
-                f"Mean absolute cosine similarity {mean_cosine_similarity:.4f} "
-                f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
-            )
-
-    # Test that the `get_eva_state_dict` function can be used to initialize a model with EVA weights and that the
-    # initialized model can be saved and loaded correctly.
     @pytest.mark.parametrize("has_rank_zero", [True, False])
-    def test_load_eva_state_dict(self, model, dataset, peft_config, has_rank_zero):
-        tmp_dirname = tempfile.mkdtemp()
+    def test_load_eva_state_dict(self, model, dataset, peft_config, tmp_path, has_rank_zero):
+        """
+        Tests that the `eva_state_dict` argument in `initialize_lora_eva_weights` can be used to initialize a model
+        with EVA weights and that the initialized model can be saved and loaded correctly.
+        """
         dataloader = DataLoader(
             dataset,
             batch_size=self.BATCH_SIZE,
@@ -1761,17 +1762,23 @@ class TestEvaInitialization:
             shuffle=False,
         )
         peft_model = get_peft_model(deepcopy(model), peft_config)
-        sd = get_eva_state_dict(model, peft_config, dataloader)
+        sd = get_eva_state_dict(peft_model, dataloader)
         if has_rank_zero:
-            k = "transformer.h.0.attn.c_attn"
+            k = "base_model.model.transformer.h.0.attn.c_attn"
             sd[k] = sd[k][:0]
-        load_eva_state_dict(peft_model, sd)
-        # test that models that initialized `load_eva_state_dict` can be saved and loaded correctly
-        peft_model.save_pretrained(tmp_dirname)
-        peft_model = PeftModel.from_pretrained(model, tmp_dirname, torch_device=self.DEVICE, low_cpu_mem_usage=True)
+        initialize_lora_eva_weights(peft_model, eva_state_dict=sd)
+        if has_rank_zero:
+            assert not isinstance(peft_model.model.transformer.h[0].attn.c_attn, LoraLayer)
+        else:
+            assert isinstance(peft_model.model.transformer.h[0].attn.c_attn, LoraLayer)
+        peft_model.save_pretrained(tmp_path)
+        peft_model = PeftModel.from_pretrained(model, tmp_path, torch_device=self.DEVICE, low_cpu_mem_usage=True)
+        peft_model(**{k: v.to(self.DEVICE) for k, v in next(iter(dataloader)).items()})
 
-    # Test that a warning is raised when some adapter modules were not initialized with EVA weights.
     def test_missing_eva_inits(self, model, dataset, peft_config):
+        """
+        Tests that a warning is raised when some adapter modules were not initialized with EVA weights.
+        """
         modified_peft_config = deepcopy(peft_config)
         modified_peft_config.target_modules = ["wte"]
         dataloader = DataLoader(
@@ -1786,9 +1793,10 @@ class TestEvaInitialization:
         ):
             initialize_lora_eva_weights(peft_model, dataloader)
 
-    # Test that a model initialized with EVA weights can be loaded correctly.
-    def test_load_eva_model(self, model, dataset, peft_config):
-        tmp_dirname = tempfile.mkdtemp()
+    def test_load_eva_model(self, model, dataset, peft_config, tmp_path):
+        """
+        Tests that a model initialized with EVA weights can be loaded correctly.
+        """
         dataloader = DataLoader(
             dataset,
             batch_size=self.BATCH_SIZE,
@@ -1797,31 +1805,40 @@ class TestEvaInitialization:
         )
         peft_model = get_peft_model(deepcopy(model), peft_config)
         initialize_lora_eva_weights(peft_model, dataloader)
-        peft_model.save_pretrained(tmp_dirname)
-        peft_model = PeftModel.from_pretrained(model, tmp_dirname, torch_device=self.DEVICE, low_cpu_mem_usage=True)
+        peft_model.save_pretrained(tmp_path)
+        peft_model = PeftModel.from_pretrained(model, tmp_path, torch_device=self.DEVICE, low_cpu_mem_usage=True)
+        peft_model(**{k: v.to(self.DEVICE) for k, v in next(iter(dataloader)).items()})
 
-    # Test that EvaConfig.__init__ raises a ValueError when rho is negative.
     def test_eva_config_rho(self):
+        """
+        Tests that EvaConfig.__init__ raises a ValueError when rho is negative.
+        """
         with pytest.raises(ValueError, match="`rho` must be >= 1.0"):
             EvaConfig(rho=-1)
 
-    # Test that EvaConfig.__init__ raises a ValueError when tau is not between 0.0 and 1.0.
     def test_eva_config_tau(self):
+        """
+        Tests that EvaConfig.__init__ raises a ValueError when tau is not between 0.0 and 1.0.
+        """
         with pytest.raises(ValueError, match="`tau` must be between 0.0 and 1.0."):
             EvaConfig(tau=-0.1)
         with pytest.raises(ValueError, match="`tau` must be between 0.0 and 1.0."):
             EvaConfig(tau=1.1)
 
-    # Test that LoraConfig.__init__ raises a warning when init_lora_weights='eva' but eva_config is not set.
     def test_lora_config_raises_warning_with_eva_init_but_not_eva_config(self):
+        """
+        Tests that LoraConfig.__init__ raises a warning when init_lora_weights='eva' but eva_config is not set.
+        """
         with pytest.warns(
             UserWarning,
             match="`init_lora_weights` is 'eva' but `eva_config` is not specified. Using default EVA config.",
         ):
             LoraConfig(init_lora_weights="eva")
 
-    # Test that LoraConfig.__init__ raises a warning when init_lora_weights is not 'eva' but eva_config is set.
     def test_lora_config_raises_warning_with_eva_config_but_not_eva_init(self):
+        """
+        Tests that LoraConfig.__init__ raises a warning when init_lora_weights is not 'eva' but eva_config is set.
+        """
         with pytest.warns(
             UserWarning, match="`eva_config` specified but will be ignored when `init_lora_weights` is not 'eva'."
         ):
