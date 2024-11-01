@@ -276,7 +276,7 @@ class TestLoraInitialization:
         assert model.embed.scaling["default"] == expected_scaling
         assert model.conv2d.scaling["default"] == expected_scaling
 
-    # bugfix for issue 2194
+    # testcase for bugfix for issue 2194
     def test_pattern_override(self):
         torch.manual_seed(0)
 
