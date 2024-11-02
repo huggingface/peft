@@ -54,6 +54,30 @@ lora_config = LoraConfig(init_lora_weights="pissa_niter_[number of iters]", ...)
 ```
 For detailed instruction on using PiSSA, please follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/pissa_finetuning).
 
+### CorDA
+
+[CorDA](https://arxiv.org/pdf/2406.05223) builds task-aware LoRA adapters from weight decomposition oriented by the context of downstream task to learn (IPM) or world knowledge to maintain (KPM).
+The KPM not only achieves better performance than LoRA on fine-tuning tasks, but also mitigates the catastrophic forgetting of pre-trained world knowledge.
+When preserving pre-trained knowledge is not a concern, 
+the IPM is favored because it can further accelerate convergence and enhance the fine-tuning performance. 
+
+You need to configure the initialization method to "corda", and specify the mode of IPM or KPM and the dataset to collect covariance matrices. 
+
+```py
+from peft import LoraConfig
+
+corda_config = CordaConfig(
+    run_model=run_model,  # The function to run the model on the dataset
+    sample_count=256,
+    corda_method="ipm",
+)
+lora_config = LoraConfig(
+    init_lora_weights="corda",
+)
+```
+
+For detailed instruction on using CorDA, please follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/corda_finetuning).
+
 ### OLoRA
 [OLoRA](https://arxiv.org/abs/2406.01775) utilizes QR decomposition to initialize the LoRA adapters. OLoRA translates the base weights of the model by a factor of their QR decompositions, i.e., it mutates the weights before performing any training on them. This approach significantly improves stability, accelerates convergence speed, and ultimately achieves superior performance.
 
