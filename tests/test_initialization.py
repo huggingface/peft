@@ -17,6 +17,7 @@ import platform
 import re
 import subprocess
 import sys
+import tempfile
 from contextlib import contextmanager
 from copy import deepcopy
 from unittest.mock import patch
@@ -48,6 +49,7 @@ from peft import (
     inject_adapter_in_model,
     set_peft_model_state_dict,
 )
+from peft.tuners.lora.config import CordaConfig
 from peft.utils import infer_device
 from peft.utils.hotswap import hotswap_adapter
 
@@ -320,6 +322,43 @@ class TestLoraInitialization:
         config = LoraConfig(init_lora_weights="pissa_niter_16", target_modules=["linear"])
         peft_model = get_peft_model(deepcopy(model), config)
         assert torch.allclose(output, peft_model(data)[0], atol=1e-06)
+
+    def test_lora_corda_linear_init_default(self, data):
+        model = self.get_model()
+        output = model(data)[0]
+
+        with tempfile.NamedTemporaryFile() as corda_cache_fp:
+            with tempfile.NamedTemporaryFile() as covariance_cache_fp:
+                config = LoraConfig(
+                    init_lora_weights="corda",
+                    target_modules=["linear"],
+                    corda_config=CordaConfig(
+                        run_model=lambda: model(data),
+                        sample_count=1,
+                        cache_file=corda_cache_fp.name,
+                        covariance_file=covariance_cache_fp.name,
+                    ),
+                )
+                peft_model = get_peft_model(deepcopy(model), config)
+                assert torch.allclose(output, peft_model(data)[0], atol=1e-06)
+
+                # If load SVD result from cache, the output should be the same
+                config = LoraConfig(
+                    init_lora_weights="corda",
+                    target_modules=["linear"],
+                    corda_config=CordaConfig(cache_file=corda_cache_fp.name),
+                )
+                peft_model = get_peft_model(deepcopy(model), config)
+                assert torch.allclose(output, peft_model(data)[0], atol=1e-06)
+
+                # If load covariance from cache, the output should be the same
+                config = LoraConfig(
+                    init_lora_weights="corda",
+                    target_modules=["linear"],
+                    corda_config=CordaConfig(covariance_file=covariance_cache_fp.name),
+                )
+                peft_model = get_peft_model(deepcopy(model), config)
+                assert torch.allclose(output, peft_model(data)[0], atol=1e-06)
 
     def test_lora_olora_linear_init_default(self, data):
         model = self.get_model()

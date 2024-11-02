@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Union
+from typing import Callable, Literal, Optional, Union
 
 from torch import nn
 
@@ -67,6 +67,26 @@ class LoftQConfig:
 
     loftq_bits: int = field(default=4, metadata={"help": "Quantization bits for LoftQ"})
     loftq_iter: int = field(default=1, metadata={"help": "Alternating iterations for LoftQ"})
+
+
+@dataclass
+class CordaConfig:
+    """
+    This is the sub-configuration class to store the configuration of a [`LoraModel`].
+
+    Args:
+        run_model (`Callable[[], None]`): Callback to run the model when building covariance.
+        cache_file (`Optional[str]`): Cache file to store the SVD result.
+        covariance_file (`Optional[str]`): Covariance file to store the covariance matrix.
+        sample_count (`int`): Divisor for each hook call.
+        corda_method (`Literal["ipm", "kpm"]`): Method to build adapter.
+    """
+
+    cache_file: Optional[str] = field(default=None)
+    covariance_file: Optional[str] = field(default=None)
+    run_model: Optional[Callable[[], None]] = field(default=None)
+    sample_count: int = field(default=256)
+    corda_method: Literal["ipm", "kpm"] = field(default="ipm")
 
 
 @dataclass
@@ -143,6 +163,9 @@ class LoraConfig(PeftConfig):
             The configuration of LoftQ. If this is not None, then LoftQ will be used to quantize the backbone weights
             and initialize Lora layers. Also pass `init_lora_weights='loftq'`. Note that you should not pass a
             quantized model in this case, as LoftQ will quantize the model itself.
+        corda_config (`Optional[CordaConfig]`):
+            The configuration of CorDA. If this is not None, then CorDA will be used to build the adapter layers. Also
+            pass `init_lora_weights='corda'`.
         use_dora (`bool`):
             Enable 'Weight-Decomposed Low-Rank Adaptation' (DoRA). This technique decomposes the updates of the weights
             into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the magnitude is
@@ -288,6 +311,15 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    corda_config: Union[CordaConfig, dict] = field(
+        default_factory=dict,
+        metadata={
+            "help": (
+                "The configuration of CorDA. If this is passed, then CorDA will be used to build the adapter layers. "
+                "Also set `init_lora_weights='corda'` in this case."
+            )
+        },
+    )
     use_dora: bool = field(
         default=False,
         metadata={
@@ -388,6 +420,10 @@ class LoraConfig(PeftConfig):
         # convert loftq_config to dict
         if self.loftq_config and not isinstance(self.loftq_config, dict):
             self.loftq_config = vars(self.loftq_config)
+
+        # convert corda_config to dict
+        if self.corda_config and not isinstance(self.corda_config, dict):
+            self.corda_config = vars(self.corda_config)
 
         self._custom_modules: Optional[dict[type[nn.Mmodule], type[nn.Module]]] = None
 

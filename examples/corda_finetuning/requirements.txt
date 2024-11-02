@@ -1,0 +1,11 @@
+datasets==2.19.0
+transformers==4.40.1
+torch
+lm_eval==0.3.0
+accelerate==0.27.2
+optimum==1.15.0
+tqdm
+peft
+jsonlines
+Fraction
+git+https://github.com/iboing/vllm.git
