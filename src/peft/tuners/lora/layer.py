@@ -13,6 +13,7 @@
 # limitations under the License.
 from __future__ import annotations
 
+import logging
 import math
 import warnings
 from typing import Any, Optional, Union
@@ -140,6 +141,9 @@ class LoraLayer(BaseTunerLayer):
         if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
             with gather_params_ctx(self.get_base_layer().weight):
                 self.pissa_init(adapter_name, init_lora_weights)
+        elif isinstance(init_lora_weights, str) and init_lora_weights.startswith("corda"):
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.corda_init(adapter_name, init_lora_weights)
         elif isinstance(init_lora_weights, str) and init_lora_weights.lower() == "olora":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.olora_init(adapter_name)
@@ -264,6 +268,66 @@ class LoraLayer(BaseTunerLayer):
         self.lora_B[adapter_name].weight.data = lora_B
         weight = weight.data - self.scaling[adapter_name] * lora_B @ lora_A
         weight = transpose(weight.to(dtype), self.fan_in_fan_out)
+        self.get_base_layer().weight.data = weight
+
+    def corda_init(self, adapter_name, init_lora_weights):
+        linear = self.get_base_layer()
+        weight = linear.weight
+        dtype = weight.dtype
+        if dtype not in [torch.float32, torch.float16, torch.bfloat16]:
+            raise TypeError(
+                "Please initialize CorDA under float32, float16, or bfloat16. "
+                "Subsequently, re-quantize the residual model to help minimize quantization errors."
+            )
+        weight = weight.to(torch.float32)
+        out_dim = weight.data.size(0)
+        in_dim = weight.data.size(1)
+
+        # Calculate WC from covariance matrix
+        assert hasattr(linear, "eigens")
+        eigens = linear.eigens
+        U = eigens.U_WC
+        S = eigens.S_WC
+        V = eigens.V_WC
+        r = self.r[adapter_name]
+
+        # nan or inf check
+        # if (S!=S).any():
+        if torch.isnan(S).any() or torch.isinf(S).any():
+            # print("nan in S")
+            raise Exception("nan or inf in S")
+        # if (U!=U).any():
+        if torch.isnan(U).any() or torch.isinf(U).any():
+            # print("nan in U")
+            raise Exception("nan or inf in U")
+        # if (V!=V).any():
+        if torch.isnan(V).any() or torch.isinf(V).any():
+            # print("nan in V")
+            raise Exception("nan or inf in V")
+
+        # Sanity check
+        logging.info(f"U.device = {U.device}, S.device = {S.device}, V.device = {V.device}")
+        logging.info(f"weight.data.device = {weight.data.device}")
+        svd_error = torch.dist(U @ torch.diag(S) @ V.t(), weight.data)
+        scale_u = torch.linalg.norm(U) / math.sqrt(r)
+        scale_v = torch.linalg.norm(V) / math.sqrt(r)
+        logging.info(f"scale_u: {scale_u:.2f}, scale_v: {scale_v:.2f}, svd_error: {svd_error:.2f}")
+        assert U.size(0) == out_dim
+        assert U.size(1) == r
+        assert S.size(0) == r
+        assert V.size(0) == in_dim
+        assert V.size(1) == r
+
+        # Apply alpha
+        S /= self.scaling[adapter_name]
+
+        # Init lora_A and lora_B weights
+        lora_A = V.t().mul(S.sqrt().view(-1, 1)).contiguous()
+        lora_B = U.mul(S.sqrt()).contiguous()
+        self.lora_A[adapter_name].weight.data = lora_A
+        self.lora_B[adapter_name].weight.data = lora_B
+        weight = weight.data - self.scaling[adapter_name] * lora_B @ lora_A
+        weight = weight.to(dtype)
         self.get_base_layer().weight.data = weight
 
     def loftq_init(self, adapter_name):

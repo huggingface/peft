@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Union
+from typing import Callable, Literal, Optional, Union
 
 from torch import nn
 
@@ -121,6 +121,100 @@ class EvaConfig:
 
 
 @dataclass
+class CordaConfig:
+    """
+    This is the sub-configuration class to store the configuration of a [`LoraModel`].
+
+    Args:
+        cache_file (`Optional[str]`):
+            File to store the SVD cache. The SVD cache is much smaller than the residual model (for example, residual
+            model of Llama-3-8b is 15GB, while SVD cache is 1.4GB), but with SVD cache and original model weights,
+            residual model weights can be built quickly. If you need to reuse residual model weights with limited
+            storage, you can store the SVD cache instead.
+        covariance_file (`Optional[str]`):
+            File to store the covariance matrix. If you wish to train multiple models with different ranks, but they
+            sample from the same dataset, you can store the covariance matrix and reuse it for different ranks. Note
+            that covariance file is usually large (comparable to model size), so you will need sufficient storage.
+        run_model (`Callable[[], None]`):
+            Callback to run the model when building covariance. This will be run once regardless of `sample_count`, so
+            you should configure the `run_model` callback to run the model exactly `sample_count` times. Typically you
+            should run model inference on your dataset in this callback.
+        hooked_model (`Optional[nn.Module]`):
+            Model to hook when building covariance. If none, original model will be hooked. This is only useful when
+            you want to hook a different model than the one you are training, typically you should leave this `None`.
+        sample_count (`int`):
+            Divisor for each hook call. You should make sure `run_model` calls the model exactly `sample_count` times
+            for consistent behaviour.
+        corda_method (`Literal["ipm", "kpm"]`):
+            Method to build adapter. The KPM not only achieves better performance than LoRA on fine-tuning tasks, but
+            also mitigates the catastrophic forgetting of pre-trained world knowledge. When preserving pre-trained
+            knowledge is not a concern, the IPM is favored because it can further accelerate convergence and enhance
+            the fine-tuning performance.
+    """
+
+    cache_file: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": (
+                "File to store the SVD cache. The SVD cache is much smaller than the residual model (for example, "
+                "residual model of Llama-3-8b is 15GB, while SVD cache is 1.4GB), but with SVD cache and original model "
+                "weights, residual model weights can be built quickly. If you need to reuse residual model weights with "
+                "limited storage, you can store the SVD cache instead."
+            )
+        },
+    )
+    covariance_file: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": (
+                "File to store the covariance matrix. If you wish to train multiple models with different ranks, but "
+                "they sample from the same dataset, you can store the covariance matrix and reuse it for different ranks. "
+                "Note that covariance file is usually large (comparable to model size), so you will need sufficient storage."
+            )
+        },
+    )
+    run_model: Optional[Callable[[], None]] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Callback to run the model when building covariance. This will be run once regardless of `sample_count`, "
+                "so you should configure the `run_model` callback to run the model exactly `sample_count` times. Typically "
+                "you should run model inference on your dataset in this callback."
+            )
+        },
+    )
+    hooked_model: Optional[nn.Module] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Model to hook when building covariance. If none, original model will be hooked. This is only useful when "
+                "you want to hook a different model than the one you are training, typically you should leave this `None`."
+            )
+        },
+    )
+    sample_count: int = field(
+        default=256,
+        metadata={
+            "help": (
+                "Divisor for each hook call. You should make sure `run_model` calls the model exactly `sample_count` times "
+                "for consistent behaviour."
+            )
+        },
+    )
+    corda_method: Literal["ipm", "kpm"] = field(
+        default="ipm",
+        metadata={
+            "help": (
+                "Method to build adapter. The KPM not only achieves better performance than LoRA on fine-tuning tasks, but "
+                "also mitigates the catastrophic forgetting of pre-trained world knowledge. When preserving pre-trained "
+                "knowledge is not a concern, the IPM is favored because it can further accelerate convergence and enhance "
+                "the fine-tuning performance."
+            )
+        },
+    )
+
+
+@dataclass
 class LoraConfig(PeftConfig):
     """
     This is the configuration class to store the configuration of a [`LoraModel`].
@@ -199,6 +293,9 @@ class LoraConfig(PeftConfig):
         eva_config (`Optional[EvaConfig]`):
             The configuration of EVA. At a minimum the dataset argument needs to be set (use the same dataset as for
             finetuning).
+        corda_config (`Optional[CordaConfig]`):
+            The configuration of CorDA. If this is not None, then CorDA will be used to build the adapter layers. Also
+            pass `init_lora_weights='corda'`.
         use_dora (`bool`):
             Enable 'Weight-Decomposed Low-Rank Adaptation' (DoRA). This technique decomposes the updates of the weights
             into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the magnitude is
@@ -360,6 +457,15 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    corda_config: Union[CordaConfig, dict] = field(
+        default_factory=dict,
+        metadata={
+            "help": (
+                "The configuration of CorDA. If this is passed, then CorDA will be used to build the adapter layers. "
+                "Also set `init_lora_weights='corda'` in this case."
+            )
+        },
+    )
     use_dora: bool = field(
         default=False,
         metadata={
@@ -488,6 +594,10 @@ class LoraConfig(PeftConfig):
                 "base weights; if you intend to do this, please ensure not to use rslora or rank_pattern/alpha_pattern."
             )
             warnings.warn(msg)
+
+        # convert corda_config to dict
+        if self.corda_config and not isinstance(self.corda_config, dict):
+            self.corda_config = vars(self.corda_config)
 
         self._custom_modules: Optional[dict[type[nn.Mmodule], type[nn.Module]]] = None
 
