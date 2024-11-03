@@ -118,6 +118,9 @@
       title: VB-LoRA
     - local: package_reference/hra
       title: HRA
+    - local: package_reference/cpt
+      title: CPT
+
 
     title: Adapters
   - sections:
