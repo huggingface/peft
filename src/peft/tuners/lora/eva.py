@@ -498,8 +498,9 @@ def _load_eva_state_dict(
 
     if missing_eva_inits:
         warnings.warn(
-            "the following layers were initialized with init_lora_weights=True because they were not found in the eva state_dict: "
-            f"{missing_eva_inits} \ncurrently only the following lora modules are not supported by EVA: {UNSUPPORTED_LORA_MODULES}"
+            "the following layers were initialized with init_lora_weights=True because they "
+            f"were not found in the eva state_dict: {missing_eva_inits}\ncurrently the "
+            f"following lora modules are not supported by EVA: {UNSUPPORTED_LORA_MODULES}"
         )
 
 
