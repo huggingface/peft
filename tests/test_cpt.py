@@ -32,7 +32,7 @@ from peft import CPTConfig, get_peft_model
 
 TEMPLATE = {"input": "input: {}", "intra_seperator": " ", "output": "output: {}", "inter_seperator": "\n"}
 
-MODEL_NAME = "bigscience/bloom-1b7"
+MODEL_NAME = "hf-internal-testing/tiny-random-OPTForCausalLM"
 MAX_INPUT_LENGTH = 1024
 
 
@@ -40,7 +40,7 @@ MAX_INPUT_LENGTH = 1024
 def global_tokenizer():
     """Load the tokenizer fixture for the model."""
 
-    return AutoTokenizer.from_pretrained(MODEL_NAME, cache_dir=".", padding_side="right", trust_remote_code=True)
+    return AutoTokenizer.from_pretrained(MODEL_NAME, padding_side="right")
 
 
 @pytest.fixture(scope="module")
@@ -217,7 +217,7 @@ def dataset(data, tokenizer):
 
 def test_model_initialization_text(global_tokenizer, config_text):
     """Test model loading and PEFT model initialization."""
-    base_model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, cache_dir=".", trust_remote_code=True)
+    base_model = AutoModelForCausalLM.from_pretrained(MODEL_NAME)
 
     model = get_peft_model(base_model, config_text)
     assert model is not None, "PEFT model initialization failed"
@@ -225,7 +225,7 @@ def test_model_initialization_text(global_tokenizer, config_text):
 
 def test_model_initialization_random(global_tokenizer, config_random):
     """Test model loading and PEFT model initialization."""
-    base_model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, cache_dir=".", trust_remote_code=True)
+    base_model = AutoModelForCausalLM.from_pretrained(MODEL_NAME)
 
     model = get_peft_model(base_model, config_random)
     assert model is not None, "PEFT model initialization failed"
@@ -234,7 +234,7 @@ def test_model_initialization_random(global_tokenizer, config_random):
 def test_model_training_random(sst_data, global_tokenizer, collator, config_random):
     """Perform a short training run to verify the model and data integration."""
 
-    base_model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, cache_dir=".", trust_remote_code=True)
+    base_model = AutoModelForCausalLM.from_pretrained(MODEL_NAME)
     model = get_peft_model(base_model, config_random)
     emb = model.prompt_encoder.default.embedding.weight.data.clone().detach()
     training_args = TrainingArguments(
@@ -265,7 +265,7 @@ def test_model_training_random(sst_data, global_tokenizer, collator, config_rand
 def test_model_batch_training_text(sst_data, global_tokenizer, collator, config_text):
     """Perform a short training run to verify the model and data integration."""
 
-    base_model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, cache_dir=".", trust_remote_code=True)
+    base_model = AutoModelForCausalLM.from_pretrained(MODEL_NAME)
     model = get_peft_model(base_model, config_text)
     emb = model.prompt_encoder.default.embedding.weight.data.clone().detach()
 

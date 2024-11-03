@@ -32,6 +32,7 @@ from safetensors.torch import save_file
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
+    CPTConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -52,7 +53,6 @@ from peft import (
     get_peft_model_state_dict,
     inject_adapter_in_model,
     prepare_model_for_kbit_training,
-    CPTConfig
 )
 from peft.tuners.lora import LoraLayer
 from peft.utils import _get_submodules, infer_device
@@ -128,7 +128,6 @@ CONFIG_TESTING_KWARGS = (
         "cpt_tokens_type_mask": [1, 2, 2, 2, 3, 3, 4, 4],
         "cpt_prompt_init": "TEXT",
     },
-
 )
 
 CLASSES_MAPPING = {
@@ -146,9 +145,8 @@ CLASSES_MAPPING = {
     "oft": (OFTConfig, CONFIG_TESTING_KWARGS[11]),
 }
 
-DECODER_MODELS_EXTRA = {
-    "cpt": (CPTConfig, CONFIG_TESTING_KWARGS[12])
-}
+DECODER_MODELS_EXTRA = {"cpt": (CPTConfig, CONFIG_TESTING_KWARGS[12])}
+
 
 # Adapted from https://github.com/huggingface/transformers/blob/48327c57182fdade7f7797d1eaad2d166de5c55b/src/transformers/activations.py#LL166C7-L166C22
 class ClassInstantier(OrderedDict):
@@ -214,6 +212,7 @@ class ClassInstantier(OrderedDict):
 
 PeftTestConfigManager = ClassInstantier(CLASSES_MAPPING)
 PeftTestConfigManagerForDecoderModels = ClassInstantier({**CLASSES_MAPPING, **DECODER_MODELS_EXTRA})
+
 
 class PeftCommonTester:
     r"""
@@ -1206,21 +1205,15 @@ class PeftCommonTester:
 
         if issubclass(config_cls, CPTConfig):
             parameters = []
-            list_names = []
             for name, param in model.prompt_encoder.named_parameters():
-                if name not in ['default.embedding.weight']:
+                if name != "default.embedding.weight":
                     parameters.append(param)
-                    list_names.append(name)
-                else:
-                    assert param.grad is None
-            ''
         else:
             parameters = model.prompt_encoder.parameters()
 
         # check that prompt encoder has grads
         for param in parameters:
             assert param.grad is not None
-
 
     def _test_delete_adapter(self, model_id, config_cls, config_kwargs):
         supported_peft_types = [
