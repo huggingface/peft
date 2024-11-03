@@ -258,20 +258,6 @@ def forward_fn_dict(model, inputs):
     return model(**inputs)
 
 
-def _eva_checks(model, adapter_name):
-    if not hasattr(model, "peft_config"):
-        raise ValueError("model must be a PeftModel")
-
-    # eva currently only works with a single active adapter
-    # Important: when removing this requirement, make sure eva init works correctly if the new rank is 0.
-    if len(model.active_adapters) > 1:
-        raise ValueError("`initialize_lora_eva_weights` currently only works with a single active adapter")
-
-    # initialize_lora_eva_weights only works with `init_lora_weights='eva'`
-    if model.peft_config[adapter_name].init_lora_weights != "eva":
-        raise ValueError("`initialize_lora_eva_weights` can only be used with `init_lora_weights='eva'`")
-
-
 def _get_eva_state_dict(
     model: torch.nn.Module,
     dataloader: Iterable,
@@ -283,8 +269,9 @@ def _get_eva_state_dict(
     show_progress_bar: bool,
 ) -> dict:
     # Computes the rank distribution for each layer based on the explained variance ratio.
+    # when rank_pattern flag is False, all values in max_components are the same
     def _get_rank_distribution(hooks, layer_hook_map, equal_inputs_map, rank_budget, max_components):
-        exp_vars = {k: h[0].svd.explained_variance_ratio_[:max_components] for k, h in hooks.items()}
+        exp_vars = {k: h[0].svd.explained_variance_ratio_[: max_components[k]] for k, h in hooks.items()}
         keys, values = zip(*[(k, c) for k, name in layer_hook_map.items() for c in exp_vars[name]])
         idx = torch.stack(values).argsort(descending=True)
         counts = Counter([keys[i] for i in idx[:rank_budget]])
@@ -296,6 +283,14 @@ def _get_eva_state_dict(
                 continue
             counts[k_hook], counts[k] = rank, rank_hook
         return counts
+
+    # for unusually high rho values, define an upper limit
+    rho_threshold = 1000
+    rho = peft_config.eva_config.rho
+    if rho > rho_threshold:
+        max_dim = max(max(p.shape) for p in model.parameters())
+        rho_ceil = max_dim // peft_config.r
+        rho = min(rho, rho_ceil)
 
     training = model.training
     device = get_device_with_meta_params(model)
@@ -310,6 +305,7 @@ def _get_eva_state_dict(
         model_inputs_for_hooks = deepcopy(inputs)
 
     hooks = {}
+    max_components = {}
     for name, module in model.named_modules():
         if not target_module_check_fn(name, module):
             continue
@@ -321,6 +317,10 @@ def _get_eva_state_dict(
         hook.model_input = model_inputs_for_hooks
         handle = module.register_forward_hook(hook)
         hooks[name] = (hook, handle)
+        layer_rank = peft_config.rank_pattern.get(
+            get_target_name_key(name, peft_config.rank_pattern.keys()), peft_config.r
+        )
+        max_components[name] = round(layer_rank * rho)
     if isinstance(prepare_layer_inputs_fn, Mapping) and len(prepare_layer_inputs_fn) > 0:
         raise ValueError(
             f"prepare_layer_inputs_fn is a mapping but the following module names were not found in the model: {prepare_layer_inputs_fn.keys()}"
@@ -330,11 +330,16 @@ def _get_eva_state_dict(
     forward_fn(model, inputs)
     hash_dict = {k: h[0].hashed_inputs[0] for k, h in hooks.items()}
     # equal input maps groups layers which receive the same input. One layer is defined as the key and receives an svd hook. For the remaining layers the svd results can be skipped.
-    equal_inputs_map = {vv: v[0] for v in find_equal_values(hash_dict).values() for vv in v[1:]}
+    equal_inputs = list(find_equal_values(hash_dict).values())
+    equal_inputs_map = {vv: v[0] for v in equal_inputs for vv in v[1:]}
+    # for layers with equal inputs we need to make sure that the max_components are the same
+    for names in equal_inputs:
+        max_value = max(max_components[n] for n in names)
+        for n in names:
+            max_components[n] = max_value
 
     # define rank budget and max components
     rank_budget = peft_config.r * len(hooks)
-    max_components = round(peft_config.r * peft_config.eva_config.rho)
 
     # initialize svd hooks
     for name in list(hooks.keys()):
@@ -342,7 +347,7 @@ def _get_eva_state_dict(
         handle.remove()
         if name in equal_inputs_map:
             continue
-        hook = SVDHook(name, max_components, peft_config.eva_config.tau, hook._prepare_layer_inputs_fn)
+        hook = SVDHook(name, max_components[name], peft_config.eva_config.tau, hook._prepare_layer_inputs_fn)
         module = model.get_submodule(name)
         handle = module.register_forward_hook(hook)
         hooks[name] = (hook, handle)  # adding the old handle here so we dont get errors in the first forward pass
@@ -354,7 +359,7 @@ def _get_eva_state_dict(
     else:
         pbar = iter(cycle(dataloader))
     convergence_dict = {k: False for k in hooks.keys()}
-    rank_dist = {k: max_components for k in layer_hook_map.keys()}
+    rank_dist = max_components.copy()
     for inputs in pbar:
         inputs = move_inputs_to_device(inputs, device)
         if prepare_model_inputs_fn is not None:
@@ -558,6 +563,9 @@ def get_eva_state_dict(
         # Conv1D for GPT2 support
         return isinstance(module, (torch.nn.Linear, Conv1D)) and is_target_module
 
+    if len(dataloader) == 0:
+        raise ValueError("dataloader is empty")
+
     is_peft_model = hasattr(model, "peft_config")
 
     # get peft_config
@@ -638,7 +646,17 @@ def initialize_lora_eva_weights(
     Returns:
         model (torch.nn.Module): The model with the initialized LoRA weights.
     """
-    _eva_checks(model, adapter_name)
+    if not hasattr(model, "peft_config"):
+        raise ValueError("model must be a PeftModel")
+
+    # eva currently only works with a single active adapter
+    # Important: when removing this requirement, make sure eva init works correctly if the new rank is 0.
+    if len(model.active_adapters) > 1:
+        raise ValueError("`initialize_lora_eva_weights` currently only works with a single active adapter")
+
+    # initialize_lora_eva_weights only works with `init_lora_weights='eva'`
+    if model.peft_config[adapter_name].init_lora_weights != "eva":
+        raise ValueError("`initialize_lora_eva_weights` can only be used with `init_lora_weights='eva'`")
 
     # compute svd
     if eva_state_dict is None:

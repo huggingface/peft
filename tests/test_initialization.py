@@ -19,6 +19,7 @@ import platform
 import re
 import subprocess
 import sys
+import time
 from collections import defaultdict
 from contextlib import contextmanager
 from copy import deepcopy
@@ -1597,7 +1598,16 @@ def test_from_pretrained_missing_keys_warning(recwarn, tmp_path):
 
 
 class TestEvaInitialization:
-    """Tests for the Eva initialization method."""
+    """Tests for the EVA (Explained Variance Adaptation) initialization method.
+
+    This test suite verifies:
+    1. Consistency of initialization across different seeds
+    2. Proper error handling for invalid inputs
+    3. Performance
+    4. Compatibility with different model architectures
+    5. Reproducibility of results
+    6. Proper handling of edge cases
+    """
 
     # Constants for test configuration
     COSINE_SIMILARITY_THRESHOLD = 0.75
@@ -1659,6 +1669,14 @@ class TestEvaInitialization:
     def prepare_layer_inputs_fn(layer_input, model_input, layer_name):
         return layer_input[0].view(-1, layer_input[0].size(-1))
 
+    def get_dataloader(self, dataset):
+        return DataLoader(
+            dataset,
+            batch_size=self.BATCH_SIZE,
+            collate_fn=self.collate_fn,
+            shuffle=False,
+        )
+
     @pytest.mark.parametrize(
         "prepare_layer_inputs_keys, expected_outcome",
         [
@@ -1688,13 +1706,7 @@ class TestEvaInitialization:
             prepare_layer_inputs_fn = {k: fn for k in prepare_layer_inputs_keys}
 
         shuffled_dataset = dataset.shuffle(seed=0)
-        dataloader = DataLoader(
-            shuffled_dataset,
-            batch_size=self.BATCH_SIZE,
-            collate_fn=self.collate_fn,
-            shuffle=False,
-        )
-
+        dataloader = self.get_dataloader(shuffled_dataset)
         modified_peft_config = deepcopy(peft_config)
         modified_peft_config.eva_config.tau = 0  # converge immediately
         if expected_outcome == "success":
@@ -1731,12 +1743,7 @@ class TestEvaInitialization:
         """
         modified_peft_config = deepcopy(peft_config)
         modified_peft_config.eva_config = eva_config
-        dataloader = DataLoader(
-            dataset,
-            batch_size=self.BATCH_SIZE,
-            collate_fn=self.collate_fn,
-            shuffle=False,
-        )
+        dataloader = self.get_dataloader(dataset)
         peft_model = get_peft_model(deepcopy(model), modified_peft_config)
         scaling_factors_before = {}
         for n, m in peft_model.named_modules():
@@ -1749,26 +1756,30 @@ class TestEvaInitialization:
 
     @pytest.mark.parametrize(
         "eva_config",
-        [EvaConfig(rho=2), EvaConfig(rho=1), EvaConfig(rho=1, whiten=True)],
+        [
+            EvaConfig(rho=2),
+            EvaConfig(rho=1),
+            EvaConfig(rho=1, whiten=True),
+            EvaConfig(rho=1.0001),
+        ],
     )
-    def test_eva_initialization_consistency(self, model, dataset, peft_config, eva_config):
+    def test_eva_initialization_consistency_and_speed(self, model, dataset, peft_config, eva_config):
         """
         Tests that the state dict returned by `get_eva_state_dict` is consistent across different seeds based on the
-        cosine similarity of the svd components.
+        cosine similarity of the svd components. Also tests that the initialization is fast.
         """
         modified_peft_config = deepcopy(peft_config)
         modified_peft_config.eva_config = eva_config
         state_dicts = []
+        elapsed_times = []
         for seed in range(self.NUM_SEEDS):
             shuffled_dataset = dataset.shuffle(seed=seed)
-            dataloader = DataLoader(
-                shuffled_dataset,
-                batch_size=self.BATCH_SIZE,
-                collate_fn=self.collate_fn,
-                shuffle=False,
-            )
+            dataloader = self.get_dataloader(shuffled_dataset)
+            start_time = time.time()
             sd = get_eva_state_dict(model, dataloader, modified_peft_config)
+            elapsed_time = time.time() - start_time
             state_dicts.append(sd)
+            elapsed_times.append(elapsed_time)
 
         cos_sims = defaultdict(list)
         for i, j in itertools.combinations(range(self.NUM_SEEDS), 2):
@@ -1783,6 +1794,7 @@ class TestEvaInitialization:
                 f"Mean absolute cosine similarity {mean_cosine_similarity:.4f} "
                 f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
             )
+        assert all(e < 0.5 for e in elapsed_times), "Eva initialization taking unexpectedly long"
 
     @pytest.mark.parametrize("has_rank_zero", [True, False])
     def test_load_eva_state_dict(self, model, dataset, peft_config, tmp_path, has_rank_zero):
@@ -1790,12 +1802,7 @@ class TestEvaInitialization:
         Tests that the `eva_state_dict` argument in `initialize_lora_eva_weights` can be used to initialize a model
         with EVA weights and that the initialized model can be saved and loaded correctly.
         """
-        dataloader = DataLoader(
-            dataset,
-            batch_size=self.BATCH_SIZE,
-            collate_fn=self.collate_fn,
-            shuffle=False,
-        )
+        dataloader = self.get_dataloader(dataset)
         peft_model = get_peft_model(deepcopy(model), peft_config)
         sd = get_eva_state_dict(peft_model, dataloader)
         if has_rank_zero:
@@ -1816,11 +1823,7 @@ class TestEvaInitialization:
         """
         modified_peft_config = deepcopy(peft_config)
         modified_peft_config.target_modules = ["wte"]
-        dataloader = DataLoader(
-            dataset,
-            batch_size=self.BATCH_SIZE,
-            collate_fn=self.collate_fn,
-        )
+        dataloader = self.get_dataloader(dataset)
         peft_model = get_peft_model(deepcopy(model), modified_peft_config)
         with pytest.warns(
             UserWarning,
@@ -1832,17 +1835,20 @@ class TestEvaInitialization:
         """
         Tests that a model initialized with EVA weights can be loaded correctly.
         """
-        dataloader = DataLoader(
-            dataset,
-            batch_size=self.BATCH_SIZE,
-            collate_fn=self.collate_fn,
-            shuffle=False,
-        )
+        dataloader = self.get_dataloader(dataset)
         peft_model = get_peft_model(deepcopy(model), peft_config)
         initialize_lora_eva_weights(peft_model, dataloader)
         peft_model.save_pretrained(tmp_path)
         peft_model = PeftModel.from_pretrained(model, tmp_path, torch_device=self.DEVICE, low_cpu_mem_usage=True)
         peft_model(**{k: v.to(self.DEVICE) for k, v in next(iter(dataloader)).items()})
+
+    def test_eva_initialization_with_invalid_dataloader(self, model, peft_config):
+        """Test that appropriate error is raised when dataloader is empty."""
+        empty_dataset = Dataset.from_dict({"text": []})
+        dataloader = self.get_dataloader(empty_dataset)
+
+        with pytest.raises(ValueError, match="dataloader is empty"):
+            get_eva_state_dict(model, dataloader, peft_config)
 
     def test_eva_config_rho(self):
         """
