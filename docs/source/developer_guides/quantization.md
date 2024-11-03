@@ -168,13 +168,11 @@ model = get_peft_model(model, config)
 
 The models that is quantized using Half-Quadratic Quantization of Large Machine Learning Models ([HQQ](https://mobiusml.github.io/hqq_blog/)) support LoRA adapter tuning. To tune the quantized model, you'll need to install the `hqq` library with: `pip install hqq`.
 
-```py
+```python
 from hqq.engine.hf import HQQModelForCausalLM
 
 quantized_model = HQQModelForCausalLM.from_quantized(save_dir_or_hfhub, device='cuda')
-
 peft_config = LoraConfig(...)
-
 quantized_model = get_peft_model(quantized_model, peft_config)
 ```
 
@@ -184,17 +182,46 @@ Or using transformers version that is compatible with HQQ (e.g. by installing it
 from transformers import HqqConfig, AutoModelForCausalLM
 
 quant_config = HqqConfig(nbits=4, group_size=64)
-
-quantized_model = AutoModelForCausalLM.from_pretrained(save_dir_or_hfhub, device='cuda', quantization_config=quant_config)
-
+quantized_model = AutoModelForCausalLM.from_pretrained(save_dir_or_hfhub, device_map=device_map, quantization_config=quant_config)
 peft_config = LoraConfig(...)
-
 quantized_model = get_peft_model(quantized_model, peft_config)
 ```
+
+## torchao (PyTorch Architecture Optimization)
+
+PEFT supports models quantized with [torchao](https://github.com/pytorch/ao) ("ao") for int8 quantization.
+
+```python
+from peft import LoraConfig, get_peft_model
+from transformers import AutoModelForCausalLM, TorchAoConfig
+
+model_id = ...
+quantization_config = TorchAoConfig(quant_type="int8_weight_only")
+base_model = AutoModelForCausalLM.from_pretrained(model_id, quantization_config=quantization_config)
+peft_config = LoraConfig(...)
+model = get_peft_model(base_model, peft_config)
+```
+
+### Caveats:
+
+- Use the most recent versions of torchao (>= v0.4.0) and transformers (> 4.42).
+- Only linear layers are currently supported.
+- `quant_type = "int4_weight_only"` is currently not supported.
+- `NF4` is not implemented in transformers as of yet and is thus also not supported.
+- DoRA only works with `quant_type = "int8_weight_only"` at the moment.
+- There is explicit support for torchao when used with LoRA. However, when torchao quantizes a layer, its class does not change, only the type of the underlying tensor. For this reason, PEFT methods other than LoRA will generally also work with torchao, even if not explicitly supported. Be aware, however, that **merging only works correctly with LoRA and with `quant_type = "int8_weight_only"`**. If you use a different PEFT method or dtype, merging will likely result in an error, and even it doesn't, the results will still be incorrect.
+
+## Other Supported PEFT Methods
+
+Besides LoRA, the following PEFT methods also support quantization:
+
+- **VeRA** (supports bitsandbytes quantization)
+- **AdaLoRA** (supports both bitsandbytes and GPTQ quantization)
+- **(IA)³** (supports bitsandbytes quantization)
 
 ## Next steps
 
 If you're interested in learning more about quantization, the following may be helpful:
 
-* Learn more about details about QLoRA and check out some benchmarks on its impact in the [Making LLMs even more accessible with bitsandbytes, 4-bit quantization and QLoRA](https://huggingface.co/blog/4bit-transformers-bitsandbytes) blog post.
+* Learn more details about QLoRA and check out some benchmarks on its impact in the [Making LLMs even more accessible with bitsandbytes, 4-bit quantization and QLoRA](https://huggingface.co/blog/4bit-transformers-bitsandbytes) blog post.
 * Read more about different quantization schemes in the Transformers [Quantization](https://hf.co/docs/transformers/main/quantization) guide.

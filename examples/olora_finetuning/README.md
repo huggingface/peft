@@ -8,7 +8,7 @@
 import torch
 from peft import LoraConfig, get_peft_model
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from trl import SFTTrainer
+from trl import SFTConfig, SFTTrainer
 from datasets import load_dataset
 
 model = AutoModelForCausalLM.from_pretrained("facebook/opt-350m", torch_dtype=torch.bfloat16, device_map="auto")
@@ -18,11 +18,10 @@ lora_config = LoraConfig(
     init_lora_weights="olora"
 )
 peft_model = get_peft_model(model, lora_config)
+training_args = SFTConfig(dataset_text_field="text", max_seq_length=128)
 trainer = SFTTrainer(
     model=peft_model,
     train_dataset=dataset,
-    dataset_text_field="text",
-    max_seq_length=512,
     tokenizer=tokenizer,
 )
 trainer.train()
@@ -69,7 +68,7 @@ train(olora_model) # Your training loop
 #Save the model after training
 olora_model.save_pretrained(output_dir, path_initial_model_for_weight_conversion=init_path) 
 ```
-After completing training, you can save and convert your OLoRA model to a conventional LoRA model by setting `path_initial_model_for_weight_conversion` to `init_path`, that is the path of your untrained OLoRA model. This conversion enables you to use multiple adapters with your LoRA model.
+After completing training, you can save and convert your OLoRA model to a conventional LoRA model by setting `path_initial_model_for_weight_conversion` to `init_path`, that is the path of your untrained OLoRA model. This conversion enables you to use multiple adapters with your LoRA model. Note that this conversion is not supported if `rslora` is used in combination with `rank_pattern` or `alpha_pattern`.
 
 ## Citation
 ```

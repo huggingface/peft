@@ -20,6 +20,8 @@ A popular way to efficiently train large models is to insert (typically in the a
 
 There are several different ways to express the weight matrix as a low-rank decomposition, but [Low-Rank Adaptation (LoRA)](../conceptual_guides/adapter#low-rank-adaptation-lora) is the most common method. The PEFT library supports several other LoRA variants, such as [Low-Rank Hadamard Product (LoHa)](../conceptual_guides/adapter#low-rank-hadamard-product-loha), [Low-Rank Kronecker Product (LoKr)](../conceptual_guides/adapter#low-rank-kronecker-product-lokr), and [Adaptive Low-Rank Adaptation (AdaLoRA)](../conceptual_guides/adapter#adaptive-low-rank-adaptation-adalora). You can learn more about how these methods work conceptually in the [Adapters](../conceptual_guides/adapter) guide. If you're interested in applying these methods to other tasks and use cases like semantic segmentation, token classification, take a look at our [notebook collection](https://huggingface.co/collections/PEFT/notebooks-6573b28b33e5a4bf5b157fc1)!
 
+Additionally, PEFT supports the [X-LoRA](../conceptual_guides/adapter#mixture-of-lora-experts-x-lora) Mixture of LoRA Experts method.
+
 This guide will show you how to quickly train an image classification model - with a low-rank decomposition method - to identify the class of food shown in an image.
 
 <Tip>
@@ -257,7 +259,7 @@ batch_size = 128
 args = TrainingArguments(
     peft_model_id,
     remove_unused_columns=False,
-    evaluation_strategy="epoch",
+    eval_strategy="epoch",
     save_strategy="epoch",
     learning_rate=5e-3,
     per_device_train_batch_size=batch_size,

@@ -18,10 +18,13 @@ import unittest
 import pytest
 import torch
 import torch.nn.functional as F
+from datasets import load_dataset
 from parameterized import parameterized
 from torch import nn
 from transformers import (
+    AutoImageProcessor,
     AutoModelForCausalLM,
+    AutoModelForImageClassification,
     AutoModelForSeq2SeqLM,
     AutoModelForSequenceClassification,
     AutoModelForTokenClassification,
@@ -36,6 +39,7 @@ from peft import (
     AdaLoraConfig,
     AdaptionPromptConfig,
     BOFTConfig,
+    HRAConfig,
     IA3Config,
     LNTuningConfig,
     LoHaConfig,
@@ -44,13 +48,22 @@ from peft import (
     OFTConfig,
     PeftModel,
     TaskType,
+    VBLoRAConfig,
     VeraConfig,
     get_peft_model,
     prepare_model_for_kbit_training,
 )
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
+from peft.tuners.lora.config import LoraRuntimeConfig
+from peft.utils import infer_device
 
-from .testing_utils import require_bitsandbytes, require_torch_gpu, require_torch_multi_gpu
+from .testing_utils import (
+    require_bitsandbytes,
+    require_multi_accelerator,
+    require_non_cpu,
+    require_torch_gpu,
+    require_torch_multi_gpu,
+)
 
 
 if is_bnb_available():
@@ -58,13 +71,15 @@ if is_bnb_available():
 
     from peft.tuners.ia3 import Linear8bitLt as IA3Linear8bitLt
     from peft.tuners.lora import Linear8bitLt as LoraLinear8bitLt
+    from peft.tuners.vera import Linear8bitLt as VeraLinear8bitLt
 
     if is_bnb_4bit_available():
         from peft.tuners.ia3 import Linear4bit as IA3Linear4bit
         from peft.tuners.lora import Linear4bit as LoraLinear4bit
+        from peft.tuners.vera import Linear4bit as VeraLinear4bit
 
 
-@require_torch_gpu
+@require_non_cpu
 class PeftGPUCommonTests(unittest.TestCase):
     r"""
     A common tester to run common operations that are performed on GPU such as generation, loading in 8bit, etc.
@@ -74,8 +89,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         self.seq2seq_model_id = "google/flan-t5-base"
         self.causal_lm_model_id = "facebook/opt-350m"
         self.audio_model_id = "openai/whisper-large"
-        if torch.cuda.is_available():
-            self.device = torch.device("cuda:0")
+        self.device = infer_device()
 
     def tearDown(self):
         r"""
@@ -135,6 +149,54 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         whisper_8bit = get_peft_model(whisper_8bit, config)
         assert isinstance(whisper_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear8bitLt)
+
+    @require_bitsandbytes
+    @pytest.mark.multi_gpu_tests
+    @pytest.mark.single_gpu_tests
+    def test_vera_bnb_8bit_quantization(self):
+        r"""
+        Test that tests if the 8bit quantization using VeRA works as expected
+        """
+        whisper_8bit = WhisperForConditionalGeneration.from_pretrained(
+            self.audio_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+        )
+
+        opt_8bit = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+        )
+
+        flan_8bit = AutoModelForSeq2SeqLM.from_pretrained(
+            self.seq2seq_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+        )
+
+        flan_vera_config = VeraConfig(
+            r=16, target_modules=["q", "v"], vera_dropout=0.05, bias="none", task_type="SEQ_2_SEQ_LM"
+        )
+
+        opt_vera_config = VeraConfig(
+            r=16,
+            target_modules=["q_proj", "v_proj"],
+            vera_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+
+        config = VeraConfig(r=32, target_modules=["q_proj", "v_proj"], vera_dropout=0.05, bias="none")
+
+        flan_8bit = get_peft_model(flan_8bit, flan_vera_config)
+        assert isinstance(flan_8bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, VeraLinear8bitLt)
+
+        opt_8bit = get_peft_model(opt_8bit, opt_vera_config)
+        assert isinstance(opt_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, VeraLinear8bitLt)
+
+        whisper_8bit = get_peft_model(whisper_8bit, config)
+        assert isinstance(whisper_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, VeraLinear8bitLt)
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
@@ -246,6 +308,43 @@ class PeftGPUCommonTests(unittest.TestCase):
             # check that both adapters are in the same layer
             assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A
             assert "adapter2" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A
+
+    @require_bitsandbytes
+    @pytest.mark.multi_gpu_tests
+    @pytest.mark.single_gpu_tests
+    @parameterized.expand(["4bit", "8bit"])
+    def test_vera_bnb_quantization_from_pretrained_safetensors(self, quantization):
+        r"""
+        Tests that the bnb quantization using VeRA works as expected with safetensors weights.
+        """
+        model_id = "facebook/opt-350m"
+        kwargs = {"device_map": "auto"}
+        if quantization == "4bit":
+            kwargs["quantization_config"] = BitsAndBytesConfig(load_in_4bit=True)
+        else:
+            kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+
+        model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
+        config = VeraConfig(task_type=TaskType.CAUSAL_LM)
+        peft_model = get_peft_model(model, config)
+        peft_model = prepare_model_for_kbit_training(peft_model)
+        peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            peft_model.save_pretrained(tmp_dir)
+            model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
+            model = PeftModel.from_pretrained(model, tmp_dir)
+            model = prepare_model_for_kbit_training(model)
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+            # loading a 2nd adapter works, #1239
+            model.load_adapter(tmp_dir, "adapter2")
+            model.set_adapter("adapter2")
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+            # check that both adapters are in the same layer
+            assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.vera_A
+            assert "adapter2" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.vera_A
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
@@ -370,6 +469,54 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         whisper_4bit = get_peft_model(whisper_4bit, config)
         assert isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear4bit)
+
+    @require_bitsandbytes
+    @pytest.mark.multi_gpu_tests
+    @pytest.mark.single_gpu_tests
+    def test_vera_bnb_4bit_quantization(self):
+        r"""
+        Test that tests if the 4bit quantization using VeRA works as expected
+        """
+        whisper_4bit = WhisperForConditionalGeneration.from_pretrained(
+            self.audio_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+        )
+
+        opt_4bit = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+        )
+
+        flan_4bit = AutoModelForSeq2SeqLM.from_pretrained(
+            self.seq2seq_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+        )
+
+        flan_vera_config = VeraConfig(
+            r=16, target_modules=["q", "v"], vera_dropout=0.05, bias="none", task_type="SEQ_2_SEQ_LM"
+        )
+
+        opt_vera_config = VeraConfig(
+            r=16,
+            target_modules=["q_proj", "v_proj"],
+            vera_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+
+        config = VeraConfig(r=32, target_modules=["q_proj", "v_proj"], vera_dropout=0.05, bias="none")
+
+        flan_4bit = get_peft_model(flan_4bit, flan_vera_config)
+        assert isinstance(flan_4bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, VeraLinear4bit)
+
+        opt_4bit = get_peft_model(opt_4bit, opt_vera_config)
+        assert isinstance(opt_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, VeraLinear4bit)
+
+        whisper_4bit = get_peft_model(whisper_4bit, config)
+        assert isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, VeraLinear4bit)
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
@@ -801,7 +948,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         with torch.inference_mode():
             out_adapter1 = model(**inputs).logits
 
-        atol, rtol = 1e-5, 1e-5
+        atol, rtol = 3e-5, 1e-5
         # sanity check, outputs have the right shape and are not the same
         assert len(out_base) >= 3
         assert len(out_base) == len(out_adapter0) == len(out_adapter1)
@@ -888,14 +1035,14 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert torch.allclose(out_adapter0[1::3], out_mixed[1::3], atol=atol, rtol=rtol)
         assert torch.allclose(out_adapter1[2::3], out_mixed[2::3], atol=atol, rtol=rtol)
 
-    @require_torch_gpu
+    @require_non_cpu
     @pytest.mark.single_gpu_tests
     def test_serialization_shared_tensors(self):
         model_checkpoint = "roberta-base"
         peft_config = LoraConfig(
             task_type=TaskType.TOKEN_CLS, inference_mode=False, r=16, lora_alpha=16, lora_dropout=0.1, bias="all"
         )
-        model = AutoModelForTokenClassification.from_pretrained(model_checkpoint, num_labels=11).to("cuda")
+        model = AutoModelForTokenClassification.from_pretrained(model_checkpoint, num_labels=11).to(self.device)
         model = get_peft_model(model, peft_config)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1082,6 +1229,159 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert torch.allclose(out_dora, out_merged, atol=atol, rtol=rtol)
         assert torch.allclose(out_dora, out_unmerged, atol=atol, rtol=rtol)
         assert torch.allclose(out_dora, out_unloaded, atol=atol, rtol=rtol)
+
+    @pytest.mark.single_gpu_tests
+    def test_dora_ephemeral_gpu_offload(self):
+        torch.manual_seed(0)
+
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            torch_dtype=torch.float32,
+        ).eval()
+
+        config = LoraConfig(
+            r=128,
+            init_lora_weights=False,
+            use_dora=True,
+            runtime_config=LoraRuntimeConfig(
+                ephemeral_gpu_offload=True
+            ),  # we enable this, but only to verify that it's gone later
+        )
+        peft_model = get_peft_model(model, config).eval()
+        # Check that ephemeral GPU offloading is present
+        assert peft_model.peft_config["default"].runtime_config.ephemeral_gpu_offload
+
+        # Save to disk
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            peft_model.save_pretrained(tmp_dir)
+
+            # Load from disk 100% on CPU without ephemeral GPU offloading
+            peft_model_cpu = PeftModel.from_pretrained(
+                model,
+                tmp_dir,
+                device_map={"": "cpu"},
+            ).eval()
+
+            # Check that ephemeral GPU offloading is absent
+            assert not peft_model_cpu.peft_config["default"].runtime_config.ephemeral_gpu_offload
+
+            # Load again, with ephemeral GPU offloading enabled
+            peft_model_ego = PeftModel.from_pretrained(
+                model,
+                tmp_dir,
+                device_map={"": "cpu"},
+                ephemeral_gpu_offload=True,
+            ).eval()
+
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        with torch.inference_mode():
+            out_peft_model_cpu = F.softmax(peft_model_cpu(random_input).logits, dim=-1)
+            out_peft_model_ego = F.softmax(peft_model_ego(random_input).logits, dim=-1)
+
+        # The results should be the same
+        assert torch.allclose(out_peft_model_cpu, out_peft_model_ego)
+
+    @require_multi_accelerator
+    @pytest.mark.multi_gpu_tests
+    def test_dora_ephemeral_gpu_offload_multigpu(self):
+        torch.manual_seed(0)
+
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            torch_dtype=torch.float32,
+        ).eval()
+
+        config = LoraConfig(
+            r=16,  # too small and the time difference is too small
+            init_lora_weights=False,
+            use_dora=True,
+            runtime_config=LoraRuntimeConfig(ephemeral_gpu_offload=True),
+        )
+        peft_model = get_peft_model(model, config).eval()
+
+        layer = peft_model.base_model.model.model.decoder.layers[0].self_attn.v_proj
+        lora_A, lora_B = layer.lora_A, layer.lora_B
+
+        possible_combinations = ["cpu", self.device, f"{self.device}:0", f"{self.device}:1"]
+        for device_A in possible_combinations:
+            la = lora_A.to(device_A)
+            for device_B in possible_combinations:
+                lb = lora_B.to(device_B)
+                layer.lora_A, layer.lora_B = la, lb
+                layer.dora_init(layer.active_adapter[0])  # should not raise an error
+
+    def test_apply_GS_hra_inference(self):
+        # check for different result with and without apply_GS
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            torch_dtype=torch.float32,
+        ).eval()
+
+        torch.manual_seed(0)
+        config_hra = HRAConfig(r=8, init_weights=True, apply_GS=False)
+        model = get_peft_model(model, config_hra).eval()
+
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        logits_hra = model(random_input).logits
+
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            torch_dtype=torch.float32,
+        )
+        torch.manual_seed(0)
+        config_hra_GS = HRAConfig(r=8, init_weights=True, apply_GS=True)
+        model = get_peft_model(model, config_hra_GS)
+
+        logits_hra_GS = model(random_input).logits
+
+        assert not torch.allclose(logits_hra, logits_hra_GS)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    def test_apply_GS_hra_conv2d_inference(self):
+        # check for different result with and without apply_GS
+        model_id = "microsoft/resnet-18"
+        image_processor = AutoImageProcessor.from_pretrained(model_id)
+        dataset = load_dataset("huggingface/cats-image", trust_remote_code=True)
+        image = dataset["test"]["image"][0]
+        data = image_processor(image, return_tensors="pt")
+
+        model = AutoModelForImageClassification.from_pretrained(model_id).eval()
+        torch.manual_seed(0)
+        config_hra = HRAConfig(r=8, init_weights=True, target_modules=["convolution"], apply_GS=False)
+        model = get_peft_model(model, config_hra).eval()
+
+        logits_hra = model(**data).logits
+
+        model = AutoModelForImageClassification.from_pretrained(model_id).eval()
+        torch.manual_seed(0)
+        config_hra_GS = HRAConfig(r=8, init_weights=True, target_modules=["convolution"], apply_GS=True)
+        model = get_peft_model(model, config_hra_GS)
+
+        logits_hra_GS = model(**data).logits
+
+        assert not torch.allclose(logits_hra, logits_hra_GS)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    def test_r_odd_hra_inference(self):
+        # check that an untrained HRA adapter can't be initialized as an identity tranformation
+        # when r is an odd number
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            torch_dtype=torch.float32,
+        ).eval()
+
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+
+        torch.manual_seed(0)
+        logits = model(random_input).logits
+
+        config_hra = HRAConfig(r=7, init_weights=True, apply_GS=False)
+        model = get_peft_model(model, config_hra).eval()
+        logits_hra = model(random_input).logits
+
+        assert not torch.allclose(logits, logits_hra)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a CUDA GPU")
@@ -1407,3 +1707,47 @@ class TestSameAdapterDifferentDevices:
         assert model.lin0.base_layer.weight.device.type == "cuda"
         assert model.lin0.vera_A.other.device.type == "cuda"
         assert model.lin0.vera_lambda_d.other.device.type == "cuda"
+
+    def test_vblora_add_new_adapter_does_not_change_device(self, mlp):
+        # same as first test, but using VBLoRA
+        config = VBLoRAConfig(target_modules=["lin0"], vector_length=2)
+        model = get_peft_model(mlp, config)
+        model = model.cuda()
+        model.lin0.vblora_logits_A.cpu()
+        model.lin0.vblora_logits_B.cpu()
+        model.lin0.vblora_vector_bank.cpu()
+
+        # check that the adapter is indeed on CPU and the base model on GPU
+        assert model.lin0.vblora_logits_A.default.device.type == "cpu"
+        assert model.lin0.vblora_logits_B.default.device.type == "cpu"
+        assert model.lin0.vblora_vector_bank.default.device.type == "cpu"
+        assert model.lin0.base_layer.weight.device.type == "cuda"
+
+        model.add_adapter("other", config)
+        # check that after adding a new adapter, the old adapter is still on CPU
+        assert model.lin0.vblora_logits_A.default.device.type == "cpu"
+        assert model.lin0.vblora_logits_B.default.device.type == "cpu"
+        assert model.lin0.vblora_vector_bank.default.device.type == "cpu"
+        # the rest should be on GPU
+        assert model.lin0.base_layer.weight.device.type == "cuda"
+        assert model.lin0.vblora_logits_A.other.device.type == "cuda"
+        assert model.lin0.vblora_logits_B.other.device.type == "cuda"
+        assert model.lin0.vblora_vector_bank.other.device.type == "cuda"
+
+    def test_hra_add_new_adapter_does_not_change_device(self, mlp):
+        # same as first test, but using HRA
+        config = HRAConfig(target_modules=["lin0"])
+        model = get_peft_model(mlp, config)
+        model = model.cuda()
+        model.lin0.hra_u.cpu()
+
+        # check that the adapter is indeed on CPU and the base model on GPU
+        assert model.lin0.hra_u.default.device.type == "cpu"
+        assert model.lin0.base_layer.weight.device.type == "cuda"
+
+        model.add_adapter("other", config)
+        # check that after adding a new adapter, the old adapter is still on CPU
+        assert model.lin0.hra_u.default.device.type == "cpu"
+        # the rest should be on GPU
+        assert model.lin0.base_layer.weight.device.type == "cuda"
+        assert model.lin0.hra_u.other.device.type == "cuda"

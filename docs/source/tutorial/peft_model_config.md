@@ -99,7 +99,7 @@ You can create your own configuration for training by initializing a [`PromptEnc
 from peft import PromptEncoderConfig, TaskType
 
 p_tuning_config = PromptEncoderConfig(
-    encoder_reprameterization_type="MLP",
+    encoder_reparameterization_type="MLP",
     encoder_hidden_size=128,
     num_attention_heads=16,
     num_layers=24,

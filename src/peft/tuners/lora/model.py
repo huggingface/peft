@@ -53,6 +53,7 @@ from .eetq import dispatch_eetq
 from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
 from .layer import Conv2d, LoraLayer, dispatch_default
+from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
 
 
@@ -72,6 +73,8 @@ class LoraModel(BaseTuner):
         model ([`torch.nn.Module`]): The model to be adapted.
         config ([`LoraConfig`]): The configuration of the Lora model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
+        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+            Create empty adapter weights on meta device. Useful to speed up the loading process.
 
     Returns:
         `torch.nn.Module`: The Lora model.
@@ -135,8 +138,8 @@ class LoraModel(BaseTuner):
 
     prefix: str = "lora_"
 
-    def __init__(self, model, config, adapter_name) -> None:
-        super().__init__(model, config, adapter_name)
+    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
+        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
     def _check_new_adapter_config(self, config: LoraConfig) -> None:
         """
@@ -196,9 +199,17 @@ class LoraModel(BaseTuner):
             "init_lora_weights": lora_config.init_lora_weights,
             "use_rslora": lora_config.use_rslora,
             "use_dora": lora_config.use_dora,
+            "ephemeral_gpu_offload": lora_config.runtime_config.ephemeral_gpu_offload,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
+        # for torchao merging, we need the get_apply_tensor_subclass from the quantization config
+        try:
+            kwargs["get_apply_tensor_subclass"] = operator.attrgetter(
+                "hf_quantizer.quantization_config.get_apply_tensor_subclass"
+            )(self.model)
+        except AttributeError:
+            pass
 
         quant_methods = ["gptq", "aqlm", "awq"]
         for quant_method in quant_methods:
@@ -250,6 +261,7 @@ class LoraModel(BaseTuner):
                 new_module.state = child.state
             new_module.to(child.weight.device)
 
+        meta = torch.device("meta")
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if (self.prefix in name) or ("ranknum" in name):
@@ -259,8 +271,11 @@ class LoraModel(BaseTuner):
                     else child.W_q
                     if hasattr(child, "W_q")
                     else child.weight
+                    if hasattr(child, "weight")
+                    else next(child.parameters())
                 )
-                module.to(weight.device)
+                if not any(p.device == meta for p in module.parameters()):
+                    module.to(weight.device)
 
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
         for n, p in model.named_parameters():
@@ -289,6 +304,26 @@ class LoraModel(BaseTuner):
         # because the first match is always used. Therefore, the default layers should be checked last.
         dispatchers = []
 
+        if lora_config._custom_modules:
+            # Experimental custom LoRA module support. Allows users to pass a custom mapping for unsupported layer
+            # types by impelementing their own LoRA layers.
+            def dynamic_dispatch_func(target, adapter_name, lora_config, **kwargs):
+                new_module = None
+
+                if isinstance(target, BaseTunerLayer):
+                    target_base_layer = target.get_base_layer()
+                else:
+                    target_base_layer = target
+
+                for key, custom_cls in lora_config._custom_modules.items():
+                    if isinstance(target_base_layer, key):
+                        new_module = custom_cls(target, adapter_name, **kwargs)
+                        break
+
+                return new_module
+
+            dispatchers.append(dynamic_dispatch_func)
+
         # avoid eager bnb import
         if is_bnb_available():
             from .bnb import dispatch_bnb_8bit
@@ -307,6 +342,7 @@ class LoraModel(BaseTuner):
                 dispatch_awq,
                 dispatch_gptq,
                 dispatch_hqq,
+                dispatch_torchao,
                 dispatch_megatron,
                 dispatch_default,
             ]
@@ -322,7 +358,8 @@ class LoraModel(BaseTuner):
             # no module could be matched
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
-                "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `transformers.pytorch_utils.Conv1D`."
+                "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `torch.nn.Conv3d`, "
+                "`transformers.pytorch_utils.Conv1D`."
             )
 
         return new_module
@@ -332,6 +369,8 @@ class LoraModel(BaseTuner):
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
+            if name == "model":  # see #1892: prevent infinite recursion if class is not initialized
+                raise
             return getattr(self.model, name)
 
     def get_peft_config_as_dict(self, inference: bool = False):
@@ -405,9 +444,22 @@ class LoraModel(BaseTuner):
         if self.training:
             raise ValueError("Cannot pass `adapter_names` when the model is in training mode.")
 
+        # Check that users only passed actually existing adapters.
+        # Note: We cannot do this on the layer level, as each individual layer may not have each adapter. Still, we want
+        # to check that there is at least one layer with the given name, or else something like typos can easily slip.
+        expected_adapters = set()
+        for layer in self.modules():
+            if isinstance(layer, LoraLayer):
+                expected_adapters |= layer.lora_A.keys()
+                expected_adapters |= layer.lora_embedding_A.keys()
+        unique_adapters = {name for name in adapter_names if name != "__base__"}
+        unexpected_adapters = unique_adapters - expected_adapters
+        if unexpected_adapters:
+            raise ValueError(f"Trying to infer with non-existing adapter(s): {', '.join(sorted(unexpected_adapters))}")
+
         hook_handles = []
         for module in self.modules():
-            if isinstance(module, LoraLayer):
+            if isinstance(module, LoraLayer) or isinstance(module, ModulesToSaveWrapper):
                 pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
                 handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                 hook_handles.append(handle)
@@ -422,6 +474,7 @@ class LoraModel(BaseTuner):
 
         Currently gptq quantization and replicated layers do not support merging.
         """
+        super()._check_merge_allowed()
         if getattr(self.model, "quantization_method", None) == "gptq":
             raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
         if self.peft_config.get("layer_replication"):
@@ -528,9 +581,9 @@ class LoraModel(BaseTuner):
                 "Combining adapters with `target_modules` type being a mix of list/set and string is not supported."
             )
 
-        if target_module_types[0] == str:
+        if target_module_types[0] is str:
             new_target_modules = "|".join(f"({self.peft_config[adapter].target_modules})" for adapter in adapters)
-        elif target_module_types[0] == set:
+        elif target_module_types[0] is set:
             new_target_modules = reduce(
                 operator.or_, (self.peft_config[adapter].target_modules for adapter in adapters)
             )

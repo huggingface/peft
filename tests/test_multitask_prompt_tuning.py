@@ -246,6 +246,7 @@ class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
         _ = mpt.generate(input_ids=input_ids, task_ids=task_ids)
 
     def test_generate_text_with_random_init(self) -> None:
+        torch.manual_seed(0)
         model = LlamaForCausalLM(self._create_test_llama_config())
 
         config = self._create_multitask_prompt_tuning_config()
@@ -273,6 +274,12 @@ class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
         ],
     )
     def test_generate_text_with_other_init(self, prompt_tuning_init) -> None:
+        # This test is flaky, hence fixing the seed. The reason is somehow related to:
+        # https://github.com/huggingface/transformers/blob/e786844425b6b1112c76513d66217ce2fe6aea41/src/transformers/generation/utils.py#L2691
+        # When an EOS token is generated, the loop is exited and the pytest.raises at the bottom is not triggered
+        # because `forward` of the PEFT model, which should raise the error, is never called.
+        torch.manual_seed(42)  # seed 43 fails with transformers v4.42.3 and torch v2.3.1
+
         with tempfile.TemporaryDirectory() as tmp_dirname:
             model = LlamaForCausalLM(self._create_test_llama_config())
             model = get_peft_model(model, self._create_multitask_prompt_tuning_config())
@@ -299,6 +306,6 @@ class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
             # check if `generate` works
             _ = model.generate(input_ids=input_ids, attention_mask=attention_mask, task_ids=task_ids)
 
-            with pytest.raises(ValueError):
+            with pytest.raises(ValueError, match="task_ids cannot be None"):
                 # check if `generate` raises an error if task_ids are not passed
                 _ = model.generate(input_ids, attention_mask=attention_mask)

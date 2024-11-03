@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Any, Optional
 
 import torch
 
+from peft.tuners.xlora.model import XLoraModel
+
 from .config import PeftConfig
 from .mixed_model import PeftMixedModel
 from .peft_model import (
@@ -36,6 +38,10 @@ from .tuners import (
     AdaptionPromptConfig,
     BOFTConfig,
     BOFTModel,
+    FourierFTConfig,
+    FourierFTModel,
+    HRAConfig,
+    HRAModel,
     IA3Config,
     IA3Model,
     LNTuningConfig,
@@ -54,10 +60,13 @@ from .tuners import (
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
+    VBLoRAConfig,
+    VBLoRAModel,
     VeraConfig,
     VeraModel,
+    XLoraConfig,
 )
-from .tuners.tuners_utils import BaseTuner as _BaseTuner
+from .tuners.tuners_utils import BaseTuner
 from .utils import _prepare_prompt_learning_config
 
 
@@ -81,6 +90,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING: dict[str, type[PeftConfig]] = {
     "P_TUNING": PromptEncoderConfig,
     "LORA": LoraConfig,
     "LOHA": LoHaConfig,
+    "LORAPLUS": LoraConfig,
     "LOKR": LoKrConfig,
     "ADALORA": AdaLoraConfig,
     "BOFT": BOFTConfig,
@@ -90,9 +100,13 @@ PEFT_TYPE_TO_CONFIG_MAPPING: dict[str, type[PeftConfig]] = {
     "POLY": PolyConfig,
     "LN_TUNING": LNTuningConfig,
     "VERA": VeraConfig,
+    "FOURIERFT": FourierFTConfig,
+    "XLORA": XLoraConfig,
+    "HRA": HRAConfig,
+    "VBLORA": VBLoRAConfig,
 }
 
-PEFT_TYPE_TO_TUNER_MAPPING: dict[str, type[_BaseTuner]] = {
+PEFT_TYPE_TO_TUNER_MAPPING: dict[str, type[BaseTuner]] = {
     "LORA": LoraModel,
     "LOHA": LoHaModel,
     "LOKR": LoKrModel,
@@ -103,6 +117,10 @@ PEFT_TYPE_TO_TUNER_MAPPING: dict[str, type[_BaseTuner]] = {
     "POLY": PolyModel,
     "LN_TUNING": LNTuningModel,
     "VERA": VeraModel,
+    "FOURIERFT": FourierFTModel,
+    "XLORA": XLoraModel,
+    "HRA": HRAModel,
+    "VBLORA": VBLoRAModel,
 }
 
 
@@ -145,11 +163,16 @@ def get_peft_model(
             The revision of the base model. If this isn't set, the saved peft model will load the `main` revision for
             the base model
     """
-    model_config = getattr(model, "config", {"model_type": "custom"})
-    if hasattr(model_config, "to_dict"):
-        model_config = model_config.to_dict()
+    model_config = BaseTuner.get_model_config(model)
+    old_name = peft_config.base_model_name_or_path
+    new_name = model.__dict__.get("name_or_path", None)
+    peft_config.base_model_name_or_path = new_name
 
-    peft_config.base_model_name_or_path = model.__dict__.get("name_or_path", None)
+    if (old_name is not None) and (old_name != new_name):
+        warnings.warn(
+            f"The PEFT config's `base_model_name_or_path` was renamed from '{old_name}' to '{new_name}'. "
+            "Please ensure that the correct base model is loaded when loading this checkpoint."
+        )
 
     if revision is not None:
         if peft_config.revision is not None and peft_config.revision != revision:
@@ -173,7 +196,7 @@ def get_peft_model(
 
 
 def inject_adapter_in_model(
-    peft_config: PeftConfig, model: torch.nn.Module, adapter_name: str = "default"
+    peft_config: PeftConfig, model: torch.nn.Module, adapter_name: str = "default", low_cpu_mem_usage: bool = False
 ) -> torch.nn.Module:
     r"""
     A simple API to create and inject adapter in-place into a model. Currently the API does not support prompt learning
@@ -187,6 +210,8 @@ def inject_adapter_in_model(
             The input model where the adapter will be injected.
         adapter_name (`str`, `optional`, defaults to `"default"`):
             The name of the adapter to be injected, if not provided, the default adapter name is used ("default").
+        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+            Create empty adapter weights on meta device. Useful to speed up the loading process.
     """
     if peft_config.is_prompt_learning or peft_config.is_adaption_prompt:
         raise ValueError("`create_and_replace` does not support prompt learning and adaption prompt yet.")
@@ -199,6 +224,6 @@ def inject_adapter_in_model(
     tuner_cls = PEFT_TYPE_TO_TUNER_MAPPING[peft_config.peft_type]
 
     # By instantiating a peft model we are injecting randomly initialized LoRA layers into the model's modules.
-    peft_model = tuner_cls(model, peft_config, adapter_name=adapter_name)
+    peft_model = tuner_cls(model, peft_config, adapter_name=adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
     return peft_model.model

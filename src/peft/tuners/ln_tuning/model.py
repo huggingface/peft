@@ -37,6 +37,8 @@ class LNTuningModel(BaseTuner):
         model ([`torch.nn.Module`]): The model to be adapted.
         config ([`LNTuningConfig`]): The configuration of the Lora model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
+        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+            This option has no effect on LN tuning but exists for consistency with other PEFT methods.
 
     Returns:
         'torch.nn.Module': The adapted model with LayerNorm tuned on.
@@ -63,15 +65,17 @@ class LNTuningModel(BaseTuner):
 
     prefix: str = "ln_tuning_"
 
-    def __init__(self, model, config, adapter_name) -> None:
+    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
         # self.adapter_name = adapter_name
-        super().__init__(model, config, adapter_name)
+        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
+            if name == "model":  # see #1892: prevent infinite recursion if class is not initialized
+                raise
             return getattr(self.model, name)
 
     # TODO: here need to handle the modules_to_save rather than the target_modules

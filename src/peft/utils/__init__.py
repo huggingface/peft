@@ -18,6 +18,7 @@
 # limitations under the License.
 
 # from .config import PeftConfig, PeftType, PromptLearningConfig, TaskType
+from .integrations import map_cache_to_layer_device_map
 from .loftq_utils import replace_lora_weights_loftq
 from .peft_types import PeftType, TaskType
 from .other import (
@@ -28,6 +29,8 @@ from .other import (
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING,
     CONFIG_NAME,
     WEIGHTS_NAME,
     SAFETENSORS_WEIGHTS_NAME,

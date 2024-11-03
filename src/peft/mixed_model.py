@@ -23,7 +23,7 @@ from accelerate.hooks import remove_hook_from_submodules
 from torch import nn
 from transformers.utils import PushToHubMixin
 
-from peft.tuners.mixed import COMPATIBLE_TUNER_TYPES
+from peft.utils.constants import DUMMY_MODEL_CONFIG
 
 from .config import PeftConfig
 from .peft_model import PeftModel
@@ -34,8 +34,8 @@ from .tuners import (
     LoKrModel,
     LoraModel,
     MixedModel,
-    OFTModel,
 )
+from .tuners.mixed import COMPATIBLE_TUNER_TYPES
 from .utils import PeftType, _set_adapter, _set_trainable
 
 
@@ -45,7 +45,6 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.LOKR: LoKrModel,
     PeftType.ADALORA: AdaLoraModel,
     PeftType.IA3: IA3Model,
-    PeftType.OFT: OFTModel,
 }
 
 
@@ -111,6 +110,8 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
             The config of the model to be tuned. The adapter type must be compatible.
         adapter_name (`str`, `optional`, defaults to `"default"`):
             The name of the first adapter.
+        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+            Create empty adapter weights on meta device. Useful to speed up the loading process.
     """
 
     def __init__(self, model: nn.Module, peft_config: PeftConfig, adapter_name: str = "default") -> None:
@@ -121,7 +122,7 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         self.base_model = MixedModel(model, {adapter_name: peft_config}, adapter_name)
         self.set_modules_to_save(peft_config, adapter_name)
 
-        self.config = getattr(model, "config", {"model_type": "custom"})
+        self.config = getattr(model, "config", DUMMY_MODEL_CONFIG)
 
         # the `pretraining_tp` is set for some models to simulate Tensor Parallelism during inference to avoid
         # numerical differences, https://github.com/pytorch/pytorch/issues/76232 - to avoid any unexpected
@@ -191,6 +192,8 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
+            if name == "base_model":  # see #1892: prevent infinite recursion if class is not initialized
+                raise
             return getattr(self.base_model, name)
 
     def forward(self, *args: Any, **kwargs: Any):
@@ -216,12 +219,38 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         finally:
             self.base_model.enable_adapter_layers()
 
-    def add_adapter(self, adapter_name: str, peft_config: PeftConfig):
+    def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
+        """
+        Add an adapter to the model based on the passed configuration.
+
+        This adapter is not trained. To load a trained adapter, check out [`PeftModel.load_adapter`].
+
+        The name for the new adapter should be unique.
+
+        The new adapter is not automatically set as the active adapter. Use [`PeftModel.set_adapter`] to set the active
+        adapter.
+
+        Args:
+            adapter_name (`str`):
+                The name of the adapter to be added.
+            peft_config ([`PeftConfig`]):
+                The configuration of the adapter to be added.
+            low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+                Create empty adapter weights on meta device. Useful to speed up the process when loading saved
+                adapters.
+
+                <Tip>
+
+                Don't use `low_cpu_mem_usage=True` when creating a new PEFT adapter for training (training is untested
+                and discouraged for PeftMixedModel in general).
+
+                </Tip>
+        """
         _check_config_compatible(peft_config)
 
         try:
             self.peft_config[adapter_name] = peft_config
-            self.base_model.inject_adapter(self, adapter_name)
+            self.base_model.inject_adapter(self, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
         except Exception:  # something went wrong, roll back
             if adapter_name in self.peft_config:
                 del self.peft_config[adapter_name]
@@ -319,7 +348,41 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
     def _split_kwargs(cls, kwargs: dict[str, Any]):
         return PeftModel._split_kwargs(kwargs)
 
+    def _check_new_adapter_config(self, peft_config: PeftConfig, is_trainable: bool) -> None:
+        return PeftModel._check_new_adapter_config(self, peft_config, is_trainable=is_trainable)
+
     def load_adapter(self, model_id: str, adapter_name: str, *args: Any, **kwargs: Any):
+        """
+        Load a trained adapter into the model.
+
+        The name for the new adapter should be unique.
+
+        The new adapter is not automatically set as the active adapter. Use [`PeftModel.set_adapter`] to set the active
+        adapter.
+
+        Args:
+            adapter_name (`str`):
+                The name of the adapter to be added.
+            peft_config ([`PeftConfig`]):
+                The configuration of the adapter to be added.
+            is_trainable (`bool`, *optional*, defaults to `False`):
+                Whether the adapter should be trainable or not. If `False`, the adapter will be frozen and can only be
+                used for inference.
+            torch_device (`str`, *optional*, defaults to None):
+                The device to load the adapter on. If `None`, the device will be inferred.
+            autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
+                Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter
+                weights using float16 and bfloat16 to float32, as this is typically required for stable training, and
+                only affect select PEFT tuners.
+            ephemeral_gpu_offload (`bool`, *optional*, defaults to `False`):
+                Whether to use ephemeral GPU offloading for partially loaded modules. Defaults to `False`.
+            low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+                Create empty adapter weights on meta device before loading the saved weights. Useful to speed up the
+                process.
+            kwargs: (`optional`):
+                Additional arguments to modify the way the adapter is loaded, e.g. the token for Hugging Face Hub.
+        """
+        # the low_cpu_mem_usage option is handled through kwargs
         output = PeftModel.load_adapter(self, model_id, adapter_name, *args, **kwargs)
         # TODO: not quite clear why this is necessary but tests fail without it
         self.set_adapter(self.active_adapters)
@@ -370,6 +433,9 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
                 The configuration object to use instead of an automatically loaded configuration. This configuration
                 object is mutually exclusive with `model_id` and `kwargs`. This is useful when configuration is already
                 loaded before calling `from_pretrained`.
+            low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+                Create empty adapter weights on meta device before loading the saved weights. Useful to speed up the
+                process.
             kwargs: (`optional`):
                 Additional keyword arguments passed along to the specific PEFT configuration class.
         """
@@ -409,5 +475,6 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
 
         # note: this is different from PeftModel.from_pretrained, we always return a PeftMixedModel
         model = cls(model, config, adapter_name)
+        # the low_cpu_mem_usage option is handled through kwargs
         model.load_adapter(model_id, adapter_name, is_trainable=is_trainable, **kwargs)
         return model

@@ -3,8 +3,8 @@ import sys
 from dataclasses import dataclass, field
 from typing import Optional
 
-from transformers import HfArgumentParser, TrainingArguments, set_seed
-from trl import SFTTrainer
+from transformers import HfArgumentParser, set_seed
+from trl import SFTConfig, SFTTrainer
 from utils import create_and_prepare_model, create_datasets
 
 
@@ -79,12 +79,6 @@ class DataTrainingArguments:
         default="timdettmers/openassistant-guanaco",
         metadata={"help": "The preference dataset to use."},
     )
-    packing: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Use packing dataset creating."},
-    )
-    dataset_text_field: str = field(default="text", metadata={"help": "Dataset field to use as input text."})
-    max_seq_length: Optional[int] = field(default=512)
     append_concat_token: Optional[bool] = field(
         default=False,
         metadata={"help": "If True, appends `eos_token_id` at the end of each sample being packed."},
@@ -112,6 +106,11 @@ def main(model_args, data_args, training_args):
     if training_args.gradient_checkpointing:
         training_args.gradient_checkpointing_kwargs = {"use_reentrant": model_args.use_reentrant}
 
+    training_args.dataset_kwargs = {
+        "append_concat_token": data_args.append_concat_token,
+        "add_special_tokens": data_args.add_special_tokens,
+    }
+
     # datasets
     train_dataset, eval_dataset = create_datasets(
         tokenizer,
@@ -128,16 +127,10 @@ def main(model_args, data_args, training_args):
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         peft_config=peft_config,
-        packing=data_args.packing,
-        dataset_kwargs={
-            "append_concat_token": data_args.append_concat_token,
-            "add_special_tokens": data_args.add_special_tokens,
-        },
-        dataset_text_field=data_args.dataset_text_field,
-        max_seq_length=data_args.max_seq_length,
     )
     trainer.accelerator.print(f"{trainer.model}")
-    trainer.model.print_trainable_parameters()
+    if hasattr(trainer.model, "print_trainable_parameters"):
+        trainer.model.print_trainable_parameters()
 
     # train
     checkpoint = None
@@ -152,7 +145,7 @@ def main(model_args, data_args, training_args):
 
 
 if __name__ == "__main__":
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, SFTConfig))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
         # let's parse it to get our arguments.

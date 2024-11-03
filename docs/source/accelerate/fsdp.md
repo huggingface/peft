@@ -74,7 +74,7 @@ accelerate launch --config_file "configs/fsdp_config.yaml"  train.py \
 --logging_steps 5 \
 --log_level "info" \
 --logging_strategy "steps" \
---evaluation_strategy "epoch" \
+--eval_strategy "epoch" \
 --save_strategy "epoch" \
 --push_to_hub \
 --hub_private_repo True \
@@ -108,7 +108,7 @@ Notice that we are using LoRA with  rank=8, alpha=16 and targeting all linear la
 
 Let's dive a little deeper into the script so you can see what's going on, and understand how it works.
 
-The first thing to know is that the script uses FSDP for distributed training as the FSDP config has been passed. The `SFTTrainer` class handles all the heavy lifting of creating PEFT model using the peft config that is passed. After that when you call `trainer.train()`, Trainer internally uses 🤗 Accelerate to prepare model, optimizer and trainer using the FSDP config to create FSDP wrapped model which is then trained. The main code snippet is below:
+The first thing to know is that the script uses FSDP for distributed training as the FSDP config has been passed. The [`~trl.SFTTrainer`] class handles all the heavy lifting of creating PEFT model using the peft config that is passed. After that when you call `trainer.train()`, Trainer internally uses 🤗 Accelerate to prepare model, optimizer and trainer using the FSDP config to create FSDP wrapped model which is then trained. The main code snippet is below:
 
 ```python
 # trainer
@@ -119,13 +119,6 @@ trainer = SFTTrainer(
     train_dataset=train_dataset,
     eval_dataset=eval_dataset,
     peft_config=peft_config,
-    packing=data_args.packing,
-    dataset_kwargs={
-        "append_concat_token": data_args.append_concat_token,
-        "add_special_tokens": data_args.add_special_tokens,
-    },
-    dataset_text_field=data_args.dataset_text_field,
-    max_seq_length=data_args.max_seq_length,
 )
 trainer.accelerator.print(f"{trainer.model}")
 if model_args.use_peft_lora:
@@ -173,7 +166,7 @@ In the above example, the memory consumed per GPU is  72-80 GB (90-98%) as seen 
 
 In this section, we will look at how to use QLoRA and FSDP for finetuning 70B llama model on 2X24GB GPUs. [Answer.AI](https://www.answer.ai/) in collaboration with bitsandbytes and Hugging Face 🤗 open sourced code enabling the usage of FSDP+QLoRA and explained the whole process in their insightful blogpost [You can now train a 70b language model at home](https://www.answer.ai/posts/2024-03-06-fsdp-qlora.html). This is now integrated in Hugging Face ecosystem. 
 
-For this, we first need `bitsandbytes>=0.43.0`, `accelerate>=0.28.0`, `transformers>4.38.2`, `trl>0.7.11` and `peft>0.9.0`. We need to set `fsdp_cpu_ram_efficient_loading=true`, `fsdp_use_orig_params=false` and `fsdp_offload_params=true`(cpu offloading) when using Accelerate config. When not using accelerate launcher, you can alternately set the environment variable `export FSDP_CPU_RAM_EFFICIENT_LOADING=true`.  Here, we will be using accelerate config and below is the config which can be found at [fsdp_config_qlora.yaml](https://github.com/huggingface/peft/blob/main/examples/sft/configs/fsdp_config_qlora.yaml):
+For this, we first need `bitsandbytes>=0.43.3`, `accelerate>=1.0.1`, `transformers>4.44.2`, `trl>0.11.4` and `peft>0.13.0`. We need to set `fsdp_cpu_ram_efficient_loading=true`, `fsdp_use_orig_params=false` and `fsdp_offload_params=true`(cpu offloading) when using Accelerate config. When not using accelerate launcher, you can alternately set the environment variable `export FSDP_CPU_RAM_EFFICIENT_LOADING=true`.  Here, we will be using accelerate config and below is the config which can be found at [fsdp_config_qlora.yaml](https://github.com/huggingface/peft/blob/main/examples/sft/configs/fsdp_config_qlora.yaml):
 
 ```yml
 compute_environment: LOCAL_MACHINE                                                                                                                                           
@@ -218,7 +211,7 @@ accelerate launch --config_file "configs/fsdp_config_qlora.yaml"  train.py \
 --logging_steps 5 \
 --log_level "info" \
 --logging_strategy "steps" \
---evaluation_strategy "epoch" \
+--eval_strategy "epoch" \
 --save_strategy "epoch" \
 --push_to_hub \
 --hub_private_repo True \

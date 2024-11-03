@@ -71,7 +71,7 @@ trainer.train()
 
 <Tip>
 
-Starting from PEFT verion v0.11.0, PEFT automatically promotes the dtype of adapter weights from `torch.float16` and `torch.bfloat16` to `torch.float32` where appropriate. To _prevent_ this behavior, you can pass `autocast_adapter_dtype=False` to [`~get_peft_model`], to [`~PeftModel.from_pretrained`], and to [`~PeftModel.load_adapter`].
+Starting from PEFT verion v0.12.0, PEFT automatically promotes the dtype of adapter weights from `torch.float16` and `torch.bfloat16` to `torch.float32` where appropriate. To _prevent_ this behavior, you can pass `autocast_adapter_dtype=False` to [`~get_peft_model`], to [`~PeftModel.from_pretrained`], and to [`~PeftModel.load_adapter`].
 
 </Tip>
 
@@ -117,6 +117,12 @@ You should probably TRAIN this model on a down-stream task to be able to use it 
 ```
 
 The mentioned layers should be added to `modules_to_save` in the config to avoid the described problem.
+
+<Tip>
+
+As an example, when loading a model that is using the DeBERTa architecture for sequence classification, you'll see a warning that the following weights are newly initialized: `['classifier.bias', 'classifier.weight', 'pooler.dense.bias', 'pooler.dense.weight']`. From this, it follows that the `classifier` and `pooler` layers should be added to: `modules_to_save=["classifier", "pooler"]`.
+
+</Tip>
 
 ### Extending the vocabulary
 
@@ -249,6 +255,19 @@ TunerModelStatus(
     devices={'adapter-1': ['cpu'], 'adapter-2': ['cuda']},
 )
 ```
+
+## Speed
+
+### Loading adapter weights is slow
+
+Loading adapters like LoRA weights should generally be fast compared to loading the base model. However, there can be use cases where the adapter weights are quite large or where users need to load a large number of adapters -- the loading time can add up in this case. The reason for this is that the adapter weights are first initialized and then overridden by the loaded weights, which is wasteful. To speed up the loading time, you can pass the `low_cpu_mem_usage=True` argument to [`~PeftModel.from_pretrained`] and [`~PeftModel.load_adapter`].
+
+<Tip>
+
+If this option works well across different use casese, it may become the default for adapter loading in the future.
+
+</Tip>
+
 
 ## Reproducibility
 

@@ -11,7 +11,7 @@ torchrun --nproc_per_node 8 --nnodes 1 train.py \
 --logging_steps 5 \
 --log_level "info" \
 --logging_strategy "steps" \
---evaluation_strategy "epoch" \
+--eval_strategy "epoch" \
 --save_strategy "epoch" \
 --push_to_hub \
 --hub_private_repo True \
