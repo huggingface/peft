@@ -80,6 +80,7 @@ from .utils import (
     id_tensor_storage,
     infer_device,
     load_peft_weights,
+    map_cache_to_layer_device_map,
     set_peft_model_state_dict,
     shift_tokens_right,
 )
@@ -649,6 +650,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         elif config.peft_type == PeftType.P_TUNING:
             prompt_encoder = PromptEncoder(config)
         elif config.peft_type == PeftType.PREFIX_TUNING:
+            # prefix tuning now uses Cache but that won't work with gradient checkpointing
+            if any(getattr(module, "gradient_checkpointing", False) for module in self.get_base_model().modules()):
+                raise ValueError("Prefix tuning does not work with gradient checkpointing.")
             prompt_encoder = PrefixEncoder(config)
         elif config.peft_type == PeftType.CPT:
             prompt_encoder = CPTEmbedding(config, self.word_embeddings)
@@ -746,6 +750,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 past_key_values.is_updated = {
                     layer_idx: False for layer_idx in range(len(past_key_values.cross_attention_cache.key_cache))
                 }
+            map_cache_to_layer_device_map(self.get_base_model(), past_key_values)  # no-op if not a Cache instance
             return past_key_values
         else:
             if peft_config.peft_type == PeftType.MULTITASK_PROMPT_TUNING:
