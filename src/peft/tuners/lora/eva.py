@@ -200,7 +200,8 @@ def move_inputs_to_device(inputs, device: Union[str, torch.device]):
     elif isinstance(inputs, (tuple, list)):
         return type(inputs)(move_inputs_to_device(v, device) for v in inputs)
     else:
-        raise warnings.warn(f"input of type {type(inputs)} could not be moved to the correct device")
+        warnings.warn(f"input of type {type(inputs)} could not be moved to the correct device")
+        return inputs
 
 
 def prepare_model_inputs_fn_language_modeling(model_input, peft_config: LoraConfig):
