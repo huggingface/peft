@@ -306,6 +306,7 @@ def _get_eva_state_dict(
 
     hooks = {}
     max_components = {}
+    rank_budget = 0
     for name, module in model.named_modules():
         if not target_module_check_fn(name, module):
             continue
@@ -321,6 +322,7 @@ def _get_eva_state_dict(
             get_target_name_key(name, peft_config.rank_pattern.keys()), peft_config.r
         )
         max_components[name] = round(layer_rank * rho)
+        rank_budget += layer_rank
     if isinstance(prepare_layer_inputs_fn, Mapping) and len(prepare_layer_inputs_fn) > 0:
         raise ValueError(
             f"prepare_layer_inputs_fn is a mapping but the following module names were not found in the model: {prepare_layer_inputs_fn.keys()}"
@@ -337,9 +339,6 @@ def _get_eva_state_dict(
         max_value = max(max_components[n] for n in names)
         for n in names:
             max_components[n] = max_value
-
-    # define rank budget and max components
-    rank_budget = peft_config.r * len(hooks)
 
     # initialize svd hooks
     for name in list(hooks.keys()):
