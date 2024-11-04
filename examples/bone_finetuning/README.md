@@ -49,32 +49,28 @@ peft_model = PeftModel.from_pretrained(model, "bone-llama-2-7b")
 
 ### Fine-tune 
 ```shell
-deepspeed --include=localhost:0,1,2,3 finetune.py \
-    --deepspeed configs/ds_config_zero2_no_offload.json \
-    --model_name_or_path $BASE_MODEL \
-    --use_bone True \
-    --target_modules "q_proj,v_proj,k_proj,o_proj,gate_proj,down_proj,up_proj" \
-    --bone_r 64 \
-    --data_path $DATA_PATH \
+python bone_finetuning.py \
+    --base_model_name_or_path meta-llama/Llama-2-7b-hf \
+    --output_dir output/bone-llama-2-7b-metamath-10k \
+    --bits bf16 \
+    --data_path meta-math/MetaMathQA \
+    --dataset_split train[:100000] \
     --dataset_field query response \
-    --dataset_split "train[:395000]"\
-    --output_dir $OUTPUT_PATH \
+    --bf16 True \
     --num_train_epochs 1 \
-    --model_max_length 512 \
     --per_device_train_batch_size 2 \
     --gradient_accumulation_steps 8 \
     --save_strategy "steps" \
     --save_steps 1000 \
-    --save_total_limit 2 \
+    --save_total_limit 1 \
+    --logging_steps 1 \
     --learning_rate 2e-5 \
     --weight_decay 0. \
-    --warmup_ratio 0. \
-    --logging_steps 1 \
-    --lr_scheduler_type "cosine" \
-    --report_to "wandb" \
-    --merge True \
-    --run_name "bone" \
+    --warmup_ratio 0.03 \
+    --tf32 True \
+    --report_to none
 ```
+
 
 
 # Citation
