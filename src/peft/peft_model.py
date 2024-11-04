@@ -107,6 +107,9 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
 }
 
 
+1 + 1
+
+
 class PeftModel(PushToHubMixin, torch.nn.Module):
     """
     Base model encompassing various Peft methods.
