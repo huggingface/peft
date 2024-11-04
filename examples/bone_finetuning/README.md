@@ -6,7 +6,8 @@ Low-Rank Adaptation (LoRA) has achieved remarkable training results by freezing 
 ```python
 import torch
 from peft import LoraConfig, get_peft_model
-from transformers import AutoTokenizer, AutoModelForCausalLMfrom trl import SFTConfig, SFTTrainer
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from trl import SFTConfig, SFTTrainer
 from datasets import load_dataset
 
 model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf", torch_dtype=torch.bfloat16, device_map="auto")
