@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import re
 import warnings
 from collections import Counter, defaultdict
 from collections.abc import Mapping
@@ -29,7 +28,7 @@ from transformers.pytorch_utils import Conv1D
 from peft.tuners.tuners_utils import _find_minimal_target_modules, check_target_module_exists
 from peft.utils.constants import MIN_TARGET_MODULES_FOR_OPTIMIZATION
 from peft.utils.incremental_pca import IncrementalPCA
-from peft.utils.other import _get_submodules
+from peft.utils.other import _get_submodules, get_pattern_key
 
 from .config import LoraConfig
 from .layer import Embedding, LoraLayer, _ConvNd
@@ -179,20 +178,14 @@ def find_equal_values(dictionary: dict) -> dict:
     return {k: v for k, v in value_dict.items() if len(v) > 1}
 
 
-def get_target_name_key(name, pattern_keys):
-    """
-    Get the first substring of `name` that matches one of the keys in `pattern_keys`.
-    """
-    return next(filter(lambda key: re.match(rf".*\.{key}$", name), pattern_keys), name)
-
-
 def get_device_with_meta_params(model: torch.nn.Module) -> torch.device:
     """
     Get the device of the model's parameters. Useful if some parameters are on meta device.
     """
     devices = list({p.device for p in model.parameters() if p.device.type != "meta"})
     if len(devices) > 1:
-        raise ValueError("model has multiple devices")
+        warnings.warn(f"Could not determine device, model has multiple devices: {devices}")
+        return
     return devices[0]
 
 
@@ -200,14 +193,14 @@ def move_inputs_to_device(inputs, device: Union[str, torch.device]):
     """
     Move the inputs to the specified device. Adapted from hf.Trainer.
     """
+    if hasattr(inputs, "to"):
+        return inputs.to(device)
     if isinstance(inputs, Mapping):
         return type(inputs)({k: move_inputs_to_device(v, device) for k, v in inputs.items()})
     elif isinstance(inputs, (tuple, list)):
         return type(inputs)(move_inputs_to_device(v, device) for v in inputs)
-    elif isinstance(inputs, torch.Tensor):
-        return inputs.to(device)
     else:
-        raise ValueError(f"unsupported input type: {type(inputs)}")
+        raise warnings.warn(f"input of type {type(inputs)} could not be moved to the correct device")
 
 
 def prepare_model_inputs_fn_language_modeling(model_input, peft_config: LoraConfig):
@@ -284,6 +277,10 @@ def _get_eva_state_dict(
             counts[k_hook], counts[k] = rank, rank_hook
         return counts
 
+    # dataloader is not empty
+    if dataloader is None or len(dataloader) == 0:
+        raise ValueError("dataloader is empty")
+
     # for unusually high rho values, define an upper limit
     rho_threshold = 1000
     rho = peft_config.eva_config.rho
@@ -298,7 +295,8 @@ def _get_eva_state_dict(
 
     # get model inputs
     inputs = next(iter(dataloader))
-    inputs = move_inputs_to_device(inputs, device)
+    if device is not None:
+        inputs = move_inputs_to_device(inputs, device)
     if prepare_model_inputs_fn is not None:
         model_inputs_for_hooks = prepare_model_inputs_fn(inputs, peft_config)
     else:
@@ -319,7 +317,7 @@ def _get_eva_state_dict(
         handle = module.register_forward_hook(hook)
         hooks[name] = (hook, handle)
         layer_rank = peft_config.rank_pattern.get(
-            get_target_name_key(name, peft_config.rank_pattern.keys()), peft_config.r
+            get_pattern_key(peft_config.rank_pattern.keys(), name), peft_config.r
         )
         max_components[name] = round(layer_rank * rho)
         rank_budget += layer_rank
@@ -360,7 +358,8 @@ def _get_eva_state_dict(
     convergence_dict = {k: False for k in hooks.keys()}
     rank_dist = max_components.copy()
     for inputs in pbar:
-        inputs = move_inputs_to_device(inputs, device)
+        if device is not None:
+            inputs = move_inputs_to_device(inputs, device)
         if prepare_model_inputs_fn is not None:
             model_inputs_for_hooks = prepare_model_inputs_fn(inputs, peft_config)
         else:
@@ -426,7 +425,8 @@ def _get_eva_state_dict(
     model.train(training)
 
     # move tensors to device
-    eva_state_dict = {k: v.to(device) for k, v in eva_state_dict.items()}
+    if device is not None:
+        eva_state_dict = {k: v.to(device) for k, v in eva_state_dict.items()}
 
     return eva_state_dict
 
@@ -443,7 +443,6 @@ def _load_eva_state_dict(
         "use_rslora": peft_config.use_rslora,
         "use_dora": peft_config.use_dora,
     }
-    # rank_pattern_keys() = list(chain(peft_config.rank_pattern.keys(), peft_config.alpha_pattern.keys()))
     missing_eva_inits = []
     new_target_modules = []
     other_module_names = []
@@ -455,9 +454,9 @@ def _load_eva_state_dict(
             other_module_names.append(name_in_base_model)
             continue
         # Regexp matching - Find key which matches current target_name in patterns provided
-        r = peft_config.rank_pattern.get(get_target_name_key(name, peft_config.rank_pattern.keys()), peft_config.r)
+        r = peft_config.rank_pattern.get(get_pattern_key(peft_config.rank_pattern.keys(), name), peft_config.r)
         alpha = peft_config.alpha_pattern.get(
-            get_target_name_key(name, peft_config.alpha_pattern.keys()), peft_config.lora_alpha
+            get_pattern_key(peft_config.alpha_pattern.keys(), name), peft_config.lora_alpha
         )
         if name in eva_state_dict:
             w = eva_state_dict.pop(name)
@@ -562,9 +561,6 @@ def get_eva_state_dict(
             is_target_module = check_target_module_exists(peft_config, name)
         # Conv1D for GPT2 support
         return isinstance(module, (torch.nn.Linear, Conv1D)) and is_target_module
-
-    if len(dataloader) == 0:
-        raise ValueError("dataloader is empty")
 
     is_peft_model = hasattr(model, "peft_config")
 
