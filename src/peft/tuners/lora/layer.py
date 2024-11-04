@@ -13,6 +13,7 @@
 # limitations under the License.
 from __future__ import annotations
 
+import logging
 import math
 import warnings
 from typing import Any, Optional, Union
@@ -263,7 +264,6 @@ class LoraLayer(BaseTunerLayer):
         weight = weight.to(torch.float32)
         out_dim = weight.data.size(0)
         in_dim = weight.data.size(1)
-        min_dim = min(in_dim, out_dim)
 
         # Calculate WC from covariance matrix
         assert hasattr(linear, "eigens")
@@ -289,10 +289,12 @@ class LoraLayer(BaseTunerLayer):
             raise Exception("nan or inf in V")
 
         # Sanity check
+        logging.info(f"U.device = {U.device}, S.device = {S.device}, V.device = {V.device}")
+        logging.info(f"weight.data.device = {weight.data.device}")
         svd_error = torch.dist(U @ torch.diag(S) @ V.t(), weight.data)
-        scale_u = torch.linalg.norm(U) / math.sqrt(min_dim)
-        scale_v = torch.linalg.norm(V) / math.sqrt(min_dim)
-        print(f"scale_u: {scale_u:.2f}, scale_v: {scale_v:.2f}, svd_error: {svd_error:.2f}")
+        scale_u = torch.linalg.norm(U) / math.sqrt(r)
+        scale_v = torch.linalg.norm(V) / math.sqrt(r)
+        logging.info(f"scale_u: {scale_u:.2f}, scale_v: {scale_v:.2f}, svd_error: {svd_error:.2f}")
         assert U.size(0) == out_dim
         assert U.size(1) == r
         assert S.size(0) == r

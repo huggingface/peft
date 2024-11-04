@@ -1,4 +1,5 @@
 import argparse
+import logging
 import os
 
 import numpy as np
@@ -38,24 +39,41 @@ def main(args):
     # Collect data
     calib_loader = get_calib_data(args.calib_dataset, tokenizer, model_id, args.calib_loader_size, seed=args.seed)
 
+    # Evaluate the original model
+    print("\n---- model before svd ---\n")
+    print(model)
+    result = evaluate_model(
+        model,
+        tokenizer,
+        args.model_id,
+        "mmlu" if args.eval_mmlu else "",
+        eval_ppl="wikitext2,ptb",
+        limit=-1,
+    )
+    print(result)
+
     # Perform decomposition
     config = LoraConfig(
         init_lora_weights="corda",
         target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
         r=args.r,
-        lora_alpha=args.alpha,
+        lora_alpha=args.r,
         corda_config=CordaConfig(
             run_model=lambda: run_model(model, calib_loader),
             sample_count=args.calib_loader_size,
             corda_method="ipm" if args.first_eigen else "kpm",
-            corda_rank=args.r,
+            cache_file="./checkpoints/cov/debug.pt",
+            run_svd_for_covariance=False,
         ),
     )
     model = get_peft_model(model, config)
 
-    # Evaluate
+    # Evaluate again to check if the model is consistent
+    # Using `model.model` here because `get_peft_model` wraps a layer to the model
+    print("\n---- model after svd ---\n")
+    print(model)
     result = evaluate_model(
-        model,
+        model.model,
         tokenizer,
         args.model_id,
         "mmlu" if args.eval_mmlu else "",
@@ -75,13 +93,15 @@ def main(args):
 
         # Save residual model
         model = model.unload()
-        model.save_pretrained(model, save_path)
+        model.save_pretrained(save_path)
 
         # Save tokenizer
         tokenizer.save_pretrained(save_path)
+        print(f"Done building CorDA huggingface model in {save_path}")
 
 
 if __name__ == "__main__":
+    logging.getLogger().setLevel(logging.INFO)
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--model_id",

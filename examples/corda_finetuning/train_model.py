@@ -1,4 +1,5 @@
 import copy
+import logging
 import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence
@@ -262,4 +263,5 @@ def train():
 
 
 if __name__ == "__main__":
+    logging.getLogger().setLevel(logging.INFO)
     train()

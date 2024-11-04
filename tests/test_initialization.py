@@ -333,10 +333,11 @@ class TestLoraInitialization:
                     init_lora_weights="corda",
                     target_modules=["linear"],
                     corda_config=CordaConfig(
-                        run_model=lambda: model(data),
-                        sample_count=1,
                         cache_file=corda_cache_fp.name,
                         covariance_file=covariance_cache_fp.name,
+                        run_model=lambda: model(data),
+                        hooked_model=model,
+                        sample_count=1,
                     ),
                 )
                 peft_model = get_peft_model(deepcopy(model), config)

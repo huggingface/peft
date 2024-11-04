@@ -75,18 +75,41 @@ class CordaConfig:
     This is the sub-configuration class to store the configuration of a [`LoraModel`].
 
     Args:
-        run_model (`Callable[[], None]`): Callback to run the model when building covariance.
-        cache_file (`Optional[str]`): Cache file to store the SVD result.
-        covariance_file (`Optional[str]`): Covariance file to store the covariance matrix.
-        sample_count (`int`): Divisor for each hook call.
-        corda_method (`Literal["ipm", "kpm"]`): Method to build adapter.
+        cache_file (`Optional[str]`):
+            Cache file to store the SVD result.
+        covariance_file (`Optional[str]`):
+            Covariance file to store the covariance matrix.
+        run_model (`Callable[[], None]`):
+            Callback to run the model when building covariance.
+        hooked_model (`Optional[nn.Module]`):
+            Model to hook when building covariance. If none, original model will be hooked.
+        sample_count (`int`):
+            Divisor for each hook call.
+        corda_method (`Literal["ipm", "kpm"]`):
+            Method to build adapter.
+        run_svd_for_covariance (`bool`):
+            If true, SVD decomposition will be run for covariance matrix. Currently for debugging purposes only.
     """
 
-    cache_file: Optional[str] = field(default=None)
-    covariance_file: Optional[str] = field(default=None)
-    run_model: Optional[Callable[[], None]] = field(default=None)
-    sample_count: int = field(default=256)
-    corda_method: Literal["ipm", "kpm"] = field(default="ipm")
+    cache_file: Optional[str] = field(default=None, metadata={"help": "Cache file to store the SVD result"})
+    covariance_file: Optional[str] = field(
+        default=None, metadata={"help": "Covariance file to store the covariance matrix"}
+    )
+    run_model: Optional[Callable[[], None]] = field(
+        default=None, metadata={"help": "Callback to run the model when building covariance"}
+    )
+    hooked_model: Optional[nn.Module] = field(
+        default=None,
+        metadata={"help": "Model to hook when building covariance. If none, original model will be hooked."},
+    )
+    sample_count: int = field(default=256, metadata={"help": "Divisor for each hook call"})
+    corda_method: Literal["ipm", "kpm"] = field(default="ipm", metadata={"help": "Method to build adapter"})
+    run_svd_for_covariance: bool = field(
+        default=False,
+        metadata={
+            "help": "If true, SVD decomposition will be run for covariance matrix. Currently for debugging purposes only."
+        },
+    )
 
 
 @dataclass
