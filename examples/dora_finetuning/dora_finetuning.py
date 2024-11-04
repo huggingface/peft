@@ -6,7 +6,7 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
-    DataCollatorWithPadding,
+    DataCollatorForLanguageModeling,
     Trainer,
     TrainingArguments,
 )
@@ -95,7 +95,7 @@ def train_model(
     tokenized_datasets = dataset.map(tokenize_function, batched=True, remove_columns=dataset["train"].column_names)
 
     # Data collator to dynamically pad the batched examples
-    data_collator = DataCollatorWithPadding(tokenizer)
+    data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
 
     # Define training arguments
     training_args = TrainingArguments(
