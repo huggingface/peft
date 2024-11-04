@@ -15,13 +15,11 @@ from __future__ import annotations
 
 import math
 import operator
-import re
 import warnings
 from contextlib import contextmanager
 from dataclasses import asdict, replace
 from enum import Enum
 from functools import partial, reduce
-from itertools import chain
 from typing import Literal, Optional
 
 import torch
