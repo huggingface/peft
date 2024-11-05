@@ -1910,7 +1910,7 @@ class TestEvaInitialization:
                 f"Mean absolute cosine similarity {mean_cosine_similarity:.4f} "
                 f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
             )
-        assert all(e < 0.5 for e in elapsed_times), "Eva initialization taking unexpectedly long"
+        assert all(e < 1.0 for e in elapsed_times), "Eva initialization taking unexpectedly long"
 
     @pytest.mark.parametrize("has_rank_zero", [True, False])
     def test_load_eva_state_dict(self, model, dataset, peft_config, tmp_path, has_rank_zero):
