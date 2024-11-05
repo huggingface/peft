@@ -348,6 +348,9 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
     def _split_kwargs(cls, kwargs: dict[str, Any]):
         return PeftModel._split_kwargs(kwargs)
 
+    def _check_new_adapter_config(self, peft_config: PeftConfig, is_trainable: bool) -> None:
+        return PeftModel._check_new_adapter_config(self, peft_config, is_trainable=is_trainable)
+
     def load_adapter(self, model_id: str, adapter_name: str, *args: Any, **kwargs: Any):
         """
         Load a trained adapter into the model.

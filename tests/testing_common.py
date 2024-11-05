@@ -1109,7 +1109,7 @@ class PeftCommonTester:
         assert nb_trainable < nb_trainable_all
 
     def _test_training_gradient_checkpointing(self, model_id, config_cls, config_kwargs):
-        if issubclass(config_cls, PromptLearningConfig):
+        if config_cls == PrefixTuningConfig:
             return pytest.skip(f"Test not applicable for {config_cls}")
 
         if (config_cls == AdaLoraConfig) and ("roberta" in model_id.lower()):
@@ -1143,7 +1143,9 @@ class PeftCommonTester:
         loss.backward()
 
         for n, param in model.named_parameters():
-            if model.prefix in n:
+            if "prompt_encoder." in n:  # prompt tuning methods
+                assert param.grad is not None
+            elif hasattr(model, "prefix") and (model.prefix in n):  # non-prompt tuning methods
                 assert param.grad is not None
             else:
                 assert param.grad is None
@@ -1601,8 +1603,8 @@ class PeftCommonTester:
 
         output_peft = get_output(peft_model)
 
-        # first check trivial case is not true that peft does not affect the output; for this to work, init_lora_weight
-        # must be False
+        # first check trivial case is not true that peft does not affect the output; for this to work, init_weight
+        # must be False (if the config supports it)
         if isinstance(peft_model, StableDiffusionPipeline):
             # for SD, check that most pixels have different values
             assert (output_before != output_peft).float().mean() > 0.8

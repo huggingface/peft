@@ -11,13 +11,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import tempfile
 import unittest
 from unittest.mock import Mock, call, patch
 
 import pytest
 import torch
+from datasets import load_dataset
 from parameterized import parameterized
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    DataCollatorForLanguageModeling,
+    Trainer,
+    TrainingArguments,
+)
 
 from peft import (
     AdaLoraConfig,
@@ -26,6 +34,7 @@ from peft import (
     LoraConfig,
     OFTConfig,
     PrefixTuningConfig,
+    PromptLearningConfig,
     PromptTuningConfig,
     PromptTuningInit,
     get_peft_model,
@@ -48,6 +57,17 @@ PEFT_DECODER_MODELS_TO_TEST = [
 
 FULL_GRID = {
     "model_ids": PEFT_DECODER_MODELS_TO_TEST,
+    "task_type": "CAUSAL_LM",
+}
+
+SMALL_GRID = {
+    "model_ids": [
+        "hf-internal-testing/tiny-random-gpt2",
+        "hf-internal-testing/tiny-random-OPTForCausalLM",
+        "hf-internal-testing/tiny-random-MistralForCausalLM",
+        "peft-internal-testing/tiny-dummy-qwen2",
+        "trl-internal-testing/tiny-random-LlamaForCausalLM",
+    ],
     "task_type": "CAUSAL_LM",
 }
 
@@ -81,6 +101,10 @@ def skip_adalora_or_oft_or_hra_and_gpt2(test_list):
             )
         )
     ]
+
+
+def only_prompt_learning_filter(test_list):
+    return [test for test in test_list if issubclass(test[2], PromptLearningConfig)]
 
 
 class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
@@ -199,6 +223,9 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
     )
     def test_save_pretrained_selected_adapters_pickle(self, test_name, model_id, config_cls, config_kwargs):
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs, safe_serialization=False)
+
+    def test_load_model_low_cpu_mem_usage(self):
+        self._test_load_model_low_cpu_mem_usage(PEFT_DECODER_MODELS_TO_TEST[0], LoraConfig, {})
 
     @parameterized.expand(
         PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_oft_or_hra_and_gpt2)
@@ -463,3 +490,81 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         x = torch.tensor([[1, 2, 3]])
         # does not raise
         model(x)
+
+    def test_prefix_tuning_mistral(self):
+        # See issue 869, 1962
+        model_id = "hf-internal-testing/tiny-random-MistralForCausalLM"
+        base_model = AutoModelForCausalLM.from_pretrained(model_id)
+        peft_config = PrefixTuningConfig(num_virtual_tokens=10, task_type="CAUSAL_LM")
+        model = get_peft_model(base_model, peft_config)
+
+        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        tokenizer.pad_token = tokenizer.eos_token
+
+        def process(samples):
+            tokenized = tokenizer(samples["quote"], truncation=True, max_length=128)
+            return tokenized
+
+        data = load_dataset("ybelkada/english_quotes_copy")
+        data = data.map(process, batched=True)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    num_train_epochs=1,
+                    max_steps=5,
+                    per_device_train_batch_size=4,
+                    output_dir=tmp_dirname,
+                ),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            )
+            trainer.train()
+
+    @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(SMALL_GRID, filter_params_func=only_prompt_learning_filter)
+    )
+    def test_prompt_learning_with_gradient_checkpointing(self, test_name, model_id, config_cls, config_kwargs):
+        # See issue 869
+        # Test prompt learning methods with gradient checkpointing in a semi realistic setting.
+        # Prefix tuning does not work if the model uses the new caching implementation. In that case, a helpful error
+        # should be raised.
+        peft_config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        base_model = self.transformers_class.from_pretrained(model_id)
+        base_model.gradient_checkpointing_enable()
+
+        try:
+            model = get_peft_model(base_model, peft_config)
+        except ValueError as exc:
+            # Some methods will raise a helpful error. After this, exit the test, as training would fail.
+            assert config_cls == PrefixTuningConfig
+            assert "Prefix tuning does not work with gradient checkpointing" in str(exc)
+            return
+
+        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        tokenizer.pad_token = tokenizer.eos_token
+
+        def process(samples):
+            tokenized = tokenizer(samples["quote"], truncation=True, max_length=128)
+            return tokenized
+
+        data = load_dataset("ybelkada/english_quotes_copy")
+        data = data.map(process, batched=True)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    num_train_epochs=1,
+                    max_steps=3,
+                    per_device_train_batch_size=4,
+                    output_dir=tmp_dirname,
+                ),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            )
+            trainer.train()
