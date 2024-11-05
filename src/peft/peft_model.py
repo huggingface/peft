@@ -46,6 +46,7 @@ from .tuners import (
     AdaLoraModel,
     AdaptionPromptModel,
     BOFTModel,
+    BoneModel,
     CPTEmbedding,
     FourierFTModel,
     HRAModel,
@@ -106,6 +107,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.HRA: HRAModel,
     PeftType.VBLORA: VBLoRAModel,
     PeftType.CPT: CPTEmbedding,
+    PeftType.BONE: BoneModel,
 }
 
 

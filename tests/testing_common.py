@@ -32,6 +32,7 @@ from safetensors.torch import save_file
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
+    BoneConfig,
     CPTConfig,
     FourierFTConfig,
     HRAConfig,
@@ -120,6 +121,11 @@ CONFIG_TESTING_KWARGS = (
     {
         "target_modules": None,
     },
+    # Bone
+    {
+        "target_modules": None,
+        "r": 2,
+    },
     # CPT tuninig
     {
         "num_virtual_tokens": 8,
@@ -128,6 +134,7 @@ CONFIG_TESTING_KWARGS = (
         "cpt_tokens_type_mask": [1, 2, 2, 2, 3, 3, 4, 4],
         "cpt_prompt_init": "TEXT",
     },
+
 )
 
 CLASSES_MAPPING = {
@@ -143,9 +150,10 @@ CLASSES_MAPPING = {
     "hra": (HRAConfig, CONFIG_TESTING_KWARGS[9]),
     "vblora": (VBLoRAConfig, CONFIG_TESTING_KWARGS[10]),
     "oft": (OFTConfig, CONFIG_TESTING_KWARGS[11]),
+    "bone": (BoneConfig, CONFIG_TESTING_KWARGS[12]),
 }
 
-DECODER_MODELS_EXTRA = {"cpt": (CPTConfig, CONFIG_TESTING_KWARGS[12])}
+DECODER_MODELS_EXTRA = {"cpt": (CPTConfig, CONFIG_TESTING_KWARGS[13])}
 
 
 # Adapted from https://github.com/huggingface/transformers/blob/48327c57182fdade7f7797d1eaad2d166de5c55b/src/transformers/activations.py#LL166C7-L166C22
@@ -744,6 +752,7 @@ class PeftCommonTester:
             PeftType.OFT,
             PeftType.BOFT,
             PeftType.HRA,
+            PeftType.BONE,
         ]
 
         if ("gpt2" in model_id.lower()) and (config_cls == IA3Config):
@@ -1227,6 +1236,7 @@ class PeftCommonTester:
             PeftType.FOURIERFT,
             PeftType.HRA,
             PeftType.VBLORA,
+            PeftType.BONE,
         ]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
@@ -1275,6 +1285,7 @@ class PeftCommonTester:
             PeftType.FOURIERFT,
             PeftType.HRA,
             PeftType.VBLORA,
+            PeftType.BONE,
         ]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
@@ -1320,7 +1331,18 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        if config.peft_type not in ("LORA", "ADALORA", "IA3", "BOFT", "OFT", "VERA", "FOURIERFT", "HRA", "VBLORA"):
+        if config.peft_type not in (
+            "LORA",
+            "ADALORA",
+            "IA3",
+            "BOFT",
+            "OFT",
+            "VERA",
+            "FOURIERFT",
+            "HRA",
+            "VBLORA",
+            "BONE",
+        ):
             with pytest.raises(AttributeError):
                 model = model.unload()
         else:

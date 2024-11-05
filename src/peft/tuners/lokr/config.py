@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 from peft.tuners.lycoris_utils import LycorisConfig
 from peft.utils import PeftType
@@ -40,6 +40,8 @@ class LoKrConfig(LycorisConfig):
             Perform rank decomposition of left kronecker product matrix.
         decompose_factor (`int`):
             Kronecker product decomposition factor.
+        rank_dropout_scale ('bool)
+            Whether to scale the rank dropout while training, defaults to `False`.
         target_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
             names will be replaced. When passing a string, a regex match will be performed. When passing a list of
@@ -53,8 +55,8 @@ class LoKrConfig(LycorisConfig):
             When passing a list of strings, either an exact match will be performed or it is checked if the name of the
             module ends with any of the passed strings.
         init_weights (`bool`):
-            Whether to perform initialization of adapter weights. This defaults to `True`, passing `False` is
-            discouraged.
+            Whether to perform initialization of adapter weights. This defaults to `True`. Use "lycoris" to initialize
+            weights in the style of the LYCORIS repository. Passing `False` is discouraged.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
@@ -91,6 +93,7 @@ class LoKrConfig(LycorisConfig):
         metadata={"help": "Perform rank decomposition of left kronecker product matrix."},
     )
     decompose_factor: int = field(default=-1, metadata={"help": "Kronecker product decomposition factor."})
+    rank_dropout_scale: bool = field(default=False, metadata={"help": "Rank dropout scale"})
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
@@ -103,12 +106,12 @@ class LoKrConfig(LycorisConfig):
         default=None,
         metadata={"help": "List of module names or regex expression of the module names to exclude from LoKr."},
     )
-    init_weights: bool = field(
+    init_weights: Union[bool, Literal["lycoris"]] = field(
         default=True,
         metadata={
             "help": (
-                "Whether to initialize the weights of the LoKr layers with their default initialization. Don't change "
-                "this setting, except if you know exactly what you're doing."
+                "Whether to initialize the weights of the LoKr layers with their default initialization. Can be True, False or 'lycoris'."
+                "Default is True. Don't change this setting to False, except if you know exactly what you're doing."
             ),
         },
     )

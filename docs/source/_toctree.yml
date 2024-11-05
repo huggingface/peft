@@ -120,7 +120,8 @@
       title: HRA
     - local: package_reference/cpt
       title: CPT
-
+    - local: package_reference/bone
+      title: Bone
 
     title: Adapters
   - sections:
