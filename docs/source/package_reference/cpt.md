@@ -25,7 +25,7 @@ The abstract from the paper is:
 
 [[autodoc]] tuners.cpt.config.CPTConfig
 
-## CPTModel
+## CPTEmbedding
 
-[[autodoc]] tuners.cpt.model.CPTModel
+[[autodoc]] tuners.cpt.model.CPTEmbedding
 
