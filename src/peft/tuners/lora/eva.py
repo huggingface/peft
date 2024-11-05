@@ -279,7 +279,7 @@ def _get_eva_state_dict(
         return counts
 
     # dataloader is not empty
-    if dataloader is None or len(dataloader) == 0:
+    if len(dataloader) == 0:
         raise ValueError("dataloader is empty")
 
     # for unusually high rho values, define an upper limit
@@ -614,7 +614,7 @@ def initialize_lora_eva_weights(
 
     Args:
         model (PeftModel): The peft model to compute the SVD for.
-        dataloader (Iterable):
+        dataloader (Optional[Iterable]):
             The dataloader to use for the forward pass. If None, eva_state_dict needs to be provided.
         eva_state_dict (Optional[dict]):
             The state_dict to load into the model. If None, a dataloader needs to be provided and the state_dict will
@@ -657,6 +657,8 @@ def initialize_lora_eva_weights(
 
     # compute svd
     if eva_state_dict is None:
+        if dataloader is None:
+            raise ValueError("dataloader is required if eva_state_dict is not provided")
         eva_state_dict = get_eva_state_dict(
             model=model,
             dataloader=dataloader,
