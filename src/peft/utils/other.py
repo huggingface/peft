@@ -16,6 +16,7 @@ from __future__ import annotations
 import copy
 import inspect
 import os
+import re
 import warnings
 from contextlib import nullcontext
 from typing import Any, Optional
@@ -718,3 +719,8 @@ def check_file_exists_on_hf_hub(repo_id: str, filename: str, **kwargs) -> Option
         )
 
     return exists
+
+
+def get_pattern_key(pattern_keys, key_to_match):
+    """Match a substring of key_to_match in pattern keys"""
+    return next(filter(lambda key: re.match(rf".*\.{key}$", key_to_match), pattern_keys), key_to_match)
