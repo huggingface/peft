@@ -109,6 +109,7 @@ class LoKrModel(LycorisTuner):
         kwargs = config.to_dict()
         kwargs["r"] = config.rank_pattern.get(target_name_key, config.r)
         kwargs["alpha"] = config.alpha_pattern.get(target_name_key, config.alpha)
+        kwargs["rank_dropout_scale"] = config.rank_dropout_scale
 
         if isinstance(target, LoKrLayer):
             target.update_layer(adapter_name, **kwargs)
