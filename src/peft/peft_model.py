@@ -655,6 +655,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 raise ValueError("Prefix tuning does not work with gradient checkpointing.")
             prompt_encoder = PrefixEncoder(config)
         elif config.peft_type == PeftType.CPT:
+            if not self.base_model.config.is_decoder:
+                raise ValueError("CPT works only with causal LM models.")
             prompt_encoder = CPTEmbedding(config, self.word_embeddings)
         else:
             raise ValueError("Not supported")
@@ -1762,13 +1764,14 @@ class PeftModelForCausalLM(PeftModel):
             inputs_embeds = torch.cat((prompts, inputs_embeds), dim=1)
             return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
 
-
-    def _cpt_forward(self, input_ids=None, inputs_embeds=None, peft_config=None, task_ids=None, batch_size=None, **kwargs):
+    def _cpt_forward(
+        self, input_ids=None, inputs_embeds=None, peft_config=None, task_ids=None, batch_size=None, **kwargs
+    ):
         # Extract labels from kwargs
         labels = kwargs.pop("labels")
-        device = [i.device for i in[input_ids, inputs_embeds, labels] if i is not None][0]
+        device = [i.device for i in [input_ids, inputs_embeds, labels] if i is not None][0]
         # Extract input_type_mask from kwargs and move it to the same device as labels
-        if 'input_type_mask' in kwargs.keys():
+        if "input_type_mask" in kwargs.keys():
             input_type_mask = kwargs.pop("input_type_mask").to(device)
         else:
             if input_ids is None:
