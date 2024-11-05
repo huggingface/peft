@@ -77,10 +77,10 @@ class EvaConfig:
 
     Args:
         rho (`float`):
-            Rho value for EVA redistribution (>= 1.0). The maximum rank for a layer is lora_r * rho. Default is 2.0
-            meaning the maximum rank allowed for a layer is 2r. Increasing rho will allow for a higher degree of
-            redistribution of ranks across layers. Some pre-trained models might be more sensitive to a rank
-            redistribution. It can therefore be beneficial to try rho=1.0 if the performance is lower than expected.
+            Rho value for EVA redistribution (>= 1.0). The maximum rank for a layer is lora_r * rho. Default is 1.0
+            meaning no redistribution as some pre-trained models can be more sensitive to a rank redistribution.
+            Increasing rho will allow for a higher degree of redistribution of ranks across layers. A recommended value
+            for eva with redistribution is 2.0, meaning the maximum rank allowed for a layer is 2r.
         tau (`float`):
             Cosine similarity threshold for early stopping. Compares the cosine similarity of right-singular vectors
             between two consecutive SVD steps. If the cosine similarity is above this threshold, the SVD iteration is
@@ -100,7 +100,7 @@ class EvaConfig:
             are adjusted so that all LoRA gradients have the same scale regardless of their rank. Default is True.
     """
 
-    rho: float = field(default=2.0, metadata={"help": "Rho value for EVA redistribution"})
+    rho: float = field(default=1.0, metadata={"help": "Rho value for EVA redistribution"})
     tau: float = field(default=0.99, metadata={"help": "Cosine similarity threshold for early stopping"})
     use_label_mask: bool = field(default=True, metadata={"help": "Use label mask for EVA initialization"})
     label_mask_value: int = field(
