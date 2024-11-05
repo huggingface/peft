@@ -39,6 +39,7 @@ from peft import (
     AdaLoraConfig,
     EvaConfig,
     IA3Config,
+    LoKrConfig,
     LoraConfig,
     PeftMixedModel,
     PeftModel,
@@ -1128,6 +1129,94 @@ class TestLoraInitialization:
         megatron_config = {"does-not": "matter-here"}
         with pytest.raises(ValueError, match="DoRA does not support megatron_core"):
             LoraConfig(target_modules=["linear"], use_dora=True, megatron_config=megatron_config)
+
+
+class TestLokrInitialization:
+    torch_device = infer_device()
+
+    def get_model(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Choose a large weight so that averages are close to expected values.
+                self.linear = nn.Linear(1000, 1000)
+                self.conv2d = nn.Conv2d(100, 100, 3)
+
+            def forward(self, x):
+                x_4d = x.flatten().reshape(1, 100, 10, 10)
+                return self.linear(x), self.conv2d(x_4d)
+
+        return MyModule().eval().to(self.torch_device)
+
+    @pytest.fixture
+    def data(self):
+        return torch.rand(10, 1000).to(self.torch_device)
+
+    def test_lokr_linear_init_default(self, data):
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        output_before = model(data)[0]
+        config = LoKrConfig(target_modules=["linear"])
+        model = get_peft_model(model, config)
+        output_after = model(data)[0]
+
+        assert torch.allclose(output_before, output_after)
+
+    def test_lokr_linear_init_false(self, data):
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        output_before = model(data)[0]
+        config = LoKrConfig(target_modules=["linear"], init_weights=False)
+        model = get_peft_model(model, config)
+        output_after = model(data)[0]
+
+        assert not torch.allclose(output_before, output_after)
+
+    def test_lokr_linear_init_lycoris(self, data):
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        output_before = model(data)[0]
+        config = LoKrConfig(target_modules=["linear"], init_weights="lycoris")
+        model = get_peft_model(model, config)
+        output_after = model(data)[0]
+
+        assert torch.allclose(output_before, output_after)
+
+    def test_lokr_conv2d_init_default(self, data):
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        output_before = model(data)[1]
+        config = LoKrConfig(target_modules=["conv2d"])
+        model = get_peft_model(model, config)
+        output_after = model(data)[1]
+
+        assert torch.allclose(output_before, output_after)
+
+    def test_lokr_conv2d_init_false(self, data):
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        output_before = model(data)[1]
+        config = LoKrConfig(target_modules=["conv2d"], init_weights=False)
+        model = get_peft_model(model, config)
+        output_after = model(data)[1]
+
+        assert not torch.allclose(output_before, output_after)
+
+    def test_lokr_conv2d_init_lycoris(self, data):
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        output_before = model(data)[1]
+        config = LoKrConfig(target_modules=["conv2d"], init_weights="lycoris")
+        model = get_peft_model(model, config)
+        output_after = model(data)[1]
+
+        assert torch.allclose(output_before, output_after)
 
 
 class TestAdaLoraInitialization:
