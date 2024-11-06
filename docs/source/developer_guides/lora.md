@@ -72,13 +72,13 @@ You can use EVA by setting `init_lora_weights="eva"` and defining [`EvaConfig`] 
 from peft import LoraConfig, EvaConfig
 peft_config = LoraConfig(
     init_lora_weights = "eva",
-    eva_config = EvaConfig(rho = 2.0),
+    eva_config = EvaConfig(rho = 1.0),
     ...
 )
 ```
-`rho` controls the degree of redistribution possible (>= 1.0). For `r=16` and `rho=1.0`, it means at most 16 ranks can be used, meaning no redistribution is possible.
+The parameter `rho` (≥ 1.0) determines how much redistribution is allowed. When `rho=1.0` and `r=16`, the system is limited to exactly 16 ranks, preventing any redistribution from occurring. A recommended value for eva with redistribution is 2.0, meaning the maximum rank allowed for a layer is 2r.
 
-It is recommended to run the SVD computation on a GPU as it is much faster. To optimize the amount of available memory for EVA, you can use the `low_cpu_mem_usage` flag in [`get_peft_model`]:
+It is recommended to perform EVA initialization on a GPU as it is much faster. To optimize the amount of available memory for EVA, you can use the `low_cpu_mem_usage` flag in [`get_peft_model`]:
 ```python
 peft_model = get_peft_model(model, peft_config, low_cpu_mem_usage=True)
 ```
