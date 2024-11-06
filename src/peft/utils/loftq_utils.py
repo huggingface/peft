@@ -267,26 +267,31 @@ class _SafetensorLoader:
 
     """
 
-    def __init__(self, peft_model, model_path):
+    def __init__(self, peft_model_or_model_id, model_path=None):
         if model_path is None:
-            try:
-                model_path = snapshot_download(peft_model.base_model.config._name_or_path, local_files_only=True)
-            except (AttributeError, HFValidationError) as exc:
-                raise ValueError(
-                    "The provided model does not appear to be a transformers model or is a local model. In this case, "
-                    "you must pass the model_path argument that points to the safetensors file."
-                ) from exc
-            except LocalEntryNotFoundError as exc:
-                raise ValueError(
-                    "The model.safetensors file must be present on disk, but it could not be found."
-                ) from exc
+            if isinstance(peft_model_or_model_id, str):
+                name_or_path = peft_model_or_model_id
+                base_model_prefix = None
+            else:
+                name_or_path = peft_model_or_model_id
+                base_model_prefix = getattr(peft_model_or_model_id.get_base_model(), "base_model_prefix", None)
+            if os.path.exists(name_or_path):
+                model_path = name_or_path
+            else:
+                try:
+                    model_path = snapshot_download(name_or_path,local_files_only=False)
+                except (AttributeError, HFValidationError) as exc:
+                    raise ValueError(
+                        "The provided model does not appear to be a transformers model or is a local model. In this case, "
+                        "you must pass the model_path argument that points to the safetensors file."
+                    ) 
 
         suffix = "model.safetensors"
         if not model_path.endswith(suffix):
             model_path = os.path.join(model_path, suffix)
 
         self.model_path = model_path
-        self.base_model_prefix = getattr(peft_model.get_base_model(), "base_model_prefix", None)
+        self.base_model_prefix = base_model_prefix
         self.prefix = "base_model.model."
         self.is_sharded = False
         self.weight_map = None
