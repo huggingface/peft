@@ -53,6 +53,8 @@ class SafeLoraConfig:
 
     local_files_only (`bool`): Using for snapshot_download.
 
+    dtype (`torch.dtype`): Data type for model weights, e.g., torch.float32 or torch.bfloat16. If your device is CPU, you should use torch.float32.
+
     """
 
     base_model_path: str = field(
@@ -99,6 +101,11 @@ class SafeLoraConfig:
         metadata={"help": "Using for snapshot_download."},
     )
 
+    dtype: torch.dtype = field(
+        default=torch.bfloat16,
+        metadata={"help": "Data type for model weights, e.g., torch.float32 or torch.bfloat16. If your device is CPU, you should use torch.float32."},
+    )
+
     def __post_init__(self):
         if self.base_model_path is None:
             raise ValueError("base_model_path cannot be None.")
@@ -106,6 +113,8 @@ class SafeLoraConfig:
             raise ValueError("aligned_model_path cannot be None.")
         if self.peft_model_path is None:
             raise ValueError("peft_model_path cannot be None.")
+        if self.devices != 'cuda' and self.dtype != torch.float32:
+            raise ValueError("When using a CPU, please set dtype to torch.float32, as CPUs do not support torch.float16.")
 
 
 def get_aligned_matrix(base_model_path, aligned_model_path, devices, peft_config, configs):
@@ -204,9 +213,9 @@ def apply_safelora(configs):
         f"{os.path.join(configs.peft_model_path, 'adapter_model.safetensors')}", framework="pt", device=configs.devices
     ) as f:
         if configs.devices == "cpu":
-            peft_weights = {name: f.get_tensor(name).to(torch.float32) for name in f.keys()}
+            peft_weights = {name: f.get_tensor(name).to(configs.dtype) for name in f.keys()}
         else:
-            peft_weights = {name: f.get_tensor(name).to(torch.bfloat16) for name in f.keys()}
+            peft_weights = {name: f.get_tensor(name).to(configs.dtype) for name in f.keys()}
     if configs.select_layers_type == "threshold":
         final_weights, _ = project_weights(configs, peft_weights, projected_matrix)
     elif configs.select_layers_type == "number":
@@ -216,6 +225,6 @@ def apply_safelora(configs):
         final_weights, _ = project_weights(configs, peft_weights, projected_matrix)
 
     if configs.save_weights:
-        save_file(final_weights, f"{os.path.join(configs.peft_model_path, 'adapter_model.safetensors1')}")
+        save_file(final_weights, f"{os.path.join(configs.peft_model_path, 'adapter_model.safetensors')}")
 
     return final_weights
