@@ -189,7 +189,6 @@ def apply_safelora(safelora_config: SafeLoraConfig):
 
     Example:
 
-    from peft import PeftConfig
     from peft.utils.safelora import SafeLoraConfig, apply_safelora
 
     config = SafeLoraConfig(base_model_path='../LLM_Models/llama-2-7b-hf/',\
