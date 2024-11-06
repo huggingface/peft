@@ -35,17 +35,17 @@ class SafeLoraConfig:
     """
 
     base_model_path: str = field(
-        default=None,
+        default='meta-llama/Llama-2-7b-hf',
         metadata={"help": "The path of the base model for obtaining the aligned matrix"},
     )
 
     aligned_model_path: str = field(
-        default=None,
+        default="TheBloke/Llama-2-7B-Chat-fp16",
         metadata={"help": "The path of the aligned model for obtaining the aligned matrix"},
     )
 
     peft_model_path: str = field(
-        default=None,
+        default='LisaSchunke/llama-2-7b-peft-finetuned-20000-dataset',
         metadata={"help": "The path of the LoRA wieghts and configs."},
     )
 
@@ -92,8 +92,8 @@ def get_aligned_matrix(base_model_path, aligned_model_path, devices, peft_config
     Get projected matrix by following the config (target_modules) from the peft model.
     The dimensions between the base model's weights and the aligned model's weights should be the same.
     """
-    sl_align = SafetensorLoader(aligned_model_path)
-    sl_base = SafetensorLoader(base_model_path)
+    sl_align = SafetensorLoader(aligned_model_path, local_files_only=configs.local_files_only)
+    sl_base = SafetensorLoader(base_model_path, local_files_only=configs.local_files_only)
 
     base_model_parameters = [name for name in sl_base.weight_map.keys() if any(v in name for v in list(peft_config["target_modules"]))]
     align_model_parameters = [
@@ -101,9 +101,8 @@ def get_aligned_matrix(base_model_path, aligned_model_path, devices, peft_config
     ]
     safety_vector = []
     for name_base, name_align in zip(base_model_parameters, align_model_parameters):
-        assert (
-            sl_base.get_tensor(name_base).shape == sl_align.get_tensor(name_align).shape
-        ), "The dimensions of the base model's weight should be the same with the aligned model's weight."
+        if sl_base.get_tensor(name_base).shape != sl_align.get_tensor(name_align).shape:
+            raise ValueError("The dimensions of the base model's weight should be the same with the aligned model's weight.")
         vec = sl_base.get_tensor(name_base) - sl_align.get_tensor(name_align)
         vec = vec.to(devices)
         if devices == "cpu":
