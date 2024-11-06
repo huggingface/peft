@@ -176,7 +176,7 @@ def project_weights(configs, peft_weights, v):
     return peft_weights, cos_total
 
 
-def apply_safelora(configs):
+def apply_safelora(safelora_config: SafeLoraConfig):
     """
 
     The official code of Safe LoRA: The Silver Lining of Reducing Safety Risks when Finetuning Large Language Models: https://arxiv.org/abs/2405.16833
@@ -203,28 +203,28 @@ def apply_safelora(configs):
 
     """
 
-    peft_config = PeftConfig.from_pretrained(configs.peft_model_path)
+    peft_config = PeftConfig.from_pretrained(safelora_config.peft_model_path)
 
     projected_matrix = get_aligned_matrix(
-        configs.base_model_path, configs.aligned_model_path, configs.devices, peft_config, configs
+        safelora_config.base_model_path, safelora_config.aligned_model_path, safelora_config.devices, peft_config, safelora_config
     )
 
     with safe_open(
-        f"{os.path.join(configs.peft_model_path, 'adapter_model.safetensors')}", framework="pt", device=configs.devices
+        f"{os.path.join(safelora_config.peft_model_path, 'adapter_model.safetensors')}", framework="pt", device=safelora_config.devices
     ) as f:
-        if configs.devices == "cpu":
-            peft_weights = {name: f.get_tensor(name).to(configs.dtype) for name in f.keys()}
+        if (safelora_config.devices).lower() == "cpu":
+            peft_weights = {name: f.get_tensor(name).to(safelora_config.dtype) for name in f.keys()}
         else:
-            peft_weights = {name: f.get_tensor(name).to(configs.dtype) for name in f.keys()}
-    if configs.select_layers_type == "threshold":
-        final_weights, _ = project_weights(configs, peft_weights, projected_matrix)
-    elif configs.select_layers_type == "number":
-        _, cos = project_weights(configs, peft_weights, projected_matrix)
-        thrs = torch.sort(torch.Tensor(cos))[0][: configs.num_proj_layers][-1]
-        configs.threshold = thrs
-        final_weights, _ = project_weights(configs, peft_weights, projected_matrix)
+            peft_weights = {name: f.get_tensor(name).to(safelora_config.dtype) for name in f.keys()}
+    if safelora_config.select_layers_type == "threshold":
+        final_weights, _ = project_weights(safelora_config, peft_weights, projected_matrix)
+    elif safelora_config.select_layers_type == "number":
+        _, cos = project_weights(safelora_config, peft_weights, projected_matrix)
+        thrs = torch.sort(torch.Tensor(cos))[0][: safelora_config.num_proj_layers][-1]
+        safelora_config.threshold = thrs
+        final_weights, _ = project_weights(safelora_config, peft_weights, projected_matrix)
 
-    if configs.save_weights:
-        save_file(final_weights, f"{os.path.join(configs.peft_model_path, 'adapter_model.safetensors')}")
+    if safelora_config.save_weights:
+        save_file(final_weights, f"{os.path.join(safelora_config.peft_model_path, 'adapter_model.safetensors')}")
 
     return final_weights
