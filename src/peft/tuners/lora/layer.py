@@ -1096,7 +1096,7 @@ class _ConvNd(nn.Module, LoraLayer):
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         self._check_forward_args(x, *args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
-  
+
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
