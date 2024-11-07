@@ -20,7 +20,6 @@ from peft.config import PromptLearningConfig
 from peft.utils import PeftType
 
 
-
 class CPTPromptInit(str, enum.Enum):
     """Enum for specifying the initialization method for CPT."""
 
@@ -99,21 +98,16 @@ class CPTConfig(PromptLearningConfig):
         self.task_type = "CAUSAL_LM"  # Ensures task type is causal language modeling.
 
         if (self.cpt_prompt_init == CPTPromptInit.TEXT) and self.cpt_token_ids is None:
-            raise ValueError(
-                f"When prompt_tuning_init='{CPTPromptInit.TEXT.value}', "
-                f"cpt_token_ids can't be None."
-            )
+            raise ValueError(f"When prompt_tuning_init='{CPTPromptInit.TEXT.value}', " f"cpt_token_ids can't be None.")
         if (self.cpt_prompt_init == CPTPromptInit.TEXT) and self.cpt_mask is None:
-            raise ValueError(
-                f"When prompt_tuning_init='{CPTPromptInit.TEXT.value}', "
-                f"cpt_mask can't be None."
-            )
+            raise ValueError(f"When prompt_tuning_init='{CPTPromptInit.TEXT.value}', " f"cpt_mask can't be None.")
         if (self.cpt_prompt_init == CPTPromptInit.TEXT) and self.cpt_tokens_type_mask is None:
             raise ValueError(
-                f"When prompt_tuning_init='{CPTPromptInit.TEXT.value}', "
-                f"cpt_tokens_type_mask can't be None."
+                f"When prompt_tuning_init='{CPTPromptInit.TEXT.value}', " f"cpt_tokens_type_mask can't be None."
             )
-        if (self.cpt_prompt_init == CPTPromptInit.TEXT) and not (len(self.cpt_token_ids) == len(self.cpt_mask) == len(self.cpt_tokens_type_mask) == self.num_virtual_tokens):
+        if (self.cpt_prompt_init == CPTPromptInit.TEXT) and not (
+            len(self.cpt_token_ids) == len(self.cpt_mask) == len(self.cpt_tokens_type_mask) == self.num_virtual_tokens
+        ):
             raise ValueError(
                 f"When prompt_tuning_init='{CPTPromptInit.TEXT.value}', "
                 f"cpt_token_ids, cpt_mask and cpt_tokens_type_mask must have the same length."
@@ -121,18 +115,13 @@ class CPTConfig(PromptLearningConfig):
 
         if (self.cpt_prompt_init == CPTPromptInit.RANDOM) and self.cpt_token_ids is not None:
             raise ValueError(
-                f"When prompt_tuning_init='{CPTPromptInit.RANDOM.value}', "
-                f"cpt_token_ids must be None."
+                f"When prompt_tuning_init='{CPTPromptInit.RANDOM.value}', " f"cpt_token_ids must be None."
             )
         if (self.cpt_prompt_init == CPTPromptInit.RANDOM) and self.cpt_mask is not None:
-            raise ValueError(
-                f"When prompt_tuning_init='{CPTPromptInit.RANDOM.value}', "
-                f"cpt_mask must be None."
-            )
+            raise ValueError(f"When prompt_tuning_init='{CPTPromptInit.RANDOM.value}', " f"cpt_mask must be None.")
         if (self.cpt_prompt_init == CPTPromptInit.RANDOM) and self.cpt_tokens_type_mask is not None:
             raise ValueError(
-                f"When prompt_tuning_init='{CPTPromptInit.RANDOM.value}', "
-                f"cpt_tokens_type_mask must be None."
+                f"When prompt_tuning_init='{CPTPromptInit.RANDOM.value}', " f"cpt_tokens_type_mask must be None."
             )
         if (self.cpt_prompt_init == CPTPromptInit.RANDOM) and self.num_virtual_tokens == 0:
             raise ValueError(
@@ -140,6 +129,4 @@ class CPTConfig(PromptLearningConfig):
                 f"num_virtual_tokens must be greater than zero."
             )
         if (self.cpt_prompt_init != CPTPromptInit.RANDOM) and (self.cpt_prompt_init != CPTPromptInit.TEXT):
-            raise ValueError(
-                f"prompt_tuning_init must be 'RANDOM' or 'TEXT'"
-            )
+            raise ValueError("prompt_tuning_init must be 'RANDOM' or 'TEXT'")
