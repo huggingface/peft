@@ -134,7 +134,6 @@ CONFIG_TESTING_KWARGS = (
         "cpt_tokens_type_mask": [1, 2, 2, 2, 3, 3, 4, 4],
         "cpt_prompt_init": "TEXT",
     },
-
 )
 
 CLASSES_MAPPING = {
