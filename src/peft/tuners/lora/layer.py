@@ -879,15 +879,17 @@ class _ConvNd(nn.Module, LoraLayer):
         self._active_adapter = adapter_name
         self._kernel_dim = base_layer.weight.dim()
 
-        self.update_layer(
-            adapter_name,
-            r,
-            lora_alpha=lora_alpha,
-            lora_dropout=lora_dropout,
-            init_lora_weights=init_lora_weights,
-            use_rslora=use_rslora,
-            use_dora=use_dora,
-        )
+        if self.base_layer.groups != self.base_layer.in_channels:
+            # lora & dora adapters for dw-conv layers where groups=inputs do not make sense (not parameter efficient)
+            self.update_layer(
+                adapter_name,
+                r,
+                lora_alpha=lora_alpha,
+                lora_dropout=lora_dropout,
+                init_lora_weights=init_lora_weights,
+                use_rslora=use_rslora,
+                use_dora=use_dora,
+            )
 
     def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora):
         if r <= 0:
@@ -909,11 +911,7 @@ class _ConvNd(nn.Module, LoraLayer):
         conv_layer = type(base_layer)
         out_kernel = out_stride = (1,) * (self._kernel_dim - 2)
         self.lora_A[adapter_name] = conv_layer(self.in_features, r, kernel_size, stride, padding, bias=False)
-        if self.base_layer.groups:
-            self.lora_B[adapter_name] = conv_layer(r, int(self.out_features / self.base_layer.groups), out_kernel,
-                                           out_stride, bias=False)
-        else:
-            self.lora_B[adapter_name] = conv_layer(r, self.out_features, out_kernel, out_stride, bias=False)
+        self.lora_B[adapter_name] = conv_layer(r, self.out_features, out_kernel, out_stride, bias=False)
 
         if use_rslora:
             self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
