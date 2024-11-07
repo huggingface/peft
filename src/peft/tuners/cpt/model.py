@@ -107,11 +107,8 @@ class CPTEmbedding(torch.nn.Module):
         MIN_VALUE = 1e-10
 
         # Calculate normalized epsilon values for input, output, and format tokens
-        normalized_format_eps = (
-            self.config.opt_projection_format_epsilon
-            * torch.sqrt(
-                torch.Tensor([self.config.token_dim / 2048])
-            )
+        normalized_format_eps = self.config.opt_projection_format_epsilon * torch.sqrt(
+            torch.Tensor([self.config.token_dim / 2048])
         )
         normalized_input_eps = self.config.opt_projection_epsilon * torch.sqrt(
             torch.Tensor([self.config.token_dim / 2048])
@@ -199,4 +196,3 @@ class CPTEmbedding(torch.nn.Module):
             raise NotImplementedError(f"Loss type '{config.opt_weighted_loss_type}' not implemented.")
 
         return base_model_output
-
