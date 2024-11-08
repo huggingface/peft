@@ -4,7 +4,7 @@ The official code of Safe LoRA: The Silver Lining of Reducing Safety Risks when 
 
 ## Quick Start
 
-Please import the SafeLoraConfig and apply_safelora first.
+Please import the `SafeLoraConfig` and `apply_safelora` first.
 Then, fill in the paths for the base, aligned, and PEFT models according to your needs. There are two types of `select_layers_type`: `threshold` and `number`. The `threshold` type will determine how many layers will be projected based on the value you set. The `number` type directly specifies the number of projected layers.
 
 ```python
