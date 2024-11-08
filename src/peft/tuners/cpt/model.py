@@ -24,8 +24,8 @@ from .config import CPTPromptInit
 
 class CPTEmbedding(torch.nn.Module):
     """
-    CPTEmbedding is a custom embedding layer designed for Context-aware Prompt Tuning (CPT) in PEFT.
-    It initializes embeddings, applies prompt-specific projections, and computes loss using label masks.
+    CPTEmbedding is a custom embedding layer designed for Context-aware Prompt Tuning (CPT) in PEFT. It initializes
+    embeddings, applies prompt-specific projections, and computes loss using label masks.
     """
 
     def __init__(self, config, word_embeddings):
