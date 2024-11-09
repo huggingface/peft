@@ -72,7 +72,7 @@ You can use EVA by setting `init_lora_weights="eva"` and defining [`EvaConfig`] 
 from peft import LoraConfig, EvaConfig
 peft_config = LoraConfig(
     init_lora_weights = "eva",
-    eva_config = EvaConfig(rho = 1.0),
+    eva_config = EvaConfig(rho = 2.0),
     ...
 )
 ```
