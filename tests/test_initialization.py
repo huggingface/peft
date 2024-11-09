@@ -1877,7 +1877,7 @@ class TestEvaInitialization:
             EvaConfig(rho=1.0001),
         ],
     )
-    def test_eva_initialization_consistency_and(self, model, dataset, peft_config, eva_config):
+    def test_eva_initialization_consistency(self, model, dataset, peft_config, eva_config):
         """
         Tests that the state dict returned by `get_eva_state_dict` is consistent across different seeds based on the
         cosine similarity of the svd components.
