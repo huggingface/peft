@@ -657,8 +657,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 raise ValueError("Prefix tuning does not work with gradient checkpointing.")
             prompt_encoder = PrefixEncoder(config)
         elif config.peft_type == PeftType.CPT:
-            if not self.base_model.config.is_decoder:
-                raise ValueError("CPT works only with causal LM models.")
             prompt_encoder = CPTEmbedding(config, self.word_embeddings)
         else:
             raise ValueError("Not supported")
