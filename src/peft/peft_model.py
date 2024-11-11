@@ -174,6 +174,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self.base_model = cls(model, {adapter_name: peft_config}, adapter_name)
             self.set_additional_trainable_modules(peft_config, adapter_name)
 
+        if hasattr(peft_config, 'task_type'):
+            if peft_config.task_type not in TaskType.__members__:
+                raise ValueError(f"Invalid task type: '{peft_config.task_type}'. Must be one of the following task types: {list(TaskType.__members__.keys())}.")
+
         if hasattr(self.base_model, "_cast_adapter_dtype"):
             self.base_model._cast_adapter_dtype(
                 adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype
