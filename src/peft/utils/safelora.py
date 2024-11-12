@@ -87,7 +87,7 @@ class SafeLoraConfig:
         metadata={"help": "The number of projected layers."},
     )
 
-    devices: str = field(
+    device: str = field(
         default="cuda",
         metadata={"help": "Devices are used in SafeLoRA. (cuda or cpu)"},
     )
