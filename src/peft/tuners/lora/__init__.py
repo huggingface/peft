@@ -14,7 +14,8 @@
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_eetq_available
 
-from .config import LoftQConfig, LoraConfig, LoraRuntimeConfig
+from .config import EvaConfig, LoftQConfig, LoraConfig, LoraRuntimeConfig
+from .eva import get_eva_state_dict, initialize_lora_eva_weights
 from .gptq import QuantLinear
 from .layer import Conv2d, Conv3d, Embedding, Linear, LoraLayer
 from .model import LoraModel
@@ -24,6 +25,7 @@ __all__ = [
     "LoraConfig",
     "LoraRuntimeConfig",
     "LoftQConfig",
+    "EvaConfig",
     "Conv2d",
     "Conv3d",
     "Embedding",
@@ -31,6 +33,8 @@ __all__ = [
     "Linear",
     "LoraModel",
     "QuantLinear",
+    "get_eva_state_dict",
+    "initialize_lora_eva_weights",
 ]
 
 
