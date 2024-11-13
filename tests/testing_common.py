@@ -1166,7 +1166,7 @@ class PeftCommonTester:
             if "prompt_encoder." in n:  # prompt tuning methods
                 if not issubclass(config_cls, CPTConfig):
                     assert param.grad is not None
-                elif "delta_embedding" in n:
+                elif "delta_embedding" in n: # delta_embedding is the embedding that should be updated with grads in CPT
                     assert param.grad is not None
             elif hasattr(model, "prefix") and (model.prefix in n):  # non-prompt tuning methods
                 assert param.grad is not None

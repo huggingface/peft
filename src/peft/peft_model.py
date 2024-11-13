@@ -1778,8 +1778,7 @@ class PeftModelForCausalLM(PeftModel):
                 N_tokens = inputs_embeds.shape[1]
             else:
                 N_tokens = input_ids.shape[1]
-            input_type_mask = torch.zeros((batch_size, N_tokens)).to(device)
-            input_type_mask[:, :] = 4
+            input_type_mask = torch.ones((batch_size, N_tokens)).to(device) * 4
 
         if peft_config.cpt_prompt_init == "TEXT":
             cpt_token_ids = peft_config.cpt_token_ids

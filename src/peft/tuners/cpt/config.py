@@ -14,7 +14,7 @@
 
 import enum
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Literal
 
 from peft.config import PromptLearningConfig
 from peft.utils import PeftType
@@ -51,7 +51,7 @@ class CPTConfig(PromptLearningConfig):
     )
 
     # Prompt tuning initialization method
-    cpt_prompt_init: Optional[str] = field(
+    cpt_prompt_init: Optional[Literal[CPTPromptInit.TEXT, CPTPromptInit.RANDOM]] = field(
         default="TEXT", metadata={"help": "Initialization method: 'TEXT' for embedding-based, 'RANDOM' for random."}
     )
 
