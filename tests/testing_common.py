@@ -1164,7 +1164,10 @@ class PeftCommonTester:
 
         for n, param in model.named_parameters():
             if "prompt_encoder." in n:  # prompt tuning methods
-                assert param.grad is not None
+                if not issubclass(config_cls, CPTConfig):
+                    assert param.grad is not None
+                elif "delta_embedding" in n:
+                    assert param.grad is not None
             elif hasattr(model, "prefix") and (model.prefix in n):  # non-prompt tuning methods
                 assert param.grad is not None
             else:

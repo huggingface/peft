@@ -97,12 +97,16 @@ class CPTConfig(PromptLearningConfig):
         self.peft_type = PeftType.CPT  # Specifies that the PEFT type is CPT.
         self.task_type = "CAUSAL_LM"  # Ensures task type is causal language modeling.
 
+        if (self.cpt_prompt_init == CPTPromptInit.TEXT) and self.cpt_token_ids is None:
+            self.cpt_token_ids = [0]
+            self.num_virtual_tokens = 1
+
         if (self.cpt_prompt_init == CPTPromptInit.TEXT) and self.cpt_mask is None:
-            raise ValueError(f"When prompt_tuning_init='{CPTPromptInit.TEXT.value}', " f"cpt_mask can't be None.")
+            self.cpt_mask = [1 for _ in self.cpt_token_ids]
+
         if (self.cpt_prompt_init == CPTPromptInit.TEXT) and self.cpt_tokens_type_mask is None:
-            raise ValueError(
-                f"When prompt_tuning_init='{CPTPromptInit.TEXT.value}', " f"cpt_tokens_type_mask can't be None."
-            )
+            self.cpt_tokens_type_mask = [1 for _ in self.cpt_token_ids]
+
         if (self.cpt_prompt_init == CPTPromptInit.TEXT) and not (
             len(self.cpt_token_ids) == len(self.cpt_mask) == len(self.cpt_tokens_type_mask) == self.num_virtual_tokens
         ):

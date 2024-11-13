@@ -1779,7 +1779,7 @@ class PeftModelForCausalLM(PeftModel):
             else:
                 N_tokens = input_ids.shape[1]
             input_type_mask = torch.zeros((batch_size, N_tokens)).to(device)
-            input_type_mask[:, -1] = 4
+            input_type_mask[:, :] = 4
 
         if peft_config.cpt_prompt_init == "TEXT":
             cpt_token_ids = peft_config.cpt_token_ids
@@ -1796,6 +1796,7 @@ class PeftModelForCausalLM(PeftModel):
         prompts = prompts.to(inputs_embeds.dtype)
         inputs_embeds = torch.cat((prompts, inputs_embeds), dim=1)
         # If labels are provided, generate prefix labels and type mask
+        cpt_labels = None
         if labels is not None:
             # Generate prefix labels and concatenate with the input labels
             prefix_labels = torch.Tensor(cpt_token_ids).long().view(1, -1)
@@ -1812,7 +1813,8 @@ class PeftModelForCausalLM(PeftModel):
             labels_idx = (cpt_type_mask > 0) & (cpt_type_mask % 4 == 0)
             cpt_labels[~labels_idx] = -100
             # Update kwargs with the modified labels
-            kwargs["labels"] = cpt_labels
+
+        kwargs["labels"] = cpt_labels
         # Pass the modified inputs to the base model
         base_model_output = self.base_model(inputs_embeds=inputs_embeds, **kwargs)
         if labels is None:
