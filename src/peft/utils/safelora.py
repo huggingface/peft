@@ -17,6 +17,7 @@
 import copy
 import os
 from dataclasses import dataclass, field
+from typing import Literal
 
 import torch
 from safetensors import safe_open
@@ -41,19 +42,19 @@ class SafeLoraConfig:
 
     peft_model_path (`str`): The path of the LoRA wieghts and configs.
 
-    select_layers_type (`str`): How to select projection layers? options: [threshold, number]
+    select_layers_type (`Literal["threshold", "number"]`): How to select projection layers? options: [threshold, number]
 
     threshold (`float`): The threshold of cosine similarity for selecting projected layers.
 
     num_proj_layers (`int`): The number of projected layers.
 
-    devices (`str`): Devices are used in SafeLoRA (cuda or cpu).
+    device (`str`): Device is used in SafeLoRA (cuda or cpu).
 
     save_weights (`bool`): Replacing and saving SafeLoRA weights to the original LoRA file.
 
     local_files_only (`bool`): Using for snapshot_download.
 
-    dtype (`torch.dtype`): Data type for model weights, e.g., torch.float32 or torch.bfloat16. If your device is CPU, you should use torch.float32.
+    dtype (`torch.dtype`): Data type for model weights, e.g., torch.float32 or torch.bfloat16.
 
     """
 
@@ -72,7 +73,7 @@ class SafeLoraConfig:
         metadata={"help": "The path of the LoRA wieghts and configs."},
     )
 
-    select_layers_type: str = field(
+    select_layers_type: Literal["threshold", "number"] = field(
         default="number",
         metadata={"help": "How to select projection layers? options: [threshold, number]."},
     )
@@ -89,7 +90,7 @@ class SafeLoraConfig:
 
     device: str = field(
         default="cuda",
-        metadata={"help": "Devices are used in SafeLoRA. (cuda or cpu)"},
+        metadata={"help": "Device is used in SafeLoRA. (cuda or cpu)"},
     )
 
     save_weights: bool = field(
@@ -103,7 +104,9 @@ class SafeLoraConfig:
 
     dtype: torch.dtype = field(
         default=torch.bfloat16,
-        metadata={"help": "Data type for model weights, e.g., torch.float32 or torch.bfloat16. If your device is CPU, you should use torch.float32."},
+        metadata={
+            "help": "Data type for model weights, e.g., torch.float32 or torch.bfloat16. If your device is CPU, you should use torch.float32."
+        },
     )
 
     def __post_init__(self):
@@ -113,21 +116,20 @@ class SafeLoraConfig:
             raise ValueError("aligned_model_path cannot be None.")
         if self.peft_model_path is None:
             raise ValueError("peft_model_path cannot be None.")
-        if self.devices != 'cuda' and self.dtype != torch.float32:
-            raise ValueError("When using a CPU, please set dtype to torch.float32, as CPUs do not support torch.float16.")
 
 
-def get_aligned_matrix(base_model_path, aligned_model_path, devices, peft_config, configs):
+def get_aligned_matrix(base_model_path, aligned_model_path, peft_config, safelora_config):
     """
     Get projected matrix by following the config (target_modules) from the peft model.
     The dimensions between the base model's weights and the aligned model's weights should be the same.
     """
-    sl_align = SafetensorLoader(aligned_model_path, local_files_only=configs.local_files_only)
-    sl_base = SafetensorLoader(base_model_path, local_files_only=configs.local_files_only)
+    sl_align = SafetensorLoader(aligned_model_path, local_files_only=safelora_config.local_files_only)
+    sl_base = SafetensorLoader(base_model_path, local_files_only=safelora_config.local_files_only)
 
     base_model_parameters = [
         name for name in sl_base.weight_map.keys() if any(v in name for v in list(peft_config.target_modules))
     ]
+
     align_model_parameters = [
         name for name in sl_align.weight_map.keys() if any(v in name for v in list(peft_config.target_modules))
     ]
@@ -137,16 +139,16 @@ def get_aligned_matrix(base_model_path, aligned_model_path, devices, peft_config
             raise ValueError(
                 "The dimensions of the base model's weight should be the same with the aligned model's weight."
             )
+        if (sl_base.get_tensor(name_base) == sl_align.get_tensor(name_align)).all():
+            raise ValueError("The weights of the base Model and the aligned Model should be different.")
         vec = sl_base.get_tensor(name_base) - sl_align.get_tensor(name_align)
-        vec = vec.to(devices)
-        if devices == "cpu":
-            vec = vec.to(torch.float32)
+        vec = vec.to(safelora_config.dtype).to(safelora_config.device)
         vec = torch.mm(vec, vec.t()) / torch.norm(vec)
         safety_vector.append((vec).detach().cpu())
     return safety_vector
 
 
-def project_weights(configs, peft_weights, v):
+def project_weights(safelora_config, peft_weights, v):
     ori_peft_weights = copy.deepcopy(peft_weights)
     vars_names_LoRA_A = [name for name in peft_weights.keys() if "lora_A" in name]
     vars_names_LoRA_B = [name for name in peft_weights.keys() if "lora_B" in name]
@@ -155,16 +157,13 @@ def project_weights(configs, peft_weights, v):
     cos_total = []
     for idx, (name_A, name_B) in enumerate(zip(vars_names_LoRA_A, vars_names_LoRA_B)):
         A = ori_peft_weights[name_A]
-        if configs.devices != "cpu":
-            P = v[idx].to(torch.bfloat16).to(configs.devices)
-        else:
-            P = v[idx].to("cpu")
+        P = v[idx].to(safelora_config.dtype).to(safelora_config.device)
         W = torch.mm(P, ori_peft_weights[name_B])
         fW = torch.mm(W, A)
         ori = torch.mm(ori_peft_weights[name_B], A)
-        cos = torch.round(torch.nn.functional.cosine_similarity(fW.reshape(1, -1), ori.reshape(1, -1)) * 10**5) / 10**5
+        cos = torch.nn.functional.cosine_similarity(fW.reshape(1, -1), ori.reshape(1, -1))
         cos_total.append(cos.item())
-        if cos <= configs.threshold:
+        if cos <= safelora_config.threshold:
             num_projected_layers += 1
             peft_weights[name_B] = W
         else:
@@ -191,10 +190,10 @@ def apply_safelora(safelora_config: SafeLoraConfig):
 
     from peft.utils.safelora import SafeLoraConfig, apply_safelora
 
-    config = SafeLoraConfig(base_model_path='../LLM_Models/llama-2-7b-hf/',\
-                            aligned_model_path='../LLM_Models/llama-2-7b-chat-fp16/',
-                            peft_model_path = '../finetuneLLM/finetuned_models/samsumBad-7b-fp16-peft-seed-42',
-                            devices='cuda',
+    config = SafeLoraConfig(base_model_path='meta-llama/Llama-2-7b-hf',\
+                            aligned_model_path='TheBloke/Llama-2-7B-Chat-fp16',
+                            peft_model_path = 'LisaSchunke/llama-2-7b-peft-finetuned-20000-dataset',
+                            device='cuda',
                             select_layers_type='threshold',
                             save_weights=True)
 
@@ -205,16 +204,15 @@ def apply_safelora(safelora_config: SafeLoraConfig):
     peft_config = PeftConfig.from_pretrained(safelora_config.peft_model_path)
 
     projected_matrix = get_aligned_matrix(
-        safelora_config.base_model_path, safelora_config.aligned_model_path, safelora_config.devices, peft_config, safelora_config
+        safelora_config.base_model_path, safelora_config.aligned_model_path, peft_config, safelora_config
     )
 
     with safe_open(
-        f"{os.path.join(safelora_config.peft_model_path, 'adapter_model.safetensors')}", framework="pt", device=safelora_config.devices
+        f"{os.path.join(safelora_config.peft_model_path, 'adapter_model.safetensors')}",
+        framework="pt",
+        device=safelora_config.device,
     ) as f:
-        if (safelora_config.devices).lower() == "cpu":
-            peft_weights = {name: f.get_tensor(name).to(safelora_config.dtype) for name in f.keys()}
-        else:
-            peft_weights = {name: f.get_tensor(name).to(safelora_config.dtype) for name in f.keys()}
+        peft_weights = {name: f.get_tensor(name).to(safelora_config.dtype) for name in f.keys()}
     if safelora_config.select_layers_type == "threshold":
         final_weights, _ = project_weights(safelora_config, peft_weights, projected_matrix)
     elif safelora_config.select_layers_type == "number":
