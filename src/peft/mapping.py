@@ -146,6 +146,7 @@ def get_peft_model(
     mixed: bool = False,
     autocast_adapter_dtype: bool = True,
     revision: Optional[str] = None,
+    low_cpu_mem_usage: bool = False,
 ) -> PeftModel | PeftMixedModel:
     """
     Returns a Peft model object from a model and a config.
@@ -166,6 +167,10 @@ def get_peft_model(
         revision (`str`, `optional`, defaults to `main`):
             The revision of the base model. If this isn't set, the saved peft model will load the `main` revision for
             the base model
+        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+            Create empty adapter weights on meta device. Useful to speed up the loading process. Leave this setting as
+            False if you intend on training the model, unless the adapter weights will be replaced by different weights
+            before training starts.
     """
     model_config = BaseTuner.get_model_config(model)
     old_name = peft_config.base_model_name_or_path
@@ -185,12 +190,28 @@ def get_peft_model(
             )
         peft_config.revision = revision
 
+    if (
+        (isinstance(peft_config, PEFT_TYPE_TO_CONFIG_MAPPING["LORA"]))
+        and (peft_config.init_lora_weights == "eva")
+        and not low_cpu_mem_usage
+    ):
+        warnings.warn(
+            "lora with eva initialization used with low_cpu_mem_usage=False"
+            "Setting low_cpu_mem_usage=True can improve the maximum batch size possible for eva initialization."
+        )
+
     if mixed:
         # note: PeftMixedModel does not support autocast_adapter_dtype, so don't pass it
         return PeftMixedModel(model, peft_config, adapter_name=adapter_name)
 
     if peft_config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys() and not peft_config.is_prompt_learning:
-        return PeftModel(model, peft_config, adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)
+        return PeftModel(
+            model,
+            peft_config,
+            adapter_name=adapter_name,
+            autocast_adapter_dtype=autocast_adapter_dtype,
+            low_cpu_mem_usage=low_cpu_mem_usage,
+        )
 
     if peft_config.is_prompt_learning:
         peft_config = _prepare_prompt_learning_config(peft_config, model_config)

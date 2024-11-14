@@ -12,11 +12,12 @@
 # limitations under the License.
 import gc
 import importlib
+import itertools
 import os
 import re
 import tempfile
 import unittest
-from collections import Counter
+from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, List, Union
@@ -26,11 +27,12 @@ import torch
 from accelerate import infer_auto_device_map
 from accelerate.test_utils.testing import run_command
 from accelerate.utils import patch_environment
-from datasets import Audio, DatasetDict, load_dataset
+from datasets import Audio, Dataset, DatasetDict, load_dataset
 from packaging import version
 from parameterized import parameterized
 from torch.distributed import init_process_group
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.utils.data import DataLoader
 from transformers import (
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
@@ -50,6 +52,7 @@ from transformers.pytorch_utils import Conv1D
 
 from peft import (
     AdaLoraConfig,
+    EvaConfig,
     LoftQConfig,
     LoraConfig,
     PeftModel,
@@ -59,6 +62,7 @@ from peft import (
     VeraConfig,
     get_peft_model,
     get_peft_model_state_dict,
+    initialize_lora_eva_weights,
     inject_adapter_in_model,
     prepare_model_for_kbit_training,
     replace_lora_weights_loftq,
@@ -3889,6 +3893,122 @@ class TestLowCpuMemUsageDifferentDevices:
 
         assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
         assert {p.device.type for p in model.parameters()} == {device_model}
+
+
+class TestEvaInitializationGPU:
+    """GPU tests for the Eva initialization method."""
+
+    # Constants for test configuration
+    COSINE_SIMILARITY_THRESHOLD = 0.75
+    NUM_SEEDS = 3
+    BATCH_SIZE = 4
+    MAX_LENGTH = 256
+    LORA_DIM = 8
+    LORA_ALPHA = 1
+    DEVICE = "cuda"
+
+    @pytest.fixture
+    def tokenizer(self):
+        tokenizer = AutoTokenizer.from_pretrained("openai-community/gpt2")
+        tokenizer.pad_token = tokenizer.eos_token
+        return tokenizer
+
+    @pytest.fixture
+    def dataset(self, tokenizer):
+        dataset = load_dataset("ybelkada/english_quotes_copy", split="train")
+        # concatenate examples
+        examples = []
+        example = ""
+        for data in dataset:
+            if len(example) >= self.MAX_LENGTH:
+                examples.append(example)
+                example = ""
+            example = example + " " + data["quote"]
+        dataset = Dataset.from_dict({"text": examples})
+        # tokenize
+        dataset = dataset.map(
+            lambda x: tokenizer(x["text"], padding="max_length", truncation=True, max_length=self.MAX_LENGTH),
+            batched=True,
+            remove_columns=dataset.column_names,
+        )
+        dataset.set_format(type="torch")
+        return dataset
+
+    @pytest.fixture
+    def model(self):
+        model = AutoModelForCausalLM.from_pretrained("openai-community/gpt2")
+        model.transformer.h = model.transformer.h[:2]  # truncate to 2 layers
+        return model.to(self.DEVICE)
+
+    @pytest.fixture
+    def model_bnb(self):
+        bnb_config = BitsAndBytesConfig(load_in_4bit=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            "openai-community/gpt2",
+            quantization_config=bnb_config,
+            attn_implementation="eager",  # gpt2 doesnt support flash attention
+        )
+        model.transformer.h = model.transformer.h[:2]  # truncate to 2 layers
+        model = prepare_model_for_kbit_training(model)
+        return model
+
+    @pytest.fixture
+    def model_fixture(self, request):
+        return request.getfixturevalue(request.param)
+
+    @pytest.fixture
+    def peft_config(self):
+        return LoraConfig(
+            r=self.LORA_DIM,
+            lora_alpha=self.LORA_ALPHA,
+            target_modules=["c_attn"],
+            init_lora_weights="eva",
+            eva_config=EvaConfig(rho=2),
+        )
+
+    def is_bnb_model(self, model):
+        return hasattr(model.config, "quantization_config")
+
+    @staticmethod
+    def collate_fn(examples):
+        return {k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()}
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+    @pytest.mark.single_gpu_tests
+    @pytest.mark.parametrize("model_fixture", ["model", "model_bnb"], indirect=True)
+    def test_eva_initialization_consistency(self, model_fixture, dataset, peft_config):
+        """Test that the state dict returned by get_eva_state_dict loaded correctly and is consistent across different seeds based
+        on the cosine similarity of the svd components."""
+        state_dicts = []
+        for seed in range(self.NUM_SEEDS):
+            shuffled_dataset = dataset.shuffle(seed=seed)
+            dataloader = DataLoader(
+                shuffled_dataset,
+                batch_size=self.BATCH_SIZE,
+                collate_fn=lambda examples: {
+                    k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()
+                },
+                shuffle=False,
+            )
+            peft_model = get_peft_model(deepcopy(model_fixture), peft_config)
+            initialize_lora_eva_weights(peft_model, dataloader)
+            state_dicts.append(
+                {k: v.cpu() for k, v in peft_model.state_dict().items() if "lora_A.default.weight" in k}
+            )
+
+        cos_sims = defaultdict(list)
+        for i, j in itertools.combinations(range(self.NUM_SEEDS), 2):
+            for k, v1 in state_dicts[i].items():
+                v2 = state_dicts[j][k]
+                min_size = min(v1.size(0), v2.size(0))
+                cos_sims[k].extend(torch.cosine_similarity(v1[:min_size], v2[:min_size], dim=1).abs().tolist())
+
+        mean_cosine_similarities = {k: torch.tensor(v).mean() for k, v in cos_sims.items()}
+        for layer_name, mean_cosine_similarity in mean_cosine_similarities.items():
+            assert mean_cosine_similarity > self.COSINE_SIMILARITY_THRESHOLD, (
+                f"Mean absolute cosine similarity {mean_cosine_similarity:.4f} "
+                f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
+            )
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
