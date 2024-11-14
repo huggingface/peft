@@ -430,8 +430,14 @@ class LoraConfig(PeftConfig):
 
             if not importlib.util.find_spec("scipy"):
                 raise ImportError("The required package 'scipy' is not installed. Please install it to continue.")
-            if self.loftq_config is None:
+            if not self.loftq_config:
                 raise ValueError("`loftq_config` must be specified when `init_lora_weights` is 'loftq'.")
+            if not isinstance(self.loftq_config, dict):
+                # convert loftq_config to dict
+                self.loftq_config = vars(self.loftq_config)
+        elif self.loftq_config:
+            self.loftq_config = {}
+            warnings.warn("`loftq_config` specified but will be ignored when `init_lora_weights` is not 'loftq'.")
 
         elif self.init_lora_weights == "eva" and self.eva_config is None:
             warnings.warn("`init_lora_weights` is 'eva' but `eva_config` is not specified. Using default EVA config.")
@@ -458,10 +464,6 @@ class LoraConfig(PeftConfig):
                 "base weights; if you intend to do this, please ensure not to use rslora or rank_pattern/alpha_pattern."
             )
             warnings.warn(msg)
-
-        # convert loftq_config to dict
-        if self.loftq_config and not isinstance(self.loftq_config, dict):
-            self.loftq_config = vars(self.loftq_config)
 
         self._custom_modules: Optional[dict[type[nn.Mmodule], type[nn.Module]]] = None
 
