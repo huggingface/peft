@@ -12,7 +12,7 @@ config = SafeLoraConfig(
     base_model_path="meta-llama/Llama-2-7b-hf",
     aligned_model_path="TheBloke/Llama-2-7B-Chat-fp16",
     peft_model_path=peft_path,
-    devices="cuda",
+    device="cuda",
     select_layers_type="threshold",
     save_weights=True,
 )
