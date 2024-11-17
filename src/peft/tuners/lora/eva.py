@@ -321,10 +321,7 @@ def _get_eva_state_dict(
         rho = min(rho, rho_ceil)
 
     training = model.training
-    if dist.is_initialized():
-        device = model.device
-    else:
-        device = get_device_with_meta_params(model)
+    device = get_device_with_meta_params(model)
     model.eval()
 
     # get model inputs
