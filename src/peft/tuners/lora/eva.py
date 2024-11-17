@@ -469,7 +469,7 @@ def _load_eva_state_dict(
             elif new_rank != r:
                 if peft_config.eva_config.adjust_scaling_factors:
                     alpha *= new_rank / r
-            if new_rank != r or module.lora_A[adapter_name].weight.device == "meta":
+            if new_rank != r or module.lora_A[adapter_name].weight.device.type == "meta":
                 module.update_layer(r=new_rank, lora_alpha=alpha, init_lora_weights="eva", **update_layer_kwargs)
             module.lora_A[adapter_name].weight.copy_(w)
             new_target_modules.append(name_in_base_model)
