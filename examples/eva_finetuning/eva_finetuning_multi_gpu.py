@@ -12,20 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+
 import torch
+import torch.distributed as dist
 from datasets import load_dataset
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
 from utils import DataCollator, TokenizerMetaMath
 
-from peft import EvaConfig, LoraConfig, get_peft_model, initialize_lora_eva_weights
-
-
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+from peft import EvaConfig, LoraConfig, get_eva_state_dict, get_peft_model, initialize_lora_eva_weights
 
 
 # config
-model_name = "meta-llama/Llama-3.1-8B"
+model_name = "meta-llama/Llama-2-7b-hf"
 max_seq_len = 512
 rank = 16
 alpha = 1
@@ -38,6 +40,17 @@ gradient_accumulation_steps = 8
 num_epochs = 1
 output_dir = "outputs"
 bf16 = True
+
+
+# Initialize distributed environment
+if torch.cuda.is_available():
+    local_rank = int(os.environ.get("LOCAL_RANK", -1))
+    torch.cuda.set_device(local_rank)
+    dist.init_process_group("nccl")
+    world_size = dist.get_world_size()
+else:
+    local_rank = -1
+    world_size = 1
 
 
 # load model and tokenizer
@@ -56,12 +69,23 @@ dataset.set_format(type="torch")
 # data collator
 data_collator = DataCollator(tokenizer.eos_token_id, max_length=max_seq_len)
 
+# Create sampler for distributed training
+sampler = DistributedSampler(dataset["train"], num_replicas=world_size, rank=local_rank)
+
 # dataloader
 dataloader = DataLoader(
     dataset["train"],
     batch_size=svd_batch_size,
     collate_fn=data_collator,
+    sampler=sampler,
+    shuffle=False,
 )
+
+sampler.set_epoch(0)
+
+# Wrap model in DDP
+model = model.to(local_rank)
+model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=False)
 
 # setup peft config
 eva_config = EvaConfig(rho=rho)
@@ -69,12 +93,16 @@ peft_config = LoraConfig(
     r=rank, lora_alpha=alpha, target_modules=target_modules, init_lora_weights="eva", eva_config=eva_config
 )
 
-# move model to GPU
-model = model.to(DEVICE)
+# EVA initialization
+eva_state_dict = get_eva_state_dict(model, dataloader, peft_config)
+eva_state_dict = {".".join(["base_model.model"] + k.split(".")[1:]): v for k, v in eva_state_dict.items()}
 
-# to optimize memory usage during eva initialization, set low_cpu_mem_usage=True
+# cleanup ddp
+model = model.module
+
+# initialize peft model
 peft_model = get_peft_model(model, peft_config, low_cpu_mem_usage=True)
-initialize_lora_eva_weights(peft_model, dataloader)
+initialize_lora_eva_weights(peft_model, eva_state_dict=eva_state_dict)
 
 # setup training arguments
 training_args = TrainingArguments(
