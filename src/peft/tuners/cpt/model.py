@@ -19,8 +19,6 @@ from torch.nn import CrossEntropyLoss
 
 from peft.utils.integrations import gather_params_ctx
 
-from .config import CPTPromptInit
-
 
 class CPTEmbedding(torch.nn.Module):
     """
@@ -33,8 +31,10 @@ class CPTEmbedding(torch.nn.Module):
         Initializes the CPTEmbedding module.
 
         Args:
-            config (Namespace): Configuration object containing model hyperparameters and CPT-specific settings.
-            word_embeddings (torch.nn.Embedding): The base word embedding layer used to initialize CPT embeddings.
+            config (Namespace):
+                Configuration object containing model hyperparameters and CPT-specific settings.
+            word_embeddings (torch.nn.Embedding):
+                The base word embedding layer used to initialize CPT embeddings.
         """
         super().__init__()
         self.config = copy.deepcopy(config)
@@ -44,7 +44,7 @@ class CPTEmbedding(torch.nn.Module):
         self.embedding = torch.nn.Embedding(num_virtual_tokens, config.token_dim)
 
         # Initialize embeddings using text-based prompt tuning, if configured
-        if config.cpt_prompt_init == CPTPromptInit.TEXT and not config.inference_mode:
+        if not config.inference_mode:
             assert config.num_virtual_tokens == len(config.cpt_token_ids)
 
             init_token_ids = torch.LongTensor(config.cpt_token_ids).to(word_embeddings.weight.device)
@@ -65,15 +65,18 @@ class CPTEmbedding(torch.nn.Module):
         Computes the prompt embeddings and applies delta adjustments.
 
         Args:
-            indices (torch.Tensor): Indices of the tokens to be embedded.
+            indices (torch.Tensor):
+                Indices of the tokens to be embedded.
 
         Returns:
-            torch.Tensor: Sum of prompt embeddings and delta embeddings.
+            torch.Tensor:
+                Sum of prompt embeddings and delta embeddings.
         """
         with torch.no_grad():
             prompt_embeddings = self.embedding(indices)
 
-        self.projection()  # Apply epsilon-based projection
+        self.delta_embedding.weight.data = self.get_projection()  # Apply epsilon-based projection
+
         delta_prompt_embeddings = self.delta_embedding(indices)
 
         return prompt_embeddings + delta_prompt_embeddings
@@ -82,15 +85,12 @@ class CPTEmbedding(torch.nn.Module):
         """
         Sets up a backward hook to selectively update token gradients based on the CPT token type mask.
         """
-        if self.config.cpt_prompt_init == CPTPromptInit.TEXT:
-            tensor_ICL_mask = torch.Tensor(self.config.cpt_tokens_type_mask).long()
-            mask_input_template = torch.remainder(tensor_ICL_mask, 4) == 1
-            mask_input = torch.remainder(tensor_ICL_mask, 4) == 2
-            mask_output_template = torch.remainder(tensor_ICL_mask, 4) == 3
-            mask = mask_input_template | mask_input | mask_output_template
-            mask = mask.view(-1, 1)
-        elif self.config.cpt_prompt_init == CPTPromptInit.RANDOM:
-            mask = torch.ones((self.config.num_virtual_tokens, 1)).long()
+        tensor_ICL_mask = torch.Tensor(self.config.cpt_tokens_type_mask).long()
+        mask_input_template = torch.remainder(tensor_ICL_mask, 4) == 1
+        mask_input = torch.remainder(tensor_ICL_mask, 4) == 2
+        mask_output_template = torch.remainder(tensor_ICL_mask, 4) == 3
+        mask = mask_input_template | mask_input | mask_output_template
+        mask = mask.view(-1, 1)
 
         def backward_hook(grad):
             grad = grad * mask.to(grad.device)  # Apply mask to gradients
@@ -99,10 +99,7 @@ class CPTEmbedding(torch.nn.Module):
         self.delta_embedding.weight.register_hook(backward_hook)
 
     def get_epsilon(self):
-        if self.config.cpt_prompt_init == "TEXT":
-            cpt_tokens_type_mask = self.config.cpt_tokens_type_mask
-        else:
-            cpt_tokens_type_mask = [2] * self.config.num_virtual_tokens
+        cpt_tokens_type_mask = self.config.cpt_tokens_type_mask
 
         MIN_VALUE = 1e-10
 
@@ -123,7 +120,7 @@ class CPTEmbedding(torch.nn.Module):
 
         return epsilon
 
-    def projection(self):
+    def get_projection(self):
         """
         Applies epsilon-based projection to the delta embeddings to control their norm.
         """
@@ -139,7 +136,7 @@ class CPTEmbedding(torch.nn.Module):
                 new_embeddings_weights[projection_mask] *= (
                     epsilon[projection_mask] / (token_norm[projection_mask].clamp(min=epsilon[projection_mask]))
                 ).view(-1, 1)
-                self.delta_embedding.weight.data = new_embeddings_weights
+            return new_embeddings_weights
 
     @staticmethod
     def calculate_loss(base_model_output, labels, cpt_type_mask, config):
@@ -147,52 +144,57 @@ class CPTEmbedding(torch.nn.Module):
         Computes the loss for CPT models with optional exponential decay.
 
         Args:
-            base_model_output (ModelOutput): Output from the base model containing logits.
-            labels (torch.Tensor): Ground-truth labels for the input tokens.
-            cpt_type_mask (torch.Tensor): Token type mask used for filtering valid loss terms.
-            config (Namespace): Configuration object containing loss-related hyperparameters.
+            base_model_output (ModelOutput):
+                Output from the base model containing logits.
+            labels (torch.Tensor):
+                Ground-truth labels for the input tokens.
+            cpt_type_mask (torch.Tensor):
+                Token type mask used for filtering valid loss terms.
+            config (Namespace):
+                Configuration object containing loss-related hyperparameters.
 
         Returns:
-            ModelOutput: The base model output with computed loss.
+            ModelOutput:
+                The base model output with computed loss.
         """
 
-        if config.opt_weighted_loss_type in ["decay"]:
-            device = base_model_output.logits.device
+        device = base_model_output.logits.device
 
-            lm_logits = base_model_output.logits
-            labels = labels.to(device)
+        lm_logits = base_model_output.logits
+        labels = labels.to(device)
 
-            # Shift logits and labels for token prediction
-            shift_logits = lm_logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
-            shift_cpt_type_mask = cpt_type_mask[..., 1:].contiguous()
+        # Shift logits and labels for token prediction
+        shift_logits = lm_logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+        shift_cpt_type_mask = cpt_type_mask[..., 1:].contiguous()
 
-            shift_labels_bool = (shift_labels.clone().detach() != -100).bool()
-            batch_size, seq_length, vocab_size = shift_logits.shape
+        shift_labels_bool = (shift_labels.clone().detach() != -100).bool()
+        batch_size, seq_length, vocab_size = shift_logits.shape
 
-            # Compute cross-entropy loss
-            loss_fct = CrossEntropyLoss(reduction="none", ignore_index=-100)
-            loss = loss_fct(
-                shift_logits.view(batch_size * seq_length, vocab_size), shift_labels.view(batch_size * seq_length)
-            )
-            loss = loss.view(batch_size, seq_length)
-            # Apply exponential decay weights to the loss
-            shift_labels_weights = shift_labels_bool.clone().detach().float()
-            for i in range(batch_size):
-                idx_labels = (shift_cpt_type_mask[i] > 0) & (shift_cpt_type_mask[i] % 4 == 0)
-                labels_ids = shift_cpt_type_mask[i][idx_labels].unique()
+        # Compute cross-entropy loss
+        loss_fct = CrossEntropyLoss(reduction="none", ignore_index=-100)
+        loss = loss_fct(
+            shift_logits.view(batch_size * seq_length, vocab_size), shift_labels.view(batch_size * seq_length)
+        )
+        loss = loss.view(batch_size, seq_length)
+        # Apply exponential decay weights to the loss
+        shift_labels_weights = shift_labels_bool.clone().detach().float()
 
-                exponential_decay = torch.ones_like(shift_cpt_type_mask[i]).to(device=device).float()
-                decay_value = 1
-                for label_mask_idx in torch.flip(labels_ids, [0]):
-                    exponential_decay[shift_cpt_type_mask[i] == label_mask_idx] = decay_value
-                    decay_value *= config.opt_loss_decay_factor
+        for i in range(batch_size):
+            idx_labels = (shift_cpt_type_mask[i] > 0) & (shift_cpt_type_mask[i] % 4 == 0)
+            labels_ids = shift_cpt_type_mask[i][idx_labels].unique()
+
+            exponential_decay = torch.ones_like(shift_cpt_type_mask[i]).to(device=device).float()
+            decay_value = 1
+            for label_mask_idx in torch.flip(labels_ids, [0]):
+                exponential_decay[shift_cpt_type_mask[i] == label_mask_idx] = decay_value
+                decay_value *= config.opt_loss_decay_factor
+            if config.opt_weighted_loss_type == "decay":
                 shift_labels_weights[i] *= exponential_decay
 
-            # Compute the weighted mean loss
-            loss = (loss[shift_labels_bool] * shift_labels_weights[shift_labels_bool]).mean()
-            base_model_output.loss = loss
-        elif config.opt_weighted_loss_type not in ["none"]:
-            raise NotImplementedError(f"Loss type '{config.opt_weighted_loss_type}' not implemented.")
+        # Compute the weighted mean loss
+        loss = (loss[shift_labels_bool] * shift_labels_weights[shift_labels_bool]).mean()
+
+        base_model_output.loss = loss
 
         return base_model_output

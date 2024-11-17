@@ -12,19 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import enum
 from dataclasses import dataclass, field
-from typing import Optional, Literal
+from typing import Literal, Optional
 
 from peft.config import PromptLearningConfig
 from peft.utils import PeftType
-
-
-class CPTPromptInit(str, enum.Enum):
-    """Enum for specifying the initialization method for CPT."""
-
-    TEXT = "TEXT"  # Initialize using text-based embeddings.
-    RANDOM = "RANDOM"  # Initialize randomly.
 
 
 @dataclass
@@ -50,13 +42,8 @@ class CPTConfig(PromptLearningConfig):
         default=None, metadata={"help": "Mask indicating the type of each CPT token."}
     )
 
-    # Prompt tuning initialization method
-    cpt_prompt_init: Optional[Literal[CPTPromptInit.TEXT, CPTPromptInit.RANDOM]] = field(
-        default="TEXT", metadata={"help": "Initialization method: 'TEXT' for embedding-based, 'RANDOM' for random."}
-    )
-
     # Loss-related configurations
-    opt_weighted_loss_type: Optional[str] = field(
+    opt_weighted_loss_type: Optional[Literal["none", "decay"]] = field(
         default="none", metadata={"help": "Type of weighted loss: 'none' or 'decay'."}
     )
     opt_loss_decay_factor: Optional[float] = field(
@@ -79,9 +66,6 @@ class CPTConfig(PromptLearningConfig):
         },
     )
 
-    # Virtual token configurations
-    num_virtual_tokens: int = field(default=0, metadata={"help": "Number of virtual tokens used in the prompt."})
-
     # CPT-specific static attributes
     is_prompt_learning = True  # Indicates that CPT is a prompt-learning method.
     num_layers = None  # Number of layers (optional, not always required).
@@ -97,38 +81,18 @@ class CPTConfig(PromptLearningConfig):
         self.peft_type = PeftType.CPT  # Specifies that the PEFT type is CPT.
         self.task_type = "CAUSAL_LM"  # Ensures task type is causal language modeling.
 
-        if (self.cpt_prompt_init == CPTPromptInit.TEXT) and self.cpt_token_ids is None:
+        if self.cpt_token_ids is None:
             self.cpt_token_ids = [0]
-            self.num_virtual_tokens = 1
 
-        if (self.cpt_prompt_init == CPTPromptInit.TEXT) and self.cpt_mask is None:
+        self.num_virtual_tokens = len(self.cpt_token_ids)
+
+        if self.cpt_mask is None:
             self.cpt_mask = [1 for _ in self.cpt_token_ids]
 
-        if (self.cpt_prompt_init == CPTPromptInit.TEXT) and self.cpt_tokens_type_mask is None:
+        if self.cpt_tokens_type_mask is None:
             self.cpt_tokens_type_mask = [1 for _ in self.cpt_token_ids]
 
-        if (self.cpt_prompt_init == CPTPromptInit.TEXT) and not (
+        if not (
             len(self.cpt_token_ids) == len(self.cpt_mask) == len(self.cpt_tokens_type_mask) == self.num_virtual_tokens
         ):
-            raise ValueError(
-                f"When prompt_tuning_init='{CPTPromptInit.TEXT.value}', "
-                f"cpt_token_ids, cpt_mask and cpt_tokens_type_mask must have the same length."
-            )
-
-        if (self.cpt_prompt_init == CPTPromptInit.RANDOM) and self.cpt_token_ids is not None:
-            raise ValueError(
-                f"When prompt_tuning_init='{CPTPromptInit.RANDOM.value}', " f"cpt_token_ids must be None."
-            )
-        if (self.cpt_prompt_init == CPTPromptInit.RANDOM) and self.cpt_mask is not None:
-            raise ValueError(f"When prompt_tuning_init='{CPTPromptInit.RANDOM.value}', " f"cpt_mask must be None.")
-        if (self.cpt_prompt_init == CPTPromptInit.RANDOM) and self.cpt_tokens_type_mask is not None:
-            raise ValueError(
-                f"When prompt_tuning_init='{CPTPromptInit.RANDOM.value}', " f"cpt_tokens_type_mask must be None."
-            )
-        if (self.cpt_prompt_init == CPTPromptInit.RANDOM) and self.num_virtual_tokens == 0:
-            raise ValueError(
-                f"When prompt_tuning_init='{CPTPromptInit.RANDOM.value}', "
-                f"num_virtual_tokens must be greater than zero."
-            )
-        if (self.cpt_prompt_init != CPTPromptInit.RANDOM) and (self.cpt_prompt_init != CPTPromptInit.TEXT):
-            raise ValueError("prompt_tuning_init must be 'RANDOM' or 'TEXT'")
+            raise ValueError("cpt_token_ids, cpt_mask and cpt_tokens_type_mask must have the same length.")

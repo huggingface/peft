@@ -128,11 +128,9 @@ CONFIG_TESTING_KWARGS = (
     },
     # CPT tuninig
     {
-        "num_virtual_tokens": 8,
         "cpt_token_ids": [0, 1, 2, 3, 4, 5, 6, 7],  # Example token IDs for testing
         "cpt_mask": [1, 1, 1, 1, 1, 1, 1, 1],
         "cpt_tokens_type_mask": [1, 2, 2, 2, 3, 3, 4, 4],
-        "cpt_prompt_init": "TEXT",
     },
 )
 
@@ -1166,7 +1164,9 @@ class PeftCommonTester:
             if "prompt_encoder." in n:  # prompt tuning methods
                 if not issubclass(config_cls, CPTConfig):
                     assert param.grad is not None
-                elif "delta_embedding" in n: # delta_embedding is the embedding that should be updated with grads in CPT
+                elif (
+                    "delta_embedding" in n
+                ):  # delta_embedding is the embedding that should be updated with grads in CPT
                     assert param.grad is not None
             elif hasattr(model, "prefix") and (model.prefix in n):  # non-prompt tuning methods
                 assert param.grad is not None
