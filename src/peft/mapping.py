@@ -190,7 +190,7 @@ def get_peft_model(
         return PeftMixedModel(model, peft_config, adapter_name=adapter_name)
 
     if peft_config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys() and not peft_config.is_prompt_learning:
-            return PeftModel(model, peft_config, adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)
+        return PeftModel(model, peft_config, adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)
 
     if peft_config.is_prompt_learning:
         peft_config = _prepare_prompt_learning_config(peft_config, model_config)
