@@ -65,7 +65,7 @@ config = LoraConfig(init_lora_weights="olora", ...)
 For more advanced usage, please refer to our [documentation](https://github.com/huggingface/peft/tree/main/examples/olora_finetuning).
 
 ### EVA
-[EVA](https://arxiv.org/pdf/2410.07170) performs SVD on the input activations of each layer and uses the right-singular vectors to initialize LoRA weights. It therefore is a data-driven initialization scheme. Furthermore EVA adaptively allocates ranks across layers based on their "explained variance ratio" - a metric derived from the SVD analysis.
+[EVA](https://arxiv.org/pdf/2410.07170) performs SVD on the input activations of each layer and uses the right-singular vectors to initialize LoRA weights. It is therefore a data-driven initialization scheme. Furthermore EVA adaptively allocates ranks across layers based on their "explained variance ratio" - a metric derived from the SVD analysis.
 
 You can use EVA by setting `init_lora_weights="eva"` and defining [`EvaConfig`] in [`LoraConfig`]:
 ```python
@@ -76,7 +76,7 @@ peft_config = LoraConfig(
     ...
 )
 ```
-The parameter `rho` (≥ 1.0) determines how much redistribution is allowed. When `rho=1.0` and `r=16`, the system is limited to exactly 16 ranks, preventing any redistribution from occurring. A recommended value for eva with redistribution is 2.0, meaning the maximum rank allowed for a layer is 2r.
+The parameter `rho` (≥ 1.0) determines how much redistribution is allowed. When `rho=1.0` and `r=16`, LoRA adapters are limited to exactly 16 ranks, preventing any redistribution from occurring. A recommended value for EVA with redistribution is 2.0, meaning the maximum rank allowed for a layer is 2r.
 
 It is recommended to perform EVA initialization on a GPU as it is much faster. To optimize the amount of available memory for EVA, you can use the `low_cpu_mem_usage` flag in [`get_peft_model`]:
 ```python
