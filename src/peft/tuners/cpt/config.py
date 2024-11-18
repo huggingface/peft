@@ -65,19 +65,19 @@ class CPTConfig(PromptLearningConfig):
             "help": "The tokenizer to use for prompt tuning initialization. Only used if prompt_tuning_init is `TEXT`"
         },
     )
-
-    # CPT-specific static attributes
+    # Neet to define CPT-specific static attributes
     is_prompt_learning = True  # Indicates that CPT is a prompt-learning method.
-    num_layers = None  # Number of layers (optional, not always required).
-    token_dim = None  # Dimension of token embeddings.
-    num_attention_heads = None  # Number of attention heads (if applicable).
-    task_type = "CAUSAL_LM"  # Specifies that CPT is used for causal language modeling.
-    num_transformer_submodules = 1  # Number of transformer submodules used.
 
     def __post_init__(self):
         """
         Post-initialization hook to set additional attributes after the config is initialized.
         """
+        # CPT-specific static attributes
+        self.is_prompt_learning = True  # Indicates that CPT is a prompt-learning method.
+        self.num_layers = None  # Number of layers (optional, not always required).
+        self.token_dim = None  # Dimension of token embeddings.
+        self.num_attention_heads = None  # Number of attention heads (if applicable).
+        self.num_transformer_submodules = 1  # Number of transformer submodules used.
         self.peft_type = PeftType.CPT  # Specifies that the PEFT type is CPT.
         self.task_type = "CAUSAL_LM"  # Ensures task type is causal language modeling.
 

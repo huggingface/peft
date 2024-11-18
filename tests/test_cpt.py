@@ -250,8 +250,7 @@ def test_model_training_random(sst_data, global_tokenizer, collator, config_rand
     # Verify that the embedding tensor remains unchanged (frozen)
     assert torch.all(model.prompt_encoder.default.embedding.weight.data.clone().detach().cpu() == emb.cpu())
 
-    model.prompt_encoder.default.projection()
-    delta_emb = model.prompt_encoder.default.delta_embedding.weight.data.clone().detach()
+    delta_emb = model.prompt_encoder.default.get_projection().clone().detach()
     norm_delta = delta_emb.norm(dim=1).cpu()
     epsilon = model.prompt_encoder.default.get_epsilon().cpu()
     # Verify that the change in tokens is constrained to epsilon
@@ -285,8 +284,7 @@ def test_model_batch_training_text(sst_data, global_tokenizer, collator, config_
     cpt_tokens_type_mask = torch.Tensor(config_text.cpt_tokens_type_mask).long()
     non_label_idx = (cpt_tokens_type_mask == 1) | (cpt_tokens_type_mask == 2) | (cpt_tokens_type_mask == 3)
 
-    model.prompt_encoder.default.projection()
-    delta_emb = model.prompt_encoder.default.delta_embedding.weight.data.clone().detach()
+    delta_emb = model.prompt_encoder.default.get_projection().clone().detach()
     norm_delta = delta_emb.norm(dim=1).cpu()
     epsilon = model.prompt_encoder.default.get_epsilon().cpu()
     # Verify that the change in tokens is constrained to epsilon
