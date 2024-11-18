@@ -22,6 +22,7 @@ from itertools import cycle
 from typing import Dict, Iterable, Optional, Union
 
 import torch
+import torch.distributed as dist
 from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
 
@@ -67,8 +68,34 @@ class _Hook:
         return layer_input
 
     @torch.no_grad()
-    def prepare_layer_inputs(self, input):
-        return self._prepare_layer_inputs_fn(input, self.model_input, self.name)
+    def prepare_layer_inputs(self, layer_input):
+        return self._prepare_layer_inputs_fn(layer_input, self.model_input, self.name)
+
+    @staticmethod
+    def gather_layer_inputs(layer_input):
+        if dist.is_initialized():
+            world_size = dist.get_world_size()
+
+            # First gather sizes from all processes more efficiently
+            local_size = torch.tensor([layer_input.shape[0]], device=layer_input.device)
+            all_sizes = torch.empty(world_size, dtype=local_size.dtype, device=layer_input.device)
+            dist.all_gather_into_tensor(all_sizes, local_size)
+            all_sizes = all_sizes.tolist()
+
+            # Find maximum size and pad tensors
+            padded_input = layer_input.new_zeros((max(all_sizes), *layer_input.shape[1:]))
+            padded_input[: layer_input.shape[0]] = layer_input
+
+            # Gather padded tensors
+            gathered_inputs = [torch.zeros_like(padded_input) for _ in range(world_size)]
+            dist.all_gather(gathered_inputs, padded_input.contiguous())
+
+            # Remove padding for each gathered tensor
+            gathered_inputs = [tensor[:size] for tensor, size in zip(gathered_inputs, all_sizes)]
+
+            # Concatenate along batch dimension
+            return torch.cat(gathered_inputs, dim=0)
+        return layer_input
 
 
 class SVDHook(_Hook):
@@ -114,6 +141,7 @@ class SVDHook(_Hook):
         if hasattr(self.svd, "components_"):
             previous_components = self.svd.components_.clone().detach()
         states = self.prepare_layer_inputs(input)
+        states = self.gather_layer_inputs(states)
         # check if batch sizes is more than the number of components
         if states.size(0) < self.n_components:
             print(f"skipping SVD for {self.name} because there are less than {self.n_components} examples")
@@ -160,8 +188,9 @@ class HashHook(_Hook):
 
     @torch.no_grad()
     def __call__(self, model, input, output):
-        x = self.prepare_layer_inputs(input).cpu()
-        self.hashed_inputs.append(self.hash_fn(x))
+        x = self.prepare_layer_inputs(input)
+        x = self.gather_layer_inputs(x)
+        self.hashed_inputs.append(self.hash_fn(x.cpu()))
 
 
 def find_equal_values(dictionary: dict) -> dict:
@@ -262,6 +291,9 @@ def _get_eva_state_dict(
     prepare_layer_inputs_fn: Union[callable, Dict[str, callable], None],
     show_progress_bar: bool,
 ) -> dict:
+    # Set seeds for reproducibility at the start of EVA computation
+    torch.manual_seed(0)
+
     # Computes the rank distribution for each layer based on the explained variance ratio.
     # when rank_pattern flag is False, all values in max_components are the same
     def _get_rank_distribution(hooks, layer_hook_map, equal_inputs_map, rank_budget, max_components):
@@ -352,10 +384,12 @@ def _get_eva_state_dict(
     layer_hook_map = {**dict(zip(hooks.keys(), hooks.keys())), **equal_inputs_map}
 
     # start svd calculation
-    if show_progress_bar:
+    if show_progress_bar and (not dist.is_initialized() or dist.get_rank() == 0):
         pbar = tqdm(iter(cycle(dataloader)), position=0, leave=False)
+        use_tqdm = True
     else:
         pbar = iter(cycle(dataloader))
+        use_tqdm = False
     convergence_dict = {k: False for k in hooks.keys()}
     rank_dist = max_components.copy()
     for inputs in pbar:
@@ -384,7 +418,7 @@ def _get_eva_state_dict(
             hook.model_input = model_inputs_for_hooks
             hooks[name] = (hook, handle)
 
-        if show_progress_bar:
+        if use_tqdm:
             layer_converged = list(convergence_dict.values()) + [
                 convergence_dict[v] for v in equal_inputs_map.values()
             ]
