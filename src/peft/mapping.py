@@ -200,7 +200,7 @@ def get_peft_model(
         and not low_cpu_mem_usage
     ):
         warnings.warn(
-            "lora with eva initialization used with low_cpu_mem_usage=False"
+            "lora with eva initialization used with low_cpu_mem_usage=False. "
             "Setting low_cpu_mem_usage=True can improve the maximum batch size possible for eva initialization."
         )
 
