@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import PeftType, TaskType
 
 
 @dataclass
@@ -104,6 +104,10 @@ class IA3Config(PeftConfig):
         self.feedforward_modules = (
             set(self.feedforward_modules) if isinstance(self.feedforward_modules, list) else self.feedforward_modules
         )
+
+        # check for invalid task type
+        if self.task_type is None or self.task_type not in TaskType.__members__:
+            raise ValueError(f"Invalid task type: '{self.task_type}'. Must be one of the following task types: {list(TaskType.__members__.keys())}.")
 
         # check if feedforward_modules is a subset of target_modules. run the check only if both are sets
         if isinstance(self.feedforward_modules, set) and isinstance(self.target_modules, set):

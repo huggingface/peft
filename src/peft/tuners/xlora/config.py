@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from peft.config import PeftConfig
-from peft.utils.peft_types import PeftType
+from peft.utils.peft_types import PeftType, TaskType
 
 
 @dataclass
@@ -77,6 +77,10 @@ class XLoraConfig(PeftConfig):
 
     def __post_init__(self):
         self.peft_type = PeftType.XLORA
+
+        # check for invalid task type
+        if self.task_type is None or self.task_type not in TaskType.__members__:
+            raise ValueError(f"Invalid task type: '{self.task_type}'. Must be one of the following task types: {list(TaskType.__members__.keys())}.")
 
         if self.hidden_size is None:
             warnings.warn(

@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import PeftType, TaskType
 
 
 @dataclass
@@ -100,3 +100,7 @@ class PolyConfig(PeftConfig):
         self.exclude_modules = (
             set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
+
+        # check for invalid task type
+        if self.task_type is None or self.task_type not in TaskType.__members__:
+            raise ValueError(f"Invalid task type: '{self.task_type}'. Must be one of the following task types: {list(TaskType.__members__.keys())}.")

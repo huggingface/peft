@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from peft.tuners.lora import LoraConfig
-from peft.utils import PeftType
+from peft.utils import PeftType, TaskType
 
 
 @dataclass
@@ -57,6 +57,10 @@ class AdaLoraConfig(LoraConfig):
 
         if self.loftq_config:
             raise ValueError(f"{self.peft_type} does not support LOFTQ.")
+        
+        # check for invalid task type
+        if self.task_type is None or self.task_type not in TaskType.__members__:
+            raise ValueError(f"Invalid task type: '{self.task_type}'. Must be one of the following task types: {list(TaskType.__members__.keys())}.")
 
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
