@@ -44,7 +44,6 @@ class _Hook:
     """
 
     def __init__(self, name: str, prepare_layer_inputs_fn: Optional[callable] = None):
-        torch.manual_seed(0)
         self.name = name
         if prepare_layer_inputs_fn is None:
             self._prepare_layer_inputs_fn = self._prepare_layer_inputs_fn_default
@@ -292,6 +291,9 @@ def _get_eva_state_dict(
     prepare_layer_inputs_fn: Union[callable, Dict[str, callable], None],
     show_progress_bar: bool,
 ) -> dict:
+    # Set seeds for reproducibility at the start of EVA computation
+    torch.manual_seed(0)
+
     # Computes the rank distribution for each layer based on the explained variance ratio.
     # when rank_pattern flag is False, all values in max_components are the same
     def _get_rank_distribution(hooks, layer_hook_map, equal_inputs_map, rank_budget, max_components):
