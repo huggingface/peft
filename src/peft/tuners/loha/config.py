@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Union
 
 from peft.tuners.lycoris_utils import LycorisConfig
-from peft.utils import PeftType, TaskType
+from peft.utils import PeftType
 
 
 @dataclass
@@ -126,6 +126,7 @@ class LoHaConfig(LycorisConfig):
     )
 
     def __post_init__(self):
+        super().__post_init__()
         self.peft_type = PeftType.LOHA
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
@@ -133,11 +134,6 @@ class LoHaConfig(LycorisConfig):
         self.exclude_modules = (
             set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
-
-        # check for invalid task type
-        if self.task_type is None or self.task_type not in TaskType.__members__:
-            raise ValueError(f"Invalid task type: '{self.task_type}'. Must be one of the following task types: {list(TaskType.__members__.keys())}.")
-                
         # check for layers_to_transform and layers_pattern
         if self.layers_pattern and not self.layers_to_transform:
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")

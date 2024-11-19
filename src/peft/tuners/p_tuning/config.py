@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Union
 
 from peft.config import PromptLearningConfig
-from peft.utils import PeftType, TaskType
+from peft.utils import PeftType
 
 
 class PromptEncoderReparameterizationType(str, enum.Enum):
@@ -56,8 +56,5 @@ class PromptEncoderConfig(PromptLearningConfig):
     )
 
     def __post_init__(self):
+        super().__post_init__()
         self.peft_type = PeftType.P_TUNING
-
-        # check for invalid task type
-        if self.task_type is None or self.task_type not in TaskType.__members__:
-            raise ValueError(f"Invalid task type: '{self.task_type}'. Must be one of the following task types: {list(TaskType.__members__.keys())}.")

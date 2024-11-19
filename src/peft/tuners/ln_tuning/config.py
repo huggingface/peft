@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType, TaskType
+from peft.utils import PeftType
 
 
 @dataclass
@@ -66,8 +66,5 @@ class LNTuningConfig(PeftConfig):
     )
 
     def __post_init__(self):
+        super().__post_init__()
         self.peft_type = PeftType.LN_TUNING
-
-        # check for invalid task type
-        if self.task_type is None or self.task_type not in TaskType.__members__:
-            raise ValueError(f"Invalid task type: '{self.task_type}'. Must be one of the following task types: {list(TaskType.__members__.keys())}.")

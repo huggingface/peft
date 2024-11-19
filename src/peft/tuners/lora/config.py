@@ -21,7 +21,7 @@ from typing import Literal, Optional, Union
 from torch import nn
 
 from peft.config import PeftConfig
-from peft.utils import PeftType, TaskType
+from peft.utils import PeftType
 
 
 @dataclass
@@ -333,6 +333,7 @@ class LoraConfig(PeftConfig):
         return rv
 
     def __post_init__(self):
+        super().__post_init__()
         self.peft_type = PeftType.LORA
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
@@ -340,10 +341,6 @@ class LoraConfig(PeftConfig):
         self.exclude_modules = (
             set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
-
-        # check for invalid task type
-        if self.task_type is None or self.task_type not in TaskType.__members__:
-            raise ValueError(f"Invalid task type: '{self.task_type}'. Must be one of the following task types: {list(TaskType.__members__.keys())}.")        
 
         # if target_modules is a regex expression, then layers_to_transform should be None
         if isinstance(self.target_modules, str) and self.layers_to_transform is not None:
