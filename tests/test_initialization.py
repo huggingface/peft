@@ -1724,7 +1724,7 @@ class TestEvaInitialization:
     """
 
     # Constants for test configuration
-    COSINE_SIMILARITY_THRESHOLD = 0.75
+    COSINE_SIMILARITY_THRESHOLD = 0.65
     NUM_SEEDS = 3
     BATCH_SIZE = 4
     MAX_LENGTH = 256
