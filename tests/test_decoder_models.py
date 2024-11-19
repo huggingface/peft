@@ -41,7 +41,8 @@ from peft import (
     get_peft_model,
 )
 
-from .testing_common import PeftCommonTester, PeftTestConfigManager
+from .testing_common import PeftCommonTester
+from .testing_common import PeftTestConfigManagerForDecoderModels as PeftTestConfigManager
 
 
 PEFT_DECODER_MODELS_TO_TEST = [

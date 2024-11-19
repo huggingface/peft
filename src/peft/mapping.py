@@ -40,6 +40,8 @@ from .tuners import (
     BOFTModel,
     BoneConfig,
     BoneModel,
+    CPTConfig,
+    CPTEmbedding,
     FourierFTConfig,
     FourierFTModel,
     HRAConfig,
@@ -106,6 +108,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING: dict[str, type[PeftConfig]] = {
     "XLORA": XLoraConfig,
     "HRA": HRAConfig,
     "VBLORA": VBLoRAConfig,
+    "CPT": CPTConfig,
     "BONE": BoneConfig,
 }
 
@@ -124,6 +127,7 @@ PEFT_TYPE_TO_TUNER_MAPPING: dict[str, type[BaseTuner]] = {
     "XLORA": XLoraModel,
     "HRA": HRAModel,
     "VBLORA": VBLoRAModel,
+    "CPT": CPTEmbedding,
     "BONE": BoneModel,
 }
 

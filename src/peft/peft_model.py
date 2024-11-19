@@ -47,6 +47,7 @@ from .tuners import (
     AdaptionPromptModel,
     BOFTModel,
     BoneModel,
+    CPTEmbedding,
     FourierFTModel,
     HRAModel,
     IA3Model,
@@ -105,6 +106,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.XLORA: XLoraModel,
     PeftType.HRA: HRAModel,
     PeftType.VBLORA: VBLoRAModel,
+    PeftType.CPT: CPTEmbedding,
     PeftType.BONE: BoneModel,
 }
 
@@ -654,6 +656,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if any(getattr(module, "gradient_checkpointing", False) for module in self.get_base_model().modules()):
                 raise ValueError("Prefix tuning does not work with gradient checkpointing.")
             prompt_encoder = PrefixEncoder(config)
+        elif config.peft_type == PeftType.CPT:
+            prompt_encoder = CPTEmbedding(config, self.word_embeddings)
         else:
             raise ValueError("Not supported")
 
@@ -1746,6 +1750,8 @@ class PeftModelForCausalLM(PeftModel):
             # overwrite past_kv in kwargs
             kwargs["past_key_values"] = self.get_prompt(batch_size)
             return self.base_model(input_ids=input_ids, inputs_embeds=inputs_embeds, **kwargs)
+        elif peft_config.peft_type == PeftType.CPT:
+            return self._cpt_forward(input_ids, inputs_embeds, peft_config, task_ids, batch_size, **kwargs)
         else:
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
@@ -1757,6 +1763,63 @@ class PeftModelForCausalLM(PeftModel):
             prompts = prompts.to(inputs_embeds.dtype)
             inputs_embeds = torch.cat((prompts, inputs_embeds), dim=1)
             return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
+
+    def _cpt_forward(
+        self, input_ids=None, inputs_embeds=None, peft_config=None, task_ids=None, batch_size=None, **kwargs
+    ):
+        # Extract labels from kwargs
+        labels = kwargs.pop("labels")
+        device = [i.device for i in [input_ids, inputs_embeds, labels] if i is not None][0]
+        # Extract input_type_mask from kwargs and move it to the same device as labels
+        if "input_type_mask" in kwargs.keys():
+            input_type_mask = kwargs.pop("input_type_mask").to(device)
+        else:
+            if input_ids is None:
+                N_tokens = inputs_embeds.shape[1]
+            else:
+                N_tokens = input_ids.shape[1]
+            input_type_mask = torch.ones((batch_size, N_tokens)).to(device) * 4
+
+        cpt_token_ids = peft_config.cpt_token_ids
+        cpt_tokens_type_mask = peft_config.cpt_tokens_type_mask
+
+        # Generate embeddings if not provided
+        if inputs_embeds is None:
+            inputs_embeds = self.word_embeddings(input_ids)
+        # Get prompt and concatenate with input embeddings
+        prompts = self.get_prompt(batch_size=batch_size, task_ids=task_ids)
+        prompts = prompts.to(inputs_embeds.dtype)
+        inputs_embeds = torch.cat((prompts, inputs_embeds), dim=1)
+        # If labels are provided, generate prefix labels and type mask
+        cpt_labels = None
+        if labels is not None:
+            # Generate prefix labels and concatenate with the input labels
+            prefix_labels = torch.Tensor(cpt_token_ids).long().view(1, -1)
+            prefix_labels = prefix_labels.repeat(batch_size, 1).to(labels.device)
+            cpt_labels = torch.cat((prefix_labels, labels), dim=1)
+            # Generate prefix type mask and shift input type mask values to avoid conflicts
+            prefix_type_mask = torch.Tensor(cpt_tokens_type_mask).long().view(1, -1)
+            prefix_type_mask = prefix_type_mask.repeat(batch_size, 1).to(labels.device)
+            adjusted_input_type_mask = input_type_mask
+            adjusted_input_type_mask[adjusted_input_type_mask > 0] += prefix_type_mask.max()
+            # Concatenate prefix and shifted input type masks
+            cpt_type_mask = torch.cat((prefix_type_mask, adjusted_input_type_mask), dim=1)
+            # Identify valid label positions and mask invalid ones with -100
+            labels_idx = (cpt_type_mask > 0) & (cpt_type_mask % 4 == 0)
+            cpt_labels[~labels_idx] = -100
+            # Update kwargs with the modified labels
+
+        kwargs["labels"] = cpt_labels
+        # Pass the modified inputs to the base model
+        base_model_output = self.base_model(inputs_embeds=inputs_embeds, **kwargs)
+        if labels is None:
+            return base_model_output
+        else:
+            # Calculate the loss using the custom CPT loss function
+            base_model_output = CPTEmbedding.calculate_loss(
+                base_model_output, cpt_labels, cpt_type_mask, self.peft_config["default"]
+            )
+            return base_model_output
 
     def generate(self, *args, **kwargs):
         peft_config = self.active_peft_config

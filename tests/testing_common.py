@@ -33,6 +33,7 @@ from peft import (
     AdaLoraConfig,
     BOFTConfig,
     BoneConfig,
+    CPTConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -125,6 +126,12 @@ CONFIG_TESTING_KWARGS = (
         "target_modules": None,
         "r": 2,
     },
+    # CPT tuninig
+    {
+        "cpt_token_ids": [0, 1, 2, 3, 4, 5, 6, 7],  # Example token IDs for testing
+        "cpt_mask": [1, 1, 1, 1, 1, 1, 1, 1],
+        "cpt_tokens_type_mask": [1, 2, 2, 2, 3, 3, 4, 4],
+    },
 )
 
 CLASSES_MAPPING = {
@@ -142,6 +149,8 @@ CLASSES_MAPPING = {
     "oft": (OFTConfig, CONFIG_TESTING_KWARGS[11]),
     "bone": (BoneConfig, CONFIG_TESTING_KWARGS[12]),
 }
+
+DECODER_MODELS_EXTRA = {"cpt": (CPTConfig, CONFIG_TESTING_KWARGS[13])}
 
 
 # Adapted from https://github.com/huggingface/transformers/blob/48327c57182fdade7f7797d1eaad2d166de5c55b/src/transformers/activations.py#LL166C7-L166C22
@@ -207,6 +216,7 @@ class ClassInstantier(OrderedDict):
 
 
 PeftTestConfigManager = ClassInstantier(CLASSES_MAPPING)
+PeftTestConfigManagerForDecoderModels = ClassInstantier({**CLASSES_MAPPING, **DECODER_MODELS_EXTRA})
 
 
 class PeftCommonTester:
@@ -1152,7 +1162,12 @@ class PeftCommonTester:
 
         for n, param in model.named_parameters():
             if "prompt_encoder." in n:  # prompt tuning methods
-                assert param.grad is not None
+                if not issubclass(config_cls, CPTConfig):
+                    assert param.grad is not None
+                elif (
+                    "delta_embedding" in n
+                ):  # delta_embedding is the embedding that should be updated with grads in CPT
+                    assert param.grad is not None
             elif hasattr(model, "prefix") and (model.prefix in n):  # non-prompt tuning methods
                 assert param.grad is not None
             else:
@@ -1199,8 +1214,16 @@ class PeftCommonTester:
         loss = output.sum()
         loss.backward()
 
+        if issubclass(config_cls, CPTConfig):
+            parameters = []
+            for name, param in model.prompt_encoder.named_parameters():
+                if name != "default.embedding.weight":
+                    parameters.append(param)
+        else:
+            parameters = model.prompt_encoder.parameters()
+
         # check that prompt encoder has grads
-        for param in model.prompt_encoder.parameters():
+        for param in parameters:
             assert param.grad is not None
 
     def _test_delete_adapter(self, model_id, config_cls, config_kwargs):
