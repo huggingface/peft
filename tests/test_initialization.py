@@ -1871,10 +1871,11 @@ class TestEvaInitialization:
     @pytest.mark.parametrize(
         "eva_config",
         [
-            EvaConfig(rho=2),
-            EvaConfig(rho=1),
-            EvaConfig(rho=1, whiten=True),
-            EvaConfig(rho=1.0001),
+            # note: lower tau to decrease number of iterations until convergence, as tests are slow on CPU
+            EvaConfig(rho=2, tau=0.9),
+            EvaConfig(rho=1, tau=0.9),
+            EvaConfig(rho=1, whiten=True, tau=0.9),
+            EvaConfig(rho=1.0001, tau=0.9),
         ],
     )
     def test_eva_initialization_consistency(self, model, dataset, peft_config, eva_config):
@@ -1888,7 +1889,7 @@ class TestEvaInitialization:
         for seed in range(self.NUM_SEEDS):
             shuffled_dataset = dataset.shuffle(seed=seed)
             dataloader = self.get_dataloader(shuffled_dataset)
-            sd = get_eva_state_dict(model, dataloader, modified_peft_config)
+            sd = get_eva_state_dict(model, dataloader, modified_peft_config, show_progress_bar=False)
             state_dicts.append(sd)
 
         cos_sims = defaultdict(list)
