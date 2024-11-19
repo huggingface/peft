@@ -41,8 +41,8 @@ SHELL ["/bin/bash", "-c"]
 RUN source activate peft && \ 
     python3 -m pip install --no-cache-dir bitsandbytes optimum auto-gptq && \
     # Add autoawq for quantization testing
-    python3 -m pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ/releases/download/v0.2.6/autoawq-0.2.6-cp311-cp311-linux_x86_64.whl && \
-    python3 -m pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ_kernels/releases/download/v0.0.8/autoawq_kernels-0.0.8-cp311-cp311-linux_x86_64.whl && \
+    python3 -m pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ/releases/download/v0.2.7.post2/autoawq-0.2.7.post2-py3-none-any.whl && \
+    python3 -m pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ_kernels/releases/download/v0.0.9/autoawq_kernels-0.0.9-cp311-cp311-linux_x86_64.whl && \
     # Add eetq for quantization testing
     python3 -m pip install git+https://github.com/NetEase-FuXi/EETQ.git
 
