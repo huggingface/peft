@@ -2431,6 +2431,17 @@ class TestLoftQ:
             torch.cuda.empty_cache()
         gc.collect()
 
+    def test_config_no_loftq_init(self):
+        with pytest.warns(
+            UserWarning,
+            match="`loftq_config` specified but will be ignored when `init_lora_weights` is not 'loftq'.",
+        ):
+            LoraConfig(loftq_config=LoftQConfig())
+
+    def test_config_no_loftq_config(self):
+        with pytest.raises(ValueError, match="`loftq_config` must be specified when `init_lora_weights` is 'loftq'."):
+            LoraConfig(init_lora_weights="loftq")
+
 
 @require_bitsandbytes
 @require_torch_gpu
