@@ -88,7 +88,7 @@ def is_eetq_available():
     try:
         from eetq import EetqLinear  # noqa: F401
     except ImportError as exc:
-        if "shard_checkpoint" in exc:
+        if "shard_checkpoint" in str(exc):
             # eetq is currently broken with newer transformers versions because it tries to import shard_checkpoint
             # see https://github.com/NetEase-FuXi/EETQ/issues/34
             # TODO: Remove once eetq releasees a fix and this release is used in CI
