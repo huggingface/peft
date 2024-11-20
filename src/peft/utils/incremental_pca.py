@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from functools import partial
 from typing import Optional, Tuple
 
 import torch
@@ -55,34 +54,38 @@ class IncrementalPCA:
         lowrank_niter: int = 4,
         lowrank_seed: Optional[int] = None,
     ):
-        self.n_components_ = n_components
+        self.n_components = n_components
         self.copy = copy
         self.batch_size = batch_size
+        self.svd_driver = svd_driver
+        self.lowrank = lowrank
+        self.lowrank_q = lowrank_q
+        self.lowrank_niter = lowrank_niter
+        self.lowrank_seed = lowrank_seed
+
         self.n_features_ = None
 
-        if lowrank:
-            if lowrank_q is None:
-                if n_components is None:
-                    raise ValueError("n_components must be specified when using lowrank mode with lowrank_q=None.")
-                lowrank_q = n_components * 2
-            if lowrank_q < n_components:
-                raise ValueError("lowrank_q must be greater than or equal to n_components.")
+        if self.lowrank:
+            self._validate_lowrank_params()
 
-            def svd_fn(X, seed):
-                if seed is not None:
-                    rng_state = torch.get_rng_state()
-                    torch.manual_seed(seed)
-                try:
-                    U, S, V = torch.svd_lowrank(X, q=lowrank_q, niter=lowrank_niter)
-                finally:
-                    if seed is not None:
-                        torch.set_rng_state(rng_state)
-                return U, S, V.mH  # V is returned as a conjugate transpose
+    def _validate_lowrank_params(self):
+        if self.lowrank_q is None:
+            if self.n_components is None:
+                raise ValueError("n_components must be specified when using lowrank mode with lowrank_q=None.")
+            self.lowrank_q = self.n_components * 2
+        elif self.lowrank_q < self.n_components:
+            raise ValueError("lowrank_q must be greater than or equal to n_components.")
 
-            self._svd_fn = partial(svd_fn, seed=lowrank_seed)
+    def _svd_fn_full(self, X):
+        return torch.linalg.svd(X, full_matrices=False, driver=self.svd_driver)
 
-        else:
-            self._svd_fn = partial(torch.linalg.svd, full_matrices=False, driver=svd_driver)
+    def _svd_fn_lowrank(self, X):
+        seed_enabled = self.lowrank_seed is not None
+        with torch.random.fork_rng(enabled=seed_enabled):
+            if seed_enabled:
+                torch.manual_seed(self.lowrank_seed)
+            U, S, V = torch.svd_lowrank(X, q=self.lowrank_q, niter=self.lowrank_niter)
+            return U, S, V.mH
 
     def _validate_data(self, X) -> torch.Tensor:
         """
@@ -102,16 +105,16 @@ class IncrementalPCA:
             X = X.clone()
 
         n_samples, n_features = X.shape
-        if self.n_components_ is None:
+        if self.n_components is None:
             pass
-        elif self.n_components_ > n_features:
+        elif self.n_components > n_features:
             raise ValueError(
-                f"n_components={self.n_components_} invalid for n_features={n_features}, "
+                f"n_components={self.n_components} invalid for n_features={n_features}, "
                 "need more rows than columns for IncrementalPCA processing."
             )
-        elif self.n_components_ > n_samples:
+        elif self.n_components > n_samples:
             raise ValueError(
-                f"n_components={self.n_components_} must be less or equal to the batch number of samples {n_samples}"
+                f"n_components={self.n_components} must be less or equal to the batch number of samples {n_samples}"
             )
 
         if X.dtype not in valid_dtypes:
@@ -219,7 +222,7 @@ class IncrementalPCA:
         if self.batch_size is None:
             self.batch_size = 5 * n_features
 
-        for batch in self.gen_batches(n_samples, self.batch_size, min_batch_size=self.n_components_ or 0):
+        for batch in self.gen_batches(n_samples, self.batch_size, min_batch_size=self.n_components or 0):
             self.partial_fit(X[batch], check_input=False)
 
         return self
@@ -247,8 +250,8 @@ class IncrementalPCA:
             self.var_ = None  # Will be initialized properly in _incremental_mean_and_var based on data dimensions
             self.n_samples_seen_ = torch.tensor([0], device=X.device)
             self.n_features_ = n_features
-            if not self.n_components_:
-                self.n_components_ = min(n_samples, n_features)
+            if not self.n_components:
+                self.n_components = min(n_samples, n_features)
 
         if n_features != self.n_features_:
             raise ValueError(
@@ -274,20 +277,23 @@ class IncrementalPCA:
                 )
             )
 
-        U, S, Vt = self._svd_fn(X)
+        if self.lowrank:
+            U, S, Vt = self._svd_fn_lowrank(X)
+        else:
+            U, S, Vt = self._svd_fn_full(X)
         U, Vt = self._svd_flip(U, Vt, u_based_decision=False)
         explained_variance = S**2 / (n_total_samples - 1)
         explained_variance_ratio = S**2 / torch.sum(col_var * n_total_samples)
 
         self.n_samples_seen_ = n_total_samples
-        self.components_ = Vt[: self.n_components_]
-        self.singular_values_ = S[: self.n_components_]
+        self.components_ = Vt[: self.n_components]
+        self.singular_values_ = S[: self.n_components]
         self.mean_ = col_mean
         self.var_ = col_var
-        self.explained_variance_ = explained_variance[: self.n_components_]
-        self.explained_variance_ratio_ = explained_variance_ratio[: self.n_components_]
-        if self.n_components_ not in (n_samples, n_features):
-            self.noise_variance_ = explained_variance[self.n_components_ :].mean()
+        self.explained_variance_ = explained_variance[: self.n_components]
+        self.explained_variance_ratio_ = explained_variance_ratio[: self.n_components]
+        if self.n_components not in (n_samples, n_features):
+            self.noise_variance_ = explained_variance[self.n_components :].mean()
         else:
             self.noise_variance_ = torch.tensor(0.0, device=X.device)
         return self

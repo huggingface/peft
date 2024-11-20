@@ -322,7 +322,7 @@ def _get_eva_state_dict(
         warnings.warn(
             "torch.distributed is initialized and `gather_distributed_inputs` is True, "
             "therefore EVA initialization will gather tensors from all ranks. "
-            "Ensure the model does not recieve the same inputs on different ranks."
+            "Ensure the model does not receive the same inputs on different ranks."
         )
 
     # for unusually high rho values, define an upper limit
