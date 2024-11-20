@@ -41,6 +41,7 @@ class IncrementalPCA:
             n_components * 2.
         lowrank_niter (int, optional): Number of subspace iterations to conduct for torch.svd_lowrank.
             Defaults to 4.
+        lowrank_seed (int, optional): Seed for making results of torch.svd_lowrank reproducible.
     """
 
     def __init__(
@@ -52,6 +53,7 @@ class IncrementalPCA:
         lowrank: bool = False,
         lowrank_q: Optional[int] = None,
         lowrank_niter: int = 4,
+        lowrank_seed: Optional[int] = None,
     ):
         self.n_components_ = n_components
         self.copy = copy
@@ -66,11 +68,18 @@ class IncrementalPCA:
             if lowrank_q < n_components:
                 raise ValueError("lowrank_q must be greater than or equal to n_components.")
 
-            def svd_fn(X):
-                U, S, V = torch.svd_lowrank(X, q=lowrank_q, niter=lowrank_niter)
+            def svd_fn(X, seed):
+                if seed is not None:
+                    rng_state = torch.get_rng_state()
+                    torch.manual_seed(seed)
+                try:
+                    U, S, V = torch.svd_lowrank(X, q=lowrank_q, niter=lowrank_niter)
+                finally:
+                    if seed is not None:
+                        torch.set_rng_state(rng_state)
                 return U, S, V.mH  # V is returned as a conjugate transpose
 
-            self._svd_fn = svd_fn
+            self._svd_fn = partial(svd_fn, seed=lowrank_seed)
 
         else:
             self._svd_fn = partial(torch.linalg.svd, full_matrices=False, driver=svd_driver)
