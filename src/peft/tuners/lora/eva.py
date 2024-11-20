@@ -658,6 +658,7 @@ def initialize_lora_eva_weights(
     prepare_model_inputs_fn: Optional[callable] = prepare_model_inputs_fn_language_modeling,
     prepare_layer_inputs_fn: Union[callable, Dict[str, callable], None] = prepare_layer_inputs_fn_language_modeling,
     adapter_name: str = "default",
+    gather_distributed_inputs: bool = True,
     show_progress_bar: bool = True,
 ):
     """
@@ -692,6 +693,7 @@ def initialize_lora_eva_weights(
             case model_inputs is the mask used to determine which indices should be used for SVD (created by
             `prepare_model_inputs_fn_language_modeling`).
         adapter_name (str): The name of the adapter to initialize the weights for.
+        gather_distributed_inputs (bool): Whether to gather the layer inputs from all ranks. Default is True.
         show_progress_bar (bool): Whether to show a progress bar. Default is True.
 
     Returns:
@@ -720,6 +722,7 @@ def initialize_lora_eva_weights(
             prepare_model_inputs_fn=prepare_model_inputs_fn,
             prepare_layer_inputs_fn=prepare_layer_inputs_fn,
             adapter_name=adapter_name,
+            gather_distributed_inputs=gather_distributed_inputs,
             show_progress_bar=show_progress_bar,
         )
 
