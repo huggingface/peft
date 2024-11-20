@@ -563,7 +563,7 @@ def get_eva_state_dict(
     prepare_model_inputs_fn: Optional[callable] = prepare_model_inputs_fn_language_modeling,
     prepare_layer_inputs_fn: Union[callable, Dict[str, callable], None] = prepare_layer_inputs_fn_language_modeling,
     adapter_name: str = "default",
-    gather_distributed_inputs: bool = False,
+    gather_distributed_inputs: bool = True,
     show_progress_bar: bool = True,
 ) -> dict:
     """
@@ -597,7 +597,10 @@ def get_eva_state_dict(
             case model_inputs is the mask used to determine which indices should be used for SVD (created by
             `prepare_model_inputs_fn_language_modeling`).
         adapter_name (str): The name of the adapter to compute the SVD for.
-        gather_distributed_inputs (bool): Whether to gather the layer inputs from all ranks. Default is False.
+        gather_distributed_inputs (bool):
+            Whether to gather the layer inputs from all ranks. Default is True meaning in a distributed setting the
+            layer inputs will be gathered from all ranks for the SVD computation. For non-distributed settings this
+            argument is ignored. Set to False if you are using a non-distributed dataloader in a distributed setting.
         show_progress_bar (bool): Whether to show a progress bar. Default is True.
 
     Returns:
@@ -658,7 +661,7 @@ def initialize_lora_eva_weights(
     prepare_model_inputs_fn: Optional[callable] = prepare_model_inputs_fn_language_modeling,
     prepare_layer_inputs_fn: Union[callable, Dict[str, callable], None] = prepare_layer_inputs_fn_language_modeling,
     adapter_name: str = "default",
-    gather_distributed_inputs: bool = False,
+    gather_distributed_inputs: bool = True,
     show_progress_bar: bool = True,
 ):
     """
@@ -693,7 +696,10 @@ def initialize_lora_eva_weights(
             case model_inputs is the mask used to determine which indices should be used for SVD (created by
             `prepare_model_inputs_fn_language_modeling`).
         adapter_name (str): The name of the adapter to initialize the weights for.
-        gather_distributed_inputs (bool): Whether to gather the layer inputs from all ranks. Default is False.
+        gather_distributed_inputs (bool):
+            Whether to gather the layer inputs from all ranks. Default is True meaning in a distributed setting the
+            layer inputs will be gathered from all ranks for the SVD computation. For non-distributed settings this
+            argument is ignored. Set to False if you are using a non-distributed dataloader in a distributed setting.
         show_progress_bar (bool): Whether to show a progress bar. Default is True.
 
     Returns:
