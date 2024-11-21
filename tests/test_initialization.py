@@ -1228,7 +1228,7 @@ class TestAdaLoraInitialization:
 
     def test_adalora_loftq_config_raises(self):
         with pytest.raises(ValueError, match="ADALORA does not support LOFTQ"):
-            AdaLoraConfig(loftq_config={"loftq": "config"})
+            AdaLoraConfig(init_lora_weights="loftq", loftq_config={"loftq": "config"})
 
     def get_model(self):
         class MyModule(nn.Module):
