@@ -40,6 +40,7 @@ from peft import (
     PromptEncoder,
     PromptEncoderConfig,
     PromptTuningConfig,
+    TaskType,
     VBLoRAConfig,
     VeraConfig,
 )
@@ -86,8 +87,24 @@ class TestPeftConfig:
         assert hasattr(config, "from_json_file")
 
     @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
-    def test_task_type(self, config_class):
-        config_class(task_type="test")
+    @pytest.mark.parametrize("valid_task_type", list(TaskType))
+    def test_valid_task_type(self, config_class, valid_task_type):
+        r"""
+        Test if all configs work correctly for all valid task types
+        """
+        config_class(task_type=valid_task_type)
+
+    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
+    @pytest.mark.parametrize("invalid_task_type", ["test"])
+    def test_invalid_task_type(self, config_class, invalid_task_type):
+        r"""
+        Test if all configs correctly raise the defined error message for invalid task types.
+        """
+        with pytest.raises(
+            ValueError,
+            match=f"Invalid task type: '{invalid_task_type}'. Must be one of the following task types: {', '.join(TaskType)}.",
+        ):
+            config_class(task_type=invalid_task_type)
 
     def test_from_peft_type(self):
         r"""
