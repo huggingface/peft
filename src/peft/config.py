@@ -55,10 +55,18 @@ class PeftConfigMixin(PushToHubMixin):
         peft_type (Union[[`~peft.utils.config.PeftType`], `str`]): The type of Peft method to use.
     """
 
+    task_type: Optional[TaskType] = field(default=None, metadata={"help": "The type of task."})
     peft_type: Optional[PeftType] = field(default=None, metadata={"help": "The type of PEFT model."})
     auto_mapping: Optional[dict] = field(
         default=None, metadata={"help": "An auto mapping dict to help retrieve the base model class if needed."}
     )
+
+    def __post_init__(self):
+        # check for invalid task type
+        if (self.task_type is not None) and (self.task_type not in list(TaskType)):
+            raise ValueError(
+                f"Invalid task type: '{self.task_type}'. Must be one of the following task types: {', '.join(TaskType)}."
+            )
 
     def to_dict(self) -> Dict:
         r"""

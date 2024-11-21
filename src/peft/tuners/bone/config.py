@@ -108,6 +108,7 @@ class BoneConfig(PeftConfig):
     )
 
     def __post_init__(self):
+        super().__post_init__()
         self.peft_type = PeftType.BONE
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
