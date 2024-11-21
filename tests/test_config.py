@@ -95,11 +95,11 @@ class TestPeftConfig:
         config_class(task_type=valid_task_type)
 
     @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
-    @pytest.mark.parametrize("invalid_task_type", ["test"])
-    def test_invalid_task_type(self, config_class, invalid_task_type):
+    def test_invalid_task_type(self, config_class):
         r"""
         Test if all configs correctly raise the defined error message for invalid task types.
         """
+        invalid_task_type = "invalid-task-type"
         with pytest.raises(
             ValueError,
             match=f"Invalid task type: '{invalid_task_type}'. Must be one of the following task types: {', '.join(TaskType)}.",
