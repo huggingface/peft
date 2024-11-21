@@ -50,6 +50,7 @@ class AdaLoraConfig(LoraConfig):
     rank_pattern: Optional[dict] = field(default=None, metadata={"help": "The saved rank pattern."})
 
     def __post_init__(self):
+        super().__post_init__()
         self.peft_type = PeftType.ADALORA
 
         if self.use_dora:
