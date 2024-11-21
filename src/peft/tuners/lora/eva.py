@@ -47,7 +47,7 @@ class _Hook:
         self,
         name: str,
         prepare_layer_inputs_fn: Optional[callable] = None,
-        gather_distributed_inputs: bool = False,
+        gather_distributed_inputs: bool = True,
     ):
         self.name = name
         self.gather_distributed_inputs = gather_distributed_inputs

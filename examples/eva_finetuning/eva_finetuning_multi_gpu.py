@@ -96,8 +96,7 @@ peft_config = LoraConfig(
 )
 
 # EVA initialization
-# It is important to set `gather_distributed_inputs=True` here if you use a distributed data sampler.
-eva_state_dict = get_eva_state_dict(model, dataloader, peft_config, gather_distributed_inputs=True)
+eva_state_dict = get_eva_state_dict(model, dataloader, peft_config)
 eva_state_dict = {".".join(["base_model.model"] + k.split(".")[1:]): v for k, v in eva_state_dict.items()}
 
 # cleanup ddp
