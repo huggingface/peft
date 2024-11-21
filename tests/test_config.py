@@ -87,7 +87,7 @@ class TestPeftConfig:
         assert hasattr(config, "from_json_file")
 
     @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
-    @pytest.mark.parametrize("valid_task_type", list(TaskType))
+    @pytest.mark.parametrize("valid_task_type", list(TaskType) + [None])
     def test_valid_task_type(self, config_class, valid_task_type):
         r"""
         Test if all configs work correctly for all valid task types
