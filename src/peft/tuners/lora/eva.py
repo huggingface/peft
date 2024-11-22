@@ -367,13 +367,15 @@ def _get_eva_state_dict(
         rank_budget += layer_rank
     if isinstance(prepare_layer_inputs_fn, Mapping) and len(prepare_layer_inputs_fn) > 0:
         raise ValueError(
-            f"prepare_layer_inputs_fn is a mapping but the following module names were not found in the model: {prepare_layer_inputs_fn.keys()}"
+            "prepare_layer_inputs_fn is a mapping but the following module names were not found in the model: "
+            f"{prepare_layer_inputs_fn.keys()}"
         )
 
     # forward for one batch to check which layer inputs are equal to avoid unneeded svd calculations
     forward_fn(model, inputs)
     hash_dict = {k: h[0].hashed_inputs[0] for k, h in hooks.items()}
-    # equal input maps groups layers which receive the same input. One layer is defined as the key and receives an svd hook. For the remaining layers the svd results can be skipped.
+    # equal input maps groups layers which receive the same input. One layer is defined as the key and receives an svd
+    # hook. For the remaining layers the svd results can be skipped.
     equal_inputs = list(find_equal_values(hash_dict).values())
     equal_inputs_map = {vv: v[0] for v in equal_inputs for vv in v[1:]}
     # for layers with equal inputs we need to make sure that the max_components are the same
@@ -446,7 +448,8 @@ def _get_eva_state_dict(
 
         forward_fn(model, inputs)
 
-        # in case some hooks have to skip the svd calculation because the number of tokens is less than the number of components
+        # in case some hooks have to skip the svd calculation because the number of tokens is less than the number of
+        # components
         if not all(hasattr(h[0].svd, "components_") for h in hooks.values()):
             continue
 
