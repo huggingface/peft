@@ -284,7 +284,8 @@ class LoraLayer(BaseTunerLayer):
         in_dim = weight.data.size(1)
 
         # Calculate WC from covariance matrix
-        assert hasattr(linear, "eigens")
+        if not hasattr(linear, "eigens"):
+            raise ValueError("eigens attribute not found, it's expected to be set by the pre-injection hook.")
         eigens = linear.eigens
         U = eigens.U_WC
         S = eigens.S_WC
@@ -292,18 +293,12 @@ class LoraLayer(BaseTunerLayer):
         r = self.r[adapter_name]
 
         # nan or inf check
-        # if (S!=S).any():
         if torch.isnan(S).any() or torch.isinf(S).any():
-            # print("nan in S")
-            raise Exception("nan or inf in S")
-        # if (U!=U).any():
+            raise ValueError("nan or inf in S")
         if torch.isnan(U).any() or torch.isinf(U).any():
-            # print("nan in U")
-            raise Exception("nan or inf in U")
-        # if (V!=V).any():
+            raise ValueError("nan or inf in U")
         if torch.isnan(V).any() or torch.isinf(V).any():
-            # print("nan in V")
-            raise Exception("nan or inf in V")
+            raise ValueError("nan or inf in V")
 
         # Sanity check
         logging.info(f"U.device = {U.device}, S.device = {S.device}, V.device = {V.device}")
@@ -312,11 +307,12 @@ class LoraLayer(BaseTunerLayer):
         scale_u = torch.linalg.norm(U) / math.sqrt(r)
         scale_v = torch.linalg.norm(V) / math.sqrt(r)
         logging.info(f"scale_u: {scale_u:.2f}, scale_v: {scale_v:.2f}, svd_error: {svd_error:.2f}")
-        assert U.size(0) == out_dim
-        assert U.size(1) == r
-        assert S.size(0) == r
-        assert V.size(0) == in_dim
-        assert V.size(1) == r
+        if U.size(0) != out_dim or U.size(1) != r:
+            raise ValueError(f"U size mismatch: {U.size()} vs. ({out_dim}, {r})")
+        if S.size(0) != r:
+            raise ValueError(f"S size mismatch: {S.size()} vs. ({r},)")
+        if V.size(0) != in_dim or V.size(1) != r:
+            raise ValueError(f"V size mismatch: {V.size()} vs. ({in_dim}, {r})")
 
         # Apply alpha
         S /= self.scaling[adapter_name]
