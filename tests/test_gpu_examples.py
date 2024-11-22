@@ -3293,6 +3293,9 @@ class PeftTorchaoGPUTests(unittest.TestCase):
     def setUp(self):
         self.causal_lm_model_id = "facebook/opt-125m"
         self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+        # torchao breaks with fp16 and if a previous test uses fp16, transformers will set this env var, which affects
+        # subsequent tests, therefore the env var needs to be cleared explicitly
+        os.environ.pop("ACCELERATE_MIXED_PRECISION", None)
 
     def tearDown(self):
         r"""
