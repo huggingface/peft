@@ -40,6 +40,6 @@ Next, you can load the base model of the Peft Model along with the Peft model it
 from transformers import AutoModelForCausalLM
 from peft import PeftConfig, PeftModel
 
-model = AutoModelForCausalLM.from_pretrained('Your base model of the Peft model PATH')
-model = PeftModel.from_pretrained(model, "Your SafeLoRA Weight PATH")
+model = AutoModelForCausalLM.from_pretrained(<base-model-id>)
+model = PeftModel.from_pretrained(model, <SafeLoRA-path>)
 ```
