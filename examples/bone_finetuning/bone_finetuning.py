@@ -14,7 +14,7 @@
 
 import os
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Literal, Optional
 
 import torch
 from datasets import load_dataset
@@ -31,7 +31,12 @@ class ScriptArguments(SFTConfig):
         default=None, metadata={"help": "The name or path of the fp32/16 base model."}
     )
     bits: str = field(default="bf16", metadata={"help": "(`['bf16', 'fp16', fp32]`)"})
-    init_bone_weights: str = field(default="False")
+    init_weights: Literal[True, "bat"] = field(
+        default=True,
+        metadata={
+            "help": ("True -> Bone; `bat` -> Bat"),
+        },
+    )
     bone_r: int = field(default=16)
     merge_and_save: bool = field(default=False)
     # dataset configs
