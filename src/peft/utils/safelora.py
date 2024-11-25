@@ -48,7 +48,7 @@ class SafeLoraConfig:
 
     num_proj_layers (`int`): The number of projected layers.
 
-    device (`str`): Device is used in SafeLoRA (cuda or cpu).
+    device (`str`): Device that is used for SafeLoRA (cuda or cpu).
 
     save_weights (`bool`): Replacing and saving SafeLoRA weights to the original LoRA file.
 
