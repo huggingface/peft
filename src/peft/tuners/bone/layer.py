@@ -71,7 +71,7 @@ class BoneLayer(BaseTunerLayer):
             raise TypeError(f"Bone is not implemented for base layers of type {type(base_layer).__name__}")
 
         # Initialize weights
-        if isinstance(init_weights, str) and init_weights == "bat":
+        if init_weights == "bat":
             if self.in_features % r != 0 or self.out_features % r != 0:
                 raise ValueError("The weight matrix must be fully divisible into [r, r] blocks.")
             self.reset_bat_parameters(adapter_name, r)
