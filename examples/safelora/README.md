@@ -30,7 +30,8 @@ If you set `save_weights=False`, but still want to save the weights, you can use
 ```python
 from safetensors.torch import save_file
 
-save_file(final_lora_weight, f"{os.path.join('Your Peft Model PATH', 'adapter_model.safetensors')}")
+path = ...  # your PEFT model path
+save_file(final_lora_weight, os.path.join(path, "adapter_model.safetensors"))
 ```
 
 ### Use SafeLoRA Model
