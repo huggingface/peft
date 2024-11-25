@@ -40,7 +40,7 @@ class SafeLoraConfig:
 
     aligned_model_path (`str`): The path of the aligned model for obtaining the aligned matrix.
 
-    peft_model_path (`str`): The path of the LoRA wieghts and configs.
+    peft_model_path (`str`): The path of the LoRA weights and config.
 
     select_layers_type (`Literal["threshold", "number"]`): How to select projection layers? options: [threshold, number]
 
