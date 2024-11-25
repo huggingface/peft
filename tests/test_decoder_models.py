@@ -539,7 +539,8 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         # Prefix tuning does not work if the model uses the new caching implementation. In that case, a helpful error
         # should be raised.
 
-        # skip if multi GPU, since this results in DataParallel usage by Trainer, which fails
+        # skip if multi GPU, since this results in DataParallel usage by Trainer, which fails with "CUDA device
+        # assertion", breaking subsequent tests
         if torch.cuda.device_count() > 1:
             pytest.skip("Skip prompt_learning_with_gradient_checkpointing test on multi-GPU setups")
 
