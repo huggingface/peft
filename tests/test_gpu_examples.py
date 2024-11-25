@@ -3295,6 +3295,8 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
         # torchao breaks with fp16 and if a previous test uses fp16, transformers will set this env var, which affects
         # subsequent tests, therefore the env var needs to be cleared explicitly
+        #
+        # TODO: remove this once https://github.com/huggingface/transformers/pull/34886 is merged
         os.environ.pop("ACCELERATE_MIXED_PRECISION", None)
 
     def tearDown(self):
