@@ -3,12 +3,14 @@
 ## Introduction ([Paper](https://arxiv.org/abs/2410.17222), [Code](https://github.com/tsachiblau/Context-aware-Prompt-Tuning-Advancing-In-Context-Learning-with-Adversarial-Methods), [Notebook](cpt_train_and_inference.ipynb), [Colab](https://colab.research.google.com/drive/1UhQDVhZ9bDlSk1551SuJV8tIUmlIayta?usp=sharing))
 Large Language Models (LLMs) can perform few-shot learning using either optimization-based approaches or In-Context Learning (ICL). Optimization-based methods often suffer from overfitting, as they require updating a large number of parameters with limited data. In contrast, ICL avoids overfitting but typically underperforms compared to optimization-based methods and is highly sensitive to the selection, order, and format of demonstration examples.
 
-To overcome these challenges, we introduce Context-aware Prompt Tuning (CPT), a method inspired by ICL, Prompt Tuning (PT), and adversarial attacks. 
-CPT builds on the ICL strategy of concatenating examples before the input, extending it by incorporating PT-like learning to refine the context embedding through iterative optimization, extracting deeper insights from the training examples. Our approach carefully modifies specific context tokens, considering the unique structure of the examples within the context.
+To overcome these challenges, Context-aware Prompt Tuning (CPT) is introduced as a method inspired by ICL, Prompt Tuning (PT), and adversarial attacks. 
+CPT builds on the ICL strategy of concatenating examples before the input, extending it by incorporating PT-like learning to refine the context embedding through iterative optimization, extracting deeper insights from the training examples. 
+The approach carefully modifies specific context tokens, considering the unique structure of the examples within the context.
 
 In addition to updating the context with PT-like optimization, CPT draws inspiration from adversarial attacks, adjusting the input based on the labels present in the context while preserving the inherent value of the user-provided data. 
-To ensure robustness and stability during optimization, we employ a projected gradient descent algorithm, constraining token embeddings to remain close to their original values and safeguarding the quality of the context.
-Our method has demonstrated superior accuracy across multiple classification tasks using various LLM models, outperforming existing baselines and effectively addressing the overfitting challenge in few-shot learning.
+To ensure robustness and stability during optimization, a projected gradient descent algorithm is employed, constraining token embeddings to remain close to their original values and safeguarding the quality of the context.
+This method demonstrates superior accuracy across multiple classification tasks using various LLM models, outperforming existing baselines and effectively addressing the overfitting challenge in few-shot learning.
+
 
 
 <div class="flex justify-center">
@@ -42,7 +44,7 @@ Templates define the structure of the input-output pairs, enabling the model to 
 - Refer to **Section 3.1** of the paper, where template-based tokenization is described as a critical step in structuring inputs for CPT.
 
 #### How it Helps
-Templates provide context-aware structure, ensuring the model does not overfit by utilizing structured input-output formats. Using cpt_tokens_type_mask, we gain fine-grained information about the roles of different tokens in the input-output structure. This enables the model to:
+Templates provide context-aware structure, ensuring the model does not overfit by utilizing structured input-output formats. Using `cpt_tokens_type_mask`, we gain fine-grained information about the roles of different tokens in the input-output structure. This enables the model to:
 
 1. Refrain from Updating Label Tokens: Prevent overfitting to label tokens by excluding their gradients during training.
 2. Apply Different Projection Norms: Use type-specific projections for different parts of the input during Projected Gradient Descent (PGD), enhancing robustness and generalization.
