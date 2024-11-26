@@ -56,7 +56,7 @@ CONFIGS = {
 # Ensure that models like Llava that pass past_key_values automatically do not fail, see #1938
 class TestPastKV:
     def test_past_kv(self):
-        model_id = "trl-internal-testing/tiny-random-LlavaForConditionalGeneration"
+        model_id = "peft-internal-testing/tiny-LlavaForConditionalGeneration"
         prompt = "USER: <image>\nWhat are these?\nASSISTANT:"
 
         # prepare model and inputs
