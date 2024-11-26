@@ -814,6 +814,38 @@ class PeftGPUCommonTests(unittest.TestCase):
     @require_torch_gpu
     @pytest.mark.single_gpu_tests
     @require_bitsandbytes
+    def test_8bit_merge_lora_with_bias(self):
+        # same as test_8bit_merge_lora but with lora_bias=True
+        torch.manual_seed(1000)
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+        )
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        out_base = F.softmax(model(random_input).logits, dim=-1)
+
+        config = LoraConfig(
+            r=8,
+            init_lora_weights=False,
+            lora_bias=True,
+        )
+        model = get_peft_model(model, config)
+
+        with torch.inference_mode():
+            out_before_merge = F.softmax(model(random_input).logits, dim=-1)
+
+        model.merge_and_unload()
+        with torch.inference_mode():
+            out_after_merge = F.softmax(model(random_input).logits, dim=-1)
+
+        atol = 0.01
+        rtol = 10
+        assert not torch.allclose(out_base, out_before_merge, atol=atol, rtol=rtol)
+        assert torch.allclose(out_before_merge, out_after_merge, atol=atol, rtol=rtol)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
     def test_4bit_merge_lora(self):
         torch.manual_seed(3000)
         bnb_config = BitsAndBytesConfig(
@@ -894,6 +926,47 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert isinstance(model, PeftModel)
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, LoraLinear4bit)
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear4bit)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_4bit_merge_lora_with_bias(self):
+        # same as test_4bit_merge_lora but with lora_bias=True
+        torch.manual_seed(3000)
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=False,
+            bnb_4bit_compute_dtype=torch.float32,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=bnb_config,
+            torch_dtype=torch.float32,
+        )
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        # compare outputs in probability space, because logits can have outliers
+        # and token ids are not precise enough
+        out_base = F.softmax(model(random_input).logits, dim=-1)
+
+        config = LoraConfig(
+            r=8,
+            init_lora_weights=False,
+            lora_bias=True,
+        )
+        model = get_peft_model(model, config)
+
+        with torch.inference_mode():
+            out_before_merge = F.softmax(model(random_input).logits, dim=-1)
+
+        model.merge_and_unload()
+        with torch.inference_mode():
+            out_after_merge = F.softmax(model(random_input).logits, dim=-1)
+
+        # tolerances are pretty high because some deviations are expected with quantization
+        atol = 0.01
+        rtol = 10
+        assert not torch.allclose(out_base, out_before_merge, atol=atol, rtol=rtol)
+        assert torch.allclose(out_before_merge, out_after_merge, atol=atol, rtol=rtol)
 
     @require_torch_gpu
     @pytest.mark.single_gpu_tests
