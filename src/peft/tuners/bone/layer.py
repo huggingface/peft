@@ -65,7 +65,7 @@ class BoneLayer(BaseTunerLayer):
         # Determine shape of Bone weights
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
-            self.bone_block[adapter_name] = nn.Parameter(torch.zeros(self.out_features // r, r, r), requires_grad=True)
+            self.bone_block[adapter_name] = nn.Parameter(torch.zeros(r, self.out_features), requires_grad=True)
 
         else:
             raise TypeError(f"Bone is not implemented for base layers of type {type(base_layer).__name__}")
@@ -329,8 +329,7 @@ class BoneLinear(nn.Module, BoneLayer):
                     if x.size(-1) % r != 0:
                         padding_size = (r - x.size(-1) % r) % r
                         x = F.pad(x, (0, padding_size))
-
-                    result = result + torch.sum(x.reshape(x.size(0), x.size(1), x.size(-1) // r, r), dim=2) @ bone
+                    result = result + torch.sum(x.reshape(*x.shape[:-1], x.size(-1) // r, r), dim=-2) @ bone
 
         result = result.to(previous_dtype)
         return result
