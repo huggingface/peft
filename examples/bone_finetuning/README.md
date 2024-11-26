@@ -16,6 +16,11 @@ tokenizer.pad_token_id = tokenizer.eos_token_id
 bone_config = BoneConfig(
     r = 64
 )
+#Bat performs better than Bone, but it uses more memory and is twice as slow. If you want to use the Bat method, you only need to add the parameter init_weights="bat".
+# bone_config = BoneConfig(
+#     r = 64,
+#     init_weights="bat"
+# )
 peft_model = get_peft_model(model, bone_config)
 
 peft_model.print_trainable_parameters()
@@ -50,9 +55,12 @@ peft_model = PeftModel.from_pretrained(model, "bone-llama-2-7b")
 
 ### Fine-tune 
 ```shell
+#Bat performs better than Bone, but it uses more memory and is twice as slow. If you want to use the Bat method, you only need to add the parameter init_weights="bat".
 python bone_finetuning.py \
     --base_model_name_or_path meta-llama/Llama-2-7b-hf \
     --output_dir output/bone-llama-2-7b-metamath-10k \
+    --bone_r 64 \
+    --init_weights True \
     --bits bf16 \
     --data_path meta-math/MetaMathQA \
     --dataset_split train[:100000] \

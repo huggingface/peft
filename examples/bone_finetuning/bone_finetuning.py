@@ -66,13 +66,14 @@ elif script_args.base_model_name_or_path is not None:
     )
     tokenizer = AutoTokenizer.from_pretrained(script_args.base_model_name_or_path)
     tokenizer.pad_token_id = tokenizer.eos_token_id
-    lora_config = BoneConfig(
+    bone_config = BoneConfig(
         r=script_args.bone_r,
         target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
         bias="none",
         task_type="CAUSAL_LM",
+        init_weights=script_args.init_weights,
     )
-    peft_model = get_peft_model(model, lora_config)
+    peft_model = get_peft_model(model, bone_config)
 
 print(peft_model)
 peft_model.print_trainable_parameters()
