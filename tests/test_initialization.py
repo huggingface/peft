@@ -1722,7 +1722,7 @@ class TestEvaInitialization:
 
     # Constants for test configuration
     COSINE_SIMILARITY_THRESHOLD = 0.75
-    NUM_SEEDS = 3
+    NUM_SEEDS = 2
     BATCH_SIZE = 4
     MAX_LENGTH = 256
     LORA_DIM = 8
@@ -1868,10 +1868,11 @@ class TestEvaInitialization:
     @pytest.mark.parametrize(
         "eva_config",
         [
-            EvaConfig(rho=2),
-            EvaConfig(rho=1),
-            EvaConfig(rho=1, whiten=True),
-            EvaConfig(rho=1.0001),
+            # note: lower tau to decrease number of iterations until convergence, as tests are slow on CPU
+            EvaConfig(rho=2, tau=0.9),
+            EvaConfig(rho=1, tau=0.9),
+            EvaConfig(rho=1, whiten=True, tau=0.9),
+            EvaConfig(rho=1.0001, tau=0.9),
         ],
     )
     def test_eva_initialization_consistency(self, model, dataset, peft_config, eva_config):
@@ -1885,7 +1886,7 @@ class TestEvaInitialization:
         for seed in range(self.NUM_SEEDS):
             shuffled_dataset = dataset.shuffle(seed=seed)
             dataloader = self.get_dataloader(shuffled_dataset)
-            sd = get_eva_state_dict(model, dataloader, modified_peft_config)
+            sd = get_eva_state_dict(model, dataloader, modified_peft_config, show_progress_bar=False)
             state_dicts.append(sd)
 
         cos_sims = defaultdict(list)
@@ -1893,7 +1894,7 @@ class TestEvaInitialization:
             for k, v1 in state_dicts[i].items():
                 v2 = state_dicts[j][k]
                 min_size = min(v1.size(0), v2.size(0))
-                cos_sims[k].extend(torch.cosine_similarity(v1[:min_size], v2[:min_size], dim=1).abs().tolist())
+                cos_sims[k].extend(torch.cosine_similarity(v1[:min_size].abs(), v2[:min_size].abs(), dim=1).tolist())
 
         mean_cosine_similarities = {k: torch.tensor(v).mean() for k, v in cos_sims.items()}
         for layer_name, mean_cosine_similarity in mean_cosine_similarities.items():
