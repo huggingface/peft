@@ -15,13 +15,11 @@ from __future__ import annotations
 
 import math
 import operator
-import re
 import warnings
 from contextlib import contextmanager
 from dataclasses import asdict, replace
 from enum import Enum
 from functools import partial, reduce
-from itertools import chain
 from typing import Literal, Optional
 
 import torch
@@ -45,6 +43,7 @@ from peft.utils import (
     get_quantization_config,
 )
 from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
+from peft.utils.other import get_pattern_key
 
 from .aqlm import dispatch_aqlm
 from .awq import dispatch_awq
@@ -186,10 +185,10 @@ class LoraModel(BaseTuner):
             raise ValueError("Current Key shouldn't be `None`")
 
         # Regexp matching - Find key which matches current target_name in patterns provided
-        pattern_keys = list(chain(lora_config.rank_pattern.keys(), lora_config.alpha_pattern.keys()))
-        target_name_key = next(filter(lambda key: re.match(rf".*\.{key}$", current_key), pattern_keys), current_key)
-        r = lora_config.rank_pattern.get(target_name_key, lora_config.r)
-        alpha = lora_config.alpha_pattern.get(target_name_key, lora_config.lora_alpha)
+        r_key = get_pattern_key(lora_config.rank_pattern.keys(), current_key)
+        alpha_key = get_pattern_key(lora_config.alpha_pattern.keys(), current_key)
+        r = lora_config.rank_pattern.get(r_key, lora_config.r)
+        alpha = lora_config.alpha_pattern.get(alpha_key, lora_config.lora_alpha)
 
         kwargs = {
             "r": r,

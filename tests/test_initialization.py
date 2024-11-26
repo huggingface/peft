@@ -12,26 +12,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
+
+import itertools
 import platform
 import re
-import subprocess
-import sys
+from collections import defaultdict
 from contextlib import contextmanager
 from copy import deepcopy
 from unittest.mock import patch
 
 import pytest
 import torch
+from datasets import Dataset, load_dataset
 from huggingface_hub.utils import reset_sessions
 from safetensors.torch import load_file
 from scipy import stats
 from torch import nn
-from transformers import AutoModelForCausalLM
+from torch.utils.data import DataLoader
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import (
     AdaLoraConfig,
+    EvaConfig,
     IA3Config,
+    LoKrConfig,
     LoraConfig,
     PeftMixedModel,
     PeftModel,
@@ -44,10 +48,13 @@ from peft import (
     PromptTuningConfig,
     VBLoRAConfig,
     VeraConfig,
+    get_eva_state_dict,
     get_peft_model,
+    initialize_lora_eva_weights,
     inject_adapter_in_model,
     set_peft_model_state_dict,
 )
+from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
 from peft.utils.hotswap import hotswap_adapter
 
@@ -277,6 +284,33 @@ class TestLoraInitialization:
         assert model.linear.scaling["default"] == expected_scaling
         assert model.embed.scaling["default"] == expected_scaling
         assert model.conv2d.scaling["default"] == expected_scaling
+
+    # testcase for bugfix for issue 2194
+    def test_pattern_override(self):
+        torch.manual_seed(0)
+
+        layer = self.get_model()
+        model = nn.Sequential(layer, layer)
+        config = LoraConfig(
+            target_modules=["linear"],
+            lora_alpha=1,
+            r=8,
+            use_rslora=False,
+            rank_pattern={"linear": 8},
+            alpha_pattern={"0.linear": 2},
+        )
+        model = get_peft_model(model, config)
+        scaling_with_rank_pattern = model.model[0].linear.scaling
+
+        layer = self.get_model()
+        model = nn.Sequential(layer, layer)
+        config = LoraConfig(
+            target_modules=["linear"], lora_alpha=1, r=8, use_rslora=False, alpha_pattern={"0.linear": 2}
+        )
+        model = get_peft_model(model, config)
+        scaling_without_rank_pattern = model.model[0].linear.scaling
+
+        assert scaling_with_rank_pattern == scaling_without_rank_pattern
 
     def test_lora_pissa_linear_init_default(self, data):
         model = self.get_model()
@@ -1145,6 +1179,94 @@ class TestLoraInitialization:
             get_peft_model(model, config)
 
 
+class TestLokrInitialization:
+    torch_device = infer_device()
+
+    def get_model(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Choose a large weight so that averages are close to expected values.
+                self.linear = nn.Linear(1000, 1000)
+                self.conv2d = nn.Conv2d(100, 100, 3)
+
+            def forward(self, x):
+                x_4d = x.flatten().reshape(1, 100, 10, 10)
+                return self.linear(x), self.conv2d(x_4d)
+
+        return MyModule().eval().to(self.torch_device)
+
+    @pytest.fixture
+    def data(self):
+        return torch.rand(10, 1000).to(self.torch_device)
+
+    def test_lokr_linear_init_default(self, data):
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        output_before = model(data)[0]
+        config = LoKrConfig(target_modules=["linear"])
+        model = get_peft_model(model, config)
+        output_after = model(data)[0]
+
+        assert torch.allclose(output_before, output_after)
+
+    def test_lokr_linear_init_false(self, data):
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        output_before = model(data)[0]
+        config = LoKrConfig(target_modules=["linear"], init_weights=False)
+        model = get_peft_model(model, config)
+        output_after = model(data)[0]
+
+        assert not torch.allclose(output_before, output_after)
+
+    def test_lokr_linear_init_lycoris(self, data):
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        output_before = model(data)[0]
+        config = LoKrConfig(target_modules=["linear"], init_weights="lycoris")
+        model = get_peft_model(model, config)
+        output_after = model(data)[0]
+
+        assert torch.allclose(output_before, output_after)
+
+    def test_lokr_conv2d_init_default(self, data):
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        output_before = model(data)[1]
+        config = LoKrConfig(target_modules=["conv2d"])
+        model = get_peft_model(model, config)
+        output_after = model(data)[1]
+
+        assert torch.allclose(output_before, output_after)
+
+    def test_lokr_conv2d_init_false(self, data):
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        output_before = model(data)[1]
+        config = LoKrConfig(target_modules=["conv2d"], init_weights=False)
+        model = get_peft_model(model, config)
+        output_after = model(data)[1]
+
+        assert not torch.allclose(output_before, output_after)
+
+    def test_lokr_conv2d_init_lycoris(self, data):
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        output_before = model(data)[1]
+        config = LoKrConfig(target_modules=["conv2d"], init_weights="lycoris")
+        model = get_peft_model(model, config)
+        output_after = model(data)[1]
+
+        assert torch.allclose(output_before, output_after)
+
+
 class TestAdaLoraInitialization:
     torch_device = infer_device()
 
@@ -1158,7 +1280,7 @@ class TestAdaLoraInitialization:
 
     def test_adalora_loftq_config_raises(self):
         with pytest.raises(ValueError, match="ADALORA does not support LOFTQ"):
-            AdaLoraConfig(loftq_config={"loftq": "config"})
+            AdaLoraConfig(init_lora_weights="loftq", loftq_config={"loftq": "config"})
 
     def get_model(self):
         class MyModule(nn.Module):
@@ -1639,6 +1761,290 @@ def test_from_pretrained_missing_keys_warning(recwarn, tmp_path):
     assert any(missing_key in str(w.message) for w in recwarn.list)
 
 
+class TestEvaInitialization:
+    """Tests for the EVA (Explained Variance Adaptation) initialization method.
+
+    This test suite verifies:
+    1. Consistency of initialization across different seeds
+    2. Proper error handling for invalid inputs
+    3. Compatibility with different model architectures
+    4. Reproducibility of results
+    5. Proper handling of edge cases
+    """
+
+    # Constants for test configuration
+    COSINE_SIMILARITY_THRESHOLD = 0.75
+    NUM_SEEDS = 2
+    BATCH_SIZE = 4
+    MAX_LENGTH = 256
+    LORA_DIM = 8
+    LORA_ALPHA = 1
+    DEVICE = infer_device()
+
+    @pytest.fixture
+    def tokenizer(self):
+        tokenizer = AutoTokenizer.from_pretrained("openai-community/gpt2")
+        tokenizer.pad_token = tokenizer.eos_token
+        return tokenizer
+
+    @pytest.fixture
+    def dataset(self, tokenizer):
+        dataset = load_dataset("ybelkada/english_quotes_copy", split="train")
+        # concatenate examples
+        examples = []
+        example = ""
+        for data in dataset:
+            if len(example) >= self.MAX_LENGTH:
+                examples.append(example)
+                example = ""
+            example = example + " " + data["quote"]
+        dataset = Dataset.from_dict({"text": examples})
+        # tokenize
+        dataset = dataset.map(
+            lambda x: tokenizer(x["text"], padding="max_length", truncation=True, max_length=self.MAX_LENGTH),
+            batched=True,
+            remove_columns=dataset.column_names,
+        )
+        dataset.set_format(type="torch")
+        return dataset
+
+    @pytest.fixture
+    def model(self):
+        model = AutoModelForCausalLM.from_pretrained("openai-community/gpt2")
+        model.transformer.h = model.transformer.h[:2]  # truncate to 2 layers
+        return model.to(self.DEVICE)
+
+    @pytest.fixture
+    def peft_config(self):
+        return LoraConfig(
+            r=self.LORA_DIM,
+            lora_alpha=self.LORA_ALPHA,
+            target_modules=["c_attn"],
+            init_lora_weights="eva",
+            eva_config=EvaConfig(rho=2),
+        )
+
+    @staticmethod
+    def collate_fn(examples):
+        return {k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()}
+
+    @staticmethod
+    def prepare_layer_inputs_fn(layer_input, model_input, layer_name):
+        return layer_input[0].view(-1, layer_input[0].size(-1))
+
+    def get_dataloader(self, dataset):
+        return DataLoader(
+            dataset,
+            batch_size=self.BATCH_SIZE,
+            collate_fn=self.collate_fn,
+            shuffle=False,
+        )
+
+    @pytest.mark.parametrize(
+        "prepare_layer_inputs_keys, expected_outcome",
+        [
+            (None, "success"),
+            (["transformer.h.0.attn.c_attn"], "success"),
+            (
+                ["transformer.h.0.attn.c_attn", "transformer.h.1.attn.c_attn", "transformer.h.2.attn.c_attn"],
+                "value_error",
+            ),
+        ],
+    )
+    def test_eva_state_dict_prepare_inputs_mapping(
+        self, model, dataset, peft_config, prepare_layer_inputs_keys, expected_outcome
+    ):
+        """
+        Tests for cases where prepare_layer_inputs_fn is a mapping. Checks that if not all target modules are present,
+        the prepare_layer_inputs_fn for the remaining modules is set to None. Also checks that if more keys than target
+        modules are present, a ValueError is raised.
+        """
+
+        def fn(x, *args):
+            return x[0].view(-1, x[0].size(-1))
+
+        if prepare_layer_inputs_keys is None:
+            prepare_layer_inputs_fn = fn
+        else:
+            prepare_layer_inputs_fn = {k: fn for k in prepare_layer_inputs_keys}
+
+        shuffled_dataset = dataset.shuffle(seed=0)
+        dataloader = self.get_dataloader(shuffled_dataset)
+        modified_peft_config = deepcopy(peft_config)
+        modified_peft_config.eva_config.tau = 0  # converge immediately
+        if expected_outcome == "success":
+            sd = get_eva_state_dict(
+                model,
+                dataloader,
+                modified_peft_config,
+                prepare_model_inputs_fn=None,
+                prepare_layer_inputs_fn=prepare_layer_inputs_fn,
+            )
+            assert len(sd) == 2
+            assert "transformer.h.0.attn.c_attn" in sd
+            assert "transformer.h.1.attn.c_attn" in sd
+        else:
+            with pytest.raises(
+                ValueError, match="prepare_layer_inputs_fn is a mapping but the following module names were not found"
+            ):
+                get_eva_state_dict(
+                    model,
+                    dataloader,
+                    modified_peft_config,
+                    prepare_model_inputs_fn=None,
+                    prepare_layer_inputs_fn=prepare_layer_inputs_fn,
+                )
+
+    @pytest.mark.parametrize(
+        "eva_config",
+        [EvaConfig(rho=2, adjust_scaling_factors=True)],
+    )
+    def test_eva_state_dict_adjust_scaling_factors(self, model, dataset, peft_config, eva_config):
+        """
+        Tests that the scaling factors are adjusted so that all LoRA gradients have the same scale regardless of their
+        rank.
+        """
+        modified_peft_config = deepcopy(peft_config)
+        modified_peft_config.eva_config = eva_config
+        dataloader = self.get_dataloader(dataset)
+        peft_model = get_peft_model(deepcopy(model), modified_peft_config)
+        scaling_factors_before = {}
+        for n, m in peft_model.named_modules():
+            if isinstance(m, LoraLayer):
+                scaling_factors_before[n] = m.scaling["default"]
+        initialize_lora_eva_weights(peft_model, dataloader)
+        for n, m in peft_model.named_modules():
+            if isinstance(m, LoraLayer):
+                assert m.scaling["default"] == scaling_factors_before[n]
+
+    @pytest.mark.parametrize(
+        "eva_config",
+        [
+            # note: lower tau to decrease number of iterations until convergence, as tests are slow on CPU
+            EvaConfig(rho=2, tau=0.9),
+            EvaConfig(rho=1, tau=0.9),
+            EvaConfig(rho=1, whiten=True, tau=0.9),
+            EvaConfig(rho=1.0001, tau=0.9),
+        ],
+    )
+    def test_eva_initialization_consistency(self, model, dataset, peft_config, eva_config):
+        """
+        Tests that the state dict returned by `get_eva_state_dict` is consistent across different seeds based on the
+        cosine similarity of the svd components.
+        """
+        modified_peft_config = deepcopy(peft_config)
+        modified_peft_config.eva_config = eva_config
+        state_dicts = []
+        for seed in range(self.NUM_SEEDS):
+            shuffled_dataset = dataset.shuffle(seed=seed)
+            dataloader = self.get_dataloader(shuffled_dataset)
+            sd = get_eva_state_dict(model, dataloader, modified_peft_config, show_progress_bar=False)
+            state_dicts.append(sd)
+
+        cos_sims = defaultdict(list)
+        for i, j in itertools.combinations(range(self.NUM_SEEDS), 2):
+            for k, v1 in state_dicts[i].items():
+                v2 = state_dicts[j][k]
+                min_size = min(v1.size(0), v2.size(0))
+                cos_sims[k].extend(torch.cosine_similarity(v1[:min_size].abs(), v2[:min_size].abs(), dim=1).tolist())
+
+        mean_cosine_similarities = {k: torch.tensor(v).mean() for k, v in cos_sims.items()}
+        for layer_name, mean_cosine_similarity in mean_cosine_similarities.items():
+            assert mean_cosine_similarity > self.COSINE_SIMILARITY_THRESHOLD, (
+                f"Mean absolute cosine similarity {mean_cosine_similarity:.4f} "
+                f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
+            )
+
+    @pytest.mark.parametrize("has_rank_zero", [True, False])
+    def test_load_eva_state_dict(self, model, dataset, peft_config, tmp_path, has_rank_zero):
+        """
+        Tests that the `eva_state_dict` argument in `initialize_lora_eva_weights` can be used to initialize a model
+        with EVA weights and that the initialized model can be saved and loaded correctly.
+        """
+        dataloader = self.get_dataloader(dataset)
+        peft_model = get_peft_model(deepcopy(model), peft_config)
+        sd = get_eva_state_dict(peft_model, dataloader)
+        if has_rank_zero:
+            k = "base_model.model.transformer.h.0.attn.c_attn"
+            sd[k] = sd[k][:0]
+        initialize_lora_eva_weights(peft_model, eva_state_dict=sd)
+        if has_rank_zero:
+            assert not isinstance(peft_model.model.transformer.h[0].attn.c_attn, LoraLayer)
+        else:
+            assert isinstance(peft_model.model.transformer.h[0].attn.c_attn, LoraLayer)
+        peft_model.save_pretrained(tmp_path)
+        peft_model = PeftModel.from_pretrained(model, tmp_path, torch_device=self.DEVICE, low_cpu_mem_usage=True)
+        peft_model(**{k: v.to(self.DEVICE) for k, v in next(iter(dataloader)).items()})
+
+    def test_missing_eva_inits(self, model, dataset, peft_config):
+        """
+        Tests that a warning is raised when some adapter modules were not initialized with EVA weights.
+        """
+        modified_peft_config = deepcopy(peft_config)
+        modified_peft_config.target_modules = ["wte"]
+        dataloader = self.get_dataloader(dataset)
+        peft_model = get_peft_model(deepcopy(model), modified_peft_config)
+        with pytest.warns(
+            UserWarning,
+            match="the following layers were initialized with init_lora_weights=True because they were not found in the eva state_dict:*",
+        ):
+            initialize_lora_eva_weights(peft_model, dataloader)
+
+    def test_load_eva_model(self, model, dataset, peft_config, tmp_path):
+        """
+        Tests that a model initialized with EVA weights can be loaded correctly.
+        """
+        dataloader = self.get_dataloader(dataset)
+        peft_model = get_peft_model(deepcopy(model), peft_config)
+        initialize_lora_eva_weights(peft_model, dataloader)
+        peft_model.save_pretrained(tmp_path)
+        peft_model = PeftModel.from_pretrained(model, tmp_path, torch_device=self.DEVICE, low_cpu_mem_usage=True)
+        peft_model(**{k: v.to(self.DEVICE) for k, v in next(iter(dataloader)).items()})
+
+    def test_eva_initialization_with_invalid_dataloader(self, model, peft_config):
+        """Test that appropriate error is raised when dataloader is empty."""
+        empty_dataset = Dataset.from_dict({"text": []})
+        dataloader = self.get_dataloader(empty_dataset)
+
+        with pytest.raises(ValueError, match="dataloader is empty"):
+            get_eva_state_dict(model, dataloader, peft_config)
+
+    def test_eva_config_rho(self):
+        """
+        Tests that EvaConfig.__init__ raises a ValueError when rho is negative.
+        """
+        with pytest.raises(ValueError, match="`rho` must be >= 1.0"):
+            EvaConfig(rho=-1)
+
+    def test_eva_config_tau(self):
+        """
+        Tests that EvaConfig.__init__ raises a ValueError when tau is not between 0.0 and 1.0.
+        """
+        with pytest.raises(ValueError, match="`tau` must be between 0.0 and 1.0."):
+            EvaConfig(tau=-0.1)
+        with pytest.raises(ValueError, match="`tau` must be between 0.0 and 1.0."):
+            EvaConfig(tau=1.1)
+
+    def test_lora_config_raises_warning_with_eva_init_but_not_eva_config(self):
+        """
+        Tests that LoraConfig.__init__ raises a warning when init_lora_weights='eva' but eva_config is not set.
+        """
+        with pytest.warns(
+            UserWarning,
+            match="`init_lora_weights` is 'eva' but `eva_config` is not specified. Using default EVA config.",
+        ):
+            LoraConfig(init_lora_weights="eva")
+
+    def test_lora_config_raises_warning_with_eva_config_but_not_eva_init(self):
+        """
+        Tests that LoraConfig.__init__ raises a warning when init_lora_weights is not 'eva' but eva_config is set.
+        """
+        with pytest.warns(
+            UserWarning, match="`eva_config` specified but will be ignored when `init_lora_weights` is not 'eva'."
+        ):
+            LoraConfig(init_lora_weights=True, eva_config=EvaConfig())
+
+
 @pytest.mark.skipif(
     platform.system() != "Linux", reason="Out of the box, torch.compile does not work on Windows or MacOS"
 )
@@ -1863,74 +2269,3 @@ class TestHotSwapping:
         msg = f"Hot swapping the adapter did not succeed. Unexpected keys: {new_key}"
         with pytest.raises(RuntimeError, match=msg):
             hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
-
-    def test_hotswapping_compiled_model_does_not_trigger_recompilation(self):
-        env = os.environ.copy()
-        env["TORCH_LOGS"] = "guards,recompiles"
-        here = os.path.dirname(__file__)
-        file_name = os.path.join(here, "run_compiled_model_hotswap.py")
-
-        process = subprocess.Popen(
-            [sys.executable, file_name, "1"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-
-        # Communicate will read the output and error streams, preventing deadlock
-        stdout, stderr = process.communicate()
-        exit_code = process.returncode
-
-        # sanity check:
-        assert exit_code == 0
-
-        # check that the recompilation message is not present
-        assert "__recompiles" not in stderr.decode()
-
-        # contingency check: without hotswapping, we *do* get recompilation
-        process = subprocess.Popen(
-            [sys.executable, file_name, "0"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-
-        # Communicate will read the output and error streams, preventing deadlock
-        stdout, stderr = process.communicate()
-        exit_code = process.returncode
-
-        # sanity check:
-        assert exit_code == 0
-
-        # check that the recompilation message is not present
-        assert "__recompiles" in stderr.decode()
-
-    @pytest.mark.xfail(strict=True, reason="Requires hotswap to be implemented in diffusers")
-    def test_hotswapping_compiled_diffusion_model_does_not_trigger_recompilation(self):
-        env = os.environ.copy()
-        env["TORCH_LOGS"] = "guards,recompiles"
-        here = os.path.dirname(__file__)
-        file_name = os.path.join(here, "run_compiled_diffusion_model_hotswap.py")
-
-        process = subprocess.Popen(
-            [sys.executable, file_name, "1"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-
-        # Communicate will read the output and error streams, preventing deadlock
-        stdout, stderr = process.communicate()
-        exit_code = process.returncode
-
-        # sanity check:
-        assert exit_code == 0
-
-        # check that the recompilation message is not present
-        assert "__recompiles" not in stderr.decode()
-
-        # contingency check: without hotswapping, we *do* get recompilation
-        process = subprocess.Popen(
-            [sys.executable, file_name, "0"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-
-        # Communicate will read the output and error streams, preventing deadlock
-        stdout, stderr = process.communicate()
-        exit_code = process.returncode
-
-        # sanity check:
-        assert exit_code == 0
-
-        # check that the recompilation message is not present
-        assert "__recompiles" in stderr.decode()
