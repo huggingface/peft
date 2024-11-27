@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
@@ -42,8 +42,9 @@ class BoneConfig(PeftConfig):
             The names of the modules to not apply the adapter. When passing a string, a regex match will be performed.
             When passing a list of strings, either an exact match will be performed or it is checked if the name of the
             module ends with any of the passed strings.
-        init_weights (`bool`):
-            Whether to perform initialization of Bone weights.
+        init_weights (bool | Literal["bat"]):
+            Different initializations correspond to different Bone variants. By default, setting True uses the Bone
+            structure, while "bat" selects the Bat structure.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
@@ -76,7 +77,7 @@ class BoneConfig(PeftConfig):
         default=None,
         metadata={"help": "List of module names or regex expression of the module names to exclude from Bone."},
     )
-    init_weights: bool = field(
+    init_weights: bool | Literal["bat"] = field(
         default=True,
         metadata={
             "help": (
