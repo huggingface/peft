@@ -32,6 +32,7 @@ class QuantLinear(torch.nn.Module, LoraLayer):
         init_lora_weights: bool = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        lora_bias: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -52,6 +53,7 @@ class QuantLinear(torch.nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
+            lora_bias=lora_bias,
         )
 
     def forward(self, x: torch.Tensor):

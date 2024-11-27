@@ -32,6 +32,9 @@ class TorchaoLoraLinear(Linear):
     def __init__(self, *args, get_apply_tensor_subclass, **kwargs):
         # this is not strictly necessary, as kwargs are stored either way, but we want to error early if
         # get_apply_tensor_subclass is missing.
+        if kwargs.get("lora_bias", False):
+            raise ValueError(f"{self.__class__.__name__} does not support lora_bias yet, set it to False")
+
         super().__init__(*args, **kwargs)
         self.get_apply_tensor_subclass = get_apply_tensor_subclass
         self._check_dtype_supported()
