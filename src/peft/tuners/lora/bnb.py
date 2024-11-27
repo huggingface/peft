@@ -121,7 +121,7 @@ if is_bnb_available():
                     w_data.to("cpu"), requires_grad=False, has_fp16_weights=weight.has_fp16_weights
                 ).to(weight.device)
                 if self.lora_bias[active_adapter]:
-                    bias_data = self.get_base_layer().bias.data = self.lora_B[active_adapter].bias
+                    bias_data = self.get_base_layer().bias.data + self.lora_B[active_adapter].bias
                     if safe_merge and not torch.isfinite(bias_data):
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
@@ -388,7 +388,7 @@ if is_bnb_4bit_available():
                 kwargs.pop("data", None)
                 self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), **kwargs).to(weight.device)
                 if self.lora_bias[active_adapter]:
-                    bias_data = self.get_base_layer().bias.data = self.lora_B[active_adapter].bias
+                    bias_data = self.get_base_layer().bias.data + self.lora_B[active_adapter].bias
                     if safe_merge and not torch.isfinite(bias_data):
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
