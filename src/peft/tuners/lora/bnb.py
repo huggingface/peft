@@ -235,7 +235,7 @@ if is_bnb_available():
                             x = x.to(compute_dtype)
 
                     if not self.use_dora[active_adapter]:
-                        result = result + lora_B(lora_A(dropout(x))) * scaling
+                        output = lora_B(lora_A(dropout(x))) * scaling
                     else:
                         if isinstance(dropout, torch.nn.Identity) or not self.training:
                             base_result = result
@@ -243,7 +243,7 @@ if is_bnb_available():
                             x = dropout(x)
                             base_result = None
 
-                        result = result + self.lora_magnitude_vector[active_adapter](
+                        output = self.lora_magnitude_vector[active_adapter](
                             x,
                             lora_A=lora_A,
                             lora_B=lora_B,
@@ -252,7 +252,8 @@ if is_bnb_available():
                             base_result=base_result,
                         )
                     if requires_conversion:
-                        result = result.to(expected_dtype)
+                        output = output.to(expected_dtype)
+                    result = result + output
 
             return result
 
@@ -490,7 +491,7 @@ if is_bnb_4bit_available():
                         x = x.to(lora_A.weight.dtype)
 
                     if not self.use_dora[active_adapter]:
-                        result = result + lora_B(lora_A(dropout(x))) * scaling
+                        output = lora_B(lora_A(dropout(x))) * scaling
                     else:
                         if isinstance(dropout, torch.nn.Identity) or not self.training:
                             base_result = result
@@ -498,7 +499,7 @@ if is_bnb_4bit_available():
                             x = dropout(x)
                             base_result = None
 
-                        result = result + self.lora_magnitude_vector[active_adapter](
+                        output = self.lora_magnitude_vector[active_adapter](
                             x,
                             lora_A=lora_A,
                             lora_B=lora_B,
@@ -507,7 +508,8 @@ if is_bnb_4bit_available():
                             base_result=base_result,
                         )
                     if requires_conversion:
-                        result = result.to(expected_dtype)
+                        output = output.to(expected_dtype)
+                    result = result + output
 
             return result
 
