@@ -15,7 +15,6 @@
 # Reference code: https://github.com/iboing/CorDA/blob/main/cordalib/decomposition.py
 # Reference paper: https://arxiv.org/abs/2406.05223
 
-import logging
 import os
 from typing import Any, Callable, Iterable, Optional
 
@@ -82,7 +81,6 @@ def preprocess_corda(
         eigens.V_WC (`torch.Tensor`):
             Right singular vectors of the weight matrix, multiplied by inverse of covariance matrix.
     """
-    logging.info(f"model device: {get_model_device(model)}")
     cache_file = config.corda_config.get("cache_file")
     covariance_file = config.corda_config.get("covariance_file")
     sample_count = config.corda_config.get("sample_count")
@@ -92,7 +90,6 @@ def preprocess_corda(
 
     # If cache exists, skip building
     if cache_file is not None and os.path.exists(cache_file) and os.path.getsize(cache_file) > 0:
-        logging.info(f"CorDA cache file found: {cache_file}")
         cache = torch.load(cache_file, map_location=get_model_device(model))
         for name, module in target_modules(model, config):
             module.corda_method = cache[f"{name}.corda_method"]
@@ -102,11 +99,7 @@ def preprocess_corda(
                 U_WC=cache[f"{name}.eigens.U_WC"],
                 V_WC=cache[f"{name}.eigens.V_WC"],
             )
-        logging.info(f"CorDA cache loaded from {cache_file}")
     else:
-        # Cache file not found, build CorDA fields
-        logging.info("CorDA cache file not found, building...")
-
         # Specify CorDA method for each layer
         if corda_method is None:
             raise ValueError("corda_method is required when cache_file is not provided")
@@ -139,7 +132,6 @@ def preprocess_corda(
 
             os.makedirs(os.path.dirname(cache_file), exist_ok=True)
             torch.save(cache, cache_file)
-            logging.info(f"CorDA cache saved at {cache_file}")
 
     # Clear run model callback as it's not serializable
     config.corda_config["run_model"] = None
@@ -156,7 +148,6 @@ def calib_cov_distribution(
     covariance_file: Optional[str],
 ):
     if covariance_file is not None and os.path.exists(covariance_file) and os.path.getsize(covariance_file) > 0:
-        logging.info(f"covariance file found: {covariance_file}")
         all_covariance_matrix = torch.load(covariance_file, map_location=get_model_device(model))
         for name, module in target_modules(model, config):
             module.covariance_matrix = all_covariance_matrix[name]
@@ -167,7 +158,6 @@ def calib_cov_distribution(
     if hooked_model is None:
         hooked_model = model
     hooked_model.eval()
-    logging.info(f"sample count: {sample_count}")
 
     def hook(module, input, output):
         input = input[0].detach().squeeze(0).data  ## (context_length = 2048, dim)
@@ -177,18 +167,14 @@ def calib_cov_distribution(
 
         # covariance = input.t() @ input ## (dim, dim)
         if torch.isnan(input).any():
-            logging.info("nan detected")
             raise Exception("nan in input, break")
         if torch.isinf(input).any():
-            logging.info("inf detected")
             raise Exception("inf in input, break")
 
         covariance = input.t().matmul(input)
         if torch.isnan(covariance).any():
-            logging.info("nan detected")
             raise Exception("nan in covariance, break")
         if torch.isinf(covariance).any():
-            logging.info("inf detected")
             raise Exception("inf in covariance, break")
 
         # calculate mean and std
@@ -203,16 +189,13 @@ def calib_cov_distribution(
         # module.covariance_matrix = (module.covariance_matrix + covariance) / 2
         del covariance, input
 
-    logging.info("registering forward hook")
     for name, module in target_modules(hooked_model, config):
         module.covariance_matrix = 0
         module.mean = 0
         module.std = 0
         module.register_forward_hook(hook)
 
-    logging.info("running model")
     run_model()
-    logging.info("covariance matrices stored in hooked model")
 
     if hooked_model is not model:
         targets = {}
@@ -225,7 +208,6 @@ def calib_cov_distribution(
                 targets[name].covariance_matrix = module.covariance_matrix
                 targets[name].mean = module.mean
                 targets[name].std = module.std
-        logging.info("covariance matrices copied to model")
 
     # Save covariance to disk
     if covariance_file is not None:
@@ -234,7 +216,6 @@ def calib_cov_distribution(
             all_covariance_matrix[name] = module.covariance_matrix
         os.makedirs(os.path.dirname(covariance_file), exist_ok=True)
         torch.save(all_covariance_matrix, covariance_file)
-        logging.info(f"covariance saved at {covariance_file}")
 
 
 @torch.no_grad()
@@ -276,8 +257,6 @@ def collect_eigens_for_layer(
         inv_error = torch.dist(
             fix_covariance_matrix @ cov_inv, torch.eye(covariance_matrix.size(0)).to(get_model_device(linear))
         ).item()
-        logging.info(f"size: {covariance_matrix.size()}, dtype: {covariance_matrix.dtype}")
-        logging.info(f"damp: {damp}, inv_error: {inv_error}")
         if inv_error < 0.05:
             break
         else:
@@ -286,10 +265,6 @@ def collect_eigens_for_layer(
 
     U, S, Vh = torch.linalg.svd(w, full_matrices=False)
     V = (Vh @ cov_inv).transpose(0, 1)
-
-    norm_of_VandCovinv = torch.sqrt((V**2).sum(dim=0))
-    logging.info(f"norm_of_VandCovinv: {norm_of_VandCovinv[:16]} ... {norm_of_VandCovinv[-16:]}")
-    logging.info(f"S: {S[:16]} ... {S[-16:]}")
 
     # Sanity check, temporarily U and V are large, they will be crop after rank search
     if U.size(0) != out_dim or U.size(1) != min_dim:
@@ -337,4 +312,3 @@ def crop_corda_eigens(model: nn.Module, config: LoraConfig):
             raise ValueError(f"V size mismatch: {module.eigens.V_WC.size(0)} vs. {module.weight.size(1)}")
         if module.eigens.V_WC.size(1) != module.rank:
             raise ValueError(f"V size mismatch: {module.eigens.V_WC.size(1)} vs. {module.rank}")
-    logging.info("CorDA eigens cropped")

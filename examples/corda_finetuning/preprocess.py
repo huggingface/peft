@@ -1,5 +1,4 @@
 import argparse
-import logging
 import os
 
 import numpy as np
@@ -82,7 +81,6 @@ def main(args):
 
 
 if __name__ == "__main__":
-    logging.getLogger().setLevel(logging.INFO)
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--model_id",

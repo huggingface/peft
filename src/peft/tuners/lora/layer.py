@@ -13,7 +13,6 @@
 # limitations under the License.
 from __future__ import annotations
 
-import logging
 import math
 import warnings
 from typing import Any, Optional, Union
@@ -301,12 +300,6 @@ class LoraLayer(BaseTunerLayer):
             raise ValueError("nan or inf in V")
 
         # Sanity check
-        logging.info(f"U.device = {U.device}, S.device = {S.device}, V.device = {V.device}")
-        logging.info(f"weight.data.device = {weight.data.device}")
-        svd_error = torch.dist(U @ torch.diag(S) @ V.t(), weight.data)
-        scale_u = torch.linalg.norm(U) / math.sqrt(r)
-        scale_v = torch.linalg.norm(V) / math.sqrt(r)
-        logging.info(f"scale_u: {scale_u:.2f}, scale_v: {scale_v:.2f}, svd_error: {svd_error:.2f}")
         if U.size(0) != out_dim or U.size(1) != r:
             raise ValueError(f"U size mismatch: {U.size()} vs. ({out_dim}, {r})")
         if S.size(0) != r:
