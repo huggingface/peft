@@ -35,6 +35,7 @@ from peft import (
     AdaLoraConfig,
     EvaConfig,
     IA3Config,
+    LoftQConfig,
     LoKrConfig,
     LoraConfig,
     PeftMixedModel,
@@ -1125,6 +1126,59 @@ class TestLoraInitialization:
         megatron_config = {"does-not": "matter-here"}
         with pytest.raises(ValueError, match="DoRA does not support megatron_core"):
             LoraConfig(target_modules=["linear"], use_dora=True, megatron_config=megatron_config)
+
+    def test_lora_with_bias_extra_params(self):
+        # lora with lora_bias=True
+        model = self.get_model()
+        config = LoraConfig(target_modules=["linear", "conv2d"], lora_bias=False)
+        model_no_bias = get_peft_model(model, config)
+
+        model = self.get_model()
+        config = LoraConfig(target_modules=["linear", "conv2d"], lora_bias=True)
+        model_bias = get_peft_model(model, config)
+
+        # check that bias for LoRA B is set
+        assert model_no_bias.base_model.model.linear.lora_B["default"].bias is None
+        assert model_bias.base_model.model.linear.lora_B["default"].bias.shape == (1000,)
+        assert model_no_bias.base_model.model.conv2d.lora_B["default"].bias is None
+        assert model_bias.base_model.model.conv2d.lora_B["default"].bias.shape == (100,)
+
+        # check that the same params are present except for the extra bias term
+        params_no_bias = {name for name, _ in model_no_bias.named_parameters()}
+        params_bias = {name for name, _ in model_bias.named_parameters()}
+        extra_params = {
+            "base_model.model.linear.lora_B.default.bias",
+            "base_model.model.conv2d.lora_B.default.bias",
+        }
+        assert params_bias - params_no_bias == extra_params
+        assert params_no_bias.issubset(params_bias)
+
+    def test_lora_with_bias_embedding_raises(self):
+        # lora with lora_bias=True is not supported for embedding layers
+        model = self.get_model()
+        config = LoraConfig(target_modules=["embed"], lora_bias=True)
+        msg = "lora_bias=True is not supported for Embedding"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+    @pytest.mark.parametrize(
+        "extra_kwargs",
+        [
+            {"use_dora": True},
+            {"init_lora_weights": "eva"},
+            {"init_lora_weights": "gaussian"},
+            {"init_lora_weights": "loftq", "loftq_config": LoftQConfig()},
+            {"init_lora_weights": "olora"},
+            {"init_lora_weights": "pissa"},
+            {"init_lora_weights": "pissa_niter_3"},
+        ],
+    )
+    def test_lora_with_bias_incompatible_arguments(self, extra_kwargs):
+        # some arguments don't work in conjunction with lora_bias and should raise
+        # just check the common chunk of the error message
+        msg = "The argument lora_bias=True is"
+        with pytest.raises(ValueError, match=msg):
+            LoraConfig(target_modules=["linear"], lora_bias=True, **extra_kwargs)
 
 
 class TestLokrInitialization:

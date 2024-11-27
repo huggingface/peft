@@ -50,8 +50,12 @@ class LoraParallelLinear(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        lora_bias: bool = False,
         **kwargs,
     ):
+        if lora_bias:
+            raise ValueError(f"{self.__class__.__name__} does not support lora_bias yet, set it to False")
+
         super().__init__()
         LoraLayer.__init__(self, base_layer=base_layer, **kwargs)
 
