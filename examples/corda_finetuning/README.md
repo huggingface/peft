@@ -3,28 +3,69 @@
 ## Introduction
 
 
-Existing PEFT methods are mostly agnoistic of the context of a task of concern, e.g., a downstream task to learn or some pre-trained world knowledge to maintain.
+Existing PEFT methods are mostly agnostic of the context of a task of concern, e.g., a downstream task to learn or some pre-trained world knowledge to maintain.
 [CorDA](https://openreview.net/pdf?id=Gi00NVru6n) builds task-aware LoRA adapters from weight decomposition oriented by the context of the task concerned. 
 
-Concretely, CorDA randomly collect a few (usually 256) data samples from a target task, e.g. questions from a QA dataset or instructions to write a code or solve a math problem, and feed these samples into a pre-trained LLM. We can obtain the covariance matrix of the input activation of each linear layer, i.e., $C=XX^T\in\mathcal{R}^{d_{in}\times d_{in}}$, where $X$ is the input of this linear layer. 
-We then perform singular value decomposition (SVD) for the weight $W\in \mathcal{R}^{d_{out}\times d_{in}}$ multiplied by the covariance matrix, i.e., $\verb|SVD|(WC) = U\Sigma V^T$, where $U$ and $V$ are singular vectors and $\Sigma$ is the diagonal matrix with the singular values arranged in descending order. In this way, the context expressed by these representative covariance matrices is able to orientate the decomposition, such that the principal components are most associated with the task of concern. To ensure the same inference result with the pre-trained model at the start of adaptation, we multiply the inverse of these covariance matrices with the decomposed components, $\hat{W}=U\Sigma V^T C^{-1}$, where $\hat{W}$ is the weight after decomposition and reconstruction. 
+Concretely, CorDA randomly collects a few (by default 256) data samples from a target task, e.g. questions from a QA dataset or instructions to write a code or solve a math problem, and feeds these samples into a pre-trained LLM. We can obtain the covariance matrix of the input activation of each linear layer, i.e., $C=XX^T\in\mathcal{R}^{d_{in}\times d_{in}}$. 
+We then perform singular value decomposition (SVD) for the weight $W\in \mathcal{R}^{d_{out}\times d_{in}}$ multiplied by the covariance matrix, i.e., $\verb|SVD|(WC) = U\Sigma V^T$. In this way, the context expressed by these representative covariance matrices is able to orientate the decomposition, such that the principal components (the singular vectors with the largest singular values) are most associated with the task of concern (please refer to Fig.2 of our paper for the advantage of our decomposition over the plain SVD). To ensure the same inference result with the pre-trained model at the start of adaptation, we multiply the inverse of these covariance matrices with the decomposed components, i.e., $\hat{W}=U\Sigma V^T C^{-1}$. 
 
-Thanks to the task-awareness, CorDA enables two optional modes, **knowledge-preserving adaptation mode (KPM)** and **instruction-previewed adaptation mode (IPM**). In KPM, we use questions from question-answering dataset whose knowledge needs to be preserved, such as TriviaQA and NQopen, to obtain the covariance matrices. After our context-oriented decomposition, we use the components with the smallest $r$ singular values, $U_{[:,-r:]}$, $\Sigma_{[-r:]}$, and $(V^T C^{-1})_{[-r:,:]}$ to initialize the learnable LoRA adapters $A=\sqrt{\Sigma}_{[-r:]}(V^T C^{-1})_{[-r:,:]}$ and $B=U_{[:,-r:]}\sqrt{\Sigma}_{[-r:]}$. The other components that compact the question-answering ability are frozen during adaptation. 
-KPM enables to learn new tasks effectively while keeping the world knowledge associated with $C$ as sound
-as possible.
-Alternatively, when one only aims to achieve performance as high as possible on the finetuning task without concern for world knowledge maintenance, our IPM will be favored. 
-In this mode, CorDA uses the instruction and response from the fine-tuning task (e.g., Math or Code) to produce the covariance matrices. The principal components with large singular values capturing the characteristics of the finetuning task in advance can better accommodate the new ability. So we initialize adapters as $A= \sqrt{\Sigma}_{[:r]} (V^T C^{-1})_{[:r,:]}$ and $B =U_{[:,:r]} \sqrt{\Sigma}_{[:r]}$, and freeze the remaining components. The implementations of KPM and IPM are compared as follows:
+Thanks to the task-awareness, you can choose how to utilize the task-specific principal components. For examples, if you want to adapt a model to a new task without losing the knowledge of a question-answering dataset, e.g., TriviaQA and NQopen, you can sample questions from this dataset to collect covariance matrices, and keep the principal components frozen because they compact the ability of this dataset, while using the lowest components with the smallest $r$ singular values to initialize the learnable LoRA adapters. This is achieved by the **knowledge-preserved mode (KPM)** of CorDA, which learns new tasks effectively while keeping the world knowledge you are concerned about as sound as possible. Alternatively, when your primary objective is to maximize performance on the finetuning task, disregarding the preservation of world knowledge, the **instruction-previewed mode (IPM**) will be favored. In this mode, CorDA uses the instruction and response from the fine-tuning task (e.g., Math or Code) to produce the covariance matrices. The principal components with the largest $r$ singular values, capturing the characteristics of the finetuning task in advance, can better adapt to the new ability, so they are used to initialize the LoRA adapters, with the remaining components frozen. IPM can further accelerate convergence to enhance the fine-tuning performance on downstream tasks.
+
+
+The implementations of KPM and IPM are compared as follows:
 
 | Mode | Collect covariance from | LoRA $A$ | LoRA $B$ |
 |---|---|---|---
-|KPM | questions from a knowledge benchmark to maintain | $A=\sqrt{\Sigma}_{[-r:]}(V^T C^{-1})_{[-r:,:]}$ | $B=U_{[:,-r:]}\sqrt{\Sigma}_{[-r:]}$ |
-IPM | instructions and responses from a downstream task to learn | $A= \sqrt{\Sigma}_{[:r]} (V^T C^{-1})_{[:r,:]}$ | $B =U_{[:,:r]} \sqrt{\Sigma}_{[:r]}$ |
+|KPM | questions from the knowledge benchmark to maintain | $A=\sqrt{\Sigma}\_{[-r:]}(V^T C^{-1})\_{[-r:,:]}$ | $B=U_{[:,-r:]}\sqrt{\Sigma}_{[-r:]}$ |
+IPM | instructions and responses from the downstream task to learn | $A= \sqrt{\Sigma}\_{[:r]} (V^T C^{-1})\_{[:r,:]}$ | $B =U_{[:,:r]} \sqrt{\Sigma}_{[:r]}$ |
 
+### Comparison with alternative methods
+
+The distinction between CorDA with other similar LoRA initialization methods is summarized as follows:
+
+| Method | Initialization for | SVD on | Data-driven | Support knowledge maintenance |
+| - | - | - | - | - |
+| PiSSA | $A$ and $B$ | weights | no | no |
+| EVA | $A$ | activations | yes | no |
+|CorDA |  $A$ and $B$ | weights (oriented by covariance) | yes | yes |
+
+### Some Results
+
+- Performance with knowledge-preserved mode (sample from NQopen, fine-tune on Math)
+
+| Method | Model | NQ open | GSM8k | Math | Avg. |
+|---|---|---|---|---|---|
+|Pre-trained|Llama-2-7b| 14.99 | -| - | - |
+|LoRA|Llama-2-7b|1.27| 42.68 | 5.88 | 16.61 |
+|**CorDA (KPM)** |Llama-2-7b| **8.20** | **46.32**	| **7.00** | **20.51** |
+|Pre-trained|Llama-2-13b|23.63|-|-|-|
+|LoRA|Llama-2-13b| 16.26 | 57.24 | 8.92 | 27.47 |
+|**CorDA (KPM)** |Llama-2-13b| **19.86** | **59.29** | **9.62** | **29.59** |
+|Pre-trained|Llama-3-8b|13.41|-|-|-|
+|LoRA|Llama-3-8b| 8.75 | 72.33 | 24.04| 35.04 |
+|**CorDA (KPM)** |Llama-3-8b| **9.61** | **74.68** | **25.34** | **36.54** |
+|Pre-trained|Gemma-2-9b|12.85|-|-|-|
+|LoRA|Gemma-2-9b| 9.28 | 83.47 | 42.30| 45.02 |
+|**CorDA (KPM)** |Gemma-2-9b|**10.17** | **84.08** | **42.64** | **45.63** |
+
+- Performance with instruction-previewed mode (sample from Math, fine-tune on Math)
+
+| Method | Model | GSM8k | Math |
+| --- | --- | --- | ---|
+|LoRA| Llama-2-7b | 42.68 | 5.88 |
+|PiSSA | Llama-2-7b | 51.63 | 7.32 |
+| **CorDA (IPM)** | Llama-2-7b | **53.45** | **8.64** |
+|LoRA| Llama-2-13b | 57.24 | 8.92 |
+|PiSSA | Llama-2-13b |60.88	| 11.08|
+| **CorDA (IPM)** | Llama-2-13b | **62.47** |**11.54** |
+|LoRA| Gemma-2-9b | 83.47 |	42.30 |
+|PiSSA | Gemma-2-9b | 84.23	| 43.52|
+| **CorDA (IPM)** | Gemma-2-9b | **84.45** | **43.88** |
 
 
 ## Quick Start
 
-- Knowledge-preserving adaptation mode
+- Knowledge-preserved adaptation mode
 
 ```py
 import torch
@@ -116,6 +157,7 @@ trainer = SFTTrainer(
 trainer.train()
 peft_model.save_pretrained("corda-llama-2-7b")
 ```
+
 
 ## Citation
 ```

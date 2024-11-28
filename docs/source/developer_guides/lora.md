@@ -56,7 +56,7 @@ For detailed instruction on using PiSSA, please follow [these instructions](http
 
 ### CorDA
 
-[CorDA](https://arxiv.org/pdf/2406.05223) builds task-aware LoRA adapters from weight decomposition oriented by the context of downstream task to learn (IPM) or world knowledge to maintain (KPM).
+[CorDA](https://arxiv.org/pdf/2406.05223) builds task-aware LoRA adapters from weight decomposition oriented by the context of downstream task to learn (instruction-previewed mode, IPM) or world knowledge to maintain (knowledge-preserved mode, KPM).
 The KPM not only achieves better performance than LoRA on fine-tuning tasks, but also mitigates the catastrophic forgetting of pre-trained world knowledge.
 When preserving pre-trained knowledge is not a concern, 
 the IPM is favored because it can further accelerate convergence and enhance the fine-tuning performance. 
