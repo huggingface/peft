@@ -35,6 +35,7 @@ from transformers.pytorch_utils import Conv1D
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
+    BoneConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -294,6 +295,22 @@ TEST_CASES = [
     ("Vanilla MLP 3 HRA", "MLP", HRAConfig, {"target_modules": ["lin0", "lin1"]}),
     ("Vanilla MLP 5 HRA", "MLP", HRAConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
     ("Conv2d 1 HRA", "Conv2d", HRAConfig, {"target_modules": ["conv2d"]}),
+    ########
+    # Bone #
+    ########
+    ("Vanilla MLP 1 Bone", "MLP", BoneConfig, {"target_modules": "lin0", "r": 2}),
+    ("Vanilla MLP 2 Bone", "MLP", BoneConfig, {"target_modules": ["lin0"], "r": 2}),
+    ("Vanilla MLP 3 Bone", "MLP", BoneConfig, {"target_modules": ["lin0", "lin1"], "r": 2}),
+    ("Vanilla MLP 5 Bone", "MLP", BoneConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "r": 2}),
+    ("Vanilla MLP 1 Bone", "MLP", BoneConfig, {"target_modules": "lin0", "r": 2, "init_weights": "bat"}),
+    ("Vanilla MLP 2 Bone", "MLP", BoneConfig, {"target_modules": ["lin0"], "r": 2, "init_weights": "bat"}),
+    ("Vanilla MLP 3 Bone", "MLP", BoneConfig, {"target_modules": ["lin0", "lin1"], "r": 2, "init_weights": "bat"}),
+    (
+        "Vanilla MLP 5 Bone",
+        "MLP",
+        BoneConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "r": 2, "init_weights": "bat"},
+    ),
     #############
     # LN Tuning #
     #############
@@ -559,6 +576,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin1"], "init_weights": False},
     ),
     (
+        "Bone Same",
+        "bone",
+        BoneConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "r": 2},
+        {"target_modules": ["lin0"], "init_weights": False, "r": 2},
+    ),
+    (
+        "Bone Different",
+        "bone",
+        BoneConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "r": 2},
+        {"target_modules": ["lin1"], "init_weights": False, "r": 2},
+    ),
+    (
         "VBLoRA Same",
         "vblora",
         VBLoRAConfig,
@@ -600,6 +631,7 @@ PREFIXES = {
     FourierFTConfig: "fourierft_",
     HRAConfig: "hra_",
     VBLoRAConfig: "vblora_",
+    BoneConfig: "bone_",
 }
 
 
@@ -1420,13 +1452,16 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert "default" in model.base_model.classifier.modules_to_save
         assert "other" in model.base_model.classifier.modules_to_save
 
-    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig])
+    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig])
     def test_multiple_adapters_mixed_modules_to_save(self, config_cls):
         # See issue 1574
         # Check that we can have a model where one adapter has modules_to_save and the other doesn't. It should be
         # possible to switch between those adapters and to use them.
         if hasattr(config_cls, "feedforward_modules"):  # IA³
             config_cls = partial(config_cls, feedforward_modules=["lin0"])
+
+        if config_cls == BoneConfig:
+            config_cls = partial(config_cls, r=2)
 
         config0 = config_cls(target_modules=["lin0"], modules_to_save=["lin1"])
         config1 = config_cls(target_modules=["lin0"])
@@ -1445,12 +1480,15 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model.set_adapter("other")
         model(**inputs)
 
-    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig])
+    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig])
     def test_multiple_adapters_mixed_modules_to_save_order_switched(self, config_cls):
         # See issue 1574
         # Same test as test_multiple_adapters_mixed_modules_to_save, but this time the 2nd adapter has modules_to_save.
         if hasattr(config_cls, "feedforward_modules"):  # IA³
             config_cls = partial(config_cls, feedforward_modules=["lin0"])
+
+        if config_cls == BoneConfig:
+            config_cls = partial(config_cls, r=2)
 
         config0 = config_cls(target_modules=["lin0"])
         config1 = config_cls(target_modules=["lin0"], modules_to_save=["lin1"])
@@ -1651,6 +1689,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             OFTConfig(target_modules=["lin0"], init_weights=False, r=2),
             BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
             HRAConfig(target_modules=["lin0"], init_weights=False),
+            BoneConfig(target_modules=["lin0"], init_weights=False, r=2),
         ]
     )
     def test_adapter_name_makes_no_difference(self, config0):
@@ -2885,6 +2924,83 @@ class RequiresGradTester(unittest.TestCase):
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.hra_u.adapter1",
+        )
+
+    def test_requires_grad_bone_different_targets(self):
+        # test two different HRA adapters that target different modules
+        config0 = BoneConfig(target_modules=["lin0"], r=2)
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = BoneConfig(target_modules=["lin1"], r=2, inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.bone_block.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.bone_block.default",
+        )
+
+        # change activate pter to pter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.bone_block.adapter1",
+        )
+
+        # disable all pters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.bone_block.adapter1",
+        )
+
+    def test_requires_grad_bone_same_targets(self):
+        # same as previous test, except that HRA adapters target the same layer
+        config0 = BoneConfig(target_modules=["lin0"], r=2)
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = BoneConfig(target_modules=["lin0"], r=2, inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.bone_block.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.bone_block.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.bone_block.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.bone_block.adapter1",
         )
 
     def test_requires_grad_boft_different_targets(self):

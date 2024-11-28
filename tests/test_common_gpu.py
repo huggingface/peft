@@ -639,7 +639,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         )
         model = get_peft_model(model, config)
 
-        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(0)
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
         _ = model(random_input)
 
     @require_torch_multi_gpu
@@ -662,7 +662,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         )
         model = get_peft_model(model, config)
 
-        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(0)
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
         _ = model(random_input)
 
     @require_torch_gpu
@@ -734,7 +734,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         original_module = lm_head.original_module
         modules_to_save = lm_head.modules_to_save.default
 
-        inputs = torch.randn(1024)
+        inputs = torch.randn(1024).to(model.device)
         o1 = lm_head(inputs)
         o1.mean().backward()
 

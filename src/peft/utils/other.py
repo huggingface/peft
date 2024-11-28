@@ -16,6 +16,7 @@ from __future__ import annotations
 import copy
 import inspect
 import os
+import re
 import warnings
 from contextlib import nullcontext
 from typing import Any, Optional
@@ -25,7 +26,7 @@ import torch
 from accelerate.hooks import add_hook_to_module, remove_hook_from_module
 from accelerate.utils import is_npu_available, is_xpu_available
 from huggingface_hub import file_exists
-from huggingface_hub.utils import EntryNotFoundError, HFValidationError
+from huggingface_hub.errors import EntryNotFoundError, HFValidationError
 from packaging import version
 from safetensors.torch import storage_ptr, storage_size
 
@@ -718,3 +719,8 @@ def check_file_exists_on_hf_hub(repo_id: str, filename: str, **kwargs) -> Option
         )
 
     return exists
+
+
+def get_pattern_key(pattern_keys, key_to_match):
+    """Match a substring of key_to_match in pattern keys"""
+    return next(filter(lambda key: re.match(rf".*\.{key}$", key_to_match), pattern_keys), key_to_match)

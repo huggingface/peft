@@ -32,6 +32,8 @@ from safetensors.torch import save_file
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
+    BoneConfig,
+    CPTConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -119,6 +121,17 @@ CONFIG_TESTING_KWARGS = (
     {
         "target_modules": None,
     },
+    # Bone
+    {
+        "target_modules": None,
+        "r": 2,
+    },
+    # CPT tuninig
+    {
+        "cpt_token_ids": [0, 1, 2, 3, 4, 5, 6, 7],  # Example token IDs for testing
+        "cpt_mask": [1, 1, 1, 1, 1, 1, 1, 1],
+        "cpt_tokens_type_mask": [1, 2, 2, 2, 3, 3, 4, 4],
+    },
 )
 
 CLASSES_MAPPING = {
@@ -134,7 +147,10 @@ CLASSES_MAPPING = {
     "hra": (HRAConfig, CONFIG_TESTING_KWARGS[9]),
     "vblora": (VBLoRAConfig, CONFIG_TESTING_KWARGS[10]),
     "oft": (OFTConfig, CONFIG_TESTING_KWARGS[11]),
+    "bone": (BoneConfig, CONFIG_TESTING_KWARGS[12]),
 }
+
+DECODER_MODELS_EXTRA = {"cpt": (CPTConfig, CONFIG_TESTING_KWARGS[13])}
 
 
 # Adapted from https://github.com/huggingface/transformers/blob/48327c57182fdade7f7797d1eaad2d166de5c55b/src/transformers/activations.py#LL166C7-L166C22
@@ -200,6 +216,7 @@ class ClassInstantier(OrderedDict):
 
 
 PeftTestConfigManager = ClassInstantier(CLASSES_MAPPING)
+PeftTestConfigManagerForDecoderModels = ClassInstantier({**CLASSES_MAPPING, **DECODER_MODELS_EXTRA})
 
 
 class PeftCommonTester:
@@ -732,6 +749,7 @@ class PeftCommonTester:
             PeftType.OFT,
             PeftType.BOFT,
             PeftType.HRA,
+            PeftType.BONE,
         ]
 
         if ("gpt2" in model_id.lower()) and (config_cls == IA3Config):
@@ -1109,7 +1127,7 @@ class PeftCommonTester:
         assert nb_trainable < nb_trainable_all
 
     def _test_training_gradient_checkpointing(self, model_id, config_cls, config_kwargs):
-        if issubclass(config_cls, PromptLearningConfig):
+        if config_cls == PrefixTuningConfig:
             return pytest.skip(f"Test not applicable for {config_cls}")
 
         if (config_cls == AdaLoraConfig) and ("roberta" in model_id.lower()):
@@ -1143,7 +1161,14 @@ class PeftCommonTester:
         loss.backward()
 
         for n, param in model.named_parameters():
-            if model.prefix in n:
+            if "prompt_encoder." in n:  # prompt tuning methods
+                if not issubclass(config_cls, CPTConfig):
+                    assert param.grad is not None
+                elif (
+                    "delta_embedding" in n
+                ):  # delta_embedding is the embedding that should be updated with grads in CPT
+                    assert param.grad is not None
+            elif hasattr(model, "prefix") and (model.prefix in n):  # non-prompt tuning methods
                 assert param.grad is not None
             else:
                 assert param.grad is None
@@ -1189,8 +1214,16 @@ class PeftCommonTester:
         loss = output.sum()
         loss.backward()
 
+        if issubclass(config_cls, CPTConfig):
+            parameters = []
+            for name, param in model.prompt_encoder.named_parameters():
+                if name != "default.embedding.weight":
+                    parameters.append(param)
+        else:
+            parameters = model.prompt_encoder.parameters()
+
         # check that prompt encoder has grads
-        for param in model.prompt_encoder.parameters():
+        for param in parameters:
             assert param.grad is not None
 
     def _test_delete_adapter(self, model_id, config_cls, config_kwargs):
@@ -1205,6 +1238,7 @@ class PeftCommonTester:
             PeftType.FOURIERFT,
             PeftType.HRA,
             PeftType.VBLORA,
+            PeftType.BONE,
         ]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
@@ -1253,6 +1287,7 @@ class PeftCommonTester:
             PeftType.FOURIERFT,
             PeftType.HRA,
             PeftType.VBLORA,
+            PeftType.BONE,
         ]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
@@ -1298,7 +1333,18 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        if config.peft_type not in ("LORA", "ADALORA", "IA3", "BOFT", "OFT", "VERA", "FOURIERFT", "HRA", "VBLORA"):
+        if config.peft_type not in (
+            "LORA",
+            "ADALORA",
+            "IA3",
+            "BOFT",
+            "OFT",
+            "VERA",
+            "FOURIERFT",
+            "HRA",
+            "VBLORA",
+            "BONE",
+        ):
             with pytest.raises(AttributeError):
                 model = model.unload()
         else:

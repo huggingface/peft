@@ -52,7 +52,7 @@ Alternatively, execute fast SVD, which takes only a few seconds. The number of i
 ```python
 lora_config = LoraConfig(init_lora_weights="pissa_niter_[number of iters]", ...) 
 ```
-For detailed instruction on using PiSSA, please follow [these instructions](https://github.com/fxmeng/peft/tree/main/examples/pissa_finetuning).
+For detailed instruction on using PiSSA, please follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/pissa_finetuning).
 
 ### OLoRA
 [OLoRA](https://arxiv.org/abs/2406.01775) utilizes QR decomposition to initialize the LoRA adapters. OLoRA translates the base weights of the model by a factor of their QR decompositions, i.e., it mutates the weights before performing any training on them. This approach significantly improves stability, accelerates convergence speed, and ultimately achieves superior performance.
@@ -63,6 +63,37 @@ from peft import LoraConfig
 config = LoraConfig(init_lora_weights="olora", ...)
 ```
 For more advanced usage, please refer to our [documentation](https://github.com/huggingface/peft/tree/main/examples/olora_finetuning).
+
+### EVA
+[EVA](https://arxiv.org/pdf/2410.07170) performs SVD on the input activations of each layer and uses the right-singular vectors to initialize LoRA weights. It is therefore a data-driven initialization scheme. Furthermore EVA adaptively allocates ranks across layers based on their "explained variance ratio" - a metric derived from the SVD analysis.
+
+You can use EVA by setting `init_lora_weights="eva"` and defining [`EvaConfig`] in [`LoraConfig`]:
+```python
+from peft import LoraConfig, EvaConfig
+peft_config = LoraConfig(
+    init_lora_weights = "eva",
+    eva_config = EvaConfig(rho = 2.0),
+    ...
+)
+```
+The parameter `rho` (≥ 1.0) determines how much redistribution is allowed. When `rho=1.0` and `r=16`, LoRA adapters are limited to exactly 16 ranks, preventing any redistribution from occurring. A recommended value for EVA with redistribution is 2.0, meaning the maximum rank allowed for a layer is 2r.
+
+It is recommended to perform EVA initialization on a GPU as it is much faster. To optimize the amount of available memory for EVA, you can use the `low_cpu_mem_usage` flag in [`get_peft_model`]:
+```python
+peft_model = get_peft_model(model, peft_config, low_cpu_mem_usage=True)
+```
+Then, call [`initialize_lora_eva_weights`] to initialize the EVA weights (in most cases the dataloader used for eva initialization can be the same as the one used for finetuning):
+```python
+initialize_lora_eva_weights(peft_model, dataloader)
+```
+EVA works out of the box with bitsandbytes. Simply initialize the model with `quantization_config` and call [`initialize_lora_eva_weights`] as usual.
+
+<Tip>
+
+For further instructions on using EVA, please refer to our [documentation](https://github.com/huggingface/peft/tree/main/examples/eva_finetuning).
+
+</Tip>
+
 ### LoftQ
 
 #### Standard approach

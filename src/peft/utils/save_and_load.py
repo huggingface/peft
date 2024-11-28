@@ -20,7 +20,7 @@ from typing import Optional
 import huggingface_hub
 import torch
 from huggingface_hub import file_exists, hf_hub_download
-from huggingface_hub.utils import EntryNotFoundError, LocalEntryNotFoundError
+from huggingface_hub.errors import EntryNotFoundError, LocalEntryNotFoundError
 from packaging import version
 from safetensors.torch import load_file as safe_load_file
 
@@ -208,6 +208,8 @@ def get_peft_model_state_dict(
         to_return["base_model.vblora_vector_bank." + adapter_name] = state_dict[
             "base_model.vblora_vector_bank." + adapter_name
         ]
+    elif config.peft_type == PeftType.BONE:
+        to_return = {k: state_dict[k] for k in state_dict if "bone_" in k}
     else:
         raise ValueError(f"Unknown PEFT type passed: {config.peft_type}")
 

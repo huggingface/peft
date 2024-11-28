@@ -264,7 +264,7 @@ def main():
 
         dataset = DatasetDict({"train": train_dataset, "validation": val_dataset})
     else:
-        dataset = load_dataset(args.dataset_name)
+        dataset = load_dataset(args.dataset_name, revision="main")
 
     def preprocess_function(examples):
         queries = examples["query"]

@@ -53,6 +53,7 @@ from .tuners import (
     LoraConfig,
     LoraRuntimeConfig,
     LoftQConfig,
+    EvaConfig,
     LoraModel,
     LoHaConfig,
     LoHaModel,
@@ -91,6 +92,12 @@ from .tuners import (
     HRAConfig,
     HRAModel,
     VBLoRAConfig,
+    get_eva_state_dict,
+    initialize_lora_eva_weights,
+    CPTEmbedding,
+    CPTConfig,
+    BoneConfig,
+    BoneModel,
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
