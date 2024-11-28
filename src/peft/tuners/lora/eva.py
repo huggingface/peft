@@ -43,8 +43,14 @@ class _Hook:
     A base class for hooks that prepares layer inputs for EVA.
     """
 
-    def __init__(self, name: str, prepare_layer_inputs_fn: Optional[callable] = None):
+    def __init__(
+        self,
+        name: str,
+        prepare_layer_inputs_fn: Optional[callable] = None,
+        gather_distributed_inputs: bool = True,
+    ):
         self.name = name
+        self.gather_distributed_inputs = gather_distributed_inputs
         if prepare_layer_inputs_fn is None:
             self._prepare_layer_inputs_fn = self._prepare_layer_inputs_fn_default
         else:
@@ -71,9 +77,8 @@ class _Hook:
     def prepare_layer_inputs(self, layer_input):
         return self._prepare_layer_inputs_fn(layer_input, self.model_input, self.name)
 
-    @staticmethod
-    def gather_layer_inputs(layer_input):
-        if dist.is_initialized():
+    def gather_layer_inputs(self, layer_input):
+        if dist.is_initialized() and self.gather_distributed_inputs:
             world_size = dist.get_world_size()
 
             # First gather sizes from all processes more efficiently
@@ -116,12 +121,11 @@ class SVDHook(_Hook):
 
     def __init__(
         self,
-        name: str,
         n_components: int,
         sim_thresh: Union[float, torch.Tensor],
-        prepare_layer_inputs_fn: Optional[callable] = None,
+        **base_class_kwargs,
     ):
-        super().__init__(name, prepare_layer_inputs_fn)
+        super().__init__(**base_class_kwargs)
         self.n_components = n_components
         self.sim_thresh = sim_thresh
         if isinstance(sim_thresh, torch.Tensor) and len(sim_thresh.shape) > 0:
@@ -131,7 +135,12 @@ class SVDHook(_Hook):
                 raise ValueError(
                     "if sim_thresh is a tensor with more than 0 dimensions it must have shape (n_components,) or (1,)"
                 )
-        self.svd = IncrementalPCA(n_components=n_components, copy=True, lowrank=True)
+        self.svd = IncrementalPCA(
+            n_components=n_components,
+            copy=True,
+            lowrank=True,
+            lowrank_seed=42,
+        )
         self.model_input = None
         self.converged = torch.zeros((n_components,), dtype=torch.bool)
 
@@ -174,12 +183,8 @@ class HashHook(_Hook):
         prepare_layer_inputs_fn (Optional[callable]): Function to prepare layer inputs for hashing.
     """
 
-    def __init__(
-        self,
-        name: str,
-        prepare_layer_inputs_fn: Optional[callable] = None,
-    ):
-        super().__init__(name, prepare_layer_inputs_fn)
+    def __init__(self, **base_class_kwargs):
+        super().__init__(**base_class_kwargs)
         self.hashed_inputs = []
 
     @staticmethod
@@ -289,11 +294,9 @@ def _get_eva_state_dict(
     forward_fn: Optional[callable],
     prepare_model_inputs_fn: Optional[callable],
     prepare_layer_inputs_fn: Union[callable, Dict[str, callable], None],
+    gather_distributed_inputs: bool,
     show_progress_bar: bool,
 ) -> dict:
-    # Set seeds for reproducibility at the start of EVA computation
-    torch.manual_seed(0)
-
     # Computes the rank distribution for each layer based on the explained variance ratio.
     # when rank_pattern flag is False, all values in max_components are the same
     def _get_rank_distribution(hooks, layer_hook_map, equal_inputs_map, rank_budget, max_components):
@@ -313,6 +316,14 @@ def _get_eva_state_dict(
     # dataloader is not empty
     if len(dataloader) == 0:
         raise ValueError("dataloader is empty")
+
+    # check if dist is initialized
+    if dist.is_initialized() and gather_distributed_inputs:
+        warnings.warn(
+            "torch.distributed is initialized and `gather_distributed_inputs` is True, "
+            "therefore EVA initialization will gather tensors from all ranks. "
+            "Ensure the model does not receive the same inputs on different ranks."
+        )
 
     # for unusually high rho values, define an upper limit
     rho_threshold = 1000
@@ -345,7 +356,7 @@ def _get_eva_state_dict(
             fn = prepare_layer_inputs_fn.pop(name, None)
         else:
             fn = prepare_layer_inputs_fn
-        hook = HashHook(name, fn)
+        hook = HashHook(name=name, prepare_layer_inputs_fn=fn, gather_distributed_inputs=gather_distributed_inputs)
         hook.model_input = model_inputs_for_hooks
         handle = module.register_forward_hook(hook)
         hooks[name] = (hook, handle)
@@ -356,13 +367,15 @@ def _get_eva_state_dict(
         rank_budget += layer_rank
     if isinstance(prepare_layer_inputs_fn, Mapping) and len(prepare_layer_inputs_fn) > 0:
         raise ValueError(
-            f"prepare_layer_inputs_fn is a mapping but the following module names were not found in the model: {prepare_layer_inputs_fn.keys()}"
+            "prepare_layer_inputs_fn is a mapping but the following module names were not found in the model: "
+            f"{prepare_layer_inputs_fn.keys()}"
         )
 
     # forward for one batch to check which layer inputs are equal to avoid unneeded svd calculations
     forward_fn(model, inputs)
     hash_dict = {k: h[0].hashed_inputs[0] for k, h in hooks.items()}
-    # equal input maps groups layers which receive the same input. One layer is defined as the key and receives an svd hook. For the remaining layers the svd results can be skipped.
+    # equal input maps groups layers which receive the same input. One layer is defined as the key and receives an svd
+    # hook. For the remaining layers the svd results can be skipped.
     equal_inputs = list(find_equal_values(hash_dict).values())
     equal_inputs_map = {vv: v[0] for v in equal_inputs for vv in v[1:]}
     # for layers with equal inputs we need to make sure that the max_components are the same
@@ -377,7 +390,13 @@ def _get_eva_state_dict(
         handle.remove()
         if name in equal_inputs_map:
             continue
-        hook = SVDHook(name, max_components[name], peft_config.eva_config.tau, hook._prepare_layer_inputs_fn)
+        hook = SVDHook(
+            n_components=max_components[name],
+            sim_thresh=peft_config.eva_config.tau,
+            name=name,
+            prepare_layer_inputs_fn=hook._prepare_layer_inputs_fn,
+            gather_distributed_inputs=gather_distributed_inputs,
+        )
         module = model.get_submodule(name)
         handle = module.register_forward_hook(hook)
         hooks[name] = (hook, handle)  # adding the old handle here so we dont get errors in the first forward pass
@@ -429,7 +448,8 @@ def _get_eva_state_dict(
 
         forward_fn(model, inputs)
 
-        # in case some hooks have to skip the svd calculation because the number of tokens is less than the number of components
+        # in case some hooks have to skip the svd calculation because the number of tokens is less than the number of
+        # components
         if not all(hasattr(h[0].svd, "components_") for h in hooks.values()):
             continue
 
@@ -477,6 +497,7 @@ def _load_eva_state_dict(
         "lora_dropout": peft_config.lora_dropout,
         "use_rslora": peft_config.use_rslora,
         "use_dora": peft_config.use_dora,
+        "lora_bias": peft_config.lora_bias,
     }
     missing_eva_inits = []
     new_target_modules = []
@@ -546,6 +567,7 @@ def get_eva_state_dict(
     prepare_model_inputs_fn: Optional[callable] = prepare_model_inputs_fn_language_modeling,
     prepare_layer_inputs_fn: Union[callable, Dict[str, callable], None] = prepare_layer_inputs_fn_language_modeling,
     adapter_name: str = "default",
+    gather_distributed_inputs: bool = True,
     show_progress_bar: bool = True,
 ) -> dict:
     """
@@ -579,6 +601,10 @@ def get_eva_state_dict(
             case model_inputs is the mask used to determine which indices should be used for SVD (created by
             `prepare_model_inputs_fn_language_modeling`).
         adapter_name (str): The name of the adapter to compute the SVD for.
+        gather_distributed_inputs (bool):
+            Whether to gather the layer inputs from all ranks. Default is True meaning in a distributed setting the
+            layer inputs will be gathered from all ranks for the SVD computation. For non-distributed settings this
+            argument is ignored. Set to False if you are using a non-distributed dataloader in a distributed setting.
         show_progress_bar (bool): Whether to show a progress bar. Default is True.
 
     Returns:
@@ -624,6 +650,7 @@ def get_eva_state_dict(
             forward_fn=forward_fn,
             prepare_model_inputs_fn=prepare_model_inputs_fn,
             prepare_layer_inputs_fn=prepare_layer_inputs_fn,
+            gather_distributed_inputs=gather_distributed_inputs,
             show_progress_bar=show_progress_bar,
         )
     return eva_state_dict
@@ -638,6 +665,7 @@ def initialize_lora_eva_weights(
     prepare_model_inputs_fn: Optional[callable] = prepare_model_inputs_fn_language_modeling,
     prepare_layer_inputs_fn: Union[callable, Dict[str, callable], None] = prepare_layer_inputs_fn_language_modeling,
     adapter_name: str = "default",
+    gather_distributed_inputs: bool = True,
     show_progress_bar: bool = True,
 ):
     """
@@ -672,6 +700,10 @@ def initialize_lora_eva_weights(
             case model_inputs is the mask used to determine which indices should be used for SVD (created by
             `prepare_model_inputs_fn_language_modeling`).
         adapter_name (str): The name of the adapter to initialize the weights for.
+        gather_distributed_inputs (bool):
+            Whether to gather the layer inputs from all ranks. Default is True meaning in a distributed setting the
+            layer inputs will be gathered from all ranks for the SVD computation. For non-distributed settings this
+            argument is ignored. Set to False if you are using a non-distributed dataloader in a distributed setting.
         show_progress_bar (bool): Whether to show a progress bar. Default is True.
 
     Returns:
@@ -700,6 +732,7 @@ def initialize_lora_eva_weights(
             prepare_model_inputs_fn=prepare_model_inputs_fn,
             prepare_layer_inputs_fn=prepare_layer_inputs_fn,
             adapter_name=adapter_name,
+            gather_distributed_inputs=gather_distributed_inputs,
             show_progress_bar=show_progress_bar,
         )
 

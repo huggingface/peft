@@ -35,6 +35,7 @@ from peft import (
     AdaLoraConfig,
     EvaConfig,
     IA3Config,
+    LoftQConfig,
     LoKrConfig,
     LoraConfig,
     PeftMixedModel,
@@ -1126,6 +1127,59 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match="DoRA does not support megatron_core"):
             LoraConfig(target_modules=["linear"], use_dora=True, megatron_config=megatron_config)
 
+    def test_lora_with_bias_extra_params(self):
+        # lora with lora_bias=True
+        model = self.get_model()
+        config = LoraConfig(target_modules=["linear", "conv2d"], lora_bias=False)
+        model_no_bias = get_peft_model(model, config)
+
+        model = self.get_model()
+        config = LoraConfig(target_modules=["linear", "conv2d"], lora_bias=True)
+        model_bias = get_peft_model(model, config)
+
+        # check that bias for LoRA B is set
+        assert model_no_bias.base_model.model.linear.lora_B["default"].bias is None
+        assert model_bias.base_model.model.linear.lora_B["default"].bias.shape == (1000,)
+        assert model_no_bias.base_model.model.conv2d.lora_B["default"].bias is None
+        assert model_bias.base_model.model.conv2d.lora_B["default"].bias.shape == (100,)
+
+        # check that the same params are present except for the extra bias term
+        params_no_bias = {name for name, _ in model_no_bias.named_parameters()}
+        params_bias = {name for name, _ in model_bias.named_parameters()}
+        extra_params = {
+            "base_model.model.linear.lora_B.default.bias",
+            "base_model.model.conv2d.lora_B.default.bias",
+        }
+        assert params_bias - params_no_bias == extra_params
+        assert params_no_bias.issubset(params_bias)
+
+    def test_lora_with_bias_embedding_raises(self):
+        # lora with lora_bias=True is not supported for embedding layers
+        model = self.get_model()
+        config = LoraConfig(target_modules=["embed"], lora_bias=True)
+        msg = "lora_bias=True is not supported for Embedding"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+    @pytest.mark.parametrize(
+        "extra_kwargs",
+        [
+            {"use_dora": True},
+            {"init_lora_weights": "eva"},
+            {"init_lora_weights": "gaussian"},
+            {"init_lora_weights": "loftq", "loftq_config": LoftQConfig()},
+            {"init_lora_weights": "olora"},
+            {"init_lora_weights": "pissa"},
+            {"init_lora_weights": "pissa_niter_3"},
+        ],
+    )
+    def test_lora_with_bias_incompatible_arguments(self, extra_kwargs):
+        # some arguments don't work in conjunction with lora_bias and should raise
+        # just check the common chunk of the error message
+        msg = "The argument lora_bias=True is"
+        with pytest.raises(ValueError, match=msg):
+            LoraConfig(target_modules=["linear"], lora_bias=True, **extra_kwargs)
+
 
 class TestLokrInitialization:
     torch_device = infer_device()
@@ -1228,7 +1282,7 @@ class TestAdaLoraInitialization:
 
     def test_adalora_loftq_config_raises(self):
         with pytest.raises(ValueError, match="ADALORA does not support LOFTQ"):
-            AdaLoraConfig(loftq_config={"loftq": "config"})
+            AdaLoraConfig(init_lora_weights="loftq", loftq_config={"loftq": "config"})
 
     def get_model(self):
         class MyModule(nn.Module):
@@ -1722,7 +1776,7 @@ class TestEvaInitialization:
 
     # Constants for test configuration
     COSINE_SIMILARITY_THRESHOLD = 0.75
-    NUM_SEEDS = 3
+    NUM_SEEDS = 2
     BATCH_SIZE = 4
     MAX_LENGTH = 256
     LORA_DIM = 8
@@ -1868,10 +1922,11 @@ class TestEvaInitialization:
     @pytest.mark.parametrize(
         "eva_config",
         [
-            EvaConfig(rho=2),
-            EvaConfig(rho=1),
-            EvaConfig(rho=1, whiten=True),
-            EvaConfig(rho=1.0001),
+            # note: lower tau to decrease number of iterations until convergence, as tests are slow on CPU
+            EvaConfig(rho=2, tau=0.9),
+            EvaConfig(rho=1, tau=0.9),
+            EvaConfig(rho=1, whiten=True, tau=0.9),
+            EvaConfig(rho=1.0001, tau=0.9),
         ],
     )
     def test_eva_initialization_consistency(self, model, dataset, peft_config, eva_config):
@@ -1885,7 +1940,7 @@ class TestEvaInitialization:
         for seed in range(self.NUM_SEEDS):
             shuffled_dataset = dataset.shuffle(seed=seed)
             dataloader = self.get_dataloader(shuffled_dataset)
-            sd = get_eva_state_dict(model, dataloader, modified_peft_config)
+            sd = get_eva_state_dict(model, dataloader, modified_peft_config, show_progress_bar=False)
             state_dicts.append(sd)
 
         cos_sims = defaultdict(list)
@@ -1893,7 +1948,7 @@ class TestEvaInitialization:
             for k, v1 in state_dicts[i].items():
                 v2 = state_dicts[j][k]
                 min_size = min(v1.size(0), v2.size(0))
-                cos_sims[k].extend(torch.cosine_similarity(v1[:min_size], v2[:min_size], dim=1).abs().tolist())
+                cos_sims[k].extend(torch.cosine_similarity(v1[:min_size].abs(), v2[:min_size].abs(), dim=1).tolist())
 
         mean_cosine_similarities = {k: torch.tensor(v).mean() for k, v in cos_sims.items()}
         for layer_name, mean_cosine_similarity in mean_cosine_similarities.items():

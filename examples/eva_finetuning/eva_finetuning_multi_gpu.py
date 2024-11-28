@@ -87,7 +87,7 @@ sampler.set_epoch(0)
 
 # Wrap model in DDP
 model = model.to(local_rank)
-model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=False)
+model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
 # setup peft config
 eva_config = EvaConfig(rho=rho)
