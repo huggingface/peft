@@ -20,6 +20,7 @@ import torch
 
 from peft.config import PeftConfig
 from peft.mapping import PEFT_TYPE_TO_CONFIG_MAPPING
+from peft.tuners.lora import Conv2d, Linear, LoraConfig, LoraLayer
 
 from .constants import PEFT_TYPE_TO_PREFIX_MAPPING
 from .other import get_pattern_key, infer_device
@@ -40,6 +41,139 @@ def _update_scaling(lora_module, adapter_name, scaling=None):
         raise ValueError("TODO")
 
     lora_module.scaling[adapter_name].fill_(scaling)
+
+
+def _convert_scalings_to_tensor(model):
+    """TODO"""
+    for module in model.modules():
+        if not isinstance(module, LoraLayer):
+            continue
+
+        scaling = module.scaling
+        for key, val in scaling.items():
+            if isinstance(val, float):
+                scaling[key] = torch.tensor(val, device=module.weight.device)
+            elif not isinstance(val, torch.Tensor):
+                raise ValueError("TODO")
+
+
+def _pad_lora_weights(model, target_rank):
+    """
+    Pad LoRA weights in a state dict to a target rank while preserving the original behavior.
+
+    Args:
+      state_dict (dict): The state dict containing LoRA weights
+      target_rank (int): The target rank to pad to
+
+    Returns: new_state_dict: A new state dict with padded LoRA weights
+    """
+    for module in model.modules():
+        if not isinstance(module, (Conv2d, Linear)):
+            continue
+
+        is_conv = isinstance(module, Conv2d)
+
+        # LoRA A
+        for name, lora_module in module.lora_A.items():
+            weight = lora_module.weight
+            original_rank = weight.size(0)
+
+            if original_rank == target_rank:
+                continue
+
+            if original_rank > target_rank:
+                # TODO: is this necessary or can we just continue???
+                raise ValueError("TODO")
+
+            if is_conv:
+                padded = torch.zeros(
+                    target_rank,
+                    weight.size(1),
+                    weight.size(2),
+                    weight.size(3),
+                    device=weight.device,
+                    dtype=weight.dtype,
+                )
+                padded[:original_rank, :, :, :] = weight
+                new_layer = torch.nn.Conv2d(
+                    target_rank,
+                    target_rank,
+                    kernel_size=lora_module.kernel_size,
+                    stride=lora_module.stride,
+                    padding=lora_module.padding,
+                    bias=lora_module.bias,
+                )
+            else:
+                padded = torch.zeros(target_rank, weight.size(1), device=weight.device, dtype=weight.dtype)
+                padded[:original_rank, :] = weight
+                new_layer = torch.nn.Linear(target_rank, weight.size(1), bias=lora_module.bias)
+
+            new_layer.weight.data = padded
+            if lora_module.bias:
+                new_layer.bias.data = lora_module.bias.data
+            module.lora_A[name] = new_layer
+
+        # LoRA B
+        for name, lora_module in module.lora_B.items():
+            weight = lora_module.weight
+            original_rank = weight.size(1)
+
+            if original_rank == target_rank:
+                continue
+
+            if original_rank > target_rank:
+                # TODO: is this necessary or can we just continue???
+                raise ValueError("TODO")
+
+            if is_conv:
+                padded = torch.zeros(
+                    weight.size(0),
+                    target_rank,
+                    weight.size(2),
+                    weight.size(3),
+                    device=weight.device,
+                    dtype=weight.dtype,
+                )
+                padded[:, :original_rank, :, :] = weight
+                new_layer = torch.nn.Conv2d(
+                    weight.size(0),
+                    target_rank,
+                    kernel_size=lora_module.kernel_size,
+                    stride=lora_module.stride,
+                    padding=lora_module.padding,
+                    bias=lora_module.bias,
+                )
+                new_layer.weight.data = padded
+            else:
+                padded = torch.zeros(weight.size(0), target_rank, device=weight.device, dtype=weight.dtype)
+                padded[:, :original_rank] = weight
+                new_layer = torch.nn.Linear(weight.size(0), target_rank, bias=lora_module.bias)
+
+            new_layer.weight.data = padded
+            if lora_module.bias:
+                new_layer.bias.data = lora_module.bias.data
+            module.lora_B[name] = new_layer
+
+
+def prepare_model_for_compiled_hotswap(
+    model: torch.nn.Module, config: LoraConfig | dict[str, LoraConfig], target_rank: int
+) -> None:
+    # TODO
+    is_compiled = hasattr(model, "_orig_mod")
+    if is_compiled:
+        raise ValueError("Call prepare_model_for_compiled_hotswap *before* compiling the model")
+
+    _convert_scalings_to_tensor(model)
+    _pad_lora_weights(model, target_rank=target_rank)
+
+    if not isinstance(config, dict):
+        config = {"dummy": config}
+
+    for lora_config in config.values():
+        lora_config.r = target_rank
+        if lora_config.rank_pattern:
+            for key in lora_config.rank_pattern:
+                lora_config.rank_pattern[key] = target_rank
 
 
 def hotswap_adapter_from_state_dict(model, state_dict, adapter_name, config, parameter_prefix="lora_"):
@@ -99,13 +233,12 @@ def hotswap_adapter_from_state_dict(model, state_dict, adapter_name, config, par
             msg += f" Unexpected keys: {', '.join(sorted(unexpected_keys))}."
         raise RuntimeError(msg)
 
-
     # actual swapping
     for key, new_val in state_dict.items():
-        # adjust alpha/scaling
         module_name = ".".join(key.split(".")[:-3])
         module = model.get_submodule(module_name)
 
+        # swap alpha/scaling
         r_key = get_pattern_key(config.rank_pattern.keys(), key)
         alpha_key = get_pattern_key(config.alpha_pattern.keys(), key)
         rank = config.rank_pattern.get(r_key, config.r)
@@ -116,6 +249,7 @@ def hotswap_adapter_from_state_dict(model, state_dict, adapter_name, config, par
             scaling = alpha / rank
         _update_scaling(module, adapter_name=adapter_name, scaling=scaling)
 
+        # swap actual weights
         # no need to account for potential _orig_mod in key here, as torch handles that
         old_val = attrgetter(key)(model)
         if is_compiled:

@@ -29,35 +29,21 @@ import torch
 from transformers import AutoModelForCausalLM
 
 from peft import LoraConfig, PeftModel, get_peft_model
-from peft.tuners.lora import LoraLayer
 from peft.utils import infer_device
-from peft.utils.hotswap import hotswap_adapter
+from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
 
 
 torch_device = infer_device()
 
 
-def _convert_scalings_to_tensor(model):
-    """TODO"""
-    for module in model.modules():
-        if not isinstance(module, LoraLayer):
-            continue
-
-        scaling = module.scaling
-        for key, val in scaling.items():
-            if isinstance(val, float):
-                scaling[key] = torch.tensor(val, device=module.weight.device)
-            elif not isinstance(val, torch.Tensor):
-                raise ValueError("TODO")
-
-
-def check_hotswap(do_hotswap=True, alpha_scalings=(16, 16)):
+def check_hotswap(do_hotswap=True, ranks=(8, 8), alpha_scalings=(16, 16)):
     torch.manual_seed(0)
     inputs = torch.arange(10).view(-1, 1).to(torch_device)
     model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM").to(torch_device)
+    rank0, rank1 = ranks
     alpha0, alpha1 = alpha_scalings
-    config0 = LoraConfig(init_lora_weights=False, lora_alpha=alpha0)
-    config1 = LoraConfig(init_lora_weights=False, lora_alpha=alpha1)
+    config0 = LoraConfig(init_lora_weights=False, r=rank0, lora_alpha=alpha0)
+    config1 = LoraConfig(init_lora_weights=False, r=rank1, lora_alpha=alpha1)
     model = get_peft_model(model, config0, adapter_name="adapter0").eval()
     model.add_adapter("adapter1", config1)
 
@@ -67,7 +53,8 @@ def check_hotswap(do_hotswap=True, alpha_scalings=(16, 16)):
 
         model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM").to(torch_device)
         model = PeftModel.from_pretrained(model, os.path.join(tmp_dirname, "adapter0")).eval()
-        _convert_scalings_to_tensor(model)
+        if do_hotswap:
+            prepare_model_for_compiled_hotswap(model, config=model.peft_config, target_rank=max(ranks))
         model = torch.compile(model, mode="reduce-overhead")
         model(inputs).logits
 
@@ -84,4 +71,5 @@ def check_hotswap(do_hotswap=True, alpha_scalings=(16, 16)):
 
 if __name__ == "__main__":
     # check_hotswap(False) will trigger recompilation
-    check_hotswap(do_hotswap=sys.argv[1] == "1", alpha_scalings=(8, 16))
+    check_hotswap(do_hotswap=sys.argv[1] == "1", ranks=(8, 12), alpha_scalings=(8, 16))  # works
+    check_hotswap(do_hotswap=sys.argv[1] == "1", ranks=(12, 8), alpha_scalings=(8, 16))  # fails
