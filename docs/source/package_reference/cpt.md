@@ -18,8 +18,10 @@ The abstract from the paper is:
 
 *Traditional fine-tuning is effective but computationally intensive, as it requires updating billions of parameters. CPT, inspired by ICL, PT, and adversarial attacks, refines context embeddings in a parameter-efficient manner. By optimizing context tokens and applying a controlled gradient descent, CPT achieves superior accuracy across various few-shot classification tasks, showing significant improvement over existing methods such as LoRA, PT, and ICL.*
 
+CPT is designed for few-shot scenarios, as concatenating more examples increases memory usage due to the self-attention mechanism and additional loss terms. For larger datasets, users can limit the number of context examples and use the remaining samples solely for optimization to manage memory efficiently
+
 Take a look at [Example](https://github.com/huggingface/peft/blob/main/examples/cpt_finetuning/README.md) for a step-by-step guide on how to train a model with CPT.
-  
+
 
 ## CPTConfig
 
