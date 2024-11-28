@@ -29,11 +29,26 @@ import torch
 from transformers import AutoModelForCausalLM
 
 from peft import LoraConfig, PeftModel, get_peft_model
+from peft.tuners.lora import LoraLayer
 from peft.utils import infer_device
 from peft.utils.hotswap import hotswap_adapter
 
 
 torch_device = infer_device()
+
+
+def _convert_scalings_to_tensor(model):
+    """TODO"""
+    for module in model.modules():
+        if not isinstance(module, LoraLayer):
+            continue
+
+        scaling = module.scaling
+        for key, val in scaling.items():
+            if isinstance(val, float):
+                scaling[key] = torch.tensor(val, device=module.weight.device)
+            elif not isinstance(val, torch.Tensor):
+                raise ValueError("TODO")
 
 
 def check_hotswap(do_hotswap=True, alpha_scalings=(16, 16)):
@@ -52,6 +67,7 @@ def check_hotswap(do_hotswap=True, alpha_scalings=(16, 16)):
 
         model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM").to(torch_device)
         model = PeftModel.from_pretrained(model, os.path.join(tmp_dirname, "adapter0")).eval()
+        _convert_scalings_to_tensor(model)
         model = torch.compile(model, mode="reduce-overhead")
         model(inputs).logits
 

@@ -4103,7 +4103,7 @@ class TestHotSwapping:
         )
 
         # Communicate will read the output and error streams, preventing deadlock
-        stdout, stderr = process.communicate()
+        _, stderr = process.communicate()
         exit_code = process.returncode
 
         # sanity check:
@@ -4118,7 +4118,7 @@ class TestHotSwapping:
         )
 
         # Communicate will read the output and error streams, preventing deadlock
-        stdout, stderr = process.communicate()
+        _, stderr = process.communicate()
         exit_code = process.returncode
 
         # sanity check:
@@ -4139,7 +4139,7 @@ class TestHotSwapping:
         )
 
         # Communicate will read the output and error streams, preventing deadlock
-        stdout, stderr = process.communicate()
+        _, stderr = process.communicate()
         exit_code = process.returncode
 
         # sanity check:
@@ -4154,7 +4154,7 @@ class TestHotSwapping:
         )
 
         # Communicate will read the output and error streams, preventing deadlock
-        stdout, stderr = process.communicate()
+        _, stderr = process.communicate()
         exit_code = process.returncode
 
         # sanity check:

@@ -22,13 +22,24 @@ from peft.config import PeftConfig
 from peft.mapping import PEFT_TYPE_TO_CONFIG_MAPPING
 
 from .constants import PEFT_TYPE_TO_PREFIX_MAPPING
-from .other import infer_device
+from .other import get_pattern_key, infer_device
 from .peft_types import PeftType
 from .save_and_load import _insert_adapter_name_into_state_dict, load_peft_weights
 
 
 # so far only LoRA is supported
 CONFIG_KEYS_TO_CHECK = {PeftType.LORA: ["use_rslora", "lora_dropout", "alpha_pattern", "use_dora"]}
+
+
+def _update_scaling(lora_module, adapter_name, scaling=None):
+    # TODO
+    if lora_module.scaling[adapter_name] == scaling:
+        return
+
+    if not isinstance(lora_module.scaling[adapter_name], torch.Tensor):
+        raise ValueError("TODO")
+
+    lora_module.scaling[adapter_name].fill_(scaling)
 
 
 def hotswap_adapter_from_state_dict(model, state_dict, adapter_name, config, parameter_prefix="lora_"):
@@ -88,16 +99,22 @@ def hotswap_adapter_from_state_dict(model, state_dict, adapter_name, config, par
             msg += f" Unexpected keys: {', '.join(sorted(unexpected_keys))}."
         raise RuntimeError(msg)
 
+
     # actual swapping
     for key, new_val in state_dict.items():
         # adjust alpha/scaling
         module_name = ".".join(key.split(".")[:-3])
         module = model.get_submodule(module_name)
-        module.lora_alpha[adapter_name] = config.lora_alpha
+
+        r_key = get_pattern_key(config.rank_pattern.keys(), key)
+        alpha_key = get_pattern_key(config.alpha_pattern.keys(), key)
+        rank = config.rank_pattern.get(r_key, config.r)
+        alpha = config.alpha_pattern.get(alpha_key, config.lora_alpha)
         if config.use_rslora:
-            module.scaling[adapter_name] = config.lora_alpha / math.sqrt(config.r)
+            scaling = alpha / math.sqrt(rank)
         else:
-            module.scaling[adapter_name] = config.lora_alpha / config.r
+            scaling = alpha / rank
+        _update_scaling(module, adapter_name=adapter_name, scaling=scaling)
 
         # no need to account for potential _orig_mod in key here, as torch handles that
         old_val = attrgetter(key)(model)
