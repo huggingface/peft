@@ -41,8 +41,12 @@ if is_hqq_available():
             init_lora_weights: bool = True,
             use_rslora: bool = False,
             use_dora: bool = False,
+            lora_bias: bool = False,
             **kwargs,
         ) -> None:
+            if lora_bias:
+                raise ValueError(f"{self.__class__.__name__} does not support lora_bias yet, set it to False")
+
             super().__init__()
             LoraLayer.__init__(self, base_layer)
             self.fan_in_fan_out = False
@@ -56,6 +60,7 @@ if is_hqq_available():
                 init_lora_weights=init_lora_weights,
                 use_rslora=use_rslora,
                 use_dora=use_dora,
+                lora_bias=lora_bias,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -218,13 +223,24 @@ if is_hqq_available():
                             x = x.to(compute_dtype)
 
                     if not self.use_dora[active_adapter]:
-                        output = lora_B(lora_A(dropout(x))) * scaling
+                        result = result + lora_B(lora_A(dropout(x))) * scaling
                     else:
-                        output = self._apply_dora(x, lora_A, lora_B, scaling, active_adapter)
-                    if requires_conversion:
-                        output = output.to(expected_dtype)
+                        if isinstance(dropout, torch.nn.Identity) or not self.training:
+                            base_result = result
+                        else:
+                            x = dropout(x)
+                            base_result = None
 
-                    result = result + output
+                        result = result + self.lora_magnitude_vector[active_adapter](
+                            x,
+                            lora_A=lora_A,
+                            lora_B=lora_B,
+                            scaling=scaling,
+                            base_layer=self.get_base_layer(),
+                            base_result=base_result,
+                        )
+                    if requires_conversion:
+                        result = result.to(expected_dtype)
 
             return result
 

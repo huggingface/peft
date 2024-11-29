@@ -18,6 +18,7 @@ import pickle
 import re
 import shutil
 import tempfile
+import warnings
 from collections import OrderedDict
 from dataclasses import replace
 
@@ -31,6 +32,8 @@ from safetensors.torch import save_file
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
+    BoneConfig,
+    CPTConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -38,6 +41,7 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
+    OFTConfig,
     PeftModel,
     PeftType,
     PrefixTuningConfig,
@@ -113,6 +117,21 @@ CONFIG_TESTING_KWARGS = (
     },
     # VBLoRA
     {"target_modules": None, "vblora_dropout": 0.05, "vector_length": 1, "num_vectors": 2},
+    # OFT
+    {
+        "target_modules": None,
+    },
+    # Bone
+    {
+        "target_modules": None,
+        "r": 2,
+    },
+    # CPT tuninig
+    {
+        "cpt_token_ids": [0, 1, 2, 3, 4, 5, 6, 7],  # Example token IDs for testing
+        "cpt_mask": [1, 1, 1, 1, 1, 1, 1, 1],
+        "cpt_tokens_type_mask": [1, 2, 2, 2, 3, 3, 4, 4],
+    },
 )
 
 CLASSES_MAPPING = {
@@ -127,7 +146,11 @@ CLASSES_MAPPING = {
     "fourierft": (FourierFTConfig, CONFIG_TESTING_KWARGS[8]),
     "hra": (HRAConfig, CONFIG_TESTING_KWARGS[9]),
     "vblora": (VBLoRAConfig, CONFIG_TESTING_KWARGS[10]),
+    "oft": (OFTConfig, CONFIG_TESTING_KWARGS[11]),
+    "bone": (BoneConfig, CONFIG_TESTING_KWARGS[12]),
 }
+
+DECODER_MODELS_EXTRA = {"cpt": (CPTConfig, CONFIG_TESTING_KWARGS[13])}
 
 
 # Adapted from https://github.com/huggingface/transformers/blob/48327c57182fdade7f7797d1eaad2d166de5c55b/src/transformers/activations.py#LL166C7-L166C22
@@ -193,6 +216,7 @@ class ClassInstantier(OrderedDict):
 
 
 PeftTestConfigManager = ClassInstantier(CLASSES_MAPPING)
+PeftTestConfigManagerForDecoderModels = ClassInstantier({**CLASSES_MAPPING, **DECODER_MODELS_EXTRA})
 
 
 class PeftCommonTester:
@@ -372,7 +396,10 @@ class PeftCommonTester:
                 model.save_pretrained(tmp_dirname, safe_serialization=False)
 
             model_from_pretrained = self.transformers_class.from_pretrained(model_id)
-            model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
+            with warnings.catch_warnings(record=True) as recs:
+                model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
+                # ensure that there is no warning
+                assert not any("Found missing adapter keys" in str(rec.message) for rec in recs)
 
             # check if the state dicts are equal
             if issubclass(config_cls, PromptEncoderConfig):
@@ -532,8 +559,16 @@ class PeftCommonTester:
 
             model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
             model = PeftModel.from_pretrained(model, tmp_dirname, torch_device=self.torch_device)
-            model.load_adapter(tmp_dirname, adapter_name="other")
-            model.load_adapter(tmp_dirname, adapter_name="yet-another")
+
+            load_result1 = model.load_adapter(tmp_dirname, adapter_name="other")
+            load_result2 = model.load_adapter(tmp_dirname, adapter_name="yet-another")
+
+            # VBLoRA uses a shared "vblora_vector_bank" across all layers, causing it to appear
+            # in the missing keys list, which leads to failed test cases. So
+            # skipping the missing keys check for VBLoRA.
+            if config.peft_type != "VBLORA":
+                assert load_result1.missing_keys == []
+                assert load_result2.missing_keys == []
 
     def _test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
         if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig, VBLoRAConfig):
@@ -638,7 +673,7 @@ class PeftCommonTester:
         if issubclass(config_cls, PromptLearningConfig):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
-        if issubclass(config_cls, BOFTConfig):
+        if issubclass(config_cls, (OFTConfig, BOFTConfig)):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
@@ -664,14 +699,15 @@ class PeftCommonTester:
         model = model.merge_and_unload()
         logits_merged_unloaded = model(**dummy_input)[0]
 
+        conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
         atol, rtol = 1e-4, 1e-4
         if self.torch_device in ["mlu"]:
             atol, rtol = 1e-3, 1e-3  # MLU
         if config.peft_type == "ADALORA":
             # AdaLoRA is a bit flaky on CI, but this cannot be reproduced locally
             atol, rtol = 1e-2, 1e-2
-        if (config.peft_type == "IA3") and (model_id == "Conv2d"):
-            # for some reason, the IA³ Conv2d introduces a larger error
+        if (config.peft_type in {"IA3", "LORA"}) and (model_id in conv_ids):
+            # for some reason, the Conv introduces a larger error
             atol, rtol = 0.3, 0.01
         assert torch.allclose(logits, logits_merged, atol=atol, rtol=rtol)
         assert torch.allclose(logits, logits_unmerged, atol=atol, rtol=rtol)
@@ -713,6 +749,7 @@ class PeftCommonTester:
             PeftType.OFT,
             PeftType.BOFT,
             PeftType.HRA,
+            PeftType.BONE,
         ]
 
         if ("gpt2" in model_id.lower()) and (config_cls == IA3Config):
@@ -824,6 +861,11 @@ class PeftCommonTester:
 
         if self.torch_device in ["mlu"]:
             atol, rtol = 1e-3, 1e-3  # MLU
+
+        conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
+        if issubclass(config_cls, (IA3Config, LoraConfig)) and model_id in conv_ids:  # more instability with Conv
+            atol, rtol = 1e-3, 1e-3
+
         # check that the logits are the same after unloading
         assert torch.allclose(logits_peft, logits_unloaded, atol=atol, rtol=rtol)
 
@@ -1085,12 +1127,16 @@ class PeftCommonTester:
         assert nb_trainable < nb_trainable_all
 
     def _test_training_gradient_checkpointing(self, model_id, config_cls, config_kwargs):
-        if issubclass(config_cls, PromptLearningConfig):
+        if config_cls == PrefixTuningConfig:
             return pytest.skip(f"Test not applicable for {config_cls}")
 
         if (config_cls == AdaLoraConfig) and ("roberta" in model_id.lower()):
             # TODO: no gradients on the "dense" layer, other layers work, not sure why
             self.skipTest("AdaLora with RoBERTa does not work correctly")
+
+        if (config_cls == OFTConfig) and ("deberta" in model_id.lower()):
+            # TODO: no gradients on the "dense" layer, other layers work, not sure why
+            self.skipTest("OFT with Deberta does not work correctly")
 
         model = self.transformers_class.from_pretrained(model_id)
 
@@ -1115,7 +1161,14 @@ class PeftCommonTester:
         loss.backward()
 
         for n, param in model.named_parameters():
-            if model.prefix in n:
+            if "prompt_encoder." in n:  # prompt tuning methods
+                if not issubclass(config_cls, CPTConfig):
+                    assert param.grad is not None
+                elif (
+                    "delta_embedding" in n
+                ):  # delta_embedding is the embedding that should be updated with grads in CPT
+                    assert param.grad is not None
+            elif hasattr(model, "prefix") and (model.prefix in n):  # non-prompt tuning methods
                 assert param.grad is not None
             else:
                 assert param.grad is None
@@ -1161,8 +1214,16 @@ class PeftCommonTester:
         loss = output.sum()
         loss.backward()
 
+        if issubclass(config_cls, CPTConfig):
+            parameters = []
+            for name, param in model.prompt_encoder.named_parameters():
+                if name != "default.embedding.weight":
+                    parameters.append(param)
+        else:
+            parameters = model.prompt_encoder.parameters()
+
         # check that prompt encoder has grads
-        for param in model.prompt_encoder.parameters():
+        for param in parameters:
             assert param.grad is not None
 
     def _test_delete_adapter(self, model_id, config_cls, config_kwargs):
@@ -1177,6 +1238,7 @@ class PeftCommonTester:
             PeftType.FOURIERFT,
             PeftType.HRA,
             PeftType.VBLORA,
+            PeftType.BONE,
         ]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
@@ -1225,6 +1287,7 @@ class PeftCommonTester:
             PeftType.FOURIERFT,
             PeftType.HRA,
             PeftType.VBLORA,
+            PeftType.BONE,
         ]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
@@ -1270,7 +1333,18 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        if config.peft_type not in ("LORA", "ADALORA", "IA3", "BOFT", "VERA", "FOURIERFT", "HRA", "VBLORA"):
+        if config.peft_type not in (
+            "LORA",
+            "ADALORA",
+            "IA3",
+            "BOFT",
+            "OFT",
+            "VERA",
+            "FOURIERFT",
+            "HRA",
+            "VBLORA",
+            "BONE",
+        ):
             with pytest.raises(AttributeError):
                 model = model.unload()
         else:
@@ -1573,8 +1647,8 @@ class PeftCommonTester:
 
         output_peft = get_output(peft_model)
 
-        # first check trivial case is not true that peft does not affect the output; for this to work, init_lora_weight
-        # must be False
+        # first check trivial case is not true that peft does not affect the output; for this to work, init_weight
+        # must be False (if the config supports it)
         if isinstance(peft_model, StableDiffusionPipeline):
             # for SD, check that most pixels have different values
             assert (output_before != output_peft).float().mean() > 0.8

@@ -1,5 +1,4 @@
 # Copyright 2023-present the HuggingFace Inc. team.
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -13,10 +12,14 @@
 # limitations under the License.
 import gc
 import importlib
+import itertools
 import os
+import re
+import subprocess
+import sys
 import tempfile
 import unittest
-from collections import Counter
+from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, List, Union
@@ -26,11 +29,12 @@ import torch
 from accelerate import infer_auto_device_map
 from accelerate.test_utils.testing import run_command
 from accelerate.utils import patch_environment
-from datasets import Audio, DatasetDict, load_dataset
+from datasets import Audio, Dataset, DatasetDict, load_dataset
 from packaging import version
 from parameterized import parameterized
 from torch.distributed import init_process_group
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.utils.data import DataLoader
 from transformers import (
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
@@ -46,16 +50,21 @@ from transformers import (
     WhisperProcessor,
     WhisperTokenizer,
 )
+from transformers.pytorch_utils import Conv1D
 
 from peft import (
     AdaLoraConfig,
+    EvaConfig,
     LoftQConfig,
     LoraConfig,
     PeftModel,
+    PrefixTuningConfig,
     PromptEncoderConfig,
     TaskType,
+    VeraConfig,
     get_peft_model,
     get_peft_model_state_dict,
+    initialize_lora_eva_weights,
     inject_adapter_in_model,
     prepare_model_for_kbit_training,
     replace_lora_weights_loftq,
@@ -78,6 +87,7 @@ from .testing_utils import (
     require_optimum,
     require_torch_gpu,
     require_torch_multi_gpu,
+    require_torchao,
 )
 
 
@@ -1133,6 +1143,232 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         weights_not_cpu = [name for name, p in peft_model.named_parameters() if p.device != torch.device("cpu")]
         assert not weights_not_cpu
 
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_vera(self):
+        r"""
+        Same as test_causal_lm_training but with VeRA
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+                device_map="auto",
+            )
+
+            tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+            model = prepare_model_for_kbit_training(model)
+
+            config = VeraConfig(
+                r=16,
+                target_modules=["q_proj", "v_proj"],
+                vera_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("ybelkada/english_quotes_copy")
+            data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_4bit_vera(self):
+        r"""
+        Same as test_causal_lm_training_4bit but with VeRA
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+                device_map="auto",
+            )
+
+            tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+            model = prepare_model_for_kbit_training(model)
+
+            config = VeraConfig(
+                r=16,
+                target_modules=["q_proj", "v_proj"],
+                vera_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("ybelkada/english_quotes_copy")
+            data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.multi_gpu_tests
+    def test_causal_lm_training_multi_gpu_vera(self):
+        r"""
+        Same as test_causal_lm_training_multi_gpu but with VeRA
+        """
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                device_map="auto",
+                quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+            )
+
+            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+
+            model = prepare_model_for_kbit_training(model)
+
+            setattr(model, "model_parallel", True)
+            setattr(model, "is_parallelizable", True)
+
+            config = VeraConfig(
+                r=16,
+                target_modules=["q_proj", "v_proj"],
+                vera_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("Abirate/english_quotes")
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.multi_gpu_tests
+    def test_causal_lm_training_multi_gpu_4bit_vera(self):
+        r"""
+        Same as test_causal_lm_training_multi_gpu_4bit but with VeRA
+        """
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                device_map="auto",
+                quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+            )
+
+            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+
+            model = prepare_model_for_kbit_training(model)
+
+            setattr(model, "model_parallel", True)
+            setattr(model, "is_parallelizable", True)
+
+            config = VeraConfig(
+                r=16,
+                target_modules=["q_proj", "v_proj"],
+                vera_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("Abirate/english_quotes")
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
 
 @require_torch_gpu
 @require_auto_gptq
@@ -1491,7 +1727,7 @@ class TestPiSSA:
         # Quantize the `weight.data` of the linear layer in the model to `num_bits` and store it with full precision.
         quantizer = NFQuantizer(num_bits=num_bits, device=device, method="normal", block_size=64)
         for name, module in model.named_modules():
-            if isinstance(module, torch.nn.Linear) and "lm_head" not in name:
+            if isinstance(module, (torch.nn.Linear, Conv1D)) and "lm_head" not in name:
                 quantized_weight, max_abs, shape = quantizer.quantize_block(module.weight.data.to(device))
                 module.weight.data = quantizer.dequantize_block(quantized_weight, max_abs, shape)
         return model
@@ -1500,7 +1736,7 @@ class TestPiSSA:
         # Calculate the nuclear norm (sum of singular values) of the error matrices between the `quantized_model` and the `base_model`.
         error_list = []
         for name, module in base_model.named_modules():
-            if isinstance(module, torch.nn.Linear) and "lm_head" not in name:
+            if isinstance(module, (torch.nn.Linear, Conv1D)) and "lm_head" not in name:
                 quant_module = quantized_model.get_submodule(name)
                 error_list.append(torch.linalg.svdvals(module.weight.data - quant_module.weight.data).sum())
         return torch.Tensor(error_list).sum()
@@ -1593,6 +1829,16 @@ class TestPiSSA:
     @pytest.mark.parametrize("device", ["cuda", "cpu"])
     def test_t5_pissa_8bit(self, device, tmp_path):
         self.get_errors(bits=8, device=device, model_id="t5-small", tmp_path=tmp_path)
+
+    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    def test_gpt2_pissa_4bit(self, device, tmp_path):
+        # see 2104
+        self.get_errors(bits=4, device=device, model_id="gpt2", tmp_path=tmp_path)
+
+    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    def test_gpt2_pissa_8bit(self, device, tmp_path):
+        # see 2104
+        self.get_errors(bits=8, device=device, model_id="gpt2", tmp_path=tmp_path)
 
     @require_bitsandbytes
     def test_lora_pissa_conversion_same_output_after_loading_with_quantization(self, tmp_path):
@@ -2187,6 +2433,17 @@ class TestLoftQ:
             torch.cuda.empty_cache()
         gc.collect()
 
+    def test_config_no_loftq_init(self):
+        with pytest.warns(
+            UserWarning,
+            match="`loftq_config` specified but will be ignored when `init_lora_weights` is not 'loftq'.",
+        ):
+            LoraConfig(loftq_config=LoftQConfig())
+
+    def test_config_no_loftq_config(self):
+        with pytest.raises(ValueError, match="`loftq_config` must be specified when `init_lora_weights` is 'loftq'."):
+            LoraConfig(init_lora_weights="loftq")
+
 
 @require_bitsandbytes
 @require_torch_gpu
@@ -2492,6 +2749,8 @@ class PeftAqlmGPUTests(unittest.TestCase):
         model.train(training)
 
     @pytest.mark.single_gpu_tests
+    # see https://github.com/Vahe1994/AQLM/pull/139
+    @pytest.mark.xfail(reason="AQLM does not work with PyTorch 2.5 (yet)", strict=True, raises=AttributeError)
     def test_causal_lm_training_aqlm(self):
         r"""
         Test the CausalLM training on a single GPU device. The test would simply fail if the adapters are not set
@@ -2678,18 +2937,18 @@ class PeftHqqGPUTests(unittest.TestCase):
             output_hqq = model(**inputs).logits
 
         # check that outputs of HQQ are highly correlated; there are outliers, so don't check for equality
-        cc_matrix = torch.corrcoef(torch.stack((output_normal.flatten(), output_hqq.flatten())))
+        cc_matrix = torch.corrcoef(torch.stack((output_normal.float().flatten(), output_hqq.float().flatten())))
         assert cc_matrix.min() > 0.97
 
         # check that outputs are the same after merging
-        cc_matrix = torch.corrcoef(torch.stack((output_normal.flatten(), output_hqq.flatten())))
+        cc_matrix = torch.corrcoef(torch.stack((output_normal.float().flatten(), output_hqq.float().flatten())))
         assert cc_matrix.min() > 0.97
 
         # check outputs are the same after unmerging
         model.unmerge_adapter()
         with torch.inference_mode():
             output_unmerged = model(**inputs).logits
-        cc_matrix = torch.corrcoef(torch.stack((output_normal.flatten(), output_unmerged.flatten())))
+        cc_matrix = torch.corrcoef(torch.stack((output_normal.float().flatten(), output_unmerged.float().flatten())))
         assert cc_matrix.min() > 0.97
 
         # check that the results are the same after saving and loading
@@ -2718,14 +2977,14 @@ class PeftHqqGPUTests(unittest.TestCase):
         model = model.merge_and_unload()
         with torch.inference_mode():
             output_merged_unloaded = model(**inputs).logits
-        cc_matrix = torch.corrcoef(torch.stack((output_normal.flatten(), output_merged_unloaded.flatten())))
+        cc_matrix = torch.corrcoef(
+            torch.stack((output_normal.float().flatten(), output_merged_unloaded.float().flatten()))
+        )
         assert cc_matrix.min() > 0.97
 
 
-# TODO: unskip the tests once https://github.com/casper-hansen/AutoAWQ/issues/466 is fixed
 @require_torch_gpu
 @require_auto_awq
-@pytest.mark.skip(reason="Needs https://github.com/casper-hansen/AutoAWQ/issues/466 to be fixed first")
 class PeftAwqGPUTests(unittest.TestCase):
     r"""
     Awq + peft tests
@@ -3015,6 +3274,376 @@ class PeftEetqGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
 
+@require_non_xpu
+@require_torch_gpu
+@require_torchao
+class PeftTorchaoGPUTests(unittest.TestCase):
+    r"""
+    torchao + peft tests
+    """
+
+    supported_quant_types = [
+        "int8_weight_only",
+        "int8_dynamic_activation_int8_weight",
+        # int4_weight_only raises an error:
+        # RuntimeError: derivative for aten::_weight_int4pack_mm is not implemented
+        # "int4_weight_only",
+    ]
+
+    def setUp(self):
+        self.causal_lm_model_id = "facebook/opt-125m"
+        self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+        # torchao breaks with fp16 and if a previous test uses fp16, transformers will set this env var, which affects
+        # subsequent tests, therefore the env var needs to be cleared explicitly
+        #
+        # TODO: remove this once https://github.com/huggingface/transformers/pull/34886 is merged
+        os.environ.pop("ACCELERATE_MIXED_PRECISION", None)
+
+    def tearDown(self):
+        r"""
+        Efficient mechanism to free GPU memory after each test. Based on
+        https://github.com/huggingface/transformers/issues/21094
+        """
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    @parameterized.expand(supported_quant_types)
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_single_gpu_torchao(self, quant_type):
+        from transformers import TorchAoConfig
+
+        device = 0
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            quantization_config = TorchAoConfig(quant_type=quant_type)
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
+            )
+            model = prepare_model_for_kbit_training(model)
+
+            config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                target_modules=["q_proj", "v_proj"],
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+            model = get_peft_model(model, config)
+
+            data = load_dataset("ybelkada/english_quotes_copy")
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            trainer.model.config.use_cache = False
+            trainer.train()
+
+            model.save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_single_gpu_torchao_dora_int8_weight_only(self):
+        from transformers import TorchAoConfig
+
+        device = 0
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            quantization_config = TorchAoConfig(quant_type="int8_weight_only")
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
+            )
+            model = prepare_model_for_kbit_training(model)
+
+            config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                target_modules=["q_proj", "v_proj"],
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+                use_dora=True,
+            )
+            model = get_peft_model(model, config)
+
+            data = load_dataset("ybelkada/english_quotes_copy")
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            trainer.model.config.use_cache = False
+            trainer.train()
+
+            model.save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_single_gpu_torchao_dora_int8_dynamic_activation_int8_weight_raises(self):
+        from transformers import TorchAoConfig
+
+        device = 0
+
+        quantization_config = TorchAoConfig(quant_type="int8_dynamic_activation_int8_weight")
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
+        )
+        model = prepare_model_for_kbit_training(model)
+
+        config = LoraConfig(
+            r=16,
+            lora_alpha=32,
+            target_modules=["q_proj", "v_proj"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+            use_dora=True,
+        )
+        with pytest.raises(NotImplementedError):
+            get_peft_model(model, config)
+
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_single_gpu_torchao_int4_raises(self):
+        # int4_weight_only raises an error:
+        # RuntimeError: derivative for aten::_weight_int4pack_mm is not implemented
+        # TODO: Once proper torchao support for int4 is added, remove this test and add int4 to supported_quant_types
+        from transformers import TorchAoConfig
+
+        device = 0
+
+        quantization_config = TorchAoConfig(quant_type="int4_weight_only")
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
+        )
+        model = prepare_model_for_kbit_training(model)
+
+        config = LoraConfig(
+            r=16,
+            lora_alpha=32,
+            target_modules=["q_proj", "v_proj"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+
+        msg = re.escape("TorchaoLoraLinear only supports int8 weights for now")
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+    @parameterized.expand(supported_quant_types)
+    @pytest.mark.multi_gpu_tests
+    @require_torch_multi_gpu
+    def test_causal_lm_training_multi_gpu_torchao(self, quant_type):
+        from transformers import TorchAoConfig
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            quantization_config = TorchAoConfig(quant_type=quant_type)
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                device_map="auto",
+                quantization_config=quantization_config,
+                torch_dtype=torch.bfloat16,
+            )
+
+            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+
+            model = prepare_model_for_kbit_training(model)
+            model.model_parallel = True
+            model.is_parallelizable = True
+
+            config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                target_modules=["q_proj", "v_proj"],
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+            model = get_peft_model(model, config)
+
+            data = load_dataset("ybelkada/english_quotes_copy")
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            trainer.model.config.use_cache = False
+            trainer.train()
+
+            model.save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.multi_gpu_tests
+    @require_torch_multi_gpu
+    def test_causal_lm_training_multi_gpu_torchao_int4_raises(self):
+        # int4_weight_only raises an error:
+        # RuntimeError: derivative for aten::_weight_int4pack_mm is not implemented
+        # TODO: Once proper torchao support for int4 is added, remove this test and add int4 to supported_quant_types
+        from transformers import TorchAoConfig
+
+        quantization_config = TorchAoConfig(quant_type="int4_weight_only")
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            device_map="auto",
+            quantization_config=quantization_config,
+            torch_dtype=torch.bfloat16,
+        )
+
+        assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+
+        model = prepare_model_for_kbit_training(model)
+        model.model_parallel = True
+        model.is_parallelizable = True
+
+        config = LoraConfig(
+            r=16,
+            lora_alpha=32,
+            target_modules=["q_proj", "v_proj"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+
+        msg = re.escape("TorchaoLoraLinear only supports int8 weights for now")
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+    @pytest.mark.single_gpu_tests
+    def test_torchao_merge_layers_int8_weight_only(self):
+        from torchao.dtypes import AffineQuantizedTensor
+        from transformers import TorchAoConfig
+
+        quant_type = "int8_weight_only"
+        torch.manual_seed(0)
+        device = 0
+        dummy_input = torch.arange(10).view(-1, 1).to(device)
+
+        quantization_config = TorchAoConfig(quant_type=quant_type)
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
+        ).eval()
+        logits_base = model(dummy_input)[0]
+
+        config = LoraConfig(
+            r=16,
+            lora_alpha=32,
+            target_modules=["q_proj", "v_proj"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+            init_lora_weights=False,
+        )
+        model = get_peft_model(model, config)
+
+        model.eval()
+        logits = model(dummy_input)[0]
+
+        # sanity check: outputs changed
+        # precision is quite low, so we need to use high atol and rtol
+        atol, rtol = 1e-1, 1e-1
+        assert not torch.allclose(logits, logits_base, atol=atol, rtol=rtol)
+
+        model.merge_adapter()
+        logits_merged = model(dummy_input)[0]
+        for name, module in model.named_modules():
+            if "base_layer" in name:
+                assert isinstance(module.weight, AffineQuantizedTensor)
+
+        model.unmerge_adapter()
+        logits_unmerged = model(dummy_input)[0]
+        for name, module in model.named_modules():
+            if "base_layer" in name:
+                assert isinstance(module.weight, AffineQuantizedTensor)
+
+        model = model.merge_and_unload()
+        logits_merged_unloaded = model(dummy_input)[0]
+
+        assert torch.allclose(logits, logits_merged, atol=atol, rtol=rtol)
+        assert torch.allclose(logits, logits_unmerged, atol=atol, rtol=rtol)
+        assert torch.allclose(logits, logits_merged_unloaded, atol=atol, rtol=rtol)
+
+    @pytest.mark.single_gpu_tests
+    def test_torchao_merge_layers_int8_dynamic_activation_int8_weight_raises(self):
+        # int8_dynamic_activation_int8_weight does not support dequantize, thus merging does not work
+        from transformers import TorchAoConfig
+
+        quant_type = "int8_dynamic_activation_int8_weight"
+        torch.manual_seed(0)
+        device = 0
+
+        quantization_config = TorchAoConfig(quant_type=quant_type)
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
+        ).eval()
+
+        config = LoraConfig(
+            r=16,
+            lora_alpha=32,
+            target_modules=["q_proj", "v_proj"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+            init_lora_weights=False,
+        )
+        model = get_peft_model(model, config)
+
+        msg = re.escape(
+            "Weights of type LinearActivationQuantizedTensor do not support dequantization (yet), which is needed to "
+            "support merging."
+        )
+        with pytest.raises(NotImplementedError, match=msg):
+            model.merge_adapter()
+
+
 PRECISIONS = [(torch.float32), (torch.float16), (torch.bfloat16)]
 
 LORA_PARAMS = {
@@ -3168,6 +3797,11 @@ class TestFSDPWrap:
         # check that this does not raise:
         FSDP(model, auto_wrap_policy=fsdp_auto_wrap_policy(model), use_orig_params=False, sync_module_states=True)
 
+    def test_fsdp_auto_wrap_policy_does_not_raise_on_custom_model(self):
+        # See #2167
+        # Avoid raising on custom models since Trainer uses fsdp_auto_wrap_policy automatically for PEFT + FSDP
+        fsdp_auto_wrap_policy(SimpleModel())  # does not raise
+
 
 class TestBOFT:
     """
@@ -3277,3 +3911,254 @@ class TestLowCpuMemUsageDifferentDevices:
 
         assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
         assert {p.device.type for p in model.parameters()} == {device_model}
+
+
+class TestEvaInitializationGPU:
+    """GPU tests for the Eva initialization method."""
+
+    # Constants for test configuration
+    COSINE_SIMILARITY_THRESHOLD = 0.75
+    NUM_SEEDS = 3
+    BATCH_SIZE = 4
+    MAX_LENGTH = 256
+    LORA_DIM = 8
+    LORA_ALPHA = 1
+    DEVICE = "cuda"
+
+    @pytest.fixture
+    def tokenizer(self):
+        tokenizer = AutoTokenizer.from_pretrained("openai-community/gpt2")
+        tokenizer.pad_token = tokenizer.eos_token
+        return tokenizer
+
+    @pytest.fixture
+    def dataset(self, tokenizer):
+        dataset = load_dataset("ybelkada/english_quotes_copy", split="train")
+        # concatenate examples
+        examples = []
+        example = ""
+        for data in dataset:
+            if len(example) >= self.MAX_LENGTH:
+                examples.append(example)
+                example = ""
+            example = example + " " + data["quote"]
+        dataset = Dataset.from_dict({"text": examples})
+        # tokenize
+        dataset = dataset.map(
+            lambda x: tokenizer(x["text"], padding="max_length", truncation=True, max_length=self.MAX_LENGTH),
+            batched=True,
+            remove_columns=dataset.column_names,
+        )
+        dataset.set_format(type="torch")
+        return dataset
+
+    @pytest.fixture
+    def model(self):
+        model = AutoModelForCausalLM.from_pretrained("openai-community/gpt2")
+        model.transformer.h = model.transformer.h[:2]  # truncate to 2 layers
+        return model.to(self.DEVICE)
+
+    @pytest.fixture
+    def model_bnb(self):
+        bnb_config = BitsAndBytesConfig(load_in_4bit=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            "openai-community/gpt2",
+            quantization_config=bnb_config,
+            attn_implementation="eager",  # gpt2 doesnt support flash attention
+        )
+        model.transformer.h = model.transformer.h[:2]  # truncate to 2 layers
+        model = prepare_model_for_kbit_training(model)
+        return model
+
+    @pytest.fixture
+    def model_fixture(self, request):
+        return request.getfixturevalue(request.param)
+
+    @pytest.fixture
+    def peft_config(self):
+        return LoraConfig(
+            r=self.LORA_DIM,
+            lora_alpha=self.LORA_ALPHA,
+            target_modules=["c_attn"],
+            init_lora_weights="eva",
+            eva_config=EvaConfig(rho=2),
+        )
+
+    def is_bnb_model(self, model):
+        return hasattr(model.config, "quantization_config")
+
+    @staticmethod
+    def collate_fn(examples):
+        return {k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()}
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+    @pytest.mark.single_gpu_tests
+    @pytest.mark.parametrize("model_fixture", ["model", "model_bnb"], indirect=True)
+    def test_eva_initialization_consistency(self, model_fixture, dataset, peft_config):
+        """Test that the state dict returned by get_eva_state_dict loaded correctly and is consistent across different seeds based
+        on the cosine similarity of the svd components."""
+        state_dicts = []
+        for seed in range(self.NUM_SEEDS):
+            shuffled_dataset = dataset.shuffle(seed=seed)
+            dataloader = DataLoader(
+                shuffled_dataset,
+                batch_size=self.BATCH_SIZE,
+                collate_fn=lambda examples: {
+                    k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()
+                },
+                shuffle=False,
+            )
+            peft_model = get_peft_model(deepcopy(model_fixture), peft_config)
+            initialize_lora_eva_weights(peft_model, dataloader)
+            state_dicts.append(
+                {k: v.cpu() for k, v in peft_model.state_dict().items() if "lora_A.default.weight" in k}
+            )
+
+        cos_sims = defaultdict(list)
+        for i, j in itertools.combinations(range(self.NUM_SEEDS), 2):
+            for k, v1 in state_dicts[i].items():
+                v2 = state_dicts[j][k]
+                min_size = min(v1.size(0), v2.size(0))
+                cos_sims[k].extend(torch.cosine_similarity(v1[:min_size], v2[:min_size], dim=1).abs().tolist())
+
+        mean_cosine_similarities = {k: torch.tensor(v).mean() for k, v in cos_sims.items()}
+        for layer_name, mean_cosine_similarity in mean_cosine_similarities.items():
+            assert mean_cosine_similarity > self.COSINE_SIMILARITY_THRESHOLD, (
+                f"Mean absolute cosine similarity {mean_cosine_similarity:.4f} "
+                f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
+            )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+@pytest.mark.multi_gpu_tests
+class TestPrefixTuning:
+    def test_prefix_tuning_multiple_devices_decoder_model(self):
+        # See issue 2134
+        model_id = "hf-internal-testing/tiny-random-MistralForCausalLM"
+        tokenizer = AutoTokenizer.from_pretrained(model_id, padding="left")
+        inputs = tokenizer(["A list of colors: red, blue"], return_tensors="pt").to("cuda")
+
+        device_map = {
+            "model.embed_tokens": 0,
+            "model.layers.0": 0,
+            "model.layers.1": 1,
+            "model.norm": 1,
+            "lm_head": 1,
+        }
+        model = AutoModelForCausalLM.from_pretrained(model_id, device_map=device_map)
+        # sanity check, as the test passes trivially for a single device
+        assert len({p.device for p in model.parameters()}) > 1
+        # sanity check: this should work without peft
+        model.generate(**inputs)  # does not raise
+
+        peft_config = PrefixTuningConfig(num_virtual_tokens=10, task_type="CAUSAL_LM")
+        model = get_peft_model(model, peft_config)
+        model.generate(**inputs)  # does not raise
+
+    def test_prefix_tuning_multiple_devices_encoder_decoder_model(self):
+        # See issue 2134
+        model_id = "hf-internal-testing/tiny-random-T5Model"
+        tokenizer = AutoTokenizer.from_pretrained(model_id, padding="left")
+        inputs = tokenizer(["A list of colors: red, blue"], return_tensors="pt").to("cuda")
+        device_map = {
+            "shared": 0,
+            "encoder.embed_tokens": 0,
+            "encoder.block.0": 0,
+            "encoder.block.1": 0,
+            "encoder.block.2": 1,
+            "encoder.block.3": 1,
+            "encoder.block.4": 1,
+            "encoder.final_layer_norm": 1,
+            "decoder.embed_tokens": 0,
+            "decoder.block.0": 0,
+            "decoder.block.1": 0,
+            "decoder.block.2": 1,
+            "decoder.block.3": 1,
+            "decoder.block.4": 1,
+            "decoder.final_layer_norm": 1,
+            "lm_head": 0,
+        }
+        model = AutoModelForSeq2SeqLM.from_pretrained(model_id, device_map=device_map)
+        # sanity check, as the test passes trivially for a single device
+        assert len({p.device for p in model.parameters()}) > 1
+        # sanity check: this should work without peft
+        model.generate(**inputs)  # does not raise
+
+        peft_config = PrefixTuningConfig(num_virtual_tokens=10, task_type="SEQ_2_SEQ_LM")
+        model = get_peft_model(model, peft_config)
+        model.generate(**inputs)  # does not raise
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+@pytest.mark.single_gpu_tests
+class TestHotSwapping:
+    def test_hotswapping_compiled_model_does_not_trigger_recompilation(self):
+        env = os.environ.copy()
+        env["TORCH_LOGS"] = "guards,recompiles"
+        here = os.path.dirname(__file__)
+        file_name = os.path.join(here, "run_compiled_model_hotswap.py")
+
+        process = subprocess.Popen(
+            [sys.executable, file_name, "1"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
+        # Communicate will read the output and error streams, preventing deadlock
+        stdout, stderr = process.communicate()
+        exit_code = process.returncode
+
+        # sanity check:
+        assert exit_code == 0
+
+        # check that the recompilation message is not present
+        assert "__recompiles" not in stderr.decode()
+
+        # contingency check: without hotswapping, we *do* get recompilation
+        process = subprocess.Popen(
+            [sys.executable, file_name, "0"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
+        # Communicate will read the output and error streams, preventing deadlock
+        stdout, stderr = process.communicate()
+        exit_code = process.returncode
+
+        # sanity check:
+        assert exit_code == 0
+
+        # check that the recompilation message is not present
+        assert "__recompiles" in stderr.decode()
+
+    @pytest.mark.xfail(strict=True, reason="Requires hotswap to be implemented in diffusers")
+    def test_hotswapping_compiled_diffusion_model_does_not_trigger_recompilation(self):
+        env = os.environ.copy()
+        env["TORCH_LOGS"] = "guards,recompiles"
+        here = os.path.dirname(__file__)
+        file_name = os.path.join(here, "run_compiled_diffusion_model_hotswap.py")
+
+        process = subprocess.Popen(
+            [sys.executable, file_name, "1"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
+        # Communicate will read the output and error streams, preventing deadlock
+        stdout, stderr = process.communicate()
+        exit_code = process.returncode
+
+        # sanity check:
+        assert exit_code == 0
+
+        # check that the recompilation message is not present
+        assert "__recompiles" not in stderr.decode()
+
+        # contingency check: without hotswapping, we *do* get recompilation
+        process = subprocess.Popen(
+            [sys.executable, file_name, "0"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
+        # Communicate will read the output and error streams, preventing deadlock
+        stdout, stderr = process.communicate()
+        exit_code = process.returncode
+
+        # sanity check:
+        assert exit_code == 0
+
+        # check that the recompilation message is not present
+        assert "__recompiles" in stderr.decode()

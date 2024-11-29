@@ -34,7 +34,6 @@ from .tuners import (
     LoKrModel,
     LoraModel,
     MixedModel,
-    OFTModel,
 )
 from .tuners.mixed import COMPATIBLE_TUNER_TYPES
 from .utils import PeftType, _set_adapter, _set_trainable
@@ -46,7 +45,6 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.LOKR: LoKrModel,
     PeftType.ADALORA: AdaLoraModel,
     PeftType.IA3: IA3Model,
-    PeftType.OFT: OFTModel,
 }
 
 
@@ -349,6 +347,9 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
     @classmethod
     def _split_kwargs(cls, kwargs: dict[str, Any]):
         return PeftModel._split_kwargs(kwargs)
+
+    def _check_new_adapter_config(self, peft_config: PeftConfig, is_trainable: bool) -> None:
+        return PeftModel._check_new_adapter_config(self, peft_config, is_trainable=is_trainable)
 
     def load_adapter(self, model_id: str, adapter_name: str, *args: Any, **kwargs: Any):
         """

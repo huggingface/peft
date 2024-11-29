@@ -33,7 +33,7 @@ from peft.utils import (
     _get_submodules,
 )
 
-from .layer import Conv2d, IA3Layer, Linear
+from .layer import Conv2d, Conv3d, IA3Layer, Linear
 
 
 class IA3Model(BaseTuner):
@@ -121,6 +121,8 @@ class IA3Model(BaseTuner):
             new_module = Linear4bit(target, adapter_name, is_feedforward=is_feedforward, **fourbit_kwargs)
         elif isinstance(target, torch.nn.Conv2d):
             new_module = Conv2d(target, adapter_name, is_feedforward=is_feedforward, **kwargs)
+        elif isinstance(target, torch.nn.Conv3d):
+            new_module = Conv3d(target, adapter_name, is_feedforward=is_feedforward, **kwargs)
         elif isinstance(target_base_layer, torch.nn.Linear):
             if kwargs["fan_in_fan_out"]:
                 warnings.warn(

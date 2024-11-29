@@ -15,13 +15,11 @@ from __future__ import annotations
 
 import math
 import operator
-import re
 import warnings
 from contextlib import contextmanager
 from dataclasses import asdict, replace
 from enum import Enum
 from functools import partial, reduce
-from itertools import chain
 from typing import Literal, Optional
 
 import torch
@@ -45,6 +43,7 @@ from peft.utils import (
     get_quantization_config,
 )
 from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
+from peft.utils.other import get_pattern_key
 
 from .aqlm import dispatch_aqlm
 from .awq import dispatch_awq
@@ -53,6 +52,7 @@ from .eetq import dispatch_eetq
 from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
 from .layer import Conv2d, LoraLayer, dispatch_default
+from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
 
 
@@ -185,10 +185,10 @@ class LoraModel(BaseTuner):
             raise ValueError("Current Key shouldn't be `None`")
 
         # Regexp matching - Find key which matches current target_name in patterns provided
-        pattern_keys = list(chain(lora_config.rank_pattern.keys(), lora_config.alpha_pattern.keys()))
-        target_name_key = next(filter(lambda key: re.match(rf".*\.{key}$", current_key), pattern_keys), current_key)
-        r = lora_config.rank_pattern.get(target_name_key, lora_config.r)
-        alpha = lora_config.alpha_pattern.get(target_name_key, lora_config.lora_alpha)
+        r_key = get_pattern_key(lora_config.rank_pattern.keys(), current_key)
+        alpha_key = get_pattern_key(lora_config.alpha_pattern.keys(), current_key)
+        r = lora_config.rank_pattern.get(r_key, lora_config.r)
+        alpha = lora_config.alpha_pattern.get(alpha_key, lora_config.lora_alpha)
 
         kwargs = {
             "r": r,
@@ -199,9 +199,17 @@ class LoraModel(BaseTuner):
             "use_rslora": lora_config.use_rslora,
             "use_dora": lora_config.use_dora,
             "ephemeral_gpu_offload": lora_config.runtime_config.ephemeral_gpu_offload,
+            "lora_bias": lora_config.lora_bias,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
+        # for torchao merging, we need the get_apply_tensor_subclass from the quantization config
+        try:
+            kwargs["get_apply_tensor_subclass"] = operator.attrgetter(
+                "hf_quantizer.quantization_config.get_apply_tensor_subclass"
+            )(self.model)
+        except AttributeError:
+            pass
 
         quant_methods = ["gptq", "aqlm", "awq"]
         for quant_method in quant_methods:
@@ -221,6 +229,7 @@ class LoraModel(BaseTuner):
                 init_lora_weights=lora_config.init_lora_weights,
                 use_rslora=lora_config.use_rslora,
                 use_dora=lora_config.use_dora,
+                lora_bias=lora_config.lora_bias,
             )
         else:
             new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
@@ -334,6 +343,7 @@ class LoraModel(BaseTuner):
                 dispatch_awq,
                 dispatch_gptq,
                 dispatch_hqq,
+                dispatch_torchao,
                 dispatch_megatron,
                 dispatch_default,
             ]
@@ -349,7 +359,8 @@ class LoraModel(BaseTuner):
             # no module could be matched
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
-                "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `transformers.pytorch_utils.Conv1D`."
+                "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `torch.nn.Conv3d`, "
+                "`transformers.pytorch_utils.Conv1D`."
             )
 
         return new_module
@@ -433,6 +444,19 @@ class LoraModel(BaseTuner):
 
         if self.training:
             raise ValueError("Cannot pass `adapter_names` when the model is in training mode.")
+
+        # Check that users only passed actually existing adapters.
+        # Note: We cannot do this on the layer level, as each individual layer may not have each adapter. Still, we want
+        # to check that there is at least one layer with the given name, or else something like typos can easily slip.
+        expected_adapters = set()
+        for layer in self.modules():
+            if isinstance(layer, LoraLayer):
+                expected_adapters |= layer.lora_A.keys()
+                expected_adapters |= layer.lora_embedding_A.keys()
+        unique_adapters = {name for name in adapter_names if name != "__base__"}
+        unexpected_adapters = unique_adapters - expected_adapters
+        if unexpected_adapters:
+            raise ValueError(f"Trying to infer with non-existing adapter(s): {', '.join(sorted(unexpected_adapters))}")
 
         hook_handles = []
         for module in self.modules():

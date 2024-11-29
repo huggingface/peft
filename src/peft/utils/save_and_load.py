@@ -20,10 +20,11 @@ from typing import Optional
 import huggingface_hub
 import torch
 from huggingface_hub import file_exists, hf_hub_download
-from huggingface_hub.utils import EntryNotFoundError, LocalEntryNotFoundError
+from huggingface_hub.errors import EntryNotFoundError, LocalEntryNotFoundError
 from packaging import version
 from safetensors.torch import load_file as safe_load_file
 
+from .constants import PEFT_TYPE_TO_PREFIX_MAPPING
 from .other import (
     EMBEDDING_LAYER_NAMES,
     SAFETENSORS_WEIGHTS_NAME,
@@ -207,6 +208,8 @@ def get_peft_model_state_dict(
         to_return["base_model.vblora_vector_bank." + adapter_name] = state_dict[
             "base_model.vblora_vector_bank." + adapter_name
         ]
+    elif config.peft_type == PeftType.BONE:
+        to_return = {k: state_dict[k] for k in state_dict if "bone_" in k}
     else:
         raise ValueError(f"Unknown PEFT type passed: {config.peft_type}")
 
@@ -304,6 +307,25 @@ def _find_mismatched_keys(
     return peft_model_state_dict, mismatched
 
 
+def _insert_adapter_name_into_state_dict(
+    state_dict: dict[str, torch.Tensor], adapter_name: str, parameter_prefix: str
+) -> dict[str, torch.Tensor]:
+    """Utility function to remap the state_dict keys to fit the PEFT model by inserting the adapter name."""
+    peft_model_state_dict = {}
+    for key, val in state_dict.items():
+        if parameter_prefix in key:
+            suffix = key.split(parameter_prefix)[1]
+            if "." in suffix:
+                suffix_to_replace = ".".join(suffix.split(".")[1:])
+                key = key.replace(suffix_to_replace, f"{adapter_name}.{suffix_to_replace}")
+            else:
+                key = f"{key}.{adapter_name}"
+            peft_model_state_dict[key] = val
+        else:
+            peft_model_state_dict[key] = val
+    return peft_model_state_dict
+
+
 def set_peft_model_state_dict(
     model,
     peft_model_state_dict,
@@ -341,37 +363,9 @@ def set_peft_model_state_dict(
     else:
         state_dict = peft_model_state_dict
 
-    if config.peft_type in (
-        PeftType.LORA,
-        PeftType.LOHA,
-        PeftType.LOKR,
-        PeftType.ADALORA,
-        PeftType.IA3,
-        PeftType.OFT,
-        PeftType.POLY,
-        PeftType.LN_TUNING,
-        PeftType.BOFT,
-        PeftType.VERA,
-        PeftType.FOURIERFT,
-        PeftType.HRA,
-        PeftType.VBLORA,
-    ):
+    if config.peft_type in PEFT_TYPE_TO_PREFIX_MAPPING:
         peft_model_state_dict = {}
-        parameter_prefix = {
-            PeftType.IA3: "ia3_",
-            PeftType.LORA: "lora_",
-            PeftType.ADALORA: "lora_",
-            PeftType.LOHA: "hada_",
-            PeftType.LOKR: "lokr_",
-            PeftType.OFT: "oft_",
-            PeftType.POLY: "poly_",
-            PeftType.BOFT: "boft_",
-            PeftType.LN_TUNING: "ln_tuning_",
-            PeftType.VERA: "vera_lambda_",
-            PeftType.FOURIERFT: "fourierft_",
-            PeftType.HRA: "hra_",
-            PeftType.VBLORA: "vblora_",
-        }[config.peft_type]
+        parameter_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
         if config.peft_type == PeftType.VBLORA and config.save_only_topk_weights:
             num_vectors, _ = model.vblora_vector_bank[adapter_name].shape
             state_dict_keys = list(state_dict.keys())
@@ -399,17 +393,10 @@ def set_peft_model_state_dict(
                     # delete the topk_indices and topk_weights from the state_dict
                     del state_dict[k]
                     del state_dict[k.replace("_topk_indices", "_topk_weights")]
-        for k, v in state_dict.items():
-            if parameter_prefix in k:
-                suffix = k.split(parameter_prefix)[1]
-                if "." in suffix:
-                    suffix_to_replace = ".".join(suffix.split(".")[1:])
-                    k = k.replace(suffix_to_replace, f"{adapter_name}.{suffix_to_replace}")
-                else:
-                    k = f"{k}.{adapter_name}"
-                peft_model_state_dict[k] = v
-            else:
-                peft_model_state_dict[k] = v
+
+        peft_model_state_dict = _insert_adapter_name_into_state_dict(
+            state_dict, adapter_name=adapter_name, parameter_prefix=parameter_prefix
+        )
 
         if config.peft_type == PeftType.ADALORA:
             rank_pattern = config.rank_pattern

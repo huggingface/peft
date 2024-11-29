@@ -12,22 +12,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from __future__ import annotations
 
-from peft.tuners.lycoris_utils import LycorisConfig
+from dataclasses import dataclass, field
+from typing import Literal, Optional, Union
+
+from peft.config import PeftConfig
 from peft.utils import PeftType
 
 
 @dataclass
-class OFTConfig(LycorisConfig):
+class OFTConfig(PeftConfig):
     """
     This is the configuration class to store the configuration of a [`OFTModel`].
 
     Args:
-        r (`int`): OFT rank.
-        module_dropout (`int`): The dropout probability for disabling OFT modules during training.
-        target_modules (`Optional[Union[List[str], str]]`):
+        r (`int`): OFT rank, number of OFT blocks per injected layer.
+        oft_block_size (`int`): OFT block size across different layers.
+        module_dropout (`float`):
+            The multiplicative dropout probability, by setting OFT blocks to identity during training, similar to the
+            dropout layer in LoRA.
+        target_modules (`Optional[Union[list[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
             names will be replaced. When passing a string, a regex match will be performed. When passing a list of
             strings, either an exact match will be performed or it is checked if the name of the module ends with any
@@ -35,14 +40,23 @@ class OFTConfig(LycorisConfig):
             the output layer. If this is not specified, modules will be chosen according to the model architecture. If
             the architecture is not known, an error will be raised -- in this case, you should specify the target
             modules manually.
+        fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
+        bias (`str`): Bias type for OFT. Can be 'none', 'all' or 'oft_only'. If 'all' or 'oft_only', the
+            corresponding biases will be updated during training. Be aware that this means that, even when disabling
+            the adapters, the model will not produce the same output as the base model would have without adaptation.
+        exclude_modules (`Optional[Union[List[str], str]]`):
+            The names of the modules to not apply the adapter. When passing a string, a regex match will be performed.
+            When passing a list of strings, either an exact match will be performed or it is checked if the name of the
+            module ends with any of the passed strings.
         init_weights (`bool`):
             Whether to perform initialization of OFT weights.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
             layer at this index.
-        layers_pattern (`str`):
-            The layer pattern name, used only if `layers_to_transform` is different from `None`.
+        layers_pattern (`Optional[Union[List[str], str]]`):
+            The layer pattern name, used only if `layers_to_transform` is different from `None`. This should target the
+            `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
         rank_pattern (`dict`):
             The mapping from layer names or regexp expression to ranks which are different from the default rank
             specified by `r`.
@@ -56,17 +70,38 @@ class OFTConfig(LycorisConfig):
             Whether to share the OFT parameters between blocks or not. This is `False` by default.
     """
 
-    r: int = field(default=8, metadata={"help": "OFT rank"})
-    module_dropout: float = field(
-        default=0.0, metadata={"help": "The dropout probability for disabling OFT modules during training"}
+    r: int = field(default=8, metadata={"help": "OFT rank, number of OFT blocks per injected layer."})
+    oft_block_size: int = field(
+        default=0,
+        metadata={
+            "help": "OFT block size across different layers.",
+            "note": "You can only specify either r or oft_block_size, but not both simultaneously, because r x oft_block_size = layer dimension.",
+        },
     )
-    target_modules: Optional[Union[List[str], str]] = field(
+    module_dropout: float = field(
+        default=0.0,
+        metadata={
+            "help": "OFT multiplicative dropout, randomly setting blocks of OFT to be identity matrix, similar to the dropout layer in LoRA."
+        },
+    )
+    target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
             "help": "List of module names or regex expression of the module names to replace with OFT."
             "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
             "This can also be a wildcard 'all-linear' which matches all linear/Conv1D layers except the output layer."
         },
+    )
+    fan_in_fan_out: bool = field(
+        default=False,
+        metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
+    )
+    bias: Literal["none", "all", "oft_only"] = field(
+        default="none", metadata={"help": "Bias type for OFT. Can be 'none', 'all' or 'oft_only'"}
+    )
+    exclude_modules: Optional[Union[list[str], str]] = field(
+        default=None,
+        metadata={"help": "List of module names or regex expression of the module names to exclude from OFT."},
     )
     init_weights: bool = field(
         default=True,
@@ -77,19 +112,20 @@ class OFTConfig(LycorisConfig):
             ),
         },
     )
-    layers_to_transform: Optional[Union[List[int], int]] = field(
+    layers_to_transform: Optional[Union[list[int], int]] = field(
         default=None,
         metadata={
             "help": "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at this index."
         },
     )
-    layers_pattern: Optional[str] = field(
+    layers_pattern: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
-            "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
+            "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern. "
+            "This should target the `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`."
         },
     )
-    modules_to_save: Optional[List[str]] = field(
+    modules_to_save: Optional[list[str]] = field(
         default=None,
         metadata={
             "help": "List of modules apart from OFT layers to be set as trainable and saved in the final checkpoint. "
@@ -111,9 +147,61 @@ class OFTConfig(LycorisConfig):
         default=False,
         metadata={"help": "Whether to share the OFT parameters between blocks or not."},
     )
+    rank_pattern: Optional[dict] = field(
+        default_factory=dict,
+        metadata={
+            "help": (
+                "The mapping from layer names or regexp expression to ranks which are different from the default rank specified by `r`. "
+                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 8`}"
+                "Important: the rank pattern won't be applied to the layers after 0.12.1.dev0!"
+            )
+        },
+    )
+    alpha_pattern: Optional[dict] = field(
+        default_factory=dict,
+        metadata={
+            "help": (
+                "The mapping from layer names or regexp expression to alphas which are different from the default alpha specified by `alpha`. "
+                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 32`}"
+                "Important: the alpha pattern won't be applied to the layers after 0.12.1.dev0!"
+            )
+        },
+    )
 
     def __post_init__(self):
+        super().__post_init__()
         self.peft_type = PeftType.OFT
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
+        self.exclude_modules = (
+            set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
+        )
+        # check for layers_to_transform and layers_pattern
+        if self.layers_pattern and not self.layers_to_transform:
+            raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
+        if self.r == 0 and self.oft_block_size == 0:
+            raise ValueError(
+                f"Either `r` or `oft_block_size` must be non-zero. Currently, r = {self.r} and oft_block_size = {self.oft_block_size}."
+            )
+        if not (self.r != 0) ^ (self.oft_block_size != 0):
+            raise ValueError(
+                f"You can only specify either r ({self.r}) or oft_block_size ({self.oft_block_size}), but not both simultaneously, because r x oft_block_size == in_features."
+            )
+
+    @classmethod
+    def check_kwargs(cls, **kwargs):
+        r"""
+        Check if the kwargs are valid for the configuration.
+
+        Args:
+            kwargs (additional keyword arguments, *optional*):
+                Additional keyword arguments passed along to the child class initialization.
+        """
+        if "oft_block_size" not in kwargs:
+            raise ValueError(
+                "OFT has been updated since PEFT 0.14.0. Your trained adapter weights are incompatible "
+                "with the latest version of OFT. Please retrain your adapter weights with newer PEFT versions. "
+                "Alternatively, downgrade PEFT to version 0.13.0 to use the old adapter weights."
+            )
+        return super().check_kwargs(**kwargs)

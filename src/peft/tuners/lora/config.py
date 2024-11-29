@@ -70,6 +70,57 @@ class LoftQConfig:
 
 
 @dataclass
+class EvaConfig:
+    """
+    This is the sub-configuration class to store the configuration for a data-driven initialization via EVA. EVA was
+    introduced in <a href='https://arxiv.org/abs/2410.07170'>Explained Variance Adaptation</a>.
+
+    Args:
+        rho (`float`):
+            Rho value for EVA redistribution (>= 1.0). The maximum rank for a layer is lora_r * rho. Default is 2.0,
+            meaning the maximum rank allowed for a layer is 2r. Increasing rho will allow for a higher degree of
+            redistribution of ranks across layers. Some pre-trained models might be more sensitive to a rank
+            redistribution. It can therefore be beneficial to try rho=1.0 (no redistribution) if the performance is
+            lower than expected.
+        tau (`float`):
+            Cosine similarity threshold for early stopping. Compares the cosine similarity of right-singular vectors
+            between two consecutive SVD steps. If the cosine similarity is above this threshold, the SVD iteration is
+            stopped. Default is 0.99.
+        use_label_mask (`bool`):
+            Use label mask for EVA initialization. This means that positions where labels=label_mask_value are ignored
+            for the SVD computation. Setting use_label_mask=True is preferred in most cases and can be especially
+            beneficial for multi-turn conversations. The default value is True. Filtering out items based on the label
+            mask can sometimes lead to a small batch size and as a result instabilities in the SVD computation. For
+            cases where a large share of batch items would be filtered out, set use_label_mask=False.
+        label_mask_value (`int`):
+            If use_label_mask=True the value to look for to mask out ignored tokens. Default is -100.
+        whiten (`bool`): Apply whitening to singular vectors. Default is False.
+            Whitening has been shown to be beneficial for EVA in the vision domain.
+        adjust_scaling_factors (`bool`):
+            Adjust LoRA scaling factors after the rank redistribution. Setting this to True means the scaling factors
+            are adjusted so that all LoRA gradients have the same scale regardless of their rank. Default is True.
+    """
+
+    rho: float = field(default=2.0, metadata={"help": "Rho value for EVA redistribution"})
+    tau: float = field(default=0.99, metadata={"help": "Cosine similarity threshold for early stopping"})
+    use_label_mask: bool = field(default=True, metadata={"help": "Use label mask for EVA initialization"})
+    label_mask_value: int = field(
+        default=-100, metadata={"help": "if use_label_mask=True the value to look for to mask out ignored tokens"}
+    )
+    whiten: bool = field(default=False, metadata={"help": "Apply whitening to singular vectors"})
+    adjust_scaling_factors: bool = field(
+        default=True,
+        metadata={"help": "Adjust LoRA scaling factors after the rank redistribution"},
+    )
+
+    def __post_init__(self):
+        if self.rho < 1.0:
+            raise ValueError("`rho` must be >= 1.0")
+        if self.tau < 0.0 or self.tau > 1.0:
+            raise ValueError("`tau` must be between 0.0 and 1.0.")
+
+
+@dataclass
 class LoraConfig(PeftConfig):
     """
     This is the configuration class to store the configuration of a [`LoraModel`].
@@ -85,6 +136,10 @@ class LoraConfig(PeftConfig):
             excluding the output layer. If this is not specified, modules will be chosen according to the model
             architecture. If the architecture is not known, an error will be raised -- in this case, you should specify
             the target modules manually.
+        exclude_modules (`Optional[Union[List[str], str]]`):
+            The names of the modules to not apply the adapter. When passing a string, a regex match will be performed.
+            When passing a list of strings, either an exact match will be performed or it is checked if the name of the
+            module ends with any of the passed strings.
         lora_alpha (`int`):
             The alpha parameter for Lora scaling.
         lora_dropout (`float`):
@@ -102,25 +157,28 @@ class LoraConfig(PeftConfig):
             Otherwise, it will use the original default value of `lora_alpha/r`.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
-        init_lora_weights (`bool` | `Literal["gaussian", "olora", "pissa", "pissa_niter_[number of iters]", "loftq"]`):
+        init_lora_weights (`bool` | `Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "loftq"]`):
             How to initialize the weights of the adapter layers. Passing True (default) results in the default
             initialization from the reference implementation from Microsoft. Passing 'gaussian' results in Gaussian
             initialization scaled by the LoRA rank for linear and layers. Setting the initialization to False leads to
-            completely random initialization and is discouraged. Pass `'loftq'` to use LoftQ initialization. Pass
-            `'olora'` to use OLoRA initialization. Passing `'pissa'` results in the initialization of <a
-            href='https://arxiv.org/abs/2404.02948'>Principal Singular values and Singular vectors Adaptation
-            (PiSSA)</a>, which converges more rapidly than LoRA and ultimately achieves superior performance. Moreover,
-            PiSSA reduces the quantization error compared to QLoRA, leading to further enhancements. Passing
-            `'pissa_niter_[number of iters]'` initiates Fast-SVD-based PiSSA initialization, where `[number of iters]`
-            indicates the number of subspace iterations to perform FSVD, and must be a nonnegative integer. When
-            `[number of iters]` is set to 16, it can complete the initialization of a 7B model within seconds, and the
-            training effect is approximately equivalent to using SVD.
+            completely random initialization and is discouraged. Pass `'loftq'` to use LoftQ initialization. Passing
+            `'eva'` results in a data-driven initialization of <ahref='https://arxiv.org/abs/2410.07170' >Explained
+            Variance Adaptation</a>. EVA initalizes LoRA based on the SVD of layer input activations and achieves SOTA
+            performance due to its ability to adapt to the finetuning data. Pass `'olora'` to use OLoRA initialization.
+            Passing `'pissa'` results in the initialization of <ahref='https://arxiv.org/abs/2404.02948' >Principal
+            Singular values and Singular vectors Adaptation (PiSSA)</a>, which converges more rapidly than LoRA and
+            ultimately achieves superior performance. Moreover, PiSSA reduces the quantization error compared to QLoRA,
+            leading to further enhancements. Passing `'pissa_niter_[number of iters]'` initiates Fast-SVD-based PiSSA
+            initialization, where `[number of iters]` indicates the number of subspace iterations to perform FSVD, and
+            must be a nonnegative integer. When `[number of iters]` is set to 16, it can complete the initialization of
+            a 7B model within seconds, and the training effect is approximately equivalent to using SVD.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
             layer at this index.
-        layers_pattern (`str`):
-            The layer pattern name, used only if `layers_to_transform` is different from `None`.
+        layers_pattern (`Optional[Union[List[str], str]]`):
+            The layer pattern name, used only if `layers_to_transform` is different from `None`. This should target the
+            `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
         rank_pattern (`dict`):
             The mapping from layer names or regexp expression to ranks which are different from the default rank
             specified by `r`.
@@ -138,6 +196,9 @@ class LoraConfig(PeftConfig):
             The configuration of LoftQ. If this is not None, then LoftQ will be used to quantize the backbone weights
             and initialize Lora layers. Also pass `init_lora_weights='loftq'`. Note that you should not pass a
             quantized model in this case, as LoftQ will quantize the model itself.
+        eva_config (`Optional[EvaConfig]`):
+            The configuration of EVA. At a minimum the dataset argument needs to be set (use the same dataset as for
+            finetuning).
         use_dora (`bool`):
             Enable 'Weight-Decomposed Low-Rank Adaptation' (DoRA). This technique decomposes the updates of the weights
             into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the magnitude is
@@ -151,6 +212,10 @@ class LoraConfig(PeftConfig):
             all have separate LoRA adapters attached to them.
         runtime_config (`LoraRuntimeConfig`):
             Runtime configurations (which are not saved or restored).
+        lora_bias (`bool`):
+            Defaults to `False`. Whether to enable the bias term for the LoRA B parameter. Typically, this should be
+            disabled. The main use case for this is when the LoRA weights were extracted from fully fine-tuned
+            parameters so the bias of those parameters can be taken into account.
     """
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})
@@ -165,6 +230,10 @@ class LoraConfig(PeftConfig):
                 "not known, an error will be raised -- in this case, you should specify the target modules manually."
             ),
         },
+    )
+    exclude_modules: Optional[Union[list[str], str]] = field(
+        default=None,
+        metadata={"help": "List of module names or regex expression of the module names to exclude from Lora."},
     )
     lora_alpha: int = field(default=8, metadata={"help": "Lora alpha"})
     lora_dropout: float = field(default=0.0, metadata={"help": "Lora dropout"})
@@ -194,7 +263,9 @@ class LoraConfig(PeftConfig):
             "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
         },
     )
-    init_lora_weights: bool | Literal["gaussian", "olora", "pissa", "pissa_niter_[number of iters]", "loftq"] = field(
+    init_lora_weights: (
+        bool | Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "loftq"]
+    ) = field(
         default=True,
         metadata={
             "help": (
@@ -202,6 +273,7 @@ class LoraConfig(PeftConfig):
                 "initialization from the reference implementation from Microsoft. Passing `'gaussian'` results "
                 "in Gaussian initialization scaled by the LoRA rank for linear and layers. Setting the initialization "
                 "to `'False'` leads to completely random initialization and *is discouraged.*"
+                "Pass `'eva'` results in a data-driven initialization of Explained Variance Adaptation."
                 "Passing `'olora'` results in OLoRA initialization."
                 "Passing `'pissa'` results in PiSSA initialization."
                 "Passing `'pissa_niter_[number of iters]'` initiates Fast-SVD-based PiSSA initialization, "
@@ -221,7 +293,8 @@ class LoraConfig(PeftConfig):
         default=None,
         metadata={
             "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
-            "This only works when target_modules is a list of str."
+            "This only works when target_modules is a list of str. This should target the `nn.ModuleList` of the "
+            "model, which is often called `'layers'` or `'h'`."
         },
     )
     rank_pattern: Optional[dict] = field(
@@ -278,6 +351,15 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    eva_config: Optional[EvaConfig] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The configuration of EVA. If this is passed, then EVA will be used to intialize the LoRA layers. "
+                "Also set `init_lora_weights='eva'` in this case. "
+            )
+        },
+    )
     use_dora: bool = field(
         default=False,
         metadata={
@@ -313,6 +395,16 @@ class LoraConfig(PeftConfig):
     runtime_config: LoraRuntimeConfig = field(
         default_factory=LoraRuntimeConfig, metadata={"help": "Runtime configurations"}
     )
+    lora_bias: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Whether to enable the bias term for the LoRA B parameter. Typically, this should be disabled. The "
+                "main use case for this is when the LoRA weights were extracted from fully fine-tuned parameters so "
+                "the bias of those parameters can be taken into account."
+            )
+        },
+    )
 
     def to_dict(self):
         """
@@ -323,10 +415,15 @@ class LoraConfig(PeftConfig):
         return rv
 
     def __post_init__(self):
+        super().__post_init__()
         self.peft_type = PeftType.LORA
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
+        self.exclude_modules = (
+            set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
+        )
+
         # if target_modules is a regex expression, then layers_to_transform should be None
         if isinstance(self.target_modules, str) and self.layers_to_transform is not None:
             raise ValueError("`layers_to_transform` cannot be used when `target_modules` is a str.")
@@ -334,6 +431,10 @@ class LoraConfig(PeftConfig):
         # if target_modules is a regex expression, then layers_pattern should be None
         if isinstance(self.target_modules, str) and self.layers_pattern is not None:
             raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
+
+        # check for layers_to_transform and layers_pattern
+        if self.layers_pattern and not self.layers_to_transform:
+            raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
 
         if self.use_dora and self.megatron_config:
             raise ValueError("DoRA does not support megatron_core, please set `use_dora=False`.")
@@ -344,8 +445,29 @@ class LoraConfig(PeftConfig):
 
             if not importlib.util.find_spec("scipy"):
                 raise ImportError("The required package 'scipy' is not installed. Please install it to continue.")
-            if self.loftq_config is None:
+            if not self.loftq_config:
                 raise ValueError("`loftq_config` must be specified when `init_lora_weights` is 'loftq'.")
+            if not isinstance(self.loftq_config, dict):
+                # convert loftq_config to dict
+                self.loftq_config = vars(self.loftq_config)
+        elif self.loftq_config:
+            self.loftq_config = {}
+            warnings.warn("`loftq_config` specified but will be ignored when `init_lora_weights` is not 'loftq'.")
+
+        elif self.init_lora_weights == "eva" and self.eva_config is None:
+            warnings.warn("`init_lora_weights` is 'eva' but `eva_config` is not specified. Using default EVA config.")
+            self.eva_config = EvaConfig()
+        elif self.init_lora_weights != "eva" and self.eva_config is not None:
+            warnings.warn("`eva_config` specified but will be ignored when `init_lora_weights` is not 'eva'.")
+
+        if self.lora_bias:
+            if self.init_lora_weights not in (True, False):
+                raise ValueError(
+                    f"The argument lora_bias=True is only supported with init_lora_weights=True or False, got "
+                    f"init_lora_weights={self.init_lora_weights} instead."
+                )
+            if self.use_dora:
+                raise ValueError("The argument lora_bias=True is not supported for DoRA, please pass use_dora=False")
 
         # Using post training conversion of modified base weights to restore their initial values (PiSSA, OLoRA) cannot
         # be correctly done when using rslora + rank_pattern/alpha_pattern. We can't really know if the user intends
@@ -366,10 +488,6 @@ class LoraConfig(PeftConfig):
                 "base weights; if you intend to do this, please ensure not to use rslora or rank_pattern/alpha_pattern."
             )
             warnings.warn(msg)
-
-        # convert loftq_config to dict
-        if self.loftq_config and not isinstance(self.loftq_config, dict):
-            self.loftq_config = vars(self.loftq_config)
 
         self._custom_modules: Optional[dict[type[nn.Mmodule], type[nn.Module]]] = None
 
