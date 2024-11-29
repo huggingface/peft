@@ -71,5 +71,8 @@ def check_hotswap(do_hotswap=True, ranks=(8, 8), alpha_scalings=(16, 16)):
 
 if __name__ == "__main__":
     # check_hotswap(False) will trigger recompilation
-    check_hotswap(do_hotswap=sys.argv[1] == "1", ranks=(8, 12), alpha_scalings=(8, 16))  # works
-    check_hotswap(do_hotswap=sys.argv[1] == "1", ranks=(12, 8), alpha_scalings=(8, 16))  # fails
+    do_hotswap = sys.argv[1] == "1"
+    # ranks is a string like '13,7'
+    ranks = sys.argv[2].split(",")
+    ranks = int(ranks[0]), int(ranks[1])
+    check_hotswap(do_hotswap=do_hotswap, ranks=ranks, alpha_scalings=(8, 16))

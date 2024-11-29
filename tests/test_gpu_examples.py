@@ -4089,17 +4089,18 @@ class TestPrefixTuning:
         model.generate(**inputs)  # does not raise
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
-@pytest.mark.single_gpu_tests
+# @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+# @pytest.mark.single_gpu_tests
 class TestHotSwapping:
-    def test_hotswapping_compiled_model_does_not_trigger_recompilation(self):
+    @pytest.mark.parametrize("ranks", ["7,13", "13,7"])  # the ranks of the 2 LoRAs as str
+    def test_hotswapping_compiled_model_does_not_trigger_recompilation(self, ranks):
         env = os.environ.copy()
         env["TORCH_LOGS"] = "guards,recompiles"
         here = os.path.dirname(__file__)
         file_name = os.path.join(here, "run_compiled_model_hotswap.py")
 
         process = subprocess.Popen(
-            [sys.executable, file_name, "1"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            [sys.executable, file_name, "1", ranks], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
 
         # Communicate will read the output and error streams, preventing deadlock
@@ -4114,7 +4115,7 @@ class TestHotSwapping:
 
         # contingency check: without hotswapping, we *do* get recompilation
         process = subprocess.Popen(
-            [sys.executable, file_name, "0"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            [sys.executable, file_name, "0", ranks], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
 
         # Communicate will read the output and error streams, preventing deadlock
@@ -4128,14 +4129,15 @@ class TestHotSwapping:
         assert "__recompiles" in stderr.decode()
 
     @pytest.mark.xfail(strict=True, reason="Requires hotswap to be implemented in diffusers")
-    def test_hotswapping_compiled_diffusion_model_does_not_trigger_recompilation(self):
+    @pytest.mark.parametrize("ranks", ["7,13", "13,7"])  # the ranks of the 2 LoRAs as str
+    def test_hotswapping_compiled_diffusion_model_does_not_trigger_recompilation(self, ranks):
         env = os.environ.copy()
         env["TORCH_LOGS"] = "guards,recompiles"
         here = os.path.dirname(__file__)
         file_name = os.path.join(here, "run_compiled_diffusion_model_hotswap.py")
 
         process = subprocess.Popen(
-            [sys.executable, file_name, "1"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            [sys.executable, file_name, "1", ranks], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
 
         # Communicate will read the output and error streams, preventing deadlock
@@ -4150,7 +4152,7 @@ class TestHotSwapping:
 
         # contingency check: without hotswapping, we *do* get recompilation
         process = subprocess.Popen(
-            [sys.executable, file_name, "0"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            [sys.executable, file_name, "0", ranks], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
 
         # Communicate will read the output and error streams, preventing deadlock

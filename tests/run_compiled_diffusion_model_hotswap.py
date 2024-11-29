@@ -33,6 +33,7 @@ from diffusers.utils.testing_utils import floats_tensor
 
 from peft import LoraConfig, get_peft_model_state_dict
 from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.utils.hotswap import prepare_model_for_compiled_hotswap
 
 
 torch_device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -59,11 +60,10 @@ def get_small_unet():
     return model.to(torch_device)
 
 
-def get_unet_lora_config(lora_alpha):
+def get_unet_lora_config(lora_rank, lora_alpha):
     # from diffusers test_models_unet_2d_condition.py
-    rank = 4
     unet_lora_config = LoraConfig(
-        r=rank,
+        r=lora_rank,
         lora_alpha=lora_alpha,
         target_modules=["to_q", "to_k", "to_v", "to_out.0"],
         init_lora_weights=False,
@@ -108,12 +108,13 @@ def set_lora_device(model, adapter_names, device):
                         )
 
 
-def check_hotswap(do_hotswap, alpha_scalings=(16, 16)):
+def check_hotswap(do_hotswap, ranks=(8, 8), alpha_scalings=(16, 16)):
     dummy_input = get_dummy_input()
     unet = get_small_unet()
+    rank0, rank1 = ranks
     alpha0, alpha1 = alpha_scalings
-    lora_config0 = get_unet_lora_config(alpha0)
-    lora_config1 = get_unet_lora_config(alpha1)
+    lora_config0 = get_unet_lora_config(rank0, alpha0)
+    lora_config1 = get_unet_lora_config(rank1, alpha1)
     unet.add_adapter(lora_config0, adapter_name="adapter0")
     unet.add_adapter(lora_config1, adapter_name="adapter1")
 
@@ -132,6 +133,9 @@ def check_hotswap(do_hotswap, alpha_scalings=(16, 16)):
         file_name0 = os.path.join(os.path.join(tmp_dirname, "adapter0"), "pytorch_lora_weights.safetensors")
         file_name1 = os.path.join(os.path.join(tmp_dirname, "adapter1"), "pytorch_lora_weights.safetensors")
         unet.load_attn_procs(file_name0)
+        prepare_model_for_compiled_hotswap(
+            unet, config={"adapter0": lora_config0, "adapter1": lora_config1}, target_rank=max(ranks)
+        )
         unet = torch.compile(unet, mode="reduce-overhead")
         unet(**dummy_input)["sample"]
 
@@ -148,4 +152,8 @@ def check_hotswap(do_hotswap, alpha_scalings=(16, 16)):
 
 if __name__ == "__main__":
     # check_hotswap(False) will trigger recompilation
-    check_hotswap(do_hotswap=sys.argv[1] == "1", alpha_scalings=(8, 16))
+    do_hotswap = sys.argv[1] == "1"
+    # ranks is a string like '13,7'
+    ranks = sys.argv[2].split(",")
+    ranks = int(ranks[0]), int(ranks[1])
+    check_hotswap(do_hotswap=do_hotswap, ranks=ranks, alpha_scalings=(8, 16))

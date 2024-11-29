@@ -31,6 +31,8 @@ with torch.inference_mode():
     output_adapter_1 = model(inputs).logits
 ```
 
+TODO
+
 Hotswapping works with transformers models and diffusers models. However, there are some caveats:
 
 - It only works for the same PEFT method, so no swapping LoRA and LoHa, for example.

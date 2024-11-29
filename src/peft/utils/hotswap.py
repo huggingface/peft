@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import math
 from operator import attrgetter
+from typing import Optional
 
 import torch
 
@@ -44,7 +45,9 @@ def _update_scaling(lora_module, adapter_name, scaling=None):
 
 
 def _convert_scalings_to_tensor(model):
-    """TODO"""
+    """
+    Convert the LoRA scaling values into torch.tensors to prevent recompilation of they change.
+    """
     for module in model.modules():
         if not isinstance(module, LoraLayer):
             continue
@@ -74,7 +77,7 @@ def _pad_lora_weights(model, target_rank):
         is_conv = isinstance(module, Conv2d)
 
         # LoRA A
-        for name, lora_module in module.lora_A.items():
+        for adapter_name, lora_module in module.lora_A.items():
             weight = lora_module.weight
             original_rank = weight.size(0)
 
@@ -106,15 +109,16 @@ def _pad_lora_weights(model, target_rank):
             else:
                 padded = torch.zeros(target_rank, weight.size(1), device=weight.device, dtype=weight.dtype)
                 padded[:original_rank, :] = weight
-                new_layer = torch.nn.Linear(target_rank, weight.size(1), bias=lora_module.bias)
+                new_layer = torch.nn.Linear(weight.size(1), target_rank, bias=lora_module.bias)
 
+            assert new_layer.weight.shape == padded.shape
             new_layer.weight.data = padded
             if lora_module.bias:
                 new_layer.bias.data = lora_module.bias.data
-            module.lora_A[name] = new_layer
+            module.lora_A[adapter_name] = new_layer
 
         # LoRA B
-        for name, lora_module in module.lora_B.items():
+        for adapter_name, lora_module in module.lora_B.items():
             weight = lora_module.weight
             original_rank = weight.size(1)
 
@@ -147,24 +151,48 @@ def _pad_lora_weights(model, target_rank):
             else:
                 padded = torch.zeros(weight.size(0), target_rank, device=weight.device, dtype=weight.dtype)
                 padded[:, :original_rank] = weight
-                new_layer = torch.nn.Linear(weight.size(0), target_rank, bias=lora_module.bias)
+                new_layer = torch.nn.Linear(target_rank, weight.size(0), bias=lora_module.bias)
 
+            assert new_layer.weight.shape == padded.shape
             new_layer.weight.data = padded
             if lora_module.bias:
                 new_layer.bias.data = lora_module.bias.data
-            module.lora_B[name] = new_layer
+            module.lora_B[adapter_name] = new_layer
 
 
 def prepare_model_for_compiled_hotswap(
-    model: torch.nn.Module, config: LoraConfig | dict[str, LoraConfig], target_rank: int
+    model: torch.nn.Module, target_rank: int, config: Optional[LoraConfig | dict[str, LoraConfig]] = None
 ) -> None:
-    # TODO
+    """
+    Helper function that prepares the model so that it can later be compiled and then used with hot-swapping.
+
+    It is necessary to call this function on the model for hot-swapping to work if the different LoRA adapters have
+    different ranks and/or different alpha values (i.e. scalings).
+
+    It is important to call this function *after* the first LoRA adapter has been loaded but *before* the model is
+    compiled.
+
+    Even with this function, hot-swapping LoRA adapters that target different layers is still not supported.
+
+    Args:
+        model (`nn.Module`):
+            The model with the loaded adapter, before compilation.
+        target_rank (`int`):
+            The target rank to pad the LoRA weights to. Should be the maximum rank among all LoRA adapters that will be
+            hot-swapped.
+        config (`LoraConfig` or `dict[str, LoraConfig]`, *optional*):
+            Optionally pass the `LoraConfig`s of the LoRA adapters. If passed, the rank in the configs will be updated
+            to `target_rank`.
+    """
     is_compiled = hasattr(model, "_orig_mod")
     if is_compiled:
         raise ValueError("Call prepare_model_for_compiled_hotswap *before* compiling the model")
 
     _convert_scalings_to_tensor(model)
     _pad_lora_weights(model, target_rank=target_rank)
+
+    if not config:
+        return
 
     if not isinstance(config, dict):
         config = {"dummy": config}
@@ -176,7 +204,13 @@ def prepare_model_for_compiled_hotswap(
                 lora_config.rank_pattern[key] = target_rank
 
 
-def hotswap_adapter_from_state_dict(model, state_dict, adapter_name, config, parameter_prefix="lora_"):
+def hotswap_adapter_from_state_dict(
+    model: torch.nn.Module,
+    state_dict: dict[str, torch.Tensor],
+    adapter_name: str,
+    config: LoraConfig,
+    parameter_prefix: str = "lora_",
+):
     """
     Swap out the adapter weights from the model with the weights from state_dict.
 
@@ -194,7 +228,8 @@ def hotswap_adapter_from_state_dict(model, state_dict, adapter_name, config, par
         adapter_name (`str`):
             The name of the adapter that should be hot-swapped, e.g. `"default"`. The name will remain the same after
             swapping.
-        config TODO
+        config (`LoraConfig`):
+            The config of the LoRA adapter. This is used to determine the scaling and rank of the adapter.
         parameter_prefix (`str`, *optional*, defaults to `"lora_"`)
             The prefix used to identify the adapter's keys in the state dict. For LoRA, this would be `"lora_"` (the
             default).
@@ -252,12 +287,29 @@ def hotswap_adapter_from_state_dict(model, state_dict, adapter_name, config, par
         # swap actual weights
         # no need to account for potential _orig_mod in key here, as torch handles that
         old_val = attrgetter(key)(model)
-        if is_compiled:
-            # Compiled models don't work with swap_tensors because there are weakrefs for the tensor. It is unclear if
-            # this workaround could not cause trouble but the tests indicate that it works.
+        if not is_compiled:
+            torch.utils.swap_tensors(old_val, new_val)
+            return
+
+        # Compiled models don't work with swap_tensors because there are weakrefs for the tensor. It is unclear if
+        # this workaround could not cause trouble but the tests indicate that it works.
+        if old_val.shape == new_val.shape:
             old_val.data = new_val.data
         else:
-            torch.utils.swap_tensors(old_val, new_val)
+            if old_val.dim() != 2:
+                raise NotImplementedError
+            if old_val.shape[0] > new_val.shape[0]:
+                old_val.data.fill_(0)
+                old_val.data[: new_val.shape[0]] = new_val.data
+            elif old_val.shape[1] > new_val.shape[1]:
+                old_val.data.fill_(0)
+                old_val.data[:, : new_val.shape[1]] = new_val.data
+            else:
+                raise ValueError(
+                    f"Incompatible shapes found for LoRA weights {key}: {old_val.shape} vs {new_val.shape}. Please "
+                    "ensure that all ranks are padded to the largest rank among all LoRA adapters by using "
+                    "peft.utils.hotswap.prepare_model_for_compiled_hotswap."
+                )
 
 
 def _check_hotswap_configs_compatible(config0: PeftConfig, config1: PeftConfig) -> None:
