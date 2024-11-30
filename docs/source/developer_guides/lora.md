@@ -64,7 +64,19 @@ the IPM is favored because it can further accelerate convergence and enhance the
 You need to configure the initialization method to "corda", and specify the mode of IPM or KPM and the dataset to collect covariance matrices. 
 
 ```py
-# TODO
+init_config = CordaInitConfig(
+    run_model=run_model,  # The callback to run your model with sample dataset
+)
+corda_config = CordaConfig(
+    sample_count=256,
+    corda_method="kpm",
+)
+lora_config = LoraConfig(
+    init_lora_weights="corda",
+    corda_config=corda_config,
+)
+preprocess_corda(model, lora_config, init_config)
+peft_model = get_peft_model(model, lora_config)
 ```
 
 For detailed instruction on using CorDA, please follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/corda_finetuning).
