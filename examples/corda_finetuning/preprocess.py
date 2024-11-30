@@ -23,7 +23,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft.mapping import get_peft_model
 from peft.tuners.lora.config import CordaConfig, CordaInitConfig, LoraConfig
-from peft.utils.corda_utils import preprocess_corda
+from peft.tuners.lora.corda import preprocess_corda
 
 
 @torch.no_grad()

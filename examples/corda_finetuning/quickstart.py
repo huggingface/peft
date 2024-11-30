@@ -2,7 +2,7 @@ import torch
 from peft import LoraConfig, get_peft_model
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft.tuners.lora.config import CordaConfig, CordaInitConfig
-from peft.utils.corda_utils import preprocess_corda
+from peft.tuners.lora.corda import preprocess_corda
 from trl import SFTConfig, SFTTrainer
 from datasets import load_dataset
 

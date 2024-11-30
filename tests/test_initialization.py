@@ -59,7 +59,7 @@ from peft import (
 from peft.tuners.lora.config import CordaConfig, CordaInitConfig
 from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
-from peft.utils.corda_utils import preprocess_corda
+from peft.tuners.lora.corda import preprocess_corda
 from peft.utils.hotswap import hotswap_adapter
 
 
