@@ -16,7 +16,6 @@
 import itertools
 import platform
 import re
-import tempfile
 from collections import defaultdict
 from contextlib import contextmanager
 from copy import deepcopy
@@ -57,9 +56,9 @@ from peft import (
     set_peft_model_state_dict,
 )
 from peft.tuners.lora.config import CordaConfig, CordaInitConfig
+from peft.tuners.lora.corda import preprocess_corda
 from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
-from peft.tuners.lora.corda import preprocess_corda
 from peft.utils.hotswap import hotswap_adapter
 
 

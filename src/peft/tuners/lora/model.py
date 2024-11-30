@@ -272,7 +272,9 @@ class LoraModel(BaseTuner):
                     else (
                         child.W_q
                         if hasattr(child, "W_q")
-                        else child.weight if hasattr(child, "weight") else next(child.parameters())
+                        else child.weight
+                        if hasattr(child, "weight")
+                        else next(child.parameters())
                     )
                 )
                 if not any(p.device == meta for p in module.parameters()):

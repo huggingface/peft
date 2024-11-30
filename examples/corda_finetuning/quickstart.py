@@ -1,10 +1,12 @@
 import torch
+from datasets import load_dataset
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from trl import SFTConfig, SFTTrainer
+
 from peft import LoraConfig, get_peft_model
-from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft.tuners.lora.config import CordaConfig, CordaInitConfig
 from peft.tuners.lora.corda import preprocess_corda
-from trl import SFTConfig, SFTTrainer
-from datasets import load_dataset
+
 
 model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf", torch_dtype=torch.bfloat16, device_map="auto")
 tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf")

@@ -175,10 +175,10 @@ class CordaConfig:
             Divisor for each hook call. You should make sure `run_model` calls the model exactly `sample_count` times
             for consistent behaviour.
         corda_method (`Literal["ipm", "kpm"]`):
-            Method to build adapter. The KPM (Knowledge-Preserved Mode) not only achieves better performance than LoRA on fine-tuning tasks, but
-            also mitigates the catastrophic forgetting of pre-trained world knowledge. When preserving pre-trained
-            knowledge is not a concern, the IPM (Instruction-Previewed Mode) is favored because it can further accelerate convergence and enhance
-            the fine-tuning performance.
+            Method to build adapter. The KPM (Knowledge-Preserved Mode) not only achieves better performance than LoRA
+            on fine-tuning tasks, but also mitigates the catastrophic forgetting of pre-trained world knowledge. When
+            preserving pre-trained knowledge is not a concern, the IPM (Instruction-Previewed Mode) is favored because
+            it can further accelerate convergence and enhance the fine-tuning performance.
         verbose (`bool`):
             If true, prints the progress of CorDA initialization.
     """
@@ -278,10 +278,10 @@ class LoraConfig(PeftConfig):
             leading to further enhancements. Passing `'pissa_niter_[number of iters]'` initiates Fast-SVD-based PiSSA
             initialization, where `[number of iters]` indicates the number of subspace iterations to perform FSVD, and
             must be a nonnegative integer. When `[number of iters]` is set to 16, it can complete the initialization of
-            a 7B model within seconds, and the training effect is approximately equivalent to using SVD. Passing `'corda'`
-            results in the initialization of <ahref='https://arxiv.org/abs/2406.05223' >Context-Oriented Decomposition
-            Adaptation</a>, which converges even more rapidly than PiSSA in Instruction-Previewed Mode, and preserves
-            world knowledge better than LoRA in Knowledge-Preserved Mode.
+            a 7B model within seconds, and the training effect is approximately equivalent to using SVD. Passing
+            `'corda'` results in the initialization of <ahref='https://arxiv.org/abs/2406.05223' >Context-Oriented
+            Decomposition Adaptation</a>, which converges even more rapidly than PiSSA in Instruction-Previewed Mode,
+            and preserves world knowledge better than LoRA in Knowledge-Preserved Mode.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the

@@ -18,14 +18,13 @@
 import os
 from typing import Any, Callable, Iterable, Optional
 
-from attr import dataclass
 import torch
 import torch.nn as nn
+from attr import dataclass
 from tqdm import tqdm
 
 from peft.tuners.lora.config import CordaInitConfig, LoraConfig
 from peft.tuners.lora.model import LoraModel
-from peft.tuners.tuners_utils import check_target_module_exists
 from peft.utils.other import get_pattern_key
 
 
