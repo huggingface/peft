@@ -104,7 +104,7 @@ def preprocess_corda(
     else:
         # Specify CorDA method for each layer
         if corda_method is None:
-            raise ValueError("corda_method is required when cache_file is not provided")
+            raise ValueError("corda_method is required when cache_file is not provided.")
         for name, module in target_modules(model, lora_config):
             module.corda_method = corda_method
 
@@ -152,7 +152,7 @@ def calib_cov_distribution(
         return
 
     if run_model is None:
-        raise ValueError("run_model must be specified when covariance file and cache file aren't built")
+        raise ValueError("run_model must be specified when covariance file and cache file aren't built.")
     if hooked_model is None:
         hooked_model = model
     hooked_model.eval()
@@ -163,17 +163,16 @@ def calib_cov_distribution(
             input = input.float()
         input = input / torch.max(input).abs()
 
-        # covariance = input.t() @ input ## (dim, dim)
-        if torch.isnan(input).any():
-            raise Exception("nan in input, break")
-        if torch.isinf(input).any():
-            raise Exception("inf in input, break")
+        # check if input is valid
+        if torch.isnan(input).any() or torch.isinf(input).any():
+            raise ValueError("Invalid value found in input, please check your input data.")
 
+        # calculate covariance and check if it's valid
         covariance = input.t().matmul(input)
-        if torch.isnan(covariance).any():
-            raise Exception("nan in covariance, break")
-        if torch.isinf(covariance).any():
-            raise Exception("inf in covariance, break")
+        if torch.isnan(covariance).any() or torch.isinf(covariance).any():
+            raise ValueError(
+                "Invalid value found in covariance. Please file an issue at https://github.com/huggingface/peft/issues."
+            )
 
         # calculate mean and std
         mean = input.mean(0)
@@ -184,7 +183,7 @@ def calib_cov_distribution(
         module.mean += mean / sample_count
         module.std += std / sample_count
 
-        # module.covariance_matrix = (module.covariance_matrix + covariance) / 2
+        # free memory
         del covariance, input
 
     for name, module in target_modules(hooked_model, config):
@@ -243,7 +242,11 @@ def collect_eigens_for_layer(
     min_dim = min(in_dim, out_dim)
 
     if not hasattr(linear, "covariance_matrix"):
-        raise ValueError("build covariance matrix with calib_cov_distribution first")
+        raise ValueError(
+            "Covariance matrix not found in linear module. Please do not call this function directly, "
+            "instead call `preprocess_corda`. If your usage is correct but this error still encounters, "
+            "please file an issue at https://github.com/huggingface/peft/issues."
+        )
     covariance_matrix = linear.covariance_matrix.float()
 
     damp = 0.01
@@ -268,12 +271,22 @@ def collect_eigens_for_layer(
     V = (Vh @ cov_inv).transpose(0, 1)
 
     # Sanity check, temporarily U and V are large, they will be crop after rank search
-    if U.size(0) != out_dim or U.size(1) != min_dim:
-        raise ValueError(f"U size mismatch: {U.size()} vs. ({out_dim}, {min_dim})")
-    if S.size(0) != min_dim:
-        raise ValueError(f"S size mismatch: {S.size()} vs. ({min_dim},)")
-    if V.size(0) != in_dim or V.size(1) != min_dim:
-        raise ValueError(f"V size mismatch: {V.size()} vs. ({in_dim}, {min_dim})")
+    r = min_dim
+    if U.size(0) != out_dim or U.size(1) != r:
+        raise ValueError(
+            f"Matrix U size mismatch: {U.size()} vs. ({out_dim}, {r}), "
+            "please file an issue at https://github.com/huggingface/peft/issues."
+        )
+    if S.size(0) != r:
+        raise ValueError(
+            f"Matrix S size mismatch: {S.size()} vs. ({r},), "
+            "please file an issue at https://github.com/huggingface/peft/issues."
+        )
+    if V.size(0) != in_dim or V.size(1) != r:
+        raise ValueError(
+            f"Matrix V size mismatch: {V.size()} vs. ({in_dim}, {r}), "
+            "please file an issue at https://github.com/huggingface/peft/issues."
+        )
 
     # Offload U and V to CPU, they consume too much memory
     U = U.cpu()
@@ -300,16 +313,31 @@ def crop_corda_eigens(model: nn.Module, config: LoraConfig):
             module.eigens.U_WC = module.eigens.U_WC[:, -module.rank :].clone().to(get_model_device(model))
             module.eigens.V_WC = module.eigens.V_WC[:, -module.rank :].clone().to(get_model_device(model))
         else:
-            raise ValueError("Invalid corda_method")
+            raise ValueError(f"Invalid corda_method found: {module.corda_method}, it should be 'ipm' or 'kpm'.")
 
         # Sanity check
         if module.eigens.S_WC.size(0) != module.rank:
-            raise ValueError(f"rank mismatch: {module.eigens.S_WC.size(0)} vs. {module.rank}")
+            raise ValueError(
+                f"rank mismatch: {module.eigens.S_WC.size(0)} vs. {module.rank},"
+                "please file an issue at https://github.com/huggingface/peft/issues."
+            )
         if module.eigens.U_WC.size(0) != module.weight.size(0):
-            raise ValueError(f"U size mismatch: {module.eigens.U_WC.size(0)} vs. {module.weight.size(0)}")
+            raise ValueError(
+                f"U size mismatch: {module.eigens.U_WC.size(0)} vs. {module.weight.size(0)},"
+                "please file an issue at https://github.com/huggingface/peft/issues."
+            )
         if module.eigens.U_WC.size(1) != module.rank:
-            raise ValueError(f"U size mismatch: {module.eigens.U_WC.size(1)} vs. {module.rank}")
+            raise ValueError(
+                f"U size mismatch: {module.eigens.U_WC.size(1)} vs. {module.rank},"
+                "please file an issue at https://github.com/huggingface/peft/issues."
+            )
         if module.eigens.V_WC.size(0) != module.weight.size(1):
-            raise ValueError(f"V size mismatch: {module.eigens.V_WC.size(0)} vs. {module.weight.size(1)}")
+            raise ValueError(
+                f"V size mismatch: {module.eigens.V_WC.size(0)} vs. {module.weight.size(1)},"
+                "please file an issue at https://github.com/huggingface/peft/issues."
+            )
         if module.eigens.V_WC.size(1) != module.rank:
-            raise ValueError(f"V size mismatch: {module.eigens.V_WC.size(1)} vs. {module.rank}")
+            raise ValueError(
+                f"V size mismatch: {module.eigens.V_WC.size(1)} vs. {module.rank},"
+                "please file an issue at https://github.com/huggingface/peft/issues."
+            )
