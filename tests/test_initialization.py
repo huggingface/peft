@@ -16,7 +16,6 @@
 import itertools
 import platform
 import re
-import tempfile
 from collections import defaultdict
 from contextlib import contextmanager
 from copy import deepcopy
