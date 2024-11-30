@@ -73,6 +73,7 @@ corda_config = CordaConfig(
 )
 lora_config = LoraConfig(
     init_lora_weights="corda",
+    corda_config=corda_config,
 )
 ```
 
