@@ -121,6 +121,42 @@ class EvaConfig:
 
 
 @dataclass
+class CordaInitConfig:
+    """
+    This is the configuration class to store the configuration when building CorDA adapters.
+
+    Args:
+        run_model (`Callable[[], None]`):
+            Callback to run the model when building covariance. This will be run once regardless of `sample_count`, so
+            you should configure the `run_model` callback to run the model exactly `sample_count` times. Typically you
+            should run model inference on your dataset in this callback.
+        hooked_model (`Optional[nn.Module]`):
+            Model to hook when building covariance. If none, original model will be hooked. This is only useful when
+            you want to hook a different model than the one you are training, typically you should leave this `None`.
+    """
+
+    run_model: Optional[Callable[[], None]] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Callback to run the model when building covariance. This will be run once regardless of `sample_count`, "
+                "so you should configure the `run_model` callback to run the model exactly `sample_count` times. Typically "
+                "you should run model inference on your dataset in this callback."
+            )
+        },
+    )
+    hooked_model: Optional[nn.Module] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Model to hook when building covariance. If none, original model will be hooked. This is only useful when "
+                "you want to hook a different model than the one you are training, typically you should leave this `None`."
+            )
+        },
+    )
+
+
+@dataclass
 class CordaConfig:
     """
     This is the sub-configuration class to store the configuration of a [`LoraModel`].
@@ -135,13 +171,6 @@ class CordaConfig:
             File to store the covariance matrix. If you wish to train multiple models with different ranks, but they
             sample from the same dataset, you can store the covariance matrix and reuse it for different ranks. Note
             that covariance file is usually large (comparable to model size), so you will need sufficient storage.
-        run_model (`Callable[[], None]`):
-            Callback to run the model when building covariance. This will be run once regardless of `sample_count`, so
-            you should configure the `run_model` callback to run the model exactly `sample_count` times. Typically you
-            should run model inference on your dataset in this callback.
-        hooked_model (`Optional[nn.Module]`):
-            Model to hook when building covariance. If none, original model will be hooked. This is only useful when
-            you want to hook a different model than the one you are training, typically you should leave this `None`.
         sample_count (`int`):
             Divisor for each hook call. You should make sure `run_model` calls the model exactly `sample_count` times
             for consistent behaviour.
@@ -172,25 +201,6 @@ class CordaConfig:
                 "File to store the covariance matrix. If you wish to train multiple models with different ranks, but "
                 "they sample from the same dataset, you can store the covariance matrix and reuse it for different ranks. "
                 "Note that covariance file is usually large (comparable to model size), so you will need sufficient storage."
-            )
-        },
-    )
-    run_model: Optional[Callable[[], None]] = field(
-        default=None,
-        metadata={
-            "help": (
-                "Callback to run the model when building covariance. This will be run once regardless of `sample_count`, "
-                "so you should configure the `run_model` callback to run the model exactly `sample_count` times. Typically "
-                "you should run model inference on your dataset in this callback."
-            )
-        },
-    )
-    hooked_model: Optional[nn.Module] = field(
-        default=None,
-        metadata={
-            "help": (
-                "Model to hook when building covariance. If none, original model will be hooked. This is only useful when "
-                "you want to hook a different model than the one you are training, typically you should leave this `None`."
             )
         },
     )

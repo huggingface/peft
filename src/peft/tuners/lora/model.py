@@ -42,7 +42,6 @@ from peft.utils import (
     get_peft_model_state_dict,
     get_quantization_config,
 )
-from peft.utils.corda_utils import preprocess_corda
 from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
 from peft.utils.other import get_pattern_key
 
@@ -140,11 +139,6 @@ class LoraModel(BaseTuner):
 
     def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
         super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
-
-    def _pre_injection_hook(self, model: nn.Module, config: LoraConfig, adapter_name: str) -> None:
-        if isinstance(config.init_lora_weights, str) and config.init_lora_weights.startswith("corda"):
-            if not hasattr(model, "corda_method"):
-                preprocess_corda(model, config)
 
     def _check_new_adapter_config(self, config: LoraConfig) -> None:
         """
@@ -275,11 +269,11 @@ class LoraModel(BaseTuner):
                 weight = (
                     child.qweight
                     if hasattr(child, "qweight")
-                    else child.W_q
-                    if hasattr(child, "W_q")
-                    else child.weight
-                    if hasattr(child, "weight")
-                    else next(child.parameters())
+                    else (
+                        child.W_q
+                        if hasattr(child, "W_q")
+                        else child.weight if hasattr(child, "weight") else next(child.parameters())
+                    )
                 )
                 if not any(p.device == meta for p in module.parameters()):
                     module.to(weight.device)
