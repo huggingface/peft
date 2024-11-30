@@ -284,7 +284,9 @@ class LoraLayer(BaseTunerLayer):
 
         # Calculate WC from covariance matrix
         if not hasattr(linear, "eigens"):
-            raise ValueError("eigens attribute not found, it's expected to be set by the pre-injection hook.")
+            raise ValueError(
+                "`eigens` attribute not found for layer, please run `preprocess_corda` first. More information can be found at examples/corda_finetuning/README.md."
+            )
         eigens = linear.eigens
         U = eigens.U_WC
         S = eigens.S_WC
@@ -293,19 +295,31 @@ class LoraLayer(BaseTunerLayer):
 
         # nan or inf check
         if torch.isnan(S).any() or torch.isinf(S).any():
-            raise ValueError("nan or inf in S")
+            raise ValueError(
+                "Invalid value found in matrix S. Please file an issue at https://github.com/huggingface/peft/issues."
+            )
         if torch.isnan(U).any() or torch.isinf(U).any():
-            raise ValueError("nan or inf in U")
+            raise ValueError(
+                "Invalid value found in matrix U. Please file an issue at https://github.com/huggingface/peft/issues."
+            )
         if torch.isnan(V).any() or torch.isinf(V).any():
-            raise ValueError("nan or inf in V")
+            raise ValueError(
+                "Invalid value found in matrix V. Please file an issue at https://github.com/huggingface/peft/issues."
+            )
 
         # Sanity check
         if U.size(0) != out_dim or U.size(1) != r:
-            raise ValueError(f"U size mismatch: {U.size()} vs. ({out_dim}, {r})")
+            raise ValueError(
+                f"Matrix U size mismatch: {U.size()} vs. ({out_dim}, {r}). Please make sure the `lora_config` and `model` argument of `preprocess_corda` is consistent with `get_peft_model`. If you're using cache in `preprocess_corda`, please make sure the cache is built with the same model and LoRA rank."
+            )
         if S.size(0) != r:
-            raise ValueError(f"S size mismatch: {S.size()} vs. ({r},)")
+            raise ValueError(
+                f"Matrix S size mismatch: {S.size()} vs. ({r},). Please make sure the `lora_config` and `model` argument of `preprocess_corda` is consistent with `get_peft_model`. If you're using cache in `preprocess_corda`, please make sure the cache is built with the same model and LoRA rank."
+            )
         if V.size(0) != in_dim or V.size(1) != r:
-            raise ValueError(f"V size mismatch: {V.size()} vs. ({in_dim}, {r})")
+            raise ValueError(
+                f"Matrix V size mismatch: {V.size()} vs. ({in_dim}, {r}). Please make sure the `lora_config` and `model` argument of `preprocess_corda` is consistent with `get_peft_model`. If you're using cache in `preprocess_corda`, please make sure the cache is built with the same model and LoRA rank."
+            )
 
         # Apply alpha
         S /= self.scaling[adapter_name]

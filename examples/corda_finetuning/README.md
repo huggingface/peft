@@ -68,49 +68,7 @@ The distinction between CorDA with other similar LoRA initialization methods is 
 - Knowledge-preserved adaptation mode
 
 ```py
-import torch
-from peft import LoraConfig, get_peft_model
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from peft.tuners.lora.config import CordaConfig
-from trl import SFTConfig, SFTTrainer
-from datasets import load_dataset
-
-model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf", torch_dtype=torch.bfloat16, device_map="auto")
-tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf")
-tokenizer.pad_token_id = tokenizer.eos_token_id
-sampled_dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="train[:256]")
-dataset = load_dataset("imdb", split="train[:256]")
-
-
-def run_model():
-    for batch in sampled_dataset:
-        input_ids = batch["text"]
-        input_ids = input_ids.to(model.device)
-        with torch.no_grad():
-            model(input_ids)
-
-
-corda_config = CordaConfig(
-    run_model=run_model,
-    sample_count=256,
-    corda_method="kpm",
-)
-lora_config = LoraConfig(
-    init_lora_weights="corda",
-    corda_config=corda_config,
-)
-peft_model = get_peft_model(model, lora_config)
-peft_model.print_trainable_parameters()
-
-training_args = SFTConfig(dataset_text_field="text", max_seq_length=128)
-trainer = SFTTrainer(
-    model=peft_model,
-    args=training_args,
-    train_dataset=dataset,
-    tokenizer=tokenizer,
-)
-trainer.train()
-peft_model.save_pretrained("corda-llama-2-7b")
+# TODO
 ```
 
 - Instruction-previewed adaptation mode
@@ -118,7 +76,7 @@ peft_model.save_pretrained("corda-llama-2-7b")
 ```py
 # Get model and dataset identically as KPM...
 
-# Different from KPM
+# Different from KPM, we run the model on dataset of the downstream task to collect covariance matrices
 def run_model():
     for batch in dataset:
         input_ids = batch["text"]
@@ -126,29 +84,52 @@ def run_model():
         with torch.no_grad():
             model(input_ids)
 
-
+# Different from KPM, we set `corda_method` to `"ipm"`
 corda_config = CordaConfig(
-    run_model=run_model,
-    sample_count=256,
     corda_method="ipm",
 )
-lora_config = LoraConfig(
-    init_lora_weights="corda",
-)
-peft_model = get_peft_model(model, lora_config)
-peft_model.print_trainable_parameters()
 
-training_args = SFTConfig(dataset_text_field="text", max_seq_length=128)
-trainer = SFTTrainer(
-    model=peft_model,
-    args=training_args,
-    train_dataset=dataset,
-    tokenizer=tokenizer,
-)
-trainer.train()
-peft_model.save_pretrained("corda-llama-2-7b")
+# The rest of training process is identical to KPM...
 ```
 
+## Advanced Usage
+
+`preprocess.py`: This script builds CorDA adapters for a model, and saves the adapters initial weights and residual model weights to a specified directory. Example usage:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python -u preprocess.py --model_id="meta-llama/Llama-2-7b-hf" \
+    --r 128 --seed 233 \
+    --save_model --save_path {your_save_path} \
+    --first_eigen --calib_dataset "MetaMATH"
+```
+
+`corda_finetuning.py`: This script fine-tunes the preprocessed model built above on a downstream task.
+
+Example usage:
+
+```bash
+python corda_finetuning.py \
+    --model_name_or_path {path_to_residual_model} \
+    --output_dir {path_to_output_model} \
+    --corda_mode True \
+    --data_path meta-math/MetaMathQA \
+    --dataset_split "train[:100000]" \
+    --dataset_field query response \
+    --num_train_epochs 1 \
+    --per_device_train_batch_size 1 \
+    --gradient_accumulation_steps 32 \
+    --save_strategy "steps" \
+    --save_steps 100 \
+    --save_total_limit 1 \
+    --learning_rate 2e-5 \
+    --weight_decay 0. \
+    --warmup_ratio 0.03 \
+    --lr_scheduler_type "cosine" \
+    --logging_steps 1 \
+    --bf16 True \
+    --tf32 True \
+    --report_to none
+```
 
 ## Citation
 ```

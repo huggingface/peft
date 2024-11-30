@@ -23,7 +23,7 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 
-from peft.tuners.lora.config import LoraConfig
+from peft.tuners.lora.config import CordaInitConfig, LoraConfig
 from peft.tuners.lora.model import LoraModel
 from peft.tuners.tuners_utils import check_target_module_exists
 from peft.utils.other import get_pattern_key
@@ -55,12 +55,21 @@ def get_model_device(model: nn.Module) -> str:
 @torch.no_grad()
 def preprocess_corda(
     model: nn.Module,
-    config: LoraConfig,
+    lora_config: LoraConfig,
+    init_config: CordaInitConfig = None,
 ):
     """
     Build necessary CorDA fields for a model.
 
-    The fields are:
+    Args:
+        model (`nn.Module`):
+            Model to preprocess.
+        lora_config (`LoraConfig`):
+            Lora configuration of the model. `lora_config.corda_config` should be set.
+        init_config (`CordaInitConfig`):
+            CorDA initialization configuration. This is not merged with `lora_config` because it's not serializable.
+
+    Upon completion, the following fields are set for each target module:
         corda_method (`Literal["ipm", "kpm"]`):
             CorDA method to apply. "ipm" for Instruction-Previewed Mode, "kpm" for Knowledge-Preserved Mode.
         rank (`int`):
@@ -72,18 +81,20 @@ def preprocess_corda(
         eigens.V_WC (`torch.Tensor`):
             Right singular vectors of the weight matrix, multiplied by inverse of covariance matrix.
     """
-    cache_file = config.corda_config.get("cache_file")
-    covariance_file = config.corda_config.get("covariance_file")
-    sample_count = config.corda_config.get("sample_count")
-    corda_method = config.corda_config.get("corda_method")
-    run_model = config.corda_config.get("run_model")
-    hooked_model = config.corda_config.get("hooked_model")
-    verbose = config.corda_config.get("verbose")
+    cache_file = lora_config.corda_config.get("cache_file")
+    covariance_file = lora_config.corda_config.get("covariance_file")
+    sample_count = lora_config.corda_config.get("sample_count")
+    corda_method = lora_config.corda_config.get("corda_method")
+    verbose = lora_config.corda_config.get("verbose")
+    if init_config is None:
+        init_config = CordaInitConfig()
+    run_model = init_config.run_model
+    hooked_model = init_config.hooked_model
 
     # If cache exists, skip building
     if cache_file is not None and os.path.exists(cache_file) and os.path.getsize(cache_file) > 0:
         cache = torch.load(cache_file, map_location=get_model_device(model))
-        for name, module in target_modules(model, config):
+        for name, module in target_modules(model, lora_config):
             module.corda_method = cache[f"{name}.corda_method"]
             module.rank = cache[f"{name}.rank"]
             module.eigens = CordaEigens(
@@ -95,27 +106,27 @@ def preprocess_corda(
         # Specify CorDA method for each layer
         if corda_method is None:
             raise ValueError("corda_method is required when cache_file is not provided")
-        for name, module in target_modules(model, config):
+        for name, module in target_modules(model, lora_config):
             module.corda_method = corda_method
 
         # Specify CorDA rank for each layer
-        for name, module in target_modules(model, config):
-            r_key = get_pattern_key(config.rank_pattern.keys(), name)
-            module.rank = config.rank_pattern.get(r_key, config.r)
+        for name, module in target_modules(model, lora_config):
+            r_key = get_pattern_key(lora_config.rank_pattern.keys(), name)
+            module.rank = lora_config.rank_pattern.get(r_key, lora_config.r)
 
         # Calculate covariance matrix
-        calib_cov_distribution(model, config, run_model, hooked_model, sample_count, covariance_file)
+        calib_cov_distribution(model, lora_config, run_model, hooked_model, sample_count, covariance_file)
 
         # Calculate eigens
-        collect_eigens(model, config, verbose)
+        collect_eigens(model, lora_config, verbose)
 
         # Crop CorDA eigens so that there's less to save
-        crop_corda_eigens(model, config)
+        crop_corda_eigens(model, lora_config)
 
         # Save cache to disk
         if cache_file is not None:
             cache: dict[str, Any] = {}
-            for name, module in target_modules(model, config):
+            for name, module in target_modules(model, lora_config):
                 cache[f"{name}.corda_method"] = module.corda_method
                 cache[f"{name}.rank"] = module.rank
                 cache[f"{name}.eigens.S_WC"] = module.eigens.S_WC
@@ -124,10 +135,6 @@ def preprocess_corda(
 
             os.makedirs(os.path.dirname(cache_file), exist_ok=True)
             torch.save(cache, cache_file)
-
-    # Clear run model callback as it's not serializable
-    config.corda_config["run_model"] = None
-    config.corda_config["hooked_model"] = None
 
 
 @torch.no_grad()

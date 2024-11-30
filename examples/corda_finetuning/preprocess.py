@@ -22,7 +22,8 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft.mapping import get_peft_model
-from peft.tuners.lora.config import CordaConfig, LoraConfig
+from peft.tuners.lora.config import CordaConfig, CordaInitConfig, LoraConfig
+from peft.utils.corda_utils import preprocess_corda
 
 
 @torch.no_grad()
@@ -56,20 +57,24 @@ def main(args):
     print(model)
 
     # Perform decomposition
-    config = LoraConfig(
+    init_config = CordaInitConfig(
+        run_model=lambda: run_model(model, calib_loader),
+    )
+    corda_config = CordaConfig(
+        sample_count=args.calib_loader_size,
+        corda_method="ipm" if args.first_eigen else "kpm",
+        cache_file="./checkpoints/cov/debug.pt",
+        run_svd_for_covariance=False,
+    )
+    lora_config = LoraConfig(
         init_lora_weights="corda",
         target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
         r=args.r,
         lora_alpha=args.r,
-        corda_config=CordaConfig(
-            run_model=lambda: run_model(model, calib_loader),
-            sample_count=args.calib_loader_size,
-            corda_method="ipm" if args.first_eigen else "kpm",
-            cache_file="./checkpoints/cov/debug.pt",
-            run_svd_for_covariance=False,
-        ),
+        corda_config=corda_config,
     )
-    model = get_peft_model(model, config)
+    preprocess_corda(model, lora_config, init_config)
+    model = get_peft_model(model, lora_config)
 
     # Evaluate again to check if the model is consistent
     # Using `model.model` here because `get_peft_model` wraps a layer to the model
