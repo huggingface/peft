@@ -18,47 +18,38 @@
 import os
 from typing import Any, Callable, Iterable, Optional
 
+from attr import dataclass
 import torch
 import torch.nn as nn
 from tqdm import tqdm
 
 from peft.tuners.lora.config import LoraConfig
+from peft.tuners.lora.model import LoraModel
 from peft.tuners.tuners_utils import check_target_module_exists
 from peft.utils.other import get_pattern_key
 
 
+@dataclass
 class CordaEigens:
     S_WC: torch.Tensor
     U_WC: torch.Tensor
     V_WC: torch.Tensor
 
-    def __init__(
-        self,
-        S_WC: torch.Tensor,
-        U_WC: torch.Tensor,
-        V_WC: torch.Tensor,
-    ):
-        self.S_WC = S_WC
-        self.U_WC = U_WC
-        self.V_WC = V_WC
 
-
-@torch.no_grad()
 def target_modules(model: nn.Module, config: LoraConfig) -> Iterable[nn.Module]:
     """
     Iterate over CorDA target name and modules of a model. A module is a target if its name is in
     `config.target_modules` and is `nn.Linear`.
     """
     for name, module in model.named_modules():
-        if check_target_module_exists(config, name) and isinstance(module, nn.Linear):
+        if LoraModel._check_target_module_exists(config, name) and isinstance(module, nn.Linear):
             yield name, module
 
 
-@torch.no_grad()
 def get_model_device(model: nn.Module) -> str:
     if hasattr(model, "module"):  # Handle DeepSpeed/DataParallel
         model = model.module
-    return "cuda" if next(iter(model.parameters())).is_cuda else "cpu"
+    return next(iter(model.parameters())).device.type
 
 
 @torch.no_grad()
@@ -87,6 +78,7 @@ def preprocess_corda(
     corda_method = config.corda_config.get("corda_method")
     run_model = config.corda_config.get("run_model")
     hooked_model = config.corda_config.get("hooked_model")
+    verbose = config.corda_config.get("verbose")
 
     # If cache exists, skip building
     if cache_file is not None and os.path.exists(cache_file) and os.path.getsize(cache_file) > 0:
@@ -115,7 +107,7 @@ def preprocess_corda(
         calib_cov_distribution(model, config, run_model, hooked_model, sample_count, covariance_file)
 
         # Calculate eigens
-        collect_eigens(model, config)
+        collect_eigens(model, config, verbose)
 
         # Crop CorDA eigens so that there's less to save
         crop_corda_eigens(model, config)
@@ -222,12 +214,15 @@ def calib_cov_distribution(
 def collect_eigens(
     model: nn.Module,
     config: LoraConfig,
+    verbose: bool,
 ):
     """Call collect_eigens_for_layer and store result in key `eigens` of each layer."""
     linear_modules = []
     for name, module in target_modules(model, config):
         linear_modules.append((name, module))
-    for name, module in tqdm(linear_modules, desc="Collecting eigens"):
+    if verbose:
+        linear_modules = tqdm(linear_modules, desc="Collecting eigens")
+    for name, module in linear_modules:
         module.eigens = collect_eigens_for_layer(module, config)
 
 

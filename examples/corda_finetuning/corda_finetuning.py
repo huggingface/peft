@@ -1,3 +1,17 @@
+# Copyright 2024-present the HuggingFace Inc. team.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import copy
 import os
 from dataclasses import dataclass, field
@@ -49,10 +63,16 @@ def get_nb_trainable_parameters(model) -> tuple[int, int]:
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):
     model_name_or_path: Optional[str] = field(default="facebook/opt-125m")
-    # adapter_name_or_path: Optional[str] = field(default=None)
     data_path: str = field(default=None, metadata={"help": "Path to the training data."})
     dataset_split: str = field(default="train[:100000]", metadata={"help": "(`['train', 'test', 'eval']`):"})
     dataset_field: List[str] = field(default=None, metadata={"help": "Fields of dataset input and output."})
+    dataloader_num_proc: int = field(default=16, metadata={"help": "Number of processes to load dataset"})
+    dataloader_batch_size: int = field(
+        default=3000,
+        metadata={
+            "help": "batch size to load dataset. To set the batch size for training, you should pass --batch_size argument instead."
+        },
+    )
     optim: str = field(default="adamw_torch")
     model_max_length: int = field(
         default=512,
@@ -62,9 +82,6 @@ class TrainingArguments(transformers.TrainingArguments):
         default=None,
         metadata={"help": "The rank of LoRA adapter. When passing `None`, CorDA or full fine-tuning is used."},
     )
-    # init_lora_weights: Literal[True, "pissa"] = field(
-    #    default=True,
-    # )
     corda_mode: bool = field(default=True, metadata={"help": "True for CorDA mode"})
 
 
@@ -214,16 +231,10 @@ def train():
             torch_dtype=torch.bfloat16,
             device_map="auto",
         )
-    print(model)
-
-    for n, p in model.named_parameters():
-        print(n, p.requires_grad)
     trainable_params, all_param = get_nb_trainable_parameters(model)
     print(
         f"trainable params: {trainable_params:,d} || all params: {all_param:,d} || trainable%: {100 * trainable_params / all_param}"
     )
-
-    ########
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         script_args.model_name_or_path,
         model_max_length=script_args.model_max_length,
@@ -237,8 +248,8 @@ def train():
     train_dataset = raw_train_datasets.map(
         train_tokenize_function,
         batched=True,
-        batch_size=3000,
-        num_proc=16,  # 32
+        batch_size=script_args.dataloader_batch_size,
+        num_proc=script_args.dataloader_num_proc,
         remove_columns=raw_train_datasets.column_names,
         load_from_cache_file=True,
         desc="Running tokenizer on train dataset",

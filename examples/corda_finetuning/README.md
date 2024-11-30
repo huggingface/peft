@@ -97,6 +97,7 @@ corda_config = CordaConfig(
 )
 lora_config = LoraConfig(
     init_lora_weights="corda",
+    corda_config=corda_config,
 )
 peft_model = get_peft_model(model, lora_config)
 peft_model.print_trainable_parameters()
@@ -115,19 +116,9 @@ peft_model.save_pretrained("corda-llama-2-7b")
 - Instruction-previewed adaptation mode
 
 ```py
-import torch
-from peft import LoraConfig, get_peft_model
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from peft.tuners.lora.config import CordaConfig
-from trl import SFTConfig, SFTTrainer
-from datasets import load_dataset
+# Get model and dataset identically as KPM...
 
-model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf", torch_dtype=torch.bfloat16, device_map="auto")
-tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf")
-tokenizer.pad_token_id = tokenizer.eos_token_id
-dataset = load_dataset("imdb", split="train[:256]")
-
-
+# Different from KPM
 def run_model():
     for batch in dataset:
         input_ids = batch["text"]
