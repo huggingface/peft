@@ -52,6 +52,7 @@ def _update_scaling(lora_module, adapter_name, scaling=None):
             f"float or torch.Tensor, got {type(lora_module.scaling[adapter_name])} instead."
         )
 
+
 def _convert_scalings_to_tensor(model):
     """
     Convert the LoRA scaling values into torch.tensors to prevent recompilation of they change.
@@ -191,7 +192,10 @@ def _pad_lora_weights(model, target_rank):
 
 
 def prepare_model_for_compiled_hotswap(
-    model: torch.nn.Module, *, target_rank: Optional[int] = None, config: Optional[LoraConfig | dict[str, LoraConfig]] = None
+    model: torch.nn.Module,
+    *,
+    target_rank: Optional[int] = None,
+    config: Optional[LoraConfig | dict[str, LoraConfig]] = None,
 ) -> None:
     """
     Helper function that prepares the model so that it can later be compiled and then used with hot-swapping.
@@ -327,7 +331,7 @@ def hotswap_adapter_from_state_dict(
         old_val = attrgetter(key)(model)
         if not is_compiled:
             torch.utils.swap_tensors(old_val, new_val)
-            return
+            continue
 
         # Compiled models don't work with swap_tensors because there are weakrefs for the tensor. It is unclear if
         # this workaround could not cause trouble but the tests indicate that it works.
