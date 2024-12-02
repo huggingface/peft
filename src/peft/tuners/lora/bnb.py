@@ -214,7 +214,8 @@ if is_bnb_available():
                 output = lora_B(lora_A(dropout(sub_batch))) * scaling
                 if requires_conversion:
                     output = output.to(expected_dtype)
-                result[sub_batch_indices_list[i]] += output
+                #result[sub_batch_indices_list[i]] += output
+                result[sub_batch_indices_list[i]] = result[sub_batch_indices_list[i]] + output
 
             return result
 
@@ -288,7 +289,6 @@ if is_bnb_available():
             eightbit_kwargs.update(
                 {
                     "has_fp16_weights": target.state.has_fp16_weights,
-                    "memory_efficient_backward": target.state.memory_efficient_backward,
                     "threshold": target.state.threshold,
                     "index": target.index,
                 }
