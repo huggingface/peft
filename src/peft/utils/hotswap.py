@@ -34,15 +34,23 @@ CONFIG_KEYS_TO_CHECK = {PeftType.LORA: ["use_rslora", "lora_dropout", "alpha_pat
 
 
 def _update_scaling(lora_module, adapter_name, scaling=None):
-    # TODO
+    """
+    Update the value of the scalings of the LoRA module.
+
+    Takes into consideration that scalings can be tensors from prepare_model_for_compiled_hotswap.
+    """
     if lora_module.scaling[adapter_name] == scaling:
         return
 
-    if not isinstance(lora_module.scaling[adapter_name], torch.Tensor):
-        raise ValueError("TODO")
-
-    lora_module.scaling[adapter_name].fill_(scaling)
-
+    if isinstance(lora_module.scaling[adapter_name], torch.Tensor):
+        lora_module.scaling[adapter_name].fill_(scaling)
+    elif isinstance(lora_module.scaling[adapter_name], (float, int)):
+        lora_module.scaling[adapter_name] = scaling
+    else:
+        raise ValueError(
+            "Something went wrong when trying to set the new scale value, expected to find the old value to be of type "
+            f"float or torch.Tensor, got {type(lora_module.scaling[adapter_name])} instead."
+        )
 
 def _convert_scalings_to_tensor(model):
     """
@@ -57,7 +65,10 @@ def _convert_scalings_to_tensor(model):
             if isinstance(val, float):
                 scaling[key] = torch.tensor(val, device=module.weight.device)
             elif not isinstance(val, torch.Tensor):
-                raise ValueError("TODO")
+                raise ValueError(
+                    "Something went wrong while trying to convert the scalings, expected to find values of type float "
+                    f"but found {type(val)} instead."
+                )
 
 
 def _pad_lora_weights(model, target_rank):
@@ -85,8 +96,11 @@ def _pad_lora_weights(model, target_rank):
                 continue
 
             if original_rank > target_rank:
-                # TODO: is this necessary or can we just continue???
-                raise ValueError("TODO")
+                raise ValueError(
+                    f"Trying to pad the adapter to the target rank {target_rank}, but the original rank is larger "
+                    f"({original_rank}), which is not possible. Please choose a target rank that is greater or equal "
+                    "to the largest rank of the adapter."
+                )
 
             if is_conv:
                 padded = torch.zeros(
@@ -99,7 +113,7 @@ def _pad_lora_weights(model, target_rank):
                 )
                 padded[:original_rank, :, :, :] = weight
                 new_layer = torch.nn.Conv2d(
-                    target_rank,
+                    weight.size(1),
                     target_rank,
                     kernel_size=lora_module.kernel_size,
                     stride=lora_module.stride,
@@ -111,7 +125,13 @@ def _pad_lora_weights(model, target_rank):
                 padded[:original_rank, :] = weight
                 new_layer = torch.nn.Linear(weight.size(1), target_rank, bias=lora_module.bias)
 
-            assert new_layer.weight.shape == padded.shape
+            if new_layer.weight.shape != padded.shape:
+                raise ValueError(
+                    "Something went wrong when trying to pad the LoRA weights, the new shape should be "
+                    f"{padded.shape} but {new_layer.weight.shape} was found. Please open an issue on PEFT "
+                    "(https://github.com/huggingface/peft/issues) and report this error."
+                )
+
             new_layer.weight.data = padded
             if lora_module.bias:
                 new_layer.bias.data = lora_module.bias.data
@@ -127,7 +147,11 @@ def _pad_lora_weights(model, target_rank):
 
             if original_rank > target_rank:
                 # TODO: is this necessary or can we just continue???
-                raise ValueError("TODO")
+                raise ValueError(
+                    f"Trying to pad the adapter to the target rank {target_rank}, but the original rank is larger "
+                    f"({original_rank}), which is not possible. Please choose a target rank that is greater or equal "
+                    "to the largest rank of the adapter."
+                )
 
             if is_conv:
                 padded = torch.zeros(
@@ -140,8 +164,8 @@ def _pad_lora_weights(model, target_rank):
                 )
                 padded[:, :original_rank, :, :] = weight
                 new_layer = torch.nn.Conv2d(
-                    weight.size(0),
                     target_rank,
+                    weight.size(0),
                     kernel_size=lora_module.kernel_size,
                     stride=lora_module.stride,
                     padding=lora_module.padding,
@@ -153,7 +177,13 @@ def _pad_lora_weights(model, target_rank):
                 padded[:, :original_rank] = weight
                 new_layer = torch.nn.Linear(target_rank, weight.size(0), bias=lora_module.bias)
 
-            assert new_layer.weight.shape == padded.shape
+            if new_layer.weight.shape != padded.shape:
+                raise ValueError(
+                    "Something went wrong when trying to pad the LoRA weights, the new shape should be "
+                    f"{padded.shape} but {new_layer.weight.shape} was found. Please open an issue on PEFT "
+                    "(https://github.com/huggingface/peft/issues) and report this error."
+                )
+
             new_layer.weight.data = padded
             if lora_module.bias:
                 new_layer.bias.data = lora_module.bias.data
@@ -161,25 +191,30 @@ def _pad_lora_weights(model, target_rank):
 
 
 def prepare_model_for_compiled_hotswap(
-    model: torch.nn.Module, target_rank: int, config: Optional[LoraConfig | dict[str, LoraConfig]] = None
+    model: torch.nn.Module, *, target_rank: Optional[int] = None, config: Optional[LoraConfig | dict[str, LoraConfig]] = None
 ) -> None:
     """
     Helper function that prepares the model so that it can later be compiled and then used with hot-swapping.
 
-    It is necessary to call this function on the model for hot-swapping to work if the different LoRA adapters have
-    different ranks and/or different alpha values (i.e. scalings).
+    It is necessary to call this function on the model for hot-swapping to work if
 
-    It is important to call this function *after* the first LoRA adapter has been loaded but *before* the model is
-    compiled.
+    - the different LoRA adapters have different ranks and/or different alpha values (i.e. scalings)
+    - you plan to torch.compile the model and want to avoid re-compilation
+
+    It is important to call this function *after* the first LoRA adapter has been loaded (i.e. the one that will be
+    swapped out) but *before* the model is compiled.
 
     Even with this function, hot-swapping LoRA adapters that target different layers is still not supported.
+
+    Note: This function modifies the model in-place. If you want to restore the model to its initial state, you will
+    have to reload it.
 
     Args:
         model (`nn.Module`):
             The model with the loaded adapter, before compilation.
-        target_rank (`int`):
+        target_rank (`int`, *optional*):
             The target rank to pad the LoRA weights to. Should be the maximum rank among all LoRA adapters that will be
-            hot-swapped.
+            hot-swapped. If not specified, the target ranks will not be changed.
         config (`LoraConfig` or `dict[str, LoraConfig]`, *optional*):
             Optionally pass the `LoraConfig`s of the LoRA adapters. If passed, the rank in the configs will be updated
             to `target_rank`.
@@ -189,9 +224,12 @@ def prepare_model_for_compiled_hotswap(
         raise ValueError("Call prepare_model_for_compiled_hotswap *before* compiling the model")
 
     _convert_scalings_to_tensor(model)
-    _pad_lora_weights(model, target_rank=target_rank)
+    if target_rank is not None:
+        _pad_lora_weights(model, target_rank=target_rank)
 
     if not config:
+        return
+    if target_rank is None:
         return
 
     if not isinstance(config, dict):
@@ -297,6 +335,7 @@ def hotswap_adapter_from_state_dict(
             old_val.data = new_val.data
         else:
             if old_val.dim() != 2:
+                # TODO conv2d
                 raise NotImplementedError
             if old_val.shape[0] > new_val.shape[0]:
                 old_val.data.fill_(0)
