@@ -214,8 +214,7 @@ if is_bnb_available():
                 output = lora_B(lora_A(dropout(sub_batch))) * scaling
                 if requires_conversion:
                     output = output.to(expected_dtype)
-                #result[sub_batch_indices_list[i]] += output
-                result[sub_batch_indices_list[i]] = result[sub_batch_indices_list[i]] + output
+                result[sub_batch_indices_list[i]] += output
 
             return result
 
