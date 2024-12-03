@@ -50,7 +50,7 @@ class SafeLoraConfig:
 
     device (`str`): Device that is used for SafeLoRA (cuda or cpu).
 
-    save_weights (`bool`): Replacing and saving SafeLoRA weights to the original LoRA file.
+    save_weights (`bool`): Whether to override the original LoRA file with SafeLoRA weights .
 
     local_files_only (`bool`): Using for snapshot_download.
 
