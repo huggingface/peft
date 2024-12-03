@@ -52,7 +52,7 @@ class SafeLoraConfig:
 
     save_weights (`bool`): Whether to override the original LoRA file with SafeLoRA weights .
 
-    local_files_only (`bool`): Using for snapshot_download.
+    local_files_only (`bool`): Set this value to True to work only with local files (no downloads).
 
     dtype (`torch.dtype`): Data type for model weights, e.g., torch.float32 or torch.bfloat16.
 
