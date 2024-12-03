@@ -144,7 +144,7 @@ def get_aligned_matrix(base_model_path, aligned_model_path, peft_config, safelor
         vec = sl_base.get_tensor(name_base) - sl_align.get_tensor(name_align)
         vec = vec.to(safelora_config.dtype).to(safelora_config.device)
         vec = torch.mm(vec, vec.t()) / torch.norm(vec)
-        safety_vector.append((vec).detach().cpu())
+        safety_vector.append(vec.detach().cpu())
     return safety_vector
 
 
