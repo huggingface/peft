@@ -90,7 +90,7 @@ class SafeLoraConfig:
 
     device: str = field(
         default="cuda",
-        metadata={"help": "Device is used in SafeLoRA. (cuda or cpu)"},
+        metadata={"help": "Device that is used for SafeLoRA (cuda or cpu)."},
     )
 
     save_weights: bool = field(
