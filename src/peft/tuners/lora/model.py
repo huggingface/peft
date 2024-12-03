@@ -272,9 +272,7 @@ class LoraModel(BaseTuner):
                     else (
                         child.W_q
                         if hasattr(child, "W_q")
-                        else child.weight
-                        if hasattr(child, "weight")
-                        else next(child.parameters())
+                        else child.weight if hasattr(child, "weight") else next(child.parameters())
                     )
                 )
                 if not any(p.device == meta for p in module.parameters()):
@@ -904,9 +902,9 @@ class LoraModel(BaseTuner):
 
     def subtract_mutated_init(self, output_state_dict: dict[str, torch.Tensor], adapter_name: str, kwargs=None):
         """
-        This function can calculate the updates of the [PiSSA | OLoRA] by comparing the parameters of the [PiSSA |
-        OLoRA] adapter in `output_state_dict` with the initial values of [PiSSA | OLoRA] in `adapter_name`, thus
-        converting [PiSSA | OLoRA] to LoRA.
+        This function can calculate the updates of the PiSSA/CorDA/OLoRA by comparing the parameters of the
+        PiSSA/CorDA/OLoRA adapter in `output_state_dict` with the initial values of PiSSA/CorDA/OLoRA in `adapter_name`, thus
+        converting PiSSA/CorDA/OLoRA to LoRA.
         """
         for name, param in self.model.named_parameters():
             if (
