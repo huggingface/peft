@@ -40,6 +40,8 @@ from .tuners import (
     BOFTModel,
     BoneConfig,
     BoneModel,
+    CPTConfig,
+    CPTEmbedding,
     FourierFTConfig,
     FourierFTModel,
     HRAConfig,
@@ -106,6 +108,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING: dict[str, type[PeftConfig]] = {
     "XLORA": XLoraConfig,
     "HRA": HRAConfig,
     "VBLORA": VBLoRAConfig,
+    "CPT": CPTConfig,
     "BONE": BoneConfig,
 }
 
@@ -124,6 +127,7 @@ PEFT_TYPE_TO_TUNER_MAPPING: dict[str, type[BaseTuner]] = {
     "XLORA": XLoraModel,
     "HRA": HRAModel,
     "VBLORA": VBLoRAModel,
+    "CPT": CPTEmbedding,
     "BONE": BoneModel,
 }
 
@@ -196,7 +200,7 @@ def get_peft_model(
         and not low_cpu_mem_usage
     ):
         warnings.warn(
-            "lora with eva initialization used with low_cpu_mem_usage=False"
+            "lora with eva initialization used with low_cpu_mem_usage=False. "
             "Setting low_cpu_mem_usage=True can improve the maximum batch size possible for eva initialization."
         )
 

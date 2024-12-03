@@ -41,7 +41,8 @@ from peft import (
     get_peft_model,
 )
 
-from .testing_common import PeftCommonTester, PeftTestConfigManager
+from .testing_common import PeftCommonTester
+from .testing_common import PeftTestConfigManagerForDecoderModels as PeftTestConfigManager
 
 
 PEFT_DECODER_MODELS_TO_TEST = [
@@ -537,6 +538,12 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         # Test prompt learning methods with gradient checkpointing in a semi realistic setting.
         # Prefix tuning does not work if the model uses the new caching implementation. In that case, a helpful error
         # should be raised.
+
+        # skip if multi GPU, since this results in DataParallel usage by Trainer, which fails with "CUDA device
+        # assertion", breaking subsequent tests
+        if torch.cuda.device_count() > 1:
+            pytest.skip("Skip prompt_learning_with_gradient_checkpointing test on multi-GPU setups")
+
         peft_config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,

@@ -111,6 +111,15 @@ TEST_CASES = [
     ("Conv3d 2 LoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d", "lin0"]}),
     ("Conv3d 1 LoRA with DoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d"], "use_dora": True}),
     ("Conv3d 2 LoRA with DoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d", "lin0"], "use_dora": True}),
+    # LoRA with lora_B bias enabled (note: embedding is not supported)
+    (
+        "Vanilla MLP 1 LoRA with lora_b bias",
+        "MLP",
+        LoraConfig,
+        {"target_modules": ["lin0", "lin1"], "lora_bias": True},
+    ),
+    ("Conv2d 1 LoRA with lora_b bias", "Conv2d", LoraConfig, {"target_modules": ["conv2d"], "lora_bias": True}),
+    ("Conv3d 1 LoRA with lora_b bias", "Conv3d", LoraConfig, {"target_modules": ["conv3d"], "lora_bias": True}),
     #######
     # IA³ #
     #######
@@ -302,6 +311,15 @@ TEST_CASES = [
     ("Vanilla MLP 2 Bone", "MLP", BoneConfig, {"target_modules": ["lin0"], "r": 2}),
     ("Vanilla MLP 3 Bone", "MLP", BoneConfig, {"target_modules": ["lin0", "lin1"], "r": 2}),
     ("Vanilla MLP 5 Bone", "MLP", BoneConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "r": 2}),
+    ("Vanilla MLP 1 Bone", "MLP", BoneConfig, {"target_modules": "lin0", "r": 2, "init_weights": "bat"}),
+    ("Vanilla MLP 2 Bone", "MLP", BoneConfig, {"target_modules": ["lin0"], "r": 2, "init_weights": "bat"}),
+    ("Vanilla MLP 3 Bone", "MLP", BoneConfig, {"target_modules": ["lin0", "lin1"], "r": 2, "init_weights": "bat"}),
+    (
+        "Vanilla MLP 5 Bone",
+        "MLP",
+        BoneConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "r": 2, "init_weights": "bat"},
+    ),
     #############
     # LN Tuning #
     #############

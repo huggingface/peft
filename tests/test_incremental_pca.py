@@ -107,7 +107,7 @@ def test_n_components_none():
         # First partial_fit call, ipca.n_components_ is inferred from
         # min(X.shape)
         ipca.partial_fit(X)
-        assert ipca.n_components_ == min(X.shape)
+        assert ipca.n_components == min(X.shape)
 
 
 def test_incremental_pca_num_features_change():

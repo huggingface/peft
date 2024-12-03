@@ -41,8 +41,12 @@ if is_hqq_available():
             init_lora_weights: bool = True,
             use_rslora: bool = False,
             use_dora: bool = False,
+            lora_bias: bool = False,
             **kwargs,
         ) -> None:
+            if lora_bias:
+                raise ValueError(f"{self.__class__.__name__} does not support lora_bias yet, set it to False")
+
             super().__init__()
             LoraLayer.__init__(self, base_layer)
             self.fan_in_fan_out = False
@@ -56,6 +60,7 @@ if is_hqq_available():
                 init_lora_weights=init_lora_weights,
                 use_rslora=use_rslora,
                 use_dora=use_dora,
+                lora_bias=lora_bias,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:

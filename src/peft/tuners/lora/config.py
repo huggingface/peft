@@ -212,6 +212,10 @@ class LoraConfig(PeftConfig):
             all have separate LoRA adapters attached to them.
         runtime_config (`LoraRuntimeConfig`):
             Runtime configurations (which are not saved or restored).
+        lora_bias (`bool`):
+            Defaults to `False`. Whether to enable the bias term for the LoRA B parameter. Typically, this should be
+            disabled. The main use case for this is when the LoRA weights were extracted from fully fine-tuned
+            parameters so the bias of those parameters can be taken into account.
     """
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})
@@ -391,6 +395,16 @@ class LoraConfig(PeftConfig):
     runtime_config: LoraRuntimeConfig = field(
         default_factory=LoraRuntimeConfig, metadata={"help": "Runtime configurations"}
     )
+    lora_bias: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Whether to enable the bias term for the LoRA B parameter. Typically, this should be disabled. The "
+                "main use case for this is when the LoRA weights were extracted from fully fine-tuned parameters so "
+                "the bias of those parameters can be taken into account."
+            )
+        },
+    )
 
     def to_dict(self):
         """
@@ -401,6 +415,7 @@ class LoraConfig(PeftConfig):
         return rv
 
     def __post_init__(self):
+        super().__post_init__()
         self.peft_type = PeftType.LORA
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
@@ -430,14 +445,29 @@ class LoraConfig(PeftConfig):
 
             if not importlib.util.find_spec("scipy"):
                 raise ImportError("The required package 'scipy' is not installed. Please install it to continue.")
-            if self.loftq_config is None:
+            if not self.loftq_config:
                 raise ValueError("`loftq_config` must be specified when `init_lora_weights` is 'loftq'.")
+            if not isinstance(self.loftq_config, dict):
+                # convert loftq_config to dict
+                self.loftq_config = vars(self.loftq_config)
+        elif self.loftq_config:
+            self.loftq_config = {}
+            warnings.warn("`loftq_config` specified but will be ignored when `init_lora_weights` is not 'loftq'.")
 
         elif self.init_lora_weights == "eva" and self.eva_config is None:
             warnings.warn("`init_lora_weights` is 'eva' but `eva_config` is not specified. Using default EVA config.")
             self.eva_config = EvaConfig()
         elif self.init_lora_weights != "eva" and self.eva_config is not None:
             warnings.warn("`eva_config` specified but will be ignored when `init_lora_weights` is not 'eva'.")
+
+        if self.lora_bias:
+            if self.init_lora_weights not in (True, False):
+                raise ValueError(
+                    f"The argument lora_bias=True is only supported with init_lora_weights=True or False, got "
+                    f"init_lora_weights={self.init_lora_weights} instead."
+                )
+            if self.use_dora:
+                raise ValueError("The argument lora_bias=True is not supported for DoRA, please pass use_dora=False")
 
         # Using post training conversion of modified base weights to restore their initial values (PiSSA, OLoRA) cannot
         # be correctly done when using rslora + rank_pattern/alpha_pattern. We can't really know if the user intends
@@ -458,10 +488,6 @@ class LoraConfig(PeftConfig):
                 "base weights; if you intend to do this, please ensure not to use rslora or rank_pattern/alpha_pattern."
             )
             warnings.warn(msg)
-
-        # convert loftq_config to dict
-        if self.loftq_config and not isinstance(self.loftq_config, dict):
-            self.loftq_config = vars(self.loftq_config)
 
         self._custom_modules: Optional[dict[type[nn.Mmodule], type[nn.Module]]] = None
 

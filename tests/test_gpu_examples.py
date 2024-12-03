@@ -15,6 +15,8 @@ import importlib
 import itertools
 import os
 import re
+import subprocess
+import sys
 import tempfile
 import unittest
 from collections import Counter, defaultdict
@@ -2431,6 +2433,17 @@ class TestLoftQ:
             torch.cuda.empty_cache()
         gc.collect()
 
+    def test_config_no_loftq_init(self):
+        with pytest.warns(
+            UserWarning,
+            match="`loftq_config` specified but will be ignored when `init_lora_weights` is not 'loftq'.",
+        ):
+            LoraConfig(loftq_config=LoftQConfig())
+
+    def test_config_no_loftq_config(self):
+        with pytest.raises(ValueError, match="`loftq_config` must be specified when `init_lora_weights` is 'loftq'."):
+            LoraConfig(init_lora_weights="loftq")
+
 
 @require_bitsandbytes
 @require_torch_gpu
@@ -3280,6 +3293,11 @@ class PeftTorchaoGPUTests(unittest.TestCase):
     def setUp(self):
         self.causal_lm_model_id = "facebook/opt-125m"
         self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+        # torchao breaks with fp16 and if a previous test uses fp16, transformers will set this env var, which affects
+        # subsequent tests, therefore the env var needs to be cleared explicitly
+        #
+        # TODO: remove this once https://github.com/huggingface/transformers/pull/34886 is merged
+        os.environ.pop("ACCELERATE_MIXED_PRECISION", None)
 
     def tearDown(self):
         r"""
@@ -4069,3 +4087,78 @@ class TestPrefixTuning:
         peft_config = PrefixTuningConfig(num_virtual_tokens=10, task_type="SEQ_2_SEQ_LM")
         model = get_peft_model(model, peft_config)
         model.generate(**inputs)  # does not raise
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+@pytest.mark.single_gpu_tests
+class TestHotSwapping:
+    def test_hotswapping_compiled_model_does_not_trigger_recompilation(self):
+        env = os.environ.copy()
+        env["TORCH_LOGS"] = "guards,recompiles"
+        here = os.path.dirname(__file__)
+        file_name = os.path.join(here, "run_compiled_model_hotswap.py")
+
+        process = subprocess.Popen(
+            [sys.executable, file_name, "1"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
+        # Communicate will read the output and error streams, preventing deadlock
+        stdout, stderr = process.communicate()
+        exit_code = process.returncode
+
+        # sanity check:
+        assert exit_code == 0
+
+        # check that the recompilation message is not present
+        assert "__recompiles" not in stderr.decode()
+
+        # contingency check: without hotswapping, we *do* get recompilation
+        process = subprocess.Popen(
+            [sys.executable, file_name, "0"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
+        # Communicate will read the output and error streams, preventing deadlock
+        stdout, stderr = process.communicate()
+        exit_code = process.returncode
+
+        # sanity check:
+        assert exit_code == 0
+
+        # check that the recompilation message is not present
+        assert "__recompiles" in stderr.decode()
+
+    @pytest.mark.xfail(strict=True, reason="Requires hotswap to be implemented in diffusers")
+    def test_hotswapping_compiled_diffusion_model_does_not_trigger_recompilation(self):
+        env = os.environ.copy()
+        env["TORCH_LOGS"] = "guards,recompiles"
+        here = os.path.dirname(__file__)
+        file_name = os.path.join(here, "run_compiled_diffusion_model_hotswap.py")
+
+        process = subprocess.Popen(
+            [sys.executable, file_name, "1"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
+        # Communicate will read the output and error streams, preventing deadlock
+        stdout, stderr = process.communicate()
+        exit_code = process.returncode
+
+        # sanity check:
+        assert exit_code == 0
+
+        # check that the recompilation message is not present
+        assert "__recompiles" not in stderr.decode()
+
+        # contingency check: without hotswapping, we *do* get recompilation
+        process = subprocess.Popen(
+            [sys.executable, file_name, "0"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
+        # Communicate will read the output and error streams, preventing deadlock
+        stdout, stderr = process.communicate()
+        exit_code = process.returncode
+
+        # sanity check:
+        assert exit_code == 0
+
+        # check that the recompilation message is not present
+        assert "__recompiles" in stderr.decode()
