@@ -95,7 +95,7 @@ class SafeLoraConfig:
 
     save_weights: bool = field(
         default=True,
-        metadata={"help": "Replacing and saving SafeLoRA weights to the original LoRA file."},
+        metadata={"help": "Whether to override the original LoRA file with SafeLoRA weights."},
     )
     local_files_only: bool = field(
         default=False,
