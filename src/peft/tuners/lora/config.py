@@ -377,7 +377,7 @@ class LoraConfig(PeftConfig):
         },
     )
     init_lora_weights: (
-        bool | Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "loftq"]
+        bool | Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "corda", "loftq"]
     ) = field(
         default=True,
         metadata={
@@ -391,6 +391,7 @@ class LoraConfig(PeftConfig):
                 "Passing `'pissa'` results in PiSSA initialization."
                 "Passing `'pissa_niter_[number of iters]'` initiates Fast-SVD-based PiSSA initialization, "
                 "where [number of iters] indicates the number of subspace iterations to perform fsvd, and must be a nonnegative integer."
+                "Passing `'corda'` results in CorDA initialization."
                 "Pass `'loftq'` to use LoftQ initialization"
             ),
         },
@@ -599,7 +600,7 @@ class LoraConfig(PeftConfig):
             if self.use_dora:
                 raise ValueError("The argument lora_bias=True is not supported for DoRA, please pass use_dora=False")
 
-        # Using post training conversion of modified base weights to restore their initial values (PiSSA, OLoRA) cannot
+        # Using post training conversion of modified base weights to restore their initial values PiSSA/CorDA/OLoRA cannot
         # be correctly done when using rslora + rank_pattern/alpha_pattern. We can't really know if the user intends
         # this when they'll eventually call save_pretrained (i.e. if they'll pass
         # path_initial_model_for_weight_conversionl). Therefore, we only warn but don't raise an error here.
@@ -609,11 +610,12 @@ class LoraConfig(PeftConfig):
             and (
                 (isinstance(self.init_lora_weights, str) and (self.init_lora_weights.startswith("pissa")))
                 or (self.init_lora_weights == "olora")
+                or (self.init_lora_weights == "corda")
             )
         ):
             msg = (
                 "Using Rank-Stabilized LoRA with rank_pattern/alpha_pattern and post-training conversion of modified "
-                "base weights (PiSSA, OLoRA) means that you won't be able to pass "
+                "base weights PiSSA/CorDA/OLoRA means that you won't be able to pass "
                 "`path_initial_model_for_weight_conversion` to `save_pretrained` to restore the initial values of the "
                 "base weights; if you intend to do this, please ensure not to use rslora or rank_pattern/alpha_pattern."
             )

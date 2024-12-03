@@ -253,11 +253,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 Whether the process calling this is the main process or not. Will default to `True`. Will not save the
                 checkpoint if not on the main process, which is important for multi device setups (e.g. DDP).
             path_initial_model_for_weight_conversion (`str, *optional*`):
-                The path to the initialized adapter, which is obtained after initializing the model with PiSSA or OLoRA
+                The path to the initialized adapter, which is obtained after initializing the model with PiSSA/CorDA/OLoRA
                 and before performing any training. When `path_initial_model_for_weight_conversion` is not None, the
                 difference in adapter before and after fine-tuning is calculated. This difference can be represented as
                 the parameters of a standard LoRA adapter. Using this converted adapter does not require changes to the
-                base model, thus conveniently allowing the use of multiple PiSSA or OLoRA adapters with LoRA adapters,
+                base model, thus conveniently allowing the use of multiple PiSSA/CorDA/OLoRA adapters with LoRA adapters,
                 and the activation or deactivation of any adapters. Note that this conversion is not supported if
                 `rslora` is used in combination with `rank_pattern` or `alpha_pattern`.
             kwargs (additional keyword arguments, *optional*):
@@ -288,10 +288,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 raise ValueError(msg)
 
             if not any(
-                str(peft_config.init_lora_weights).lower().startswith(prefix) for prefix in ["pissa", "olora", "true"]
+                str(peft_config.init_lora_weights).lower().startswith(prefix)
+                for prefix in ["pissa", "corda", "olora", "true"]
             ):
                 warnings.warn(
-                    "`path_initial_model_for_weight_conversion` only works for converting a PiSSA or OLoRA adapter to "
+                    "`path_initial_model_for_weight_conversion` only works for converting a PiSSA/CorDA/OLoRA adapter to "
                     "a LoRA adapter"
                 )
             initial_adapter_name = os.path.basename(path_initial_model_for_weight_conversion)
@@ -302,8 +303,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     adapter_name=initial_adapter_name,
                 )
                 is_pissa = str(self.peft_config[initial_adapter_name].init_lora_weights).lower().startswith("pissa")
+                is_corda = str(self.peft_config[initial_adapter_name].init_lora_weights).lower() == "corda"
                 is_olora = str(self.peft_config[initial_adapter_name].init_lora_weights).lower() == "olora"
-                if is_pissa or is_olora:
+                if is_pissa or is_corda or is_olora:
                     raise ValueError(
                         "The `init_lora_weights` parameter of the initial adapter should be set to `True`. "
                         "Otherwise, `self.load_adapter` will subtract the decomposed values again based on the "
@@ -1164,7 +1166,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if peft_config.is_prompt_learning and is_trainable:
             raise ValueError("Cannot set a prompt learning adapter to trainable when loading pretrained adapter.")
 
-        # Since PiSSA/OLoRA modifies the base weights, it should not be combined with other adapters.
+        # Since PiSSA/CorDA/OLoRA modifies the base weights, it should not be combined with other adapters.
         all_configs = [peft_config] + list(self.peft_config.values())
         if len(all_configs) > 1:
             if any(getattr(config, "init_lora_weights", None) == "pissa" for config in all_configs):
@@ -1172,6 +1174,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     "PiSSA changes the base weights of the model and should thus not be used with other adapters. "
                     "Consider converting the PiSSA adapter into a normal LoRA adapter: "
                     "https://github.com/huggingface/peft/tree/main/examples/pissa_finetuning#convert-pissa-to-lora"
+                )
+                warnings.warn(msg)
+            elif any(getattr(config, "init_lora_weights", None) == "corda" for config in all_configs):
+                msg = (
+                    "CorDA changes the base weights of the model and should thus not be used with other adapters. "
+                    "Consider converting the CorDA adapter into a normal LoRA adapter: "
+                    "https://github.com/huggingface/peft/tree/main/examples/corda_finetuning#convert-corda-to-lora"
                 )
                 warnings.warn(msg)
             elif any(getattr(config, "init_lora_weights", None) == "olora" for config in all_configs):

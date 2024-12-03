@@ -340,14 +340,15 @@ class TestLoraInitialization:
             run_model=lambda: model(data),
             hooked_model=model,
         )
+        corda_config = CordaConfig(
+            cache_file=tmp_path / "corda_cache.pt",
+            covariance_file=tmp_path / "covariance_cache.pt",
+            sample_count=1,
+        )
         config = LoraConfig(
             init_lora_weights="corda",
             target_modules=["linear"],
-            corda_config=CordaConfig(
-                cache_file=tmp_path / "corda_cache.pt",
-                covariance_file=tmp_path / "covariance_cache.pt",
-                sample_count=1,
-            ),
+            corda_config=corda_config,
         )
         preprocess_corda(model, config, init_config)
         peft_model = get_peft_model(deepcopy(model), config)
@@ -416,6 +417,292 @@ class TestLoraInitialization:
         preprocess_corda(model, config)
         peft_model = get_peft_model(deepcopy(model), config)
         assert torch.allclose(output, peft_model(data)[0], atol=1e-06)
+
+    def test_lora_corda_conversion_same_output_after_loading(self, data, tmp_path):
+        model = self.get_model()
+        output_base = model(data)[0]
+
+        init_config = CordaInitConfig(run_model=lambda: model(data), hooked_model=model)
+        corda_config = CordaConfig(sample_count=1)
+        config = LoraConfig(init_lora_weights="corda", target_modules=["linear"], r=8, corda_config=corda_config)
+        preprocess_corda(model, config, init_config)
+        peft_model = get_peft_model(deepcopy(model), config)
+        # save the initial model
+        peft_model.peft_config["default"].init_lora_weights = True
+        peft_model.save_pretrained(tmp_path / "init-model")
+        peft_model.peft_config["default"].init_lora_weights = "corda"
+
+        # modify the weights, or else the adapter performs an identity transformation
+        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
+        output_corda = peft_model(data)[0]
+
+        # sanity check
+        tol = 1e-06
+        assert not torch.allclose(output_base, output_corda, atol=tol, rtol=tol)
+
+        # save the model normally
+        peft_model.save_pretrained(tmp_path / "corda-model")
+        model_loaded = PeftModel.from_pretrained(deepcopy(model), tmp_path / "corda-model")
+        output_loaded = model_loaded(data)[0]
+
+        assert torch.allclose(output_corda, output_loaded, atol=tol, rtol=tol)
+        # sanity check: ranks should still be 8 as initially
+        assert model_loaded.peft_config["default"].r == 8
+        assert model_loaded.base_model.model.linear.lora_A["default"].weight.shape[0] == 8
+        # sanity check: the base model weights were indeed changed
+        assert not torch.allclose(
+            model.linear.weight, model_loaded.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+        # save the model with conversion
+        peft_config_keys_before = list(peft_model.peft_config.keys())
+        peft_config_dict_before = peft_model.peft_config["default"].to_dict()
+        peft_model.save_pretrained(
+            tmp_path / "corda-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+        )
+        peft_config_keys_after = list(peft_model.peft_config.keys())
+        peft_config_dict_after = peft_model.peft_config["default"].to_dict()
+        assert peft_config_keys_before == peft_config_keys_after
+        assert peft_config_dict_before == peft_config_dict_after
+
+        model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "corda-model-converted")
+        output_converted = model_converted(data)[0]
+
+        assert torch.allclose(output_corda, output_converted, atol=tol, rtol=tol)
+        # rank should be double of what it was initially
+        assert model_converted.peft_config["default"].r == 16
+        assert model_converted.base_model.model.linear.lora_A["default"].weight.shape[0] == 16
+        # base model weights should be the same as the initial model
+        assert torch.allclose(
+            model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+    def test_lora_corda_conversion_same_output_after_loading_with_rank_pattern(self, data, tmp_path):
+        # same as above, but using rank_pattern
+        model = self.get_model()
+        output_base = model(data)[0]
+
+        # use rank_pattern here; note that since there is only a single linear layer, r is completely overridden
+        init_config = CordaInitConfig(run_model=lambda: model(data), hooked_model=model)
+        corda_config = CordaConfig(sample_count=1)
+        config = LoraConfig(
+            init_lora_weights="corda",
+            target_modules=["linear"],
+            r=8,
+            rank_pattern={"linear": 32},
+            corda_config=corda_config,
+        )
+        preprocess_corda(model, config, init_config)
+        peft_model = get_peft_model(deepcopy(model), config)
+        # save the initial model
+        peft_model.peft_config["default"].init_lora_weights = True
+        peft_model.save_pretrained(tmp_path / "init-model")
+        peft_model.peft_config["default"].init_lora_weights = "corda"
+
+        # modify the weights, or else the adapter performs an identity transformation
+        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
+        output_corda = peft_model(data)[0]
+
+        # sanity check
+        tol = 1e-06
+        assert not torch.allclose(output_base, output_corda, atol=tol, rtol=tol)
+
+        # save the model normally
+        peft_model.save_pretrained(tmp_path / "corda-model")
+        model_loaded = PeftModel.from_pretrained(deepcopy(model), tmp_path / "corda-model")
+        output_loaded = model_loaded(data)[0]
+
+        assert torch.allclose(output_corda, output_loaded, atol=tol, rtol=tol)
+        # sanity check: ranks should still be 8 as initially
+        assert model_loaded.peft_config["default"].r == 8
+        assert model_loaded.base_model.model.linear.lora_A["default"].weight.shape[0] == 32
+        # sanity check: the base model weights were indeed changed
+        assert not torch.allclose(
+            model.linear.weight, model_loaded.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+        # save the model with conversion
+        peft_model.save_pretrained(
+            tmp_path / "corda-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+        )
+        model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "corda-model-converted")
+        output_converted = model_converted(data)[0]
+
+        assert torch.allclose(output_corda, output_converted, atol=tol, rtol=tol)
+        # rank should be double of what it was initially
+        assert model_converted.peft_config["default"].r == 16
+        assert model_converted.base_model.model.linear.lora_A["default"].weight.shape[0] == 64
+        # base model weights should be the same as the initial model
+        assert torch.allclose(
+            model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+    def test_lora_corda_conversion_same_output_after_loading_with_alpha_pattern(self, data, tmp_path):
+        # same as above, but using alpha_pattern
+        model = self.get_model()
+        output_base = model(data)[0]
+
+        # use alpha_pattern here; note that since there is only a single linear layer, lora_alpha is completely
+        # overridden
+        init_config = CordaInitConfig(run_model=lambda: model(data), hooked_model=model)
+        corda_config = CordaConfig(sample_count=1)
+        config = LoraConfig(
+            init_lora_weights="corda",
+            target_modules=["linear"],
+            alpha_pattern={"linear": 5},
+            corda_config=corda_config,
+        )
+        preprocess_corda(model, config, init_config)
+        peft_model = get_peft_model(deepcopy(model), config)
+        # save the initial model
+        peft_model.peft_config["default"].init_lora_weights = True
+        peft_model.save_pretrained(tmp_path / "init-model")
+        peft_model.peft_config["default"].init_lora_weights = "corda"
+
+        # modify the weights, or else the adapter performs an identity transformation
+        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
+        output_corda = peft_model(data)[0]
+
+        # sanity check
+        tol = 1e-06
+        assert not torch.allclose(output_base, output_corda, atol=tol, rtol=tol)
+
+        # save the model normally
+        peft_model.save_pretrained(tmp_path / "corda-model")
+        model_loaded = PeftModel.from_pretrained(deepcopy(model), tmp_path / "corda-model")
+        output_loaded = model_loaded(data)[0]
+
+        assert torch.allclose(output_corda, output_loaded, atol=tol, rtol=tol)
+        # sanity check: ranks should still be 8 as initially
+        assert model_loaded.peft_config["default"].r == 8
+        assert model_loaded.base_model.model.linear.lora_A["default"].weight.shape[0] == 8
+        assert model_loaded.base_model.model.linear.scaling["default"] == 5 / 8
+        # sanity check: the base model weights were indeed changed
+        assert not torch.allclose(
+            model.linear.weight, model_loaded.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+        # save the model with conversion
+        peft_model.save_pretrained(
+            tmp_path / "corda-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+        )
+        model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "corda-model-converted")
+        output_converted = model_converted(data)[0]
+
+        assert torch.allclose(output_corda, output_converted, atol=tol, rtol=tol)
+        # rank should be double of what it was initially
+        assert model_converted.peft_config["default"].r == 16
+        assert model_converted.base_model.model.linear.lora_A["default"].weight.shape[0] == 16
+        assert model_converted.base_model.model.linear.scaling["default"] == 10 / 16
+        # base model weights should be the same as the initial model
+        assert torch.allclose(
+            model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+    def test_lora_corda_conversion_same_output_after_loading_with_rslora(self, data, tmp_path):
+        model = self.get_model()
+        output_base = model(data)[0]
+
+        init_config = CordaInitConfig(run_model=lambda: model(data), hooked_model=model)
+        corda_config = CordaConfig(sample_count=1)
+        config = LoraConfig(
+            init_lora_weights="corda", target_modules=["linear"], r=8, use_rslora=True, corda_config=corda_config
+        )
+        preprocess_corda(model, config, init_config)
+        peft_model = get_peft_model(deepcopy(model), config)
+        # save the initial model
+        peft_model.peft_config["default"].init_lora_weights = True
+        peft_model.save_pretrained(tmp_path / "init-model")
+        peft_model.peft_config["default"].init_lora_weights = "corda"
+
+        # modify the weights, or else the adapter performs an identity transformation
+        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
+        output_corda = peft_model(data)[0]
+
+        # sanity check
+        tol = 1e-06
+        assert not torch.allclose(output_base, output_corda, atol=tol, rtol=tol)
+
+        # save the model normally
+        peft_model.save_pretrained(tmp_path / "corda-model")
+        model_loaded = PeftModel.from_pretrained(deepcopy(model), tmp_path / "corda-model")
+        output_loaded = model_loaded(data)[0]
+
+        assert torch.allclose(output_corda, output_loaded, atol=tol, rtol=tol)
+        # sanity check: ranks should still be 8 as initially
+        assert model_loaded.peft_config["default"].r == 8
+        assert model_loaded.base_model.model.linear.lora_A["default"].weight.shape[0] == 8
+        assert model_loaded.base_model.model.linear.scaling["default"] == 8 / (8**0.5)
+        # sanity check: the base model weights were indeed changed
+        assert not torch.allclose(
+            model.linear.weight, model_loaded.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+        # save the model with conversion
+        peft_model.save_pretrained(
+            tmp_path / "corda-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+        )
+        model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "corda-model-converted")
+        output_converted = model_converted(data)[0]
+
+        assert torch.allclose(output_corda, output_converted, atol=tol, rtol=tol)
+        # rank should be double of what it was initially
+        assert model_converted.peft_config["default"].r == 16
+        assert model_converted.base_model.model.linear.lora_A["default"].weight.shape[0] == 16
+        # same scale as before with a little bit of floating point imprecision
+        assert model_converted.base_model.model.linear.scaling["default"] == pytest.approx(8 / (8**0.5))
+        # base model weights should be the same as the initial model
+        assert torch.allclose(
+            model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+    def test_corda_rank_pattern_and_rslora_raises(self, data, tmp_path):
+        # it's not possible to determine the correct scale when using rslora with rank or alpha pattern, because the
+        # scale is not stored in the state_dict
+        model = self.get_model()
+        init_config = CordaInitConfig(run_model=lambda: model(data), hooked_model=model)
+        corda_config = CordaConfig(sample_count=1)
+        config = LoraConfig(
+            init_lora_weights="corda",
+            target_modules=["linear"],
+            r=8,
+            rank_pattern={"linear": 2},
+            use_rslora=True,
+            corda_config=corda_config,
+        )
+        preprocess_corda(model, config, init_config)
+        peft_model = get_peft_model(model, config)
+        peft_model.save_pretrained(tmp_path / "init-model")
+
+        msg = re.escape("Passing `path_initial_model_for_weight_conversion` to `save_pretrained`")
+        with pytest.raises(ValueError, match=msg):
+            peft_model.save_pretrained(
+                tmp_path / "corda-model", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+            )
+
+    def test_corda_alpha_pattern_and_rslora_raises(self, data, tmp_path):
+        # it's not possible to determine the correct scale when using rslora with rank or alpha pattern, because the
+        # scale is not stored in the state_dict
+        model = self.get_model()
+        init_config = CordaInitConfig(run_model=lambda: model(data), hooked_model=model)
+        corda_config = CordaConfig(sample_count=1)
+        config = LoraConfig(
+            init_lora_weights="corda",
+            target_modules=["linear"],
+            r=8,
+            alpha_pattern={"linear": 2},
+            use_rslora=True,
+            corda_config=corda_config,
+        )
+        preprocess_corda(model, config, init_config)
+        peft_model = get_peft_model(model, config)
+        peft_model.save_pretrained(tmp_path / "init-model")
+
+        msg = re.escape("Passing `path_initial_model_for_weight_conversion` to `save_pretrained`")
+        with pytest.raises(ValueError, match=msg):
+            peft_model.save_pretrained(
+                tmp_path / "corda-model", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+            )
 
     def test_lora_olora_linear_init_default(self, data):
         model = self.get_model()
