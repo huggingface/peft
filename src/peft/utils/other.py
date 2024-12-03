@@ -30,7 +30,7 @@ from huggingface_hub.errors import EntryNotFoundError, HFValidationError
 from packaging import version
 from safetensors.torch import storage_ptr, storage_size
 
-from ..import_utils import is_auto_gptq_available, is_torch_tpu_available
+from ..import_utils import is_auto_gptq_available, is_gptqmodel_available, is_torch_tpu_available
 from .constants import (
     CONFIG_NAME,
     EMBEDDING_LAYER_NAMES,
@@ -607,20 +607,28 @@ def get_auto_gptq_quant_linear(gptq_quantization_config):
     """
     Get the right AutoGPTQQuantLinear class based on the quantization config file
     """
-    if gptq_quantization_config is not None and is_auto_gptq_available():
-        from auto_gptq.utils.import_utils import dynamically_import_QuantLinear
+    if gptq_quantization_config is None:
+        return None
 
-        desc_act = gptq_quantization_config.desc_act
-        group_size = gptq_quantization_config.group_size
-        bits = gptq_quantization_config.bits
-        if hasattr(gptq_quantization_config, "use_exllama"):
-            use_exllama = gptq_quantization_config.use_exllama
-        else:
-            use_exllama = not gptq_quantization_config.disable_exllama
-        if hasattr(gptq_quantization_config, "exllama_config"):
-            exllama_version = gptq_quantization_config.exllama_config["version"]
-        else:
-            exllama_version = 1
+    if is_auto_gptq_available():
+        from auto_gptq.utils.import_utils import dynamically_import_QuantLinear
+    elif is_gptqmodel_available():
+        from gptqmodel.utils.importer import hf_select_quant_linear
+    else:
+        return None
+
+    desc_act = gptq_quantization_config.desc_act
+    group_size = gptq_quantization_config.group_size
+    bits = gptq_quantization_config.bits
+    if hasattr(gptq_quantization_config, "use_exllama"):
+        use_exllama = gptq_quantization_config.use_exllama
+    else:
+        use_exllama = not gptq_quantization_config.disable_exllama
+    if hasattr(gptq_quantization_config, "exllama_config"):
+        exllama_version = gptq_quantization_config.exllama_config["version"]
+    else:
+        exllama_version = 1
+    if is_auto_gptq_available():
         AutoGPTQQuantLinear = dynamically_import_QuantLinear(
             use_triton=False,
             desc_act=desc_act,
@@ -629,8 +637,10 @@ def get_auto_gptq_quant_linear(gptq_quantization_config):
             disable_exllama=not (use_exllama and exllama_version == 1),
             disable_exllamav2=not (use_exllama and exllama_version == 2),
         )
-        return AutoGPTQQuantLinear
-    return None
+    elif is_gptqmodel_available():
+        AutoGPTQQuantLinear = hf_select_quant_linear(bits=bits, group_size=group_size, desc_act=desc_act, sym=True)
+
+    return AutoGPTQQuantLinear
 
 
 def id_tensor_storage(tensor: torch.Tensor) -> tuple[torch.device, int, int]:

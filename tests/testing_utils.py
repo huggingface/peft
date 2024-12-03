@@ -24,6 +24,7 @@ from peft.import_utils import (
     is_auto_awq_available,
     is_auto_gptq_available,
     is_eetq_available,
+    is_gptqmodel_available,
     is_hqq_available,
     is_optimum_available,
     is_torchao_available,
@@ -96,6 +97,13 @@ def require_auto_gptq(test_case):
     Decorator marking a test that requires auto-gptq. These tests are skipped when auto-gptq isn't installed.
     """
     return unittest.skipUnless(is_auto_gptq_available(), "test requires auto-gptq")(test_case)
+
+
+def require_gptqmodel(test_case):
+    """
+    Decorator marking a test that requires gptqmodel. These tests are skipped when gptqmodel isn't installed.
+    """
+    return unittest.skipUnless(is_gptqmodel_available(), "test requires gptqmodel")(test_case)
 
 
 def require_aqlm(test_case):
