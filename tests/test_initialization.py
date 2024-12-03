@@ -1642,6 +1642,28 @@ class TestLowCpuMemUsage:
         assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
 
     @pytest.mark.parametrize("device", devices)
+    def test_get_peft_model_low_cpu_mem_usage_works(self, device, inputs):
+        # when calling get_peft_model, the PEFT weights will not be initialized on device but remain on meta
+        model = self.get_model().to(device)
+        model = get_peft_model(model, LoraConfig(target_modules="all-linear"), low_cpu_mem_usage=True)
+
+        devices_lora_weights = {p.device for n, p in model.named_parameters() if "lora_" in n}
+        expected = {torch.device("meta")}
+        assert devices_lora_weights == expected
+
+    @pytest.mark.parametrize("device", devices)
+    def test_get_peft_model_with_task_type_low_cpu_mem_usage_works(self, device, inputs):
+        # same as the previous test, but pass the task_type argument
+        model = self.get_model().to(device)
+        model = get_peft_model(
+            model, LoraConfig(target_modules="all-linear", task_type="CAUSAL_LM"), low_cpu_mem_usage=True
+        )
+
+        devices_lora_weights = {p.device for n, p in model.named_parameters() if "lora_" in n}
+        expected = {torch.device("meta")}
+        assert devices_lora_weights == expected
+
+    @pytest.mark.parametrize("device", devices)
     def test_inject_adapter_low_cpu_mem_usage_works(self, device, inputs, lora_path, lora_config):
         # external libs like transformers and diffusers use inject_adapter_in_model, let's check that this also works
         model = self.get_model().to(device)
