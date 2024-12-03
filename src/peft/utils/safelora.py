@@ -99,7 +99,7 @@ class SafeLoraConfig:
     )
     local_files_only: bool = field(
         default=False,
-        metadata={"help": "Using for snapshot_download."},
+        metadata={"help": "Set this value to True to work only with local files (no downloads)."},
     )
 
     dtype: torch.dtype = field(
