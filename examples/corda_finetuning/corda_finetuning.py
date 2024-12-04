@@ -266,7 +266,6 @@ def train():
         "data_collator": data_collator,
     }
     trainer = Trainer(model=model, tokenizer=tokenizer, args=script_args, **data_module)
-    model.config.use_cache = False
     trainer.train()
     trainer.save_state()
     model.save_pretrained(os.path.join(script_args.output_dir, "ft"))
