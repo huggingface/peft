@@ -654,7 +654,7 @@ class TestLoraInitialization:
             model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
         )
 
-    def test_corda_rank_pattern_and_rslora_raises(self, data, tmp_path):
+    def test_lora_corda_rank_pattern_and_rslora_raises(self, data, tmp_path):
         # it's not possible to determine the correct scale when using rslora with rank or alpha pattern, because the
         # scale is not stored in the state_dict
         model = self.get_model()
@@ -677,7 +677,7 @@ class TestLoraInitialization:
                 tmp_path / "corda-model", path_initial_model_for_weight_conversion=tmp_path / "init-model"
             )
 
-    def test_corda_alpha_pattern_and_rslora_raises(self, data, tmp_path):
+    def test_lora_corda_alpha_pattern_and_rslora_raises(self, data, tmp_path):
         # it's not possible to determine the correct scale when using rslora with rank or alpha pattern, because the
         # scale is not stored in the state_dict
         model = self.get_model()

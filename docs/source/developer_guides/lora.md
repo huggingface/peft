@@ -64,9 +64,14 @@ the IPM is favored because it can further accelerate convergence and enhance the
 You need to configure the initialization method to "corda", and specify the mode of IPM or KPM and the dataset to collect covariance matrices. 
 
 ```py
-init_config = CordaInitConfig(
-    run_model=run_model,  # The callback to run your model with sample dataset
-)
+@torch.no_grad()
+def run_model():
+    # Assume `model` and `dataset` is in context...
+    model.eval()
+    for batch in dataset:
+        model(**batch)
+
+
 corda_config = CordaConfig(
     sample_count=256,
     corda_method="kpm",
@@ -75,7 +80,7 @@ lora_config = LoraConfig(
     init_lora_weights="corda",
     corda_config=corda_config,
 )
-preprocess_corda(model, lora_config, init_config)
+preprocess_corda(model, lora_config, run_model=run_model)
 peft_model = get_peft_model(model, lora_config)
 ```
 

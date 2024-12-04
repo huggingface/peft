@@ -65,13 +65,13 @@ The distinction between CorDA with other similar LoRA initialization methods is 
 
 ## Quick Start
 
-- Knowledge-preserved adaptation mode
+### Knowledge-preserved adaptation mode
 
 ```py
 import torch
 from peft import LoraConfig, get_peft_model
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from peft.tuners.lora.config import CordaConfig, CordaInitConfig
+from peft.tuners.lora.config import CordaConfig
 from peft.tuners.lora.corda import preprocess_corda
 from trl import SFTConfig, SFTTrainer
 from datasets import load_dataset
@@ -91,9 +91,6 @@ def run_model():
             model(input_ids)
 
 
-init_config = CordaInitConfig(
-    run_model=run_model,
-)
 corda_config = CordaConfig(
     sample_count=256,
     corda_method="kpm",
@@ -102,7 +99,7 @@ lora_config = LoraConfig(
     init_lora_weights="corda",
     corda_config=corda_config,
 )
-preprocess_corda(model, lora_config, init_config)
+preprocess_corda(model, lora_config, run_model=run_model)
 peft_model = get_peft_model(model, lora_config)
 peft_model.print_trainable_parameters()
 
@@ -117,7 +114,7 @@ trainer.train()
 peft_model.save_pretrained("corda-llama-2-7b")
 ```
 
-- Instruction-previewed adaptation mode
+### Instruction-previewed adaptation mode
 
 ```py
 # Get model and dataset identically as KPM...
@@ -145,7 +142,7 @@ corda_config = CordaConfig(
 ```bash
 CUDA_VISIBLE_DEVICES=0 python -u preprocess.py --model_id="meta-llama/Llama-2-7b-hf" \
     --r 128 --seed 233 \
-    --save_model --save_path {your_save_path} \
+    --save_model --save_path {path_to_residual_model} \
     --first_eigen --calib_dataset "MetaMATH"
 ```
 
