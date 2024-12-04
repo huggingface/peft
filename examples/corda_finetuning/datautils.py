@@ -140,9 +140,8 @@ def get_calib_data(name, tokenizer, model_id, nsamples, seqlen=2048, seed=3):
         traindata = load_dataset("nq_open", split="train")
         tot_text = "\n\n".join(traindata["question"])
     elif name == "alpaca":
-        list_data_dict = load_dataset("iboing/alpaca_data", split="train")
+        selected_data_dict = load_dataset("iboing/alpaca_data", split="train").shuffle().take(nsamples)
         traindataset = []
-        selected_data_dict = random.sample(list_data_dict, nsamples)
         for example in selected_data_dict:
             if example.get("input", "") == "":
                 s = llama_chat_format.format(instruction=example["instruction"], response=example["output"])
@@ -154,10 +153,8 @@ def get_calib_data(name, tokenizer, model_id, nsamples, seqlen=2048, seed=3):
         torch.save(traindataset, cache_file)
         return traindataset
     elif name == "MetaMATH":
-        list_data_dict = load_dataset("iboing/MetaMathQA-395K", split="train")
-        print(list_data_dict[:10])
+        selected_data_dict = load_dataset("iboing/MetaMathQA-395K", split="train").shuffle().take(nsamples)
         traindataset = []
-        selected_data_dict = random.sample(list_data_dict, nsamples)
         for example in selected_data_dict:
             if example.get("input", "") == "":
                 s = llama_chat_format.format(instruction=example["query"], response=example["response"])
