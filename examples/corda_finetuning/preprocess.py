@@ -60,8 +60,6 @@ def main(args):
     corda_config = CordaConfig(
         sample_count=args.calib_loader_size,
         corda_method="ipm" if args.first_eigen else "kpm",
-        cache_file="./checkpoints/cov/debug.pt",
-        run_svd_for_covariance=False,
     )
     lora_config = LoraConfig(
         init_lora_weights="corda",
