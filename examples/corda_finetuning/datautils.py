@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
 import os
 import random
 
@@ -107,7 +106,6 @@ llama_chat_format = """<s>[INST] <<SYS>>
 def get_calib_data(name, tokenizer, model_id, nsamples, seqlen=2048, seed=3):
     print(f" get_data_from: {name}, nsamples={nsamples}, seqlen={seqlen}, {seed}")
     cache_file = f"cache/{name}_{model_id.replace('/','_')}_{nsamples}_{seqlen}_{seed}.pt"
-    random.seed(seed)
     if not os.path.exists("cache"):
         os.makedirs("cache")
     if os.path.exists(cache_file):
@@ -140,7 +138,7 @@ def get_calib_data(name, tokenizer, model_id, nsamples, seqlen=2048, seed=3):
         traindata = load_dataset("nq_open", split="train")
         tot_text = "\n\n".join(traindata["question"])
     elif name == "alpaca":
-        selected_data_dict = load_dataset("iboing/alpaca_data", split="train").shuffle().take(nsamples)
+        selected_data_dict = load_dataset("iboing/alpaca_data", split="train").shuffle(seed=seed).take(nsamples)
         traindataset = []
         for example in selected_data_dict:
             if example.get("input", "") == "":
@@ -153,7 +151,7 @@ def get_calib_data(name, tokenizer, model_id, nsamples, seqlen=2048, seed=3):
         torch.save(traindataset, cache_file)
         return traindataset
     elif name == "MetaMATH":
-        selected_data_dict = load_dataset("iboing/MetaMathQA-395K", split="train").shuffle().take(nsamples)
+        selected_data_dict = load_dataset("iboing/MetaMathQA-395K", split="train").shuffle(seed=seed).take(nsamples)
         traindataset = []
         for example in selected_data_dict:
             if example.get("input", "") == "":
@@ -166,18 +164,9 @@ def get_calib_data(name, tokenizer, model_id, nsamples, seqlen=2048, seed=3):
         torch.save(traindataset, cache_file)
         return traindataset
     elif name == "codefeedback":
-        data_path = "data/CodeFeedback-Filtered-Instruction.jsonl"
-        with open(data_path) as json_file:
-            json_list = list(json_file)
-        print(len(json_list))
-        list_data_dict = []
-        for item in json_list:
-            dict_item = json.loads(item)
-            list_data_dict.append(dict_item)
-            assert isinstance(dict_item, dict)
-        traindataset = []
-        random_indices = np.random.choice(len(list_data_dict), nsamples, replace=False)
-        selected_data_dict = [list_data_dict[i] for i in random_indices]
+        selected_data_dict = (
+            load_dataset("iboing/CodeFeedback-Filtered-Instruction", split="train").shuffle(seed=seed).take(nsamples)
+        )
         for example in selected_data_dict:
             if example.get("input", "") == "":
                 s = llama_chat_format.format(instruction=example["query"], response=example["answer"])
@@ -189,17 +178,9 @@ def get_calib_data(name, tokenizer, model_id, nsamples, seqlen=2048, seed=3):
         torch.save(traindataset, cache_file)
         return traindataset
     elif name == "WizLMinstruct":
-        data_path = "data/WizardLM_evol_instruct_V2_143k.jsonl"
-        with open(data_path) as json_file:
-            json_list = list(json_file)
-        print(len(json_list))
-        list_data_dict = []
-        for item in json_list:
-            dict_item = json.loads(item)
-            list_data_dict.append(dict_item)
-            assert isinstance(dict_item, dict)
-        traindataset = []
-        selected_data_dict = random.sample(list_data_dict, nsamples)
+        selected_data_dict = (
+            load_dataset("iboing/WizardLM_evol_instruct_V2_143k", split="train").shuffle(seed=seed).take(nsamples)
+        )
         for example in selected_data_dict:
             if example.get("input", "") == "":
                 s = llama_chat_format.format(
