@@ -72,6 +72,7 @@ from .tuners import (
 )
 from .tuners.tuners_utils import BaseTuner
 from .utils import _prepare_prompt_learning_config
+from .utils.constants import PEFT_TYPE_TO_PREFIX_MAPPING
 
 
 if TYPE_CHECKING:
@@ -202,6 +203,13 @@ def get_peft_model(
         warnings.warn(
             "lora with eva initialization used with low_cpu_mem_usage=False. "
             "Setting low_cpu_mem_usage=True can improve the maximum batch size possible for eva initialization."
+        )
+
+    prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(peft_config.peft_type)
+    if prefix and adapter_name in prefix:
+        warnings.warn(
+            f"Adapter name {adapter_name} should not be contained in the prefix {prefix}."
+            "This may lead to reinitialization of the adapter weights during loading."
         )
 
     if mixed:
