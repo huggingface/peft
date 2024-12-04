@@ -137,7 +137,27 @@ corda_config = CordaConfig(
 
 ## Advanced Usage
 
+### Preprocessing
+
 `preprocess.py`: This script builds CorDA adapters for a model, and saves the adapters initial weights and residual model weights to a specified directory. Example usage:
+
+####  Knowledge-preserved adaptation mode
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python -u preprocess.py --model_id="meta-llama/Llama-2-7b-hf" \
+    --r 128 --seed 233 \
+    --save_model --save_path {path_to_residual_model} \
+    --calib_dataset "nqopen"
+```
+**Arguments**:
+
+- `--model_id` is the pre-trained model for decomposition.
+- `--r` is the low rank of LoRA, e.g. 128.
+- `--calib_dataset` specifies the dataset to sample data to obtain covariance matrices. KPA mode uses QA datasets such as `"nqopen"`, `"traivia_qa"`, or other choices.
+- `--save_model` saves the initialized model in `--save_path`. 
+
+
+#### Instruction-previewed adaptation mode
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python -u preprocess.py --model_id="meta-llama/Llama-2-7b-hf" \
@@ -145,6 +165,14 @@ CUDA_VISIBLE_DEVICES=0 python -u preprocess.py --model_id="meta-llama/Llama-2-7b
     --save_model --save_path {path_to_residual_model} \
     --first_eigen --calib_dataset "MetaMATH"
 ```
+
+
+**Arguments**:
+
+- `--first_eigen` uses the largest $r$ singular values and vectors to initialize the learnable adapter for the instruction-previewed adaptation mode. 
+- `--calib_dataset` specifies the dataset to sample data to obtain covariance matrices. Instruction-previewed mode uses the downstream task dataset you are learning, such as  `"MetaMATH"`, `"codefeedback"`, `"WizLMinstruct"`, `"alpaca"`, or other choices.
+
+### Fine-tuning
 
 `corda_finetuning.py`: This script fine-tunes the preprocessed model built above on a downstream task.
 
@@ -173,6 +201,9 @@ python corda_finetuning.py \
     --tf32 True \
     --report_to none
 ```
+
+### Convert CorDA to LoRA
+
 
 ## Citation
 ```
