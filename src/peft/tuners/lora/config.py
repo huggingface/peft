@@ -145,6 +145,9 @@ class CordaConfig:
             it can further accelerate convergence and enhance the fine-tuning performance.
         verbose (`bool`):
             If true, prints the progress of CorDA initialization.
+        use_float16_for_covariance (`bool`):
+            If true, uses float16 for the covariance matrix. This can reduce the memory usage of the covariance matrix
+            by half, but may lead to numerical instability.
     """
 
     cache_file: Optional[str] = field(
@@ -189,6 +192,15 @@ class CordaConfig:
         },
     )
     verbose: bool = field(default=False, metadata={"help": "If true, prints the progress of CorDA initialization."})
+    use_float16_for_covariance: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "If true, uses float16 for the covariance matrix. This can reduce the memory usage of the covariance matrix "
+                "by half, but may lead to numerical instability."
+            )
+        },
+    )
 
 
 @dataclass
@@ -438,8 +450,8 @@ class LoraConfig(PeftConfig):
             )
         },
     )
-    corda_config: Union[CordaConfig, dict] = field(
-        default_factory=dict,
+    corda_config: Optional[CordaConfig] = field(
+        default=None,
         metadata={
             "help": (
                 "The configuration of CorDA. If this is passed, then CorDA will be used to build the adapter layers. "
@@ -584,10 +596,6 @@ class LoraConfig(PeftConfig):
                 "base weights; if you intend to do this, please ensure not to use rslora or rank_pattern/alpha_pattern."
             )
             warnings.warn(msg)
-
-        # convert corda_config to dict
-        if self.corda_config and not isinstance(self.corda_config, dict):
-            self.corda_config = vars(self.corda_config)
 
         self._custom_modules: Optional[dict[type[nn.Mmodule], type[nn.Module]]] = None
 

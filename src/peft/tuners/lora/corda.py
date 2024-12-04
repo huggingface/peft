@@ -86,11 +86,11 @@ def preprocess_corda(
         eigens.V_WC (`torch.Tensor`):
             Right singular vectors of the weight matrix, multiplied by inverse of covariance matrix.
     """
-    cache_file = lora_config.corda_config.get("cache_file")
-    covariance_file = lora_config.corda_config.get("covariance_file")
-    sample_count = lora_config.corda_config.get("sample_count")
-    corda_method = lora_config.corda_config.get("corda_method")
-    verbose = lora_config.corda_config.get("verbose")
+    cache_file = lora_config.corda_config.cache_file
+    covariance_file = lora_config.corda_config.covariance_file
+    sample_count = lora_config.corda_config.sample_count
+    corda_method = lora_config.corda_config.corda_method
+    verbose = lora_config.corda_config.verbose
 
     # If cache exists, skip building
     if cache_file is not None and os.path.exists(cache_file) and os.path.getsize(cache_file) > 0:
@@ -161,7 +161,7 @@ def calib_cov_distribution(
 
     def hook(module, input, output):
         input = input[0].detach().squeeze(0).data  ## (context_length = 2048, dim)
-        if config.corda_config.get("use_float32_for_covariance", True):
+        if not config.corda_config.use_float16_for_covariance:
             input = input.float()
         input = input / torch.max(input).abs()
 
