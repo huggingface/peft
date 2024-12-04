@@ -630,20 +630,33 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if config.num_transformer_submodules is None:
             config.num_transformer_submodules = 2 if config.task_type == TaskType.SEQ_2_SEQ_LM else 1
 
-        for named_param, value in list(transformer_backbone.named_parameters()):
-            # for ZeRO-3, the tensor is sharded across accelerators and deepspeed modifies it to a tensor with shape [0]
-            # the actual unsharded shape is stored in "ds_shape" attribute
-            # special handling is needed in case the model is initialized in deepspeed.zero.Init() context or HfDeepSpeedConfig
-            # has been called before
-            # For reference refer to issue: https://github.com/huggingface/peft/issues/996
-            deepspeed_distributed_tensor_shape = getattr(value, "ds_shape", None)
+        # determine the word embeddings
+        word_embeddings = None
+        try:
+            # First try to find the word embeddings based on the module name, this should work for models like Bert,
+            # Roberta, Deberta, etc.
+            word_embeddings = self.base_model.get_submodule("embeddings.word_embeddings")
+        except AttributeError:
+            pass
 
-            if value.shape[0] == self.base_model.config.vocab_size or (
-                deepspeed_distributed_tensor_shape is not None
-                and deepspeed_distributed_tensor_shape[0] == self.base_model.config.vocab_size
-            ):
-                self.word_embeddings = transformer_backbone.get_submodule(named_param.replace(".weight", ""))
-                break
+        if word_embeddings is None:
+            # Word embeddings could not be determined. Next try to guess them by checking which parameter has the size
+            # of the vocab.
+            for named_param, value in list(transformer_backbone.named_parameters()):
+                # for ZeRO-3, the tensor is sharded across accelerators and deepspeed modifies it to a tensor with shape
+                # [0] the actual unsharded shape is stored in "ds_shape" attribute special handling is needed in case
+                # the model is initialized in deepspeed.zero.Init() context or HfDeepSpeedConfig has been called before
+                # For reference refer to issue: https://github.com/huggingface/peft/issues/996
+                deepspeed_distributed_tensor_shape = getattr(value, "ds_shape", None)
+
+                if value.shape[0] == self.base_model.config.vocab_size or (
+                    deepspeed_distributed_tensor_shape is not None
+                    and deepspeed_distributed_tensor_shape[0] == self.base_model.config.vocab_size
+                ):
+                    word_embeddings = transformer_backbone.get_submodule(named_param.replace(".weight", ""))
+                    break
+
+        self.word_embeddings = word_embeddings
 
         if config.peft_type == PeftType.PROMPT_TUNING:
             prompt_encoder = PromptEmbedding(config, self.word_embeddings)
