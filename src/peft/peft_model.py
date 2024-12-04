@@ -229,7 +229,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         selected_adapters: Optional[list[str]] = None,
         save_embedding_layers: Union[str, bool] = "auto",
         is_main_process: bool = True,
-        convert_pissa_to_lora: Optional[str] = None,
         path_initial_model_for_weight_conversion: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
@@ -253,8 +252,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             is_main_process (`bool`, *optional*):
                 Whether the process calling this is the main process or not. Will default to `True`. Will not save the
                 checkpoint if not on the main process, which is important for multi device setups (e.g. DDP).
-            convert_pissa_to_lora (`str, *optional*`):
-                Deprecated. Use `path_initial_model_for_weight_conversion` instead.
             path_initial_model_for_weight_conversion (`str, *optional*`):
                 The path to the initialized adapter, which is obtained after initializing the model with PiSSA or OLoRA
                 and before performing any training. When `path_initial_model_for_weight_conversion` is not None, the
@@ -281,13 +278,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     f"You passed an invalid `selected_adapters` arguments, current supported adapter names are"
                     f" {list(self.peft_config.keys())} - got {selected_adapters}."
                 )
-        # TODO: remove deprecated parameter in PEFT v0.14.0
-        if convert_pissa_to_lora is not None:
-            warnings.warn(
-                "`convert_pissa_to_lora` is deprecated and will be removed in a future version. "
-                "Use `path_initial_model_for_weight_conversion` instead."
-            )
-            path_initial_model_for_weight_conversion = convert_pissa_to_lora
 
         def save_mutated_as_lora(peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs):
             if peft_config.use_rslora and (peft_config.rank_pattern or peft_config.alpha_pattern):
