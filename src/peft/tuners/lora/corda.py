@@ -23,7 +23,7 @@ import torch.nn as nn
 from attr import dataclass
 from tqdm import tqdm
 
-from peft.tuners.lora.config import CordaInitConfig, LoraConfig
+from peft.tuners.lora.config import LoraConfig
 from peft.tuners.lora.model import LoraModel
 from peft.utils.other import get_pattern_key
 
@@ -55,7 +55,8 @@ def get_model_device(model: nn.Module) -> str:
 def preprocess_corda(
     model: nn.Module,
     lora_config: LoraConfig,
-    init_config: CordaInitConfig = None,
+    run_model: Optional[Callable[[], None]] = None,
+    hooked_model: Optional[nn.Module] = None,
 ):
     """
     Build necessary CorDA fields for a model.
@@ -65,8 +66,13 @@ def preprocess_corda(
             Model to preprocess.
         lora_config (`LoraConfig`):
             Lora configuration of the model. `lora_config.corda_config` should be set.
-        init_config (`CordaInitConfig`):
-            CorDA initialization configuration. This is not merged with `lora_config` because it's not serializable.
+        run_model (`Callable[[], None]`):
+            Callback to run the model when building covariance. This will be run once regardless of `sample_count`, so
+            you should configure the `run_model` callback to run the model exactly `sample_count` times. Typically you
+            should run model inference on your dataset in this callback.
+        hooked_model (`Optional[nn.Module]`):
+            Model to hook when building covariance. If none, original model will be hooked. This is only useful when
+            you want to hook a different model than the one you are training, typically you should leave this `None`.
 
     Upon completion, the following fields are set for each target module:
         corda_method (`Literal["ipm", "kpm"]`):
@@ -85,10 +91,6 @@ def preprocess_corda(
     sample_count = lora_config.corda_config.get("sample_count")
     corda_method = lora_config.corda_config.get("corda_method")
     verbose = lora_config.corda_config.get("verbose")
-    if init_config is None:
-        init_config = CordaInitConfig()
-    run_model = init_config.run_model
-    hooked_model = init_config.hooked_model
 
     # If cache exists, skip building
     if cache_file is not None and os.path.exists(cache_file) and os.path.getsize(cache_file) > 0:

@@ -55,7 +55,7 @@ from peft import (
     inject_adapter_in_model,
     set_peft_model_state_dict,
 )
-from peft.tuners.lora.config import CordaConfig, CordaInitConfig
+from peft.tuners.lora.config import CordaConfig
 from peft.tuners.lora.corda import preprocess_corda
 from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
@@ -335,10 +335,6 @@ class TestLoraInitialization:
         model = self.get_model()
         output = model(data)[0]
 
-        init_config = CordaInitConfig(
-            run_model=lambda: model(data),
-            hooked_model=model,
-        )
         corda_config = CordaConfig(
             cache_file=tmp_path / "corda_cache.pt",
             covariance_file=tmp_path / "covariance_cache.pt",
@@ -349,7 +345,12 @@ class TestLoraInitialization:
             target_modules=["linear"],
             corda_config=corda_config,
         )
-        preprocess_corda(model, config, init_config)
+        preprocess_corda(
+            model,
+            config,
+            run_model=lambda: model(data),
+            hooked_model=model,
+        )
         peft_model = get_peft_model(deepcopy(model), config)
         assert torch.allclose(output, peft_model(data)[0], atol=1e-06)
 
@@ -377,10 +378,6 @@ class TestLoraInitialization:
         model = self.get_model()
         output = model(data)[0]
 
-        init_config = CordaInitConfig(
-            run_model=lambda: model(data),
-            hooked_model=model,
-        )
         config = LoraConfig(
             rank_pattern={"linear": 8, "embed": 16, "conv2d": 32},
             init_lora_weights="corda",
@@ -391,7 +388,12 @@ class TestLoraInitialization:
                 sample_count=1,
             ),
         )
-        preprocess_corda(model, config, init_config)
+        preprocess_corda(
+            model,
+            config,
+            run_model=lambda: model(data),
+            hooked_model=model,
+        )
         peft_model = get_peft_model(deepcopy(model), config)
         assert torch.allclose(output, peft_model(data)[0], atol=1e-06)
 
@@ -421,10 +423,9 @@ class TestLoraInitialization:
         model = self.get_model()
         output_base = model(data)[0]
 
-        init_config = CordaInitConfig(run_model=lambda: model(data), hooked_model=model)
         corda_config = CordaConfig(sample_count=1)
         config = LoraConfig(init_lora_weights="corda", target_modules=["linear"], r=8, corda_config=corda_config)
-        preprocess_corda(model, config, init_config)
+        preprocess_corda(model, config, run_model=lambda: model(data), hooked_model=model)
         peft_model = get_peft_model(deepcopy(model), config)
         # save the initial model
         peft_model.peft_config["default"].init_lora_weights = True
@@ -482,7 +483,6 @@ class TestLoraInitialization:
         output_base = model(data)[0]
 
         # use rank_pattern here; note that since there is only a single linear layer, r is completely overridden
-        init_config = CordaInitConfig(run_model=lambda: model(data), hooked_model=model)
         corda_config = CordaConfig(sample_count=1)
         config = LoraConfig(
             init_lora_weights="corda",
@@ -491,7 +491,7 @@ class TestLoraInitialization:
             rank_pattern={"linear": 32},
             corda_config=corda_config,
         )
-        preprocess_corda(model, config, init_config)
+        preprocess_corda(model, config, run_model=lambda: model(data), hooked_model=model)
         peft_model = get_peft_model(deepcopy(model), config)
         # save the initial model
         peft_model.peft_config["default"].init_lora_weights = True
@@ -543,7 +543,6 @@ class TestLoraInitialization:
 
         # use alpha_pattern here; note that since there is only a single linear layer, lora_alpha is completely
         # overridden
-        init_config = CordaInitConfig(run_model=lambda: model(data), hooked_model=model)
         corda_config = CordaConfig(sample_count=1)
         config = LoraConfig(
             init_lora_weights="corda",
@@ -551,7 +550,7 @@ class TestLoraInitialization:
             alpha_pattern={"linear": 5},
             corda_config=corda_config,
         )
-        preprocess_corda(model, config, init_config)
+        preprocess_corda(model, config, run_model=lambda: model(data), hooked_model=model)
         peft_model = get_peft_model(deepcopy(model), config)
         # save the initial model
         peft_model.peft_config["default"].init_lora_weights = True
@@ -602,12 +601,11 @@ class TestLoraInitialization:
         model = self.get_model()
         output_base = model(data)[0]
 
-        init_config = CordaInitConfig(run_model=lambda: model(data), hooked_model=model)
         corda_config = CordaConfig(sample_count=1)
         config = LoraConfig(
             init_lora_weights="corda", target_modules=["linear"], r=8, use_rslora=True, corda_config=corda_config
         )
-        preprocess_corda(model, config, init_config)
+        preprocess_corda(model, config, run_model=lambda: model(data), hooked_model=model)
         peft_model = get_peft_model(deepcopy(model), config)
         # save the initial model
         peft_model.peft_config["default"].init_lora_weights = True
@@ -659,7 +657,6 @@ class TestLoraInitialization:
         # it's not possible to determine the correct scale when using rslora with rank or alpha pattern, because the
         # scale is not stored in the state_dict
         model = self.get_model()
-        init_config = CordaInitConfig(run_model=lambda: model(data), hooked_model=model)
         corda_config = CordaConfig(sample_count=1)
         config = LoraConfig(
             init_lora_weights="corda",
@@ -669,7 +666,7 @@ class TestLoraInitialization:
             use_rslora=True,
             corda_config=corda_config,
         )
-        preprocess_corda(model, config, init_config)
+        preprocess_corda(model, config, run_model=lambda: model(data), hooked_model=model)
         peft_model = get_peft_model(model, config)
         peft_model.save_pretrained(tmp_path / "init-model")
 
@@ -683,7 +680,6 @@ class TestLoraInitialization:
         # it's not possible to determine the correct scale when using rslora with rank or alpha pattern, because the
         # scale is not stored in the state_dict
         model = self.get_model()
-        init_config = CordaInitConfig(run_model=lambda: model(data), hooked_model=model)
         corda_config = CordaConfig(sample_count=1)
         config = LoraConfig(
             init_lora_weights="corda",
@@ -693,7 +689,7 @@ class TestLoraInitialization:
             use_rslora=True,
             corda_config=corda_config,
         )
-        preprocess_corda(model, config, init_config)
+        preprocess_corda(model, config, run_model=lambda: model(data), hooked_model=model)
         peft_model = get_peft_model(model, config)
         peft_model.save_pretrained(tmp_path / "init-model")
 

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from typing import Callable, Literal, Optional, Union
+from typing import Literal, Optional, Union
 
 from torch import nn
 
@@ -118,42 +118,6 @@ class EvaConfig:
             raise ValueError("`rho` must be >= 1.0")
         if self.tau < 0.0 or self.tau > 1.0:
             raise ValueError("`tau` must be between 0.0 and 1.0.")
-
-
-@dataclass
-class CordaInitConfig:
-    """
-    This is the configuration class to store the configuration when building CorDA adapters.
-
-    Args:
-        run_model (`Callable[[], None]`):
-            Callback to run the model when building covariance. This will be run once regardless of `sample_count`, so
-            you should configure the `run_model` callback to run the model exactly `sample_count` times. Typically you
-            should run model inference on your dataset in this callback.
-        hooked_model (`Optional[nn.Module]`):
-            Model to hook when building covariance. If none, original model will be hooked. This is only useful when
-            you want to hook a different model than the one you are training, typically you should leave this `None`.
-    """
-
-    run_model: Optional[Callable[[], None]] = field(
-        default=None,
-        metadata={
-            "help": (
-                "Callback to run the model when building covariance. This will be run once regardless of `sample_count`, "
-                "so you should configure the `run_model` callback to run the model exactly `sample_count` times. Typically "
-                "you should run model inference on your dataset in this callback."
-            )
-        },
-    )
-    hooked_model: Optional[nn.Module] = field(
-        default=None,
-        metadata={
-            "help": (
-                "Model to hook when building covariance. If none, original model will be hooked. This is only useful when "
-                "you want to hook a different model than the one you are training, typically you should leave this `None`."
-            )
-        },
-    )
 
 
 @dataclass

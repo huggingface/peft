@@ -22,7 +22,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft.mapping import get_peft_model
-from peft.tuners.lora.config import CordaConfig, CordaInitConfig, LoraConfig
+from peft.tuners.lora.config import CordaConfig, LoraConfig
 from peft.tuners.lora.corda import preprocess_corda
 
 
@@ -57,9 +57,6 @@ def main(args):
     print(model)
 
     # Perform decomposition
-    init_config = CordaInitConfig(
-        run_model=lambda: run_model(model, calib_loader),
-    )
     corda_config = CordaConfig(
         sample_count=args.calib_loader_size,
         corda_method="ipm" if args.first_eigen else "kpm",
@@ -73,7 +70,11 @@ def main(args):
         lora_alpha=args.r,
         corda_config=corda_config,
     )
-    preprocess_corda(model, lora_config, init_config)
+    preprocess_corda(
+        model,
+        lora_config,
+        run_model=lambda: run_model(model, calib_loader),
+    )
     model = get_peft_model(model, lora_config)
 
     # Evaluate again to check if the model is consistent
