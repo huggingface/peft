@@ -253,13 +253,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 Whether the process calling this is the main process or not. Will default to `True`. Will not save the
                 checkpoint if not on the main process, which is important for multi device setups (e.g. DDP).
             path_initial_model_for_weight_conversion (`str, *optional*`):
-                The path to the initialized adapter, which is obtained after initializing the model with PiSSA/CorDA/OLoRA
-                and before performing any training. When `path_initial_model_for_weight_conversion` is not None, the
-                difference in adapter before and after fine-tuning is calculated. This difference can be represented as
-                the parameters of a standard LoRA adapter. Using this converted adapter does not require changes to the
-                base model, thus conveniently allowing the use of multiple PiSSA/CorDA/OLoRA adapters with LoRA adapters,
-                and the activation or deactivation of any adapters. Note that this conversion is not supported if
-                `rslora` is used in combination with `rank_pattern` or `alpha_pattern`.
+                The path to the initialized adapter, which is obtained after initializing the model with
+                PiSSA/CorDA/OLoRA and before performing any training. When `path_initial_model_for_weight_conversion`
+                is not None, the difference in adapter before and after fine-tuning is calculated. This difference can
+                be represented as the parameters of a standard LoRA adapter. Using this converted adapter does not
+                require changes to the base model, thus conveniently allowing the use of multiple PiSSA/CorDA/OLoRA
+                adapters with LoRA adapters, and the activation or deactivation of any adapters. Note that this
+                conversion is not supported if `rslora` is used in combination with `rank_pattern` or `alpha_pattern`.
             kwargs (additional keyword arguments, *optional*):
                 Additional keyword arguments passed along to the `push_to_hub` method.
 
