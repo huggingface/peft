@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import io
 import json
 import os
 import random
@@ -105,21 +104,6 @@ llama_chat_format = """<s>[INST] <<SYS>>
 """
 
 
-def _make_r_io_base(f, mode: str):
-    if not isinstance(f, io.IOBase):
-        f = open(f, mode=mode)
-        # f = open(f)
-    return f
-
-
-def jload(f, mode="r"):
-    """Load a .json file into a dictionary."""
-    f = _make_r_io_base(f, mode)
-    jdict = json.load(f)
-    f.close()
-    return jdict
-
-
 def get_calib_data(name, tokenizer, model_id, nsamples, seqlen=2048, seed=3):
     print(f" get_data_from: {name}, nsamples={nsamples}, seqlen={seqlen}, {seed}")
     cache_file = f"cache/{name}_{model_id.replace('/','_')}_{nsamples}_{seqlen}_{seed}.pt"
@@ -156,13 +140,9 @@ def get_calib_data(name, tokenizer, model_id, nsamples, seqlen=2048, seed=3):
         traindata = load_dataset("nq_open", split="train")
         tot_text = "\n\n".join(traindata["question"])
     elif name == "alpaca":
-        # this is for chat models
-        data_path = "data/alpaca_data.json"
-        list_data_dict = jload(data_path)
+        list_data_dict = load_dataset("iboing/alpaca_data")
         traindataset = []
         selected_data_dict = random.sample(list_data_dict, nsamples)
-        # random_indices = np.random.choice(len(list_data_dict), nsamples, replace=False)
-        # selected_data_dict = [list_data_dict[i] for i in random_indices]
         for example in selected_data_dict:
             if example.get("input", "") == "":
                 s = llama_chat_format.format(instruction=example["instruction"], response=example["output"])
@@ -174,8 +154,7 @@ def get_calib_data(name, tokenizer, model_id, nsamples, seqlen=2048, seed=3):
         torch.save(traindataset, cache_file)
         return traindataset
     elif name == "MetaMATH":
-        data_path = "data/MetaMathQA-395K.json"
-        list_data_dict = jload(data_path)
+        list_data_dict = load_dataset("iboing/MetaMathQA-395K")
         traindataset = []
         selected_data_dict = random.sample(list_data_dict, nsamples)
         for example in selected_data_dict:
@@ -198,9 +177,7 @@ def get_calib_data(name, tokenizer, model_id, nsamples, seqlen=2048, seed=3):
             dict_item = json.loads(item)
             list_data_dict.append(dict_item)
             assert isinstance(dict_item, dict)
-        # list_data_dict = jload(data_path)
         traindataset = []
-        # selected_data_dict=random.sample(list_data_dict, nsamples)
         random_indices = np.random.choice(len(list_data_dict), nsamples, replace=False)
         selected_data_dict = [list_data_dict[i] for i in random_indices]
         for example in selected_data_dict:
@@ -223,7 +200,6 @@ def get_calib_data(name, tokenizer, model_id, nsamples, seqlen=2048, seed=3):
             dict_item = json.loads(item)
             list_data_dict.append(dict_item)
             assert isinstance(dict_item, dict)
-        # list_data_dict = jload(data_path)
         traindataset = []
         selected_data_dict = random.sample(list_data_dict, nsamples)
         for example in selected_data_dict:
