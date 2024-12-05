@@ -49,6 +49,7 @@ from .other import (
     _is_valid_match,
     infer_device,
     get_auto_gptq_quant_linear,
+    get_gptqmodel_quant_linear,
     get_quantization_config,
     id_tensor_storage,
     cast_mixed_precision_params,

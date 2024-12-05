@@ -25,8 +25,10 @@ from peft.utils import (
     _freeze_adapter,
     _get_submodules,
     get_auto_gptq_quant_linear,
+    get_gptqmodel_quant_linear,
     get_quantization_config,
 )
+from peft.import_utils import is_gptqmodel_available
 from peft.utils.integrations import gather_params_ctx
 
 from .gptq import SVDQuantLinear
@@ -135,7 +137,7 @@ class AdaLoraModel(LoraModel):
 
         # If it is not an AdaLoraLayer, create a new module, else update it with new adapters
         if not isinstance(target, AdaLoraLayer):
-            new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
+            new_module = self._create_new_module(lora_config, adapter_name, target, self.model.hf_device_map, **kwargs)
             if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
@@ -150,7 +152,7 @@ class AdaLoraModel(LoraModel):
             )
 
     @staticmethod
-    def _create_new_module(lora_config, adapter_name, target, **kwargs):
+    def _create_new_module(lora_config, adapter_name, target, device_map, **kwargs):
         # avoid eager bnb import
         if is_bnb_available():
             import bitsandbytes as bnb
@@ -160,7 +162,11 @@ class AdaLoraModel(LoraModel):
             from .bnb import SVDLinear4bit
 
         gptq_quantization_config = kwargs.get("gptq_quantization_config", None)
-        AutoGPTQQuantLinear = get_auto_gptq_quant_linear(gptq_quantization_config)
+
+        if is_gptqmodel_available():
+            QuantLinear = get_gptqmodel_quant_linear(gptq_quantization_config, device_map)
+        else:
+            QuantLinear = get_auto_gptq_quant_linear(gptq_quantization_config)
 
         loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
         loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)
@@ -190,7 +196,7 @@ class AdaLoraModel(LoraModel):
                 }
             )
             new_module = SVDLinear4bit(target, adapter_name, **fourbit_kwargs)
-        elif AutoGPTQQuantLinear is not None and isinstance(target, AutoGPTQQuantLinear):
+        elif QuantLinear is not None and isinstance(target, QuantLinear):
             new_module = SVDQuantLinear(target, adapter_name, **kwargs)
         else:
             if isinstance(target_base_layer, torch.nn.Linear):
