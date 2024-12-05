@@ -25,7 +25,7 @@ The distinction between CorDA with other similar LoRA initialization methods is 
 
 | Method | Initialization for | SVD on | Data-driven | Support knowledge maintenance |
 | - | - | - | - | - |
-| PiSSA | $A$ and $B$ | weights | no | no |
+| CorDA | $A$ and $B$ | weights | no | no |
 | EVA | $A$ | activations | yes | no |
 |CorDA |  $A$ and $B$ | weights (oriented by covariance) | yes | yes |
 
@@ -53,13 +53,13 @@ The distinction between CorDA with other similar LoRA initialization methods is 
 | Method | Model | GSM8k | Math |
 | --- | --- | --- | ---|
 |LoRA| Llama-2-7b | 42.68 | 5.88 |
-|PiSSA | Llama-2-7b | 51.63 | 7.32 |
+|CorDA | Llama-2-7b | 51.63 | 7.32 |
 | **CorDA (IPM)** | Llama-2-7b | **53.45** | **8.64** |
 |LoRA| Llama-2-13b | 57.24 | 8.92 |
-|PiSSA | Llama-2-13b |60.88	| 11.08|
+|CorDA | Llama-2-13b |60.88	| 11.08|
 | **CorDA (IPM)** | Llama-2-13b | **62.47** |**11.54** |
 |LoRA| Gemma-2-9b | 83.47 |	42.30 |
-|PiSSA | Gemma-2-9b | 84.23	| 43.52|
+|CorDA | Gemma-2-9b | 84.23	| 43.52|
 | **CorDA (IPM)** | Gemma-2-9b | **84.45** | **43.88** |
 
 
@@ -204,6 +204,33 @@ python corda_finetuning.py \
 
 ### Convert CorDA to LoRA
 
+The main advantage of CorDA is concentrated during the training phase. For a trained CorDA adapter, we recommend converting it equivalently to the LoRA adapter for using and sharing.
+
+```python
+# The fine-tuned matrices $A$ and $B$ in CorDA adapter is saved and should be combined with the residual model.
+peft_model.save_pretrained(output_dir) 
+# Given the matrices $A_0$ and $B_0$, initialized by CorDA and untrained, and the trained matrices $A$ and $B$, 
+# we can convert these to LoRA by setting $\Delta W = A \times B - A_0 \times B_0 = [A \mid A_0] \times [B \mid -B_0]^T = A'B'$.
+peft_model.save_pretrained(output_dir, path_initial_model_for_weight_conversion="corda_init")
+```
+
+This conversion enables the loading of LoRA on top of a standard base model:
+
+```python
+import torch
+from peft import PeftModel
+from transformers import AutoModelForCausalLM
+
+model = AutoModelForCausalLM.from_pretrained(
+    "meta-llama/Llama-2-7b-hf", torch_dtype=torch.bfloat16, device_map="auto"
+)
+# No SVD is performed during this step, and the base model remains unaltered.
+peft_model = PeftModel.from_pretrained(model, "corda-llama-2-7b-lora")
+```
+
+Utilizing the converted LoRA does not require modifying the parameters of the base model. When multiple converted LoRAs are needed simultaneously, each adapter operates independently without interference, allowing for the adapters to be freely deleted or added.
+
+Note that this conversion is not supported if `rslora` is used in combination with `rank_pattern` or `alpha_pattern`.
 
 ## Citation
 ```
