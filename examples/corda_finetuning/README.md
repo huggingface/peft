@@ -25,7 +25,7 @@ The distinction between CorDA with other similar LoRA initialization methods is 
 
 | Method | Initialization for | SVD on | Data-driven | Support knowledge maintenance |
 | - | - | - | - | - |
-| CorDA | $A$ and $B$ | weights | no | no |
+| PiSSA | $A$ and $B$ | weights | no | no |
 | EVA | $A$ | activations | yes | no |
 |CorDA |  $A$ and $B$ | weights (oriented by covariance) | yes | yes |
 
@@ -53,13 +53,13 @@ The distinction between CorDA with other similar LoRA initialization methods is 
 | Method | Model | GSM8k | Math |
 | --- | --- | --- | ---|
 |LoRA| Llama-2-7b | 42.68 | 5.88 |
-|CorDA | Llama-2-7b | 51.63 | 7.32 |
+|PiSSA | Llama-2-7b | 51.63 | 7.32 |
 | **CorDA (IPM)** | Llama-2-7b | **53.45** | **8.64** |
 |LoRA| Llama-2-13b | 57.24 | 8.92 |
-|CorDA | Llama-2-13b |60.88	| 11.08|
+|PiSSA | Llama-2-13b |60.88	| 11.08|
 | **CorDA (IPM)** | Llama-2-13b | **62.47** |**11.54** |
 |LoRA| Gemma-2-9b | 83.47 |	42.30 |
-|CorDA | Gemma-2-9b | 84.23	| 43.52|
+|PiSSA | Gemma-2-9b | 84.23	| 43.52|
 | **CorDA (IPM)** | Gemma-2-9b | **84.45** | **43.88** |
 
 
