@@ -66,10 +66,11 @@ def preprocess_corda(
             Model to preprocess.
         lora_config (`LoraConfig`):
             Lora configuration of the model. `lora_config.corda_config` should be set.
-        run_model (`Callable[[], None]`):
+        run_model (`Optional[Callable[[], None]]`):
             Callback to run the model when building covariance. This will be run once regardless of `sample_count`, so
             you should configure the `run_model` callback to run the model exactly `sample_count` times. Typically you
-            should run model inference on your dataset in this callback.
+            should run model inference on your dataset in this callback. `run_model` can be `None` only if covariance
+            file in `lora_config.corda_config` is already created.
         hooked_model (`Optional[nn.Module]`):
             Model to hook when building covariance. If none, original model will be hooked. This is only useful when
             you want to hook a different model than the one you are training, typically you should leave this `None`.
@@ -196,6 +197,8 @@ def calib_cov_distribution(
 
     run_model()
 
+    # In some edge cases you might need to hook a model different from the model to add adapters,
+    # this case you would specify `hooked_model` and set it to a different model from `model`.
     if hooked_model is not model:
         targets = {}
         for name, module in target_modules(model, config):

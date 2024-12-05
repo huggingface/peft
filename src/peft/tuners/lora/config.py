@@ -137,17 +137,17 @@ class CordaConfig:
             that covariance file is usually large (comparable to model size), so you will need sufficient storage.
         sample_count (`int`):
             Divisor for each hook call. You should make sure `run_model` calls the model exactly `sample_count` times
-            for consistent behaviour.
+            for consistent behaviour. Defaults to 1.
         corda_method (`Literal["ipm", "kpm"]`):
             Method to build adapter. The KPM (Knowledge-Preserved Mode) not only achieves better performance than LoRA
             on fine-tuning tasks, but also mitigates the catastrophic forgetting of pre-trained world knowledge. When
             preserving pre-trained knowledge is not a concern, the IPM (Instruction-Previewed Mode) is favored because
-            it can further accelerate convergence and enhance the fine-tuning performance.
+            it can further accelerate convergence and enhance the fine-tuning performance. Defaults to `'ipm'`.
         verbose (`bool`):
-            If true, prints the progress of CorDA initialization.
+            If true, prints the progress of CorDA initialization. Defaults to `False`.
         use_float16_for_covariance (`bool`):
             If true, uses float16 for the covariance matrix. This can reduce the memory usage of the covariance matrix
-            by half, but may lead to numerical instability.
+            by half, but may lead to numerical instability. Defaults to `False`.
     """
 
     cache_file: Optional[str] = field(
@@ -172,7 +172,7 @@ class CordaConfig:
         },
     )
     sample_count: int = field(
-        default=256,
+        default=1,
         metadata={
             "help": (
                 "Divisor for each hook call. You should make sure `run_model` calls the model exactly `sample_count` times "
