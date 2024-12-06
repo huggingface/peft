@@ -58,7 +58,6 @@ def main(args):
 
     # Perform decomposition
     corda_config = CordaConfig(
-        sample_count=args.calib_loader_size,
         corda_method="ipm" if args.first_eigen else "kpm",
     )
     lora_config = LoraConfig(

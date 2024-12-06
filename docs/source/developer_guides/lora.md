@@ -73,7 +73,6 @@ def run_model():
 
 
 corda_config = CordaConfig(
-    sample_count=256,
     corda_method="kpm",
 )
 lora_config = LoraConfig(

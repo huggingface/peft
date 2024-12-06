@@ -67,10 +67,9 @@ def preprocess_corda(
         lora_config (`LoraConfig`):
             Lora configuration of the model. `lora_config.corda_config` should be set.
         run_model (`Optional[Callable[[], None]]`):
-            Callback to run the model when building covariance. This will be run once regardless of `sample_count`, so
-            you should configure the `run_model` callback to run the model exactly `sample_count` times. Typically you
-            should run model inference on your dataset in this callback. `run_model` can be `None` only if covariance
-            file in `lora_config.corda_config` is already created.
+            Callback to run the model when building covariance. Typically you should run model inference on your sample
+            dataset in this callback. The size of sample dataset is typically 256. `run_model` can be `None` only if
+            covariance file in `lora_config.corda_config` is already created.
         hooked_model (`Optional[nn.Module]`):
             Model to hook when building covariance. If none, original model will be hooked. This is only useful when
             you want to hook a different model than the one you are training, typically you should leave this `None`.
@@ -89,7 +88,6 @@ def preprocess_corda(
     """
     cache_file = lora_config.corda_config.cache_file
     covariance_file = lora_config.corda_config.covariance_file
-    sample_count = lora_config.corda_config.sample_count
     corda_method = lora_config.corda_config.corda_method
     verbose = lora_config.corda_config.verbose
 
@@ -117,7 +115,7 @@ def preprocess_corda(
             module.rank = lora_config.rank_pattern.get(r_key, lora_config.r)
 
         # Calculate covariance matrix
-        calib_cov_distribution(model, lora_config, run_model, hooked_model, sample_count, covariance_file)
+        calib_cov_distribution(model, lora_config, run_model, hooked_model, covariance_file)
 
         # Calculate eigens
         collect_eigens(model, lora_config, verbose)
@@ -145,7 +143,6 @@ def calib_cov_distribution(
     config: LoraConfig,
     run_model: Optional[Callable[[], None]],
     hooked_model: Optional[nn.Module],
-    sample_count: int,
     covariance_file: Optional[str],
 ):
     if covariance_file is not None and os.path.exists(covariance_file) and os.path.getsize(covariance_file) > 0:
@@ -182,14 +179,16 @@ def calib_cov_distribution(
         std = input.std(0)
 
         # add to module
-        module.covariance_matrix += covariance / sample_count
-        module.mean += mean / sample_count
-        module.std += std / sample_count
+        module.sample_count += 1
+        module.covariance_matrix += covariance
+        module.mean += mean
+        module.std += std
 
         # free memory
         del covariance, input
 
     for name, module in target_modules(hooked_model, config):
+        module.sample_count = 0
         module.covariance_matrix = 0
         module.mean = 0
         module.std = 0
@@ -207,9 +206,9 @@ def calib_cov_distribution(
             # There can be modules used only in inference, but not training
             # Exclude modules not in target model to prevent KeyError in this case
             if name in targets:
-                targets[name].covariance_matrix = module.covariance_matrix
-                targets[name].mean = module.mean
-                targets[name].std = module.std
+                targets[name].covariance_matrix = module.covariance_matrix / module.sample_count
+                targets[name].mean = module.mean / module.sample_count
+                targets[name].std = module.std / module.sample_count
 
     # Save covariance to disk
     if covariance_file is not None:
