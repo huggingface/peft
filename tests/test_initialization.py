@@ -1806,7 +1806,6 @@ class TestCordaInitialization:
         corda_config = CordaConfig(
             cache_file=tmp_path / "corda_cache.pt",
             covariance_file=tmp_path / "covariance_cache.pt",
-            sample_count=1,
             corda_method=corda_method,
         )
         config = LoraConfig(
@@ -1855,7 +1854,6 @@ class TestCordaInitialization:
         corda_config = CordaConfig(
             cache_file=tmp_path / "corda_cache.pt",
             covariance_file=tmp_path / "covariance_cache.pt",
-            sample_count=1,
             corda_method=corda_method,
         )
         config = LoraConfig(
@@ -1905,7 +1903,6 @@ class TestCordaInitialization:
         corda_config = CordaConfig(
             cache_file=tmp_path / "corda_cache.pt",
             covariance_file=tmp_path / "covariance_cache.pt",
-            sample_count=1,
             corda_method=corda_method,
         )
         config = LoraConfig(
@@ -1951,7 +1948,7 @@ class TestCordaInitialization:
         model = self.get_model()
         output_base = model(data)[0]
 
-        corda_config = CordaConfig(sample_count=1, corda_method=corda_method)
+        corda_config = CordaConfig(corda_method=corda_method)
         config = LoraConfig(init_lora_weights="corda", target_modules=["linear"], r=8, corda_config=corda_config)
         preprocess_corda(model, config, run_model=lambda: model(data), hooked_model=model)
         peft_model = get_peft_model(deepcopy(model), config)
@@ -2012,7 +2009,7 @@ class TestCordaInitialization:
         output_base = model(data)[0]
 
         # use rank_pattern here; note that since there is only a single linear layer, r is completely overridden
-        corda_config = CordaConfig(sample_count=1, corda_method=corda_method)
+        corda_config = CordaConfig(corda_method=corda_method)
         config = LoraConfig(
             init_lora_weights="corda",
             target_modules=["linear"],
@@ -2073,7 +2070,7 @@ class TestCordaInitialization:
 
         # use alpha_pattern here; note that since there is only a single linear layer, lora_alpha is completely
         # overridden
-        corda_config = CordaConfig(sample_count=1, corda_method=corda_method)
+        corda_config = CordaConfig(corda_method=corda_method)
         config = LoraConfig(
             init_lora_weights="corda",
             target_modules=["linear"],
@@ -2132,7 +2129,7 @@ class TestCordaInitialization:
         model = self.get_model()
         output_base = model(data)[0]
 
-        corda_config = CordaConfig(sample_count=1, corda_method=corda_method)
+        corda_config = CordaConfig(corda_method=corda_method)
         config = LoraConfig(
             init_lora_weights="corda", target_modules=["linear"], r=8, use_rslora=True, corda_config=corda_config
         )
@@ -2189,7 +2186,7 @@ class TestCordaInitialization:
         # it's not possible to determine the correct scale when using rslora with rank or alpha pattern, because the
         # scale is not stored in the state_dict
         model = self.get_model()
-        corda_config = CordaConfig(sample_count=1, corda_method=corda_method)
+        corda_config = CordaConfig(corda_method=corda_method)
         config = LoraConfig(
             init_lora_weights="corda",
             target_modules=["linear"],
@@ -2213,7 +2210,7 @@ class TestCordaInitialization:
         # it's not possible to determine the correct scale when using rslora with rank or alpha pattern, because the
         # scale is not stored in the state_dict
         model = self.get_model()
-        corda_config = CordaConfig(sample_count=1, corda_method=corda_method)
+        corda_config = CordaConfig(corda_method=corda_method)
         config = LoraConfig(
             init_lora_weights="corda",
             target_modules=["linear"],

@@ -135,9 +135,6 @@ class CordaConfig:
             File to store the covariance matrix. If you wish to train multiple models with different ranks, but they
             sample from the same dataset, you can store the covariance matrix and reuse it for different ranks. Note
             that covariance file is usually large (comparable to model size), so you will need sufficient storage.
-        sample_count (`int`):
-            Divisor for each hook call. You should make sure `run_model` calls the model exactly `sample_count` times
-            for consistent behaviour. Defaults to 1.
         corda_method (`Literal["ipm", "kpm"]`):
             Method to build adapter. The KPM (Knowledge-Preserved Mode) not only achieves better performance than LoRA
             on fine-tuning tasks, but also mitigates the catastrophic forgetting of pre-trained world knowledge. When
@@ -168,15 +165,6 @@ class CordaConfig:
                 "File to store the covariance matrix. If you wish to train multiple models with different ranks, but "
                 "they sample from the same dataset, you can store the covariance matrix and reuse it for different ranks. "
                 "Note that covariance file is usually large (comparable to model size), so you will need sufficient storage."
-            )
-        },
-    )
-    sample_count: int = field(
-        default=1,
-        metadata={
-            "help": (
-                "Divisor for each hook call. You should make sure `run_model` calls the model exactly `sample_count` times "
-                "for consistent behaviour."
             )
         },
     )
