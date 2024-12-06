@@ -912,7 +912,13 @@ class MockTransformerWrapper:
 
 
 class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
-    """TODO"""
+    """
+    Implements the tests for custom models.
+
+    Most tests should just call the parent class, e.g. test_save_pretrained calls self._test_save_pretrained. Override
+    this if custom models don't work with the parent test method.
+
+    """
 
     transformers_class = MockTransformerWrapper
 

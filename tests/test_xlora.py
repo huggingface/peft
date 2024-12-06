@@ -15,19 +15,14 @@
 import os
 
 import huggingface_hub
-import packaging
 import pytest
 import torch
-import transformers
 from safetensors.torch import load_file
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import LoraConfig, PeftType, TaskType, XLoraConfig, get_peft_model
 from peft.peft_model import PeftModel
 from peft.utils import infer_device
-
-
-uses_transformers_4_45 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.45.0")
 
 
 class TestXlora:
@@ -133,8 +128,7 @@ class TestXlora:
         )
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
 
-    # TODO: remove the skip when 4.45 is released!
-    @pytest.mark.skipif(not uses_transformers_4_45, reason="Requires transformers >= 4.45")
+    # TODO: fix the xfailing test
     @pytest.mark.xfail
     def test_scalings_logging_methods(self, tokenizer, model):
         model.enable_scalings_logging()
