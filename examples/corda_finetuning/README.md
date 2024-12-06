@@ -149,7 +149,7 @@ CUDA_VISIBLE_DEVICES=0 python -u preprocess.py --model_id="meta-llama/Llama-2-7b
     --save_model --save_path {path_to_residual_model} \
     --calib_dataset "nqopen"
 ```
-**Arguments**:
+Arguments:
 
 - `--model_id` is the pre-trained model for decomposition.
 - `--r` is the low rank of LoRA, e.g. 128.
@@ -167,10 +167,20 @@ CUDA_VISIBLE_DEVICES=0 python -u preprocess.py --model_id="meta-llama/Llama-2-7b
 ```
 
 
-**Arguments**:
+Arguments:
 
 - `--first_eigen` uses the largest $r$ singular values and vectors to initialize the learnable adapter for the instruction-previewed adaptation mode. 
 - `--calib_dataset` specifies the dataset to sample data to obtain covariance matrices. Instruction-previewed mode uses the downstream task dataset you are learning, such as  `"MetaMATH"`, `"codefeedback"`, `"WizLMinstruct"`, `"alpaca"`, or other choices.
+
+
+#### Note about memory consumption 
+
+The process of collecting covariance matrices is performed in `torch.float32` by default. If you would like to reduce the memory consumption of preprocessing, you can specify `use_float16_for_covariance=True` in `CordaConfig` to collect covariance matrices in `torch.float16`. But this may cause numerical instability only in a few cases, such that the initialized model does not ensure the exact same inference result as the original model. So it is suggested to check, e.g., comparing the inference result of Wiki/PTB perplexity before and after preprocessing, if you choose to perform in `torch.float16`. 
+
+
+
+
+
 
 ### Fine-tuning
 
