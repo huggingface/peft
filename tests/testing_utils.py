@@ -24,6 +24,7 @@ from peft.import_utils import (
     is_auto_awq_available,
     is_auto_gptq_available,
     is_eetq_available,
+    is_gptqmodel_available,
     is_hqq_available,
     is_optimum_available,
     is_torchao_available,
@@ -91,11 +92,13 @@ def require_bitsandbytes(test_case):
     return test_case
 
 
-def require_auto_gptq(test_case):
+def require_gptq(test_case):
     """
-    Decorator marking a test that requires auto-gptq. These tests are skipped when auto-gptq isn't installed.
+    Decorator marking a test that requires gptqmodel or auto-gptq. These tests are skipped when gptqmodel and auto-gptq are not installed.
     """
-    return unittest.skipUnless(is_auto_gptq_available(), "test requires auto-gptq")(test_case)
+    return unittest.skipUnless(
+        is_gptqmodel_available() or is_auto_gptq_available(), "test requires gptqmodel or auto-gptq"
+    )(test_case)
 
 
 def require_aqlm(test_case):
