@@ -140,6 +140,9 @@ class LoraLayer(BaseTunerLayer):
         if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
             with gather_params_ctx(self.get_base_layer().weight):
                 self.pissa_init(adapter_name, init_lora_weights)
+        elif isinstance(init_lora_weights, str) and init_lora_weights.startswith("corda"):
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.corda_init(adapter_name, init_lora_weights)
         elif isinstance(init_lora_weights, str) and init_lora_weights.lower() == "olora":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.olora_init(adapter_name)
@@ -264,6 +267,77 @@ class LoraLayer(BaseTunerLayer):
         self.lora_B[adapter_name].weight.data = lora_B
         weight = weight.data - self.scaling[adapter_name] * lora_B @ lora_A
         weight = transpose(weight.to(dtype), self.fan_in_fan_out)
+        self.get_base_layer().weight.data = weight
+
+    def corda_init(self, adapter_name, init_lora_weights):
+        linear = self.get_base_layer()
+        weight = linear.weight
+        dtype = weight.dtype
+        if dtype not in [torch.float32, torch.float16, torch.bfloat16]:
+            raise TypeError(
+                "Please initialize CorDA under float32, float16, or bfloat16. "
+                "Subsequently, re-quantize the residual model to help minimize quantization errors."
+            )
+        weight = weight.to(torch.float32)
+        out_dim = weight.data.size(0)
+        in_dim = weight.data.size(1)
+
+        # Calculate WC from covariance matrix
+        if not hasattr(linear, "eigens"):
+            raise ValueError(
+                "`eigens` attribute not found for layer, please run `preprocess_corda` first. "
+                "More information can be found at examples/corda_finetuning/README.md."
+            )
+        eigens = linear.eigens
+        U = eigens.U_WC
+        S = eigens.S_WC
+        V = eigens.V_WC
+        r = self.r[adapter_name]
+
+        # nan or inf check
+        if torch.isnan(S).any() or torch.isinf(S).any():
+            raise ValueError(
+                "Invalid value found in matrix S. Please file an issue at https://github.com/huggingface/peft/issues."
+            )
+        if torch.isnan(U).any() or torch.isinf(U).any():
+            raise ValueError(
+                "Invalid value found in matrix U. Please file an issue at https://github.com/huggingface/peft/issues."
+            )
+        if torch.isnan(V).any() or torch.isinf(V).any():
+            raise ValueError(
+                "Invalid value found in matrix V. Please file an issue at https://github.com/huggingface/peft/issues."
+            )
+
+        # Sanity check
+        if U.size(0) != out_dim or U.size(1) != r:
+            raise ValueError(
+                f"Matrix U size mismatch: {U.size()} vs. ({out_dim}, {r}). Please make sure the `lora_config` and "
+                "`model` argument of `preprocess_corda` is consistent with `get_peft_model`. If you're using cache "
+                "in `preprocess_corda`, please make sure the cache is built with the same model and LoRA rank."
+            )
+        if S.size(0) != r:
+            raise ValueError(
+                f"Matrix S size mismatch: {S.size()} vs. ({r},). Please make sure the `lora_config` and `model` argument "
+                "of `preprocess_corda` is consistent with `get_peft_model`. If you're using cache in `preprocess_corda`, "
+                "please make sure the cache is built with the same model and LoRA rank."
+            )
+        if V.size(0) != in_dim or V.size(1) != r:
+            raise ValueError(
+                f"Matrix V size mismatch: {V.size()} vs. ({in_dim}, {r}). Please make sure the `lora_config` and "
+                "`model` argument of `preprocess_corda` is consistent with `get_peft_model`. If you're using cache "
+                "in `preprocess_corda`, please make sure the cache is built with the same model and LoRA rank."
+            )
+
+        # Apply alpha
+        S /= self.scaling[adapter_name]
+
+        # Init lora_A and lora_B weights
+        lora_A = V.t().mul(S.sqrt().view(-1, 1)).contiguous()
+        lora_B = U.mul(S.sqrt()).contiguous()
+        self.lora_A[adapter_name].weight.data = lora_A
+        self.lora_B[adapter_name].weight.data = lora_B
+        weight = weight.data - self.scaling[adapter_name] * lora_B @ lora_A
+        weight = weight.to(dtype)
         self.get_base_layer().weight.data = weight
 
     def loftq_init(self, adapter_name):
