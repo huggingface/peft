@@ -115,3 +115,10 @@ def is_torchao_available():
             f"but only versions above {TORCHAO_MINIMUM_VERSION} are supported"
         )
     return True
+
+
+@lru_cache
+def is_quanto_available():
+    return (importlib.util.find_spec("optimum") is not None) and (
+        importlib.util.find_spec("optimum.quanto") is not None
+    )
