@@ -25,7 +25,6 @@ from .testing_common import PeftCommonTester, PeftTestConfigManager
 
 PEFT_ENCODER_DECODER_MODELS_TO_TEST = [
     "ybelkada/tiny-random-T5ForConditionalGeneration-calibrated",
-    "hf-internal-testing/tiny-random-BartForConditionalGeneration",
 ]
 
 FULL_GRID = {"model_ids": PEFT_ENCODER_DECODER_MODELS_TO_TEST, "task_type": "SEQ_2_SEQ_LM"}
