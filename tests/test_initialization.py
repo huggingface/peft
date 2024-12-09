@@ -35,6 +35,7 @@ from peft import (
     AdaLoraConfig,
     EvaConfig,
     IA3Config,
+    LoftQConfig,
     LoKrConfig,
     LoraConfig,
     PeftMixedModel,
@@ -576,44 +577,6 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match=msg):
             peft_model.save_pretrained(
                 tmp_path / "pissa-model", path_initial_model_for_weight_conversion=tmp_path / "init-model"
-            )
-
-    # TODO: remove test for deprecated arg in PEFT v0.14.0
-    def test_lora_pissa_conversion_same_output_after_loading_with_deprecated_arg(self, data, tmp_path):
-        model = self.get_model()
-        config = LoraConfig(init_lora_weights="pissa", target_modules=["linear"], r=8)
-        peft_model = get_peft_model(deepcopy(model), config)
-        peft_model.peft_config["default"].init_lora_weights = True
-        peft_model.save_pretrained(tmp_path / "init-model")
-        peft_model.peft_config["default"].init_lora_weights = "pissa"
-
-        tol = 1e-06
-        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
-        output_pissa = peft_model(data)[0]
-
-        peft_model.save_pretrained(tmp_path / "pissa-model-converted", convert_pissa_to_lora=tmp_path / "init-model")
-        model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "pissa-model-converted")
-        output_converted = model_converted(data)[0]
-
-        assert torch.allclose(output_pissa, output_converted, atol=tol, rtol=tol)
-        assert model_converted.peft_config["default"].r == 16
-        assert model_converted.base_model.model.linear.lora_A["default"].weight.shape[0] == 16
-        assert torch.allclose(
-            model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
-        )
-
-    # TODO: remove test for deprecated warning in PEFT v0.14.0
-    def test_lora_pissa_conversion_deprecated_warning(self, data, tmp_path):
-        model = self.get_model()
-        config = LoraConfig(init_lora_weights="pissa", target_modules=["linear"], r=8)
-        peft_model = get_peft_model(deepcopy(model), config)
-        peft_model.peft_config["default"].init_lora_weights = True
-        peft_model.save_pretrained(tmp_path / "init-model")
-        warning_message = "`convert_pissa_to_lora` is deprecated and will be removed in a future version. Use `path_initial_model_for_weight_conversion` instead."
-        # Test the warning
-        with pytest.warns(UserWarning, match=warning_message):
-            peft_model.save_pretrained(
-                tmp_path / "pissa-model-converted", convert_pissa_to_lora=tmp_path / "init-model"
             )
 
     def test_olora_conversion_same_output_after_loading(self, data, tmp_path):
@@ -1178,6 +1141,59 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match=msg):
             get_peft_model(model, config)
 
+    def test_lora_with_bias_extra_params(self):
+        # lora with lora_bias=True
+        model = self.get_model()
+        config = LoraConfig(target_modules=["linear", "conv2d"], lora_bias=False)
+        model_no_bias = get_peft_model(model, config)
+
+        model = self.get_model()
+        config = LoraConfig(target_modules=["linear", "conv2d"], lora_bias=True)
+        model_bias = get_peft_model(model, config)
+
+        # check that bias for LoRA B is set
+        assert model_no_bias.base_model.model.linear.lora_B["default"].bias is None
+        assert model_bias.base_model.model.linear.lora_B["default"].bias.shape == (1000,)
+        assert model_no_bias.base_model.model.conv2d.lora_B["default"].bias is None
+        assert model_bias.base_model.model.conv2d.lora_B["default"].bias.shape == (100,)
+
+        # check that the same params are present except for the extra bias term
+        params_no_bias = {name for name, _ in model_no_bias.named_parameters()}
+        params_bias = {name for name, _ in model_bias.named_parameters()}
+        extra_params = {
+            "base_model.model.linear.lora_B.default.bias",
+            "base_model.model.conv2d.lora_B.default.bias",
+        }
+        assert params_bias - params_no_bias == extra_params
+        assert params_no_bias.issubset(params_bias)
+
+    def test_lora_with_bias_embedding_raises(self):
+        # lora with lora_bias=True is not supported for embedding layers
+        model = self.get_model()
+        config = LoraConfig(target_modules=["embed"], lora_bias=True)
+        msg = "lora_bias=True is not supported for Embedding"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+    @pytest.mark.parametrize(
+        "extra_kwargs",
+        [
+            {"use_dora": True},
+            {"init_lora_weights": "eva"},
+            {"init_lora_weights": "gaussian"},
+            {"init_lora_weights": "loftq", "loftq_config": LoftQConfig()},
+            {"init_lora_weights": "olora"},
+            {"init_lora_weights": "pissa"},
+            {"init_lora_weights": "pissa_niter_3"},
+        ],
+    )
+    def test_lora_with_bias_incompatible_arguments(self, extra_kwargs):
+        # some arguments don't work in conjunction with lora_bias and should raise
+        # just check the common chunk of the error message
+        msg = "The argument lora_bias=True is"
+        with pytest.raises(ValueError, match=msg):
+            LoraConfig(target_modules=["linear"], lora_bias=True, **extra_kwargs)
+
 
 class TestLokrInitialization:
     torch_device = infer_device()
@@ -1638,6 +1654,28 @@ class TestLowCpuMemUsage:
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
         assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+
+    @pytest.mark.parametrize("device", devices)
+    def test_get_peft_model_low_cpu_mem_usage_works(self, device, inputs):
+        # when calling get_peft_model, the PEFT weights will not be initialized on device but remain on meta
+        model = self.get_model().to(device)
+        model = get_peft_model(model, LoraConfig(target_modules="all-linear"), low_cpu_mem_usage=True)
+
+        devices_lora_weights = {p.device for n, p in model.named_parameters() if "lora_" in n}
+        expected = {torch.device("meta")}
+        assert devices_lora_weights == expected
+
+    @pytest.mark.parametrize("device", devices)
+    def test_get_peft_model_with_task_type_low_cpu_mem_usage_works(self, device, inputs):
+        # same as the previous test, but pass the task_type argument
+        model = self.get_model().to(device)
+        model = get_peft_model(
+            model, LoraConfig(target_modules="all-linear", task_type="CAUSAL_LM"), low_cpu_mem_usage=True
+        )
+
+        devices_lora_weights = {p.device for n, p in model.named_parameters() if "lora_" in n}
+        expected = {torch.device("meta")}
+        assert devices_lora_weights == expected
 
     @pytest.mark.parametrize("device", devices)
     def test_inject_adapter_low_cpu_mem_usage_works(self, device, inputs, lora_path, lora_config):

@@ -90,4 +90,4 @@ In CPT, only specific context token embeddings are optimized, while the rest of 
 To prevent overfitting and maintain stability, CPT uses controlled perturbations to limit the allowed changes to context embeddings within a defined range. 
 Additionally, to address the phenomenon of recency bias—where examples near the end of the context tend to be prioritized over earlier ones—CPT applies a decay loss factor.
 
-Take a look at [Context-Aware Prompt Tuning for few-shot classification](../task_guides/cpt-few-shot-classification) for a step-by-step guide on how to train a model with CPT.
+Take a look at [Example](https://github.com/huggingface/peft/blob/main/examples/cpt_finetuning/README.md) for a step-by-step guide on how to train a model with CPT.

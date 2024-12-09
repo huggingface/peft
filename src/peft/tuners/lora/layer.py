@@ -58,6 +58,7 @@ class LoraLayer(BaseTunerLayer):
         self._disable_adapters = False
         self.merged_adapters = []
         self.use_dora: dict[str, bool] = {}
+        self.lora_bias: dict[str, bool] = {}
         self.lora_magnitude_vector = torch.nn.ModuleDict()  # for DoRA
         self._caches: dict[str, Any] = {}
         self.ephemeral_gpu_offload: bool = ephemeral_gpu_offload
@@ -112,7 +113,15 @@ class LoraLayer(BaseTunerLayer):
         self.out_features = out_features
 
     def update_layer(
-        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora: bool = False
+        self,
+        adapter_name,
+        r,
+        lora_alpha,
+        lora_dropout,
+        init_lora_weights,
+        use_rslora,
+        use_dora: bool = False,
+        lora_bias: bool = False,
     ):
         # This code works for linear layers, override for other layer types
         if r <= 0:
@@ -128,7 +137,9 @@ class LoraLayer(BaseTunerLayer):
         self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
         # Actual trainable parameters
         self.lora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
-        self.lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=False)
+        self.lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=lora_bias)
+        self.lora_bias[adapter_name] = lora_bias
+
         if use_rslora:
             self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
         else:
@@ -173,11 +184,16 @@ class LoraLayer(BaseTunerLayer):
             else:
                 raise ValueError(f"Unknown initialization {init_lora_weights=}")
             nn.init.zeros_(self.lora_B[adapter_name].weight)
+            if self.lora_bias[adapter_name]:
+                nn.init.zeros_(self.lora_B[adapter_name].bias)
         if adapter_name in self.lora_embedding_A.keys():
             # Initialize A to zeros and B the same way as the default for nn.Embedding, see:
             # https://github.com/microsoft/LoRA/blob/4c0333854cb905966f8cc4e9a74068c1e507c7b7/loralib/layers.py#L59-L60
             nn.init.zeros_(self.lora_embedding_A[adapter_name])
             nn.init.normal_(self.lora_embedding_B[adapter_name])
+            if self.lora_bias[adapter_name]:
+                # embeddings are not supported at the moment, but still adding this for consistency
+                nn.init.zeros_(self.lora_embedding_B[adapter_name].bias)
 
     def olora_init(self, adapter_name):
         base_layer = self.get_base_layer()
@@ -422,6 +438,7 @@ class Linear(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        lora_bias: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -437,6 +454,7 @@ class Linear(nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
+            lora_bias=lora_bias,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
@@ -490,6 +508,15 @@ class Linear(nn.Module, LoraLayer):
                         )
 
                     base_layer.weight.data = orig_weights
+
+                    if self.lora_bias[active_adapter]:
+                        new_bias = base_layer.bias + self.lora_B[active_adapter].bias
+                        if not torch.isfinite(new_bias).all():
+                            raise ValueError(
+                                f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                            )
+                        base_layer.bias.data = new_bias
+
                 else:
                     delta_weight = self.get_delta_weight(active_adapter)
                     if not self.use_dora[active_adapter]:
@@ -513,6 +540,9 @@ class Linear(nn.Module, LoraLayer):
                         new_weight = dora_factor * (base_layer.weight.data + delta_weight)
                         base_layer.weight.data = new_weight
 
+                    if self.lora_bias[active_adapter]:
+                        base_layer.bias.data += self.lora_B[active_adapter].bias
+
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -534,6 +564,9 @@ class Linear(nn.Module, LoraLayer):
                     dora_factor = self.lora_magnitude_vector[active_adapter].weight / weight_norm
                     weight_orig = weight.data / dora_factor.view(-1, 1) - delta_weight
                     weight.data = weight_orig
+
+                if self.lora_bias[active_adapter]:
+                    self.get_base_layer().bias.data -= self.lora_B[active_adapter].bias
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -632,8 +665,13 @@ class Embedding(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        lora_bias: bool = False,
         **kwargs,
     ) -> None:
+        if lora_bias:
+            # lora_bias=True is not supported (yet) for embedding layers, as they use nn.Parameter
+            raise ValueError(f"lora_bias={lora_bias} is not supported for {self.__class__.__name__}.")
+
         super().__init__()
         LoraLayer.__init__(self, base_layer)
 
@@ -646,9 +684,12 @@ class Embedding(nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
+            lora_bias=lora_bias,
         )
 
-    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora):
+    def update_layer(
+        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora, lora_bias
+    ):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
@@ -665,6 +706,8 @@ class Embedding(nn.Module, LoraLayer):
         weight_B = torch.randn((self.out_features, r))
         self.lora_embedding_A[adapter_name] = nn.Parameter(weight_A)
         self.lora_embedding_B[adapter_name] = nn.Parameter(weight_B)
+        self.lora_bias[adapter_name] = lora_bias
+
         if use_rslora:
             self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
         else:
@@ -882,6 +925,7 @@ class _ConvNd(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        lora_bias: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -898,9 +942,12 @@ class _ConvNd(nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
+            lora_bias=lora_bias,
         )
 
-    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora):
+    def update_layer(
+        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora, lora_bias
+    ):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
@@ -920,7 +967,9 @@ class _ConvNd(nn.Module, LoraLayer):
         conv_layer = type(base_layer)
         out_kernel = out_stride = (1,) * (self._kernel_dim - 2)
         self.lora_A[adapter_name] = conv_layer(self.in_features, r, kernel_size, stride, padding, bias=False)
-        self.lora_B[adapter_name] = conv_layer(r, self.out_features, out_kernel, out_stride, bias=False)
+        self.lora_B[adapter_name] = conv_layer(r, self.out_features, out_kernel, out_stride, bias=lora_bias)
+        self.lora_bias[adapter_name] = lora_bias
+
         if use_rslora:
             self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
         else:
@@ -1011,6 +1060,15 @@ class _ConvNd(nn.Module, LoraLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
                     base_layer.weight.data = orig_weights
+
+                    if self.lora_bias[active_adapter]:
+                        new_bias = base_layer.bias + self.lora_B[active_adapter].bias
+                        if not torch.isfinite(new_bias).all():
+                            raise ValueError(
+                                f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                            )
+                        base_layer.bias.data = new_bias
+
                 else:
                     delta_weight = self.get_delta_weight(active_adapter)
                     if not self.use_dora[active_adapter]:
@@ -1033,6 +1091,9 @@ class _ConvNd(nn.Module, LoraLayer):
                         )
                         base_layer.weight.data = new_weight
 
+                    if self.lora_bias[active_adapter]:
+                        base_layer.bias.data += self.lora_B[active_adapter].bias
+
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -1054,6 +1115,9 @@ class _ConvNd(nn.Module, LoraLayer):
                     dora_factor = self.lora_magnitude_vector[active_adapter].weight / weight_norm
                     weight_orig = weight.data / dora_factor.view(*self._get_dora_factor_view()) - delta_weight
                     weight.data = weight_orig
+
+                if self.lora_bias[active_adapter]:
+                    self.get_base_layer().bias.data -= self.lora_B[active_adapter].bias
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """

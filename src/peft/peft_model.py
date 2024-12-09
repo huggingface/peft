@@ -230,7 +230,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         selected_adapters: Optional[list[str]] = None,
         save_embedding_layers: Union[str, bool] = "auto",
         is_main_process: bool = True,
-        convert_pissa_to_lora: Optional[str] = None,
         path_initial_model_for_weight_conversion: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
@@ -254,8 +253,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             is_main_process (`bool`, *optional*):
                 Whether the process calling this is the main process or not. Will default to `True`. Will not save the
                 checkpoint if not on the main process, which is important for multi device setups (e.g. DDP).
-            convert_pissa_to_lora (`str, *optional*`):
-                Deprecated. Use `path_initial_model_for_weight_conversion` instead.
             path_initial_model_for_weight_conversion (`str, *optional*`):
                 The path to the initialized adapter, which is obtained after initializing the model with PiSSA or OLoRA
                 and before performing any training. When `path_initial_model_for_weight_conversion` is not None, the
@@ -282,13 +279,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     f"You passed an invalid `selected_adapters` arguments, current supported adapter names are"
                     f" {list(self.peft_config.keys())} - got {selected_adapters}."
                 )
-        # TODO: remove deprecated parameter in PEFT v0.14.0
-        if convert_pissa_to_lora is not None:
-            warnings.warn(
-                "`convert_pissa_to_lora` is deprecated and will be removed in a future version. "
-                "Use `path_initial_model_for_weight_conversion` instead."
-            )
-            path_initial_model_for_weight_conversion = convert_pissa_to_lora
 
         def save_mutated_as_lora(peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs):
             if peft_config.use_rslora and (peft_config.rank_pattern or peft_config.alpha_pattern):
@@ -631,20 +621,33 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if config.num_transformer_submodules is None:
             config.num_transformer_submodules = 2 if config.task_type == TaskType.SEQ_2_SEQ_LM else 1
 
-        for named_param, value in list(transformer_backbone.named_parameters()):
-            # for ZeRO-3, the tensor is sharded across accelerators and deepspeed modifies it to a tensor with shape [0]
-            # the actual unsharded shape is stored in "ds_shape" attribute
-            # special handling is needed in case the model is initialized in deepspeed.zero.Init() context or HfDeepSpeedConfig
-            # has been called before
-            # For reference refer to issue: https://github.com/huggingface/peft/issues/996
-            deepspeed_distributed_tensor_shape = getattr(value, "ds_shape", None)
+        # determine the word embeddings
+        word_embeddings = None
+        try:
+            # First try to find the word embeddings based on the module name, this should work for models like Bert,
+            # Roberta, Deberta, etc.
+            word_embeddings = self.base_model.get_submodule("embeddings.word_embeddings")
+        except AttributeError:
+            pass
 
-            if value.shape[0] == self.base_model.config.vocab_size or (
-                deepspeed_distributed_tensor_shape is not None
-                and deepspeed_distributed_tensor_shape[0] == self.base_model.config.vocab_size
-            ):
-                self.word_embeddings = transformer_backbone.get_submodule(named_param.replace(".weight", ""))
-                break
+        if word_embeddings is None:
+            # Word embeddings could not be determined. Next try to guess them by checking which parameter has the size
+            # of the vocab.
+            for named_param, value in list(transformer_backbone.named_parameters()):
+                # for ZeRO-3, the tensor is sharded across accelerators and deepspeed modifies it to a tensor with shape
+                # [0] the actual unsharded shape is stored in "ds_shape" attribute special handling is needed in case
+                # the model is initialized in deepspeed.zero.Init() context or HfDeepSpeedConfig has been called before
+                # For reference refer to issue: https://github.com/huggingface/peft/issues/996
+                deepspeed_distributed_tensor_shape = getattr(value, "ds_shape", None)
+
+                if value.shape[0] == self.base_model.config.vocab_size or (
+                    deepspeed_distributed_tensor_shape is not None
+                    and deepspeed_distributed_tensor_shape[0] == self.base_model.config.vocab_size
+                ):
+                    word_embeddings = transformer_backbone.get_submodule(named_param.replace(".weight", ""))
+                    break
+
+        self.word_embeddings = word_embeddings
 
         if config.peft_type == PeftType.PROMPT_TUNING:
             prompt_encoder = PromptEmbedding(config, self.word_embeddings)
