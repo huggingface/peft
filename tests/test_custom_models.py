@@ -1935,8 +1935,10 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
     would be overkill.
     """
 
+    torch_device = infer_device()
+
     def prepare_inputs_for_testing(self):
-        X = torch.arange(90).view(9, 10)
+        X = torch.arange(90).view(9, 10).to(self.torch_device)
         return {"X": X}
 
     def set_multiple_active_adapters(self, model, adapter_names):
@@ -1949,8 +1951,7 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
         self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
     ):
         torch.manual_seed(0)
-        model = MLP(bias=tuner_method != "ia3")
-        model.eval()
+        model = MLP(bias=tuner_method != "ia3").to(self.torch_device).eval()
         X = self.prepare_inputs_for_testing()
 
         config_1 = config_cls(**config_kwargs_1)
@@ -1990,8 +1991,7 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
         self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
     ):
         torch.manual_seed(0)
-        model = MLP(bias=tuner_method != "ia3")
-        model.eval()
+        model = MLP(bias=tuner_method != "ia3").to(self.torch_device).eval()
         X = self.prepare_inputs_for_testing()
         base_output = model(**X)
 
@@ -2007,7 +2007,7 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
 
         peft_model.merge_adapter()
         merged_combined_output = peft_model(**X)
-        assert torch.allclose(merged_combined_output, combined_output, atol=1e-5)
+        assert torch.allclose(merged_combined_output, combined_output, atol=1e-4)
 
         peft_model.unmerge_adapter()
 
@@ -2019,8 +2019,7 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
     @parameterized.expand(MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES)
     def test_merge_layers_multi(self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2):
         torch.manual_seed(0)
-        model = MLP(bias=tuner_method != "ia3")
-        model.eval()
+        model = MLP(bias=tuner_method != "ia3").to(self.torch_device).eval()
 
         config_1 = config_cls(**config_kwargs_1)
         config_2 = config_cls(**config_kwargs_2)
