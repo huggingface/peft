@@ -48,7 +48,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install setuptools
+          pip install setuptools pytest-monitor
           # cpu version of pytorch
           pip install -e .[test]
       - name: Downgrade numpy on MacOS and Windows
@@ -59,4 +59,12 @@ jobs:
           pip install --force-reinstall -U "numpy<2.0.0"
       - name: Test with pytest
         run: |
-          make test
+          #make test
+          # TODO: also test with --no-gc
+          python --db monitor_db.sqlite -m pytest -n 3 tests/
+      - name: Upload monitor data
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitor_db_${{ matrix.os }}_${{ matrix.python_version }}.sqlite
+          path: monitor_db.sqlite
+          retention-days: 1
