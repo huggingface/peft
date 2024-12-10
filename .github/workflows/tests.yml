@@ -62,7 +62,7 @@ jobs:
         run: |
           #make test
           # TODO: also test with --no-gc
-          python -m pytest --db monitor_db.sqlite -n 3 tests/
+          python -m pytest --db monitor_db.sqlite --dist loadscope -n 3 tests/
       - name: Upload monitor data
         uses: actions/upload-artifact@v4
         with:
