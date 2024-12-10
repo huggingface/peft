@@ -51,7 +51,7 @@ jobs:
           pip install setuptools pytest-monitor
           # cpu version of pytorch
           pip install -e .[test]
-          pip uninstall pytest-cov
+          pip uninstall -y pytest-cov
       - name: Downgrade numpy on MacOS and Windows
         # TODO: remove numpy downgrade on MacOS & Windows once torch fixes numpy 2.0 issue
         shell: bash
