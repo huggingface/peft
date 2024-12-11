@@ -50,8 +50,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install setuptools
           # cpu version of pytorch
-          pip install "torch==2.4.1" --index-url https://download.pytorch.org/whl/cpu
           pip install -e .[test]
+          pip install "transformers==4.46.3"
+          pip list
       - name: Downgrade numpy on MacOS and Windows
         # TODO: remove numpy downgrade on MacOS & Windows once torch fixes numpy 2.0 issue
         shell: bash
@@ -60,5 +61,4 @@ jobs:
           pip install --force-reinstall -U "numpy<2.0.0"
       - name: Test with pytest
         run: |
-          pip list | grep torch
           make test
