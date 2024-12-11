@@ -596,7 +596,17 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             # Let's warn here since (in contrast to load_adapter) we don't return the load result, so it could be quite
             # difficult for users to even notice that something might have gone wrong here. As we filter out non PEFT
             # keys from the missing keys, this gives no false positives.
-            warnings.warn(f"Found missing adapter keys while loading the checkpoint: {missing_keys}")
+
+            warn_message = f"Found missing adapter keys while loading the checkpoint: {missing_keys}."
+
+            prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(config.peft_type)
+            if prefix and adapter_name in prefix:
+                warn_message += (
+                    f"Adapter name {adapter_name} should not be contained in the prefix {prefix}."
+                    "This could be the potential reason for missing adapter keys."
+                )
+
+            warnings.warn(warn_message)
 
         return model
 
@@ -940,6 +950,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 adapters. Don't use this option when creating a new PEFT adapter for training.
 
         """
+        prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(peft_config.peft_type)
+        if prefix and adapter_name in prefix:
+            warnings.warn(
+                f"Adapter name {adapter_name} should not be contained in the prefix {prefix}."
+                "This may lead to reinitialization of the adapter weights during loading."
+            )
+
         if peft_config.peft_type != self.peft_type:
             raise ValueError(
                 f"Cannot combine adapters with different peft types. "
