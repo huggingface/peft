@@ -6,7 +6,7 @@
 Existing PEFT methods are mostly agnostic of the context of a task of concern, e.g., a downstream task to learn or some pre-trained world knowledge to maintain.
 [CorDA](https://openreview.net/pdf?id=Gi00NVru6n) builds task-aware LoRA adapters from weight decomposition oriented by the context of the task concerned. 
 
-Concretely, CorDA randomly collects a few (by default 256) data samples from a target task, e.g. questions from a QA dataset or instructions to write a code or solve a math problem, and feeds these samples into a pre-trained LLM. We can obtain the covariance matrix of the input activation of each linear layer, i.e., $C=XX^T\in\mathcal{R}^{d_{in}\times d_{in}}$. 
+Concretely, CorDA randomly collects a few (by default 256 in our `preprocess.py`) data samples from a target task, e.g. questions from a QA dataset or instructions to write a code or solve a math problem, and feeds these samples into a pre-trained LLM. We can obtain the covariance matrix of the input activation of each linear layer, i.e., $C=XX^T\in\mathcal{R}^{d_{in}\times d_{in}}$. 
 We then perform singular value decomposition (SVD) for the weight $W\in \mathcal{R}^{d_{out}\times d_{in}}$ multiplied by the covariance matrix, i.e., $\verb|SVD|(WC) = U\Sigma V^T$. In this way, the context expressed by these representative covariance matrices is able to orientate the decomposition, such that the principal components (the singular vectors with the largest singular values) are most associated with the task of concern (please refer to Fig.2 of our paper for the advantage of our decomposition over the plain SVD). To ensure the same inference result with the pre-trained model at the start of adaptation, we multiply the inverse of these covariance matrices with the decomposed components, i.e., $\hat{W}=U\Sigma V^T C^{-1}$. 
 
 Thanks to the task-awareness, you can choose how to utilize the task-specific principal components. For examples, if you want to adapt a model to a new task without losing the knowledge of a question-answering dataset, e.g., TriviaQA and NQopen, you can sample questions from this dataset to collect covariance matrices, and keep the principal components frozen because they compact the ability of this dataset, while using the lowest components with the smallest $r$ singular values to initialize the learnable LoRA adapters. This is achieved by the **knowledge-preserved mode (KPM)** of CorDA, which learns new tasks effectively while keeping the world knowledge you are concerned about as sound as possible. Alternatively, when your primary objective is to maximize performance on the finetuning task, disregarding the preservation of world knowledge, the **instruction-previewed mode (IPM**) will be favored. In this mode, CorDA uses the instruction and response from the fine-tuning task (e.g., Math or Code) to produce the covariance matrices. The principal components with the largest $r$ singular values, capturing the characteristics of the finetuning task in advance, can better adapt to the new ability, so they are used to initialize the LoRA adapters, with the remaining components frozen. IPM can further accelerate convergence to enhance the fine-tuning performance on downstream tasks.
@@ -155,7 +155,6 @@ Arguments:
 - `--calib_dataset` specifies the dataset to sample data to obtain covariance matrices. KPA mode uses QA datasets such as `"nqopen"`, `"traivia_qa"`, or other choices.
 - `--save_model` saves the initialized model in `--save_path`. 
 
-
 #### Instruction-previewed adaptation mode
 
 ```bash
@@ -165,21 +164,14 @@ CUDA_VISIBLE_DEVICES=0 python -u preprocess.py --model_id="meta-llama/Llama-2-7b
     --first_eigen --calib_dataset "MetaMATH"
 ```
 
-
 Arguments:
 
 - `--first_eigen` uses the largest $r$ singular values and vectors to initialize the learnable adapter for the instruction-previewed adaptation mode. 
 - `--calib_dataset` specifies the dataset to sample data to obtain covariance matrices. Instruction-previewed mode uses the downstream task dataset you are learning, such as  `"MetaMATH"`, `"codefeedback"`, `"WizLMinstruct"`, `"alpaca"`, or other choices.
 
-
 #### Note about memory consumption 
 
 The process of collecting covariance matrices is performed in `torch.float32` by default. If you would like to reduce the memory consumption of preprocessing, you can specify `use_float16_for_covariance=True` in `CordaConfig` to collect covariance matrices in `torch.float16`. But this may cause numerical instability only in a few cases, such that the initialized model does not ensure the exact same inference result as the original model. So it is suggested to check, e.g., comparing the inference result of Wiki/PTB perplexity before and after preprocessing, if you choose to perform in `torch.float16`. 
-
-
-
-
-
 
 ### Fine-tuning
 
