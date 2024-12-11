@@ -993,7 +993,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self.modules_to_save = set(peft_config.modules_to_save)
             else:
                 self.modules_to_save.update(peft_config.modules_to_save)
-            _set_trainable(self, adapter_name)  # this may add a new ModulesToSaveWrapper
+            # this may add a new ModulesToSaveWrapper
+            _set_trainable(self, adapter_name, modules_to_save=peft_config.modules_to_save)
 
     def get_layer_status(self) -> list[TunerLayerStatus]:
         """Get the status of each adapter layer in the model.
@@ -1483,7 +1484,7 @@ class PeftModelForSequenceClassification(PeftModel):
                 break
 
         # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
-        _set_trainable(self, adapter_name)
+        _set_trainable(self, adapter_name, modules_to_save=peft_config.modules_to_save)
 
     def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """
@@ -2275,7 +2276,7 @@ class PeftModelForTokenClassification(PeftModel):
                 break
 
         # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
-        _set_trainable(self, adapter_name)
+        _set_trainable(self, adapter_name, modules_to_save=peft_config.modules_to_save)
 
     def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """
@@ -2496,7 +2497,7 @@ class PeftModelForQuestionAnswering(PeftModel):
                 break
 
         # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
-        _set_trainable(self, adapter_name)
+        _set_trainable(self, adapter_name, modules_to_save=peft_config.modules_to_save)
 
     def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """
