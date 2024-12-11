@@ -30,6 +30,7 @@ from transformers import (
     AutoModelForSequenceClassification,
     BitsAndBytesConfig,
 )
+from transformers.pytorch_utils import Conv1D
 
 from peft import (
     AdaptionPromptConfig,
@@ -333,11 +334,12 @@ class PeftCustomKwargsTester(unittest.TestCase):
         model_id = "hf-internal-testing/tiny-stable-diffusion-torch"
         model = StableDiffusionPipeline.from_pretrained(model_id)
         config = LoraConfig(base_model_name_or_path=model_id, target_modules="all-linear")
-        with pytest.raises(
-            ValueError,
-            match="Only instances of PreTrainedModel support `target_modules='all-linear'`",
-        ):
-            model.unet = get_peft_model(model.unet, config)
+
+        # all linear layers should be converted
+        num_linear = sum(isinstance(module, (nn.Linear, Conv1D)) for module in model.unet.modules())
+        model.unet = get_peft_model(model.unet, config)
+        num_lora = sum(isinstance(module, LoraLayer) for module in model.unet.modules())
+        assert num_lora == num_linear
 
     def test_maybe_include_all_linear_does_not_target_classifier_head(self):
         # See issue 2027
@@ -348,6 +350,8 @@ class PeftCustomKwargsTester(unittest.TestCase):
         # sanity check
         assert isinstance(model.score, nn.Linear)
 
+        num_linear = sum(isinstance(module, (nn.Linear, Conv1D)) for module in model.modules())
+
         config = LoraConfig(task_type="SEQ_CLS", target_modules="all-linear")
         model = get_peft_model(model, config)
         assert isinstance(model.base_model.score, ModulesToSaveWrapper)
@@ -355,6 +359,10 @@ class PeftCustomKwargsTester(unittest.TestCase):
         # the bug was that these were lora.Linear instances
         assert isinstance(model.base_model.score.original_module, nn.Linear)
         assert isinstance(model.base_model.score.modules_to_save["default"], nn.Linear)
+
+        # ensure that all but one linear layer was targeted by LoRA
+        num_lora = sum(isinstance(module, LoraLayer) for module in model.modules())
+        assert num_lora == num_linear - 1
 
 
 class MLP(nn.Module):
