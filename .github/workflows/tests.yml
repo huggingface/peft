@@ -51,7 +51,7 @@ jobs:
           pip install setuptools
           # cpu version of pytorch
           pip install -e .[test]
-          pip install "transformers==4.46.3"
+          pip install git+https://github.com/huggingface/transformers.git@5f8b24ee12a4254c00d9dff7bdc451f94fdc2aba
           pip list
       - name: Downgrade numpy on MacOS and Windows
         # TODO: remove numpy downgrade on MacOS & Windows once torch fixes numpy 2.0 issue
