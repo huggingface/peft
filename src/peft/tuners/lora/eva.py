@@ -32,10 +32,10 @@ from peft.utils.incremental_pca import IncrementalPCA
 from peft.utils.other import _get_submodules, get_pattern_key
 
 from .config import LoraConfig
-from .layer import Embedding, LoraLayer, _ConvNd
+from .layer import Embedding, LoraLayer, MultiheadAttention, _ConvNd
 
 
-UNSUPPORTED_LORA_MODULES = (Embedding, _ConvNd)
+UNSUPPORTED_LORA_MODULES = (Embedding, MultiheadAttention, _ConvNd)
 
 
 class _Hook:
