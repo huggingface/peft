@@ -61,7 +61,7 @@ jobs:
         run: |
           #make test
           # TODO: also test with --no-gc
-          python -m pytest --db monitor_db.sqlite --dist loadscope -n 3 --profile tests/
+          python -m pytest -n 3 --profile tests/
       - name: Pack profiles
         run: |
           tar -czf profiles.tar.gz prof
