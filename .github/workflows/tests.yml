@@ -51,6 +51,8 @@ jobs:
           pip install setuptools pytest-profiling
           # cpu version of pytorch
           pip install -e .[test]
+          pip install "transformers==4.46.3"
+          pip list
       - name: Downgrade numpy on MacOS and Windows
         # TODO: remove numpy downgrade on MacOS & Windows once torch fixes numpy 2.0 issue
         shell: bash
