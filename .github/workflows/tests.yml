@@ -48,10 +48,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install setuptools pytest-monitor
+          pip install setuptools pytest-profiling
           # cpu version of pytorch
           pip install -e .[test]
-          pip uninstall -y pytest-cov
       - name: Downgrade numpy on MacOS and Windows
         # TODO: remove numpy downgrade on MacOS & Windows once torch fixes numpy 2.0 issue
         shell: bash
@@ -62,10 +61,13 @@ jobs:
         run: |
           #make test
           # TODO: also test with --no-gc
-          python -m pytest --db monitor_db.sqlite --dist loadscope -n 3 tests/
+          python -m pytest --db monitor_db.sqlite --dist loadscope -n 3 --profile tests/
+      - name: Pack profiles
+        run: |
+          tar -czf profiles.tar.gz prof
       - name: Upload monitor data
         uses: actions/upload-artifact@v4
         with:
-          name: monitor_db_${{ matrix.os }}_${{ matrix.python-version }}.sqlite
-          path: monitor_db.sqlite
+          name: profiles_${{ matrix.os }}_${{ matrix.python-version }}.tar.gz
+          path: profiles.tar.gz
           retention-days: 1
