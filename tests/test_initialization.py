@@ -57,6 +57,7 @@ from peft import (
 )
 from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
+from peft.utils.constants import PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.utils.hotswap import hotswap_adapter
 
 
@@ -1745,6 +1746,75 @@ def test_from_pretrained_missing_keys_warning(recwarn, tmp_path):
     model = PeftModel.from_pretrained(model, tmp_path)
     assert any(msg in str(w.message) for w in recwarn.list)
     assert any(missing_key in str(w.message) for w in recwarn.list)
+
+
+class TestNamingConflictWarning:
+    """
+    Tests for warnings related to naming conflicts between adapter names and tuner prefixes. References: Issue 2252
+    """
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        self.peft_config = LoraConfig()
+        self.prefix = PEFT_TYPE_TO_PREFIX_MAPPING[self.peft_config.peft_type]
+        self.base_model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+
+    def _save_and_reload_model(self, model, adapter_name, tmp_path):
+        # Helper method to save and reload the PEFT model
+        model.save_pretrained(tmp_path, selected_adapters=[adapter_name])
+        del model
+        reloaded_base_model = AutoModelForCausalLM.from_pretrained(tmp_path / adapter_name)
+        return PeftModel.from_pretrained(reloaded_base_model, tmp_path / adapter_name)
+
+    def test_no_warning_without_naming_conflict_get_peft_model(self, recwarn):
+        # No warning should be raised when there is no naming conflict during get_peft_model.
+        non_conflict_adapter = "adapter"
+        _ = get_peft_model(self.base_model, self.peft_config, adapter_name=non_conflict_adapter)
+        expected_msg = f"Adapter name {non_conflict_adapter} should not be contained in the prefix {self.prefix}."
+        assert not any(expected_msg in str(w.message) for w in recwarn.list)
+
+    def test_no_warning_without_naming_conflict_add_adapter(self, recwarn):
+        # No warning should be raised when adding an adapter without naming conflict.
+        non_conflict_adapter = "adapter"
+        other_non_conflict_adapter = "other_adapter"
+        model = get_peft_model(self.base_model, self.peft_config, adapter_name=non_conflict_adapter)
+        _ = model.add_adapter(other_non_conflict_adapter, self.peft_config)
+        expected_msg = (
+            f"Adapter name {other_non_conflict_adapter} should not be contained in the prefix {self.prefix}."
+        )
+        assert not any(expected_msg in str(w.message) for w in recwarn.list)
+
+    def test_no_warning_without_naming_conflict_save_and_load(self, recwarn, tmp_path):
+        # No warning should be raised when saving and loading the model without naming conflict.
+        non_conflict_adapter = "adapter"
+        model = get_peft_model(self.base_model, self.peft_config, adapter_name=non_conflict_adapter)
+        _ = self._save_and_reload_model(model, non_conflict_adapter, tmp_path)
+        expected_msg = f"Adapter name {non_conflict_adapter} should not be contained in the prefix {self.prefix}."
+        assert not any(expected_msg in str(w.message) for w in recwarn.list)
+
+    def test_warning_naming_conflict_get_peft_model(self, recwarn):
+        # Warning is raised when the adapter name conflicts with the prefix in get_peft_model.
+        conflicting_adapter_name = self.prefix[:-1]
+        _ = get_peft_model(self.base_model, self.peft_config, adapter_name=conflicting_adapter_name)
+        expected_msg = f"Adapter name {conflicting_adapter_name} should not be contained in the prefix {self.prefix}."
+        assert any(expected_msg in str(w.message) for w in recwarn.list)
+
+    def test_warning_naming_conflict_add_adapter(self, recwarn):
+        # Warning is raised when adding an adapter with a name that conflicts with the prefix.
+        conflicting_adapter = self.prefix[1:]
+        non_conflict_adapter = "adapter"
+        model = get_peft_model(self.base_model, self.peft_config, adapter_name=non_conflict_adapter)
+        _ = model.add_adapter(conflicting_adapter, self.peft_config)
+        expected_msg = f"Adapter name {conflicting_adapter} should not be contained in the prefix {self.prefix}."
+        assert any(expected_msg in str(w.message) for w in recwarn.list)
+
+    def test_warning_naming_conflict_save_and_load(self, recwarn, tmp_path):
+        # Warning is raised when saving and loading the model with a naming conflict.
+        conflicting_adapter = self.prefix[:-1]
+        model = get_peft_model(self.base_model, self.peft_config, adapter_name=conflicting_adapter)
+        _ = self._save_and_reload_model(model, conflicting_adapter, tmp_path)
+        expected_msg = f"Adapter name {conflicting_adapter} should not be contained in the prefix {self.prefix}."
+        assert any(expected_msg in str(w.message) for w in recwarn.list)
 
 
 class TestEvaInitialization:
