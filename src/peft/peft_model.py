@@ -43,26 +43,11 @@ from peft.utils.constants import DUMMY_MODEL_CONFIG, PEFT_TYPE_TO_PREFIX_MAPPING
 from . import __version__
 from .config import PeftConfig
 from .tuners import (
-    AdaLoraModel,
-    AdaptionPromptModel,
-    BOFTModel,
-    BoneModel,
     CPTEmbedding,
-    FourierFTModel,
-    HRAModel,
-    IA3Model,
-    LNTuningModel,
-    LoHaModel,
-    LoKrModel,
-    LoraModel,
     MultitaskPromptEmbedding,
-    OFTModel,
-    PolyModel,
     PrefixEncoder,
     PromptEmbedding,
     PromptEncoder,
-    VBLoRAModel,
-    VeraModel,
     XLoraConfig,
     XLoraModel,
 )
@@ -85,30 +70,6 @@ from .utils import (
     set_peft_model_state_dict,
     shift_tokens_right,
 )
-
-
-PEFT_TYPE_TO_MODEL_MAPPING = {
-    PeftType.LORA: LoraModel,
-    PeftType.LOHA: LoHaModel,
-    PeftType.LOKR: LoKrModel,
-    PeftType.PROMPT_TUNING: PromptEmbedding,
-    PeftType.P_TUNING: PromptEncoder,
-    PeftType.PREFIX_TUNING: PrefixEncoder,
-    PeftType.ADALORA: AdaLoraModel,
-    PeftType.BOFT: BOFTModel,
-    PeftType.ADAPTION_PROMPT: AdaptionPromptModel,
-    PeftType.IA3: IA3Model,
-    PeftType.OFT: OFTModel,
-    PeftType.POLY: PolyModel,
-    PeftType.LN_TUNING: LNTuningModel,
-    PeftType.VERA: VeraModel,
-    PeftType.FOURIERFT: FourierFTModel,
-    PeftType.XLORA: XLoraModel,
-    PeftType.HRA: HRAModel,
-    PeftType.VBLORA: VBLoRAModel,
-    PeftType.CPT: CPTEmbedding,
-    PeftType.BONE: BoneModel,
-}
 
 
 class PeftModel(PushToHubMixin, torch.nn.Module):
@@ -170,7 +131,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self.add_adapter(adapter_name, peft_config, low_cpu_mem_usage=low_cpu_mem_usage)
         else:
             self._peft_config = None
-            cls = PEFT_TYPE_TO_MODEL_MAPPING[peft_config.peft_type]
+            cls = PEFT_TYPE_TO_TUNER_MAPPING[peft_config.peft_type]
             ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
             with ctx():
                 self.base_model = cls(model, {adapter_name: peft_config}, adapter_name)

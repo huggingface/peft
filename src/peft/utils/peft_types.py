@@ -84,3 +84,34 @@ class TaskType(str, enum.Enum):
     TOKEN_CLS = "TOKEN_CLS"
     QUESTION_ANS = "QUESTION_ANS"
     FEATURE_EXTRACTION = "FEATURE_EXTRACTION"
+
+
+def register_peft_method(*, name, config_cls, model_cls=None) -> None:
+    """TODO"""
+    from peft.mapping import PEFT_TYPE_TO_CONFIG_MAPPING, PEFT_TYPE_TO_TUNER_MAPPING
+    from peft.utils.constants import PEFT_TYPE_TO_PREFIX_MAPPING
+
+    if name.endswith("_"):
+        raise ValueError(f"Please pass the name of the PEFT method without '_' suffix, got {name}.")
+
+    if not name.islower():
+        raise ValueError(f"The name of the PEFT method should be in lower case letters, got {name}.")
+
+    if name.upper() not in list(PeftType):
+        raise ValueError(f"Unknown PEFT type {name.upper()}, please add an entry to peft.utils.peft_types.PeftType.")
+
+    peft_type = getattr(PeftType, name.upper())
+
+    # model_cls can be None for prompt learning methods, which don't have dedicated model classes
+    if model_cls:
+
+        if model_cls.prefix != name + "_":
+            raise ValueError(
+                f"Inconsistent names: The method is called '{name}' but the prefix is called {model_cls.prefix} "
+                "(they should be the same, except that the prefix ends with an '_')"
+            )
+
+    PEFT_TYPE_TO_PREFIX_MAPPING[peft_type] = name
+    PEFT_TYPE_TO_CONFIG_MAPPING[peft_type] = config_cls
+    if model_cls:
+        PEFT_TYPE_TO_TUNER_MAPPING[peft_type] = model_cls

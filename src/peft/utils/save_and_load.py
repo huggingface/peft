@@ -208,7 +208,7 @@ def get_peft_model_state_dict(
         to_return["base_model.vblora_vector_bank." + adapter_name] = state_dict[
             "base_model.vblora_vector_bank." + adapter_name
         ]
-    elif config.peft_type == PeftType.BONE:
+    elif config.peft_type in list(PeftType):
         to_return = {k: state_dict[k] for k in state_dict if "bone_" in k}
     else:
         raise ValueError(f"Unknown PEFT type passed: {config.peft_type}")

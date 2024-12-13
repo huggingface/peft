@@ -26,6 +26,7 @@ from .auto import (  # noqa: I001
 from .mapping import (
     MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
     PEFT_TYPE_TO_CONFIG_MAPPING,
+    PEFT_TYPE_TO_TUNER_MAPPING,
     get_peft_config,
     get_peft_model,
     inject_adapter_in_model,
@@ -111,6 +112,7 @@ from .config import PeftConfig, PromptLearningConfig
 __all__ = [
     "MODEL_TYPE_TO_PEFT_MODEL_MAPPING",
     "PEFT_TYPE_TO_CONFIG_MAPPING",
+    "PEFT_TYPE_TO_TUNER_MAPPING",
     "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
     "AdaLoraConfig",
     "AdaLoraModel",
