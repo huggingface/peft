@@ -38,11 +38,12 @@ from transformers import Cache, DynamicCache, EncoderDecoderCache, PreTrainedMod
 from transformers.modeling_outputs import QuestionAnsweringModelOutput, SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
 
-from peft.utils.constants import DUMMY_MODEL_CONFIG
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
+from peft.utils.constants import DUMMY_MODEL_CONFIG
+
 from . import __version__
 from .config import PeftConfig
-from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING, PEFT_TYPE_TO_TUNER_MAPPING, PEFT_TYPE_TO_PREFIX_MAPPING
+from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING, PEFT_TYPE_TO_PREFIX_MAPPING, PEFT_TYPE_TO_TUNER_MAPPING
 from .utils import (
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
@@ -1736,9 +1737,7 @@ class PeftModelForCausalLM(PeftModel):
             inputs_embeds = torch.cat((prompts, inputs_embeds), dim=1)
             return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
 
-    def _cpt_forward(
-        self, input_ids, inputs_embeds, peft_config, task_ids, batch_size, **kwargs
-    ):
+    def _cpt_forward(self, input_ids, inputs_embeds, peft_config, task_ids, batch_size, **kwargs):
         # Extract labels from kwargs
         labels = kwargs.pop("labels")
         device = [i.device for i in [input_ids, inputs_embeds, labels] if i is not None][0]

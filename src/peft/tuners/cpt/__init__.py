@@ -13,10 +13,10 @@
 # limitations under the License.
 
 
+from peft.utils import register_peft_method
+
 from .config import CPTConfig
 from .model import CPTEmbedding
-
-from peft.utils import register_peft_method
 
 
 __all__ = ["CPTConfig", "CPTEmbedding"]

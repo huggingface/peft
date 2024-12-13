@@ -87,9 +87,16 @@ class TaskType(str, enum.Enum):
     FEATURE_EXTRACTION = "FEATURE_EXTRACTION"
 
 
-def register_peft_method(*, name: str, config_cls, model_cls, prefix: Optional[str] = None, is_mixed_compatible=False) -> None:
+def register_peft_method(
+    *, name: str, config_cls, model_cls, prefix: Optional[str] = None, is_mixed_compatible=False
+) -> None:
     """TODO"""
-    from peft.mapping import PEFT_TYPE_TO_CONFIG_MAPPING, PEFT_TYPE_TO_MIXED_MODEL_MAPPING, PEFT_TYPE_TO_TUNER_MAPPING, PEFT_TYPE_TO_PREFIX_MAPPING
+    from peft.mapping import (
+        PEFT_TYPE_TO_CONFIG_MAPPING,
+        PEFT_TYPE_TO_MIXED_MODEL_MAPPING,
+        PEFT_TYPE_TO_PREFIX_MAPPING,
+        PEFT_TYPE_TO_TUNER_MAPPING,
+    )
 
     if name.endswith("_"):
         raise ValueError(f"Please pass the name of the PEFT method without '_' suffix, got {name}.")
@@ -106,7 +113,11 @@ def register_peft_method(*, name: str, config_cls, model_cls, prefix: Optional[s
     if prefix is None:
         prefix = name + "_"
 
-    if (peft_type in PEFT_TYPE_TO_CONFIG_MAPPING) or (peft_type in PEFT_TYPE_TO_TUNER_MAPPING) or (peft_type in PEFT_TYPE_TO_MIXED_MODEL_MAPPING):
+    if (
+        (peft_type in PEFT_TYPE_TO_CONFIG_MAPPING)
+        or (peft_type in PEFT_TYPE_TO_TUNER_MAPPING)
+        or (peft_type in PEFT_TYPE_TO_MIXED_MODEL_MAPPING)
+    ):
         raise KeyError(f"There is already PEFT method called '{name}', please choose a unique name.")
 
     if prefix in PEFT_TYPE_TO_PREFIX_MAPPING:
@@ -114,7 +125,9 @@ def register_peft_method(*, name: str, config_cls, model_cls, prefix: Optional[s
 
     model_cls_prefix = getattr(model_cls, "prefix", None)
     if (model_cls_prefix is not None) and (model_cls_prefix != prefix):
-        raise ValueError(f"Inconsistent prefixes found: '{prefix}' and '{model_cls_prefix}' (they should be the same).")
+        raise ValueError(
+            f"Inconsistent prefixes found: '{prefix}' and '{model_cls_prefix}' (they should be the same)."
+        )
 
     PEFT_TYPE_TO_PREFIX_MAPPING[peft_type] = prefix
     PEFT_TYPE_TO_CONFIG_MAPPING[peft_type] = config_cls

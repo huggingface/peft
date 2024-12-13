@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from peft.utils import register_peft_method
+
 from .config import BoneConfig
 from .layer import BoneLayer, BoneLinear
 from .model import BoneModel
-
-from peft.utils import register_peft_method
 
 
 __all__ = ["BoneConfig", "BoneModel", "BoneLinear", "BoneLayer"]

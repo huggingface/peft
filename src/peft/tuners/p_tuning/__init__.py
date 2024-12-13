@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from peft.utils import register_peft_method
+
 from .config import PromptEncoderConfig, PromptEncoderReparameterizationType
 from .model import PromptEncoder
-
-from peft.utils import register_peft_method
 
 
 __all__ = ["PromptEncoder", "PromptEncoderConfig", "PromptEncoderReparameterizationType"]

@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from peft.utils import register_peft_method
+
 from .config import BOFTConfig
 from .layer import BOFTLayer
 from .model import BOFTModel
-
-from peft.utils import register_peft_method
 
 
 __all__ = ["BOFTConfig", "BOFTLayer", "BOFTModel"]

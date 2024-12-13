@@ -24,7 +24,9 @@ from .model import AdaLoraModel
 __all__ = ["AdaLoraConfig", "AdaLoraLayer", "AdaLoraModel", "SVDLinear", "RankAllocator", "SVDQuantLinear"]
 
 
-register_peft_method(name="adalora", config_cls=AdaLoraConfig, model_cls=AdaLoraModel, prefix="lora_", is_mixed_compatible=True)
+register_peft_method(
+    name="adalora", config_cls=AdaLoraConfig, model_cls=AdaLoraModel, prefix="lora_", is_mixed_compatible=True
+)
 
 
 def __getattr__(name):

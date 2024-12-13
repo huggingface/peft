@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from peft.utils import register_peft_method
+
 from .config import VBLoRAConfig
 from .layer import Linear, VBLoRALayer
 from .model import VBLoRAModel
-
-from peft.utils import register_peft_method
 
 
 __all__ = ["VBLoRAConfig", "VBLoRALayer", "Linear", "VBLoRAModel"]

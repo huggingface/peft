@@ -15,8 +15,6 @@
 import torch
 from transformers import BloomPreTrainedModel
 
-from .peft_types import PeftType
-
 
 # needed for prefix-tuning of bloom model
 def bloom_model_postprocess_past_key_value(past_key_values):
