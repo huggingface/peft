@@ -20,7 +20,7 @@ from .layer import Linear, VeraLayer
 from .model import VeraModel
 
 
-__all__ = ["VeraConfig", "VeraLayer", "Linear", "VeraModel"]
+__all__ = ["Linear", "VeraConfig", "VeraLayer", "VeraModel"]
 
 
 register_peft_method(name="vera", config_cls=VeraConfig, model_cls=VeraModel, prefix="vera_lambda_")

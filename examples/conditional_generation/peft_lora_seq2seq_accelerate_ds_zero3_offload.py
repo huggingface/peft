@@ -125,7 +125,7 @@ def main():
     )
 
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
-    target_max_length = max([len(tokenizer(class_label)["input_ids"]) for class_label in classes])
+    target_max_length = max(len(tokenizer(class_label)["input_ids"]) for class_label in classes)
 
     def preprocess_function(examples):
         inputs = examples[text_column]

@@ -18,6 +18,6 @@ from .layer import AdaptedAttention
 from .model import AdaptionPromptModel
 
 
-__all__ = ["AdaptionPromptConfig", "AdaptedAttention", "AdaptionPromptModel"]
+__all__ = ["AdaptedAttention", "AdaptionPromptConfig", "AdaptionPromptModel"]
 
 register_peft_method(name="adaption_prompt", config_cls=AdaptionPromptConfig, model_cls=AdaptionPromptModel)
