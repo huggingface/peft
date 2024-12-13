@@ -28,7 +28,6 @@ ignore = [
     "UP007", # X | Y style Unions
 ]
 
-
 [tool.ruff.lint.isort]
 lines-after-imports = 2
 known-first-party = ["peft"]
