@@ -27,6 +27,7 @@ from peft.utils.constants import DUMMY_MODEL_CONFIG
 
 from .config import PeftConfig
 from .peft_model import PeftModel
+from .tuners import MixedModel
 from .utils import _set_adapter, _set_trainable
 
 
