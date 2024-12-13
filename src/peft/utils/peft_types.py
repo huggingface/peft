@@ -116,7 +116,7 @@ def register_peft_method(*, name: str, config_cls, model_cls, prefix: Optional[s
     if (model_cls_prefix is not None) and (model_cls_prefix != prefix):
         raise ValueError(f"Inconsistent prefixes found: '{prefix}' and '{model_cls_prefix}' (they should be the same).")
 
-    PEFT_TYPE_TO_PREFIX_MAPPING[peft_type] = name
+    PEFT_TYPE_TO_PREFIX_MAPPING[peft_type] = prefix
     PEFT_TYPE_TO_CONFIG_MAPPING[peft_type] = config_cls
     PEFT_TYPE_TO_TUNER_MAPPING[peft_type] = model_cls
     if is_mixed_compatible:

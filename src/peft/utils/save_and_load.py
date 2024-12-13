@@ -151,7 +151,8 @@ def get_peft_model_state_dict(
         to_return["prompt_embeddings"] = prompt_embeddings
 
     elif config.peft_type == PeftType.VERA:
-        to_return = {k: state_dict[k] for k in state_dict if "vera_lambda_" in k}
+        vera_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
+        to_return = {k: state_dict[k] for k in state_dict if vera_prefix in k}
         if config.save_projection:
             # TODO: adding vera_A and vera_B to `self.get_base_layer` would
             # make name to match here difficult to predict.
@@ -188,7 +189,8 @@ def get_peft_model_state_dict(
             "base_model.vblora_vector_bank." + adapter_name
         ]
     elif config.peft_type in list(PeftType):
-        to_return = {k: state_dict[k] for k in state_dict if PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type] in k}
+        prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
+        to_return = {k: state_dict[k] for k in state_dict if prefix in k}
     else:
         raise ValueError(f"Unknown PEFT type passed: {config.peft_type}")
 
@@ -342,7 +344,11 @@ def set_peft_model_state_dict(
     else:
         state_dict = peft_model_state_dict
 
-    if config.peft_type in PEFT_TYPE_TO_PREFIX_MAPPING:
+    if config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT:
+        peft_model_state_dict = state_dict
+    elif config.peft_type == PeftType.XLORA:
+        peft_model_state_dict = state_dict
+    elif config.peft_type in PEFT_TYPE_TO_PREFIX_MAPPING:
         peft_model_state_dict = {}
         parameter_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
         if config.peft_type == PeftType.VBLORA and config.save_only_topk_weights:
@@ -409,11 +415,6 @@ def set_peft_model_state_dict(
                 return k
 
             peft_model_state_dict = {renamed_dora_weights(k): v for k, v in peft_model_state_dict.items()}
-
-    elif config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT:
-        peft_model_state_dict = state_dict
-    elif config.peft_type == PeftType.XLORA:
-        peft_model_state_dict = state_dict
     else:
         raise NotImplementedError
 
