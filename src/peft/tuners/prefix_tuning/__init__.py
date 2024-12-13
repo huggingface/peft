@@ -16,4 +16,4 @@ from .config import PrefixTuningConfig
 from .model import PrefixEncoder
 
 
-__all__ = ["PrefixTuningConfig", "PrefixEncoder"]
+__all__ = ["PrefixEncoder", "PrefixTuningConfig"]
