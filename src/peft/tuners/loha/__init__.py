@@ -16,5 +16,9 @@ from .config import LoHaConfig
 from .layer import Conv2d, Linear, LoHaLayer
 from .model import LoHaModel
 
+from peft.utils import register_peft_method
+
 
 __all__ = ["LoHaConfig", "LoHaModel", "Conv2d", "Linear", "LoHaLayer"]
+
+register_peft_method(name="loha", config_cls=LoHaConfig, model_cls=LoHaModel, prefix="hada_", is_mixed_compatible=True)

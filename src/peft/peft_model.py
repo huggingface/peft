@@ -38,20 +38,11 @@ from transformers import Cache, DynamicCache, EncoderDecoderCache, PreTrainedMod
 from transformers.modeling_outputs import QuestionAnsweringModelOutput, SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
 
-from peft.utils.constants import DUMMY_MODEL_CONFIG, PEFT_TYPE_TO_PREFIX_MAPPING
-
+from peft.utils.constants import DUMMY_MODEL_CONFIG
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from . import __version__
 from .config import PeftConfig
-from .tuners import (
-    CPTEmbedding,
-    MultitaskPromptEmbedding,
-    PrefixEncoder,
-    PromptEmbedding,
-    PromptEncoder,
-    XLoraConfig,
-    XLoraModel,
-)
-from .tuners.tuners_utils import BaseTuner, BaseTunerLayer
+from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING, PEFT_TYPE_TO_TUNER_MAPPING, PEFT_TYPE_TO_PREFIX_MAPPING
 from .utils import (
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
@@ -432,7 +423,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             kwargs: (`optional`):
                 Additional keyword arguments passed along to the specific PEFT configuration class.
         """
-        from .mapping import MODEL_TYPE_TO_PEFT_MODEL_MAPPING, PEFT_TYPE_TO_CONFIG_MAPPING
+        from .auto import MODEL_TYPE_TO_PEFT_MODEL_MAPPING
+        from .tuners import XLoraConfig, XLoraModel
 
         # load the config
         if config is None:
@@ -618,20 +610,17 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     break
 
         self.word_embeddings = word_embeddings
+        model_cls = PEFT_TYPE_TO_TUNER_MAPPING[config.peft_type]
 
-        if config.peft_type == PeftType.PROMPT_TUNING:
-            prompt_encoder = PromptEmbedding(config, self.word_embeddings)
-        elif config.peft_type == PeftType.MULTITASK_PROMPT_TUNING:
-            prompt_encoder = MultitaskPromptEmbedding(config, self.word_embeddings)
+        if config.peft_type in (PeftType.PROMPT_TUNING, PeftType.MULTITASK_PROMPT_TUNING, PeftType.CPT):
+            prompt_encoder = model_cls(config, self.word_embeddings)
         elif config.peft_type == PeftType.P_TUNING:
-            prompt_encoder = PromptEncoder(config)
+            prompt_encoder = model_cls(config)
         elif config.peft_type == PeftType.PREFIX_TUNING:
             # prefix tuning now uses Cache but that won't work with gradient checkpointing
             if any(getattr(module, "gradient_checkpointing", False) for module in self.get_base_model().modules()):
                 raise ValueError("Prefix tuning does not work with gradient checkpointing.")
-            prompt_encoder = PrefixEncoder(config)
-        elif config.peft_type == PeftType.CPT:
-            prompt_encoder = CPTEmbedding(config, self.word_embeddings)
+            prompt_encoder = model_cls(config)
         else:
             raise ValueError("Not supported")
 
@@ -669,11 +658,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         prompt_tokens = (
             self.prompt_tokens[adapter_name].unsqueeze(0).expand(1, -1).to(prompt_encoder.embedding.weight.device)
         )
+        peft_type = self.peft_config[adapter_name].peft_type
         if self.peft_config[adapter_name].peft_type == PeftType.PREFIX_TUNING:
             prompt_tokens = prompt_tokens[:, : self.peft_config[adapter_name].num_virtual_tokens]
 
         if self.peft_config[adapter_name].peft_type == PeftType.MULTITASK_PROMPT_TUNING:
-            prompt_embeddings = super(MultitaskPromptEmbedding, prompt_encoder).forward(prompt_tokens)
+            prompt_embedding_cls = PEFT_TYPE_TO_TUNER_MAPPING[peft_type]
+            prompt_embeddings = super(prompt_embedding_cls, prompt_encoder).forward(prompt_tokens)
         else:
             prompt_embeddings = prompt_encoder(prompt_tokens)
 
@@ -1746,7 +1737,7 @@ class PeftModelForCausalLM(PeftModel):
             return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
 
     def _cpt_forward(
-        self, input_ids=None, inputs_embeds=None, peft_config=None, task_ids=None, batch_size=None, **kwargs
+        self, input_ids, inputs_embeds, peft_config, task_ids, batch_size, **kwargs
     ):
         # Extract labels from kwargs
         labels = kwargs.pop("labels")
@@ -1797,7 +1788,8 @@ class PeftModelForCausalLM(PeftModel):
             return base_model_output
         else:
             # Calculate the loss using the custom CPT loss function
-            base_model_output = CPTEmbedding.calculate_loss(
+            cpt_embedding = PEFT_TYPE_TO_TUNER_MAPPING[peft_config.peft_type]
+            base_model_output = cpt_embedding.calculate_loss(
                 base_model_output, cpt_labels, cpt_type_mask, self.peft_config["default"]
             )
             return base_model_output

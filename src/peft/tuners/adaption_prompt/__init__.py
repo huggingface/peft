@@ -15,5 +15,9 @@ from .config import AdaptionPromptConfig
 from .layer import AdaptedAttention
 from .model import AdaptionPromptModel
 
+from peft.utils import register_peft_method
+
 
 __all__ = ["AdaptionPromptConfig", "AdaptedAttention", "AdaptionPromptModel"]
+
+register_peft_method(name="adaption_prompt", config_cls=AdaptionPromptConfig, model_cls=AdaptionPromptModel)

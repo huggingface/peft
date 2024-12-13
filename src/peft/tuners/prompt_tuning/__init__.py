@@ -15,5 +15,9 @@
 from .config import PromptTuningConfig, PromptTuningInit
 from .model import PromptEmbedding
 
+from peft.utils import register_peft_method
+
 
 __all__ = ["PromptTuningConfig", "PromptEmbedding", "PromptTuningInit"]
+
+register_peft_method(name="prompt_tuning", config_cls=PromptTuningConfig, model_cls=PromptEmbedding)

@@ -15,5 +15,9 @@
 from .config import PrefixTuningConfig
 from .model import PrefixEncoder
 
+from peft.utils import register_peft_method
+
 
 __all__ = ["PrefixTuningConfig", "PrefixEncoder"]
+
+register_peft_method(name="prefix_tuning", config_cls=PrefixTuningConfig, model_cls=PrefixEncoder)

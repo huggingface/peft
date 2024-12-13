@@ -15,5 +15,9 @@
 from .config import PromptEncoderConfig, PromptEncoderReparameterizationType
 from .model import PromptEncoder
 
+from peft.utils import register_peft_method
+
 
 __all__ = ["PromptEncoder", "PromptEncoderConfig", "PromptEncoderReparameterizationType"]
+
+register_peft_method(name="p_tuning", config_cls=PromptEncoderConfig, model_cls=PromptEncoder)

@@ -16,5 +16,9 @@ from .config import OFTConfig
 from .layer import Conv2d, Linear, OFTLayer
 from .model import OFTModel
 
+from peft.utils import register_peft_method
+
 
 __all__ = ["OFTConfig", "OFTModel", "Conv2d", "Linear", "OFTLayer"]
+
+register_peft_method(name="oft", config_cls=OFTConfig, model_cls=OFTModel)

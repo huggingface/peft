@@ -29,7 +29,6 @@ from transformers import (
 )
 
 from .config import PeftConfig
-from .mapping import MODEL_TYPE_TO_PEFT_MODEL_MAPPING
 from .peft_model import (
     PeftModel,
     PeftModelForCausalLM,
@@ -41,6 +40,16 @@ from .peft_model import (
 )
 from .utils.constants import TOKENIZER_CONFIG_NAME
 from .utils.other import check_file_exists_on_hf_hub
+
+
+MODEL_TYPE_TO_PEFT_MODEL_MAPPING: dict[str, type[PeftModel]] = {
+    "SEQ_CLS": PeftModelForSequenceClassification,
+    "SEQ_2_SEQ_LM": PeftModelForSeq2SeqLM,
+    "CAUSAL_LM": PeftModelForCausalLM,
+    "TOKEN_CLS": PeftModelForTokenClassification,
+    "QUESTION_ANS": PeftModelForQuestionAnswering,
+    "FEATURE_EXTRACTION": PeftModelForFeatureExtraction,
+}
 
 
 class _BaseAutoPeftModel:

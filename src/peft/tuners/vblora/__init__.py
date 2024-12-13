@@ -16,5 +16,9 @@ from .config import VBLoRAConfig
 from .layer import Linear, VBLoRALayer
 from .model import VBLoRAModel
 
+from peft.utils import register_peft_method
+
 
 __all__ = ["VBLoRAConfig", "VBLoRALayer", "Linear", "VBLoRAModel"]
+
+register_peft_method(name="vblora", config_cls=VBLoRAConfig, model_cls=VBLoRAModel)

@@ -286,22 +286,6 @@ TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING = {
     "qwen2": ["q_proj", "v_proj"],
 }
 
-PEFT_TYPE_TO_PREFIX_MAPPING = {
-    PeftType.IA3: "ia3_",
-    PeftType.LORA: "lora_",
-    PeftType.ADALORA: "lora_",
-    PeftType.LOHA: "hada_",
-    PeftType.LOKR: "lokr_",
-    PeftType.OFT: "oft_",
-    PeftType.POLY: "poly_",
-    PeftType.BOFT: "boft_",
-    PeftType.LN_TUNING: "ln_tuning_",
-    PeftType.VERA: "vera_lambda_",
-    PeftType.FOURIERFT: "fourierft_",
-    PeftType.HRA: "hra_",
-    PeftType.VBLORA: "vblora_",
-}
-
 WEIGHTS_NAME = "adapter_model.bin"
 SAFETENSORS_WEIGHTS_NAME = "adapter_model.safetensors"
 CONFIG_NAME = "adapter_config.json"

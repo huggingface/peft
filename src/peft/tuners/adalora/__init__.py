@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
+from peft.utils import register_peft_method
 
 from .config import AdaLoraConfig
 from .gptq import SVDQuantLinear
@@ -21,6 +22,9 @@ from .model import AdaLoraModel
 
 
 __all__ = ["AdaLoraConfig", "AdaLoraLayer", "AdaLoraModel", "SVDLinear", "RankAllocator", "SVDQuantLinear"]
+
+
+register_peft_method(name="adalora", config_cls=AdaLoraConfig, model_cls=AdaLoraModel, prefix="lora_", is_mixed_compatible=True)
 
 
 def __getattr__(name):

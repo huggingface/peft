@@ -15,5 +15,9 @@
 from .config import MultitaskPromptTuningConfig, MultitaskPromptTuningInit
 from .model import MultitaskPromptEmbedding
 
+from peft.utils import register_peft_method
+
 
 __all__ = ["MultitaskPromptTuningConfig", "MultitaskPromptTuningInit", "MultitaskPromptEmbedding"]
+
+register_peft_method(name="multitask_prompt_tuning", config_cls=MultitaskPromptTuningConfig, model_cls=MultitaskPromptEmbedding)

@@ -16,5 +16,9 @@ from .config import PolyConfig
 from .layer import Linear, PolyLayer
 from .model import PolyModel
 
+from peft.utils import register_peft_method
+
 
 __all__ = ["Linear", "PolyConfig", "PolyLayer", "PolyModel"]
+
+register_peft_method(name="poly", config_cls=PolyConfig, model_cls=PolyModel)

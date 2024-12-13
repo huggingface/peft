@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import enum
+from typing import Optional
 
 
 class PeftType(str, enum.Enum):
@@ -86,10 +87,9 @@ class TaskType(str, enum.Enum):
     FEATURE_EXTRACTION = "FEATURE_EXTRACTION"
 
 
-def register_peft_method(*, name, config_cls, model_cls=None) -> None:
+def register_peft_method(*, name: str, config_cls, model_cls, prefix: Optional[str] = None, is_mixed_compatible=False) -> None:
     """TODO"""
-    from peft.mapping import PEFT_TYPE_TO_CONFIG_MAPPING, PEFT_TYPE_TO_TUNER_MAPPING
-    from peft.utils.constants import PEFT_TYPE_TO_PREFIX_MAPPING
+    from peft.mapping import PEFT_TYPE_TO_CONFIG_MAPPING, PEFT_TYPE_TO_MIXED_MODEL_MAPPING, PEFT_TYPE_TO_TUNER_MAPPING, PEFT_TYPE_TO_PREFIX_MAPPING
 
     if name.endswith("_"):
         raise ValueError(f"Please pass the name of the PEFT method without '_' suffix, got {name}.")
@@ -103,15 +103,21 @@ def register_peft_method(*, name, config_cls, model_cls=None) -> None:
     peft_type = getattr(PeftType, name.upper())
 
     # model_cls can be None for prompt learning methods, which don't have dedicated model classes
-    if model_cls:
+    if prefix is None:
+        prefix = name + "_"
 
-        if model_cls.prefix != name + "_":
-            raise ValueError(
-                f"Inconsistent names: The method is called '{name}' but the prefix is called {model_cls.prefix} "
-                "(they should be the same, except that the prefix ends with an '_')"
-            )
+    if (peft_type in PEFT_TYPE_TO_CONFIG_MAPPING) or (peft_type in PEFT_TYPE_TO_TUNER_MAPPING) or (peft_type in PEFT_TYPE_TO_MIXED_MODEL_MAPPING):
+        raise KeyError(f"There is already PEFT method called '{name}', please choose a unique name.")
+
+    if prefix in PEFT_TYPE_TO_PREFIX_MAPPING:
+        raise KeyError(f"There is already a prefix called '{prefix}', please choose a unique prefix.")
+
+    model_cls_prefix = getattr(model_cls, "prefix", None)
+    if (model_cls_prefix is not None) and (model_cls_prefix != prefix):
+        raise ValueError(f"Inconsistent prefixes found: '{prefix}' and '{model_cls_prefix}' (they should be the same).")
 
     PEFT_TYPE_TO_PREFIX_MAPPING[peft_type] = name
     PEFT_TYPE_TO_CONFIG_MAPPING[peft_type] = config_cls
-    if model_cls:
-        PEFT_TYPE_TO_TUNER_MAPPING[peft_type] = model_cls
+    PEFT_TYPE_TO_TUNER_MAPPING[peft_type] = model_cls
+    if is_mixed_compatible:
+        PEFT_TYPE_TO_MIXED_MODEL_MAPPING[peft_type] = model_cls

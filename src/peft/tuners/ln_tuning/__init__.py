@@ -15,5 +15,8 @@
 from .config import LNTuningConfig
 from .model import LNTuningModel
 
+from peft.utils import register_peft_method
 
 __all__ = ["LNTuningConfig", "LNTuningModel"]
+
+register_peft_method(name="ln_tuning", config_cls=LNTuningConfig, model_cls=LNTuningModel)

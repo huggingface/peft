@@ -18,8 +18,13 @@ from .config import VeraConfig
 from .layer import Linear, VeraLayer
 from .model import VeraModel
 
+from peft.utils import register_peft_method
+
 
 __all__ = ["VeraConfig", "VeraLayer", "Linear", "VeraModel"]
+
+
+register_peft_method(name="vera", config_cls=VeraConfig, model_cls=VeraModel, prefix="vera_lambda_")
 
 
 def __getattr__(name):

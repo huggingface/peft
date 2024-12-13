@@ -16,5 +16,9 @@ from .config import BOFTConfig
 from .layer import BOFTLayer
 from .model import BOFTModel
 
+from peft.utils import register_peft_method
+
 
 __all__ = ["BOFTConfig", "BOFTLayer", "BOFTModel"]
+
+register_peft_method(name="boft", config_cls=BOFTConfig, model_cls=BOFTModel)

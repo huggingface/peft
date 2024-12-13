@@ -15,5 +15,9 @@
 from .config import XLoraConfig
 from .model import XLoraModel
 
+from peft.utils import register_peft_method
+
 
 __all__ = ["XLoraConfig", "XLoraModel"]
+
+register_peft_method(name="xlora", config_cls=XLoraConfig, model_cls=XLoraModel)

@@ -16,5 +16,9 @@ from .config import HRAConfig
 from .layer import HRAConv2d, HRALayer, HRALinear
 from .model import HRAModel
 
+from peft.utils import register_peft_method
+
 
 __all__ = ["HRAConfig", "HRAModel", "HRAConv2d", "HRALinear", "HRALayer"]
+
+register_peft_method(name="hra", config_cls=HRAConfig, model_cls=HRAModel)

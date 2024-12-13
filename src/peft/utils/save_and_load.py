@@ -24,7 +24,8 @@ from huggingface_hub.errors import EntryNotFoundError, LocalEntryNotFoundError
 from packaging import version
 from safetensors.torch import load_file as safe_load_file
 
-from .constants import PEFT_TYPE_TO_PREFIX_MAPPING
+from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
+
 from .other import (
     EMBEDDING_LAYER_NAMES,
     SAFETENSORS_WEIGHTS_NAME,
@@ -133,12 +134,6 @@ def get_peft_model_state_dict(
         else:
             raise NotImplementedError
 
-    elif config.peft_type == PeftType.LOHA:
-        to_return = {k: state_dict[k] for k in state_dict if "hada_" in k}
-
-    elif config.peft_type == PeftType.LOKR:
-        to_return = {k: state_dict[k] for k in state_dict if "lokr_" in k}
-
     elif config.peft_type == PeftType.ADAPTION_PROMPT:
         to_return = {k: state_dict[k] for k in state_dict if k.split(".")[-1].startswith("adaption_")}
 
@@ -155,18 +150,6 @@ def get_peft_model_state_dict(
                 prompt_embeddings = model.get_prompt_embedding_to_save(adapter_name)
         to_return["prompt_embeddings"] = prompt_embeddings
 
-    elif config.peft_type == PeftType.IA3:
-        to_return = {k: state_dict[k] for k in state_dict if "ia3_" in k}
-
-    elif config.peft_type == PeftType.OFT:
-        to_return = {k: state_dict[k] for k in state_dict if "oft_" in k}
-
-    elif config.peft_type == PeftType.POLY:
-        to_return = {k: state_dict[k] for k in state_dict if "poly_" in k}
-
-    elif config.peft_type == PeftType.LN_TUNING:
-        to_return = {k: state_dict[k] for k in state_dict if "ln_tuning_" in k}
-
     elif config.peft_type == PeftType.VERA:
         to_return = {k: state_dict[k] for k in state_dict if "vera_lambda_" in k}
         if config.save_projection:
@@ -179,12 +162,8 @@ def get_peft_model_state_dict(
                 )
             to_return["base_model.vera_A." + adapter_name] = state_dict["base_model.vera_A." + adapter_name]
             to_return["base_model.vera_B." + adapter_name] = state_dict["base_model.vera_B." + adapter_name]
-    elif config.peft_type == PeftType.FOURIERFT:
-        to_return = {k: state_dict[k] for k in state_dict if "fourierft_" in k}
     elif config.peft_type == PeftType.XLORA:
         to_return = {k: state_dict[k] for k in state_dict if "internal_xlora_classifier" in k}
-    elif config.peft_type == PeftType.HRA:
-        to_return = {k: state_dict[k] for k in state_dict if "hra_" in k}
     elif config.peft_type == PeftType.VBLORA:
         to_return = {}
         # choose the most efficient dtype for indices
@@ -209,7 +188,7 @@ def get_peft_model_state_dict(
             "base_model.vblora_vector_bank." + adapter_name
         ]
     elif config.peft_type in list(PeftType):
-        to_return = {k: state_dict[k] for k in state_dict if "bone_" in k}
+        to_return = {k: state_dict[k] for k in state_dict if PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type] in k}
     else:
         raise ValueError(f"Unknown PEFT type passed: {config.peft_type}")
 
