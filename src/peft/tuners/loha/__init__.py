@@ -17,4 +17,4 @@ from .layer import Conv2d, Linear, LoHaLayer
 from .model import LoHaModel
 
 
-__all__ = ["LoHaConfig", "LoHaModel", "Conv2d", "Linear", "LoHaLayer"]
+__all__ = ["Conv2d", "Linear", "LoHaConfig", "LoHaLayer", "LoHaModel"]

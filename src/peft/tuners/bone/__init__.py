@@ -17,4 +17,4 @@ from .layer import BoneLayer, BoneLinear
 from .model import BoneModel
 
 
-__all__ = ["BoneConfig", "BoneModel", "BoneLinear", "BoneLayer"]
+__all__ = ["BoneConfig", "BoneLayer", "BoneLinear", "BoneModel"]
