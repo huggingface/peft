@@ -24,7 +24,7 @@ from .auto import (  # noqa: I001
     AutoPeftModelForFeatureExtraction,
     MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
 )
-from .foo import get_peft_model
+from .func import get_peft_model
 from .mapping import (
     PEFT_TYPE_TO_CONFIG_MAPPING,
     PEFT_TYPE_TO_MIXED_MODEL_MAPPING,
