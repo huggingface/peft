@@ -23,11 +23,13 @@ IPM | instructions and responses from the downstream task to learn | $A= \sqrt{\
 
 The distinction between CorDA with other similar LoRA initialization methods is summarized as follows:
 
-| Method | Initialization for | SVD on | Data-driven | Support knowledge maintenance |
+| Method | Initialization for | SVD on | Data-driven | Supports knowledge maintenance |
 | - | - | - | - | - |
 | PiSSA | $A$ and $B$ | weights | no | no |
 | EVA | $A$ | activations | yes | no |
 |CorDA |  $A$ and $B$ | weights (oriented by covariance) | yes | yes |
+
+"Supports knowledge maintenance" denotes the ability of explicitly associating a knowledge benchmark with some components of the pre-trained weights after decomposition, and keeping these components frozen during fine-tuning. 
 
 ### Some Results
 
