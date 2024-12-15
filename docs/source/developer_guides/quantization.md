@@ -211,6 +211,27 @@ model = get_peft_model(base_model, peft_config)
 - DoRA only works with `quant_type = "int8_weight_only"` at the moment.
 - There is explicit support for torchao when used with LoRA. However, when torchao quantizes a layer, its class does not change, only the type of the underlying tensor. For this reason, PEFT methods other than LoRA will generally also work with torchao, even if not explicitly supported. Be aware, however, that **merging only works correctly with LoRA and with `quant_type = "int8_weight_only"`**. If you use a different PEFT method or dtype, merging will likely result in an error, and even it doesn't, the results will still be incorrect.
 
+## Optimum-quanto
+
+PEFT supports models quantized with [optimum-quanto](https://github.com/huggingface/optimum-quanto). This has been tested with 2bit, 4bit, and 8bit int quantization. Optimum-quanto also works on CPU and MPS.
+
+```python
+from transformers import AutoModelForCausalLM, QuantoConfig
+
+model_id = ...
+quantization_config = QuantoConfig(weights="int4")  # or qint2 or qint8
+base_model = AutoModelForCausalLM.from_pretrained(model_id, quantization_config=quantization_config)
+peft_config = LoraConfig(...)
+model = get_peft_model(base_model, peft_config)
+```
+
+### Caveats:
+
+- Use optimum-quanto v0.2.5 or above, otherwise saving and loading won't work properly.
+- If you want to use optimum-quanto via transformers, install transformers v4.46.0 or above.
+- Float8 is discouraged as it can easily produce NaNs.
+- There is explicit support for optimum-quanto when used with LoRA. However, when optimum-quanto quantizes a layer, it remains a subclass of the corresponding torch class (e.g., quanto's `QLinear` is a subclass of `nn.Linear`). For this reason, non-LoRA methods will generally also work with optimum-quanto, even if not explicitly supported. Be aware, however, that **merging only works correctly with LoRA**. If you use a method other than LoRA, merging may not raise an error but the results will be incorrect.
+
 ## Other Supported PEFT Methods
 
 Besides LoRA, the following PEFT methods also support quantization:
