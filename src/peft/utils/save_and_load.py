@@ -442,7 +442,7 @@ def set_peft_model_state_dict(
         model, peft_model_state_dict, ignore_mismatched_sizes=ignore_mismatched_sizes
     )
     if low_cpu_mem_usage:
-        load_result = model.load_state_dict(peft_model_state_dict, strict=False, assign=True)
+        load_result = model.load_state_dict(peft_model_state_dict, strict=False)
         # ensure that the correct device is set
         for module in model.modules():
             if hasattr(module, "_move_adapter_to_device_of_base_layer"):
