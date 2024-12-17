@@ -68,7 +68,7 @@ def preprocess_corda(
             Lora configuration of the model. `lora_config.corda_config` should be set.
         run_model (`Optional[Callable[[], None]]`):
             Callback to run the model when building covariance. Typically you should run model inference on your sample
-            dataset in this callback. The size of sample dataset is typically 256. `run_model` can be `None` only if
+            dataset in this callback. Experiments have shown 256 samples to be a good default dataset size. `run_model` can be `None` only if
             covariance file in `lora_config.corda_config` is already created.
         hooked_model (`Optional[nn.Module]`):
             Model to hook when building covariance. If none, original model will be hooked. This is only useful when
