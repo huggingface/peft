@@ -14,7 +14,6 @@
 import tempfile
 import unittest
 
-import pytest
 import torch
 from parameterized import parameterized
 from transformers import AutoModelForSeq2SeqLM, AutoModelForTokenClassification
