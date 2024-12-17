@@ -460,11 +460,14 @@ class LoraModel(BaseTuner):
 
         # deal with beam search
         num_beams = kwargs.get("num_beams", None)
-        if isinstance(num_beams, int) and (num_beams > 1):
+        uses_beam_search = isinstance(num_beams, int) and (num_beams > 1)
+        original_adapter_names = adapter_names[:]
+        if uses_beam_search:
             if not isinstance(adapter_names, (list, tuple)):
                 raise TypeError(f"Got adapter names of type {type(adapter_names)}, expected a list of str.")
             # When there is beam search, the inputs are repeated n times, thus we repeat each adapter name n times and
-            # then flatten the nested list
+            # then flatten the nested list. For encoder-decoder models, this extended list should not be applied to the
+            # encoder part.
             adapter_names = sum(([n] * kwargs["num_beams"] for n in adapter_names), [])
 
         hook_handles = []
@@ -473,6 +476,15 @@ class LoraModel(BaseTuner):
                 pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
                 handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                 hook_handles.append(handle)
+
+        if uses_beam_search and hasattr(self.model, "get_encoder"):
+            # For encooder-decoder models, even when applying beam search, the encoder part of the model should not use
+            # the extended adapter_names.
+            for module in self.model.get_encoder().modules():
+                if isinstance(module, LoraLayer) or isinstance(module, ModulesToSaveWrapper):
+                    pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=original_adapter_names)
+                    handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
+                    hook_handles.append(handle)
 
         yield
 

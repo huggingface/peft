@@ -128,7 +128,6 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
             },
         )
     )
-    @pytest.mark.xfail(reason="beam search with encoder-decoder models is broken right now", strict=True)
     def test_generate_with_mixed_adapter_batches(self, test_name, model_id, config_cls, config_kwargs):
         self._test_generate_with_mixed_adapter_batches_and_beam_search(model_id, config_cls, config_kwargs)
 
