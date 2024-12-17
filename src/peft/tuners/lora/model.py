@@ -458,6 +458,15 @@ class LoraModel(BaseTuner):
         if unexpected_adapters:
             raise ValueError(f"Trying to infer with non-existing adapter(s): {', '.join(sorted(unexpected_adapters))}")
 
+        # deal with beam search
+        num_beams = kwargs.get("num_beams", None)
+        if isinstance(num_beams, int) and (num_beams > 1):
+            if not isinstance(adapter_names, (list, tuple)):
+                raise TypeError(f"Got adapter names of type {type(adapter_names)}, expected a list of str.")
+            # When there is beam search, the inputs are repeated n times, thus we repeat each adapter name n times and
+            # then flatten the nested list
+            adapter_names = sum(([n] * kwargs["num_beams"] for n in adapter_names), [])
+
         hook_handles = []
         for module in self.modules():
             if isinstance(module, LoraLayer) or isinstance(module, ModulesToSaveWrapper):

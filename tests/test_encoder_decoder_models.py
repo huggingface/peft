@@ -14,6 +14,7 @@
 import tempfile
 import unittest
 
+import pytest
 import torch
 from parameterized import parameterized
 from transformers import AutoModelForSeq2SeqLM, AutoModelForTokenClassification
@@ -117,6 +118,19 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
     )
     def test_mixed_adapter_batches(self, test_name, model_id, config_cls, config_kwargs):
         self._test_mixed_adapter_batches(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_ENCODER_DECODER_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False]},
+                "task_type": "CAUSAL_LM",
+            },
+        )
+    )
+    @pytest.mark.xfail(reason="beam search with encoder-decoder models is broken right now", strict=True)
+    def test_generate_with_mixed_adapter_batches(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_generate_with_mixed_adapter_batches_and_beam_search(model_id, config_cls, config_kwargs)
 
     # skip non lora models - generate does not work for prefix tuning, prompt tuning
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
