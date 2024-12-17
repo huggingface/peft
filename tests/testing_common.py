@@ -954,6 +954,9 @@ class PeftCommonTester:
         model = get_peft_model(model, config, adapter_name="adapter0").eval()
         model.add_adapter("adapter1", config)
 
+        # In contrast to forward, for generate, it can sometimes happen that we get the same results as the base model
+        # even with LoRA applied because the impact of LoRA is not big enough. Therefore, use this "trick" to make LoRA
+        # stronger.
         for name, param in model.named_parameters():
             if model.base_model.prefix in name:
                 param.data.mul_(10.0)
@@ -967,17 +970,14 @@ class PeftCommonTester:
         gen_kwargs = {**dummy_input, "max_length": 20, "num_beams": 10, "early_stopping": True}
         with torch.inference_mode():
             with model.disable_adapter():
-                torch.manual_seed(0)
                 gen_base = model.generate(**gen_kwargs)
 
         model.set_adapter("adapter0")
         with torch.inference_mode():
-            torch.manual_seed(0)
             gen_adapter0 = model.generate(**gen_kwargs)
 
         model.set_adapter("adapter1")
         with torch.inference_mode():
-            torch.manual_seed(0)
             gen_adapter1 = model.generate(**gen_kwargs)
 
         def remove_padding(seq, pad_value):
@@ -1012,7 +1012,6 @@ class PeftCommonTester:
         gen_kwargs["adapter_names"] = [adapters[i % 3] for i in (range(len(dummy_input["input_ids"])))]
 
         with torch.inference_mode():
-            torch.manual_seed(0)
             gen_mixed = model.generate(**gen_kwargs)
 
         assert gens_are_same(gen_base[::3], gen_mixed[::3])
