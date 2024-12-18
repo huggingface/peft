@@ -27,7 +27,7 @@ from typing import Any, Literal, Optional, Union
 import packaging.version
 import torch
 import transformers
-from accelerate import dispatch_model, infer_auto_device_map, init_empty_weights
+from accelerate import dispatch_model, infer_auto_device_map
 from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
 from accelerate.utils import get_balanced_memory, named_module_tensors
 from huggingface_hub import HfFileSystem, ModelCard, ModelCardData, hf_hub_download
@@ -39,6 +39,7 @@ from transformers.modeling_outputs import QuestionAnsweringModelOutput, Sequence
 from transformers.utils import PushToHubMixin
 
 from peft.utils.constants import DUMMY_MODEL_CONFIG, PEFT_TYPE_TO_PREFIX_MAPPING
+from peft.utils.integrations import init_empty_weights
 
 from . import __version__
 from .config import PeftConfig
