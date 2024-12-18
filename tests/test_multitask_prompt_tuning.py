@@ -22,7 +22,7 @@ import torch
 from parameterized import parameterized
 from torch.testing import assert_close
 
-from peft.mapping import get_peft_model
+from peft import get_peft_model
 from peft.peft_model import PeftModel
 from peft.tuners.multitask_prompt_tuning import MultitaskPromptTuningConfig, MultitaskPromptTuningInit
 from peft.utils.other import WEIGHTS_NAME, prepare_model_for_kbit_training

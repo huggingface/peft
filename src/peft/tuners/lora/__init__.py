@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_eetq_available
+from peft.utils import register_peft_method
 
 from .config import EvaConfig, LoftQConfig, LoraConfig, LoraRuntimeConfig
 from .eva import get_eva_state_dict, initialize_lora_eva_weights
@@ -36,6 +37,8 @@ __all__ = [
     "get_eva_state_dict",
     "initialize_lora_eva_weights",
 ]
+
+register_peft_method(name="lora", config_cls=LoraConfig, model_cls=LoraModel, is_mixed_compatible=True)
 
 
 def __getattr__(name):

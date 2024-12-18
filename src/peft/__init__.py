@@ -15,6 +15,7 @@
 __version__ = "0.14.1.dev0"
 
 from .auto import (
+    MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
     AutoPeftModel,
     AutoPeftModelForCausalLM,
     AutoPeftModelForFeatureExtraction,
@@ -24,11 +25,12 @@ from .auto import (
     AutoPeftModelForTokenClassification,
 )
 from .config import PeftConfig, PromptLearningConfig
+from .func import get_peft_model
 from .mapping import (
-    MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
     PEFT_TYPE_TO_CONFIG_MAPPING,
+    PEFT_TYPE_TO_MIXED_MODEL_MAPPING,
+    PEFT_TYPE_TO_TUNER_MAPPING,
     get_peft_config,
-    get_peft_model,
     inject_adapter_in_model,
 )
 from .mixed_model import PeftMixedModel
@@ -112,6 +114,8 @@ from .utils import (
 __all__ = [
     "MODEL_TYPE_TO_PEFT_MODEL_MAPPING",
     "PEFT_TYPE_TO_CONFIG_MAPPING",
+    "PEFT_TYPE_TO_MIXED_MODEL_MAPPING",
+    "PEFT_TYPE_TO_TUNER_MAPPING",
     "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
     "AdaLoraConfig",
     "AdaLoraModel",

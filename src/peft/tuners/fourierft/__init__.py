@@ -12,9 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from peft.utils import register_peft_method
+
 from .config import FourierFTConfig
 from .layer import FourierFTLayer, FourierFTLinear
 from .model import FourierFTModel
 
 
 __all__ = ["FourierFTConfig", "FourierFTLayer", "FourierFTLinear", "FourierFTModel"]
+
+register_peft_method(name="fourierft", model_cls=FourierFTModel, config_cls=FourierFTConfig)
