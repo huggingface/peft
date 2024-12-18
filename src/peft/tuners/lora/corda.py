@@ -68,8 +68,8 @@ def preprocess_corda(
             Lora configuration of the model. `lora_config.corda_config` should be set.
         run_model (`Optional[Callable[[], None]]`):
             Callback to run the model when building covariance. Typically you should run model inference on your sample
-            dataset in this callback. Experiments have shown 256 samples to be a good default dataset size. `run_model` can be `None` only if
-            covariance file in `lora_config.corda_config` is already created.
+            dataset in this callback. Experiments have shown 256 samples to be a good default dataset size. `run_model`
+            can be `None` only if covariance file in `lora_config.corda_config` is already created.
         hooked_model (`Optional[nn.Module]`):
             Model to hook when building covariance. If none, original model will be hooked. This is only useful when
             you want to hook a different model than the one you are training, typically you should leave this `None`.
@@ -187,14 +187,19 @@ def calib_cov_distribution(
         # free memory
         del covariance, input
 
+    handles = []
     for name, module in target_modules(hooked_model, config):
         module.sample_count = 0
         module.covariance_matrix = 0
         module.mean = 0
         module.std = 0
-        module.register_forward_hook(hook)
+        handles.append(module.register_forward_hook(hook))
 
     run_model()
+
+    # Clear the hooks
+    for handle in handles:
+        handle.remove()
 
     # In some edge cases you might need to hook a model different from the model to add adapters,
     # this case you would specify `hooked_model` and set it to a different model from `model`.
@@ -206,9 +211,16 @@ def calib_cov_distribution(
             # There can be modules used only in inference, but not training
             # Exclude modules not in target model to prevent KeyError in this case
             if name in targets:
-                targets[name].covariance_matrix = module.covariance_matrix / module.sample_count
-                targets[name].mean = module.mean / module.sample_count
-                targets[name].std = module.std / module.sample_count
+                targets[name].sample_count = module.sample_count
+                targets[name].covariance_matrix = module.covariance_matrix
+                targets[name].mean = module.mean
+                targets[name].std = module.std
+
+    # Divide by sample count
+    for name, module in target_modules(model, config):
+        module.covariance_matrix /= module.sample_count
+        module.mean /= module.sample_count
+        module.std /= module.sample_count
 
     # Save covariance to disk
     if covariance_file is not None:

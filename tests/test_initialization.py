@@ -1843,6 +1843,74 @@ class TestCordaInitialization:
         return torch.rand(1000, 1000).to(self.torch_device)
 
     @pytest.mark.parametrize("corda_method", ("ipm", "kpm"))
+    def test_lora_corda_sample_count(self, data, corda_method):
+        original_model = self.get_model()
+        model = deepcopy(original_model)
+
+        corda_config = CordaConfig(
+            corda_method=corda_method,
+        )
+        config = LoraConfig(
+            init_lora_weights="corda",
+            target_modules=["linear"],
+            corda_config=corda_config,
+        )
+        preprocess_corda(
+            model,
+            config,
+            run_model=lambda: [model(data), model(data)],  # running model twice to test `sample_count`
+            hooked_model=model,
+        )
+
+        # covariance of linear should be data.T @ data
+        layer = model.linear
+        assert hasattr(layer, "covariance_matrix")
+        assert torch.allclose(layer.covariance_matrix, data.T @ data, atol=1e-06)
+
+        # sample count of linear should be 2
+        assert hasattr(layer, "sample_count")
+        assert layer.sample_count == 2
+
+    @pytest.mark.parametrize("corda_method", ("ipm", "kpm"))
+    def test_lora_corda_hook_unregister(self, data, corda_method):
+        original_model = self.get_model()
+        model = deepcopy(original_model)
+
+        hook_call_count = 0
+
+        def hook(*args):
+            nonlocal hook_call_count
+            hook_call_count += 1
+
+        model.linear.register_forward_hook(hook)
+
+        corda_config = CordaConfig(
+            corda_method=corda_method,
+        )
+        config = LoraConfig(
+            init_lora_weights="corda",
+            target_modules=["linear"],
+            corda_config=corda_config,
+        )
+        preprocess_corda(
+            model,
+            config,
+            run_model=lambda: model(data),
+            hooked_model=model,
+        )
+
+        # after preprocessing, external and internal hook should be run once
+        assert hook_call_count == 1
+        assert model.linear.sample_count == 1
+
+        # run preprocessed model once
+        model(data)[0]
+
+        # the external hook should be kept, but the internal hook should be gone
+        assert hook_call_count == 2
+        assert model.linear.sample_count == 1
+
+    @pytest.mark.parametrize("corda_method", ("ipm", "kpm"))
     def test_lora_corda_linear_init_default(self, data, tmp_path, corda_method):
         original_model = self.get_model()
         model = deepcopy(original_model)
