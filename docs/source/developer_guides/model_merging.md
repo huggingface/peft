@@ -50,6 +50,9 @@ config = PeftConfig.from_pretrained("smangrul/tinyllama_lora_norobots")
 model = AutoModelForCausalLM.from_pretrained(config.base_model_name_or_path, load_in_4bit=True, device_map="auto").eval()
 tokenizer = AutoTokenizer.from_pretrained("smangrul/tinyllama_lora_norobots")
 
+model.config.vocab_size = 32005
+model.resize_token_embeddings(32005)
+
 model = PeftModel.from_pretrained(model, "smangrul/tinyllama_lora_norobots", adapter_name="norobots")
 _ = model.load_adapter("smangrul/tinyllama_lora_sql", adapter_name="sql")
 _ = model.load_adapter("smangrul/tinyllama_lora_adcopy", adapter_name="adcopy")
