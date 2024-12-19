@@ -167,6 +167,7 @@ def get_calib_data(name, tokenizer, model_id, nsamples, seqlen=2048, seed=3):
         selected_data_dict = (
             load_dataset("iboing/CodeFeedback-Filtered-Instruction", split="train").shuffle(seed=seed).take(nsamples)
         )
+        traindataset = []
         for example in selected_data_dict:
             if example.get("input", "") == "":
                 s = llama_chat_format.format(instruction=example["query"], response=example["answer"])
@@ -181,6 +182,7 @@ def get_calib_data(name, tokenizer, model_id, nsamples, seqlen=2048, seed=3):
         selected_data_dict = (
             load_dataset("iboing/WizardLM_evol_instruct_V2_143k", split="train").shuffle(seed=seed).take(nsamples)
         )
+        traindataset = []
         for example in selected_data_dict:
             if example.get("input", "") == "":
                 s = llama_chat_format.format(
