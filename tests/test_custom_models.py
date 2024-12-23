@@ -43,6 +43,7 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
+    MoSLoraConfig,
     OFTConfig,
     PeftModel,
     TaskType,
@@ -120,6 +121,25 @@ TEST_CASES = [
     ),
     ("Conv2d 1 LoRA with lora_b bias", "Conv2d", LoraConfig, {"target_modules": ["conv2d"], "lora_bias": True}),
     ("Conv3d 1 LoRA with lora_b bias", "Conv3d", LoraConfig, {"target_modules": ["conv3d"], "lora_bias": True}),
+    ########
+    # MoSLoRA #
+    ########
+    ("Vanilla MLP 1 MoSLoRA", "MLP", MoSLoraConfig, {"target_modules": "lin0", "use_moslora": "kai"}),
+    ("Vanilla MLP 2 MoSLoRA", "MLP", MoSLoraConfig, {"target_modules": ["lin0"], "use_moslora": "kai"}),
+    ("Vanilla MLP 3 MoSLoRA", "MLP", MoSLoraConfig, {"target_modules": ["lin1"], "use_moslora": "kai"}),
+    ("Vanilla MLP 4 MoSLoRA", "MLP", MoSLoraConfig, {"target_modules": ["lin0", "lin1"], "use_moslora": "kai"}),
+    ("Vanilla MLP 5 MoSLoRA", "MLP", MoSLoraConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "use_moslora": "kai"}),
+    (
+        "Vanilla MLP 6 MoSLoRA",
+        "MLP",
+        MoSLoraConfig,
+        {
+            "target_modules": ["lin0"],
+            "lora_alpha": 4,
+            "lora_dropout": 0.1,
+            "use_moslora": True,
+        },
+    ),
     #######
     # IA³ #
     #######
@@ -503,6 +523,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin1"], "init_lora_weights": False},
     ),
     (
+        "MoSLoRA Same",
+        "moslora",
+        MoSLoraConfig,
+        {"target_modules": ["lin0"], "init_lora_weights": False, "use_moslora": True},
+        {"target_modules": ["lin0"], "init_lora_weights": False, "use_moslora": True},
+    ),
+    (
+        "MoSLoRA Different",
+        "moslora",
+        MoSLoraConfig,
+        {"target_modules": ["lin0"], "init_lora_weights": False, "use_moslora": True},
+        {"target_modules": ["lin1"], "init_lora_weights": False, "use_moslora": True},
+    ),
+    (
         "IA3 Same",
         "ia3",
         IA3Config,
@@ -636,6 +670,7 @@ PREFIXES = {
     OFTConfig: "oft_",
     BOFTConfig: "boft_",
     LNTuningConfig: "ln_tuning_",
+    MoSLoraConfig: "lora_",
     VeraConfig: "vera_lambda_",
     FourierFTConfig: "fourierft_",
     HRAConfig: "hra_",
@@ -1699,6 +1734,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             LoraConfig(target_modules=["lin0"], init_lora_weights=False),
             LoKrConfig(target_modules=["lin0"], init_weights=False),
             LoHaConfig(target_modules=["lin0"], init_weights=False),
+            MoSLoraConfig(target_modules=["lin0"], init_lora_weights=False),
             AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
             IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
             OFTConfig(target_modules=["lin0"], init_weights=False, r=2),
@@ -2259,6 +2295,98 @@ class RequiresGradTester(unittest.TestCase):
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.lora_A.adapter1.weight",
+            "base_model.model.lin0.lora_B.adapter1.weight",
+        )
+    
+    def test_requires_grad_moslora_different_targets(self):
+        # test two different MoSLoRA adapters that target different modules
+        config0 = MoSLoraConfig(target_modules=["lin0"], use_moslora=True)
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = MoSLoraConfig(target_modules=["lin1"], use_moslora=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.lora_A.default.weight",
+            "base_model.model.lin0.lora_mixer.default.weight",
+            "base_model.model.lin0.lora_B.default.weight",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.lora_A.default.weight",
+            "base_model.model.lin0.lora_mixer.default.weight",
+            "base_model.model.lin0.lora_B.default.weight",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.lora_A.adapter1.weight",
+            "base_model.model.lin1.lora_mixer.adapter1.weight",
+            "base_model.model.lin1.lora_B.adapter1.weight",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.lora_A.adapter1.weight",
+            "base_model.model.lin1.lora_mixer.adapter1.weight",
+            "base_model.model.lin1.lora_B.adapter1.weight",
+        )
+
+    def test_requires_grad_moslora_same_targets(self):
+        # same as previous test, except that MoSLoRA adapters target the same layer
+        config0 = MoSLoraConfig(target_modules=["lin0"], use_moslora=True)
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = MoSLoraConfig(target_modules=["lin0"], use_moslora=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.lora_A.default.weight",
+            "base_model.model.lin0.lora_mixer.default.weight",
+            "base_model.model.lin0.lora_B.default.weight",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.lora_A.default.weight",
+            "base_model.model.lin0.lora_mixer.default.weight",
+            "base_model.model.lin0.lora_B.default.weight",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.lora_A.adapter1.weight",
+            "base_model.model.lin0.lora_mixer.adapter1.weight",
+            "base_model.model.lin0.lora_B.adapter1.weight",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.lora_A.adapter1.weight",
+            "base_model.model.lin0.lora_mixer.adapter1.weight",
             "base_model.model.lin0.lora_B.adapter1.weight",
         )
 

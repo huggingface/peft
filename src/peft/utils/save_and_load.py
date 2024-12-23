@@ -115,6 +115,28 @@ def get_peft_model_state_dict(
                 return k
 
             to_return = {renamed_dora_weights(k): v for k, v in to_return.items()}
+    
+    elif config.peft_type == PeftType.MOSLORA:
+        # to_return = lora_state_dict(model, bias=model.peft_config.bias)
+        # adapted from `https://github.com/microsoft/LoRA/blob/main/loralib/utils.py`
+        # to be used directly with the state dict which is necessary when using DeepSpeed or FSDP
+        bias = config.bias
+        if bias == "none":
+            to_return = {k: state_dict[k] for k in state_dict if "lora_" in k}
+        elif bias == "all":
+            to_return = {k: state_dict[k] for k in state_dict if "lora_" in k or "bias" in k}
+        elif bias == "lora_only":
+            to_return = {}
+            for k in state_dict:
+                if "lora_" in k:
+                    to_return[k] = state_dict[k]
+                    bias_name = k.split("lora_")[0] + "bias"
+                    if bias_name in state_dict:
+                        to_return[bias_name] = state_dict[bias_name]
+        else:
+            raise NotImplementedError
+        to_return = {k: v for k, v in to_return.items() if (("lora_" in k and adapter_name in k) or ("bias" in k))}
+        
 
     elif config.peft_type == PeftType.BOFT:
         bias = config.bias
