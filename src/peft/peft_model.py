@@ -229,7 +229,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         selected_adapters: Optional[list[str]] = None,
         save_embedding_layers: Union[str, bool] = "auto",
         is_main_process: bool = True,
-        convert_pissa_to_lora: Optional[str] = None,
         path_initial_model_for_weight_conversion: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
@@ -253,16 +252,14 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             is_main_process (`bool`, *optional*):
                 Whether the process calling this is the main process or not. Will default to `True`. Will not save the
                 checkpoint if not on the main process, which is important for multi device setups (e.g. DDP).
-            convert_pissa_to_lora (`str, *optional*`):
-                Deprecated. Use `path_initial_model_for_weight_conversion` instead.
             path_initial_model_for_weight_conversion (`str, *optional*`):
-                The path to the initialized adapter, which is obtained after initializing the model with PiSSA or OLoRA
-                and before performing any training. When `path_initial_model_for_weight_conversion` is not None, the
-                difference in adapter before and after fine-tuning is calculated. This difference can be represented as
-                the parameters of a standard LoRA adapter. Using this converted adapter does not require changes to the
-                base model, thus conveniently allowing the use of multiple PiSSA or OLoRA adapters with LoRA adapters,
-                and the activation or deactivation of any adapters. Note that this conversion is not supported if
-                `rslora` is used in combination with `rank_pattern` or `alpha_pattern`.
+                The path to the initialized adapter, which is obtained after initializing the model with
+                PiSSA/CorDA/OLoRA and before performing any training. When `path_initial_model_for_weight_conversion`
+                is not None, the difference in adapter before and after fine-tuning is calculated. This difference can
+                be represented as the parameters of a standard LoRA adapter. Using this converted adapter does not
+                require changes to the base model, thus conveniently allowing the use of multiple PiSSA/CorDA/OLoRA
+                adapters with LoRA adapters, and the activation or deactivation of any adapters. Note that this
+                conversion is not supported if `rslora` is used in combination with `rank_pattern` or `alpha_pattern`.
             kwargs (additional keyword arguments, *optional*):
                 Additional keyword arguments passed along to the `push_to_hub` method.
 
@@ -281,13 +278,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     f"You passed an invalid `selected_adapters` arguments, current supported adapter names are"
                     f" {list(self.peft_config.keys())} - got {selected_adapters}."
                 )
-        # TODO: remove deprecated parameter in PEFT v0.14.0
-        if convert_pissa_to_lora is not None:
-            warnings.warn(
-                "`convert_pissa_to_lora` is deprecated and will be removed in a future version. "
-                "Use `path_initial_model_for_weight_conversion` instead."
-            )
-            path_initial_model_for_weight_conversion = convert_pissa_to_lora
 
         def save_mutated_as_lora(peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs):
             if peft_config.use_rslora and (peft_config.rank_pattern or peft_config.alpha_pattern):
@@ -298,10 +288,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 raise ValueError(msg)
 
             if not any(
-                str(peft_config.init_lora_weights).lower().startswith(prefix) for prefix in ["pissa", "olora", "true"]
+                str(peft_config.init_lora_weights).lower().startswith(prefix)
+                for prefix in ["pissa", "corda", "olora", "true"]
             ):
                 warnings.warn(
-                    "`path_initial_model_for_weight_conversion` only works for converting a PiSSA or OLoRA adapter to "
+                    "`path_initial_model_for_weight_conversion` only works for converting a PiSSA/CorDA/OLoRA adapter to "
                     "a LoRA adapter"
                 )
             initial_adapter_name = os.path.basename(path_initial_model_for_weight_conversion)
@@ -312,8 +303,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     adapter_name=initial_adapter_name,
                 )
                 is_pissa = str(self.peft_config[initial_adapter_name].init_lora_weights).lower().startswith("pissa")
+                is_corda = str(self.peft_config[initial_adapter_name].init_lora_weights).lower() == "corda"
                 is_olora = str(self.peft_config[initial_adapter_name].init_lora_weights).lower() == "olora"
-                if is_pissa or is_olora:
+                if is_pissa or is_corda or is_olora:
                     raise ValueError(
                         "The `init_lora_weights` parameter of the initial adapter should be set to `True`. "
                         "Otherwise, `self.load_adapter` will subtract the decomposed values again based on the "
@@ -606,7 +598,17 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             # Let's warn here since (in contrast to load_adapter) we don't return the load result, so it could be quite
             # difficult for users to even notice that something might have gone wrong here. As we filter out non PEFT
             # keys from the missing keys, this gives no false positives.
-            warnings.warn(f"Found missing adapter keys while loading the checkpoint: {missing_keys}")
+
+            warn_message = f"Found missing adapter keys while loading the checkpoint: {missing_keys}."
+
+            prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(config.peft_type)
+            if prefix and adapter_name in prefix:
+                warn_message += (
+                    f"Adapter name {adapter_name} should not be contained in the prefix {prefix}."
+                    "This could be the potential reason for missing adapter keys."
+                )
+
+            warnings.warn(warn_message)
 
         return model
 
@@ -630,20 +632,33 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if config.num_transformer_submodules is None:
             config.num_transformer_submodules = 2 if config.task_type == TaskType.SEQ_2_SEQ_LM else 1
 
-        for named_param, value in list(transformer_backbone.named_parameters()):
-            # for ZeRO-3, the tensor is sharded across accelerators and deepspeed modifies it to a tensor with shape [0]
-            # the actual unsharded shape is stored in "ds_shape" attribute
-            # special handling is needed in case the model is initialized in deepspeed.zero.Init() context or HfDeepSpeedConfig
-            # has been called before
-            # For reference refer to issue: https://github.com/huggingface/peft/issues/996
-            deepspeed_distributed_tensor_shape = getattr(value, "ds_shape", None)
+        # determine the word embeddings
+        word_embeddings = None
+        try:
+            # First try to find the word embeddings based on the module name, this should work for models like Bert,
+            # Roberta, Deberta, etc.
+            word_embeddings = self.base_model.get_submodule("embeddings.word_embeddings")
+        except AttributeError:
+            pass
 
-            if value.shape[0] == self.base_model.config.vocab_size or (
-                deepspeed_distributed_tensor_shape is not None
-                and deepspeed_distributed_tensor_shape[0] == self.base_model.config.vocab_size
-            ):
-                self.word_embeddings = transformer_backbone.get_submodule(named_param.replace(".weight", ""))
-                break
+        if word_embeddings is None:
+            # Word embeddings could not be determined. Next try to guess them by checking which parameter has the size
+            # of the vocab.
+            for named_param, value in list(transformer_backbone.named_parameters()):
+                # for ZeRO-3, the tensor is sharded across accelerators and deepspeed modifies it to a tensor with shape
+                # [0] the actual unsharded shape is stored in "ds_shape" attribute special handling is needed in case
+                # the model is initialized in deepspeed.zero.Init() context or HfDeepSpeedConfig has been called before
+                # For reference refer to issue: https://github.com/huggingface/peft/issues/996
+                deepspeed_distributed_tensor_shape = getattr(value, "ds_shape", None)
+
+                if value.shape[0] == self.base_model.config.vocab_size or (
+                    deepspeed_distributed_tensor_shape is not None
+                    and deepspeed_distributed_tensor_shape[0] == self.base_model.config.vocab_size
+                ):
+                    word_embeddings = transformer_backbone.get_submodule(named_param.replace(".weight", ""))
+                    break
+
+        self.word_embeddings = word_embeddings
 
         if config.peft_type == PeftType.PROMPT_TUNING:
             prompt_encoder = PromptEmbedding(config, self.word_embeddings)
@@ -937,6 +952,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 adapters. Don't use this option when creating a new PEFT adapter for training.
 
         """
+        prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(peft_config.peft_type)
+        if prefix and adapter_name in prefix:
+            warnings.warn(
+                f"Adapter name {adapter_name} should not be contained in the prefix {prefix}."
+                "This may lead to reinitialization of the adapter weights during loading."
+            )
+
         if peft_config.peft_type != self.peft_type:
             raise ValueError(
                 f"Cannot combine adapters with different peft types. "
@@ -1144,7 +1166,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if peft_config.is_prompt_learning and is_trainable:
             raise ValueError("Cannot set a prompt learning adapter to trainable when loading pretrained adapter.")
 
-        # Since PiSSA/OLoRA modifies the base weights, it should not be combined with other adapters.
+        # Since PiSSA/CorDA/OLoRA modifies the base weights, it should not be combined with other adapters.
         all_configs = [peft_config] + list(self.peft_config.values())
         if len(all_configs) > 1:
             if any(getattr(config, "init_lora_weights", None) == "pissa" for config in all_configs):
@@ -1152,6 +1174,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     "PiSSA changes the base weights of the model and should thus not be used with other adapters. "
                     "Consider converting the PiSSA adapter into a normal LoRA adapter: "
                     "https://github.com/huggingface/peft/tree/main/examples/pissa_finetuning#convert-pissa-to-lora"
+                )
+                warnings.warn(msg)
+            elif any(getattr(config, "init_lora_weights", None) == "corda" for config in all_configs):
+                msg = (
+                    "CorDA changes the base weights of the model and should thus not be used with other adapters. "
+                    "Consider converting the CorDA adapter into a normal LoRA adapter: "
+                    "https://github.com/huggingface/peft/tree/main/examples/corda_finetuning#convert-corda-to-lora"
                 )
                 warnings.warn(msg)
             elif any(getattr(config, "init_lora_weights", None) == "olora" for config in all_configs):

@@ -199,6 +199,7 @@ class LoraModel(BaseTuner):
             "use_rslora": lora_config.use_rslora,
             "use_dora": lora_config.use_dora,
             "ephemeral_gpu_offload": lora_config.runtime_config.ephemeral_gpu_offload,
+            "lora_bias": lora_config.lora_bias,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
@@ -228,6 +229,7 @@ class LoraModel(BaseTuner):
                 init_lora_weights=lora_config.init_lora_weights,
                 use_rslora=lora_config.use_rslora,
                 use_dora=lora_config.use_dora,
+                lora_bias=lora_config.lora_bias,
             )
         else:
             new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
@@ -900,9 +902,9 @@ class LoraModel(BaseTuner):
 
     def subtract_mutated_init(self, output_state_dict: dict[str, torch.Tensor], adapter_name: str, kwargs=None):
         """
-        This function can calculate the updates of the [PiSSA | OLoRA] by comparing the parameters of the [PiSSA |
-        OLoRA] adapter in `output_state_dict` with the initial values of [PiSSA | OLoRA] in `adapter_name`, thus
-        converting [PiSSA | OLoRA] to LoRA.
+        This function can calculate the updates of the PiSSA/CorDA/OLoRA by comparing the parameters of the
+        PiSSA/CorDA/OLoRA adapter in `output_state_dict` with the initial values of PiSSA/CorDA/OLoRA in
+        `adapter_name`, thus converting PiSSA/CorDA/OLoRA to LoRA.
         """
         for name, param in self.model.named_parameters():
             if (

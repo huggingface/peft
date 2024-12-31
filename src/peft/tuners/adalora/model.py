@@ -174,7 +174,6 @@ class AdaLoraModel(LoraModel):
             kwargs.update(
                 {
                     "has_fp16_weights": target_base_layer.state.has_fp16_weights,
-                    "memory_efficient_backward": target_base_layer.state.memory_efficient_backward,
                     "threshold": target_base_layer.state.threshold,
                     "index": target_base_layer.index,
                 }

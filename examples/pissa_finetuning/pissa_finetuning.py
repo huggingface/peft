@@ -136,7 +136,7 @@ trainer.save_state()
 if script_args.convert_pissa_to_lora:
     peft_model.save_pretrained(
         os.path.join(script_args.output_dir, "pissa_lora"),
-        convert_pissa_to_lora=os.path.join(script_args.residual_model_name_or_path, "pissa_init"),
+        path_initial_model_for_weight_conversion=os.path.join(script_args.residual_model_name_or_path, "pissa_init"),
     )
 else:
     peft_model.save_pretrained(

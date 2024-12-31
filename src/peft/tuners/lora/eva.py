@@ -497,6 +497,7 @@ def _load_eva_state_dict(
         "lora_dropout": peft_config.lora_dropout,
         "use_rslora": peft_config.use_rslora,
         "use_dora": peft_config.use_dora,
+        "lora_bias": peft_config.lora_bias,
     }
     missing_eva_inits = []
     new_target_modules = []

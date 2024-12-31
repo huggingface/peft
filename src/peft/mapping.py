@@ -72,6 +72,7 @@ from .tuners import (
 )
 from .tuners.tuners_utils import BaseTuner
 from .utils import _prepare_prompt_learning_config
+from .utils.constants import PEFT_TYPE_TO_PREFIX_MAPPING
 
 
 if TYPE_CHECKING:
@@ -204,6 +205,13 @@ def get_peft_model(
             "Setting low_cpu_mem_usage=True can improve the maximum batch size possible for eva initialization."
         )
 
+    prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(peft_config.peft_type)
+    if prefix and adapter_name in prefix:
+        warnings.warn(
+            f"Adapter name {adapter_name} should not be contained in the prefix {prefix}."
+            "This may lead to reinitialization of the adapter weights during loading."
+        )
+
     if mixed:
         # note: PeftMixedModel does not support autocast_adapter_dtype, so don't pass it
         return PeftMixedModel(model, peft_config, adapter_name=adapter_name)
@@ -220,7 +228,11 @@ def get_peft_model(
     if peft_config.is_prompt_learning:
         peft_config = _prepare_prompt_learning_config(peft_config, model_config)
     return MODEL_TYPE_TO_PEFT_MODEL_MAPPING[peft_config.task_type](
-        model, peft_config, adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype
+        model,
+        peft_config,
+        adapter_name=adapter_name,
+        autocast_adapter_dtype=autocast_adapter_dtype,
+        low_cpu_mem_usage=low_cpu_mem_usage,
     )
 
 
