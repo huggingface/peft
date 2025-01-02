@@ -19,7 +19,7 @@ from .layer import Linear, VeraLayer
 from .model import VeraModel
 
 
-__all__ = ["VeraConfig", "VeraLayer", "Linear", "VeraModel"]
+__all__ = ["Linear", "VeraConfig", "VeraLayer", "VeraModel"]
 
 
 def __getattr__(name):

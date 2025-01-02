@@ -17,4 +17,4 @@ from .layer import Linear, VBLoRALayer
 from .model import VBLoRAModel
 
 
-__all__ = ["VBLoRAConfig", "VBLoRALayer", "Linear", "VBLoRAModel"]
+__all__ = ["Linear", "VBLoRAConfig", "VBLoRALayer", "VBLoRAModel"]
