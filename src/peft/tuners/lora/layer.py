@@ -1245,8 +1245,10 @@ class MultiheadAttention(nn.Module, LoraLayer):
     one of them. Don't try to apply LoRA to the out_proj of MultiheadAttention by targeting that layer specifically,
     since the forward method of that layer is not being used, hence the LoRA adapter would be ignored.
 
-    This is a little bit hacky because of the way that MultiheadAttention is implemented in PyTorch. It works by
-    merging the weights before the forward call and unmerging them after the forward call.
+    This is a little bit hacky because of the way that MultiheadAttention is implemented in PyTorch: There are
+    no `nn.Linear` layers which we can hook onto or, in case of output projection, `.forward` is not used. 
+    This implementation works around these problems by merging the weights before the forward call 
+    and unmerging them after the forward call.
     """
 
     def __init__(
@@ -1358,7 +1360,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
                 base_layer = self.get_base_layer()
                 if safe_merge:
                     # TODO: work with separate weights
-                    # merging in_proj
+                    # merging in_proj (nn.Parameter)
                     orig_weights_in = base_layer.in_proj_weight.data.detach().clone()
                     orig_weights_in += self.get_delta_weight(active_adapter)
                     if not torch.isfinite(orig_weights_in).all():
@@ -1366,7 +1368,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    # merging out_proj
+                    # merging out_proj (subclass of nn.Linear)
                     orig_weights_out = base_layer.out_proj.weight.data.detach().clone()
                     orig_weights_out += base_layer.out_proj.get_delta_weight(active_adapter)
                     if not torch.isfinite(orig_weights_out).all():
@@ -1381,13 +1383,13 @@ class MultiheadAttention(nn.Module, LoraLayer):
                     base_layer.out_proj.get_base_layer().weight = orig_weights_out
                     base_layer.out_proj.merge(adapter_names=[active_adapter])
                 else:
-                    # merging in_proj
+                    # merging in_proj (nn.Parameter)
                     # TODO: work with separate weights
                     weight_merged = base_layer.in_proj_weight.data.detach() + self.get_delta_weight(active_adapter)
                     del base_layer.in_proj_weight
                     base_layer.in_proj_weight = weight_merged
 
-                    # merging out_proj
+                    # merging out_proj (subclass of nn.Linear)
                     weight_merged = base_layer.out_proj.weight.data.detach() + base_layer.out_proj.get_delta_weight(
                         active_adapter
                     )

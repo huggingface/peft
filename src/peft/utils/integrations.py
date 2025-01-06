@@ -177,6 +177,9 @@ def map_cache_to_layer_device_map(model, cache) -> None:
 ##################################
 # START: ADAPTED FROM ACCELERATE #
 ##################################
+#
+# Modified to support explicitly skipping layer initialization for faster switching between layer states
+# (necessary for supporting `nn.MultiHeadAttention` adapters)
 
 
 @contextmanager
