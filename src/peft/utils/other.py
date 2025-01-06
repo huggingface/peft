@@ -99,7 +99,8 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
 
     This method wraps the entire protocol for preparing a model before running a training. This includes:
         1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
-        head to fp32
+        head to fp32 4- Freezing the base model layers to ensure they are not updated during training
+
 
     Args:
         model (`transformers.PreTrainedModel`):
