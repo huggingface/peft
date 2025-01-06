@@ -15,10 +15,11 @@
 
 from typing import List
 
+import os
 import torch
 import transformers
 from datasets import load_dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, set_seed
 
 from peft import (
     LoraConfig,
@@ -38,13 +39,22 @@ def train(
     quantize: bool = False,
     eval_step: int = 100,
     save_step: int = 100,
-    device_map: str = "auto",
+    device_map: str = None,
     lora_r: int = 32,
     lora_alpha: int = 16,
     lora_dropout: float = 0.05,
     lora_target_modules: List[str] = None,
+    seed: int = None,
+    torch_dtype: str = "float16",
     init_lora_weights="olora",
 ):
+    # Set device_map="auto" if no ditributed training
+    world_size = int(os.environ.get("WORLD_SIZE", 0)) or int(os.environ.get("PMI_SIZE", 0))
+    if world_size <= 1:
+        device_map = "auto"
+    # Set seed
+    if seed:
+        set_seed(seed)
     model = AutoModelForCausalLM.from_pretrained(
         base_model,
         device_map=device_map,
@@ -56,7 +66,7 @@ def train(
         )
         if quantize
         else None,
-        torch_dtype=torch.float16,
+        torch_dtype=getattr(torch, torch_dtype),
     )
 
     tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
@@ -154,11 +164,13 @@ if __name__ == "__main__":
     parser.add_argument("--quantize", action="store_true")
     parser.add_argument("--eval_step", type=int, default=100)
     parser.add_argument("--save_step", type=int, default=100)
-    parser.add_argument("--device_map", type=str, default="auto")
+    parser.add_argument("--device_map", type=str, default=None)
     parser.add_argument("--lora_r", type=int, default=32)
     parser.add_argument("--lora_alpha", type=int, default=16)
     parser.add_argument("--lora_dropout", type=float, default=0.05)
     parser.add_argument("--lora_target_modules", type=str, default=None)
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--torch_dtype", type=str, default="float16")
     parser.add_argument("--init_lora_weights", type=str, default="olora")
 
     args = parser.parse_args()
@@ -180,5 +192,7 @@ if __name__ == "__main__":
         lora_alpha=args.lora_alpha,
         lora_dropout=args.lora_dropout,
         lora_target_modules=args.lora_target_modules,
+        seed=args.seed,
+        torch_dtype=args.torch_dtype,
         init_lora_weights=args.init_lora_weights,
     )
