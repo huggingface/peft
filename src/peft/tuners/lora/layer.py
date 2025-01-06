@@ -1294,6 +1294,38 @@ class MultiheadAttention(nn.Module, LoraLayer):
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
 
+    @property
+    def embed_dim(self) -> int:
+        return self.get_base_layer().embed_dim
+
+    @property
+    def kdim(self) -> Optional[int]:
+        return self.get_base_layer().kdim
+
+    @property
+    def vdim(self) -> Optional[int]:
+        return self.get_base_layer().vdim
+
+    @property
+    def _qkv_same_embed_dim(self) -> bool:
+        return self.get_base_layer()._qkv_same_embed_dim
+
+    @property
+    def num_heads(self) -> int:
+        return self.get_base_layer().num_heads
+
+    @property
+    def dropout(self) -> float:
+        return self.get_base_layer().dropout
+
+    @property
+    def batch_first(self) -> bool:
+        return self.get_base_layer().batch_first
+
+    @property
+    def head_dim(self) -> int:
+        return self.get_base_layer().head_dim
+
     def update_layer(self, *args, **kwargs) -> None:
         super().update_layer(*args, **kwargs)
         # Note: LoRA is applied to both in_proj and out_proj. There is currently no way to only specify one of them.

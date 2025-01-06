@@ -1141,6 +1141,28 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match=msg):
             get_peft_model(model, config)
 
+    def test_mha_exposes_attributes(self, mha_cls):
+        model = mha_cls()
+        embed_dim = model.mha.embed_dim
+        kdim = model.mha.kdim
+        vdim = model.mha.vdim
+        qkv_same_embed_dim = model.mha._qkv_same_embed_dim
+        num_heads = model.mha.num_heads
+        dropout = model.mha.dropout
+        batch_first = model.mha.batch_first
+        head_dim = model.mha.head_dim
+
+        config = LoraConfig(target_modules=["mha"])
+        peft_model = get_peft_model(model, config)
+        assert peft_model.base_model.mha.embed_dim == embed_dim
+        assert peft_model.base_model.mha.kdim == kdim
+        assert peft_model.base_model.mha.vdim == vdim
+        assert peft_model.base_model.mha._qkv_same_embed_dim == qkv_same_embed_dim
+        assert peft_model.base_model.mha.num_heads == num_heads
+        assert peft_model.base_model.mha.dropout == dropout
+        assert peft_model.base_model.mha.batch_first == batch_first
+        assert peft_model.base_model.mha.head_dim == head_dim
+
     def test_lora_with_bias_extra_params(self):
         # lora with lora_bias=True
         model = self.get_model()
