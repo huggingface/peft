@@ -39,7 +39,7 @@ def train(
     quantize: bool = False,
     eval_step: int = 100,
     save_step: int = 100,
-    device_map: str = None,
+    device_map: str = "auto",
     lora_r: int = 32,
     lora_alpha: int = 16,
     lora_dropout: float = 0.05,
@@ -48,26 +48,23 @@ def train(
     torch_dtype: str = "float16",
     init_lora_weights="olora",
 ):
-    # Set device_map="auto" if no ditributed training
+    # Set device_map to the right place when enabling DDP.
     world_size = int(os.environ.get("WORLD_SIZE", 0)) or int(os.environ.get("PMI_SIZE", 0))
-    if world_size <= 1 and device_map is None:
-        device_map = "auto"
+    if world_size > 1:
+        from accelerate import Accelerator
+        device_map = {'': Accelerator().process_index}
     # Set seed
     if seed:
         set_seed(seed)
-    model = AutoModelForCausalLM.from_pretrained(
-        base_model,
-        device_map=device_map,
-        quantization_config=BitsAndBytesConfig(
+    model_kwargs = dict(torch_dtype=getattr(torch, torch_dtype), device_map=device_map)
+    if quantize:
+        model_kwargs["quantization_config"] = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_compute_dtype=torch.bfloat16,
             bnb_4bit_use_double_quant=True,
             bnb_4bit_quant_type="nf4",
         )
-        if quantize
-        else None,
-        torch_dtype=getattr(torch, torch_dtype),
-    )
+    model = AutoModelForCausalLM.from_pretrained(base_model, **model_kwargs)
 
     tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
     if tokenizer.pad_token is None:
@@ -166,7 +163,7 @@ if __name__ == "__main__":
     parser.add_argument("--quantize", action="store_true")
     parser.add_argument("--eval_step", type=int, default=100)
     parser.add_argument("--save_step", type=int, default=100)
-    parser.add_argument("--device_map", type=str, default=None)
+    parser.add_argument("--device_map", type=str, default="auto")
     parser.add_argument("--lora_r", type=int, default=32)
     parser.add_argument("--lora_alpha", type=int, default=16)
     parser.add_argument("--lora_dropout", type=float, default=0.05)
