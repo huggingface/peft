@@ -71,7 +71,7 @@ def train(
 
     tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
     if tokenizer.pad_token is None:
-        tokenizer.add_special_tokens({'pad_token': '<pad>'})
+        tokenizer.pad_token_id = 0  # unk. we want this to be different from the eos token
 
     def tokenize(prompt, add_eos_token=True):
         result = tokenizer(
@@ -124,7 +124,6 @@ def train(
             warmup_steps=100,
             num_train_epochs=num_epochs,
             learning_rate=learning_rate,
-            fp16=True,
             logging_steps=100,
             optim="adamw_torch",
             evaluation_strategy="steps",
@@ -134,6 +133,7 @@ def train(
             output_dir=output_dir,
             save_total_limit=3,
             load_best_model_at_end=True,
+            ddp_find_unused_parameters=False if world_size > 1 else True,
         ),
         data_collator=transformers.DataCollatorForSeq2Seq(
             tokenizer, pad_to_multiple_of=8, return_tensors="pt", padding=True
