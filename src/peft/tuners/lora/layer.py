@@ -1246,8 +1246,8 @@ class MultiheadAttention(nn.Module, LoraLayer):
     since the forward method of that layer is not being used, hence the LoRA adapter would be ignored.
 
     This is a little bit hacky because of the way that MultiheadAttention is implemented in PyTorch: There are
-    no `nn.Linear` layers which we can hook onto or, in case of output projection, `.forward` is not used. 
-    This implementation works around these problems by merging the weights before the forward call 
+    no `nn.Linear` layers which we can hook onto or, in case of output projection, `.forward` is not used.
+    This implementation works around these problems by merging the weights before the forward call
     and unmerging them after the forward call.
     """
 
