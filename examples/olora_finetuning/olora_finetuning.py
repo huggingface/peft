@@ -50,7 +50,7 @@ def train(
 ):
     # Set device_map="auto" if no ditributed training
     world_size = int(os.environ.get("WORLD_SIZE", 0)) or int(os.environ.get("PMI_SIZE", 0))
-    if world_size <= 1:
+    if world_size <= 1 and device_map is None:
         device_map = "auto"
     # Set seed
     if seed:
