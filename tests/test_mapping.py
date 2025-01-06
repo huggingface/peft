@@ -27,7 +27,7 @@ class TestGetPeftModel:
         with pytest.warns(UserWarning, match=self.RELOAD_WARNING_EXPECTED_MATCH):
             get_peft_model(base_model, lora_config)
 
-    def test_get_peft_model_proposed_fix_in_warning_help(self, get_peft_model, lora_config, base_model, recwarn):
+    def test_get_peft_model_proposed_fix_in_warning_helps(self, get_peft_model, lora_config, base_model, recwarn):
         peft_model = get_peft_model(base_model, lora_config)
         peft_model.unload()
         get_peft_model(base_model, lora_config)
