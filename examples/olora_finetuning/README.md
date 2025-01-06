@@ -39,6 +39,8 @@ OLoRA also supports quantization. To use 4-bit quantization try:
 ```bash
 python3 examples/olora_finetuning/olora_finetuning.py --base_model facebook/opt-350m --quantize
 ```
+or you can just pass a quantized model without the quantiza flag.
+
 If you want to run DDP by accelerate, please run `accelerate config` to set your ddp config, and run:
 ```bash
 accelerate launch examples/olora_finetuning/olora_finetuning.py --base_model facebook/opt-350m
