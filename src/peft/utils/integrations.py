@@ -194,6 +194,9 @@ def _init_on_device(device: torch.device, include_buffers: bool = None):
         old_register_buffer = nn.Module.register_buffer
 
     def register_empty_parameter(module, name, param):
+        # This works because torch first initializes the parameters with torch.empty, thus not assigning any new memory.
+        # Then the parameter is moved to meta device before reset_parameters() is called, which then operates on the
+        # meta device, making any subsequent calls to initialization methods no-ops.
         old_register_parameter(module, name, param)
         if (param is not None) and (getattr(_init_on_device, "_skip", False) is not True):
             param_cls = type(module._parameters[name])
