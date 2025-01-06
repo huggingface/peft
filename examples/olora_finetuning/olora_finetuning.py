@@ -70,6 +70,8 @@ def train(
     )
 
     tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.add_special_tokens({'pad_token': '<pad>'})
 
     def tokenize(prompt, add_eos_token=True):
         result = tokenizer(
