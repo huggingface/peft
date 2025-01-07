@@ -47,6 +47,7 @@ class TestGetPeftModel:
     def test_get_peft_model_repeated_invocation(self, lora_config_0, base_model):
         peft_model = get_peft_model(base_model, lora_config_0)
 
+        # use direct-addressing of the other layer to accomodate for the nested model
         lora_config_1 = LoraConfig(target_modules="base_model.model.1")
 
         with pytest.warns(UserWarning, match=self.RELOAD_WARNING_EXPECTED_MATCH):
