@@ -67,8 +67,9 @@ def train(
     model = AutoModelForCausalLM.from_pretrained(base_model, **model_kwargs)
 
     tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
+    # For some tokenizer with no pad token like llama
     if tokenizer.pad_token is None:
-        tokenizer.pad_token_id = 0  # unk. we want this to be different from the eos token
+        tokenizer.pad_token_id = 0
 
     def tokenize(prompt, add_eos_token=True):
         result = tokenizer(
