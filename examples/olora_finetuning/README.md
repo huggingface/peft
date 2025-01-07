@@ -47,6 +47,8 @@ accelerate launch examples/olora_finetuning/olora_finetuning.py --base_model fac
 ```
 please add `--device_map cpu` if you want to run finetune on CPU.
 
+If you want to train a quantized model like AWQ and GPTQ which do not support olora init method, please pass `--init_lora_weights gaussian`.
+
 
 ## Use the model
 You can load and use the model as any other 🤗 PEFT model
