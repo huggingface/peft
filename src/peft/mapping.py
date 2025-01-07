@@ -31,7 +31,6 @@ from .peft_model import (
     PeftModelForSeq2SeqLM,
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
-    get_layer_status,
 )
 from .tuners import (
     AdaLoraConfig,
@@ -71,7 +70,7 @@ from .tuners import (
     VeraModel,
     XLoraConfig,
 )
-from .tuners.tuners_utils import BaseTuner
+from .tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from .utils import _prepare_prompt_learning_config
 
 
@@ -182,20 +181,14 @@ def get_peft_model(
     new_name = model.__dict__.get("name_or_path", None)
     peft_config.base_model_name_or_path = new_name
 
-    # Especially in notebook environments there could be a case that a user
-    # wants to experiment with different configuration values. However, it
-    # is likely that there won't be any changes for new configs on an already
+    # Especially in notebook environments there could be a case that a user wants to experiment with different
+    # configuration values. However, it is likely that there won't be any changes for new configs on an already
     # initialized PEFT model. The best we can do is warn the user about it.
-    try:
-        if len(get_layer_status(model)) > 0:
-            warnings.warn(
-                "You are trying to modify a model with PEFT for a "
-                "second time. If you want to reload the model with a "
-                "different config, make sure to call `.unload()` before."
-            )
-    except ValueError:
-        # not a PEFT model or no adapters in use
-        pass
+    if any(isinstance(module, BaseTunerLayer) for module in model.modules()):
+        warnings.warn(
+            "You are trying to modify a model with PEFT for a second time. If you want to reload the model with a "
+            "different config, make sure to call `.unload()` before."
+        )
 
     if (old_name is not None) and (old_name != new_name):
         warnings.warn(
