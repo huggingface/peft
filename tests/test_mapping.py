@@ -14,7 +14,8 @@
 import pytest
 import torch
 
-from peft import get_peft_model, LoraConfig
+from peft import LoraConfig, get_peft_model
+
 
 class TestGetPeftModel:
     RELOAD_WARNING_EXPECTED_MATCH = r"You are trying to modify a model .*"
