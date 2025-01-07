@@ -45,6 +45,7 @@ If you want to run DDP by accelerate, please run `accelerate config` to set your
 ```bash
 accelerate launch examples/olora_finetuning/olora_finetuning.py --base_model facebook/opt-350m
 ```
+please add `--device_map cpu` if you want to run finetune on CPU.
 
 
 ## Use the model
