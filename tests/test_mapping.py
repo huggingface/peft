@@ -14,35 +14,40 @@
 import pytest
 import torch
 
-from peft import get_peft_model
-
+from peft import get_peft_model, LoraConfig
 
 class TestGetPeftModel:
     RELOAD_WARNING_EXPECTED_MATCH = r"You are trying to modify a model .*"
 
     @pytest.fixture
-    def lora_config(self):
-        from peft import LoraConfig
-
+    def lora_config_0(self):
         return LoraConfig(target_modules="0")
 
     @pytest.fixture
     def base_model(self):
-        return torch.nn.Sequential(torch.nn.Linear(10, 2))
+        return torch.nn.Sequential(torch.nn.Linear(10, 2), torch.nn.Linear(2, 10))
 
-    def test_get_peft_model_warns_when_reloading_model(self, lora_config, base_model):
-        get_peft_model(base_model, lora_config)
+    def test_get_peft_model_warns_when_reloading_model(self, lora_config_0, base_model):
+        get_peft_model(base_model, lora_config_0)
 
         with pytest.warns(UserWarning, match=self.RELOAD_WARNING_EXPECTED_MATCH):
-            get_peft_model(base_model, lora_config)
+            get_peft_model(base_model, lora_config_0)
 
-    def test_get_peft_model_proposed_fix_in_warning_helps(self, lora_config, base_model, recwarn):
-        peft_model = get_peft_model(base_model, lora_config)
+    def test_get_peft_model_proposed_fix_in_warning_helps(self, lora_config_0, base_model, recwarn):
+        peft_model = get_peft_model(base_model, lora_config_0)
         peft_model.unload()
-        get_peft_model(base_model, lora_config)
+        get_peft_model(base_model, lora_config_0)
 
         warning_checker = pytest.warns(UserWarning, match=self.RELOAD_WARNING_EXPECTED_MATCH)
 
         for warning in recwarn:
             if warning_checker.matches(warning):
                 pytest.fail("Warning raised even though model was unloaded.")
+
+    def test_get_peft_model_repeated_invocation(self, lora_config_0, base_model):
+        peft_model = get_peft_model(base_model, lora_config_0)
+
+        lora_config_1 = LoraConfig(target_modules="base_model.model.1")
+
+        with pytest.warns(UserWarning, match=self.RELOAD_WARNING_EXPECTED_MATCH):
+            get_peft_model(peft_model, lora_config_1)
