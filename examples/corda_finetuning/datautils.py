@@ -106,6 +106,7 @@ llama_chat_format = """<s>[INST] <<SYS>>
 def get_calib_data(name, tokenizer, model_id, nsamples, seqlen=2048, seed=3):
     print(f" get_data_from: {name}, nsamples={nsamples}, seqlen={seqlen}, {seed}")
     cache_file = f"cache/{name}_{model_id.replace('/','_')}_{nsamples}_{seqlen}_{seed}.pt"
+    traindataset = []
     if not os.path.exists("cache"):
         os.makedirs("cache")
     if os.path.exists(cache_file):
@@ -139,7 +140,6 @@ def get_calib_data(name, tokenizer, model_id, nsamples, seqlen=2048, seed=3):
         tot_text = "\n\n".join(traindata["question"])
     elif name == "alpaca":
         selected_data_dict = load_dataset("iboing/alpaca_data", split="train").shuffle(seed=seed).take(nsamples)
-        traindataset = []
         for example in selected_data_dict:
             if example.get("input", "") == "":
                 s = llama_chat_format.format(instruction=example["instruction"], response=example["output"])
@@ -152,7 +152,6 @@ def get_calib_data(name, tokenizer, model_id, nsamples, seqlen=2048, seed=3):
         return traindataset
     elif name == "MetaMATH":
         selected_data_dict = load_dataset("iboing/MetaMathQA-395K", split="train").shuffle(seed=seed).take(nsamples)
-        traindataset = []
         for example in selected_data_dict:
             if example.get("input", "") == "":
                 s = llama_chat_format.format(instruction=example["query"], response=example["response"])
@@ -167,7 +166,6 @@ def get_calib_data(name, tokenizer, model_id, nsamples, seqlen=2048, seed=3):
         selected_data_dict = (
             load_dataset("iboing/CodeFeedback-Filtered-Instruction", split="train").shuffle(seed=seed).take(nsamples)
         )
-        traindataset = []
         for example in selected_data_dict:
             if example.get("input", "") == "":
                 s = llama_chat_format.format(instruction=example["query"], response=example["answer"])
@@ -182,7 +180,6 @@ def get_calib_data(name, tokenizer, model_id, nsamples, seqlen=2048, seed=3):
         selected_data_dict = (
             load_dataset("iboing/WizardLM_evol_instruct_V2_143k", split="train").shuffle(seed=seed).take(nsamples)
         )
-        traindataset = []
         for example in selected_data_dict:
             if example.get("input", "") == "":
                 s = llama_chat_format.format(
@@ -198,7 +195,6 @@ def get_calib_data(name, tokenizer, model_id, nsamples, seqlen=2048, seed=3):
     else:
         raise NotImplementedError
     print(f"tot_text={len(tot_text)}")
-    traindataset = []
     for _ in range(nsamples):
         i = random.randint(0, len(tot_text) - seqlen - 1)
         j = i + seqlen * 10
