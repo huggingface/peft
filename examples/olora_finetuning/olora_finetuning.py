@@ -44,7 +44,7 @@ def train(
     lora_alpha: int = 16,
     lora_dropout: float = 0.05,
     lora_target_modules: List[str] = None,
-    seed: int = None,
+    seed: Optional[int] = None,
     torch_dtype: str = "float16",
     init_lora_weights="olora",
 ):
