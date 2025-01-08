@@ -586,9 +586,9 @@ class LoraConfig(PeftConfig):
             )
             warnings.warn(msg)
 
-        self._custom_modules: Optional[dict[type[nn.Mmodule], type[nn.Module]]] = None
+        self._custom_modules: Optional[dict[type[nn.Module], type[nn.Module]]] = None
 
-    def _register_custom_module(self, mapping: dict[type[nn.Mmodule], type[nn.Module]]) -> None:
+    def _register_custom_module(self, mapping: dict[type[nn.Module], type[nn.Module]]) -> None:
         """
         Experimental API to support providing custom LoRA layers.
 
