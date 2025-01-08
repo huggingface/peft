@@ -13,9 +13,9 @@
 # limitations under the License.
 
 
+import os
 from typing import List, Optional
 
-import os
 import torch
 import transformers
 from datasets import load_dataset
@@ -56,7 +56,7 @@ def train(
     # Set seed
     if seed is not None:
         set_seed(seed)
-    model_kwargs = dict(torch_dtype=getattr(torch, torch_dtype), device_map=device_map)
+    model_kwargs = {"torch_dtype": getattr(torch, torch_dtype), "device_map": device_map}
     if quantize:
         model_kwargs["quantization_config"] = BitsAndBytesConfig(
             load_in_4bit=True,
