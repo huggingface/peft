@@ -54,6 +54,17 @@ lora_config = LoraConfig(init_lora_weights="pissa_niter_[number of iters]", ...)
 ```
 For detailed instruction on using PiSSA, please follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/pissa_finetuning).
 
+### MoSLoRA
+[MoSLoRA](https://arxiv.org/abs/2406.11909) initializes the lora branch with an extra mixer layer. The vanilla LoRA can be viewed as the special case that the mixer is a _fixed_ identity metrix mixing $r$ subspaces. MoSLoRA try to employ a _learnable_ matrix to mix the information from $r^2$ subspaces.
+
+
+```python
+from peft import MoSLoraConfig
+config = LoraConfig(use_moslora="kai", ...)
+```
+
+For detailed instruction on using MoSLoRA, please follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/moslora_finetuning).
+
 ### CorDA
 
 [CorDA](https://arxiv.org/pdf/2406.05223) builds task-aware LoRA adapters from weight decomposition oriented by the context of downstream task to learn (instruction-previewed mode, IPM) or world knowledge to maintain (knowledge-preserved mode, KPM).

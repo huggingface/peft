@@ -72,6 +72,7 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
+    MoSLoraConfig,
     PeftModel,
     VBLoRAConfig,
     VeraConfig,
@@ -321,6 +322,17 @@ class TestMlp(RegressionTester):
         )
         model = get_peft_model(base_model, config)
         self.assert_results_equal_or_store(model, "lora_dora_mlp")
+    
+    def test_moslora(self):
+        base_model = self.load_base_model()
+        config = MoSLoraConfig(
+            r=8,
+            init_lora_weights=False,
+            target_modules=["lin0"],
+            use_moslora="orth",
+        )
+        model = get_peft_model(base_model, config)
+        self.assert_results_equal_or_store(model, "moslora_mlp")
 
     def test_adalora(self):
         base_model = self.load_base_model()
@@ -561,6 +573,16 @@ class TestOpt(RegressionTester):
         )
         model = get_peft_model(base_model, config)
         self.assert_results_equal_or_store(model, "lora_opt-350m")
+    
+    def test_moslora(self):
+        base_model = self.load_base_model()
+        config = MoSLoraConfig(
+            r=8,
+            init_lora_weights=False,
+            use_moslora="kai",
+        )
+        model = get_peft_model(base_model, config)
+        self.assert_results_equal_or_store(model, "moslora_opt-350m")
 
     def test_adalora(self):
         base_model = self.load_base_model()
@@ -606,6 +628,19 @@ class TestOpt8bitBnb(RegressionTester):
         )
         model = get_peft_model(base_model, config)
         self.assert_results_equal_or_store(model, "lora_opt-350m_bnb_8bit")
+    
+    def test_moslora_8bit(self):
+        # Warning: bnb results can vary significantly depending on the GPU. Therefore, if there is a change in GPU used
+        # in the CI, the test can fail without any code change. In that case, delete the regression artifact and create
+        # a new one using the new GPU.
+        base_model = self.load_base_model()
+        config = MoSLoraConfig(
+            r=8,
+            init_lora_weights=False,
+            use_moslora="kai",
+        )
+        model = get_peft_model(base_model, config)
+        self.assert_results_equal_or_store(model, "moslora_opt-350m_bnb_8bit")
 
     def test_adalora(self):
         # TODO
@@ -668,6 +703,19 @@ class TestOpt4bitBnb(RegressionTester):
         )
         model = get_peft_model(base_model, config)
         self.assert_results_equal_or_store(model, "lora_opt-350m_bnb_4bit")
+    
+    def test_moslora_4bit(self):
+        # Warning: bnb results can vary significantly depending on the GPU. Therefore, if there is a change in GPU used
+        # in the CI, the test can fail without any code change. In that case, delete the regression artifact and create
+        # a new one using the new GPU.
+        base_model = self.load_base_model()
+        config = MoSLoraConfig(
+            r=8,
+            init_lora_weights=False,
+            use_moslora=True,
+        )
+        model = get_peft_model(base_model, config)
+        self.assert_results_equal_or_store(model, "moslora_opt-350m_bnb_4bit")
 
     def test_adalora(self):
         # TODO

@@ -57,6 +57,7 @@ from peft import (
     EvaConfig,
     LoftQConfig,
     LoraConfig,
+    MoSLoraConfig,
     PeftModel,
     PrefixTuningConfig,
     PromptEncoderConfig,
@@ -830,6 +831,42 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         # sanity check
         assert n_trainable_default == n_trainable_other
         assert n_total_default == n_total_other
+    
+    @pytest.mark.single_gpu_tests
+    def test_8bit_non_default_adapter_name_moslora(self):
+        # See PR 1294, using MoSLoRA
+        config = MoSLoraConfig(
+            r=16,
+            target_modules=["q_proj", "v_proj"],
+            bias="none",
+            task_type="CAUSAL_LM",
+            use_moslora="kai",
+        )
+
+        # default adapter name
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+        )
+        model = prepare_model_for_kbit_training(model)
+        model = get_peft_model(model, config)
+        n_trainable_default, n_total_default = model.get_nb_trainable_parameters()
+
+        # other adapter name
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+        )
+        model = prepare_model_for_kbit_training(model)
+        model = get_peft_model(model, config, adapter_name="other")
+        n_trainable_other, n_total_other = model.get_nb_trainable_parameters()
+
+        assert n_trainable_other > 0
+        # sanity check
+        assert n_trainable_default == n_trainable_other
+        assert n_total_default == n_total_other
 
     @pytest.mark.single_gpu_tests
     def test_causal_lm_training_4bit_dora(self):
@@ -1136,6 +1173,33 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         assert not weights_not_cpu
 
         lora_config = LoraConfig(use_dora=True)
+
+        # should not raise
+        peft_model = get_peft_model(model, lora_config)
+        # check that the weights are still on CPU
+        weights_not_cpu = [name for name, p in peft_model.named_parameters() if p.device != torch.device("cpu")]
+        assert not weights_not_cpu
+
+    @parameterized.expand(["4bit", "8bit"])
+    def test_initialize_moslora_with_bnb_on_cpu(self, kbit):
+        # 1674
+        # The issue is that to initialize MoSLoRA, we need to dequantize the weights. That only works on GPU for bnb.
+        # Therefore, intializing DoRA with bnb on CPU used to fail.
+        model_id = "facebook/opt-125m"
+        if kbit == "4bit":
+            bnb_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4")
+        elif kbit == "8bit":
+            bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+        else:
+            raise ValueError("Only 4bit and 8bit bnb allowed")
+
+        model = AutoModelForCausalLM.from_pretrained(model_id, quantization_config=bnb_config)
+        model = model.cpu()  # ensure that we're on CPU
+        # sanity check that all weights are on CPU
+        weights_not_cpu = [name for name, p in model.named_parameters() if p.device != torch.device("cpu")]
+        assert not weights_not_cpu
+
+        lora_config = MoSLoraConfig(use_moslora=True)
 
         # should not raise
         peft_model = get_peft_model(model, lora_config)

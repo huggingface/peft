@@ -45,6 +45,8 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
+    MoSLoraConfig,
+    MoSLoraModel,
     OFTConfig,
     PeftModel,
     TaskType,
@@ -72,11 +74,13 @@ if is_bnb_available():
     from peft.tuners.ia3 import Linear8bitLt as IA3Linear8bitLt
     from peft.tuners.lora import Linear8bitLt as LoraLinear8bitLt
     from peft.tuners.vera import Linear8bitLt as VeraLinear8bitLt
+    from peft.tuners.moslora import Linear8bitLt as MoSLoraLinear8bitLt
 
     if is_bnb_4bit_available():
         from peft.tuners.ia3 import Linear4bit as IA3Linear4bit
         from peft.tuners.lora import Linear4bit as LoraLinear4bit
         from peft.tuners.vera import Linear4bit as VeraLinear4bit
+        from peft.tuners.moslora import Linear4bit as MoSLoraLinear4bit
 
 
 @require_non_cpu
@@ -149,6 +153,56 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         whisper_8bit = get_peft_model(whisper_8bit, config)
         assert isinstance(whisper_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear8bitLt)
+    
+    @require_bitsandbytes
+    @pytest.mark.multi_gpu_tests
+    @pytest.mark.single_gpu_tests
+    def test_moslora_bnb_8bit_quantization(self):
+        r"""
+        Test that tests if the 8bit quantization using LoRA works as expected
+        """
+        whisper_8bit = WhisperForConditionalGeneration.from_pretrained(
+            self.audio_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+        )
+
+        opt_8bit = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+        )
+
+        flan_8bit = AutoModelForSeq2SeqLM.from_pretrained(
+            self.seq2seq_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+        )
+
+        flan_lora_config = MoSLoraConfig(
+            r=16, use_moslora=True, lora_alpha=32, target_modules=["q", "v"], lora_dropout=0.05, bias="none", task_type="SEQ_2_SEQ_LM"
+        )
+
+        opt_lora_config = MoSLoraConfig(
+            r=16,
+            lora_alpha=32,
+            target_modules=["q_proj", "v_proj"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+            use_moslora="kai",
+        )
+
+        config = MoSLoraConfig(r=32, lora_alpha=64, use_moslora="orth", target_modules=["q_proj", "v_proj"], lora_dropout=0.05, bias="none")
+
+        flan_8bit = get_peft_model(flan_8bit, flan_lora_config)
+        assert isinstance(flan_8bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, MoSLoraLinear8bitLt)
+
+        opt_8bit = get_peft_model(opt_8bit, opt_lora_config)
+        assert isinstance(opt_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, MoSLoraLinear8bitLt)
+
+        whisper_8bit = get_peft_model(whisper_8bit, config)
+        assert isinstance(whisper_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, MoSLoraLinear8bitLt)
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
@@ -271,6 +325,43 @@ class PeftGPUCommonTests(unittest.TestCase):
         # check that both adapters are in the same layer
         assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A
         assert "adapter2" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A
+
+    @require_bitsandbytes
+    @pytest.mark.multi_gpu_tests
+    @pytest.mark.single_gpu_tests
+    @parameterized.expand(["4bit", "8bit"])
+    def test_moslora_bnb_quantization_from_pretrained_safetensors(self, quantization):
+        r"""
+        Tests that the bnb quantization using AdaLora works as expected with safetensors weights.
+        """
+        model_id = "facebook/opt-350m"
+        kwargs = {"device_map": "auto"}
+        if quantization == "4bit":
+            kwargs["quantization_config"] = BitsAndBytesConfig(load_in_4bit=True)
+        else:
+            kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+
+        model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
+        config = MoSLoraConfig(task_type=TaskType.CAUSAL_LM)
+        peft_model = get_peft_model(model, config)
+        peft_model = prepare_model_for_kbit_training(peft_model)
+        peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            peft_model.save_pretrained(tmp_dir)
+            model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
+            model = PeftModel.from_pretrained(model, tmp_dir)
+            model = prepare_model_for_kbit_training(peft_model)
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+            # loading a 2nd adapter works, #1239
+            model.load_adapter(tmp_dir, "adapter2")
+            model.set_adapter("adapter2")
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+            # check that both adapters are in the same layer
+            assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A
+            assert "adapter2" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
@@ -420,6 +511,45 @@ class PeftGPUCommonTests(unittest.TestCase):
             # check that both adapters are in the same layer
             assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A
             assert "adapter2" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A
+    
+
+    @pytest.mark.single_gpu_tests
+    def test_moslora_gptq_quantization_from_pretrained_safetensors(self):
+        r"""
+        Tests that the autogptq quantization using MoSLoRA works as expected with safetensors weights.
+        """
+        from transformers import GPTQConfig
+
+        model_id = "marcsun13/opt-350m-gptq-4bit"
+        quantization_config = GPTQConfig(bits=4, use_exllama=False)
+        kwargs = {
+            "pretrained_model_name_or_path": model_id,
+            "torch_dtype": torch.float16,
+            "device_map": "auto",
+            "quantization_config": quantization_config,
+        }
+        model = AutoModelForCausalLM.from_pretrained(**kwargs)
+        model = prepare_model_for_kbit_training(model)
+
+        config = MoSLoraConfig(task_type="CAUSAL_LM")
+        peft_model = get_peft_model(model, config)
+        peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            peft_model.save_pretrained(tmp_dir)
+            model = AutoModelForCausalLM.from_pretrained(**kwargs)
+            model = PeftModel.from_pretrained(model, tmp_dir)
+            model = prepare_model_for_kbit_training(model)
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+            # loading a 2nd adapter works, #1239
+            model.load_adapter(tmp_dir, "adapter2")
+            model.set_adapter("adapter2")
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+            # check that both adapters are in the same layer
+            assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A
+            assert "adapter2" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
@@ -469,6 +599,56 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         whisper_4bit = get_peft_model(whisper_4bit, config)
         assert isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear4bit)
+
+    @require_bitsandbytes
+    @pytest.mark.multi_gpu_tests
+    @pytest.mark.single_gpu_tests
+    def test_moslora_bnb_4bit_quantization(self):
+        r"""
+        Test that tests if the 4bit quantization using LoRA works as expected
+        """
+        whisper_4bit = WhisperForConditionalGeneration.from_pretrained(
+            self.audio_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+        )
+
+        opt_4bit = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+        )
+
+        flan_4bit = AutoModelForSeq2SeqLM.from_pretrained(
+            self.seq2seq_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+        )
+
+        flan_lora_config = MoSLoraConfig(
+            r=16, lora_alpha=32, use_moslora=True, target_modules=["q", "v"], lora_dropout=0.05, bias="none", task_type="SEQ_2_SEQ_LM"
+        )
+
+        opt_lora_config = MoSLoraConfig(
+            r=16,
+            lora_alpha=32,
+            target_modules=["q_proj", "v_proj"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+            use_moslora="kai",
+        )
+
+        config = MoSLoraConfig(r=32, lora_alpha=64, use_moslora="orth", target_modules=["q_proj", "v_proj"], lora_dropout=0.05, bias="none")
+
+        flan_4bit = get_peft_model(flan_4bit, flan_lora_config)
+        assert isinstance(flan_4bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, MoSLoraLinear4bit)
+
+        opt_4bit = get_peft_model(opt_4bit, opt_lora_config)
+        assert isinstance(opt_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, MoSLoraLinear4bit)
+
+        whisper_4bit = get_peft_model(whisper_4bit, config)
+        assert isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, MoSLoraLinear4bit)
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
@@ -590,6 +770,36 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         # this should work without any problem
         _ = model.generate(input_ids=input_ids)
+    
+    @pytest.mark.multi_gpu_tests
+    @require_torch_multi_gpu
+    def test_moslora_causal_lm_multi_gpu_inference(self):
+        r"""
+        Test if MoSLORA can be used for inference on multiple GPUs.
+        """
+        lora_config = MoSLoraConfig(
+            r=16,
+            lora_alpha=32,
+            target_modules=["q_proj", "v_proj"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+            use_moslora=True,
+        )
+
+        model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map="balanced")
+        tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
+
+        assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+
+        model = get_peft_model(model, lora_config)
+        assert isinstance(model, PeftModel)
+
+        dummy_input = "This is a dummy input:"
+        input_ids = tokenizer(dummy_input, return_tensors="pt").input_ids.to(self.device)
+
+        # this should work without any problem
+        _ = model.generate(input_ids=input_ids)
 
     @require_torch_multi_gpu
     @pytest.mark.multi_gpu_tests
@@ -612,6 +822,35 @@ class PeftGPUCommonTests(unittest.TestCase):
         model = get_peft_model(model, lora_config)
         assert isinstance(model, PeftModel)
         assert isinstance(model.base_model.model.encoder.block[0].layer[0].SelfAttention.q, LoraLinear8bitLt)
+
+        dummy_input = "This is a dummy input:"
+        input_ids = tokenizer(dummy_input, return_tensors="pt").input_ids.to(self.device)
+
+        # this should work without any problem
+        _ = model.generate(input_ids=input_ids)
+    
+
+    @require_torch_multi_gpu
+    @pytest.mark.multi_gpu_tests
+    @require_bitsandbytes
+    def test_moslora_seq2seq_lm_multi_gpu_inference(self):
+        r"""
+        Test if MoSLORA can be used for inference on multiple GPUs - 8bit version.
+        """
+        lora_config = MoSLoraConfig(
+            r=16, use_moslora=True, lora_alpha=32, target_modules=["q", "v"], lora_dropout=0.05, bias="none", task_type="SEQ_2_SEQ_LM"
+        )
+
+        model = AutoModelForSeq2SeqLM.from_pretrained(
+            self.seq2seq_model_id, device_map="balanced", quantization_config=BitsAndBytesConfig(load_in_8bit=True)
+        )
+        tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
+
+        assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+
+        model = get_peft_model(model, lora_config)
+        assert isinstance(model, PeftModel)
+        assert isinstance(model.base_model.model.encoder.block[0].layer[0].SelfAttention.q, MoSLoraLinear8bitLt)
 
         dummy_input = "This is a dummy input:"
         input_ids = tokenizer(dummy_input, return_tensors="pt").input_ids.to(self.device)
@@ -741,6 +980,43 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert modules_to_save.weight.requires_grad is True
         assert original_module.weight.grad is None
         assert modules_to_save.weight.grad is not None
+    
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_modules_to_save_grad_moslora(self):
+        model_id = "bigscience/bloomz-560m"
+
+        model = AutoModelForSequenceClassification.from_pretrained(
+            model_id,
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+            torch_dtype=torch.float32,
+        )
+
+        model = prepare_model_for_kbit_training(model)
+
+        config = MoSLoraConfig(
+            r=16,
+            lora_alpha=16,
+            lora_dropout=0.05,
+            bias="none",
+            task_type="SEQ_CLS",
+            use_moslora="kai",
+        )
+
+        peft_model = get_peft_model(model, config)
+
+        lm_head = peft_model.base_model.model.score
+        original_module = lm_head.original_module
+        modules_to_save = lm_head.modules_to_save.default
+
+        inputs = torch.randn(1024).to(model.device)
+        o1 = lm_head(inputs)
+        o1.mean().backward()
+
+        assert modules_to_save.weight.requires_grad is True
+        assert original_module.weight.grad is None
+        assert modules_to_save.weight.grad is not None
 
     @require_torch_gpu
     @pytest.mark.single_gpu_tests
@@ -774,6 +1050,42 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert isinstance(model, PeftModel)
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, bnb.nn.Linear8bitLt)
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, bnb.nn.Linear8bitLt)
+    
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_8bit_merge_moslora(self):
+        torch.manual_seed(1000)
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+        )
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        out_base = F.softmax(model(random_input).logits, dim=-1)
+
+        config = MoSLoraConfig(
+            r=8,
+            init_lora_weights=False,
+            use_moslora=True,
+        )
+        model = get_peft_model(model, config)
+
+        with torch.inference_mode():
+            out_before_merge = F.softmax(model(random_input).logits, dim=-1)
+
+        model.merge_and_unload()
+        with torch.inference_mode():
+            out_after_merge = F.softmax(model(random_input).logits, dim=-1)
+
+        atol = 1e-3
+        rtol = 1
+        assert not torch.allclose(out_base, out_before_merge, atol=atol, rtol=rtol)
+        assert torch.allclose(out_before_merge, out_after_merge, atol=atol, rtol=rtol)
+        assert isinstance(model, PeftModel)
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, bnb.nn.Linear8bitLt)
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, bnb.nn.Linear8bitLt)
+
 
     @require_torch_gpu
     @pytest.mark.single_gpu_tests
@@ -810,6 +1122,43 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert isinstance(model, PeftModel)
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, LoraLinear8bitLt)
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear8bitLt)
+    
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_8bit_merge_and_disable_moslora(self):
+        torch.manual_seed(1000)
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+        )
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        # compare outputs in probability space, because logits can have outliers
+        # and token ids are not precise enough
+        out_base = F.softmax(model(random_input).logits, dim=-1)
+
+        config = MoSLoraConfig(
+            r=8,
+            init_lora_weights=False,
+            use_moslora="orth",
+        )
+        model = get_peft_model(model, config)
+
+        with torch.inference_mode():
+            out_before = F.softmax(model(random_input).logits, dim=-1)
+
+        model.merge_adapter()
+        with model.disable_adapter():
+            with torch.inference_mode():
+                out_after = F.softmax(model(random_input).logits, dim=-1)
+
+        atol = 1e-3
+        rtol = 1
+        assert not torch.allclose(out_base, out_before, atol=atol, rtol=rtol)
+        assert torch.allclose(out_base, out_after, atol=atol, rtol=rtol)
+        assert isinstance(model, PeftModel)
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, MoSLoraLinear8bitLt)
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, MoSLoraLinear8bitLt)
 
     @require_torch_gpu
     @pytest.mark.single_gpu_tests
@@ -828,6 +1177,39 @@ class PeftGPUCommonTests(unittest.TestCase):
             r=8,
             init_lora_weights=False,
             lora_bias=True,
+        )
+        model = get_peft_model(model, config)
+
+        with torch.inference_mode():
+            out_before_merge = F.softmax(model(random_input).logits, dim=-1)
+
+        model.merge_and_unload()
+        with torch.inference_mode():
+            out_after_merge = F.softmax(model(random_input).logits, dim=-1)
+
+        atol = 1e-3
+        rtol = 1
+        assert not torch.allclose(out_base, out_before_merge, atol=atol, rtol=rtol)
+        assert torch.allclose(out_before_merge, out_after_merge, atol=atol, rtol=rtol)
+    
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_8bit_merge_moslora_with_bias(self):
+        # same as test_8bit_merge_lora but with lora_bias=True
+        torch.manual_seed(1000)
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+        )
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        out_base = F.softmax(model(random_input).logits, dim=-1)
+
+        config = MoSLoraConfig(
+            r=8,
+            init_lora_weights=False,
+            lora_bias=True,
+            use_moslora="kai",
         )
         model = get_peft_model(model, config)
 
@@ -884,6 +1266,49 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert isinstance(model, PeftModel)
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, bnb.nn.Linear4bit)
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, bnb.nn.Linear4bit)
+    
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_4bit_merge_moslora(self):
+        torch.manual_seed(3000)
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=False,
+            bnb_4bit_compute_dtype=torch.float32,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=bnb_config,
+            torch_dtype=torch.float32,
+        )
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        # compare outputs in probability space, because logits can have outliers
+        # and token ids are not precise enough
+        out_base = F.softmax(model(random_input).logits, dim=-1)
+
+        config = MoSLoraConfig(
+            r=8,
+            init_lora_weights=False,
+            use_moslora="kai",
+        )
+        model = get_peft_model(model, config)
+
+        with torch.inference_mode():
+            out_before_merge = F.softmax(model(random_input).logits, dim=-1)
+
+        model.merge_and_unload()
+        with torch.inference_mode():
+            out_after_merge = F.softmax(model(random_input).logits, dim=-1)
+
+        # tolerances are pretty high because some deviations are expected with quantization
+        atol = 0.02
+        rtol = 10
+        assert not torch.allclose(out_base, out_before_merge, atol=atol, rtol=rtol)
+        assert torch.allclose(out_before_merge, out_after_merge, atol=atol, rtol=rtol)
+        assert isinstance(model, PeftModel)
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, bnb.nn.Linear4bit)
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, bnb.nn.Linear4bit)
 
     @require_torch_gpu
     @pytest.mark.single_gpu_tests
@@ -926,6 +1351,49 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert isinstance(model, PeftModel)
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, LoraLinear4bit)
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear4bit)
+    
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_4bit_merge_and_disable_moslora(self):
+        torch.manual_seed(3000)
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=False,
+            bnb_4bit_compute_dtype=torch.float32,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=bnb_config,
+            torch_dtype=torch.float32,
+        )
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        # compare outputs in probability space, because logits can have outliers
+        # and token ids are not precise enough
+        out_base = F.softmax(model(random_input).logits, dim=-1)
+
+        config = MoSLoraConfig(
+            r=8,
+            init_lora_weights=False,
+            use_moslora=True,
+        )
+        model = get_peft_model(model, config)
+
+        with torch.inference_mode():
+            out_before = F.softmax(model(random_input).logits, dim=-1)
+
+        model.merge_adapter()
+        with model.disable_adapter():
+            with torch.inference_mode():
+                out_after = F.softmax(model(random_input).logits, dim=-1)
+
+        atol = 0.01
+        rtol = 10
+        assert not torch.allclose(out_base, out_before, atol=atol, rtol=rtol)
+        assert torch.allclose(out_base, out_after, atol=atol, rtol=rtol)
+        assert isinstance(model, PeftModel)
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, MoSLoraLinear4bit)
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, MoSLoraLinear4bit)
 
     @require_torch_gpu
     @pytest.mark.single_gpu_tests
@@ -952,6 +1420,48 @@ class PeftGPUCommonTests(unittest.TestCase):
             r=8,
             init_lora_weights=False,
             lora_bias=True,
+        )
+        model = get_peft_model(model, config)
+
+        with torch.inference_mode():
+            out_before_merge = F.softmax(model(random_input).logits, dim=-1)
+
+        model.merge_and_unload()
+        with torch.inference_mode():
+            out_after_merge = F.softmax(model(random_input).logits, dim=-1)
+
+        # tolerances are pretty high because some deviations are expected with quantization
+        atol = 0.01
+        rtol = 10
+        assert not torch.allclose(out_base, out_before_merge, atol=atol, rtol=rtol)
+        assert torch.allclose(out_before_merge, out_after_merge, atol=atol, rtol=rtol)
+    
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_4bit_merge_moslora_with_bias(self):
+        # same as test_4bit_merge_lora but with lora_bias=True
+        torch.manual_seed(3000)
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=False,
+            bnb_4bit_compute_dtype=torch.float32,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=bnb_config,
+            torch_dtype=torch.float32,
+        )
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        # compare outputs in probability space, because logits can have outliers
+        # and token ids are not precise enough
+        out_base = F.softmax(model(random_input).logits, dim=-1)
+
+        config = MoSLoraConfig(
+            r=8,
+            init_lora_weights=False,
+            lora_bias=True,
+            use_moslora=True,
         )
         model = get_peft_model(model, config)
 
@@ -1107,6 +1617,77 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert torch.allclose(out_base[::3], out_mixed[::3], atol=atol, rtol=rtol)
         assert torch.allclose(out_adapter0[1::3], out_mixed[1::3], atol=atol, rtol=rtol)
         assert torch.allclose(out_adapter1[2::3], out_mixed[2::3], atol=atol, rtol=rtol)
+    
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_8bit_moslora_mixed_adapter_batches_moslora(self):
+        # check that we can pass mixed adapter names to the model
+        # note that with 8bit, we have quite a bit of imprecision, therefore we use softmax and higher tolerances
+        torch.manual_seed(3000)
+        bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=bnb_config,
+            torch_dtype=torch.float32,
+        ).eval()
+        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
+        # input with 9 samples
+        inputs = tokenizer(
+            [
+                "Hello, my dog is cute",
+                "Hello, my cat is awesome",
+                "Hello, my fish is great",
+                "Salut, mon chien est mignon",
+                "Salut, mon chat est génial",
+                "Salut, mon poisson est super",
+                "Hallo, mein Hund ist süß",
+                "Hallo, meine Katze ist toll",
+                "Hallo, mein Fisch ist großartig",
+            ],
+            return_tensors="pt",
+            padding=True,
+        ).to(model.device)
+        with torch.inference_mode():
+            out_base = F.softmax(model(**inputs).logits, dim=-1)
+
+        config0 = MoSLoraConfig(
+            r=8,
+            init_lora_weights=False,
+            use_moslora=True,
+        )
+        model = get_peft_model(model, config0).eval()
+        with torch.inference_mode():
+            out_adapter0 = F.softmax(model(**inputs).logits, dim=-1)
+
+        config1 = MoSLoraConfig(
+            r=16,
+            init_lora_weights=False,
+            use_moslora="kai",
+        )
+        model.add_adapter("adapter1", config1)
+        model.set_adapter("adapter1")
+        with torch.inference_mode():
+            out_adapter1 = F.softmax(model(**inputs).logits, dim=-1)
+
+        atol = 0.01
+        rtol = 0.5
+        # sanity check, outputs have the right shape and are not the same
+        assert len(out_base) >= 3
+        assert len(out_base) == len(out_adapter0) == len(out_adapter1)
+        assert not torch.allclose(out_base, out_adapter0, atol=atol, rtol=rtol)
+        assert not torch.allclose(out_base, out_adapter1, atol=atol, rtol=rtol)
+        assert not torch.allclose(out_adapter0, out_adapter1, atol=atol, rtol=rtol)
+
+        # mixed adapter batch
+        adapters = ["__base__", "default", "adapter1"]
+        adapter_names = [adapters[i % 3] for i in (range(9))]
+        with torch.inference_mode():
+            out_mixed = F.softmax(model(**inputs, adapter_names=adapter_names).logits, dim=-1)
+
+        assert torch.allclose(out_base[::3], out_mixed[::3], atol=atol, rtol=rtol)
+        assert torch.allclose(out_adapter0[1::3], out_mixed[1::3], atol=atol, rtol=rtol)
+        assert torch.allclose(out_adapter1[2::3], out_mixed[2::3], atol=atol, rtol=rtol)
 
     @require_non_cpu
     @pytest.mark.single_gpu_tests
@@ -1114,6 +1695,19 @@ class PeftGPUCommonTests(unittest.TestCase):
         model_checkpoint = "roberta-base"
         peft_config = LoraConfig(
             task_type=TaskType.TOKEN_CLS, inference_mode=False, r=16, lora_alpha=16, lora_dropout=0.1, bias="all"
+        )
+        model = AutoModelForTokenClassification.from_pretrained(model_checkpoint, num_labels=11).to(self.device)
+        model = get_peft_model(model, peft_config)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model.save_pretrained(tmp_dir, safe_serialization=True)
+    
+    @require_non_cpu
+    @pytest.mark.single_gpu_tests
+    def test_serialization_shared_tensors2(self):
+        model_checkpoint = "roberta-base"
+        peft_config = MoSLoraConfig(
+            task_type=TaskType.TOKEN_CLS, inference_mode=False, r=16, lora_alpha=16, lora_dropout=0.1, bias="all", use_moslora=True,
         )
         model = AutoModelForTokenClassification.from_pretrained(model_checkpoint, num_labels=11).to(self.device)
         model = get_peft_model(model, peft_config)
@@ -1823,3 +2417,24 @@ class TestSameAdapterDifferentDevices:
         # the rest should be on GPU
         assert model.lin0.base_layer.weight.device.type == "cuda"
         assert model.lin0.hra_u.other.device.type == "cuda"
+    
+    def test_moslora_one_target_add_new_adapter_does_not_change_device(self, mlp):
+        config = MoSLoraConfig(target_modules=["lin0"], use_moslora="kai",)
+        model = get_peft_model(mlp, config)
+        model = model.cuda()
+        model.lin0.lora_A.cpu()
+        model.lin0.lora_B.cpu()
+
+        # check that the adapter is indeed on CPU and the base model on GPU
+        assert model.lin0.lora_A.default.weight.device.type == "cpu"
+        assert model.lin0.lora_B.default.weight.device.type == "cpu"
+        assert model.lin0.base_layer.weight.device.type == "cuda"
+
+        model.add_adapter("other", config)
+        # check that after adding a new adapter, the old adapter is still on CPU
+        assert model.lin0.lora_A.default.weight.device.type == "cpu"
+        assert model.lin0.lora_B.default.weight.device.type == "cpu"
+        # the rest should be on GPU
+        assert model.lin0.base_layer.weight.device.type == "cuda"
+        assert model.lin0.lora_A.other.weight.device.type == "cuda"
+        assert model.lin0.lora_B.other.weight.device.type == "cuda"

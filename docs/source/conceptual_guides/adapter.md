@@ -93,6 +93,10 @@ OFT preserves the hyperspherical energy by learning an orthogonal transformation
 
 [AdaLoRA](https://hf.co/papers/2303.10512) manages the parameter budget introduced from LoRA by allocating more parameters - in other words, a higher rank `r` - for important weight matrices that are better adapted for a task and pruning less important ones. The rank is controlled by a method similar to singular value decomposition (SVD). The ∆W is parameterized with two orthogonal matrices and a diagonal matrix which contains singular values. This parametrization method avoids iteratively applying SVD which is computationally expensive. Based on this method, the rank of ∆W is adjusted according to an importance score. ∆W is divided into triplets and each triplet is scored according to its contribution to model performance. Triplets with low importance scores are pruned and triplets with high importance scores are kept for finetuning.
 
+## Mixture-of-Subspaces Low-Rank Adaptation (MoSLoRA)
+
+[MoSLoRA](https://huggingface.co/papers/2406.11909) is a subspace-inspired Low-Rank Adaptation (LoRA) method, which is computationally efficient, easy to implement, and readily applicable to large language, multimodal, and diffusion models. After equivalently decomposing the weights of LoRA into two subspaces, simply mixing these two subspaces can enhance performance. Revisit it through a fine-grained subspace lens, it shows that such modification is equivalent to employing a fixed `mixer` to fuse the subspaces. For vanilla LoRA, the mixer is the __fixed__ identity matrix fusing $r$ subspaces. MoSLoRA introduces a __learnable__ mixer to model the information of more subspaces ($r^2$) and is more flexible.
+
 ## Llama-Adapter
 
 [Llama-Adapter](https://hf.co/papers/2303.16199) is a method for adapting Llama into a instruction-following model. To help adapt the model for instruction-following, the adapter is trained with a 52K instruction-output dataset.

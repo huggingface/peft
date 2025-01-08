@@ -33,6 +33,7 @@ from .lora import (
     initialize_lora_eva_weights,
 )
 from .mixed import MixedModel
+from .moslora import MoSLoraConfig, MoSLoraModel
 from .multitask_prompt_tuning import MultitaskPromptEmbedding, MultitaskPromptTuningConfig, MultitaskPromptTuningInit
 from .oft import OFTConfig, OFTModel
 from .p_tuning import PromptEncoder, PromptEncoderConfig, PromptEncoderReparameterizationType
@@ -73,6 +74,8 @@ __all__ = [
     "LoraModel",
     "LoraRuntimeConfig",
     "MixedModel",
+    "MoSLoraConfig",
+    "MoSLoraModel",
     "MultitaskPromptEmbedding",
     "MultitaskPromptTuningConfig",
     "MultitaskPromptTuningInit",

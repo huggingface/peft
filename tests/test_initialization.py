@@ -38,6 +38,7 @@ from peft import (
     LoftQConfig,
     LoKrConfig,
     LoraConfig,
+    MoSLoraConfig,
     PeftMixedModel,
     PeftModel,
     PeftModelForCausalLM,
@@ -1275,6 +1276,53 @@ class TestAdaLoraInitialization:
         model = get_peft_model(model, config)
         output_after = model(data)
         assert torch.allclose(output_before, output_after)
+
+class TestMoSLoraInitialization:
+    torch_device = infer_device()
+
+    def test_moslora_target_modules_set(self):
+        config = MoSLoraConfig(target_modules=["linear", "embed", "conv2d"])
+        assert config.target_modules == {"linear", "embed", "conv2d"}
+
+    def test_moslora_use_dora_raises(self):
+        with pytest.raises(ValueError, match="MOSLORA does not support DoRA. You can set use_moslora=False to enable this."):
+            MoSLoraConfig(use_dora=True)
+    
+    def test_moslora_use_lora_init_corda_raises(self):
+        with pytest.raises(ValueError, match="MOSLORA does not support other initilization methods. You can set use_moslora=False to enable this."):
+            MoSLoraConfig(init_lora_weights="corda")
+
+    def test_moslora_use_lora_init_olora_raises(self):
+        with pytest.raises(ValueError, match="MOSLORA does not support other initilization methods. You can set use_moslora=False to enable this."):
+            MoSLoraConfig(init_lora_weights="olora")
+
+    def test_moslora_use_lora_init_gaussian_raises(self):
+        with pytest.raises(ValueError, match="MOSLORA does not support other initilization methods. You can set use_moslora=False to enable this."):
+            MoSLoraConfig(init_lora_weights="gaussian")
+
+    def test_moslora_use_lora_init_pissa_raises(self):
+        with pytest.raises(ValueError, match="MOSLORA does not support other initilization methods. You can set use_moslora=False to enable this."):
+            MoSLoraConfig(init_lora_weights="pissa")
+
+    def test_moslora_use_lora_init_eva_raises(self):
+        with pytest.raises(ValueError, match="MOSLORA does not support other initilization methods. You can set use_moslora=False to enable this."):
+            MoSLoraConfig(init_lora_weights="eva")
+
+    def test_moslora_loftq_config_raises(self):
+        with pytest.raises(ValueError, match="MOSLORA does not support LOFTQ"):
+            MoSLoraConfig(init_lora_weights="loftq", loftq_config={"loftq": "config"})
+
+    def get_model(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                # choose a large weight so that averages are close to expected values
+                self.linear = nn.Linear(1000, 1000)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        return MyModule().eval().to(self.torch_device)
 
 
 class TestPromptTuningInitialization:
