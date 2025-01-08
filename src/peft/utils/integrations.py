@@ -88,7 +88,7 @@ def dequantize_bnb_weight(weight: torch.nn.Parameter, state=None):
     # BNB requires CUDA weights
     device = weight.device
     is_cpu = device.type == torch.device("cpu").type
-    if is_cpu:
+    if is_cpu and torch.cuda.is_available():
         weight = weight.to(torch.device("cuda"))
 
     cls_name = weight.__class__.__name__
