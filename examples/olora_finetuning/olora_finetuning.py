@@ -131,7 +131,7 @@ def train(
             output_dir=output_dir,
             save_total_limit=3,
             load_best_model_at_end=True,
-            ddp_find_unused_parameters=False if world_size > 1 else True,
+            ddp_find_unused_parameters=False if world_size > 1 else None,
         ),
         data_collator=transformers.DataCollatorForSeq2Seq(
             tokenizer, pad_to_multiple_of=8, return_tensors="pt", padding=True
