@@ -54,7 +54,7 @@ def train(
         from accelerate import Accelerator
         device_map = {'': Accelerator().process_index}
     # Set seed
-    if seed:
+    if seed is not None:
         set_seed(seed)
     model_kwargs = dict(torch_dtype=getattr(torch, torch_dtype), device_map=device_map)
     if quantize:
