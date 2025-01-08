@@ -33,6 +33,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v3
+        with:
+          persist-credentials: false
       - name: Pip install
         run: |
           source activate peft
@@ -156,6 +158,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v3
+        with:
+          persist-credentials: false
       - name: Pip install
         run: |
           source activate peft

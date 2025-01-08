@@ -1,0 +1,5 @@
+rules:
+  dangerous-triggers:
+    ignore:
+      # this workflow is only triggered after maintainer approval
+      - upload_pr_documentation.yml:3:1
