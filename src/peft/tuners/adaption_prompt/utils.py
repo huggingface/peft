@@ -84,6 +84,14 @@ def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
             # since transformers 4.36, this is a DynamicCache instance
             seq_len += past_key_value.get_seq_length(model.layer_idx)
 
+    # model.rotary_emb is deprecated and will be removed in transformers > 4.47.0. Instead, the position embeddings are
+    # passed via the kwargs
+    if "position_embeddings" in kwargs:
+        cos, sin = kwargs["position_embeddings"]
+        cos = cos.unsqueeze(1)
+        sin = sin.unsqueeze(1)
+        return (query_states * cos) + (llama_rotate_half(query_states) * sin)
+
     # For transformers > 4.37.2 `position_ids` became a required arguments in the rotary embedding's forward pass.
     if "position_ids" not in inspect.signature(model.rotary_emb.forward).parameters:
         # TODO we assume that position_ids is not None here, not sure if that is safe but the old code also did that
