@@ -52,7 +52,8 @@ def train(
     world_size = int(os.environ.get("WORLD_SIZE", 0)) or int(os.environ.get("PMI_SIZE", 0))
     if world_size > 1 and device_map != "cpu":
         from accelerate import Accelerator
-        device_map = {'': Accelerator().process_index}
+
+        device_map = {"": Accelerator().process_index}
     # Set seed
     if seed is not None:
         set_seed(seed)
