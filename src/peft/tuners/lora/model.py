@@ -266,8 +266,6 @@ class LoraModel(BaseTuner):
                     weight = child.weight
                 elif getattr(child, "in_proj_weight", None) is not None:  # MHA
                     weight = child.in_proj_weight
-                elif getattr(child, "q_proj_weight", None) is not None:  # MHA
-                    weight = child.q_proj_weight
                 else:
                     weight = next(child.parameters())
                 if not any(p.device == meta for p in module.parameters()):
