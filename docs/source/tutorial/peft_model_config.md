@@ -136,7 +136,7 @@ lora_model.print_trainable_parameters()
 ```
 
 > [!WARNING]
-> When calling [`get_peft_model`], the base model will be modified *in-place*. That means, when modifying a model with [`get_peft_model`] that was already modified in the same way before, even specifying a different configuration may not change the trainable parameter count (e.g., when specifying target modules that are only a subset of the previous target modules). Therefore, if you would like to modify your PEFT configuration after having called [`get_peft_model()`] before, you would first have to unload the model with [`~LoraModel.unload`] and then call [`get_peft_model()`] with your new configuration.
+> When calling [`get_peft_model`], the base model will be modified *in-place*. That means, when calling [`get_peft_model`] on a model that was already modified in the same way before, this model will be further mutated. Therefore, if you would like to modify your PEFT configuration after having called [`get_peft_model()`] before, you would first have to unload the model with [`~LoraModel.unload`] and then call [`get_peft_model()`] with your new configuration. Alternatively, you can re-initialize the model to ensure a fresh, unmodified state before applying a new PEFT configuration.
 
 Now you can train the [`PeftModel`] with your preferred training framework! After training, you can save your model locally with [`~PeftModel.save_pretrained`] or upload it to the Hub with the [`~transformers.PreTrainedModel.push_to_hub`] method.
 
