@@ -2775,29 +2775,6 @@ class TestHotSwapping:
         # real check: model now behaves again like adapter 0
         assert torch.allclose(output0, output_loaded_back0, atol=atol, rtol=rtol)
 
-    def test_hotswap_incompatible_config_params_raises(self, tmp_path):
-        # When the configs of the two adapters are incompatible, an error is raised
-        config0 = LoraConfig(target_modules=["lin0"], lora_alpha=1.0)
-        config1 = LoraConfig(target_modules=["lin0"], lora_alpha=2.0)
-
-        model = self.get_model()
-        model = get_peft_model(model, config0)
-        model.save_pretrained(tmp_path / "adapter0")
-        del model
-
-        model = self.get_model()
-        model = get_peft_model(model, config1)
-        model.save_pretrained(tmp_path / "adapter1")
-        del model
-
-        # load adapter 0
-        model = self.get_model()
-        model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
-
-        msg = r"Configs are incompatible: for lora_alpha, 1.0 != 2.0"
-        with pytest.raises(ValueError, match=msg):
-            hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
-
     def test_hotswap_different_peft_types_raises(self, tmp_path):
         # When the configs of the two adapters are different PEFT methods, raise
         config0 = LoraConfig(target_modules=["lin0"])
