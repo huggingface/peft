@@ -1376,6 +1376,8 @@ class MultiheadAttention(nn.Module, LoraLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
+                    # unregister parameter implicitly and overwrite using merged weights; gradients are computed after
+                    # forward and, thus, after unmerging (see forward()), therefore this is safe to do.
                     del base_layer.in_proj_weight
                     base_layer.in_proj_weight = orig_weights_in
 
@@ -1386,6 +1388,9 @@ class MultiheadAttention(nn.Module, LoraLayer):
                     # merging in_proj (nn.Parameter)
                     # TODO: work with separate weights
                     weight_merged = base_layer.in_proj_weight.data.detach() + self.get_delta_weight(active_adapter)
+
+                    # unregister parameter implicitly and overwrite using merged weights; gradients are computed after
+                    # forward and, thus, after unmerging (see forward()), therefore this is safe to do.
                     del base_layer.in_proj_weight
                     base_layer.in_proj_weight = weight_merged
 
