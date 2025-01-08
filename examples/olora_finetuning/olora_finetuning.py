@@ -13,7 +13,7 @@
 # limitations under the License.
 
 
-from typing import List
+from typing import List, Optional
 
 import os
 import torch
@@ -44,9 +44,9 @@ def train(
     lora_alpha: int = 16,
     lora_dropout: float = 0.05,
     lora_target_modules: List[str] = None,
-    seed: Optional[int] = None,
     torch_dtype: str = "float16",
     init_lora_weights="olora",
+    seed: Optional[int] = None,
 ):
     # Set device_map to the right place when enabling DDP.
     world_size = int(os.environ.get("WORLD_SIZE", 0)) or int(os.environ.get("PMI_SIZE", 0))
@@ -69,7 +69,7 @@ def train(
     tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
     # For some tokenizer with no pad token like llama
     if tokenizer.pad_token is None:
-        tokenizer.pad_token_id = 0
+        tokenizer.pad_token = tokenizer.eos_token
 
     def tokenize(prompt, add_eos_token=True):
         result = tokenizer(
@@ -169,9 +169,9 @@ if __name__ == "__main__":
     parser.add_argument("--lora_alpha", type=int, default=16)
     parser.add_argument("--lora_dropout", type=float, default=0.05)
     parser.add_argument("--lora_target_modules", type=str, default=None)
-    parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--torch_dtype", type=str, default="float16")
     parser.add_argument("--init_lora_weights", type=str, default="olora")
+    parser.add_argument("--seed", type=int, default=None)
 
     args = parser.parse_args()
 
@@ -192,7 +192,7 @@ if __name__ == "__main__":
         lora_alpha=args.lora_alpha,
         lora_dropout=args.lora_dropout,
         lora_target_modules=args.lora_target_modules,
-        seed=args.seed,
         torch_dtype=args.torch_dtype,
         init_lora_weights=args.init_lora_weights,
+        seed=args.seed,
     )
