@@ -24,7 +24,6 @@ from contextlib import contextmanager, nullcontext
 from typing import Any, Optional, Union
 
 import torch
-from accelerate import init_empty_weights
 from accelerate.hooks import AlignDevicesHook
 from accelerate.utils import named_module_tensors, offload_state_dict
 from torch import nn
@@ -39,6 +38,7 @@ from peft.utils.constants import (
     MIN_TARGET_MODULES_FOR_OPTIMIZATION,
     SEQ_CLS_HEAD_NAMES,
 )
+from peft.utils.integrations import init_empty_weights
 from peft.utils.peft_types import PeftType, TaskType
 
 from ..config import PeftConfig
@@ -828,9 +828,12 @@ class BaseTunerLayer(ABC):
         Move the adapter of the given name to the device of the base layer.
         """
         if device is None:
+            base_layer = self.get_base_layer()
+            if isinstance(base_layer, nn.MultiheadAttention):
+                base_layer = base_layer.out_proj
             # check weight and qweight (for GPTQ)
             for weight_name in ("weight", "qweight"):
-                weight = getattr(self.get_base_layer(), weight_name, None)
+                weight = getattr(base_layer, weight_name, None)
                 if weight is not None:
                     device = weight.device
                     dtype = weight.dtype
