@@ -154,7 +154,7 @@ def get_peft_model(
     low_cpu_mem_usage: bool = False,
 ) -> PeftModel | PeftMixedModel:
     """
-    Returns a Peft model object from a model and a config.
+    Returns a Peft model object from a model and a config, where the model will be modified in-place.
 
     Args:
         model ([`transformers.PreTrainedModel`]):
