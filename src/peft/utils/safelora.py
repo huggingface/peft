@@ -23,6 +23,7 @@ import torch
 from safetensors import safe_open
 from safetensors.torch import save_file
 
+import peft
 from peft import PeftConfig
 
 from .loftq_utils import _SafetensorLoader as SafetensorLoader
@@ -31,45 +32,58 @@ from .loftq_utils import _SafetensorLoader as SafetensorLoader
 @dataclass
 class SafeLoraConfig:
     """
-    This is the configuration class to store the configuration of a safeLora.
+    This is the configuration class to store the configuration of a [`safeLora`].
 
 
     Args:
 
-    base_model_path (`str`): The path of the base model for obtaining the aligned matrix.
+        base_model_path (`str`): 
+            The path of the base model for obtaining the aligned matrix. The base model should be one that has not 
+            undergone training techniques such as RLHF or SFT, often referred to as an uncensored model. The path 
+            can be either a local path or a Hugging Face model ID.
 
-    aligned_model_path (`str`): The path of the aligned model for obtaining the aligned matrix.
+        aligned_model_path (`str`): 
+            The path of the aligned model for obtaining the aligned matrix. The aligned model should be one that has
+            been trained using techniques such as RLHF or SFT. The path can be either a local path or a Hugging Face 
+            model ID.
 
-    peft_model_path (`str`): The path of the LoRA weights and config.
+        peft_model_path (`str`): 
+            The path of the LoRA weights and config.
 
-    select_layers_type (`Literal["threshold", "number"]`): How to select projection layers? options: [threshold, number]
+        select_layers_type (`Literal["threshold", "number"]`): 
+            Specifies the method for selecting projection layers. The value must be a string and can only be either 
+            "threshold" or "number". Use "threshold" to set a cosine similarity threshold or "number" to specify the 
+            number of layers directly.
 
-    threshold (`float`): The threshold of cosine similarity for selecting projected layers.
+        threshold (`float`): 
+            The threshold of cosine similarity for selecting projected layers.
 
-    num_proj_layers (`int`): The number of projected layers.
+        num_proj_layers (`int`): 
+            The number of projected layers.
 
-    device (`str`): Device that is used for SafeLoRA (cuda or cpu).
+        device (`str`): 
+            Device that is used for SafeLoRA (cuda or cpu).
 
-    save_weights (`bool`): Whether to override the original LoRA file with SafeLoRA weights .
+        save_weights (`bool`): 
+            Whether to override the original LoRA file with SafeLoRA weights .
 
-    local_files_only (`bool`): Set this value to True to work only with local files (no downloads).
+        local_files_only (`bool`): 
+            Set this value to True to work only with local files (no downloads).
 
-    dtype (`torch.dtype`): Data type for model weights, e.g., torch.float32 or torch.bfloat16.
+        dtype (`torch.dtype`): 
+            Data type for model weights, e.g., torch.float32 or torch.bfloat16.
 
     """
 
     base_model_path: str = field(
-        default="meta-llama/Llama-2-7b-hf",
         metadata={"help": "The path of the base model for obtaining the aligned matrix."},
     )
 
     aligned_model_path: str = field(
-        default="TheBloke/Llama-2-7B-Chat-fp16",
         metadata={"help": "The path of the aligned model for obtaining the aligned matrix."},
     )
 
     peft_model_path: str = field(
-        default="LisaSchunke/llama-2-7b-peft-finetuned-20000-dataset",
         metadata={"help": "The path of the LoRA wieghts and configs."},
     )
 
@@ -142,7 +156,7 @@ def get_aligned_matrix(base_model_path, aligned_model_path, peft_config, safelor
         if (sl_base.get_tensor(name_base) == sl_align.get_tensor(name_align)).all():
             raise ValueError("The weights of the base Model and the aligned Model should be different.")
         vec = sl_base.get_tensor(name_base) - sl_align.get_tensor(name_align)
-        vec = vec.to(safelora_config.dtype).to(safelora_config.device)
+        vec = vec.to(dtype=safelora_config.dtype, device=safelora_config.device)
         vec = torch.mm(vec, vec.t()) / torch.norm(vec)
         safety_vector.append(vec.detach().cpu())
     return safety_vector
@@ -183,32 +197,47 @@ def apply_safelora(safelora_config: SafeLoraConfig):
     After fine-tuning large language models (LLMs) using LoRA, the alignment of the resulting models may decrease.
     Therefore, applying `apply_safelora()` is intended to help preserve the alignment of the final models.
 
-    It is important to note that the model weights of the aligned model and the base model must be of the same size.
+    It is important to note that the model weights of the aligned model and the base model must be of the same size. 
+    Additionally, for SafeLoRA, only the safetensors format is supported.
+    
+    Args:
+
+        safelora_config: The config of SafeLora.
+
+    Returns:
+        `torch.nn.Module`: The Lora model is applied SafeLoRA.
 
 
     Example:
 
-    from peft.utils.safelora import SafeLoraConfig, apply_safelora
+        ```py
 
-    config = SafeLoraConfig(base_model_path='meta-llama/Llama-2-7b-hf',\
+        >>> from peft.utils.safelora import SafeLoraConfig, apply_safelora
+
+        >>> config = SafeLoraConfig(base_model_path='meta-llama/Llama-2-7b-hf',\
                             aligned_model_path='TheBloke/Llama-2-7B-Chat-fp16',
                             peft_model_path = 'LisaSchunke/llama-2-7b-peft-finetuned-20000-dataset',
                             device='cuda',
                             select_layers_type='threshold',
                             save_weights=True)
 
-    final_lora_weight = apply_safelora(config)
+        >>> final_lora_weight = apply_safelora(config)
+        ```
 
     """
 
     peft_config = PeftConfig.from_pretrained(safelora_config.peft_model_path)
+    if peft_config.use_dora:
+        raise ValueError(
+                "SafeLoRA do not support dora."
+            )
 
     projected_matrix = get_aligned_matrix(
         safelora_config.base_model_path, safelora_config.aligned_model_path, peft_config, safelora_config
     )
 
     with safe_open(
-        f"{os.path.join(safelora_config.peft_model_path, 'adapter_model.safetensors')}",
+        f"{os.path.join(safelora_config.peft_model_path, peft.utils.constants.SAFETENSORS_WEIGHTS_NAME)}",
         framework="pt",
         device=safelora_config.device,
     ) as f:
@@ -222,6 +251,6 @@ def apply_safelora(safelora_config: SafeLoraConfig):
         final_weights, _ = project_weights(safelora_config, peft_weights, projected_matrix)
 
     if safelora_config.save_weights:
-        save_file(final_weights, f"{os.path.join(safelora_config.peft_model_path, 'adapter_model.safetensors')}")
+        save_file(final_weights, f"{os.path.join(safelora_config.peft_model_path, peft.utils.constants.SAFETENSORS_WEIGHTS_NAME)}")
 
     return final_weights
