@@ -24,7 +24,7 @@ from .config import PeftConfig
 from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING, PEFT_TYPE_TO_PREFIX_MAPPING
 from .mixed_model import PeftMixedModel
 from .peft_model import PeftModel
-from .tuners.tuners_utils import BaseTuner
+from .tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from .utils import _prepare_prompt_learning_config
 
 
@@ -38,7 +38,7 @@ def get_peft_model(
     low_cpu_mem_usage: bool = False,
 ) -> PeftModel | PeftMixedModel:
     """
-    Returns a Peft model object from a model and a config.
+    Returns a Peft model object from a model and a config, where the model will be modified in-place.
 
     Args:
         model ([`transformers.PreTrainedModel`]):
@@ -65,6 +65,15 @@ def get_peft_model(
     old_name = peft_config.base_model_name_or_path
     new_name = model.__dict__.get("name_or_path", None)
     peft_config.base_model_name_or_path = new_name
+
+    # Especially in notebook environments there could be a case that a user wants to experiment with different
+    # configuration values. However, it is likely that there won't be any changes for new configs on an already
+    # initialized PEFT model. The best we can do is warn the user about it.
+    if any(isinstance(module, BaseTunerLayer) for module in model.modules()):
+        warnings.warn(
+            "You are trying to modify a model with PEFT for a second time. If you want to reload the model with a "
+            "different config, make sure to call `.unload()` before."
+        )
 
     if (old_name is not None) and (old_name != new_name):
         warnings.warn(

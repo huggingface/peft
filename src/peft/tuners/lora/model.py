@@ -247,14 +247,6 @@ class LoraModel(BaseTuner):
         if hasattr(child, "base_layer"):
             child = child.base_layer
 
-        if not hasattr(new_module, "base_layer"):
-            if hasattr(new_module, "W_q"):  # HQQ
-                new_module.W_q = child.W_q
-            else:
-                new_module.weight = child.weight
-            if hasattr(child, "bias"):
-                new_module.bias = child.bias
-
         if getattr(child, "state", None) is not None:
             if hasattr(new_module, "base_layer"):
                 new_module.base_layer.state = child.state
@@ -266,15 +258,16 @@ class LoraModel(BaseTuner):
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if (self.prefix in name) or ("ranknum" in name):
-                weight = (
-                    child.qweight
-                    if hasattr(child, "qweight")
-                    else child.W_q
-                    if hasattr(child, "W_q")
-                    else child.weight
-                    if hasattr(child, "weight")
-                    else next(child.parameters())
-                )
+                if hasattr(child, "qweight"):
+                    weight = child.qweight
+                elif hasattr(child, "W_q"):
+                    weight = child.W_q
+                elif hasattr(child, "weight"):
+                    weight = child.weight
+                elif getattr(child, "in_proj_weight", None) is not None:  # MHA
+                    weight = child.in_proj_weight
+                else:
+                    weight = next(child.parameters())
                 if not any(p.device == meta for p in module.parameters()):
                     module.to(weight.device)
 
@@ -360,7 +353,7 @@ class LoraModel(BaseTuner):
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
                 "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `torch.nn.Conv3d`, "
-                "`transformers.pytorch_utils.Conv1D`."
+                "`transformers.pytorch_utils.Conv1D`, `torch.nn.MultiheadAttention.`."
             )
 
         return new_module
@@ -509,7 +502,13 @@ class LoraModel(BaseTuner):
             except AttributeError:
                 continue
             with onload_layer(target):
-                if hasattr(target, "base_layer"):
+                if hasattr(target, "unload_and_optionally_merge_module"):
+                    # if layers have special unloading method, like MultiheadAttention, use that
+                    unloaded_module = target.unload_and_optionally_merge_module(
+                        merge=merge, safe_merge=safe_merge, adapter_names=adapter_names
+                    )
+                    self._replace_module(parent, target_name, unloaded_module, target)
+                elif hasattr(target, "base_layer"):
                     if merge:
                         target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
                     self._replace_module(parent, target_name, target.get_base_layer(), target)
@@ -902,9 +901,9 @@ class LoraModel(BaseTuner):
 
     def subtract_mutated_init(self, output_state_dict: dict[str, torch.Tensor], adapter_name: str, kwargs=None):
         """
-        This function can calculate the updates of the [PiSSA | OLoRA] by comparing the parameters of the [PiSSA |
-        OLoRA] adapter in `output_state_dict` with the initial values of [PiSSA | OLoRA] in `adapter_name`, thus
-        converting [PiSSA | OLoRA] to LoRA.
+        This function can calculate the updates of the PiSSA/CorDA/OLoRA by comparing the parameters of the
+        PiSSA/CorDA/OLoRA adapter in `output_state_dict` with the initial values of PiSSA/CorDA/OLoRA in
+        `adapter_name`, thus converting PiSSA/CorDA/OLoRA to LoRA.
         """
         for name, param in self.model.named_parameters():
             if (
