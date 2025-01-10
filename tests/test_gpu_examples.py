@@ -4043,6 +4043,7 @@ class TestPrefixTuning:
             "model.layers.0": 0,
             "model.layers.1": 1,
             "model.norm": 1,
+            "model.rotary_emb": 1,
             "lm_head": 1,
         }
         model = AutoModelForCausalLM.from_pretrained(model_id, device_map=device_map)
