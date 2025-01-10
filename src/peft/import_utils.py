@@ -81,19 +81,7 @@ def is_auto_awq_available():
 
 @lru_cache
 def is_eetq_available():
-    if importlib.util.find_spec("eetq") is None:
-        return False
-
-    is_available = True
-    try:
-        from eetq import EetqLinear  # noqa: F401
-    except ImportError as exc:
-        if "shard_checkpoint" in str(exc):
-            # eetq is currently broken with newer transformers versions because it tries to import shard_checkpoint
-            # see https://github.com/NetEase-FuXi/EETQ/issues/34
-            # TODO: Remove once eetq releasees a fix and this release is used in CI
-            is_available = False
-    return is_available
+    return importlib.util.find_spec("eetq") is not None
 
 
 @lru_cache
@@ -107,7 +95,15 @@ def is_torchao_available():
         return False
 
     TORCHAO_MINIMUM_VERSION = packaging.version.parse("0.4.0")
-    torchao_version = packaging.version.parse(importlib_metadata.version("torchao"))
+    try:
+        torchao_version = packaging.version.parse(importlib_metadata.version("torchao"))
+    except importlib_metadata.PackageNotFoundError:
+        # Same idea as in diffusers:
+        # https://github.com/huggingface/diffusers/blob/9f06a0d1a4a998ac6a463c5be728c892f95320a8/src/diffusers/utils/import_utils.py#L351-L357
+        # It's not clear under what circumstances `importlib_metadata.version("torchao")` can raise an error even
+        # though `importlib.util.find_spec("torchao") is not None` but it has been observed, so adding this for
+        # precaution.
+        return False
 
     if torchao_version < TORCHAO_MINIMUM_VERSION:
         raise ImportError(
