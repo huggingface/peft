@@ -68,6 +68,7 @@ def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
     past_key_value = kwargs.get("past_key_value")
     bsz, q_len, _ = hidden_states.size()
     if hasattr(model, "num_heads"):
+        # TODO: remove this clause after 2026-01-01
         num_heads = model.num_heads
     else:  # changed in https://github.com/huggingface/transformers/pull/35235
         num_heads = model.config.num_attention_heads

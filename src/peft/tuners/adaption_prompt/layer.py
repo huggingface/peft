@@ -49,6 +49,7 @@ class AdaptedAttention(nn.Module):
             model.q_proj.weight.dtype if model.q_proj.weight.dtype not in [torch.int8, torch.uint8] else torch.float32
         )
         if hasattr(self.model, "hidden_size"):
+            # TODO: remove this clause after 2026-01-01
             hidden_size = self.model.hidden_size
         else:  # changed in https://github.com/huggingface/transformers/pull/35235
             hidden_size = self.model.config.hidden_size
@@ -89,6 +90,7 @@ class AdaptedAttention(nn.Module):
             value = getattr(self.model, v_proj_layer)(self.adaption_prompt)
 
         if hasattr(self.model, "num_heads"):
+            # TODO: remove this clause after 2026-01-01
             num_heads = self.model.num_heads
         else:  # changed in https://github.com/huggingface/transformers/pull/35235
             num_heads = self.model.config.num_attention_heads
