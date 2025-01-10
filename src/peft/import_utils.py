@@ -81,7 +81,19 @@ def is_auto_awq_available():
 
 @lru_cache
 def is_eetq_available():
-    return importlib.util.find_spec("eetq") is not None
+    if importlib.util.find_spec("eetq") is None:
+        return False
+
+    is_available = True
+    try:
+        from eetq import EetqLinear  # noqa: F401
+    except ImportError as exc:
+        if "shard_checkpoint" in str(exc):
+            # eetq is currently broken with newer transformers versions because it tries to import shard_checkpoint
+            # see https://github.com/NetEase-FuXi/EETQ/issues/34
+            # TODO: Remove once eetq releasees a fix and this release is used in CI
+            is_available = False
+    return is_available
 
 
 @lru_cache

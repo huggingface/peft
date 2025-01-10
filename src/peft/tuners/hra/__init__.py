@@ -17,4 +17,4 @@ from .layer import HRAConv2d, HRALayer, HRALinear
 from .model import HRAModel
 
 
-__all__ = ["HRAConfig", "HRAModel", "HRAConv2d", "HRALinear", "HRALayer"]
+__all__ = ["HRAConfig", "HRAConv2d", "HRALayer", "HRALinear", "HRAModel"]

@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.#
+# Copyright 2023-present the HuggingFace Inc. team.
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -12,11 +12,14 @@
 # limitations under the License.
 import gc
 import importlib
+import itertools
 import os
 import re
+import subprocess
+import sys
 import tempfile
 import unittest
-from collections import Counter
+from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, List, Union
@@ -26,11 +29,12 @@ import torch
 from accelerate import infer_auto_device_map
 from accelerate.test_utils.testing import run_command
 from accelerate.utils import patch_environment
-from datasets import Audio, DatasetDict, load_dataset
+from datasets import Audio, Dataset, DatasetDict, load_dataset
 from packaging import version
 from parameterized import parameterized
 from torch.distributed import init_process_group
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.utils.data import DataLoader
 from transformers import (
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
@@ -50,14 +54,17 @@ from transformers.pytorch_utils import Conv1D
 
 from peft import (
     AdaLoraConfig,
+    EvaConfig,
     LoftQConfig,
     LoraConfig,
     PeftModel,
+    PrefixTuningConfig,
     PromptEncoderConfig,
     TaskType,
     VeraConfig,
     get_peft_model,
     get_peft_model_state_dict,
+    initialize_lora_eva_weights,
     inject_adapter_in_model,
     prepare_model_for_kbit_training,
     replace_lora_weights_loftq,
@@ -2426,6 +2433,17 @@ class TestLoftQ:
             torch.cuda.empty_cache()
         gc.collect()
 
+    def test_config_no_loftq_init(self):
+        with pytest.warns(
+            UserWarning,
+            match="`loftq_config` specified but will be ignored when `init_lora_weights` is not 'loftq'.",
+        ):
+            LoraConfig(loftq_config=LoftQConfig())
+
+    def test_config_no_loftq_config(self):
+        with pytest.raises(ValueError, match="`loftq_config` must be specified when `init_lora_weights` is 'loftq'."):
+            LoraConfig(init_lora_weights="loftq")
+
 
 @require_bitsandbytes
 @require_torch_gpu
@@ -2731,6 +2749,8 @@ class PeftAqlmGPUTests(unittest.TestCase):
         model.train(training)
 
     @pytest.mark.single_gpu_tests
+    # see https://github.com/Vahe1994/AQLM/pull/139
+    @pytest.mark.xfail(reason="AQLM does not work with PyTorch 2.5 (yet)", strict=True, raises=AttributeError)
     def test_causal_lm_training_aqlm(self):
         r"""
         Test the CausalLM training on a single GPU device. The test would simply fail if the adapters are not set
@@ -3273,6 +3293,11 @@ class PeftTorchaoGPUTests(unittest.TestCase):
     def setUp(self):
         self.causal_lm_model_id = "facebook/opt-125m"
         self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+        # torchao breaks with fp16 and if a previous test uses fp16, transformers will set this env var, which affects
+        # subsequent tests, therefore the env var needs to be cleared explicitly
+        #
+        # TODO: remove this once https://github.com/huggingface/transformers/pull/34886 is merged
+        os.environ.pop("ACCELERATE_MIXED_PRECISION", None)
 
     def tearDown(self):
         r"""
@@ -3886,3 +3911,254 @@ class TestLowCpuMemUsageDifferentDevices:
 
         assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
         assert {p.device.type for p in model.parameters()} == {device_model}
+
+
+class TestEvaInitializationGPU:
+    """GPU tests for the Eva initialization method."""
+
+    # Constants for test configuration
+    COSINE_SIMILARITY_THRESHOLD = 0.75
+    NUM_SEEDS = 3
+    BATCH_SIZE = 4
+    MAX_LENGTH = 256
+    LORA_DIM = 8
+    LORA_ALPHA = 1
+    DEVICE = "cuda"
+
+    @pytest.fixture
+    def tokenizer(self):
+        tokenizer = AutoTokenizer.from_pretrained("openai-community/gpt2")
+        tokenizer.pad_token = tokenizer.eos_token
+        return tokenizer
+
+    @pytest.fixture
+    def dataset(self, tokenizer):
+        dataset = load_dataset("ybelkada/english_quotes_copy", split="train")
+        # concatenate examples
+        examples = []
+        example = ""
+        for data in dataset:
+            if len(example) >= self.MAX_LENGTH:
+                examples.append(example)
+                example = ""
+            example = example + " " + data["quote"]
+        dataset = Dataset.from_dict({"text": examples})
+        # tokenize
+        dataset = dataset.map(
+            lambda x: tokenizer(x["text"], padding="max_length", truncation=True, max_length=self.MAX_LENGTH),
+            batched=True,
+            remove_columns=dataset.column_names,
+        )
+        dataset.set_format(type="torch")
+        return dataset
+
+    @pytest.fixture
+    def model(self):
+        model = AutoModelForCausalLM.from_pretrained("openai-community/gpt2")
+        model.transformer.h = model.transformer.h[:2]  # truncate to 2 layers
+        return model.to(self.DEVICE)
+
+    @pytest.fixture
+    def model_bnb(self):
+        bnb_config = BitsAndBytesConfig(load_in_4bit=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            "openai-community/gpt2",
+            quantization_config=bnb_config,
+            attn_implementation="eager",  # gpt2 doesnt support flash attention
+        )
+        model.transformer.h = model.transformer.h[:2]  # truncate to 2 layers
+        model = prepare_model_for_kbit_training(model)
+        return model
+
+    @pytest.fixture
+    def model_fixture(self, request):
+        return request.getfixturevalue(request.param)
+
+    @pytest.fixture
+    def peft_config(self):
+        return LoraConfig(
+            r=self.LORA_DIM,
+            lora_alpha=self.LORA_ALPHA,
+            target_modules=["c_attn"],
+            init_lora_weights="eva",
+            eva_config=EvaConfig(rho=2),
+        )
+
+    def is_bnb_model(self, model):
+        return hasattr(model.config, "quantization_config")
+
+    @staticmethod
+    def collate_fn(examples):
+        return {k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()}
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+    @pytest.mark.single_gpu_tests
+    @pytest.mark.parametrize("model_fixture", ["model", "model_bnb"], indirect=True)
+    def test_eva_initialization_consistency(self, model_fixture, dataset, peft_config):
+        """Test that the state dict returned by get_eva_state_dict loaded correctly and is consistent across different seeds based
+        on the cosine similarity of the svd components."""
+        state_dicts = []
+        for seed in range(self.NUM_SEEDS):
+            shuffled_dataset = dataset.shuffle(seed=seed)
+            dataloader = DataLoader(
+                shuffled_dataset,
+                batch_size=self.BATCH_SIZE,
+                collate_fn=lambda examples: {
+                    k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()
+                },
+                shuffle=False,
+            )
+            peft_model = get_peft_model(deepcopy(model_fixture), peft_config)
+            initialize_lora_eva_weights(peft_model, dataloader)
+            state_dicts.append(
+                {k: v.cpu() for k, v in peft_model.state_dict().items() if "lora_A.default.weight" in k}
+            )
+
+        cos_sims = defaultdict(list)
+        for i, j in itertools.combinations(range(self.NUM_SEEDS), 2):
+            for k, v1 in state_dicts[i].items():
+                v2 = state_dicts[j][k]
+                min_size = min(v1.size(0), v2.size(0))
+                cos_sims[k].extend(torch.cosine_similarity(v1[:min_size], v2[:min_size], dim=1).abs().tolist())
+
+        mean_cosine_similarities = {k: torch.tensor(v).mean() for k, v in cos_sims.items()}
+        for layer_name, mean_cosine_similarity in mean_cosine_similarities.items():
+            assert mean_cosine_similarity > self.COSINE_SIMILARITY_THRESHOLD, (
+                f"Mean absolute cosine similarity {mean_cosine_similarity:.4f} "
+                f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
+            )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+@pytest.mark.multi_gpu_tests
+class TestPrefixTuning:
+    def test_prefix_tuning_multiple_devices_decoder_model(self):
+        # See issue 2134
+        model_id = "hf-internal-testing/tiny-random-MistralForCausalLM"
+        tokenizer = AutoTokenizer.from_pretrained(model_id, padding="left")
+        inputs = tokenizer(["A list of colors: red, blue"], return_tensors="pt").to("cuda")
+
+        device_map = {
+            "model.embed_tokens": 0,
+            "model.layers.0": 0,
+            "model.layers.1": 1,
+            "model.norm": 1,
+            "lm_head": 1,
+        }
+        model = AutoModelForCausalLM.from_pretrained(model_id, device_map=device_map)
+        # sanity check, as the test passes trivially for a single device
+        assert len({p.device for p in model.parameters()}) > 1
+        # sanity check: this should work without peft
+        model.generate(**inputs)  # does not raise
+
+        peft_config = PrefixTuningConfig(num_virtual_tokens=10, task_type="CAUSAL_LM")
+        model = get_peft_model(model, peft_config)
+        model.generate(**inputs)  # does not raise
+
+    def test_prefix_tuning_multiple_devices_encoder_decoder_model(self):
+        # See issue 2134
+        model_id = "hf-internal-testing/tiny-random-T5Model"
+        tokenizer = AutoTokenizer.from_pretrained(model_id, padding="left")
+        inputs = tokenizer(["A list of colors: red, blue"], return_tensors="pt").to("cuda")
+        device_map = {
+            "shared": 0,
+            "encoder.embed_tokens": 0,
+            "encoder.block.0": 0,
+            "encoder.block.1": 0,
+            "encoder.block.2": 1,
+            "encoder.block.3": 1,
+            "encoder.block.4": 1,
+            "encoder.final_layer_norm": 1,
+            "decoder.embed_tokens": 0,
+            "decoder.block.0": 0,
+            "decoder.block.1": 0,
+            "decoder.block.2": 1,
+            "decoder.block.3": 1,
+            "decoder.block.4": 1,
+            "decoder.final_layer_norm": 1,
+            "lm_head": 0,
+        }
+        model = AutoModelForSeq2SeqLM.from_pretrained(model_id, device_map=device_map)
+        # sanity check, as the test passes trivially for a single device
+        assert len({p.device for p in model.parameters()}) > 1
+        # sanity check: this should work without peft
+        model.generate(**inputs)  # does not raise
+
+        peft_config = PrefixTuningConfig(num_virtual_tokens=10, task_type="SEQ_2_SEQ_LM")
+        model = get_peft_model(model, peft_config)
+        model.generate(**inputs)  # does not raise
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+@pytest.mark.single_gpu_tests
+class TestHotSwapping:
+    def test_hotswapping_compiled_model_does_not_trigger_recompilation(self):
+        env = os.environ.copy()
+        env["TORCH_LOGS"] = "guards,recompiles"
+        here = os.path.dirname(__file__)
+        file_name = os.path.join(here, "run_compiled_model_hotswap.py")
+
+        process = subprocess.Popen(
+            [sys.executable, file_name, "1"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
+        # Communicate will read the output and error streams, preventing deadlock
+        stdout, stderr = process.communicate()
+        exit_code = process.returncode
+
+        # sanity check:
+        assert exit_code == 0
+
+        # check that the recompilation message is not present
+        assert "__recompiles" not in stderr.decode()
+
+        # contingency check: without hotswapping, we *do* get recompilation
+        process = subprocess.Popen(
+            [sys.executable, file_name, "0"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
+        # Communicate will read the output and error streams, preventing deadlock
+        stdout, stderr = process.communicate()
+        exit_code = process.returncode
+
+        # sanity check:
+        assert exit_code == 0
+
+        # check that the recompilation message is not present
+        assert "__recompiles" in stderr.decode()
+
+    @pytest.mark.xfail(strict=True, reason="Requires hotswap to be implemented in diffusers")
+    def test_hotswapping_compiled_diffusion_model_does_not_trigger_recompilation(self):
+        env = os.environ.copy()
+        env["TORCH_LOGS"] = "guards,recompiles"
+        here = os.path.dirname(__file__)
+        file_name = os.path.join(here, "run_compiled_diffusion_model_hotswap.py")
+
+        process = subprocess.Popen(
+            [sys.executable, file_name, "1"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
+        # Communicate will read the output and error streams, preventing deadlock
+        stdout, stderr = process.communicate()
+        exit_code = process.returncode
+
+        # sanity check:
+        assert exit_code == 0
+
+        # check that the recompilation message is not present
+        assert "__recompiles" not in stderr.decode()
+
+        # contingency check: without hotswapping, we *do* get recompilation
+        process = subprocess.Popen(
+            [sys.executable, file_name, "0"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
+        # Communicate will read the output and error streams, preventing deadlock
+        stdout, stderr = process.communicate()
+        exit_code = process.returncode
+
+        # sanity check:
+        assert exit_code == 0
+
+        # check that the recompilation message is not present
+        assert "__recompiles" in stderr.decode()

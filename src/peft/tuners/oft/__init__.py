@@ -17,4 +17,4 @@ from .layer import Conv2d, Linear, OFTLayer
 from .model import OFTModel
 
 
-__all__ = ["OFTConfig", "OFTModel", "Conv2d", "Linear", "OFTLayer"]
+__all__ = ["Conv2d", "Linear", "OFTConfig", "OFTLayer", "OFTModel"]

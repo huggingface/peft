@@ -16,6 +16,7 @@ from __future__ import annotations
 import copy
 import inspect
 import os
+import re
 import warnings
 from contextlib import nullcontext
 from typing import Any, Optional
@@ -60,18 +61,18 @@ if version.parse(accelerate.__version__) >= version.parse("0.29.0"):
 __all__ = [
     "CONFIG_NAME",
     "EMBEDDING_LAYER_NAMES",
+    "INCLUDE_LINEAR_LAYERS_SHORTHAND",
     "SAFETENSORS_WEIGHTS_NAME",
     "TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
-    "TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING",
-    "TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING",
-    "TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING",
     "WEIGHTS_NAME",
-    "INCLUDE_LINEAR_LAYERS_SHORTHAND",
     "bloom_model_postprocess_past_key_value",
     "starcoder_model_postprocess_past_key_value",
 ]
@@ -98,7 +99,8 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
 
     This method wraps the entire protocol for preparing a model before running a training. This includes:
         1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
-        head to fp32
+        head to fp32 4- Freezing the base model layers to ensure they are not updated during training
+
 
     Args:
         model (`transformers.PreTrainedModel`):
@@ -718,3 +720,8 @@ def check_file_exists_on_hf_hub(repo_id: str, filename: str, **kwargs) -> Option
         )
 
     return exists
+
+
+def get_pattern_key(pattern_keys, key_to_match):
+    """Match a substring of key_to_match in pattern keys"""
+    return next(filter(lambda key: re.match(rf".*\.{key}$", key_to_match), pattern_keys), key_to_match)
