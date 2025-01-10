@@ -25,7 +25,6 @@ from .auto import (
     AutoPeftModelForTokenClassification,
 )
 from .config import PeftConfig, PromptLearningConfig
-from .func import get_peft_model
 from .mapping import (
     PEFT_TYPE_TO_CONFIG_MAPPING,
     PEFT_TYPE_TO_MIXED_MODEL_MAPPING,
@@ -33,6 +32,7 @@ from .mapping import (
     get_peft_config,
     inject_adapter_in_model,
 )
+from .mapping_func import get_peft_model
 from .mixed_model import PeftMixedModel
 from .peft_model import (
     PeftModel,
