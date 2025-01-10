@@ -135,10 +135,6 @@ class TestLoraInitialization:
         normal = self.get_normal(0.0, 1 / config.r)
         _, p_value = stats.kstest(weight_A.detach().flatten().cpu().numpy(), normal.flatten().cpu().numpy())
 
-        # import matplotlib.pyplot as plt
-        # x = weight_A.detach().flatten().cpu().numpy()
-        # breakpoint()
-
         assert p_value > 0.5
 
         # check that weight A is *not* from a uniform distribution
@@ -1091,6 +1087,84 @@ class TestLoraInitialization:
         megatron_config = {"does-not": "matter-here"}
         with pytest.raises(ValueError, match="DoRA does not support megatron_core"):
             LoraConfig(target_modules=["linear"], use_dora=True, megatron_config=megatron_config)
+
+    @pytest.fixture
+    def mha_cls(self):
+        class ModelMha(nn.Module):
+            def __init__(self, kdim=None, vdim=None):
+                super().__init__()
+                self.mha = nn.MultiheadAttention(10, 2, kdim=kdim, vdim=vdim)
+                self.lin0 = nn.Linear(10, 2)
+                self.sm = nn.LogSoftmax(dim=-1)
+
+            def forward(self, X):
+                X = X.float()
+                X, _ = self.mha(X, X, X)
+                X = self.lin0(X)
+                X = self.sm(X)
+                return X
+
+        return ModelMha
+
+    def test_mha_load_init_model_first(self, mha_cls):
+        # This test used to fail and require a workaround, for more context, see:
+        # https://github.com/huggingface/peft/pull/1324#issuecomment-2252473980
+        # The workaround was that _restore_weights had to be called manually on lora.MHA layers in order to make loading
+        # the state dict work. With recent changes, this workaround is no longer required, so that test has been
+        # deleted.
+        inputs = torch.rand(10, 10, 10)
+        model = mha_cls()
+        config = LoraConfig(target_modules=["mha"], init_lora_weights=False)
+        model = get_peft_model(model, config).eval()
+        restore_state_dict = {k: v.detach().cpu() for k, v in model.state_dict().items()}
+
+        del model
+
+        model = mha_cls()
+        model = get_peft_model(model, config)
+        # the workaround used to be:
+        # for module in model.modules():
+        #     if isinstance(module, peft.tuners.lora.layer.MultiheadAttention):
+        #         module._restore_weights()
+        model(inputs)
+        model.load_state_dict(restore_state_dict)
+
+    def test_mha_with_separate_qkv_embed_raises(self, mha_cls):
+        # passing different kdim and vdim results in separate parameters for q, k, v, which is not supported (yet)
+        model = mha_cls(kdim=20, vdim=30)
+        config = LoraConfig(target_modules=["mha"])
+        msg = "Only same embed for query/key/value is supported as of now for MultiheadAttention"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+    def test_mha_with_dora_raises(self, mha_cls):
+        model = mha_cls()
+        config = LoraConfig(target_modules=["mha"], use_dora=True)
+        msg = re.escape("MultiheadAttention does not support DoRA (yet), please set use_dora to False")
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+    def test_mha_exposes_attributes(self, mha_cls):
+        model = mha_cls()
+        embed_dim = model.mha.embed_dim
+        kdim = model.mha.kdim
+        vdim = model.mha.vdim
+        qkv_same_embed_dim = model.mha._qkv_same_embed_dim
+        num_heads = model.mha.num_heads
+        dropout = model.mha.dropout
+        batch_first = model.mha.batch_first
+        head_dim = model.mha.head_dim
+
+        config = LoraConfig(target_modules=["mha"])
+        peft_model = get_peft_model(model, config)
+        assert peft_model.base_model.mha.embed_dim == embed_dim
+        assert peft_model.base_model.mha.kdim == kdim
+        assert peft_model.base_model.mha.vdim == vdim
+        assert peft_model.base_model.mha._qkv_same_embed_dim == qkv_same_embed_dim
+        assert peft_model.base_model.mha.num_heads == num_heads
+        assert peft_model.base_model.mha.dropout == dropout
+        assert peft_model.base_model.mha.batch_first == batch_first
+        assert peft_model.base_model.mha.head_dim == head_dim
 
     def test_lora_with_bias_extra_params(self):
         # lora with lora_bias=True

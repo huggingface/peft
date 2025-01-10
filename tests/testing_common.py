@@ -57,6 +57,7 @@ from peft import (
     prepare_model_for_kbit_training,
 )
 from peft.tuners.lora import LoraLayer
+from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import _get_submodules, infer_device
 
 from .testing_utils import get_state_dict
@@ -560,7 +561,6 @@ class PeftCommonTester:
 
             model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
             model = PeftModel.from_pretrained(model, tmp_dirname, torch_device=self.torch_device)
-
             load_result1 = model.load_adapter(tmp_dirname, adapter_name="other")
             load_result2 = model.load_adapter(tmp_dirname, adapter_name="yet-another")
 
@@ -698,6 +698,9 @@ class PeftCommonTester:
         logits_unmerged = model(**dummy_input)[0]
 
         model = model.merge_and_unload()
+
+        # check that PEFT layers are completely removed
+        assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
         logits_merged_unloaded = model(**dummy_input)[0]
 
         conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
@@ -1342,6 +1345,8 @@ class PeftCommonTester:
 
     def _test_unload_adapter(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
+        num_params_base = len(model.state_dict())
+
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -1373,9 +1378,13 @@ class PeftCommonTester:
             model.eval()
             model = model.unload()
             logits_unload = model(**dummy_input)[0]
+            num_params_unloaded = len(model.state_dict())
 
+            # check that PEFT layers are completely removed
+            assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
             assert not torch.allclose(logits_with_adapter, logits_unload, atol=1e-10, rtol=1e-10)
             assert torch.allclose(logits_transformers, logits_unload, atol=1e-4, rtol=1e-4)
+            assert num_params_base == num_params_unloaded
 
     def _test_weighted_combination_of_adapters_lora(self, model, config, adapter_list, weight_list):
         model.add_adapter(adapter_list[1], config)
