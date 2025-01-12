@@ -30,19 +30,22 @@ from transformers import AutoModelForCausalLM
 
 from peft import LoraConfig, PeftModel, get_peft_model
 from peft.utils import infer_device
-from peft.utils.hotswap import hotswap_adapter
+from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
 
 
 torch_device = infer_device()
 
 
-def check_hotswap(do_hotswap=True):
+def check_hotswap(do_hotswap=True, ranks=(8, 8), alpha_scalings=(16, 16)):
     torch.manual_seed(0)
     inputs = torch.arange(10).view(-1, 1).to(torch_device)
     model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM").to(torch_device)
-    config = LoraConfig(init_lora_weights=False)
-    model = get_peft_model(model, config, adapter_name="adapter0").eval()
-    model.add_adapter("adapter1", config)
+    rank0, rank1 = ranks
+    alpha0, alpha1 = alpha_scalings
+    config0 = LoraConfig(init_lora_weights=False, r=rank0, lora_alpha=alpha0)
+    config1 = LoraConfig(init_lora_weights=False, r=rank1, lora_alpha=alpha1)
+    model = get_peft_model(model, config0, adapter_name="adapter0").eval()
+    model.add_adapter("adapter1", config1)
 
     with tempfile.TemporaryDirectory() as tmp_dirname:
         model.save_pretrained(tmp_dirname)
@@ -50,6 +53,8 @@ def check_hotswap(do_hotswap=True):
 
         model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM").to(torch_device)
         model = PeftModel.from_pretrained(model, os.path.join(tmp_dirname, "adapter0")).eval()
+        if do_hotswap:
+            prepare_model_for_compiled_hotswap(model, config=model.peft_config, target_rank=max(ranks))
         model = torch.compile(model, mode="reduce-overhead")
         model(inputs).logits
 
@@ -66,4 +71,8 @@ def check_hotswap(do_hotswap=True):
 
 if __name__ == "__main__":
     # check_hotswap(False) will trigger recompilation
-    check_hotswap(do_hotswap=sys.argv[1] == "1")
+    do_hotswap = sys.argv[1] == "1"
+    # ranks is a string like '13,7'
+    ranks = sys.argv[2].split(",")
+    ranks = int(ranks[0]), int(ranks[1])
+    check_hotswap(do_hotswap=do_hotswap, ranks=ranks, alpha_scalings=(8, 16))
