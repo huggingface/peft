@@ -145,6 +145,8 @@ class CordaConfig:
         use_float16_for_covariance (`bool`):
             If true, uses float16 for the covariance matrix. This can reduce the memory usage of the covariance matrix
             by half, but may lead to numerical instability. Defaults to `False`.
+        prune_temporary_fields (`bool`):
+            If true, temporary fields generated in CorDA preprocessing will be pruned. Defaults to `True`.
     """
 
     cache_file: Optional[str] = field(
@@ -189,6 +191,9 @@ class CordaConfig:
             )
         },
     )
+    prune_temporary_fields: bool = field(
+        default=True, metadata={"help": "If true, temporary fields generated in CorDA preprocessing will be pruned."}
+    )
 
 
 @dataclass
@@ -232,7 +237,7 @@ class LoraConfig(PeftConfig):
             How to initialize the weights of the adapter layers. Passing True (default) results in the default
             initialization from the reference implementation from Microsoft. Passing 'gaussian' results in Gaussian
             initialization scaled by the LoRA rank for linear and layers. Setting the initialization to False leads to
-            completely random initialization and is discouraged. Pass `'loftq'` to use LoftQ initialization. Passing
+            completely hrandom initialization and is discouraged. Pass `'loftq'` to use LoftQ initialization. Passing
             `'eva'` results in a data-driven initialization of <ahref='https://arxiv.org/abs/2410.07170' >Explained
             Variance Adaptation</a>. EVA initalizes LoRA based on the SVD of layer input activations and achieves SOTA
             performance due to its ability to adapt to the finetuning data. Pass `'olora'` to use OLoRA initialization.

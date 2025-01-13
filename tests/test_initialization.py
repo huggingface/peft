@@ -1917,12 +1917,43 @@ class TestCordaInitialization:
         return torch.rand(1000, 1000).to(self.torch_device)
 
     @pytest.mark.parametrize("corda_method", ("ipm", "kpm"))
+    def test_lora_corda_no_redundant_fields(self, data, corda_method):
+        original_model = self.get_model()
+        model = deepcopy(original_model)
+
+        corda_config = CordaConfig(
+            corda_method=corda_method,
+        )
+        config = LoraConfig(
+            init_lora_weights="corda",
+            target_modules=["linear"],
+            corda_config=corda_config,
+        )
+        preprocess_corda(
+            model,
+            config,
+            run_model=lambda: model(data),
+            hooked_model=model,
+        )
+        peft_model = get_peft_model(model, config)
+
+        # check if the redundant fields are removed
+        assert not hasattr(peft_model.base_model.linear, "sample_count")
+        assert not hasattr(peft_model.base_model.linear, "covariance_matrix")
+        assert not hasattr(peft_model.base_model.linear, "mean")
+        assert not hasattr(peft_model.base_model.linear, "std")
+        assert not hasattr(peft_model.base_model.linear, "corda_method")
+        assert not hasattr(peft_model.base_model.linear, "rank")
+        assert not hasattr(peft_model.base_model.linear, "eigens")
+
+    @pytest.mark.parametrize("corda_method", ("ipm", "kpm"))
     def test_lora_corda_sample_count(self, data, corda_method):
         original_model = self.get_model()
         model = deepcopy(original_model)
 
         corda_config = CordaConfig(
             corda_method=corda_method,
+            prune_temporary_fields=False,
         )
         config = LoraConfig(
             init_lora_weights="corda",
@@ -1960,6 +1991,7 @@ class TestCordaInitialization:
 
         corda_config = CordaConfig(
             corda_method=corda_method,
+            prune_temporary_fields=False,
         )
         config = LoraConfig(
             init_lora_weights="corda",
