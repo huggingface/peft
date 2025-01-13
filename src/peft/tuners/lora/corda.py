@@ -61,6 +61,10 @@ def preprocess_corda(
     """
     Build necessary CorDA fields for a model.
 
+    For each `M * N` linear layer, a `M * M` covariance matrix will be built temporarily during the preprocessing
+    process, consuming roughly another `2 * MODEL_SIZE` memory for typical LLMs if model weight is FP16 and covariance
+    is FP32. If that's too much, consider specifying `use_float16_for_covariance` in `lora_config.corda_config`.
+
     Args:
         model (`nn.Module`):
             Model to preprocess.
@@ -68,8 +72,11 @@ def preprocess_corda(
             Lora configuration of the model. `lora_config.corda_config` should be set.
         run_model (`Optional[Callable[[], None]]`):
             Callback to run the model when building covariance. Typically you should run model inference on your sample
-            dataset in this callback. Experiments have shown 256 samples to be a good default dataset size. `run_model`
-            can be `None` only if covariance file in `lora_config.corda_config` is already created.
+            dataset in this callback. Experiments have shown that when token count per sample is 2048, hidden dimension
+            is 4096, collecting 256 distinct samples is enough. If you collect too few or too repetitive samples, the
+            covariance matrix may be low-ranked and unstabilize preprocessing. You can estimate sample count as
+            `HIDDEN_DIM / TOKEN_PER_SAMPLE * 128`. `run_model` can be `None` only if covariance file in
+            `lora_config.corda_config` is already created.
         hooked_model (`Optional[nn.Module]`):
             Model to hook when building covariance. If none, original model will be hooked. This is only useful when
             you want to hook a different model than the one you are training, typically you should leave this `None`.
