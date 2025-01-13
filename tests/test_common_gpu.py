@@ -58,6 +58,7 @@ from peft.tuners.lora.config import LoraRuntimeConfig
 from peft.utils import infer_device
 
 from .testing_utils import (
+    device_count,
     require_bitsandbytes,
     require_multi_accelerator,
     require_non_cpu,
@@ -99,6 +100,8 @@ class PeftGPUCommonTests(unittest.TestCase):
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+        elif torch.xpu.is_available():
+            torch.xpu.empty_cache()
         gc.collect()
 
     @require_bitsandbytes
@@ -563,7 +566,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, IA3Linear4bit)
 
     @pytest.mark.multi_gpu_tests
-    @require_torch_multi_gpu
+    @require_multi_accelerator
     def test_lora_causal_lm_multi_gpu_inference(self):
         r"""
         Test if LORA can be used for inference on multiple GPUs.
@@ -580,7 +583,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map="balanced")
         tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
 
-        assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+        assert set(model.hf_device_map.values()) == set(range(device_count))
 
         model = get_peft_model(model, lora_config)
         assert isinstance(model, PeftModel)
@@ -607,7 +610,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         )
         tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
 
-        assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+        assert set(model.hf_device_map.values()) == set(range(device_count))
 
         model = get_peft_model(model, lora_config)
         assert isinstance(model, PeftModel)
@@ -706,7 +709,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert trainable_params == EXPECTED_TRAINABLE_PARAMS
         assert all_params == EXPECTED_ALL_PARAMS
 
-    @require_torch_gpu
+    @require_non_cpu
     @pytest.mark.single_gpu_tests
     @require_bitsandbytes
     def test_modules_to_save_grad(self):
@@ -742,7 +745,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert original_module.weight.grad is None
         assert modules_to_save.weight.grad is not None
 
-    @require_torch_gpu
+    @require_non_cpu
     @pytest.mark.single_gpu_tests
     @require_bitsandbytes
     def test_8bit_merge_lora(self):
@@ -1408,7 +1411,7 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         assert not torch.allclose(logits_hra, logits_hra_GS)
 
-    @require_torch_gpu
+    @require_non_cpu
     @pytest.mark.single_gpu_tests
     def test_apply_GS_hra_conv2d_inference(self):
         # check for different result with and without apply_GS
@@ -1434,7 +1437,7 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         assert not torch.allclose(logits_hra, logits_hra_GS)
 
-    @require_torch_gpu
+    @require_non_cpu
     @pytest.mark.single_gpu_tests
     def test_r_odd_hra_inference(self):
         # check that an untrained HRA adapter can't be initialized as an identity tranformation
@@ -1456,9 +1459,11 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert not torch.allclose(logits, logits_hra)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a CUDA GPU")
+@require_non_cpu
 @pytest.mark.single_gpu_tests
 class TestSameAdapterDifferentDevices:
+    device = infer_device()
+
     # 1639
     # The original issue comes down to the following problem: If the user has a base layer on CUDA, moves the adapter to
     # CPU, then adds another adapter (which will automatically be moved to CUDA), then the first adapter will also be
@@ -1495,29 +1500,29 @@ class TestSameAdapterDifferentDevices:
     def test_lora_one_target_add_new_adapter_does_not_change_device(self, mlp):
         config = LoraConfig(target_modules=["lin0"])
         model = get_peft_model(mlp, config)
-        model = model.cuda()
+        model = model.to(self.device)
         model.lin0.lora_A.cpu()
         model.lin0.lora_B.cpu()
 
         # check that the adapter is indeed on CPU and the base model on GPU
         assert model.lin0.lora_A.default.weight.device.type == "cpu"
         assert model.lin0.lora_B.default.weight.device.type == "cpu"
-        assert model.lin0.base_layer.weight.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
 
         model.add_adapter("other", config)
         # check that after adding a new adapter, the old adapter is still on CPU
         assert model.lin0.lora_A.default.weight.device.type == "cpu"
         assert model.lin0.lora_B.default.weight.device.type == "cpu"
         # the rest should be on GPU
-        assert model.lin0.base_layer.weight.device.type == "cuda"
-        assert model.lin0.lora_A.other.weight.device.type == "cuda"
-        assert model.lin0.lora_B.other.weight.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
+        assert model.lin0.lora_A.other.weight.device.type == self.device
+        assert model.lin0.lora_B.other.weight.device.type == self.device
 
     def test_lora_multiple_targets_add_new_adapater_does_not_change_device(self, mlp):
         # same as the previous test, but targeting multiple layers
         config = LoraConfig(target_modules=["lin0", "lin1"])
         model = get_peft_model(mlp, config)
-        model = model.cuda()
+        model = model.to(self.device)
         # move lin1 to CPU but leave lin0 on GPU
         model.lin1.lora_A.cpu()
         model.lin1.lora_B.cpu()
@@ -1525,74 +1530,74 @@ class TestSameAdapterDifferentDevices:
         # check that the adapter is indeed on CPU and the base model on GPU
         assert model.lin1.lora_A.default.weight.device.type == "cpu"
         assert model.lin1.lora_B.default.weight.device.type == "cpu"
-        assert model.lin1.base_layer.weight.device.type == "cuda"
-        assert model.lin0.lora_A.default.weight.device.type == "cuda"
-        assert model.lin0.lora_B.default.weight.device.type == "cuda"
-        assert model.lin0.base_layer.weight.device.type == "cuda"
+        assert model.lin1.base_layer.weight.device.type == self.device
+        assert model.lin0.lora_A.default.weight.device.type == self.device
+        assert model.lin0.lora_B.default.weight.device.type == self.device
+        assert model.lin0.base_layer.weight.device.type == self.device
 
         model.add_adapter("other", config)
         # check that after adding a new adapter, the old adapter is still on CPU
         assert model.lin1.lora_A.default.weight.device.type == "cpu"
         assert model.lin1.lora_B.default.weight.device.type == "cpu"
-        assert model.lin1.base_layer.weight.device.type == "cuda"
+        assert model.lin1.base_layer.weight.device.type == self.device
         # the rest should be on GPU
-        assert model.lin0.lora_A.default.weight.device.type == "cuda"
-        assert model.lin0.lora_B.default.weight.device.type == "cuda"
-        assert model.lin0.base_layer.weight.device.type == "cuda"
-        assert model.lin0.lora_A.other.weight.device.type == "cuda"
-        assert model.lin0.lora_B.other.weight.device.type == "cuda"
-        assert model.lin1.lora_A.other.weight.device.type == "cuda"
-        assert model.lin1.lora_B.other.weight.device.type == "cuda"
+        assert model.lin0.lora_A.default.weight.device.type == self.device
+        assert model.lin0.lora_B.default.weight.device.type == self.device
+        assert model.lin0.base_layer.weight.device.type == self.device
+        assert model.lin0.lora_A.other.weight.device.type == self.device
+        assert model.lin0.lora_B.other.weight.device.type == self.device
+        assert model.lin1.lora_A.other.weight.device.type == self.device
+        assert model.lin1.lora_B.other.weight.device.type == self.device
 
     def test_lora_embedding_target_add_new_adapter_does_not_change_device(self, emb_conv1d):
         # same as first test, but targeting the embedding layer
         config = LoraConfig(target_modules=["emb"])
         model = get_peft_model(emb_conv1d, config)
-        model = model.cuda()
+        model = model.to(self.device)
         model.emb.lora_embedding_A.cpu()
         model.emb.lora_embedding_B.cpu()
 
         # check that the adapter is indeed on CPU and the base model on GPU
         assert model.emb.lora_embedding_A.default.device.type == "cpu"
         assert model.emb.lora_embedding_B.default.device.type == "cpu"
-        assert model.emb.weight.device.type == "cuda"
+        assert model.emb.weight.device.type == self.device
 
         model.add_adapter("other", config)
         # check that after adding a new adapter, the old adapter is still on CPU
         assert model.emb.lora_embedding_A.default.device.type == "cpu"
         assert model.emb.lora_embedding_B.default.device.type == "cpu"
         # the rest should be on GPU
-        assert model.emb.weight.device.type == "cuda"
-        assert model.emb.lora_embedding_A.other.device.type == "cuda"
-        assert model.emb.lora_embedding_B.other.device.type == "cuda"
+        assert model.emb.weight.device.type == self.device
+        assert model.emb.lora_embedding_A.other.device.type == self.device
+        assert model.emb.lora_embedding_B.other.device.type == self.device
 
     def test_lora_conv1d_target_add_new_adapter_does_not_change_device(self, emb_conv1d):
         # same as first test, but targeting the Conv1D layer
         config = LoraConfig(target_modules=["conv1d"])
         model = get_peft_model(emb_conv1d, config)
-        model = model.cuda()
+        model = model.to(self.device)
         model.conv1d.lora_A.cpu()
         model.conv1d.lora_B.cpu()
 
         # check that the adapter is indeed on CPU and the base model on GPU
         assert model.conv1d.lora_A.default.weight.device.type == "cpu"
         assert model.conv1d.lora_B.default.weight.device.type == "cpu"
-        assert model.conv1d.weight.device.type == "cuda"
+        assert model.conv1d.weight.device.type == self.device
 
         model.add_adapter("other", config)
         # check that after adding a new adapter, the old adapter is still on CPU
         assert model.conv1d.lora_A.default.weight.device.type == "cpu"
         assert model.conv1d.lora_B.default.weight.device.type == "cpu"
         # the rest should be on GPU
-        assert model.conv1d.weight.device.type == "cuda"
-        assert model.conv1d.lora_A.other.weight.device.type == "cuda"
-        assert model.conv1d.lora_B.other.weight.device.type == "cuda"
+        assert model.conv1d.weight.device.type == self.device
+        assert model.conv1d.lora_A.other.weight.device.type == self.device
+        assert model.conv1d.lora_B.other.weight.device.type == self.device
 
     def test_lora_dora_add_new_adapter_does_not_change_device(self, mlp):
         # same as first test, but also using DoRA
         config = LoraConfig(target_modules=["lin0"], use_dora=True)
         model = get_peft_model(mlp, config)
-        model = model.cuda()
+        model = model.to(self.device)
         model.lin0.lora_A.cpu()
         model.lin0.lora_B.cpu()
         model.lin0.lora_magnitude_vector.cpu()
@@ -1601,7 +1606,7 @@ class TestSameAdapterDifferentDevices:
         assert model.lin0.lora_A.default.weight.device.type == "cpu"
         assert model.lin0.lora_B.default.weight.device.type == "cpu"
         assert model.lin0.lora_magnitude_vector.default.weight.device.type == "cpu"
-        assert model.lin0.base_layer.weight.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
 
         model.add_adapter("other", config)
         # check that after adding a new adapter, the old adapter is still on CPU
@@ -1609,182 +1614,182 @@ class TestSameAdapterDifferentDevices:
         assert model.lin0.lora_B.default.weight.device.type == "cpu"
         assert model.lin0.lora_magnitude_vector.default.weight.device.type == "cpu"
         # the rest should be on GPU
-        assert model.lin0.base_layer.weight.device.type == "cuda"
-        assert model.lin0.lora_A.other.weight.device.type == "cuda"
-        assert model.lin0.lora_B.other.weight.device.type == "cuda"
-        assert model.lin0.lora_magnitude_vector.other.weight.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
+        assert model.lin0.lora_A.other.weight.device.type == self.device
+        assert model.lin0.lora_B.other.weight.device.type == self.device
+        assert model.lin0.lora_magnitude_vector.other.weight.device.type == self.device
 
     def test_adalora_add_new_adapter_does_not_change_device(self, mlp):
         # same as first test, but using AdaLORA
         # AdaLora does not like multiple trainable adapters, hence inference_mode=True
         config = AdaLoraConfig(target_modules=["lin0"], inference_mode=True)
         model = get_peft_model(mlp, config)
-        model = model.cuda()
+        model = model.to(self.device)
         model.lin0.lora_A.cpu()
         model.lin0.lora_E.cpu()
 
         # check that the adapter is indeed on CPU and the base model on GPU
         assert model.lin0.lora_A.default.device.type == "cpu"
         assert model.lin0.lora_E.default.device.type == "cpu"
-        assert model.lin0.base_layer.weight.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
 
         model.add_adapter("other", config)
         # check that after adding a new adapter, the old adapter is still on CPU
         assert model.lin0.lora_A.default.device.type == "cpu"
         assert model.lin0.lora_E.default.device.type == "cpu"
         # the rest should be on GPU
-        assert model.lin0.base_layer.weight.device.type == "cuda"
-        assert model.lin0.lora_A.other.device.type == "cuda"
-        assert model.lin0.lora_E.other.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
+        assert model.lin0.lora_A.other.device.type == self.device
+        assert model.lin0.lora_E.other.device.type == self.device
 
     def test_boft_add_new_adapter_does_not_change_device(self, mlp):
         # same as first test, but using BoFT
         config = BOFTConfig(target_modules=["lin0"])
         model = get_peft_model(mlp, config)
-        model = model.cuda()
+        model = model.to(self.device)
         model.lin0.boft_R.cpu()
         model.lin0.boft_s.cpu()
 
         # check that the adapter is indeed on CPU and the base model on GPU
         assert model.lin0.boft_R.default.device.type == "cpu"
         assert model.lin0.boft_s.default.device.type == "cpu"
-        assert model.lin0.base_layer.weight.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
 
         model.add_adapter("other", config)
         # check that after adding a new adapter, the old adapter is still on CPU
         assert model.lin0.boft_R.default.device.type == "cpu"
         assert model.lin0.boft_s.default.device.type == "cpu"
         # the rest should be on GPU
-        assert model.lin0.base_layer.weight.device.type == "cuda"
-        assert model.lin0.boft_R.other.device.type == "cuda"
-        assert model.lin0.boft_s.other.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
+        assert model.lin0.boft_R.other.device.type == self.device
+        assert model.lin0.boft_s.other.device.type == self.device
 
     def test_ia3_add_new_adapter_does_not_change_device(self, mlp):
         # same as first test, but using IA3
         config = IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"])
         model = get_peft_model(mlp, config)
-        model = model.cuda()
+        model = model.to(self.device)
         model.lin0.ia3_l.cpu()
 
         # check that the adapter is indeed on CPU and the base model on GPU
         assert model.lin0.ia3_l.default.device.type == "cpu"
-        assert model.lin0.base_layer.weight.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
 
         model.add_adapter("other", config)
         # check that after adding a new adapter, the old adapter is still on CPU
         assert model.lin0.ia3_l.default.device.type == "cpu"
         # the rest should be on GPU
-        assert model.lin0.base_layer.weight.device.type == "cuda"
-        assert model.lin0.ia3_l.other.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
+        assert model.lin0.ia3_l.other.device.type == self.device
 
     @pytest.mark.xfail(reason="LN Tuning handling of multiple adapters may not be correct", strict=True)
     def test_ln_tuning_add_new_adapter_does_not_change_device(self, mlp):
         # same as first test, but using LN tuning
         config = LNTuningConfig(target_modules=["lin0"])
         model = get_peft_model(mlp, config)
-        model = model.cuda()
+        model = model.to(self.device)
         model.lin0.ln_tuning_layers.cpu()
 
         # check that the adapter is indeed on CPU and the base model on GPU
         assert model.lin0.ln_tuning_layers.default.weight.device.type == "cpu"
-        assert model.lin0.base_layer.weight.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
 
         model.add_adapter("other", config)
         # check that after adding a new adapter, the old adapter is still on CPU
         assert model.lin0.ln_tuning_layers.default.weight.device.type == "cpu"
         # the rest should be on GPU
-        assert model.lin0.base_layer.weight.device.type == "cuda"
-        assert model.lin0.ln_tuning_layers.other.weight.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
+        assert model.lin0.ln_tuning_layers.other.weight.device.type == self.device
 
     def test_loha_add_new_adapter_does_not_change_device(self, mlp):
         # same as first test, but using LoHa
         config = LoHaConfig(target_modules=["lin0"])
         model = get_peft_model(mlp, config)
-        model = model.cuda()
+        model = model.to(self.device)
         model.lin0.hada_w1_a.cpu()
         model.lin0.hada_w2_b.cpu()
 
         # check that the adapter is indeed on CPU and the base model on GPU
         assert model.lin0.hada_w1_a.default.device.type == "cpu"
         assert model.lin0.hada_w2_b.default.device.type == "cpu"
-        assert model.lin0.base_layer.weight.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
 
         model.add_adapter("other", config)
         # check that after adding a new adapter, the old adapter is still on CPU
         assert model.lin0.hada_w1_a.default.device.type == "cpu"
         assert model.lin0.hada_w2_b.default.device.type == "cpu"
         # the rest should be on GPU
-        assert model.lin0.base_layer.weight.device.type == "cuda"
-        assert model.lin0.hada_w1_a.other.device.type == "cuda"
-        assert model.lin0.hada_w2_b.other.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
+        assert model.lin0.hada_w1_a.other.device.type == self.device
+        assert model.lin0.hada_w2_b.other.device.type == self.device
 
     def test_lokr_add_new_adapter_does_not_change_device(self, mlp):
         # same as first test, but using LoKr
         config = LoKrConfig(target_modules=["lin0"])
         model = get_peft_model(mlp, config)
-        model = model.cuda()
+        model = model.to(self.device)
         model.lin0.lokr_w1.cpu()
         model.lin0.lokr_w2.cpu()
 
         # check that the adapter is indeed on CPU and the base model on GPU
         assert model.lin0.lokr_w1.default.device.type == "cpu"
         assert model.lin0.lokr_w2.default.device.type == "cpu"
-        assert model.lin0.base_layer.weight.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
 
         model.add_adapter("other", config)
         # check that after adding a new adapter, the old adapter is still on CPU
         assert model.lin0.lokr_w1.default.device.type == "cpu"
         assert model.lin0.lokr_w2.default.device.type == "cpu"
         # the rest should be on GPU
-        assert model.lin0.base_layer.weight.device.type == "cuda"
-        assert model.lin0.lokr_w1.other.device.type == "cuda"
-        assert model.lin0.lokr_w2.other.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
+        assert model.lin0.lokr_w1.other.device.type == self.device
+        assert model.lin0.lokr_w2.other.device.type == self.device
 
     def test_oft_add_new_adapter_does_not_change_device(self, mlp):
         # same as first test, but using OFT
         config = OFTConfig(target_modules=["lin0"])
         model = get_peft_model(mlp, config)
-        model = model.cuda()
+        model = model.to(self.device)
         model.lin0.oft_r.cpu()
 
         # check that the adapter is indeed on CPU and the base model on GPU
         assert model.lin0.oft_r.default.device.type == "cpu"
-        assert model.lin0.base_layer.weight.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
 
         model.add_adapter("other", config)
         # check that after adding a new adapter, the old adapter is still on CPU
         assert model.lin0.oft_r.default.device.type == "cpu"
         # the rest should be on GPU
-        assert model.lin0.base_layer.weight.device.type == "cuda"
-        assert model.lin0.oft_r.other.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
+        assert model.lin0.oft_r.other.device.type == self.device
 
     def test_vera_add_new_adapter_does_not_change_device(self, mlp):
         # same as first test, but using VERA
         config = VeraConfig(target_modules=["lin0"])
         model = get_peft_model(mlp, config)
-        model = model.cuda()
+        model = model.to(self.device)
         model.lin0.vera_A.cpu()
         model.lin0.vera_lambda_d.cpu()
 
         # check that the adapter is indeed on CPU and the base model on GPU
         assert model.lin0.vera_A.default.device.type == "cpu"
         assert model.lin0.vera_lambda_d.default.device.type == "cpu"
-        assert model.lin0.base_layer.weight.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
 
         model.add_adapter("other", config)
         # check that after adding a new adapter, the old adapter is still on CPU
         assert model.lin0.vera_A.default.device.type == "cpu"
         assert model.lin0.vera_lambda_d.default.device.type == "cpu"
         # the rest should be on GPU
-        assert model.lin0.base_layer.weight.device.type == "cuda"
-        assert model.lin0.vera_A.other.device.type == "cuda"
-        assert model.lin0.vera_lambda_d.other.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
+        assert model.lin0.vera_A.other.device.type == self.device
+        assert model.lin0.vera_lambda_d.other.device.type == self.device
 
     def test_vblora_add_new_adapter_does_not_change_device(self, mlp):
         # same as first test, but using VBLoRA
         config = VBLoRAConfig(target_modules=["lin0"], vector_length=2)
         model = get_peft_model(mlp, config)
-        model = model.cuda()
+        model = model.to(self.device)
         model.lin0.vblora_logits_A.cpu()
         model.lin0.vblora_logits_B.cpu()
         model.lin0.vblora_vector_bank.cpu()
@@ -1793,7 +1798,7 @@ class TestSameAdapterDifferentDevices:
         assert model.lin0.vblora_logits_A.default.device.type == "cpu"
         assert model.lin0.vblora_logits_B.default.device.type == "cpu"
         assert model.lin0.vblora_vector_bank.default.device.type == "cpu"
-        assert model.lin0.base_layer.weight.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
 
         model.add_adapter("other", config)
         # check that after adding a new adapter, the old adapter is still on CPU
@@ -1801,25 +1806,25 @@ class TestSameAdapterDifferentDevices:
         assert model.lin0.vblora_logits_B.default.device.type == "cpu"
         assert model.lin0.vblora_vector_bank.default.device.type == "cpu"
         # the rest should be on GPU
-        assert model.lin0.base_layer.weight.device.type == "cuda"
-        assert model.lin0.vblora_logits_A.other.device.type == "cuda"
-        assert model.lin0.vblora_logits_B.other.device.type == "cuda"
-        assert model.lin0.vblora_vector_bank.other.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
+        assert model.lin0.vblora_logits_A.other.device.type == self.device
+        assert model.lin0.vblora_logits_B.other.device.type == self.device
+        assert model.lin0.vblora_vector_bank.other.device.type == self.device
 
     def test_hra_add_new_adapter_does_not_change_device(self, mlp):
         # same as first test, but using HRA
         config = HRAConfig(target_modules=["lin0"])
         model = get_peft_model(mlp, config)
-        model = model.cuda()
+        model = model.to(self.device)
         model.lin0.hra_u.cpu()
 
         # check that the adapter is indeed on CPU and the base model on GPU
         assert model.lin0.hra_u.default.device.type == "cpu"
-        assert model.lin0.base_layer.weight.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
 
         model.add_adapter("other", config)
         # check that after adding a new adapter, the old adapter is still on CPU
         assert model.lin0.hra_u.default.device.type == "cpu"
         # the rest should be on GPU
-        assert model.lin0.base_layer.weight.device.type == "cuda"
-        assert model.lin0.hra_u.other.device.type == "cuda"
+        assert model.lin0.base_layer.weight.device.type == self.device
+        assert model.lin0.hra_u.other.device.type == self.device
