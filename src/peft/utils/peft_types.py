@@ -90,7 +90,35 @@ class TaskType(str, enum.Enum):
 def register_peft_method(
     *, name: str, config_cls, model_cls, prefix: Optional[str] = None, is_mixed_compatible=False
 ) -> None:
-    """TODO"""
+    """
+    Function to register a finetuning method like LoRA to be available in PEFT.
+
+    This method takes care of registering the PEFT method's configuration class, the model class, and optionally the
+    prefix.
+
+    Args:
+        name (str):
+            The name of the PEFT method. It must be unique.
+        config_cls:
+            The configuration class of the PEFT method.
+        model_cls:
+            The model class of the PEFT method.
+        prefix (Optional[str], optional):
+            The prefix of the PEFT method. It should be unique. If not provided, the name of the PEFT method is used as
+            the prefix.
+        is_mixed_compatible (bool, optional):
+            Whether the PEFT method is compatible with `PeftMixedModel`. If you're not sure, leave it as False
+            (default).
+
+    Example:
+
+        ```py
+        # inside of peft/tuners/my_peft_method/__init__.py
+        from peft.utils import register_peft_method
+
+        register_peft_method(name="my_peft_method", config_cls=MyConfig, model_cls=MyModel)
+        ```
+    """
     from peft.mapping import (
         PEFT_TYPE_TO_CONFIG_MAPPING,
         PEFT_TYPE_TO_MIXED_MODEL_MAPPING,
