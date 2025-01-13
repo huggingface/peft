@@ -248,15 +248,6 @@ class LoraModel(BaseTuner):
             child = child.base_layer
 
         meta = torch.device("meta")
-
-        # handle .state attribute of 8 bit bnb
-        if (getattr(child, "state", None) is not None) and not any(p.device == meta for p in new_module.parameters()):
-            if hasattr(new_module, "base_layer"):
-                new_module.base_layer.state = child.state
-            else:
-                new_module.state = child.state
-            new_module.to(child.weight.device)
-
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if (self.prefix in name) or ("ranknum" in name):
