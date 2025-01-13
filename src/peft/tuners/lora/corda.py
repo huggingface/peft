@@ -125,10 +125,6 @@ def preprocess_corda(
                     del module.sample_count
                 if hasattr(module, "covariance_matrix"):
                     del module.covariance_matrix
-                if hasattr(module, "mean"):
-                    del module.mean
-                if hasattr(module, "std"):
-                    del module.std
                 if hasattr(module, "corda_method"):
                     del module.corda_method
                 if hasattr(module, "rank"):
@@ -183,15 +179,9 @@ def calib_cov_distribution(
                 "Invalid value found in covariance. Please file an issue at https://github.com/huggingface/peft/issues."
             )
 
-        # calculate mean and std
-        mean = input.mean(0)
-        std = input.std(0)
-
         # add to module
         module.sample_count += 1
         module.covariance_matrix += covariance
-        module.mean += mean
-        module.std += std
 
         # free memory
         del covariance, input
@@ -200,8 +190,6 @@ def calib_cov_distribution(
     for name, module in target_modules(hooked_model, config):
         module.sample_count = 0
         module.covariance_matrix = 0
-        module.mean = 0
-        module.std = 0
         handles.append(module.register_forward_hook(hook))
 
     run_model()
@@ -222,14 +210,10 @@ def calib_cov_distribution(
             if name in targets:
                 targets[name].sample_count = module.sample_count
                 targets[name].covariance_matrix = module.covariance_matrix
-                targets[name].mean = module.mean
-                targets[name].std = module.std
 
     # Divide by sample count
     for name, module in target_modules(model, config):
         module.covariance_matrix /= module.sample_count
-        module.mean /= module.sample_count
-        module.std /= module.sample_count
 
     # Save covariance to disk
     if covariance_file is not None:

@@ -1940,11 +1940,13 @@ class TestCordaInitialization:
         # check if the redundant fields are removed
         assert not hasattr(peft_model.base_model.linear, "sample_count")
         assert not hasattr(peft_model.base_model.linear, "covariance_matrix")
-        assert not hasattr(peft_model.base_model.linear, "mean")
-        assert not hasattr(peft_model.base_model.linear, "std")
         assert not hasattr(peft_model.base_model.linear, "corda_method")
         assert not hasattr(peft_model.base_model.linear, "rank")
         assert not hasattr(peft_model.base_model.linear, "eigens")
+
+        # legacy debug fields
+        assert not hasattr(peft_model.base_model.linear, "mean")
+        assert not hasattr(peft_model.base_model.linear, "std")
 
     @pytest.mark.parametrize("corda_method", ("ipm", "kpm"))
     def test_lora_corda_sample_count(self, data, corda_method):
