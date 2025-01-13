@@ -237,7 +237,7 @@ class LoraConfig(PeftConfig):
             How to initialize the weights of the adapter layers. Passing True (default) results in the default
             initialization from the reference implementation from Microsoft. Passing 'gaussian' results in Gaussian
             initialization scaled by the LoRA rank for linear and layers. Setting the initialization to False leads to
-            completely hrandom initialization and is discouraged. Pass `'loftq'` to use LoftQ initialization. Passing
+            completely random initialization and is discouraged. Pass `'loftq'` to use LoftQ initialization. Passing
             `'eva'` results in a data-driven initialization of <ahref='https://arxiv.org/abs/2410.07170' >Explained
             Variance Adaptation</a>. EVA initalizes LoRA based on the SVD of layer input activations and achieves SOTA
             performance due to its ability to adapt to the finetuning data. Pass `'olora'` to use OLoRA initialization.
