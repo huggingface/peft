@@ -49,7 +49,15 @@ jobs:
       - name: Model cache
         uses: actions/cache@v4
         with:
-          path: ${{ env.HF_HOME }}
+          # Avoid caching HF_HOME/modules and Python cache files to prevent interoperability
+          # issues and potential cache poisioning. We also avoid lock files to prevent runs
+          # avoiding re-download because they see a lock file.
+          path: |
+            ${{ env.HF_HOME }}/datasets/**
+            !${{ env.HF_HOME }}/datasets/**/*.lock
+            ${{ env.HF_HOME }}/hub/**
+            !${{ env.HF_HOME }}/hub/.locks/**
+            !${{ env.HF_HOME }}/**/*.pyc
           key: model-cache-${{ runner.os }}-${{ github.run_id }}
           restore-keys: model-cache-${{ runner.os }}
       - name: Set up Python ${{ matrix.python-version }}
