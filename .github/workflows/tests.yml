@@ -58,8 +58,9 @@ jobs:
             ${{ env.HF_HOME }}/hub/**
             !${{ env.HF_HOME }}/hub/.locks/**
             !${{ env.HF_HOME }}/**/*.pyc
-          key: model-cache-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: model-cache-${{ runner.os }}
+          key: model-cache-${{ github.run_id }}
+          restore-keys: model-cache-
+          enableCrossOsArchive: true
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v4
         with:
