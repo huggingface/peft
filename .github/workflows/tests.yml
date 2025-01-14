@@ -9,6 +9,9 @@ on:
     paths-ignore:
       - 'docs/**'
 
+env:
+  HF_HOME: .cache/huggingface
+
 jobs:
   check_code_quality:
     runs-on: ubuntu-latest
@@ -43,6 +46,12 @@ jobs:
       - uses: actions/checkout@v3
         with:
           persist-credentials: false
+      - name: Model cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.HF_HOME }}
+          key: model-cache-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: model-cache-${{ runner.os }}
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v4
         with:
