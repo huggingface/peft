@@ -2074,6 +2074,7 @@ class TestOLoRA:
 
 
 @require_non_cpu
+@require_bitsandbytes
 class TestLoftQ:
     r"""
     Tests for LoftQ to ensure that it reduces the quantization error compared to normal LoRA quantization.
