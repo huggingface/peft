@@ -275,8 +275,10 @@ class ModulesToSaveWrapper(torch.nn.Module):
 
                 context_manager = deepspeed.zero.GatheredParameters(self.original_module.parameters(), modifier_rank=0)
                 break
-        with context_manager:
-            self.modules_to_save.update(torch.nn.ModuleDict({adapter_name: copy.deepcopy(self.original_module)}))
+
+        if adapter_name not in self.modules_to_save:
+            with context_manager:
+                self.modules_to_save[adapter_name] = copy.deepcopy(self.original_module)
 
         if hasattr(self.modules_to_save[adapter_name], "_hf_hook"):
             old_hook = self.modules_to_save[adapter_name]._hf_hook
@@ -416,10 +418,10 @@ def _freeze_adapter(model, adapter_name):
             p.requires_grad = False
 
 
-def _set_trainable(model, adapter_name):
+def _set_trainable(model, adapter_name, modules_to_save):
     key_list = [key for key, _ in model.named_modules()]
     for key in key_list:
-        target_module_found = any(key.endswith(target_key) for target_key in model.modules_to_save)
+        target_module_found = any(key.endswith(target_key) for target_key in modules_to_save)
         if target_module_found:
             parent, target, target_name = _get_submodules(model, key)
             if isinstance(target, ModulesToSaveWrapper):

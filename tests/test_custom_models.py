@@ -1608,6 +1608,26 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         with pytest.raises(ValueError, match=msg):
             model.add_weighted_adapter(["default", "other"], weights=[1.0, 1.0], adapter_name="merged")
 
+    def test_multiple_adapters_no_needless_copy_modules_to_save(self):
+        # See 2206
+        # The problem was that we keep a "global" modules_to_save on the model which contains all possible
+        # modules_to_save for each adapter. When the first adapter targets embed_tokens with modules_to_save and the
+        # second adapter targets lm_head, then embed_tokens will create a copy of the original module for the second
+        # adapter, even though it's not needed. The copy still acts as expected but uses unnecessary memory.
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
+        config0 = LoraConfig(modules_to_save=["embed_tokens"])
+        config1 = LoraConfig(modules_to_save=["lm_head"])
+        model = get_peft_model(model, config0)
+        model.add_adapter("other", config1)
+
+        lm_head_keys = list(model.base_model.model.lm_head.modules_to_save.keys())
+        assert lm_head_keys == ["other"]
+
+        embed_token_keys = list(model.base_model.model.model.decoder.embed_tokens.modules_to_save.keys())
+        # before the fix, this would be: ['default', 'other']
+        assert embed_token_keys == ["default"]
+
     def test_existing_model_card(self):
         # ensure that if there is already a model card, it is not overwritten
         model = MLP()
