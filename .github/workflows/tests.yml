@@ -53,10 +53,7 @@ jobs:
           # issues and potential cache poisioning. We also avoid lock files to prevent runs
           # avoiding re-download because they see a lock file.
           path: |
-            ${{ env.HF_HOME }}/datasets/**
-            !${{ env.HF_HOME }}/datasets/**/*.lock
             ${{ env.HF_HOME }}/hub/**
-            !${{ env.HF_HOME }}/hub/.locks/**
             !${{ env.HF_HOME }}/**/*.pyc
           key: model-cache-${{ github.run_id }}
           restore-keys: model-cache-
