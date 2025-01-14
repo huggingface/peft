@@ -47,7 +47,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Model cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           # Avoid caching HF_HOME/modules and Python cache files to prevent interoperability
           # issues and potential cache poisioning. We also avoid lock files to prevent runs
@@ -79,3 +79,14 @@ jobs:
       - name: Test with pytest
         run: |
           make test
+      - name: Update model cache
+        uses: actions/cache/save@v4
+        # Only let one runner (preferably the one that covers most tests) update the model cache
+        # after *every* run. This way we make sure that our cache is never outdated and we don't
+        # have to keep track of hashes.
+        if: always() && matrix.os == 'ubuntu' && matrix.python-version == '3.10'
+        with:
+          path: |
+            ${{ env.HF_HOME }}/hub/**
+            !${{ env.HF_HOME }}/**/*.pyc
+          key: model-cache-${{ github.run_id }}
