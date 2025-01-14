@@ -247,13 +247,6 @@ class LoraModel(BaseTuner):
         if hasattr(child, "base_layer"):
             child = child.base_layer
 
-        if getattr(child, "state", None) is not None:
-            if hasattr(new_module, "base_layer"):
-                new_module.base_layer.state = child.state
-            else:
-                new_module.state = child.state
-            new_module.to(child.weight.device)
-
         meta = torch.device("meta")
         # dispatch to correct device
         for name, module in new_module.named_modules():
