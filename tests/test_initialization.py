@@ -2961,3 +2961,25 @@ class TestHotSwapping:
         msg = f"Hot swapping the adapter did not succeed. Unexpected keys: {new_key}"
         with pytest.raises(RuntimeError, match=msg):
             hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+
+
+def test_import_peft_type_to_model_mapping_deprecation_warning(recwarn):
+    # This is for backwards compatibility: In #2282, PEFT_TYPE_TO_MODEL_MAPPING was removed as it was redundant with
+    # PEFT_TYPE_TO_TUNER_MAPPING. However, third party code could still use this mapping, e.g.:
+    # https://github.com/AutoGPTQ/AutoGPTQ/blob/6689349625de973b9ee3016c28c11f32acf7f02c/auto_gptq/utils/peft_utils.py#L8
+    # TODO: Remove after 2026-01
+
+    # first check that there is no warning under normal circumstances
+    from peft.peft_model import PeftModel  # noqa
+
+    expected = (
+        "PEFT_TYPE_TO_MODEL_MAPPING is deprecated, please use `from peft import PEFT_TYPE_TO_TUNER_MAPPING` instead"
+    )
+    warnings = (w.message.args[0] for w in recwarn.list)
+    assert not any(w.startswith(expected) for w in warnings)
+
+    from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING  # noqa
+
+    # check that there is a warning with this message after importing the method
+    warnings = (w.message.args[0] for w in recwarn.list)
+    assert any(w.startswith(expected) for w in warnings)
