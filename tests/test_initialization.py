@@ -2980,6 +2980,6 @@ def test_import_peft_type_to_model_mapping_deprecation_warning(recwarn):
 
     from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING  # noqa
 
-    # check that there is a warning with this message after importing the method
+    # check that there is a warning with this message after importing the variable
     warnings = (w.message.args[0] for w in recwarn.list)
     assert any(w.startswith(expected) for w in warnings)
