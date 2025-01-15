@@ -59,6 +59,7 @@ from peft.utils import infer_device
 
 from .testing_utils import (
     require_bitsandbytes,
+    require_gptq,
     require_multi_accelerator,
     require_non_cpu,
     require_torch_gpu,
@@ -79,8 +80,7 @@ if is_bnb_available():
         from peft.tuners.vera import Linear4bit as VeraLinear4bit
 
 
-@require_non_cpu
-class PeftGPUCommonTests(unittest.TestCase):
+class PeftCommonTests(unittest.TestCase):
     r"""
     A common tester to run common operations that are performed on GPU such as generation, loading in 8bit, etc.
     """
@@ -383,7 +383,7 @@ class PeftGPUCommonTests(unittest.TestCase):
             assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.ia3_l
             assert "adapter2" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.ia3_l
 
-    @pytest.mark.single_gpu_tests
+    @require_gptq
     def test_lora_gptq_quantization_from_pretrained_safetensors(self):
         r"""
         Tests that the autogptq quantization using LoRA works as expected with safetensors weights.
@@ -403,19 +403,19 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         config = LoraConfig(task_type="CAUSAL_LM")
         peft_model = get_peft_model(model, config)
-        peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+        peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(peft_model.device))
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             peft_model.save_pretrained(tmp_dir)
             model = AutoModelForCausalLM.from_pretrained(**kwargs)
             model = PeftModel.from_pretrained(model, tmp_dir)
             model = prepare_model_for_kbit_training(model)
-            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(peft_model.device))
 
             # loading a 2nd adapter works, #1239
             model.load_adapter(tmp_dir, "adapter2")
             model.set_adapter("adapter2")
-            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(peft_model.device))
 
             # check that both adapters are in the same layer
             assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A
