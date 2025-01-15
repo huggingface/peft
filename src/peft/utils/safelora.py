@@ -34,7 +34,6 @@ class SafeLoraConfig:
     """
     This is the configuration class to store the configuration of a [`safeLora`].
 
-
     Args:
         base_model_path (`str`):
             The path of the base model for obtaining the aligned matrix. The base model should be one that has not
