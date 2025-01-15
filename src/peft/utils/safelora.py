@@ -228,7 +228,7 @@ def apply_safelora(safelora_config: SafeLoraConfig):
 
     peft_config = PeftConfig.from_pretrained(safelora_config.peft_model_path)
     if peft_config.use_dora:
-        raise ValueError("SafeLoRA do not support dora.")
+        raise ValueError("SafeLoRA do not support DoRA.")
 
     projected_matrix = get_aligned_matrix(
         safelora_config.base_model_path, safelora_config.aligned_model_path, peft_config, safelora_config
