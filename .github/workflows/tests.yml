@@ -59,6 +59,7 @@ jobs:
           restore-keys: model-cache-
           enableCrossOsArchive: true
       - name: Dump cache content
+        # TODO: remove this step after 2025-02-15
         if: matrix.os != 'windows-latest'
         run: |
           SHASUM=sha256sum
@@ -86,12 +87,15 @@ jobs:
         run: |
           make test
       - name: Dump cache content and diff
+        # This is just debug info so that we can monitor if the model cache diverges substantially
+        # over time and what the diverging model is.
+        # TODO: remove after 2025-02-15
         if: matrix.os != 'windows-latest'
         run: |
           SHASUM=sha256sum
           [ -f "$(which shasum)" ] && SHASUM=shasum
           find "${{ env.HF_HOME }}/hub" -type f -exec "$SHASUM" {} \; > cache_content_after
-          diff -udp cache_content_initial cache_content_after
+          diff -udp cache_content_initial cache_content_after || true
       - name: Update model cache
         uses: actions/cache/save@v4
         # Only let one runner (preferably the one that covers most tests) update the model cache
