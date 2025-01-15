@@ -58,6 +58,9 @@ jobs:
           key: model-cache-${{ github.run_id }}
           restore-keys: model-cache-
           enableCrossOsArchive: true
+      - name: Dump cache content
+        run: |
+          find "${{ env.HF_HOME }}/hub" -type f -exec sha256sum {} \; > cache_content_initial
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v4
         with:
@@ -79,6 +82,10 @@ jobs:
       - name: Test with pytest
         run: |
           make test
+      - name: Dump cache content and diff
+        run: |
+          find "${{ env.HF_HOME }}/hub" -type f -exec sha256sum {} \; > cache_content_after
+          diff -udp cache_content_initial cache_content_after
       - name: Update model cache
         uses: actions/cache/save@v4
         # Only let one runner (preferably the one that covers most tests) update the model cache
