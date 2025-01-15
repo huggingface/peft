@@ -21,7 +21,7 @@ from datautils import get_calib_data
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from peft.mapping import get_peft_model
+from peft import get_peft_model
 from peft.tuners.lora.config import CordaConfig, LoraConfig
 from peft.tuners.lora.corda import preprocess_corda
 
