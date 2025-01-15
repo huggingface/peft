@@ -59,8 +59,11 @@ jobs:
           restore-keys: model-cache-
           enableCrossOsArchive: true
       - name: Dump cache content
+        if: matrix.os != 'windows-latest'
         run: |
-          find "${{ env.HF_HOME }}/hub" -type f -exec sha256sum {} \; > cache_content_initial
+          SHASUM=sha256sum
+          [ -f "$(which shasum)" ] && SHASUM=shasum
+          find "${{ env.HF_HOME }}/hub" -type f -exec "$SHASUM" {} \; > cache_content_initial
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v4
         with:
@@ -83,8 +86,11 @@ jobs:
         run: |
           make test
       - name: Dump cache content and diff
+        if: matrix.os != 'windows-latest'
         run: |
-          find "${{ env.HF_HOME }}/hub" -type f -exec sha256sum {} \; > cache_content_after
+          SHASUM=sha256sum
+          [ -f "$(which shasum)" ] && SHASUM=shasum
+          find "${{ env.HF_HOME }}/hub" -type f -exec "$SHASUM" {} \; > cache_content_after
           diff -udp cache_content_initial cache_content_after
       - name: Update model cache
         uses: actions/cache/save@v4
