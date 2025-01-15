@@ -349,6 +349,9 @@ class LoraLayer(BaseTunerLayer):
         weight = weight.to(dtype)
         self.get_base_layer().weight.data = weight
 
+        # Remove redundant fields
+        del linear.eigens
+
     def loftq_init(self, adapter_name):
         from peft.utils.loftq_utils import loftq_init
 
