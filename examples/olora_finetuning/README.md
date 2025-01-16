@@ -39,6 +39,19 @@ OLoRA also supports quantization. To use 4-bit quantization try:
 ```bash
 python3 examples/olora_finetuning/olora_finetuning.py --base_model facebook/opt-350m --quantize
 ```
+or you can just pass a quantized model without the quantize flag.
+
+If you want to run DDP by [accelerate](https://huggingface.co/docs/accelerate/en/index), please run `accelerate config` to set your ddp config, and run:
+```bash
+accelerate launch examples/olora_finetuning/olora_finetuning.py --base_model facebook/opt-350m
+```
+please add `--device_map cpu` if you want to run finetune on CPU.
+
+If you want to train a quantized model like AWQ and GPTQ which do not support olora init method, please pass `--init_lora_weights gaussian`. For example:
+```bash
+python3 examples/olora_finetuning/olora_finetuning.py --base_model hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4 --init_lora_weights gaussian
+
+```
 
 
 ## Use the model
