@@ -3,8 +3,6 @@ name: CI security linting
 on:
   push:
     branches: ["main"]
-    paths:
-      - '.github/**'
   pull_request:
     branches: ["*"]
     paths:
