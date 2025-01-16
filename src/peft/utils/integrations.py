@@ -130,14 +130,21 @@ def get_layer_device_map(model):
     """
     Derive the device map for the layers of the model.
     """
-    main_device = [d for d in model.hf_device_map.values() if d not in ["cpu", "disk"]][0]
+    if not hasattr(model, "hf_device_map"):
+        return None
+
+    if (len(model.hf_device_map) == 1) and hasattr(model, "device"):
+        # E.g. with quanto, when the model is loaded as:
+        # `model = AutoModel.from_pretrained(model_id, quantization_config=quanto_config)`
+        # Then the model.hf_device_map is set to {'': 'cpu'}, even if model.to(0) is called later. Thus we can't fully
+        # rely on the hf_device_map.
+        main_device = model.device
+    else:
+        main_device = [d for d in model.hf_device_map.values() if d not in ["cpu", "disk"]][0]
 
     execution_device_map = {
         name: main_device if device in ["cpu", "disk"] else device for name, device in model.hf_device_map.items()
     }
-
-    if execution_device_map is None:
-        return None
 
     if len(execution_device_map) == 1 and "" in execution_device_map:
         return {idx: execution_device_map[""] for idx in range(model.config.num_hidden_layers)}
@@ -168,6 +175,9 @@ def map_cache_to_layer_device_map(model, cache) -> None:
         return
 
     layer_device_map = get_layer_device_map(model)
+    if layer_device_map is None:
+        return
+
     for idx in range(model.config.num_hidden_layers):
         layer_device = layer_device_map[idx]
         cache.key_cache[idx] = cache.key_cache[idx].to(layer_device)
