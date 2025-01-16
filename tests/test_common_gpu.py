@@ -1461,7 +1461,7 @@ class PeftGPUCommonTests(unittest.TestCase):
 
 @require_non_cpu
 @pytest.mark.single_gpu_tests
-class TestSameAdapterDifferentDevices:
+class TestSameAdapterDifferentDevices(unittest.TestCase):
     device = infer_device()
 
     # 1639

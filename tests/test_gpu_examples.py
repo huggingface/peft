@@ -2075,7 +2075,7 @@ class TestOLoRA:
 
 @require_non_cpu
 @require_bitsandbytes
-class TestLoftQ:
+class TestLoftQ(unittest.TestCase):
     r"""
     Tests for LoftQ to ensure that it reduces the quantization error compared to normal LoRA quantization.
     """
@@ -3803,7 +3803,7 @@ class TestFSDPWrap:
         fsdp_auto_wrap_policy(SimpleModel())  # does not raise
 
 
-class TestBOFT:
+class TestBOFT(unittest.TestCase):
     """
     Test that we can correctly use half-precision models with BOFT.
     """
@@ -3829,7 +3829,7 @@ class TestBOFT:
 
 
 @require_non_cpu
-class TestPTuningReproducibility:
+class TestPTuningReproducibility(unittest.TestCase):
     device = infer_device()
 
     def test_p_tuning_exactly_reproducible_after_loading(self, tmp_path):
@@ -3869,7 +3869,7 @@ class TestPTuningReproducibility:
 
 @require_non_cpu
 @pytest.mark.single_gpu_tests
-class TestLowCpuMemUsageDifferentDevices:
+class TestLowCpuMemUsageDifferentDevices(unittest.TestCase):
     """Test for the low CPU memory usage option for loading PEFT models.
 
     There are already tests for this in test_initialization.py but here we want to specifically test diverging devices
@@ -3915,7 +3915,7 @@ class TestLowCpuMemUsageDifferentDevices:
         assert {p.device.type for p in model.parameters()} == {device_model}
 
 
-class TestEvaInitializationGPU:
+class TestEvaInitializationGPU(unittest.TestCase):
     """GPU tests for the Eva initialization method."""
 
     # Constants for test configuration
@@ -3994,6 +3994,7 @@ class TestEvaInitializationGPU:
         return {k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()}
 
     @require_non_cpu
+    @require_bitsandbytes
     @pytest.mark.single_gpu_tests
     @pytest.mark.parametrize("model_fixture", ["model", "model_bnb"], indirect=True)
     def test_eva_initialization_consistency(self, model_fixture, dataset, peft_config):
@@ -4033,7 +4034,7 @@ class TestEvaInitializationGPU:
 
 @require_non_cpu
 @pytest.mark.multi_gpu_tests
-class TestPrefixTuning:
+class TestPrefixTuning(unittest.TestCase):
     device = infer_device()
 
     def test_prefix_tuning_multiple_devices_decoder_model(self):
