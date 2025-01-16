@@ -82,6 +82,7 @@ from .testing_utils import (
     require_bitsandbytes,
     require_eetq,
     require_hqq,
+    require_multi_accelerator,
     require_non_cpu,
     require_non_xpu,
     require_optimum,
@@ -4037,6 +4038,7 @@ class TestEvaInitializationGPU(unittest.TestCase):
 class TestPrefixTuning(unittest.TestCase):
     device = infer_device()
 
+    @require_multi_accelerator
     def test_prefix_tuning_multiple_devices_decoder_model(self):
         # See issue 2134
         model_id = "hf-internal-testing/tiny-random-MistralForCausalLM"
@@ -4061,6 +4063,7 @@ class TestPrefixTuning(unittest.TestCase):
         model = get_peft_model(model, peft_config)
         model.generate(**inputs)  # does not raise
 
+    @require_multi_accelerator
     def test_prefix_tuning_multiple_devices_encoder_decoder_model(self):
         # See issue 2134
         model_id = "hf-internal-testing/tiny-random-T5Model"
