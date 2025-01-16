@@ -82,6 +82,7 @@ from .testing_utils import (
     require_bitsandbytes,
     require_eetq,
     require_hqq,
+    require_multi_accelerator,
     require_non_cpu,
     require_non_xpu,
     require_optimum,
@@ -2073,8 +2074,9 @@ class TestOLoRA:
         assert torch.isfinite(logits).all()
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
-class TestLoftQ:
+@require_non_cpu
+@require_bitsandbytes
+class TestLoftQ(unittest.TestCase):
     r"""
     Tests for LoftQ to ensure that it reduces the quantization error compared to normal LoRA quantization.
     """
@@ -2083,19 +2085,18 @@ class TestLoftQ:
     # quantization without LoftQ. Thus 1.03 means that the error should be decreased by 3% at least. This is a very
     # conservative value to prevent flakiness, in practice most gains are > 1.5
     error_factor = 1.03
+    device = infer_device()
 
     def get_input(self, model_id, device):
         tokenizer = AutoTokenizer.from_pretrained(model_id)
         inputs = tokenizer("All I want is", padding=True, return_tensors="pt")
-        if device == "cuda":
-            inputs = inputs.to("cuda")
+        inputs = inputs.to(self.device)
         return inputs
 
     def get_base_model(self, model_id, device, **kwargs):
         cls = AutoModelForSeq2SeqLM if "t5" in str(model_id) else AutoModelForCausalLM
         model = cls.from_pretrained(model_id, **kwargs).eval()
-        if device == "cuda":
-            model = model.to("cuda")
+        model = model.to(self.device)
         return model
 
     def get_logits(self, model, inputs):
@@ -3803,31 +3804,33 @@ class TestFSDPWrap:
         fsdp_auto_wrap_policy(SimpleModel())  # does not raise
 
 
-class TestBOFT:
+class TestBOFT(unittest.TestCase):
     """
     Test that we can correctly use half-precision models with BOFT.
     """
 
-    @require_torch_gpu
+    device = infer_device()
+
+    @require_non_cpu
     @pytest.mark.single_gpu_tests
     def test_boft_half_linear(self):
         # Check that we can use BoFT with model loaded in half precision
-        layer = torch.nn.Linear(160, 160).cuda()
+        layer = torch.nn.Linear(160, 160).to(self.device)
         layer = boft.layer.Linear(layer, "layer", boft_n_butterfly_factor=2).to(dtype=torch.bfloat16)
-        x = torch.randn(160, 160, device="cuda", dtype=torch.bfloat16)
+        x = torch.randn(160, 160, device=self.device, dtype=torch.bfloat16)
         layer(x)  # does not raise
 
-    @require_torch_gpu
+    @require_non_cpu
     @pytest.mark.single_gpu_tests
     def test_boft_half_conv(self):
-        conv = torch.nn.Conv2d(1, 1, 4).cuda()
+        conv = torch.nn.Conv2d(1, 1, 4).to(self.device)
         conv = boft.layer.Conv2d(conv, "conv", boft_n_butterfly_factor=2).to(dtype=torch.bfloat16)
-        x = torch.randn(1, 160, 160, device="cuda", dtype=torch.bfloat16)
+        x = torch.randn(1, 160, 160, device=self.device, dtype=torch.bfloat16)
         conv(x)  # does not raise
 
 
-@require_torch_gpu
-class TestPTuningReproducibility:
+@require_non_cpu
+class TestPTuningReproducibility(unittest.TestCase):
     device = infer_device()
 
     def test_p_tuning_exactly_reproducible_after_loading(self, tmp_path):
@@ -3865,9 +3868,9 @@ class TestPTuningReproducibility:
         torch.testing.assert_close(gen_loaded, gen_peft)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+@require_non_cpu
 @pytest.mark.single_gpu_tests
-class TestLowCpuMemUsageDifferentDevices:
+class TestLowCpuMemUsageDifferentDevices(unittest.TestCase):
     """Test for the low CPU memory usage option for loading PEFT models.
 
     There are already tests for low_cpu_mem_usage=True in test_initialization.py but here we want to run tests that
@@ -3878,7 +3881,7 @@ class TestLowCpuMemUsageDifferentDevices:
     model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
     device = infer_device()
 
-    @pytest.mark.parametrize("device_model, device_sd", [("cpu", "cuda"), ("cuda", "cpu")])
+    @pytest.mark.parametrize("device_model, device_sd", [("cpu", infer_device()), (infer_device(), "cpu")])
     def test_low_cpu_mem_usage_model_model_on_gpu_state_dict_on_cpu_works(self, device_model, device_sd):
         # specifically test diverging devices for the model and state_dict
         inputs = {"input_ids": torch.randint(0, 100, (1, 10)), "attention_mask": torch.ones(1, 10)}
@@ -3943,7 +3946,7 @@ class TestLowCpuMemUsageDifferentDevices:
         assert {p.device.type for p in model.parameters()} == {self.device, "meta"}
 
 
-class TestEvaInitializationGPU:
+class TestEvaInitializationGPU(unittest.TestCase):
     """GPU tests for the Eva initialization method."""
 
     # Constants for test configuration
@@ -3953,7 +3956,7 @@ class TestEvaInitializationGPU:
     MAX_LENGTH = 256
     LORA_DIM = 8
     LORA_ALPHA = 1
-    DEVICE = "cuda"
+    DEVICE = infer_device()
 
     @pytest.fixture
     def tokenizer(self):
@@ -4021,7 +4024,8 @@ class TestEvaInitializationGPU:
     def collate_fn(examples):
         return {k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()}
 
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+    @require_non_cpu
+    @require_bitsandbytes
     @pytest.mark.single_gpu_tests
     @pytest.mark.parametrize("model_fixture", ["model", "model_bnb"], indirect=True)
     def test_eva_initialization_consistency(self, model_fixture, dataset, peft_config):
@@ -4059,14 +4063,17 @@ class TestEvaInitializationGPU:
             )
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+@require_non_cpu
 @pytest.mark.multi_gpu_tests
-class TestPrefixTuning:
+class TestPrefixTuning(unittest.TestCase):
+    device = infer_device()
+
+    @require_multi_accelerator
     def test_prefix_tuning_multiple_devices_decoder_model(self):
         # See issue 2134
         model_id = "hf-internal-testing/tiny-random-MistralForCausalLM"
         tokenizer = AutoTokenizer.from_pretrained(model_id, padding="left")
-        inputs = tokenizer(["A list of colors: red, blue"], return_tensors="pt").to("cuda")
+        inputs = tokenizer(["A list of colors: red, blue"], return_tensors="pt").to(self.device)
 
         device_map = {
             "model.embed_tokens": 0,
@@ -4086,11 +4093,12 @@ class TestPrefixTuning:
         model = get_peft_model(model, peft_config)
         model.generate(**inputs)  # does not raise
 
+    @require_multi_accelerator
     def test_prefix_tuning_multiple_devices_encoder_decoder_model(self):
         # See issue 2134
         model_id = "hf-internal-testing/tiny-random-T5Model"
         tokenizer = AutoTokenizer.from_pretrained(model_id, padding="left")
-        inputs = tokenizer(["A list of colors: red, blue"], return_tensors="pt").to("cuda")
+        inputs = tokenizer(["A list of colors: red, blue"], return_tensors="pt").to(self.device)
         device_map = {
             "shared": 0,
             "encoder.embed_tokens": 0,
@@ -4120,7 +4128,7 @@ class TestPrefixTuning:
         model.generate(**inputs)  # does not raise
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+@require_non_cpu
 @pytest.mark.single_gpu_tests
 class TestHotSwapping:
     def test_hotswapping_compiled_model_does_not_trigger_recompilation(self):
