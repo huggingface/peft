@@ -12,9 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from peft.utils import register_peft_method
+
 from .config import LoHaConfig
 from .layer import Conv2d, Linear, LoHaLayer
 from .model import LoHaModel
 
 
-__all__ = ["LoHaConfig", "LoHaModel", "Conv2d", "Linear", "LoHaLayer"]
+__all__ = ["Conv2d", "Linear", "LoHaConfig", "LoHaLayer", "LoHaModel"]
+
+register_peft_method(name="loha", config_cls=LoHaConfig, model_cls=LoHaModel, prefix="hada_", is_mixed_compatible=True)

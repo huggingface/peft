@@ -9,6 +9,8 @@ line-length = 119
 extend-exclude = ["*.ipynb"]
 
 [tool.ruff.lint]
+preview = true
+explicit-preview-rules = true
 extend-select = [
     "C", # Complexity
     "E", # PEP8 errors
@@ -17,10 +19,12 @@ extend-select = [
     "UP", # Pyupgrade upgrades
     "W", # PEP8 warnings
     "PT009", # Pytest assertions
+    "RUF022", # Sorting of __all__
 ]
 ignore = [
     "C901", # Function too complex
     "E501", # Line length (handled by ruff-format)
+    "F841", # unused variable
     "UP007", # X | Y style Unions
 ]
 

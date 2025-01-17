@@ -12,9 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from peft.utils import register_peft_method
+
 from .config import OFTConfig
 from .layer import Conv2d, Linear, OFTLayer
 from .model import OFTModel
 
 
-__all__ = ["OFTConfig", "OFTModel", "Conv2d", "Linear", "OFTLayer"]
+__all__ = ["Conv2d", "Linear", "OFTConfig", "OFTLayer", "OFTModel"]
+
+register_peft_method(name="oft", config_cls=OFTConfig, model_cls=OFTModel)

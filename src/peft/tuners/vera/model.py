@@ -99,7 +99,7 @@ class VeraModel(BaseTuner):
         - **peft_config** ([`VeraConfig`]): The configuration of the Vera model.
     """
 
-    prefix: str = "vera_lambda"
+    prefix: str = "vera_lambda_"
 
     def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
         super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
@@ -314,7 +314,6 @@ class VeraModel(BaseTuner):
             eightbit_kwargs.update(
                 {
                     "has_fp16_weights": target_base_layer.state.has_fp16_weights,
-                    "memory_efficient_backward": target_base_layer.state.memory_efficient_backward,
                     "threshold": target_base_layer.state.threshold,
                     "index": target_base_layer.index,
                 }

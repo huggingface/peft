@@ -48,8 +48,13 @@ class AdaptedAttention(nn.Module):
         target_dtype = (
             model.q_proj.weight.dtype if model.q_proj.weight.dtype not in [torch.int8, torch.uint8] else torch.float32
         )
+        if hasattr(self.model, "hidden_size"):
+            # TODO: remove this clause after 2026-01-01
+            hidden_size = self.model.hidden_size
+        else:  # changed in https://github.com/huggingface/transformers/pull/35235
+            hidden_size = self.model.config.hidden_size
         self.adaption_prompt = nn.Parameter(
-            torch.empty(1, adapter_len, self.model.hidden_size, device=device, dtype=target_dtype).normal_()
+            torch.empty(1, adapter_len, hidden_size, device=device, dtype=target_dtype).normal_()
         )
         # Initialize the gate to 0 as this is "zero-init".
         self.adaption_gate = nn.Parameter(torch.zeros(1, device=device, dtype=target_dtype))
@@ -67,7 +72,7 @@ class AdaptedAttention(nn.Module):
         if kwargs.get("output_attention", False):
             raise NotImplementedError("output_attention is not currently supported.")
 
-        output, _, past_key_value = self.model(**kwargs)
+        output, *_ = self.model(**kwargs)
         bsz = output.shape[0]
         q_len = output.shape[1]
         embed_dim = output.shape[2]
@@ -84,14 +89,19 @@ class AdaptedAttention(nn.Module):
             key = getattr(self.model, k_proj_layer)(self.adaption_prompt)
             value = getattr(self.model, v_proj_layer)(self.adaption_prompt)
 
+        if hasattr(self.model, "num_heads"):
+            # TODO: remove this clause after 2026-01-01
+            num_heads = self.model.num_heads
+        else:  # changed in https://github.com/huggingface/transformers/pull/35235
+            num_heads = self.model.config.num_attention_heads
         # (bsz, num_key_value_heads, adapter_len, head_dim)
         adapter_k = (
-            key.view(1, self.adapter_len, (self.model.num_heads // factor), self.model.head_dim)
+            key.view(1, self.adapter_len, (num_heads // factor), self.model.head_dim)
             .repeat(bsz, 1, 1, 1)
             .transpose(1, 2)
         )
         adapter_v = (
-            value.view(1, self.adapter_len, (self.model.num_heads // factor), self.model.head_dim)
+            value.view(1, self.adapter_len, (num_heads // factor), self.model.head_dim)
             .repeat(bsz, 1, 1, 1)
             .transpose(1, 2)
         )
@@ -125,4 +135,4 @@ class AdaptedAttention(nn.Module):
 
         # Restore original dtype.
         output = output.to(previous_dtype)
-        return output, None, past_key_value
+        return output, *_

@@ -121,6 +121,82 @@ class EvaConfig:
 
 
 @dataclass
+class CordaConfig:
+    """
+    This is the sub-configuration class to store the configuration of a [`LoraModel`].
+
+    Args:
+        cache_file (`Optional[str]`):
+            File to store the SVD cache. The SVD cache is much smaller than the residual model (for example, residual
+            model of Llama-3-8b is 15GB, while SVD cache is 1.4GB), but with SVD cache and original model weights,
+            residual model weights can be built quickly. If you need to reuse residual model weights with limited
+            storage, you can store the SVD cache instead.
+        covariance_file (`Optional[str]`):
+            File to store the covariance matrix. If you wish to train multiple models with different ranks, but they
+            sample from the same dataset, you can store the covariance matrix and reuse it for different ranks. Note
+            that covariance file is usually large (comparable to model size), so you will need sufficient storage.
+        corda_method (`Literal["ipm", "kpm"]`):
+            Method to build adapter. The KPM (Knowledge-Preserved Mode) not only achieves better performance than LoRA
+            on fine-tuning tasks, but also mitigates the catastrophic forgetting of pre-trained world knowledge. When
+            preserving pre-trained knowledge is not a concern, the IPM (Instruction-Previewed Mode) is favored because
+            it can further accelerate convergence and enhance the fine-tuning performance. Defaults to `'ipm'`.
+        verbose (`bool`):
+            If true, prints the progress of CorDA initialization. Defaults to `False`.
+        use_float16_for_covariance (`bool`):
+            If true, uses float16 for the covariance matrix. This can reduce the memory usage of the covariance matrix
+            by half, but may lead to numerical instability. Defaults to `False`.
+        prune_temporary_fields (`bool`):
+            If true, temporary fields generated in CorDA preprocessing will be pruned. Defaults to `True`.
+    """
+
+    cache_file: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": (
+                "File to store the SVD cache. The SVD cache is much smaller than the residual model (for example, "
+                "residual model of Llama-3-8b is 15GB, while SVD cache is 1.4GB), but with SVD cache and original model "
+                "weights, residual model weights can be built quickly. If you need to reuse residual model weights with "
+                "limited storage, you can store the SVD cache instead."
+            )
+        },
+    )
+    covariance_file: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": (
+                "File to store the covariance matrix. If you wish to train multiple models with different ranks, but "
+                "they sample from the same dataset, you can store the covariance matrix and reuse it for different ranks. "
+                "Note that covariance file is usually large (comparable to model size), so you will need sufficient storage."
+            )
+        },
+    )
+    corda_method: Literal["ipm", "kpm"] = field(
+        default="ipm",
+        metadata={
+            "help": (
+                "Method to build adapter. The KPM not only achieves better performance than LoRA on fine-tuning tasks, but "
+                "also mitigates the catastrophic forgetting of pre-trained world knowledge. When preserving pre-trained "
+                "knowledge is not a concern, the IPM is favored because it can further accelerate convergence and enhance "
+                "the fine-tuning performance."
+            )
+        },
+    )
+    verbose: bool = field(default=False, metadata={"help": "If true, prints the progress of CorDA initialization."})
+    use_float16_for_covariance: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "If true, uses float16 for the covariance matrix. This can reduce the memory usage of the covariance matrix "
+                "by half, but may lead to numerical instability."
+            )
+        },
+    )
+    prune_temporary_fields: bool = field(
+        default=True, metadata={"help": "If true, temporary fields generated in CorDA preprocessing will be pruned."}
+    )
+
+
+@dataclass
 class LoraConfig(PeftConfig):
     """
     This is the configuration class to store the configuration of a [`LoraModel`].
@@ -132,10 +208,10 @@ class LoraConfig(PeftConfig):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
             names will be replaced. When passing a string, a regex match will be performed. When passing a list of
             strings, either an exact match will be performed or it is checked if the name of the module ends with any
-            of the passed strings. If this is specified as 'all-linear', then all linear/Conv1D modules are chosen,
-            excluding the output layer. If this is not specified, modules will be chosen according to the model
-            architecture. If the architecture is not known, an error will be raised -- in this case, you should specify
-            the target modules manually.
+            of the passed strings. If this is specified as 'all-linear', then all linear/Conv1D modules are chosen (if
+            the model is a PreTrainedModel, the output layer excluded). If this is not specified, modules will be
+            chosen according to the model architecture. If the architecture is not known, an error will be raised -- in
+            this case, you should specify the target modules manually.
         exclude_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to not apply the adapter. When passing a string, a regex match will be performed.
             When passing a list of strings, either an exact match will be performed or it is checked if the name of the
@@ -157,7 +233,7 @@ class LoraConfig(PeftConfig):
             Otherwise, it will use the original default value of `lora_alpha/r`.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
-        init_lora_weights (`bool` | `Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "loftq"]`):
+        init_lora_weights (`bool` | `Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "corda", "loftq"]`):
             How to initialize the weights of the adapter layers. Passing True (default) results in the default
             initialization from the reference implementation from Microsoft. Passing 'gaussian' results in Gaussian
             initialization scaled by the LoRA rank for linear and layers. Setting the initialization to False leads to
@@ -171,7 +247,10 @@ class LoraConfig(PeftConfig):
             leading to further enhancements. Passing `'pissa_niter_[number of iters]'` initiates Fast-SVD-based PiSSA
             initialization, where `[number of iters]` indicates the number of subspace iterations to perform FSVD, and
             must be a nonnegative integer. When `[number of iters]` is set to 16, it can complete the initialization of
-            a 7B model within seconds, and the training effect is approximately equivalent to using SVD.
+            a 7B model within seconds, and the training effect is approximately equivalent to using SVD. Passing
+            `'corda'` results in the initialization of <ahref='https://arxiv.org/abs/2406.05223' >Context-Oriented
+            Decomposition Adaptation</a>, which converges even more rapidly than PiSSA in Instruction-Previewed Mode,
+            and preserves world knowledge better than LoRA in Knowledge-Preserved Mode.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
@@ -199,6 +278,9 @@ class LoraConfig(PeftConfig):
         eva_config (`Optional[EvaConfig]`):
             The configuration of EVA. At a minimum the dataset argument needs to be set (use the same dataset as for
             finetuning).
+        corda_config (`Optional[CordaConfig]`):
+            The configuration of CorDA. If this is not None, then CorDA will be used to build the adapter layers. Also
+            pass `init_lora_weights='corda'`.
         use_dora (`bool`):
             Enable 'Weight-Decomposed Low-Rank Adaptation' (DoRA). This technique decomposes the updates of the weights
             into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the magnitude is
@@ -225,7 +307,8 @@ class LoraConfig(PeftConfig):
             "help": (
                 "List of module names or regex expression of the module names to replace with LoRA."
                 "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'."
-                "This can also be a wildcard 'all-linear' which matches all linear/Conv1D layers except the output layer."
+                "This can also be a wildcard 'all-linear' which matches all linear/Conv1D "
+                "(if the model is a PreTrainedModel, the output layer excluded)."
                 "If not specified, modules will be chosen according to the model architecture, If the architecture is "
                 "not known, an error will be raised -- in this case, you should specify the target modules manually."
             ),
@@ -264,7 +347,7 @@ class LoraConfig(PeftConfig):
         },
     )
     init_lora_weights: (
-        bool | Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "loftq"]
+        bool | Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "corda", "loftq"]
     ) = field(
         default=True,
         metadata={
@@ -278,6 +361,7 @@ class LoraConfig(PeftConfig):
                 "Passing `'pissa'` results in PiSSA initialization."
                 "Passing `'pissa_niter_[number of iters]'` initiates Fast-SVD-based PiSSA initialization, "
                 "where [number of iters] indicates the number of subspace iterations to perform fsvd, and must be a nonnegative integer."
+                "Passing `'corda'` results in CorDA initialization."
                 "Pass `'loftq'` to use LoftQ initialization"
             ),
         },
@@ -357,6 +441,15 @@ class LoraConfig(PeftConfig):
             "help": (
                 "The configuration of EVA. If this is passed, then EVA will be used to intialize the LoRA layers. "
                 "Also set `init_lora_weights='eva'` in this case. "
+            )
+        },
+    )
+    corda_config: Optional[CordaConfig] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The configuration of CorDA. If this is passed, then CorDA will be used to build the adapter layers. "
+                "Also set `init_lora_weights='corda'` in this case."
             )
         },
     )
@@ -460,6 +553,14 @@ class LoraConfig(PeftConfig):
         elif self.init_lora_weights != "eva" and self.eva_config is not None:
             warnings.warn("`eva_config` specified but will be ignored when `init_lora_weights` is not 'eva'.")
 
+        elif self.init_lora_weights == "corda" and self.corda_config is None:
+            warnings.warn(
+                "`init_lora_weights` is 'corda' but `corda_config` is not specified. Using default CorDA config."
+            )
+            self.corda_config = CordaConfig()
+        elif self.init_lora_weights != "corda" and self.corda_config is not None:
+            warnings.warn("`corda_config` specified but will be ignored when `init_lora_weights` is not 'corda'.")
+
         if self.lora_bias:
             if self.init_lora_weights not in (True, False):
                 raise ValueError(
@@ -469,7 +570,7 @@ class LoraConfig(PeftConfig):
             if self.use_dora:
                 raise ValueError("The argument lora_bias=True is not supported for DoRA, please pass use_dora=False")
 
-        # Using post training conversion of modified base weights to restore their initial values (PiSSA, OLoRA) cannot
+        # Using post training conversion of modified base weights to restore their initial values PiSSA/CorDA/OLoRA cannot
         # be correctly done when using rslora + rank_pattern/alpha_pattern. We can't really know if the user intends
         # this when they'll eventually call save_pretrained (i.e. if they'll pass
         # path_initial_model_for_weight_conversionl). Therefore, we only warn but don't raise an error here.
@@ -479,19 +580,20 @@ class LoraConfig(PeftConfig):
             and (
                 (isinstance(self.init_lora_weights, str) and (self.init_lora_weights.startswith("pissa")))
                 or (self.init_lora_weights == "olora")
+                or (self.init_lora_weights == "corda")
             )
         ):
             msg = (
                 "Using Rank-Stabilized LoRA with rank_pattern/alpha_pattern and post-training conversion of modified "
-                "base weights (PiSSA, OLoRA) means that you won't be able to pass "
+                "base weights PiSSA/CorDA/OLoRA means that you won't be able to pass "
                 "`path_initial_model_for_weight_conversion` to `save_pretrained` to restore the initial values of the "
                 "base weights; if you intend to do this, please ensure not to use rslora or rank_pattern/alpha_pattern."
             )
             warnings.warn(msg)
 
-        self._custom_modules: Optional[dict[type[nn.Mmodule], type[nn.Module]]] = None
+        self._custom_modules: Optional[dict[type[nn.Module], type[nn.Module]]] = None
 
-    def _register_custom_module(self, mapping: dict[type[nn.Mmodule], type[nn.Module]]) -> None:
+    def _register_custom_module(self, mapping: dict[type[nn.Module], type[nn.Module]]) -> None:
         """
         Experimental API to support providing custom LoRA layers.
 

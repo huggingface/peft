@@ -767,8 +767,8 @@ class PeftGPUCommonTests(unittest.TestCase):
         with torch.inference_mode():
             out_after_merge = F.softmax(model(random_input).logits, dim=-1)
 
-        atol = 0.01
-        rtol = 10
+        atol = 1e-3
+        rtol = 1
         assert not torch.allclose(out_base, out_before_merge, atol=atol, rtol=rtol)
         assert torch.allclose(out_before_merge, out_after_merge, atol=atol, rtol=rtol)
         assert isinstance(model, PeftModel)
@@ -803,8 +803,8 @@ class PeftGPUCommonTests(unittest.TestCase):
             with torch.inference_mode():
                 out_after = F.softmax(model(random_input).logits, dim=-1)
 
-        atol = 0.01
-        rtol = 10
+        atol = 1e-3
+        rtol = 1
         assert not torch.allclose(out_base, out_before, atol=atol, rtol=rtol)
         assert torch.allclose(out_base, out_after, atol=atol, rtol=rtol)
         assert isinstance(model, PeftModel)
@@ -838,8 +838,8 @@ class PeftGPUCommonTests(unittest.TestCase):
         with torch.inference_mode():
             out_after_merge = F.softmax(model(random_input).logits, dim=-1)
 
-        atol = 0.01
-        rtol = 10
+        atol = 1e-3
+        rtol = 1
         assert not torch.allclose(out_base, out_before_merge, atol=atol, rtol=rtol)
         assert torch.allclose(out_before_merge, out_after_merge, atol=atol, rtol=rtol)
 
@@ -1294,9 +1294,8 @@ class PeftGPUCommonTests(unittest.TestCase):
             model = model.merge_and_unload()
             out_unloaded = F.softmax(model(random_input).logits, dim=-1)
 
-        # 8bit merging less precise than 4bit
-        atol = 0.01
-        rtol = 10
+        atol = 1e-3
+        rtol = 1
         # sanity check that using DoRA changes the results
         assert not torch.allclose(out_base, out_dora, atol=atol, rtol=rtol)
         assert torch.allclose(out_dora, out_merged, atol=atol, rtol=rtol)
