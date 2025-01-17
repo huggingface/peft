@@ -1,4 +1,6 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Note: These tests were copied from test_common_gpu.py and test_gpu_examples.py as they can run on CPU too.
+#
+# Copyright 2025-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
