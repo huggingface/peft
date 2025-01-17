@@ -152,7 +152,7 @@ class AdaLoraModel(LoraModel):
             )
 
     @staticmethod
-    def _create_new_module(lora_config, adapter_name, target, device_map, **kwargs):
+    def _create_new_module(lora_config, adapter_name, target, device_map=None, **kwargs):
         # avoid eager bnb import
         if is_bnb_available():
             import bitsandbytes as bnb
