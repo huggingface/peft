@@ -118,8 +118,7 @@ def is_torchao_available():
 @lru_cache
 def is_xpu_available(check_device=False):
     """
-    Checks if XPU acceleration is available either via `intel_extension_for_pytorch` or via stock PyTorch (>=2.4) and
-    potentially if a XPU is in the environment
+    Checks if XPU acceleration is available and potentially if a XPU is in the environment
     """
 
     system = platform.system()
