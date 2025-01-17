@@ -2074,9 +2074,11 @@ class TestOLoRA:
         assert torch.isfinite(logits).all()
 
 
-@require_non_cpu
+@pytest.mark.skipif(
+    not (torch.cuda.is_available() or torch.xpu.is_available()), reason="test requires a hardware accelerator"
+)
 @require_bitsandbytes
-class TestLoftQ(unittest.TestCase):
+class TestLoftQ:
     r"""
     Tests for LoftQ to ensure that it reduces the quantization error compared to normal LoRA quantization.
     """
@@ -3804,7 +3806,7 @@ class TestFSDPWrap:
         fsdp_auto_wrap_policy(SimpleModel())  # does not raise
 
 
-class TestBOFT(unittest.TestCase):
+class TestBOFT:
     """
     Test that we can correctly use half-precision models with BOFT.
     """
@@ -3829,10 +3831,10 @@ class TestBOFT(unittest.TestCase):
         conv(x)  # does not raise
 
 
-@require_non_cpu
-class TestPTuningReproducibility(unittest.TestCase):
+class TestPTuningReproducibility:
     device = infer_device()
 
+    @require_non_cpu
     def test_p_tuning_exactly_reproducible_after_loading(self, tmp_path):
         # See: https://github.com/huggingface/peft/issues/2043#issuecomment-2321522577
         # Ensure that after loading a p-tuning checkpoint, results are exactly reproducible (before the patch, they were
@@ -3868,9 +3870,8 @@ class TestPTuningReproducibility(unittest.TestCase):
         torch.testing.assert_close(gen_loaded, gen_peft)
 
 
-@require_non_cpu
 @pytest.mark.single_gpu_tests
-class TestLowCpuMemUsageDifferentDevices(unittest.TestCase):
+class TestLowCpuMemUsageDifferentDevices:
     """Test for the low CPU memory usage option for loading PEFT models.
 
     There are already tests for this in test_initialization.py but here we want to specifically test diverging devices
@@ -3880,6 +3881,7 @@ class TestLowCpuMemUsageDifferentDevices(unittest.TestCase):
 
     model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
 
+    @require_non_cpu
     @pytest.mark.parametrize("device_model, device_sd", [("cpu", infer_device()), (infer_device(), "cpu")])
     def test_low_cpu_mem_usage_model_model_on_gpu_state_dict_on_cpu_works(self, device_model, device_sd):
         inputs = {"input_ids": torch.randint(0, 100, (1, 10)), "attention_mask": torch.ones(1, 10)}
@@ -3916,7 +3918,7 @@ class TestLowCpuMemUsageDifferentDevices(unittest.TestCase):
         assert {p.device.type for p in model.parameters()} == {device_model}
 
 
-class TestEvaInitializationGPU(unittest.TestCase):
+class TestEvaInitializationGPU:
     """GPU tests for the Eva initialization method."""
 
     # Constants for test configuration
@@ -4033,9 +4035,8 @@ class TestEvaInitializationGPU(unittest.TestCase):
             )
 
 
-@require_non_cpu
 @pytest.mark.multi_gpu_tests
-class TestPrefixTuning(unittest.TestCase):
+class TestPrefixTuning:
     device = infer_device()
 
     @require_multi_accelerator
@@ -4098,7 +4099,9 @@ class TestPrefixTuning(unittest.TestCase):
         model.generate(**inputs)  # does not raise
 
 
-@require_non_cpu
+@pytest.mark.skipif(
+    not (torch.cuda.is_available() or torch.xpu.is_available()), reason="test requires a hardware accelerator"
+)
 @pytest.mark.single_gpu_tests
 class TestHotSwapping:
     def test_hotswapping_compiled_model_does_not_trigger_recompilation(self):
