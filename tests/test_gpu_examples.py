@@ -78,9 +78,9 @@ from peft.utils.other import fsdp_auto_wrap_policy
 from .testing_utils import (
     require_aqlm,
     require_auto_awq,
+    require_auto_gptq,
     require_bitsandbytes,
     require_eetq,
-    require_gptq,
     require_hqq,
     require_non_cpu,
     require_non_xpu,
@@ -1370,9 +1370,10 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
 
-@require_gptq
+@require_torch_gpu
+@require_auto_gptq
 @require_optimum
-class PeftGPTQTests(unittest.TestCase):
+class PeftGPTQGPUTests(unittest.TestCase):
     r"""
     GPTQ + peft tests
     """
@@ -1381,7 +1382,8 @@ class PeftGPTQTests(unittest.TestCase):
         from transformers import GPTQConfig
 
         self.causal_lm_model_id = "marcsun13/opt-350m-gptq-4bit"
-        self.quantization_config = GPTQConfig(bits=4, backend="auto_trainable")
+        # TODO : check if it works for Exllamav2 kernels
+        self.quantization_config = GPTQConfig(bits=4, use_exllama=False)
         self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
 
     def tearDown(self):
@@ -1400,6 +1402,7 @@ class PeftGPTQTests(unittest.TestCase):
         assert torch.isfinite(output.logits).all()
         model.train(training)
 
+    @pytest.mark.single_gpu_tests
     def test_causal_lm_training(self):
         r"""
         Test the CausalLM training on a single GPU device. The test would simply fail if the adapters are not set
@@ -1453,6 +1456,7 @@ class PeftGPTQTests(unittest.TestCase):
             # assert loss is not None
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
+    @pytest.mark.single_gpu_tests
     def test_adalora_causalLM(self):
         r"""
         Tests the gptq training with adalora
@@ -1580,6 +1584,7 @@ class PeftGPTQTests(unittest.TestCase):
             # assert loss is not None
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
+    @pytest.mark.single_gpu_tests
     def test_non_default_adapter_name(self):
         # See issue 1346
         config = LoraConfig(
@@ -1660,6 +1665,7 @@ class OffloadSaveTests(unittest.TestCase):
             offloaded_output = offloaded_lora_model(input_tokens)[0]
         assert torch.allclose(output, offloaded_output, atol=1e-5)
 
+    @pytest.mark.single_gpu_tests
     def test_offload_merge(self):
         r"""
         Test merging, unmerging, and unloading of a model with CPU- and disk- offloaded modules.
