@@ -100,7 +100,12 @@ lora_config = LoraConfig(
     init_lora_weights="corda",
     corda_config=corda_config,
 )
+
+# Call `preprocess_corda` first to collect covariance matrix and build SVD result for model
+# For more details, please refer to documentation of `preprocess_corda`
 preprocess_corda(model, lora_config, run_model=run_model)
+
+# Call `get_peft_model` after preprocessing, or else you'll encounter error
 peft_model = get_peft_model(model, lora_config)
 peft_model.print_trainable_parameters()
 

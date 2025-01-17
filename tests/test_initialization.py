@@ -55,11 +55,11 @@ from peft import (
     inject_adapter_in_model,
     set_peft_model_state_dict,
 )
+from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.tuners.lora.config import CordaConfig
 from peft.tuners.lora.corda import preprocess_corda
 from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
-from peft.utils.constants import PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.utils.hotswap import hotswap_adapter
 
 
@@ -1917,12 +1917,45 @@ class TestCordaInitialization:
         return torch.rand(1000, 1000).to(self.torch_device)
 
     @pytest.mark.parametrize("corda_method", ("ipm", "kpm"))
+    def test_lora_corda_no_redundant_fields(self, data, corda_method):
+        original_model = self.get_model()
+        model = deepcopy(original_model)
+
+        corda_config = CordaConfig(
+            corda_method=corda_method,
+        )
+        config = LoraConfig(
+            init_lora_weights="corda",
+            target_modules=["linear"],
+            corda_config=corda_config,
+        )
+        preprocess_corda(
+            model,
+            config,
+            run_model=lambda: model(data),
+            hooked_model=model,
+        )
+        peft_model = get_peft_model(model, config)
+
+        # check if the redundant fields are removed
+        assert not hasattr(peft_model.base_model.linear, "sample_count")
+        assert not hasattr(peft_model.base_model.linear, "covariance_matrix")
+        assert not hasattr(peft_model.base_model.linear, "corda_method")
+        assert not hasattr(peft_model.base_model.linear, "rank")
+        assert not hasattr(peft_model.base_model.linear, "eigens")
+
+        # legacy debug fields
+        assert not hasattr(peft_model.base_model.linear, "mean")
+        assert not hasattr(peft_model.base_model.linear, "std")
+
+    @pytest.mark.parametrize("corda_method", ("ipm", "kpm"))
     def test_lora_corda_sample_count(self, data, corda_method):
         original_model = self.get_model()
         model = deepcopy(original_model)
 
         corda_config = CordaConfig(
             corda_method=corda_method,
+            prune_temporary_fields=False,
         )
         config = LoraConfig(
             init_lora_weights="corda",
@@ -1960,6 +1993,7 @@ class TestCordaInitialization:
 
         corda_config = CordaConfig(
             corda_method=corda_method,
+            prune_temporary_fields=False,
         )
         config = LoraConfig(
             init_lora_weights="corda",
@@ -2961,3 +2995,25 @@ class TestHotSwapping:
         msg = f"Hot swapping the adapter did not succeed. Unexpected keys: {new_key}"
         with pytest.raises(RuntimeError, match=msg):
             hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+
+
+def test_import_peft_type_to_model_mapping_deprecation_warning(recwarn):
+    # This is for backwards compatibility: In #2282, PEFT_TYPE_TO_MODEL_MAPPING was removed as it was redundant with
+    # PEFT_TYPE_TO_TUNER_MAPPING. However, third party code could still use this mapping, e.g.:
+    # https://github.com/AutoGPTQ/AutoGPTQ/blob/6689349625de973b9ee3016c28c11f32acf7f02c/auto_gptq/utils/peft_utils.py#L8
+    # TODO: Remove after 2026-01
+
+    # first check that there is no warning under normal circumstances
+    from peft.peft_model import PeftModel  # noqa
+
+    expected = (
+        "PEFT_TYPE_TO_MODEL_MAPPING is deprecated, please use `from peft import PEFT_TYPE_TO_TUNER_MAPPING` instead"
+    )
+    warnings = (w.message.args[0] for w in recwarn.list)
+    assert not any(w.startswith(expected) for w in warnings)
+
+    from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING  # noqa
+
+    # check that there is a warning with this message after importing the variable
+    warnings = (w.message.args[0] for w in recwarn.list)
+    assert any(w.startswith(expected) for w in warnings)
