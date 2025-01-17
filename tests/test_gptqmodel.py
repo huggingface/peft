@@ -66,7 +66,7 @@ class PeftGPTQModelCommonTests(unittest.TestCase):
 
     def test_lora_gptq_quantization_from_pretrained_safetensors(self):
         r"""
-        Tests that the autogptq quantization using LoRA works as expected with safetensors weights.
+        Tests that the gptqmodel quantization using LoRA works as expected with safetensors weights.
         """
         from transformers import GPTQConfig
 
