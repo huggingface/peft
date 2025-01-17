@@ -81,7 +81,10 @@ SETTINGS = {
     "vera": (VeraConfig(task_type=TaskType.CAUSAL_LM), {}),
     "hra": (HRAConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"]), {}),
     "bone": (BoneConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], r=2), {}),
-    "bone-bat": (BoneConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], r=2, init_weights="bat"), {}),
+    "bone-bat": (
+        BoneConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], r=2, init_weights="bat"),
+        {},
+    ),
 }
 
 
