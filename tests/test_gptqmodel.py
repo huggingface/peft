@@ -42,7 +42,7 @@ from .testing_utils import (
     require_torch_multi_gpu,
 )
 
-
+@require_gptqmodel
 class PeftGPTQModelCommonTests(unittest.TestCase):
     r"""
     A common tester to run common operations that are performed on GPU such as generation, loading in 8bit, etc.
@@ -64,7 +64,6 @@ class PeftGPTQModelCommonTests(unittest.TestCase):
             torch.cuda.empty_cache()
         gc.collect()
 
-    @require_gptqmodel
     def test_lora_gptq_quantization_from_pretrained_safetensors(self):
         r"""
         Tests that the autogptq quantization using LoRA works as expected with safetensors weights.
