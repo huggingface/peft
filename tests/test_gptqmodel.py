@@ -45,13 +45,11 @@ from .testing_utils import (
 @require_gptqmodel
 class PeftGPTQModelCommonTests(unittest.TestCase):
     r"""
-    A common tester to run common operations that are performed on GPU such as generation, loading in 8bit, etc.
+    A common tester to run common operations that are performed on GPU/CPU such as generation, loading in 8bit, etc.
     """
 
     def setUp(self):
-        self.seq2seq_model_id = "google/flan-t5-base"
         self.causal_lm_model_id = "facebook/opt-350m"
-        self.audio_model_id = "openai/whisper-large"
         self.device = infer_device()
 
     def tearDown(self):
@@ -62,7 +60,7 @@ class PeftGPTQModelCommonTests(unittest.TestCase):
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        gc.collect()
+            gc.collect()
 
     def test_lora_gptq_quantization_from_pretrained_safetensors(self):
         r"""
