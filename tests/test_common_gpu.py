@@ -13,6 +13,7 @@
 # limitations under the License.
 import gc
 import tempfile
+import unittest
 
 import pytest
 import torch
@@ -79,7 +80,8 @@ if is_bnb_available():
         from peft.tuners.vera import Linear4bit as VeraLinear4bit
 
 
-class PeftGPUCommonTests:
+@require_non_cpu
+class PeftGPUCommonTests(unittest.TestCase):
     r"""
     A common tester to run common operations that are performed on GPU such as generation, loading in 8bit, etc.
     """
