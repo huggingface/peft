@@ -1005,7 +1005,8 @@ class PeftCommonTester:
             return True
 
         # sanity check that there are enough outputs and that they are different
-        assert len(gen_base) == len(gen_adapter0) == len(gen_adapter1) >= 3
+        assert len(gen_base) == len(gen_adapter0) == len(gen_adapter1)
+        assert len(gen_adapter1) >= 3
         assert not gens_are_same(gen_base, gen_adapter0)
         assert not gens_are_same(gen_base, gen_adapter1)
         assert not gens_are_same(gen_adapter0, gen_adapter1)
