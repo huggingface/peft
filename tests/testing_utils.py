@@ -96,9 +96,9 @@ def require_auto_gptq(test_case):
     """
     Decorator marking a test that requires auto-gptq. These tests are skipped when auto-gptq isn't installed.
     """
-    return unittest.skipUnless(
-        is_gptqmodel_available() or is_auto_gptq_available(), "test requires auto-gptq"
-    )(test_case)
+    return unittest.skipUnless(is_gptqmodel_available() or is_auto_gptq_available(), "test requires auto-gptq")(
+        test_case
+    )
 
 
 def require_gptqmodel(test_case):
@@ -106,6 +106,7 @@ def require_gptqmodel(test_case):
     Decorator marking a test that requires gptqmodel. These tests are skipped when gptqmodel isn't installed.
     """
     return unittest.skipUnless(is_gptqmodel_available(), "test requires gptqmodel")(test_case)
+
 
 def require_aqlm(test_case):
     """

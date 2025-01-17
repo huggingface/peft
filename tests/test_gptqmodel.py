@@ -42,6 +42,7 @@ from .testing_utils import (
     require_torch_multi_gpu,
 )
 
+
 @require_gptqmodel
 class PeftGPTQModelCommonTests(unittest.TestCase):
     r"""
@@ -98,6 +99,7 @@ class PeftGPTQModelCommonTests(unittest.TestCase):
             # check that both adapters are in the same layer
             assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A
             assert "adapter2" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A
+
 
 @require_gptqmodel
 @require_optimum

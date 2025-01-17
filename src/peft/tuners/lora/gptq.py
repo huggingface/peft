@@ -16,10 +16,10 @@ from typing import Any, Optional
 
 import torch
 
+from peft.import_utils import is_gptqmodel_available
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import get_auto_gptq_quant_linear, get_gptqmodel_quant_linear
-from peft.import_utils import is_gptqmodel_available
 
 
 class QuantLinear(torch.nn.Module, LoraLayer):
