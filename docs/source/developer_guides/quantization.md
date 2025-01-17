@@ -107,6 +107,32 @@ QLoRA adds trainable weights to all the linear layers in the transformer archite
 config = LoraConfig(target_modules="all-linear", ...)
 ```
 
+## GPTQ quantization
+
+You can learn more about gptq based `[2, 3, 4, 8]` bits quantization at [GPTQModel](https://github.com/ModelCloud/GPTQModel) and [HF GPTQ Doc](https://github.com/huggingface/transformers/blob/main/docs/source/en/quantization/gptq.md). PEFT post-quant training can use both [GPTQModel](https://github.com/ModelCloud/GPTQModel) or [AutoGPTQ](https://github.com/autogptq/autogptq) libraries but we recommend GPTQModel as AutoGPTQ will be deprecated in a future release. 
+
+```bash
+# gptqmodel install
+pip install gptqmodel --no-build-isolation
+```
+
+```py
+from transformers import AutoModelForCausalLM, AutoTokenizer, GPTQConfig
+
+model_id = "facebook/opt-125m"
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+gptq_config = GPTQConfig(bits=4, group_size=128, dataset="wikitext2", tokenizer=tokenizer)
+
+quantized_model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto", quantization_config=gptq_config)
+
+# save quantized model
+quantized_model.save_pretrained("./opt-125m-gptq")
+tokenizer.save_pretrained("./opt-125m-gptq")
+```
+
+Once quantized, you can post-train gptq models using normal PEFT apis.
+
 ## AQLM quantization
 
 Additive Quantization of Language Models ([AQLM](https://arxiv.org/abs/2401.06118)) is a Large Language Models compression method. It quantizes multiple weights together and takes advantage of interdependencies between them. AQLM represents groups of 8-16 weights as a sum of multiple vector codes. This allows it to compress models down to as low as 2-bit with considerably low accuracy losses.
