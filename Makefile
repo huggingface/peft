@@ -34,8 +34,6 @@ tests_core_single_gpu:
 tests_common_gpu:
 	python -m pytest tests/test_decoder_models.py $(if $(IS_GITHUB_CI),--report-log "common_decoder.log",)
 	python -m pytest tests/test_encoder_decoder_models.py $(if $(IS_GITHUB_CI),--report-log "common_encoder_decoder.log",)
-
-test_gptqmodel_gpu:
     python -m pytest tests/test_gptqmodel.py $(if $(IS_GITHUB_CI),--report-log "gptqmodel_gpu.log",)
 
 tests_examples_multi_gpu_bnb:
