@@ -70,6 +70,7 @@ from peft import (
     replace_lora_weights_loftq,
     set_peft_model_state_dict,
 )
+from peft.import_utils import is_xpu_available
 from peft.tuners import boft
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
 from peft.utils.loftq_utils import NFQuantizer
@@ -2075,7 +2076,7 @@ class TestOLoRA:
 
 
 @pytest.mark.skipif(
-    not (torch.cuda.is_available() or torch.xpu.is_available()), reason="test requires a hardware accelerator"
+    not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a hardware accelerator"
 )
 @require_bitsandbytes
 class TestLoftQ:
@@ -3919,6 +3920,7 @@ class TestLowCpuMemUsageDifferentDevices:
         assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
         assert {p.device.type for p in model.parameters()} == {device_model}
 
+    @require_bitsandbytes
     @pytest.mark.parametrize("quantization_method", ["bnb-4bit", "bnb-8bit"])
     def test_low_cpu_mem_usage_with_quantization(self, quantization_method):
         # Ensure that low_cpu_mem_usage works with quantization
@@ -4130,7 +4132,7 @@ class TestPrefixTuning:
 
 
 @pytest.mark.skipif(
-    not (torch.cuda.is_available() or torch.xpu.is_available()), reason="test requires a hardware accelerator"
+    not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a hardware accelerator"
 )
 @pytest.mark.single_gpu_tests
 class TestHotSwapping:

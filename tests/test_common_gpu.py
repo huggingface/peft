@@ -53,7 +53,7 @@ from peft import (
     get_peft_model,
     prepare_model_for_kbit_training,
 )
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_xpu_available
 from peft.tuners.lora.config import LoraRuntimeConfig
 from peft.utils import infer_device
 
@@ -100,7 +100,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        elif torch.xpu.is_available():
+        elif is_xpu_available():
             torch.xpu.empty_cache()
         gc.collect()
 
@@ -1460,7 +1460,7 @@ class PeftGPUCommonTests(unittest.TestCase):
 
 
 @pytest.mark.skipif(
-    not (torch.cuda.is_available() or torch.xpu.is_available()), reason="test requires a hardware accelerator"
+    not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a hardware accelerator"
 )
 @pytest.mark.single_gpu_tests
 class TestSameAdapterDifferentDevices:
