@@ -109,7 +109,7 @@ config = LoraConfig(target_modules="all-linear", ...)
 
 ## GPTQ quantization
 
-You can learn more about gptq based `[2, 3, 4, 8]` bits quantization at [GPTQModel](https://github.com/ModelCloud/GPTQModel) and [HF GPTQ Doc](https://github.com/huggingface/transformers/blob/main/docs/source/en/quantization/gptq.md). PEFT post-quant training can use both [GPTQModel](https://github.com/ModelCloud/GPTQModel) or [AutoGPTQ](https://github.com/autogptq/autogptq) libraries but we recommend GPTQModel as AutoGPTQ will be deprecated in a future release. 
+You can learn more about gptq based `[2, 3, 4, 8]` bits quantization at [GPTQModel](https://github.com/ModelCloud/GPTQModel) and the Transformers [GPTQ](https://huggingface.co/docs/transformers/quantization/gptq) doc. Post-quant training, PEFT can use both [GPTQModel](https://github.com/ModelCloud/GPTQModel) or [AutoGPTQ](https://github.com/autogptq/autogptq) libraries, but we recommend GPTQModel because AutoGPTQ will be deprecated in a future release. 
 
 ```bash
 # gptqmodel install
