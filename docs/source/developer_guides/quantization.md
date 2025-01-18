@@ -131,7 +131,7 @@ quantized_model.save_pretrained("./opt-125m-gptq")
 tokenizer.save_pretrained("./opt-125m-gptq")
 ```
 
-Once quantized, you can post-train gptq models using normal PEFT apis.
+Once quantized, you can post-train GPTQ models with PEFT APIs.
 
 ## AQLM quantization
 
