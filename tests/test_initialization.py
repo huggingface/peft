@@ -1145,6 +1145,7 @@ class TestLoraInitialization:
             get_peft_model(model, config)
 
     def test_mha_exposes_attributes(self, mha_cls):
+        # MHA requires a bunch of attributes to be exposed, try to check them exhaustively here
         model = mha_cls()
         embed_dim = model.mha.embed_dim
         kdim = model.mha.kdim
@@ -1154,6 +1155,12 @@ class TestLoraInitialization:
         dropout = model.mha.dropout
         batch_first = model.mha.batch_first
         head_dim = model.mha.head_dim
+        in_proj_weight = model.mha.in_proj_weight
+        in_proj_bias = model.mha.in_proj_bias
+        out_proj = model.mha.out_proj
+        bias_k = model.mha.bias_k
+        bias_v = model.mha.bias_v
+        add_zero_attn = model.mha.add_zero_attn
 
         config = LoraConfig(target_modules=["mha"])
         peft_model = get_peft_model(model, config)
@@ -1165,6 +1172,39 @@ class TestLoraInitialization:
         assert peft_model.base_model.mha.dropout == dropout
         assert peft_model.base_model.mha.batch_first == batch_first
         assert peft_model.base_model.mha.head_dim == head_dim
+        if in_proj_weight is not None:
+            assert torch.allclose(peft_model.base_model.mha.in_proj_weight, in_proj_weight)
+        else:
+            assert peft_model.base_model.mha.in_proj_weight is None
+        if in_proj_bias is not None:
+            assert torch.allclose(peft_model.base_model.mha.in_proj_bias, in_proj_bias)
+        else:
+            assert peft_model.base_model.mha.in_proj_bias is None
+        assert peft_model.base_model.mha.out_proj is out_proj
+        if bias_k is not None:
+            assert torch.allclose(peft_model.base_model.mha.bias_k, bias_k)
+        else:
+            assert peft_model.base_model.mha.bias_k is None
+        if bias_v is not None:
+            assert torch.allclose(peft_model.base_model.mha.bias_v, bias_v)
+        else:
+            assert peft_model.base_model.mha.bias_v is None
+        assert peft_model.base_model.mha.add_zero_attn == add_zero_attn
+
+    def test_mha_merge_masks_method(self, mha_cls):
+        # MHA requires a merge_masks method to be exposed, check that it works
+        model = mha_cls()
+        config = LoraConfig(target_modules=["mha"])
+        peft_model = get_peft_model(model, config)
+
+        attn_mask = torch.randint(0, 2, (10, 10))
+        key_padding_mask = torch.randint(0, 2, (10, 10))
+        query = torch.rand(10, 10, 10)
+        merged_mask0, mask_type0 = model.mha.merge_masks(attn_mask, key_padding_mask, query)
+        merged_mask1, mask_type1 = peft_model.base_model.mha.merge_masks(attn_mask, key_padding_mask, query)
+
+        assert torch.allclose(merged_mask0, merged_mask1)
+        assert mask_type0 == mask_type1
 
     def test_lora_with_bias_extra_params(self):
         # lora with lora_bias=True
