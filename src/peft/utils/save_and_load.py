@@ -335,10 +335,11 @@ def set_peft_model_state_dict(
     state_dict = {}
     if getattr(model, "modules_to_save", None) is not None:
         for key, value in peft_model_state_dict.items():
-            if any(module_name in key for module_name in model.modules_to_save):
-                for module_name in model.modules_to_save:
-                    if module_name in key:
-                        key = key.replace(module_name, f"{module_name}.modules_to_save.{adapter_name}")
+            if any(f".{module_name}." in key for module_name in model.modules_to_save):
+                # sort to make order deterministic, but should not affect overall logic
+                for module_name in sorted(model.modules_to_save):
+                    if f".{module_name}." in key:
+                        key = key.replace(f".{module_name}.", f".{module_name}.modules_to_save.{adapter_name}.")
                         break
             state_dict[key] = value
     else:
