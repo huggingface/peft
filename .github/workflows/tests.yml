@@ -96,6 +96,9 @@ jobs:
           [ -f "$(which shasum)" ] && SHASUM=shasum
           find "${{ env.HF_HOME }}/hub" -type f -exec "$SHASUM" {} \; > cache_content_after
           diff -udp cache_content_initial cache_content_after || true
+      - name: Delete old model cache entries
+        run: |
+          python scripts/ci_clean_cache.py -d
       - name: Update model cache
         uses: actions/cache/save@v4
         # Only let one runner (preferably the one that covers most tests) update the model cache
