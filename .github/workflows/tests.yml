@@ -64,7 +64,7 @@ jobs:
         run: |
           SHASUM=sha256sum
           [ -f "$(which shasum)" ] && SHASUM=shasum
-          find "${{ env.HF_HOME }}/hub" -type f -exec "$SHASUM" {} \; > cache_content_initial
+          [ -d "${{ env.HF_HOME }}/hub" ] && find "${{ env.HF_HOME }}/hub" -type f -exec "$SHASUM" {} \; > cache_content_initial
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v4
         with:
@@ -94,7 +94,7 @@ jobs:
         run: |
           SHASUM=sha256sum
           [ -f "$(which shasum)" ] && SHASUM=shasum
-          find "${{ env.HF_HOME }}/hub" -type f -exec "$SHASUM" {} \; > cache_content_after
+          [ -d "${{ env.HF_HOME }}/hub" ] && find "${{ env.HF_HOME }}/hub" -type f -exec "$SHASUM" {} \; > cache_content_after
           diff -udp cache_content_initial cache_content_after || true
       - name: Delete old model cache entries
         run: |
