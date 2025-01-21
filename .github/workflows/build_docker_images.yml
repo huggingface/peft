@@ -10,6 +10,8 @@ concurrency:
   group: docker-image-builds
   cancel-in-progress: false
 
+permissions: {}
+
 env:
   CI_SLACK_CHANNEL: ${{ secrets.CI_DOCKER_CHANNEL }}
 

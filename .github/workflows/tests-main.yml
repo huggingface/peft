@@ -6,6 +6,8 @@ on:
     paths-ignore:
         - 'docs/**'
 
+permissions: {}
+
 jobs:
   tests:
     runs-on: ubuntu-latest

@@ -8,6 +8,8 @@ on:
     paths:
       - '.github/**'
 
+permissions: {}
+
 jobs:
   zizmor:
     name: zizmor latest via Cargo
