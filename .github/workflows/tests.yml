@@ -98,7 +98,8 @@ jobs:
           diff -udp cache_content_initial cache_content_after || true
       - name: Delete old model cache entries
         run: |
-          python scripts/ci_clean_cache.py -d
+          # make sure that cache cleaning doesn't break the pipeline
+          python scripts/ci_clean_cache.py -d || true
       - name: Update model cache
         uses: actions/cache/save@v4
         # Only let one runner (preferably the one that covers most tests) update the model cache
