@@ -4,6 +4,8 @@ on:
   schedule:
     - cron: "0 15 * * *"
 
+permissions: {}
+
 jobs:
   close_stale_issues:
     name: Close Stale Issues

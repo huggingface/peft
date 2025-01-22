@@ -9,6 +9,8 @@ on:
     paths-ignore:
       - 'docs/**'
 
+permissions: {}
+
 jobs:
   check_code_quality:
     runs-on: ubuntu-latest
