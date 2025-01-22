@@ -1299,7 +1299,7 @@ class Conv2d(_ConvNd):
         return DoraConv2dLayer
 
 class Conv1d(_ConvNd):
-    # Lora implemented in a conv3d layer
+    # Lora implemented in a conv1d layer
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if not self._kernel_dim == 3:
