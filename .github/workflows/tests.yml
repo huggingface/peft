@@ -12,6 +12,8 @@ on:
 env:
   HF_HOME: .cache/huggingface
 
+permissions: {}
+
 jobs:
   check_code_quality:
     runs-on: ubuntu-latest

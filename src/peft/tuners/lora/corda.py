@@ -61,6 +61,10 @@ def preprocess_corda(
     """
     Build necessary CorDA fields for a model.
 
+    For each `M * N` linear layer, a `M * M` covariance matrix will be built temporarily during the preprocessing
+    process, consuming roughly another `2 * MODEL_SIZE` memory for typical LLMs if model weight is FP16 and covariance
+    is FP32. If that's too much, consider specifying `use_float16_for_covariance` in `lora_config.corda_config`.
+
     Args:
         model (`nn.Module`):
             Model to preprocess.
@@ -68,17 +72,16 @@ def preprocess_corda(
             Lora configuration of the model. `lora_config.corda_config` should be set.
         run_model (`Optional[Callable[[], None]]`):
             Callback to run the model when building covariance. Typically you should run model inference on your sample
-            dataset in this callback. Experiments have shown 256 samples to be a good default dataset size. `run_model`
-            can be `None` only if covariance file in `lora_config.corda_config` is already created.
+            dataset in this callback. Experiments have shown that when token count per sample is 2048, hidden dimension
+            is 4096, collecting 256 distinct samples is enough. If you collect too few or too repetitive samples, the
+            covariance matrix may be low-ranked and unstabilize preprocessing. You can estimate sample count as
+            `HIDDEN_DIM / TOKEN_PER_SAMPLE * 128`. `run_model` can be `None` only if covariance file in
+            `lora_config.corda_config` is already created.
         hooked_model (`Optional[nn.Module]`):
             Model to hook when building covariance. If none, original model will be hooked. This is only useful when
             you want to hook a different model than the one you are training, typically you should leave this `None`.
 
     Upon completion, the following fields are set for each target module:
-        corda_method (`Literal["ipm", "kpm"]`):
-            CorDA method to apply. "ipm" for Instruction-Previewed Mode, "kpm" for Knowledge-Preserved Mode.
-        rank (`int`):
-            Rank of CorDA to apply.
         eigens.S_WC (`torch.Tensor`):
             Singular values of the weight matrix.
         eigens.U_WC (`torch.Tensor`):
@@ -90,13 +93,12 @@ def preprocess_corda(
     covariance_file = lora_config.corda_config.covariance_file
     corda_method = lora_config.corda_config.corda_method
     verbose = lora_config.corda_config.verbose
+    prune_temporary_fields = lora_config.corda_config.prune_temporary_fields
 
     # If cache exists, skip building
     if cache_file is not None and os.path.exists(cache_file) and os.path.getsize(cache_file) > 0:
         cache = torch.load(cache_file, map_location=get_model_device(model))
         for name, module in target_modules(model, lora_config):
-            module.corda_method = cache[f"{name}.corda_method"]
-            module.rank = cache[f"{name}.rank"]
             module.eigens = CordaEigens(
                 S_WC=cache[f"{name}.eigens.S_WC"],
                 U_WC=cache[f"{name}.eigens.U_WC"],
@@ -123,12 +125,22 @@ def preprocess_corda(
         # Crop CorDA eigens so that there's less to save
         crop_corda_eigens(model, lora_config)
 
+        # Remove redundant fields if exist
+        if prune_temporary_fields:
+            for name, module in target_modules(model, lora_config):
+                if hasattr(module, "sample_count"):
+                    del module.sample_count
+                if hasattr(module, "covariance_matrix"):
+                    del module.covariance_matrix
+                if hasattr(module, "corda_method"):
+                    del module.corda_method
+                if hasattr(module, "rank"):
+                    del module.rank
+
         # Save cache to disk
         if cache_file is not None:
             cache: dict[str, Any] = {}
             for name, module in target_modules(model, lora_config):
-                cache[f"{name}.corda_method"] = module.corda_method
-                cache[f"{name}.rank"] = module.rank
                 cache[f"{name}.eigens.S_WC"] = module.eigens.S_WC
                 cache[f"{name}.eigens.U_WC"] = module.eigens.U_WC
                 cache[f"{name}.eigens.V_WC"] = module.eigens.V_WC
@@ -174,15 +186,9 @@ def calib_cov_distribution(
                 "Invalid value found in covariance. Please file an issue at https://github.com/huggingface/peft/issues."
             )
 
-        # calculate mean and std
-        mean = input.mean(0)
-        std = input.std(0)
-
         # add to module
         module.sample_count += 1
         module.covariance_matrix += covariance
-        module.mean += mean
-        module.std += std
 
         # free memory
         del covariance, input
@@ -191,8 +197,6 @@ def calib_cov_distribution(
     for name, module in target_modules(hooked_model, config):
         module.sample_count = 0
         module.covariance_matrix = 0
-        module.mean = 0
-        module.std = 0
         handles.append(module.register_forward_hook(hook))
 
     run_model()
@@ -213,14 +217,10 @@ def calib_cov_distribution(
             if name in targets:
                 targets[name].sample_count = module.sample_count
                 targets[name].covariance_matrix = module.covariance_matrix
-                targets[name].mean = module.mean
-                targets[name].std = module.std
 
     # Divide by sample count
     for name, module in target_modules(model, config):
         module.covariance_matrix /= module.sample_count
-        module.mean /= module.sample_count
-        module.std /= module.sample_count
 
     # Save covariance to disk
     if covariance_file is not None:

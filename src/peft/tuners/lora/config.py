@@ -145,6 +145,8 @@ class CordaConfig:
         use_float16_for_covariance (`bool`):
             If true, uses float16 for the covariance matrix. This can reduce the memory usage of the covariance matrix
             by half, but may lead to numerical instability. Defaults to `False`.
+        prune_temporary_fields (`bool`):
+            If true, temporary fields generated in CorDA preprocessing will be pruned. Defaults to `True`.
     """
 
     cache_file: Optional[str] = field(
@@ -188,6 +190,9 @@ class CordaConfig:
                 "by half, but may lead to numerical instability."
             )
         },
+    )
+    prune_temporary_fields: bool = field(
+        default=True, metadata={"help": "If true, temporary fields generated in CorDA preprocessing will be pruned."}
     )
 
 
