@@ -1306,6 +1306,9 @@ class Conv1d(_ConvNd):
             raise ValueError(f"Conv1d layer kernel must have 3 dimensions, not {self._kernel_dim}")
         self.conv_fn = F.conv1d
 
+    def _get_dora_layer_class(self):
+        raise NotImplementedError
+
 class Conv3d(_ConvNd):
     # Lora implemented in a conv3d layer
     def __init__(self, *args, **kwargs):
