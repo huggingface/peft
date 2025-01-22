@@ -53,9 +53,22 @@ def is_auto_gptq_available():
 def is_gptqmodel_available():
     if importlib.util.find_spec("gptqmodel") is not None:
         GPTQMODEL_MINIMUM_VERSION = packaging.version.parse("1.7.0")
+        OPTIMUM_MINIMUM_VERSION = packaging.version.parse("1.23.99")
         version_gptqmodel = packaging.version.parse(importlib_metadata.version("gptqmodel"))
         if GPTQMODEL_MINIMUM_VERSION <= version_gptqmodel:
-            return True
+            if is_optimum_available():
+                version_optimum = packaging.version.parse(importlib_metadata.version("optimum"))
+                if OPTIMUM_MINIMUM_VERSION <= version_optimum:
+                    return True
+                else:
+                    raise ImportError(
+                        f"gptqmodel requires optimum version {OPTIMUM_MINIMUM_VERSION} or higher. Found version {version_optimum}, "
+                        f"but only versions above {OPTIMUM_MINIMUM_VERSION} are supported"
+                    )
+            else:
+                raise ImportError(
+                    f"gptqmodel requires optimum version {OPTIMUM_MINIMUM_VERSION} or higher to be installed."
+                )
         else:
             raise ImportError(
                 f"Found an incompatible version of gptqmodel. Found version {version_gptqmodel}, "
