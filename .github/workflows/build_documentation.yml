@@ -7,6 +7,8 @@ on:
       - doc-builder*
       - v*-release
 
+permissions: {}
+
 jobs:
    build:
     uses: huggingface/doc-builder/.github/workflows/build_main_documentation.yml@main

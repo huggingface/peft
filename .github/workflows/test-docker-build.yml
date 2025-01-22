@@ -5,6 +5,9 @@ on:
     paths:
       # Run only when DockerFile files are modified
       - "docker/*/Dockerfile"
+
+permissions: {}
+
 jobs:
   get_changed_files:
     name: "Build all modified docker images"

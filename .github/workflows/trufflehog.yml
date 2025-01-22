@@ -3,6 +3,8 @@ on:
 
 name: Secret Leaks
 
+permissions: {}
+
 jobs:
   trufflehog:
     runs-on: ubuntu-latest
