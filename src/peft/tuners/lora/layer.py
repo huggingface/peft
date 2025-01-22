@@ -1405,6 +1405,33 @@ class MultiheadAttention(nn.Module, LoraLayer):
     def head_dim(self) -> int:
         return self.get_base_layer().head_dim
 
+    @property
+    def in_proj_weight(self) -> nn.Parameter:
+        return self.get_base_layer().in_proj_weight
+
+    @property
+    def in_proj_bias(self) -> nn.Parameter:
+        return self.get_base_layer().in_proj_bias
+
+    @property
+    def out_proj(self) -> nn.Module:
+        return self.get_base_layer().out_proj.get_base_layer()
+
+    @property
+    def bias_k(self) -> Optional[nn.Parameter]:
+        return self.get_base_layer().bias_k
+
+    @property
+    def bias_v(self) -> Optional[nn.Parameter]:
+        return self.get_base_layer().bias_v
+
+    def merge_masks(self, *args, **kwargs) -> tuple[Optional[torch.Tensor], Optional[int]]:
+        return self.get_base_layer().merge_masks(*args, **kwargs)
+
+    @property
+    def add_zero_attn(self) -> bool:
+        return self.get_base_layer().add_zero_attn
+
     def update_layer(self, *args, **kwargs) -> None:
         super().update_layer(*args, **kwargs)
         # Note: LoRA is applied to both in_proj and out_proj. There is currently no way to only specify one of them.

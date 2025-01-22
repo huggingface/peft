@@ -13,9 +13,11 @@
 # limitations under the License.
 import importlib
 import importlib.metadata as importlib_metadata
+import platform
 from functools import lru_cache
 
 import packaging.version
+import torch
 
 
 @lru_cache
@@ -125,3 +127,23 @@ def is_torchao_available():
             f"but only versions above {TORCHAO_MINIMUM_VERSION} are supported"
         )
     return True
+
+
+@lru_cache
+def is_xpu_available(check_device=False):
+    """
+    Checks if XPU acceleration is available and potentially if a XPU is in the environment
+    """
+
+    system = platform.system()
+    if system == "Darwin":
+        return False
+    else:
+        if check_device:
+            try:
+                # Will raise a RuntimeError if no XPU is found
+                _ = torch.xpu.device_count()
+                return torch.xpu.is_available()
+            except RuntimeError:
+                return False
+        return hasattr(torch, "xpu") and torch.xpu.is_available()
