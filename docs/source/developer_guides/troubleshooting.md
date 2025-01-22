@@ -290,3 +290,29 @@ config = LoraConfig(
 ```
 
 Depending on the type of model you use, the batch norm layers could have different names than `"normalization"`, so please ensure that the name matches your model architecture.
+
+## Version mismatch
+
+### Error while loading the config because of an unexpected keyword argument
+
+When you encounter an error like this:
+
+```
+TypeError: LoraConfig.__init__() got an unexpected keyword argument <argument-name>
+```
+
+it means that there is a version mismatch of PEFT. More specifically, it means that the adapter you're trying to load was trained with a more recent version of PEFT than the version you have installed on your system. The best way to resolve this issue is to install the latest PEFT version:
+
+```sh
+python -m pip install -U PEFT
+```
+
+In rare cases, this is not enough. This can happen if the version used to train this adapter was using a source install of PEFT, i.e. a PEFT version that is yet unreleased. In that case, you also need to install PEFT from source:
+
+```sh
+python -m pip install -U git+https://github.com/huggingface/peft.git
+```
+
+If, for some reason, it is not possible for you to upgrade PEFT, there is a workaround. It works as follows: Let's assume that the error message says that the unknown keyword argument is named `foobar`. You can search inside the `adapter_config.json` of this PEFT adapter for the entry for `foobar` and delete it from the file. Then save the file and try loading the model again.
+
+This solution works most of the time: As long as the value for `foobar` was the default value, it can be ignored. However, when it is set to something different, you will get incorrect results. This is why upgrading PEFT is the recommended solution.
