@@ -152,8 +152,6 @@ class TestTorchCompileCausalLM:
         r"""Train a PEFT model with torch.compile using Trainer"""
         tmp_dir = tmp_path / "model"
         config, compile_kwargs = settings
-        if isinstance(config, AdaLoraConfig):
-            pytest.skip(reason="AdaLora does not work correctly with Trainer")
 
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
@@ -190,6 +188,14 @@ class TestTorchCompileCausalLM:
             data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
         )
         model.config.use_cache = False
+
+        if isinstance(config, AdaLoraConfig):
+            class OptimizerStepCallback(TrainerCallback):
+                def on_optimizer_step(self, args, state, control, **kwargs):
+                    model.update_and_allocate(state.global_step)
+
+            trainer.add_callback(OptimizerStepCallback())
+
         trainer.train()
 
         model.eval()
