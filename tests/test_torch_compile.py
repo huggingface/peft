@@ -31,6 +31,7 @@ from transformers import (
     BitsAndBytesConfig,
     DataCollatorForLanguageModeling,
     Trainer,
+    TrainerCallback,
     TrainingArguments,
 )
 
@@ -190,6 +191,7 @@ class TestTorchCompileCausalLM:
         model.config.use_cache = False
 
         if isinstance(config, AdaLoraConfig):
+
             class OptimizerStepCallback(TrainerCallback):
                 def on_optimizer_step(self, args, state, control, **kwargs):
                     model.update_and_allocate(state.global_step)

@@ -119,7 +119,7 @@ class TestPeftConfig:
             mandatory_config_kwargs = {}
 
             if expected_cls == AdaLoraConfig:
-                mandatory_config_kwargs = {'total_step': 1}
+                mandatory_config_kwargs = {"total_step": 1}
 
             config = PeftConfig.from_peft_type(peft_type=peft_type, **mandatory_config_kwargs)
             assert type(config) is expected_cls
