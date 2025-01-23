@@ -179,7 +179,7 @@ class TestScalingAdapters:
         assert torch.allclose(logits_base_model, logits_lora_model)
 
     def test_diffusers_pipeline(self):
-        model_id = "hf-internal-testing/tiny-stable-diffusion-torch"
+        model_id = "hf-internal-testing/tiny-sd-pipe"
         pipeline = StableDiffusionPipeline.from_pretrained(model_id)
 
         text_encoder_kwargs = {

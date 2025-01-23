@@ -36,7 +36,7 @@ from .testing_common import ClassInstantier, PeftCommonTester
 from .testing_utils import temp_seed
 
 
-PEFT_DIFFUSERS_SD_MODELS_TO_TEST = ["hf-internal-testing/tiny-stable-diffusion-torch"]
+PEFT_DIFFUSERS_SD_MODELS_TO_TEST = ["hf-internal-testing/tiny-sd-pipe"]
 CONFIG_TESTING_KWARGS = (
     {
         "text_encoder": {
