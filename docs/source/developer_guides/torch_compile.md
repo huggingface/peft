@@ -59,7 +59,7 @@ Below are some of the more advanced PEFT features that **work**. They were all t
 - Disabling adapters (i.e. using `with model.disable_adapter()`)
 - Unloading (i.e. calling `model.merge_and_unload()`)
 - Mixed adapter batches (i.e. calling `model(batch, adapter_names=["__base__", "default", "other", ...])`)
-- Inference with multiple adapters
+- Inference with multiple adapters (i.e. using `model.add_adapter` or `model.load_adapter` to load more than 1 adapter); for this, only call `torch.compile` _after_ loading all adapters
 
 Generally, we can expect that if a feature works correctly with LoRA and is also supported by other adapter types, it should also work for that adapter type.
 
