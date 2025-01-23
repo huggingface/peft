@@ -291,7 +291,7 @@ class PeftGPUCommonTests(unittest.TestCase):
             kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
 
         model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
-        config = AdaLoraConfig(task_type=TaskType.CAUSAL_LM)
+        config = AdaLoraConfig(task_type=TaskType.CAUSAL_LM, total_step=1)
         peft_model = get_peft_model(model, config)
         peft_model = prepare_model_for_kbit_training(peft_model)
         peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
@@ -1624,7 +1624,7 @@ class TestSameAdapterDifferentDevices:
     def test_adalora_add_new_adapter_does_not_change_device(self, mlp):
         # same as first test, but using AdaLORA
         # AdaLora does not like multiple trainable adapters, hence inference_mode=True
-        config = AdaLoraConfig(target_modules=["lin0"], inference_mode=True)
+        config = AdaLoraConfig(target_modules=["lin0"], inference_mode=True, total_step=1)
         model = get_peft_model(mlp, config)
         model = model.to(self.device)
         model.lin0.lora_A.cpu()

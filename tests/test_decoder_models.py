@@ -453,6 +453,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
             "target_modules": None,
             "task_type": "CAUSAL_LM",
             "lora_dropout": 0.0,
+            "total_step": 1,
         }
         self._test_generate(model_id, AdaLoraConfig, config_kwargs)
 

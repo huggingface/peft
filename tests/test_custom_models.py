@@ -538,15 +538,15 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         "AdaLora Same",
         "adalora",
         AdaLoraConfig,
-        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True},
-        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True},
+        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True, "total_step": 1},
+        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True, "total_step": 1},
     ),
     (
         "AdaLora Different",
         "adalora",
         AdaLoraConfig,
-        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True},
-        {"target_modules": ["lin1"], "init_lora_weights": False, "inference_mode": True},
+        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True, "total_step": 1},
+        {"target_modules": ["lin1"], "init_lora_weights": False, "inference_mode": True, "total_step": 1},
     ),
     (
         "FourierFT Same",
@@ -2405,10 +2405,10 @@ class RequiresGradTester(unittest.TestCase):
 
     def test_requires_grad_adalora_different_targets(self):
         # test two different AdaLora adapters that target different modules
-        config0 = AdaLoraConfig(target_modules=["lin0"])
+        config0 = AdaLoraConfig(target_modules=["lin0"], total_step=1)
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = AdaLoraConfig(target_modules=["lin1"], inference_mode=True)
+        config1 = AdaLoraConfig(target_modules=["lin1"], total_step=1, inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -2451,10 +2451,10 @@ class RequiresGradTester(unittest.TestCase):
 
     def test_requires_grad_adalora_same_targets(self):
         # same as previous test, except that AdaLora adapters target the same layer
-        config0 = AdaLoraConfig(target_modules=["lin0"])
+        config0 = AdaLoraConfig(target_modules=["lin0"], total_step=1)
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = AdaLoraConfig(target_modules=["lin0"], inference_mode=True)
+        config1 = AdaLoraConfig(target_modules=["lin0"], total_step=1, inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"

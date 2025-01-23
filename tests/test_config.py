@@ -48,30 +48,31 @@ from peft import (
 
 PEFT_MODELS_TO_TEST = [("lewtun/tiny-random-OPTForCausalLM-delta", "v1")]
 
+# Config classes and their mandatory parameters
 ALL_CONFIG_CLASSES = (
-    AdaLoraConfig,
-    AdaptionPromptConfig,
-    BOFTConfig,
-    FourierFTConfig,
-    HRAConfig,
-    IA3Config,
-    LNTuningConfig,
-    LoHaConfig,
-    LoKrConfig,
-    LoraConfig,
-    MultitaskPromptTuningConfig,
-    PolyConfig,
-    PrefixTuningConfig,
-    PromptEncoderConfig,
-    PromptTuningConfig,
-    VeraConfig,
-    VBLoRAConfig,
+    (AdaLoraConfig, {"total_step": 1}),
+    (AdaptionPromptConfig, {}),
+    (BOFTConfig, {}),
+    (FourierFTConfig, {}),
+    (HRAConfig, {}),
+    (IA3Config, {}),
+    (LNTuningConfig, {}),
+    (LoHaConfig, {}),
+    (LoKrConfig, {}),
+    (LoraConfig, {}),
+    (MultitaskPromptTuningConfig, {}),
+    (PolyConfig, {}),
+    (PrefixTuningConfig, {}),
+    (PromptEncoderConfig, {}),
+    (PromptTuningConfig, {}),
+    (VeraConfig, {}),
+    (VBLoRAConfig, {}),
 )
 
 
 class TestPeftConfig:
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
-    def test_methods(self, config_class):
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
+    def test_methods(self, config_class, mandatory_kwargs):
         r"""
         Test if all configs have the expected methods. Here we test
         - to_dict
@@ -80,22 +81,22 @@ class TestPeftConfig:
         - from_json_file
         """
         # test if all configs have the expected methods
-        config = config_class()
+        config = config_class(**mandatory_kwargs)
         assert hasattr(config, "to_dict")
         assert hasattr(config, "save_pretrained")
         assert hasattr(config, "from_pretrained")
         assert hasattr(config, "from_json_file")
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
     @pytest.mark.parametrize("valid_task_type", list(TaskType) + [None])
-    def test_valid_task_type(self, config_class, valid_task_type):
+    def test_valid_task_type(self, config_class, mandatory_kwargs, valid_task_type):
         r"""
         Test if all configs work correctly for all valid task types
         """
-        config_class(task_type=valid_task_type)
+        config_class(task_type=valid_task_type, **mandatory_kwargs)
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
-    def test_invalid_task_type(self, config_class):
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
+    def test_invalid_task_type(self, config_class, mandatory_kwargs):
         r"""
         Test if all configs correctly raise the defined error message for invalid task types.
         """
@@ -104,7 +105,7 @@ class TestPeftConfig:
             ValueError,
             match=f"Invalid task type: '{invalid_task_type}'. Must be one of the following task types: {', '.join(TaskType)}.",
         ):
-            config_class(task_type=invalid_task_type)
+            config_class(task_type=invalid_task_type, **mandatory_kwargs)
 
     def test_from_peft_type(self):
         r"""
@@ -115,11 +116,16 @@ class TestPeftConfig:
 
         for peft_type in PeftType:
             expected_cls = PEFT_TYPE_TO_CONFIG_MAPPING[peft_type]
-            config = PeftConfig.from_peft_type(peft_type=peft_type)
+            mandatory_config_kwargs = {}
+
+            if expected_cls == AdaLoraConfig:
+                mandatory_config_kwargs = {'total_step': 1}
+
+            config = PeftConfig.from_peft_type(peft_type=peft_type, **mandatory_config_kwargs)
             assert type(config) is expected_cls
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
-    def test_from_pretrained(self, config_class):
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
+    def test_from_pretrained(self, config_class, mandatory_kwargs):
         r"""
         Test if the config is correctly loaded using:
         - from_pretrained
@@ -128,22 +134,22 @@ class TestPeftConfig:
             # Test we can load config from delta
             config_class.from_pretrained(model_name, revision=revision)
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
-    def test_save_pretrained(self, config_class):
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
+    def test_save_pretrained(self, config_class, mandatory_kwargs):
         r"""
         Test if the config is correctly saved and loaded using
         - save_pretrained
         """
-        config = config_class()
+        config = config_class(**mandatory_kwargs)
         with tempfile.TemporaryDirectory() as tmp_dirname:
             config.save_pretrained(tmp_dirname)
 
             config_from_pretrained = config_class.from_pretrained(tmp_dirname)
             assert config.to_dict() == config_from_pretrained.to_dict()
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
-    def test_from_json_file(self, config_class):
-        config = config_class()
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
+    def test_from_json_file(self, config_class, mandatory_kwargs):
+        config = config_class(**mandatory_kwargs)
         with tempfile.TemporaryDirectory() as tmp_dirname:
             config.save_pretrained(tmp_dirname)
 
@@ -159,17 +165,17 @@ class TestPeftConfig:
             config_from_json = config_class.from_json_file(config_path)
             assert config.to_dict() == config_from_json
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
-    def test_to_dict(self, config_class):
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
+    def test_to_dict(self, config_class, mandatory_kwargs):
         r"""
         Test if the config can be correctly converted to a dict using:
         - to_dict
         """
-        config = config_class()
+        config = config_class(**mandatory_kwargs)
         assert isinstance(config.to_dict(), dict)
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
-    def test_from_pretrained_cache_dir(self, config_class):
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
+    def test_from_pretrained_cache_dir(self, config_class, mandatory_kwargs):
         r"""
         Test if the config is correctly loaded with extra kwargs
         """
@@ -186,8 +192,8 @@ class TestPeftConfig:
             PeftConfig.from_pretrained("ybelkada/test-st-lora", cache_dir=tmp_dirname)
             assert "models--ybelkada--test-st-lora" in os.listdir(tmp_dirname)
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
-    def test_save_pretrained_with_runtime_config(self, config_class):
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
+    def test_save_pretrained_with_runtime_config(self, config_class, mandatory_kwargs):
         r"""
         Test if the config correctly removes runtime config when saving
         """
@@ -201,10 +207,10 @@ class TestPeftConfig:
                 cfg = config_class.from_pretrained(tmp_dirname)
                 assert not cfg.runtime_config.ephemeral_gpu_offload
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
-    def test_set_attributes(self, config_class):
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
+    def test_set_attributes(self, config_class, mandatory_kwargs):
         # manually set attributes and check if they are correctly written
-        config = config_class(peft_type="test")
+        config = config_class(peft_type="test", **mandatory_kwargs)
 
         # save pretrained
         with tempfile.TemporaryDirectory() as tmp_dirname:
@@ -213,24 +219,24 @@ class TestPeftConfig:
             config_from_pretrained = config_class.from_pretrained(tmp_dirname)
             assert config.to_dict() == config_from_pretrained.to_dict()
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
-    def test_config_copy(self, config_class):
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
+    def test_config_copy(self, config_class, mandatory_kwargs):
         # see https://github.com/huggingface/peft/issues/424
-        config = config_class()
+        config = config_class(**mandatory_kwargs)
         copied = copy.copy(config)
         assert config.to_dict() == copied.to_dict()
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
-    def test_config_deepcopy(self, config_class):
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
+    def test_config_deepcopy(self, config_class, mandatory_kwargs):
         # see https://github.com/huggingface/peft/issues/424
-        config = config_class()
+        config = config_class(**mandatory_kwargs)
         copied = copy.deepcopy(config)
         assert config.to_dict() == copied.to_dict()
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
-    def test_config_pickle_roundtrip(self, config_class):
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
+    def test_config_pickle_roundtrip(self, config_class, mandatory_kwargs):
         # see https://github.com/huggingface/peft/issues/424
-        config = config_class()
+        config = config_class(**mandatory_kwargs)
         copied = pickle.loads(pickle.dumps(config))
         assert config.to_dict() == copied.to_dict()
 
@@ -371,14 +377,14 @@ class TestPeftConfig:
 
         assert "The supplied schedule values don't allow for a budgeting phase" in str(e)
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
-    def test_from_pretrained_forward_compatible(self, config_class, tmp_path, recwarn):
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
+    def test_from_pretrained_forward_compatible(self, config_class, mandatory_kwargs, tmp_path, recwarn):
         """
         Make it possible to load configs that contain unknown keys by ignoring them.
 
         The idea is to make PEFT configs forward-compatible with future versions of the library.
         """
-        config = config_class()
+        config = config_class(**mandatory_kwargs)
         config.save_pretrained(tmp_path)
         # add a spurious key to the config
         with open(tmp_path / "adapter_config.json") as f:
@@ -398,8 +404,8 @@ class TestPeftConfig:
         assert config.to_dict() == config_from_pretrained.to_dict()
         assert isinstance(config_from_pretrained, config_class)
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
-    def test_from_pretrained_sanity_check(self, config_class, tmp_path):
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
+    def test_from_pretrained_sanity_check(self, config_class, mandatory_kwargs, tmp_path):
         """Following up on the previous test about forward compatibility, we *don't* want any random json to be accepted as
         a PEFT config. There should be a minimum set of required keys.
         """

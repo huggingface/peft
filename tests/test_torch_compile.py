@@ -61,7 +61,7 @@ if os.environ.get("PEFT_DEBUG_WITH_TORCH_COMPILE") != "1":
 
 # Mapping: name of the setting -> (Peft config instance, torch.compile kwargs)
 SETTINGS = {
-    "adalora": (AdaLoraConfig(task_type=TaskType.CAUSAL_LM), {}),
+    "adalora": (AdaLoraConfig(task_type=TaskType.CAUSAL_LM, total_step=1), {}),
     "boft": (BOFTConfig(task_type=TaskType.CAUSAL_LM), {}),
     "dora": (LoraConfig(task_type=TaskType.CAUSAL_LM, use_dora=True), {}),
     "ia3": (IA3Config(task_type=TaskType.CAUSAL_LM), {}),
