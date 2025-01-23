@@ -197,7 +197,7 @@ class BoneModel(BaseTuner):
             new_module = BoneLinear(target, adapter_name, **kwargs)
         else:
             raise ValueError(
-                f"Target module {target} is not supported. " "Currently, only `torch.nn.Linear` is supported."
+                f"Target module {target} is not supported. Currently, only `torch.nn.Linear` is supported."
             )
 
         return new_module

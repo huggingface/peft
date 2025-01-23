@@ -71,8 +71,7 @@ class AdaptionPromptModel(nn.Module):
                 parents.append(par)
         if len(parents) < config.adapter_layers:
             raise ValueError(
-                f"Config specifies more adapter layers '{config.adapter_layers}'"
-                f" than the model has '{len(parents)}'."
+                f"Config specifies more adapter layers '{config.adapter_layers}' than the model has '{len(parents)}'."
             )
         # Note that if the target modules are not in Sequential, ModuleList, or
         # some other PyTorch ordered container, the behavior is undefined as we
