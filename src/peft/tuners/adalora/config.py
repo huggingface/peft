@@ -98,7 +98,10 @@ class AdaLoraConfig(LoraConfig):
                 "If you intended to set the initial rank, use `init_r` instead."
             )
 
-        if tinit > (total_step - tfinal):
+        if self.total_step is None or self.total_step <= 0:
+            raise ValueError("AdaLoRA does not work when `total_step` is None, supply a value > 0.")
+
+        if self.tinit >= (self.total_step - self.tfinal):
             raise ValueError(
                 "The supplied schedule values don't allow for a budgeting phase. Decrease `tfinal`/`tinit` or "
                 "increase `total_step`."

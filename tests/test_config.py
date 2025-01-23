@@ -317,7 +317,7 @@ class TestPeftConfig:
     def test_adalora_config_r_warning(self):
         # This test checks that a warning is raised when r is set other than default in AdaLoraConfig
         # No warning should be raised when initializing AdaLoraConfig with default values.
-        kwargs = {"peft_type": "ADALORA", "task_type": "SEQ_2_SEQ_LM", "init_r": 12, "lora_alpha": 32}
+        kwargs = {"peft_type": "ADALORA", "task_type": "SEQ_2_SEQ_LM", "init_r": 12, "lora_alpha": 32, "total_step": 1}
         # Test that no warning is raised with default initialization
         with warnings.catch_warnings():
             warnings.simplefilter("error")
@@ -327,7 +327,43 @@ class TestPeftConfig:
                 pytest.fail("AdaLoraConfig raised a warning with default initialization.")
         # Test that a warning is raised when r != 8 in AdaLoraConfig
         with pytest.warns(UserWarning, match="Note that `r` is not used in AdaLora and will be ignored."):
-            AdaLoraConfig(r=10)
+            AdaLoraConfig(r=10, total_step=1)
+
+    def test_adalora_config_correct_timing_still_works(self):
+        pass
+
+    @pytest.mark.parametrize('timing_kwargs', [
+        {'total_step': 100, 'tinit': 0, 'tfinal': 0},
+        {'total_step': 100, 'tinit': 10, 'tfinal': 10},
+        {'total_step': 100, 'tinit': 79, 'tfinal': 20},
+        {'total_step': 100, 'tinit': 80, 'tfinal': 19},
+    ])
+    def test_adalora_config_valid_timing_works(self, timing_kwargs):
+        # Make sure that passing correct timing values is not prevented by faulty config checks.
+        AdaLoraConfig(**timing_kwargs) # does not raise
+
+    def test_adalora_config_invalid_total_step_raises(self):
+        with pytest.raises(ValueError) as e:
+            AdaLoraConfig(total_step=None)
+        assert "AdaLoRA does not work when `total_step` is None, supply a value > 0." in str(e)
+
+    @pytest.mark.parametrize('timing_kwargs', [
+        {'total_step': 100, 'tinit': 20, 'tfinal': 80},
+        {'total_step': 100, 'tinit': 80, 'tfinal': 20},
+        {'total_step': 10, 'tinit': 20, 'tfinal': 0},
+        {'total_step': 10, 'tinit': 0, 'tfinal': 10},
+        {'total_step': 10, 'tinit': 10, 'tfinal': 0},
+        {'total_step': 10, 'tinit': 20, 'tfinal': 0},
+        {'total_step': 10, 'tinit': 20, 'tfinal': 20},
+        {'total_step': 10, 'tinit': 0, 'tfinal': 20},
+    ])
+    def test_adalora_config_timing_bounds_error(self, timing_kwargs):
+        # Check if the user supplied timing values that will certainly fail because it breaks
+        # AdaLoRA assumptions.
+        with pytest.raises(ValueError) as e:
+            AdaLoraConfig(**timing_kwargs)
+
+        assert "The supplied schedule values don't allow for a budgeting phase" in str(e)
 
     @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
     def test_from_pretrained_forward_compatible(self, config_class, tmp_path, recwarn):

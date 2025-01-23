@@ -1725,7 +1725,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             LoraConfig(target_modules=["lin0"], init_lora_weights=False),
             LoKrConfig(target_modules=["lin0"], init_weights=False),
             LoHaConfig(target_modules=["lin0"], init_weights=False),
-            AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
+            AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False, total_step=1),
             IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
             OFTConfig(target_modules=["lin0"], init_weights=False, r=2),
             BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
