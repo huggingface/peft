@@ -38,10 +38,10 @@ class AdaLoraConfig(LoraConfig):
     The last phase, beginning once `total_step - tfinal` steps are reached, does not change the layer ranks anymore but
     fine-tunes the reduced-rank layers that resulted from the previous phase.
 
-    A practical example: `tinit` is 10, `tfinal` is 20, `total_step` is 100.  We spend 10 steps doing pre-training
+    A practical example: `tinit` is 10, `tfinal` is 20, `total_step` is 100. We spend 10 steps doing pre-training
     without rank reduction because our budget is constant (init phase), then we spend 80 (100-20) steps in the
-    reduction phase where our budget decreases step-wise and, finally, 20 steps in the final fine-tuning stage
-    without reduction.
+    reduction phase where our budget decreases step-wise and, finally, 20 steps in the final fine-tuning stage without
+    reduction.
 
     Args:
         target_r (`int`): The target average rank of incremental matrix.
