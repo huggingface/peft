@@ -1298,6 +1298,7 @@ class Conv2d(_ConvNd):
     def _get_dora_layer_class(self):
         return DoraConv2dLayer
 
+
 class Conv1d(_ConvNd):
     # Lora implemented in a conv1d layer
     def __init__(self, *args, **kwargs):
@@ -1308,6 +1309,7 @@ class Conv1d(_ConvNd):
 
     def _get_dora_layer_class(self):
         raise NotImplementedError
+
 
 class Conv3d(_ConvNd):
     # Lora implemented in a conv3d layer
