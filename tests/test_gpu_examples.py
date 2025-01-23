@@ -44,6 +44,7 @@ from transformers import (
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
     Trainer,
+    TrainerCallback,
     TrainingArguments,
     WhisperFeatureExtractor,
     WhisperForConditionalGeneration,
@@ -349,18 +350,9 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             # assert loss is not None
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
-    @pytest.fixture
-    def adalora_optimizer_callback_creator(self):
-        def constructor(model):
-            class OptimizerStepCallback(TrainerCallback):
-                def on_optimizer_step(self, args, state, control, **kwargs):
-                    model.update_and_allocate(state.global_step)
-
-        return constructor
-
     @pytest.mark.single_gpu_tests
     @require_torch_gpu
-    def test_4bit_adalora_causalLM(self, adalora_optimizer_callback_creator):
+    def test_4bit_adalora_causalLM(self):
         r"""
         Tests the 4bit training with adalora
         """
@@ -398,7 +390,11 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         batch = tokenizer(data["train"][:3]["quote"], return_tensors="pt", padding=True)
         self._check_inference_finite(model, batch)
 
-        step_callback = adalora_optimizer_callback_creator(model)
+        class OptimizerStepCallback(TrainerCallback):
+            def on_optimizer_step(self, args, state, control, **kwargs):
+                model.update_and_allocate(state.global_step)
+
+        step_callback = OptimizerStepCallback()
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             trainer = Trainer(
@@ -430,7 +426,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
     @pytest.mark.single_gpu_tests
     @require_torch_gpu
-    def test_8bit_adalora_causalLM(self, adalora_optimizer_callback_creator):
+    def test_8bit_adalora_causalLM(self):
         r"""
         Tests the 8bit training with adalora
         """
@@ -467,7 +463,11 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         batch = tokenizer(data["train"][:3]["quote"], return_tensors="pt", padding=True)
         self._check_inference_finite(model, batch)
 
-        step_callback = adalora_optimizer_callback_creator(model)
+        class OptimizerStepCallback(TrainerCallback):
+            def on_optimizer_step(self, args, state, control, **kwargs):
+                model.update_and_allocate(state.global_step)
+
+        step_callback = OptimizerStepCallback()
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             trainer = Trainer(
