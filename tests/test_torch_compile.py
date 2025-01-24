@@ -62,7 +62,7 @@ if os.environ.get("PEFT_DEBUG_WITH_TORCH_COMPILE") != "1":
 
 # Mapping: name of the setting -> (Peft config instance, torch.compile kwargs)
 SETTINGS = {
-    "adalora": (AdaLoraConfig(task_type=TaskType.CAUSAL_LM, total_step=1), {}),
+    "adalora": (AdaLoraConfig(task_type=TaskType.CAUSAL_LM, total_step=5), {}),
     "boft": (BOFTConfig(task_type=TaskType.CAUSAL_LM), {}),
     "dora": (LoraConfig(task_type=TaskType.CAUSAL_LM, use_dora=True), {}),
     "ia3": (IA3Config(task_type=TaskType.CAUSAL_LM), {}),
@@ -191,12 +191,11 @@ class TestTorchCompileCausalLM:
         model.config.use_cache = False
 
         if isinstance(config, AdaLoraConfig):
-
             class OptimizerStepCallback(TrainerCallback):
                 def on_optimizer_step(self, args, state, control, **kwargs):
                     model.update_and_allocate(state.global_step)
-
             trainer.add_callback(OptimizerStepCallback())
+            train_kwargs["learning_rate"] = 1e-2
 
         trainer.train()
 
