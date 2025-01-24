@@ -136,8 +136,7 @@ class BufferDict(Module):
             for j, p in enumerate(buffers):
                 if not isinstance(p, collections.abc.Iterable):
                     raise TypeError(
-                        "BufferDict update sequence element "
-                        "#" + str(j) + " should be Iterable; is" + type(p).__name__
+                        "BufferDict update sequence element #" + str(j) + " should be Iterable; is" + type(p).__name__
                     )
                 if not len(p) == 2:
                     raise ValueError(

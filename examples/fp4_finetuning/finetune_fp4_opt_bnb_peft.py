@@ -38,7 +38,7 @@ Here let's load the `opt-6.7b` model, its weights in half-precision (float16) ar
 
 
 free_in_GB = int(torch.cuda.mem_get_info()[0] / 1024**3)
-max_memory = f"{free_in_GB-2}GB"
+max_memory = f"{free_in_GB - 2}GB"
 
 n_gpus = torch.cuda.device_count()
 max_memory = {i: max_memory for i in range(n_gpus)}
