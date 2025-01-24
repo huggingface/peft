@@ -395,7 +395,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 LoraConfig(target_modules=["lin0"], init_lora_weights=False),
                 LoHaConfig(target_modules=["lin0"], init_weights=False),
                 LoKrConfig(target_modules=["lin0"], init_weights=False),
-                AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
+                AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False, total_step=1),
             ],
             r=2,
         ),
@@ -415,7 +415,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 LoraConfig(target_modules=["lin1"], init_lora_weights=False),
                 LoHaConfig(target_modules=["lin1"], init_weights=False),
                 LoKrConfig(target_modules=["lin1"], init_weights=False),
-                AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False),
+                AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False, total_step=1),
             ],
             r=2,
         ),
@@ -439,7 +439,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 LoraConfig(init_lora_weights=False),
                 LoHaConfig(init_weights=False),
                 LoKrConfig(init_weights=False),
-                AdaLoraConfig(init_lora_weights=False),
+                AdaLoraConfig(init_lora_weights=False, total_step=1),
             ],
             r=2,
         ),
@@ -480,8 +480,8 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 LoKrConfig(target_modules=["lin1"], init_weights=False),
             ),
             (
-                AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False),
-                AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False),
+                AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False, total_step=1),
+                AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False, total_step=1),
             ),
         ],
         name_func=_param_name_func,
@@ -509,8 +509,8 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 LoKrConfig(target_modules=["lin0"], init_weights=False),
             ),
             (
-                AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
-                AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
+                AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False, total_step=1),
+                AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False, total_step=1),
             ),
         ],
         name_func=_param_name_func,
@@ -542,7 +542,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         config1 = LoHaConfig(r=4, alpha=4, target_modules=["lin0"], init_weights=False)
         peft_model.add_adapter("adapter1", config1)
 
-        config2 = AdaLoraConfig(r=4, lora_alpha=4, target_modules=["lin1"], init_lora_weights=False)
+        config2 = AdaLoraConfig(r=4, lora_alpha=4, target_modules=["lin1"], init_lora_weights=False, total_step=1)
         peft_model.add_adapter("adapter2", config2)
 
         config3 = LoKrConfig(r=4, alpha=4, target_modules=["lin0", "lin1"], init_weights=False)
@@ -683,7 +683,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         assert trainable_params1 == (params_lora + params_loha)
         assert all_param1 == ((params_base + params_lora) + params_loha)
 
-        config2 = AdaLoraConfig(target_modules=["lin0", "lin1"])
+        config2 = AdaLoraConfig(target_modules=["lin0", "lin1"], total_step=1)
         peft_model.add_adapter("adapter2", config2)
         peft_model.set_adapter(["adapter0", "adapter1", "adapter2"])
         params_adalora = sum(p.numel() for n, p in model.named_parameters() if "adapter2" in n)
@@ -732,7 +732,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         assert not torch.allclose(output0, output1)
 
         torch.manual_seed(2)
-        config2 = AdaLoraConfig(task_type="CAUSAL_LM", init_lora_weights=False)
+        config2 = AdaLoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, total_step=1)
         peft_model.add_adapter("adapter2", config2)
         peft_model.set_adapter(["adapter0", "adapter1", "adapter2"])
         output2 = peft_model.generate(**input_dict)

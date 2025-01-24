@@ -1352,16 +1352,16 @@ class TestAdaLoraInitialization:
     torch_device = infer_device()
 
     def test_adalora_target_modules_set(self):
-        config = AdaLoraConfig(target_modules=["linear", "embed", "conv2d"])
+        config = AdaLoraConfig(target_modules=["linear", "embed", "conv2d"], total_step=1)
         assert config.target_modules == {"linear", "embed", "conv2d"}
 
     def test_adalora_use_dora_raises(self):
         with pytest.raises(ValueError, match="ADALORA does not support DoRA"):
-            AdaLoraConfig(use_dora=True)
+            AdaLoraConfig(use_dora=True, total_step=1)
 
     def test_adalora_loftq_config_raises(self):
         with pytest.raises(ValueError, match="ADALORA does not support LOFTQ"):
-            AdaLoraConfig(init_lora_weights="loftq", loftq_config={"loftq": "config"})
+            AdaLoraConfig(init_lora_weights="loftq", loftq_config={"loftq": "config"}, total_step=1)
 
     def get_model(self):
         class MyModule(nn.Module):
@@ -1385,7 +1385,7 @@ class TestAdaLoraInitialization:
 
         model = self.get_model()
         output_before = model(data)
-        config = AdaLoraConfig(target_modules=["linear"])
+        config = AdaLoraConfig(target_modules=["linear"], total_step=1)
         model = get_peft_model(model, config)
         output_after = model(data)
         assert torch.allclose(output_before, output_after)
