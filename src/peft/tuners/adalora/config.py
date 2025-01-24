@@ -25,11 +25,29 @@ class AdaLoraConfig(LoraConfig):
     """
     This is the configuration class to store the configuration of a [`~peft.AdaLora`].
 
+    AdaLoRA has three phases defined by `tinit`, `tfinal` and `total_step`.
+
+    The initial phase can be understood as a step for pre-training the adapters so that when reducing their rank, there
+    is already some information encoded that can be reduced instead of random matrices. This phase is defined by
+    supplying `tinit`.
+
+    After the initial phase is over (`tinit` steps have passed) and the final phase has not begun, AdaLoRA reduces the
+    budget of how much rank each layer is allowed to have with each step. This is where the reduction of rank is
+    happening. This goes on until `total_step - tfinal` steps are reached.
+
+    The last phase, beginning once `total_step - tfinal` steps are reached, does not change the layer ranks anymore but
+    fine-tunes the reduced-rank layers that resulted from the previous phase.
+
+    A practical example: `tinit` is 10, `tfinal` is 20, `total_step` is 100. We spend 10 steps doing pre-training
+    without rank reduction because our budget is constant (init phase), then we spend 80 (100-20) steps in the
+    reduction phase where our budget decreases step-wise and, finally, 20 steps in the final fine-tuning stage without
+    reduction.
+
     Args:
         target_r (`int`): The target average rank of incremental matrix.
         init_r (`int`): The initial rank for each incremental matrix.
         tinit (`int`): The steps of initial fine-tuning warmup.
-        tfinal (`int`): The step of final fine-tuning.
+        tfinal (`int`): The number of steps of final fine-tuning.
         deltaT (`int`): The time internval between two budget allocations.
         beta1 (`float`): The hyperparameter of EMA for sensitivity smoothing.
         beta2 (`float`): The hyperparameter of EMA for undertainty quantification.
@@ -78,4 +96,13 @@ class AdaLoraConfig(LoraConfig):
             warnings.warn(
                 "Note that `r` is not used in AdaLora and will be ignored."
                 "If you intended to set the initial rank, use `init_r` instead."
+            )
+
+        if self.total_step is None or self.total_step <= 0:
+            raise ValueError("AdaLoRA does not work when `total_step` is None, supply a value > 0.")
+
+        if self.tinit >= (self.total_step - self.tfinal):
+            raise ValueError(
+                "The supplied schedule values don't allow for a budgeting phase. Decrease `tfinal`/`tinit` or "
+                "increase `total_step`."
             )

@@ -92,6 +92,7 @@ CONFIG_TESTING_KWARGS = (
     # AdaLoRA
     {
         "target_modules": None,
+        "total_step": 1,
     },
     # BOFT
     {

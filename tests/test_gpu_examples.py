@@ -44,6 +44,7 @@ from transformers import (
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
     Trainer,
+    TrainerCallback,
     TrainingArguments,
     WhisperFeatureExtractor,
     WhisperForConditionalGeneration,
@@ -371,6 +372,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             target_r=4,
             tinit=50,
             tfinal=100,
+            total_step=200,
             deltaT=5,
             beta1=0.3,
             beta2=0.3,
@@ -387,6 +389,12 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
         batch = tokenizer(data["train"][:3]["quote"], return_tensors="pt", padding=True)
         self._check_inference_finite(model, batch)
+
+        class OptimizerStepCallback(TrainerCallback):
+            def on_optimizer_step(self, args, state, control, **kwargs):
+                model.update_and_allocate(state.global_step)
+
+        step_callback = OptimizerStepCallback()
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             trainer = Trainer(
@@ -405,6 +413,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
             )
             model.config.use_cache = False
+            trainer.add_callback(step_callback)
             trainer.train()
 
             model.cpu().save_pretrained(tmp_dir)
@@ -436,6 +445,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             target_r=4,
             tinit=50,
             tfinal=100,
+            total_step=200,
             deltaT=5,
             beta1=0.3,
             beta2=0.3,
@@ -452,6 +462,12 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
         batch = tokenizer(data["train"][:3]["quote"], return_tensors="pt", padding=True)
         self._check_inference_finite(model, batch)
+
+        class OptimizerStepCallback(TrainerCallback):
+            def on_optimizer_step(self, args, state, control, **kwargs):
+                model.update_and_allocate(state.global_step)
+
+        step_callback = OptimizerStepCallback()
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             trainer = Trainer(
@@ -470,6 +486,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
             )
             model.config.use_cache = False
+            trainer.add_callback(step_callback)
             trainer.train()
 
             model.cpu().save_pretrained(tmp_dir)

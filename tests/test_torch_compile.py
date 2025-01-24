@@ -31,6 +31,7 @@ from transformers import (
     BitsAndBytesConfig,
     DataCollatorForLanguageModeling,
     Trainer,
+    TrainerCallback,
     TrainingArguments,
 )
 
@@ -62,7 +63,7 @@ if os.environ.get("PEFT_DEBUG_WITH_TORCH_COMPILE") != "1":
 
 # Mapping: name of the setting -> (Peft config instance, torch.compile kwargs)
 SETTINGS = {
-    "adalora": (AdaLoraConfig(task_type=TaskType.CAUSAL_LM), {}),
+    "adalora": (AdaLoraConfig(task_type=TaskType.CAUSAL_LM, total_step=5), {}),
     "boft": (BOFTConfig(task_type=TaskType.CAUSAL_LM), {}),
     "dora": (LoraConfig(task_type=TaskType.CAUSAL_LM, use_dora=True), {}),
     "ia3": (IA3Config(task_type=TaskType.CAUSAL_LM), {}),
@@ -93,7 +94,7 @@ class TestTorchCompileCausalLM:
     """
     Tests for using torch.compile with causal LM.
 
-    Tip: When adding a new test, set `fake_compile = False` below. With this setting, torch.compile is being skipped.
+    Tip: When adding a new test, set `fake_compile = True` below. With this setting, torch.compile is being skipped.
     This is useful for two reasons:
 
     - compile is slow, so to quickly iterate on the test, it's best to disable it and only enable it at the very end
@@ -156,8 +157,6 @@ class TestTorchCompileCausalLM:
         r"""Train a PEFT model with torch.compile using Trainer"""
         tmp_dir = tmp_path / "model"
         config, compile_kwargs = settings
-        if isinstance(config, AdaLoraConfig):
-            pytest.skip(reason="AdaLora does not work correctly with Trainer")
 
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
@@ -181,6 +180,10 @@ class TestTorchCompileCausalLM:
             "output_dir": tmp_dir,
             "seed": 0,
         }
+
+        if isinstance(config, AdaLoraConfig):
+            train_kwargs["learning_rate"] = 1e-2
+
         training_args = TrainingArguments(
             torch_compile=not self.fake_compile,
             torch_compile_backend=compile_kwargs.get("torch_compile_backend", None),
@@ -194,6 +197,15 @@ class TestTorchCompileCausalLM:
             data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
         )
         model.config.use_cache = False
+
+        if isinstance(config, AdaLoraConfig):
+
+            class OptimizerStepCallback(TrainerCallback):
+                def on_optimizer_step(self, args, state, control, **kwargs):
+                    model.update_and_allocate(state.global_step)
+
+            trainer.add_callback(OptimizerStepCallback())
+
         trainer.train()
 
         model.eval()
