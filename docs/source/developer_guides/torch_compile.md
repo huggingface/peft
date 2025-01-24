@@ -18,7 +18,7 @@ rendered properly in your Markdown viewer.
 
 In PEFT, [torch.compile](https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html) works for some but not all features. The reason why it won't always work is because PEFT is highly dynamic in certain places (loading and switching between multiple adapters, for instance), which can cause trouble for `torch.compile`. In other places, `torch.compile` may work, but won't be as fast as expected because of graph breaks.
 
-If you don't see an error, it doesn't necessarily mean that `torch.compile` worked correctly. It might give you an output, but the output is incorrect. This guide describes what works with `torch.compile` and what doesn't.
+If you don't see an error, it doesn't necessarily mean that `torch.compile` worked correctly. It might give you an output, but the output is incorrect. This guide describes what works with `torch.compile` and what doesn't. For your own testing, we recommend using the latest PyTorch version, as `torch.compile` is constantly being improved.
 
 > [!TIP]
 > Unless indicated otherwise, the default `torch.compile` settings were used.
@@ -36,19 +36,17 @@ The following adapters were tested successfully:
 
 - AdaLoRA
 - BOFT
+- Bone
 - IA³
 - Layer Norm Tuning
 - LoHa
+- LoKr
 - LoRA
 - LoRA + DoRA
+- LoRA applied to embedding layers
 - OFT
 - VeRA
 - HRA
-
-The following adapters **don't work** correctly for training or inference when using `torch.compile`:
-
-- LoKr
-- LoRA targeting embedding layers
 
 ## Advanced PEFT features with `torch.compile`
 
@@ -57,16 +55,13 @@ Below are some of the more advanced PEFT features that **work**. They were all t
 - `modules_to_save` (i.e. `config = LoraConfig(..., modules_to_save=...)`)
 - Merging adapters (one or multiple)
 - Merging multiple adapters into one adapter (i.e. calling `model.add_weighted_adapter(...)`)
+- Using PEFT adapters with quantization (bitsandbytes)
+- Disabling adapters (i.e. using `with model.disable_adapter()`)
+- Unloading (i.e. calling `model.merge_and_unload()`)
+- Mixed adapter batches (i.e. calling `model(batch, adapter_names=["__base__", "default", "other", ...])`)
+- Inference with multiple adapters (i.e. using `model.add_adapter` or `model.load_adapter` to load more than 1 adapter); for this, only call `torch.compile` _after_ loading all adapters
 
 Generally, we can expect that if a feature works correctly with LoRA and is also supported by other adapter types, it should also work for that adapter type.
-
-The more advanced PEFT features below **don't work** in conjunction with `torch.compile`. Tests were run with LoRA:
-
-- Using PEFT adapters with quantization (bitsandbytes)
-- Inference with multiple adapters
-- Unloading (i.e. calling `model.merge_and_unload()`)
-- Disabling adapters (i.e. using `with model.disable_adapter()`)
-- Mixed adapter batches (i.e. calling `model(batch, adapter_names=["__base__", "default", "other", ...])`)
 
 ## Test cases
 

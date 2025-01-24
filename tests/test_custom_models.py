@@ -120,6 +120,8 @@ TEST_CASES = [
     ),
     ("Conv2d 1 LoRA with lora_b bias", "Conv2d", LoraConfig, {"target_modules": ["conv2d"], "lora_bias": True}),
     ("Conv3d 1 LoRA with lora_b bias", "Conv3d", LoraConfig, {"target_modules": ["conv3d"], "lora_bias": True}),
+    ("MHA 1 LoRA", "MHA", LoraConfig, {"target_modules": ["mha"]}),
+    ("MHA 2 LoRA", "MHA", LoraConfig, {"target_modules": ["mha", "lin0"]}),
     #######
     # IA³ #
     #######
@@ -872,6 +874,21 @@ class ModelConv3D(nn.Module):
         return X
 
 
+class ModelMha(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mha = nn.MultiheadAttention(10, 2)
+        self.lin0 = nn.Linear(10, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        X = X.float()
+        X, _ = self.mha(X, X, X)
+        X = self.lin0(X)
+        X = self.sm(X)
+        return X
+
+
 class MockTransformerWrapper:
     """Mock class to behave like a transformers model.
 
@@ -907,6 +924,9 @@ class MockTransformerWrapper:
 
         if model_id == "Conv2d2":
             return ModelConv2D2().to(torch_dtype)
+
+        if model_id == "MHA":
+            return ModelMha().to(torch_dtype)
 
         raise ValueError(f"model_id {model_id} not implemented")
 
@@ -1074,12 +1094,13 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model_before = copy.deepcopy(model)
 
         model.train()
-        # this high learning rate was found through testing to be necessary to avoid flakiness
-        lr = (
-            100.0
-            if (config_kwargs.get("use_dora") and model_id == "EmbConv1D") or issubclass(config_cls, VBLoRAConfig)
-            else 0.5
-        )
+        lr = 0.5
+        if (config_kwargs.get("use_dora") and model_id == "EmbConv1D") or issubclass(config_cls, VBLoRAConfig):
+            # this high learning rate was found through testing to be necessary to avoid flakiness
+            lr = 100
+        elif "mha" in model_id.lower():
+            # we get exploding gradients with MHA when learning rate is too high
+            lr = 1e-3
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
@@ -1117,8 +1138,13 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         )
         model = get_peft_model(model, config)
         model.train()
-        lr = 0.5 if not config_kwargs.get("use_dora") else 0.1  # otherwise we get nan
-        if issubclass(config_cls, VBLoRAConfig):
+
+        lr = 0.5
+        if config_kwargs.get("use_dora"):
+            lr = 0.1  # otherwise we get nan
+        elif "mha" in model_id.lower():
+            lr = 1e-3  # we get exploding gradients with MHA when learning rate is too high
+        elif issubclass(config_cls, VBLoRAConfig):
             lr = 0.01  # otherwise we get nan
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
@@ -1582,6 +1608,26 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         with pytest.raises(ValueError, match=msg):
             model.add_weighted_adapter(["default", "other"], weights=[1.0, 1.0], adapter_name="merged")
 
+    def test_multiple_adapters_no_needless_copy_modules_to_save(self):
+        # See 2206
+        # The problem was that we keep a "global" modules_to_save on the model which contains all possible
+        # modules_to_save for each adapter. When the first adapter targets embed_tokens with modules_to_save and the
+        # second adapter targets lm_head, then embed_tokens will create a copy of the original module for the second
+        # adapter, even though it's not needed. The copy still acts as expected but uses unnecessary memory.
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
+        config0 = LoraConfig(modules_to_save=["embed_tokens"])
+        config1 = LoraConfig(modules_to_save=["lm_head"])
+        model = get_peft_model(model, config0)
+        model.add_adapter("other", config1)
+
+        lm_head_keys = list(model.base_model.model.lm_head.modules_to_save.keys())
+        assert lm_head_keys == ["other"]
+
+        embed_token_keys = list(model.base_model.model.model.decoder.embed_tokens.modules_to_save.keys())
+        # before the fix, this would be: ['default', 'other']
+        assert embed_token_keys == ["default"]
+
     def test_existing_model_card(self):
         # ensure that if there is already a model card, it is not overwritten
         model = MLP()
@@ -1775,6 +1821,14 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # should not raise an error
         model.merge_and_unload(safe_merge=True)
 
+    def test_unload_adapter_multihead_attention(self):
+        # MultiheadAttention has special logic for unloading, that logic is covered by this test
+        self._test_unload_adapter(
+            model_id="MHA",
+            config_cls=LoraConfig,
+            config_kwargs={"target_modules": ["mha"], "init_lora_weights": False},
+        )
+
     def test_dora_save_and_load_remapping(self):
         # Here we test the refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a ModuleDict
         # with a DoraLayer instance. The old parameter is now the "weight" attribute of that layer. Since we want the
@@ -1809,6 +1863,37 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert state_dict.keys() == state_dict_loaded.keys()
         for k in state_dict:
             assert torch.allclose(state_dict[k], state_dict_loaded[k])
+
+    @parameterized.expand([False, True])
+    def test_mha_gradients_set_correctly(self, with_forward_call):
+        # check for this bug: https://github.com/huggingface/peft/issues/761#issuecomment-1893804738
+        base_model = ModelMha()
+        config = LoraConfig(target_modules=["mha"])
+        model = get_peft_model(base_model, config)
+        model = model.to(self.torch_device)
+
+        if with_forward_call:
+            # after the merge-unmerge roundtrip happening in forward of lora MHA, the base weights should be set to
+            # requires_grad=False
+            inputs = self.prepare_inputs_for_testing()
+            model(**inputs)
+
+        assert model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad is False
+        assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is False
+
+        # _restore_weights used to ignore the gradient, this checks that it is indeed considered
+        model.base_model.model.mha._restore_weights()
+        assert model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad is False
+        assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is False
+
+        model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad = True
+        model.base_model.model.mha.base_layer.in_proj_weight.requires_grad = True
+        assert model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad is True
+        assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is True
+
+        model.base_model.model.mha._restore_weights()
+        assert model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad is True
+        assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is True
 
 
 class TestMultiRankAdapter(unittest.TestCase):
@@ -1874,9 +1959,9 @@ class TestMultiRankAdapter(unittest.TestCase):
                 if isinstance(module, BaseTunerLayer):
                     rank_expected = rank_pattern.get(key, r)
                     rank_current = module.lora_A[adapter].weight.shape[0]
-                    assert (
-                        rank_current == rank_expected
-                    ), f"Rank {rank_current} is not equal to expected {rank_expected}"
+                    assert rank_current == rank_expected, (
+                        f"Rank {rank_current} is not equal to expected {rank_expected}"
+                    )
 
 
 class TestRepr(unittest.TestCase):
@@ -3629,6 +3714,18 @@ class TestMixedAdapterBatches:
 
         inputs = {"X": torch.arange(270).view(6, 5, 3, 3).to(self.torch_device)}
         self.run_checks(peft_model, inputs)
+
+    def test_mixed_adapter_batches_mha_raises(self):
+        base_model = ModelMha().to(self.torch_device).eval()
+        config0 = LoraConfig(target_modules=["mha"], init_lora_weights=False)
+        config1 = LoraConfig(target_modules=["mha"], r=16, init_lora_weights=False)
+        peft_model = get_peft_model(base_model, config0, "adapter0").eval()
+        peft_model.add_adapter("adapter1", config1)
+
+        inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
+        msg = "lora.MultiheadAttention does not support mixed adapter batches"
+        with pytest.raises(TypeError, match=msg):
+            self.run_checks(peft_model, inputs)
 
     def test_mixed_adapter_batches_lora_length_mismatch_raises(self, mlp_lora):
         inputs = {

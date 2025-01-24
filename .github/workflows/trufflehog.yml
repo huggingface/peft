@@ -3,6 +3,8 @@ on:
 
 name: Secret Leaks
 
+permissions: {}
+
 jobs:
   trufflehog:
     runs-on: ubuntu-latest
@@ -11,5 +13,6 @@ jobs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
+        persist-credentials: false
     - name: Secret Scanning
       uses: trufflesecurity/trufflehog@main

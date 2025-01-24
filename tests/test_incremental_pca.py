@@ -93,7 +93,7 @@ def test_incremental_pca_validation():
     n_components = 3
     with pytest.raises(
         ValueError,
-        match=(f"n_components={n_components} must be" " less or equal to the batch number of" f" samples {n_samples}"),
+        match=(f"n_components={n_components} must be less or equal to the batch number of samples {n_samples}"),
     ):
         IncrementalPCA(n_components=n_components).partial_fit(X)
 

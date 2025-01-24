@@ -1,0 +1,15 @@
+rules:
+  dangerous-triggers:
+    ignore:
+      # this workflow is only triggered after maintainer approval
+      - upload_pr_documentation.yml:3:1
+  cache-poisoning:
+    ignore:
+      # the docker buildx binary is cached and zizmor warns about a cache poisoning attack.
+      # OTOH this cache would make us more resilient against an intrusion on docker-buildx' side.
+      # There is no obvious benefit so we leave it as it is.
+      - build_docker_images.yml:37:9
+      - build_docker_images.yml:70:9
+      - build_docker_images.yml:103:9
+      - build_docker_images.yml:136:9
+      - build_docker_images.yml:169:9

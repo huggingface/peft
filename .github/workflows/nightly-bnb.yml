@@ -12,6 +12,7 @@ env:
   NVIDIA_DISABLE_REQUIRE: "1"
   SLACK_API_TOKEN: ${{ secrets.SLACK_API_TOKEN }}
 
+permissions: {}
 
 jobs:
   run_all_tests_single_gpu:
@@ -33,6 +34,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v3
+        with:
+          persist-credentials: false
       - name: Pip install
         run: |
           source activate peft
@@ -156,6 +159,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v3
+        with:
+          persist-credentials: false
       - name: Pip install
         run: |
           source activate peft

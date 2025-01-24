@@ -55,11 +55,11 @@ from peft import (
     inject_adapter_in_model,
     set_peft_model_state_dict,
 )
+from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.tuners.lora.config import CordaConfig
 from peft.tuners.lora.corda import preprocess_corda
 from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
-from peft.utils.constants import PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
 
 
@@ -134,10 +134,6 @@ class TestLoraInitialization:
         # use statistical test to check if weight A is from a normal distribution
         normal = self.get_normal(0.0, 1 / config.r)
         _, p_value = stats.kstest(weight_A.detach().flatten().cpu().numpy(), normal.flatten().cpu().numpy())
-
-        # import matplotlib.pyplot as plt
-        # x = weight_A.detach().flatten().cpu().numpy()
-        # breakpoint()
 
         assert p_value > 0.5
 
@@ -1092,6 +1088,124 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match="DoRA does not support megatron_core"):
             LoraConfig(target_modules=["linear"], use_dora=True, megatron_config=megatron_config)
 
+    @pytest.fixture
+    def mha_cls(self):
+        class ModelMha(nn.Module):
+            def __init__(self, kdim=None, vdim=None):
+                super().__init__()
+                self.mha = nn.MultiheadAttention(10, 2, kdim=kdim, vdim=vdim)
+                self.lin0 = nn.Linear(10, 2)
+                self.sm = nn.LogSoftmax(dim=-1)
+
+            def forward(self, X):
+                X = X.float()
+                X, _ = self.mha(X, X, X)
+                X = self.lin0(X)
+                X = self.sm(X)
+                return X
+
+        return ModelMha
+
+    def test_mha_load_init_model_first(self, mha_cls):
+        # This test used to fail and require a workaround, for more context, see:
+        # https://github.com/huggingface/peft/pull/1324#issuecomment-2252473980
+        # The workaround was that _restore_weights had to be called manually on lora.MHA layers in order to make loading
+        # the state dict work. With recent changes, this workaround is no longer required, so that test has been
+        # deleted.
+        inputs = torch.rand(10, 10, 10)
+        model = mha_cls()
+        config = LoraConfig(target_modules=["mha"], init_lora_weights=False)
+        model = get_peft_model(model, config).eval()
+        restore_state_dict = {k: v.detach().cpu() for k, v in model.state_dict().items()}
+
+        del model
+
+        model = mha_cls()
+        model = get_peft_model(model, config)
+        # the workaround used to be:
+        # for module in model.modules():
+        #     if isinstance(module, peft.tuners.lora.layer.MultiheadAttention):
+        #         module._restore_weights()
+        model(inputs)
+        model.load_state_dict(restore_state_dict)
+
+    def test_mha_with_separate_qkv_embed_raises(self, mha_cls):
+        # passing different kdim and vdim results in separate parameters for q, k, v, which is not supported (yet)
+        model = mha_cls(kdim=20, vdim=30)
+        config = LoraConfig(target_modules=["mha"])
+        msg = "Only same embed for query/key/value is supported as of now for MultiheadAttention"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+    def test_mha_with_dora_raises(self, mha_cls):
+        model = mha_cls()
+        config = LoraConfig(target_modules=["mha"], use_dora=True)
+        msg = re.escape("MultiheadAttention does not support DoRA (yet), please set use_dora to False")
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+    def test_mha_exposes_attributes(self, mha_cls):
+        # MHA requires a bunch of attributes to be exposed, try to check them exhaustively here
+        model = mha_cls()
+        embed_dim = model.mha.embed_dim
+        kdim = model.mha.kdim
+        vdim = model.mha.vdim
+        qkv_same_embed_dim = model.mha._qkv_same_embed_dim
+        num_heads = model.mha.num_heads
+        dropout = model.mha.dropout
+        batch_first = model.mha.batch_first
+        head_dim = model.mha.head_dim
+        in_proj_weight = model.mha.in_proj_weight
+        in_proj_bias = model.mha.in_proj_bias
+        out_proj = model.mha.out_proj
+        bias_k = model.mha.bias_k
+        bias_v = model.mha.bias_v
+        add_zero_attn = model.mha.add_zero_attn
+
+        config = LoraConfig(target_modules=["mha"])
+        peft_model = get_peft_model(model, config)
+        assert peft_model.base_model.mha.embed_dim == embed_dim
+        assert peft_model.base_model.mha.kdim == kdim
+        assert peft_model.base_model.mha.vdim == vdim
+        assert peft_model.base_model.mha._qkv_same_embed_dim == qkv_same_embed_dim
+        assert peft_model.base_model.mha.num_heads == num_heads
+        assert peft_model.base_model.mha.dropout == dropout
+        assert peft_model.base_model.mha.batch_first == batch_first
+        assert peft_model.base_model.mha.head_dim == head_dim
+        if in_proj_weight is not None:
+            assert torch.allclose(peft_model.base_model.mha.in_proj_weight, in_proj_weight)
+        else:
+            assert peft_model.base_model.mha.in_proj_weight is None
+        if in_proj_bias is not None:
+            assert torch.allclose(peft_model.base_model.mha.in_proj_bias, in_proj_bias)
+        else:
+            assert peft_model.base_model.mha.in_proj_bias is None
+        assert peft_model.base_model.mha.out_proj is out_proj
+        if bias_k is not None:
+            assert torch.allclose(peft_model.base_model.mha.bias_k, bias_k)
+        else:
+            assert peft_model.base_model.mha.bias_k is None
+        if bias_v is not None:
+            assert torch.allclose(peft_model.base_model.mha.bias_v, bias_v)
+        else:
+            assert peft_model.base_model.mha.bias_v is None
+        assert peft_model.base_model.mha.add_zero_attn == add_zero_attn
+
+    def test_mha_merge_masks_method(self, mha_cls):
+        # MHA requires a merge_masks method to be exposed, check that it works
+        model = mha_cls()
+        config = LoraConfig(target_modules=["mha"])
+        peft_model = get_peft_model(model, config)
+
+        attn_mask = torch.randint(0, 2, (10, 10))
+        key_padding_mask = torch.randint(0, 2, (10, 10))
+        query = torch.rand(10, 10, 10)
+        merged_mask0, mask_type0 = model.mha.merge_masks(attn_mask, key_padding_mask, query)
+        merged_mask1, mask_type1 = peft_model.base_model.mha.merge_masks(attn_mask, key_padding_mask, query)
+
+        assert torch.allclose(merged_mask0, merged_mask1)
+        assert mask_type0 == mask_type1
+
     def test_lora_with_bias_extra_params(self):
         # lora with lora_bias=True
         model = self.get_model()
@@ -1843,12 +1957,45 @@ class TestCordaInitialization:
         return torch.rand(1000, 1000).to(self.torch_device)
 
     @pytest.mark.parametrize("corda_method", ("ipm", "kpm"))
+    def test_lora_corda_no_redundant_fields(self, data, corda_method):
+        original_model = self.get_model()
+        model = deepcopy(original_model)
+
+        corda_config = CordaConfig(
+            corda_method=corda_method,
+        )
+        config = LoraConfig(
+            init_lora_weights="corda",
+            target_modules=["linear"],
+            corda_config=corda_config,
+        )
+        preprocess_corda(
+            model,
+            config,
+            run_model=lambda: model(data),
+            hooked_model=model,
+        )
+        peft_model = get_peft_model(model, config)
+
+        # check if the redundant fields are removed
+        assert not hasattr(peft_model.base_model.linear, "sample_count")
+        assert not hasattr(peft_model.base_model.linear, "covariance_matrix")
+        assert not hasattr(peft_model.base_model.linear, "corda_method")
+        assert not hasattr(peft_model.base_model.linear, "rank")
+        assert not hasattr(peft_model.base_model.linear, "eigens")
+
+        # legacy debug fields
+        assert not hasattr(peft_model.base_model.linear, "mean")
+        assert not hasattr(peft_model.base_model.linear, "std")
+
+    @pytest.mark.parametrize("corda_method", ("ipm", "kpm"))
     def test_lora_corda_sample_count(self, data, corda_method):
         original_model = self.get_model()
         model = deepcopy(original_model)
 
         corda_config = CordaConfig(
             corda_method=corda_method,
+            prune_temporary_fields=False,
         )
         config = LoraConfig(
             init_lora_weights="corda",
@@ -1886,6 +2033,7 @@ class TestCordaInitialization:
 
         corda_config = CordaConfig(
             corda_method=corda_method,
+            prune_temporary_fields=False,
         )
         config = LoraConfig(
             init_lora_weights="corda",
@@ -3069,3 +3217,25 @@ class TestHotSwapping:
 
         assert model.peft_config["default"].r == new_rank
         assert model.peft_config["default"].rank_pattern == {"lin1": new_rank}
+
+
+def test_import_peft_type_to_model_mapping_deprecation_warning(recwarn):
+    # This is for backwards compatibility: In #2282, PEFT_TYPE_TO_MODEL_MAPPING was removed as it was redundant with
+    # PEFT_TYPE_TO_TUNER_MAPPING. However, third party code could still use this mapping, e.g.:
+    # https://github.com/AutoGPTQ/AutoGPTQ/blob/6689349625de973b9ee3016c28c11f32acf7f02c/auto_gptq/utils/peft_utils.py#L8
+    # TODO: Remove after 2026-01
+
+    # first check that there is no warning under normal circumstances
+    from peft.peft_model import PeftModel  # noqa
+
+    expected = (
+        "PEFT_TYPE_TO_MODEL_MAPPING is deprecated, please use `from peft import PEFT_TYPE_TO_TUNER_MAPPING` instead"
+    )
+    warnings = (w.message.args[0] for w in recwarn.list)
+    assert not any(w.startswith(expected) for w in warnings)
+
+    from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING  # noqa
+
+    # check that there is a warning with this message after importing the variable
+    warnings = (w.message.args[0] for w in recwarn.list)
+    assert any(w.startswith(expected) for w in warnings)

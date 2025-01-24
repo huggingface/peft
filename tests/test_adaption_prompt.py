@@ -22,7 +22,7 @@ import pytest
 import torch
 from torch.testing import assert_close
 
-from peft.mapping import get_peft_model
+from peft import get_peft_model
 from peft.peft_model import PeftModel
 from peft.tuners.adaption_prompt import AdaptionPromptConfig
 from peft.utils.other import prepare_model_for_kbit_training

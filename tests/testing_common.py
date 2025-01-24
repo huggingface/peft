@@ -56,6 +56,7 @@ from peft import (
     prepare_model_for_kbit_training,
 )
 from peft.tuners.lora import LoraLayer
+from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import _get_submodules, infer_device
 
 from .testing_utils import get_state_dict
@@ -559,7 +560,6 @@ class PeftCommonTester:
 
             model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
             model = PeftModel.from_pretrained(model, tmp_dirname, torch_device=self.torch_device)
-
             load_result1 = model.load_adapter(tmp_dirname, adapter_name="other")
             load_result2 = model.load_adapter(tmp_dirname, adapter_name="yet-another")
 
@@ -697,6 +697,9 @@ class PeftCommonTester:
         logits_unmerged = model(**dummy_input)[0]
 
         model = model.merge_and_unload()
+
+        # check that PEFT layers are completely removed
+        assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
         logits_merged_unloaded = model(**dummy_input)[0]
 
         conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
@@ -937,6 +940,87 @@ class PeftCommonTester:
         assert torch.allclose(logits_base[::3], logits_mixed[::3], atol=atol, rtol=rtol)
         assert torch.allclose(logits_adapter0[1::3], logits_mixed[1::3], atol=atol, rtol=rtol)
         assert torch.allclose(logits_adapter1[2::3], logits_mixed[2::3], atol=atol, rtol=rtol)
+
+    def _test_generate_with_mixed_adapter_batches_and_beam_search(self, model_id, config_cls, config_kwargs):
+        # Test generating with beam search and with mixing different adapters in a single batch by passing the
+        # adapter_names argument. See #2283.
+        if config_cls not in (LoraConfig,):
+            return pytest.skip(f"Mixed adapter batches not supported for {config_cls}")
+
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+
+        torch.manual_seed(0)
+        model = self.transformers_class.from_pretrained(model_id)
+        model = get_peft_model(model, config, adapter_name="adapter0").eval()
+        model.add_adapter("adapter1", config)
+
+        # In contrast to forward, for generate, it can sometimes happen that we get the same results as the base model
+        # even with LoRA applied because the impact of LoRA is not big enough. Therefore, use this "trick" to make LoRA
+        # stronger.
+        for name, param in model.named_parameters():
+            if model.base_model.prefix in name:
+                param.data.mul_(10.0)
+
+        model = model.to(self.torch_device).eval()
+
+        dummy_input = self.prepare_inputs_for_testing()
+        # ensure that we have at least 3 samples for this test
+        dummy_input = {k: torch.cat([v for _ in range(3)]) for k, v in dummy_input.items()}
+
+        gen_kwargs = {**dummy_input, "max_length": 20, "num_beams": 10, "early_stopping": True}
+        with torch.inference_mode():
+            with model.disable_adapter():
+                gen_base = model.generate(**gen_kwargs)
+
+        model.set_adapter("adapter0")
+        with torch.inference_mode():
+            gen_adapter0 = model.generate(**gen_kwargs)
+
+        model.set_adapter("adapter1")
+        with torch.inference_mode():
+            gen_adapter1 = model.generate(**gen_kwargs)
+
+        def remove_padding(seq, pad_value):
+            lst = list(seq)
+            while lst and (lst[-1] == pad_value):
+                lst.pop()
+            return lst
+
+        def gens_are_same(gen0, gen1):
+            # Special function to compare generations. We cannot use torch.allclose it will raise an error when sequence
+            # lengths differ. Morevoer, we need to remove the padding from the sequences. This is because, even though
+            # normally identical sequences should have the same length, when we do mixed adapter batches, each sample
+            # will be padded to the longest sequence in that mixed batch, which can be different from the longest
+            # sequence without mixed adapter batches.
+            pad_value = model.config.eos_token_id
+            for sample0, sample1 in zip(gen0, gen1):
+                sample0 = remove_padding(sample0, pad_value)
+                sample1 = remove_padding(sample1, pad_value)
+                if (len(sample0) != len(sample1)) or (sample0 != sample1):
+                    # at least one sample differs, the generations are not identical
+                    return False
+            return True
+
+        # sanity check that there are enough outputs and that they are different
+        assert len(gen_base) == len(gen_adapter0) == len(gen_adapter1)
+        assert len(gen_adapter1) >= 3
+        assert not gens_are_same(gen_base, gen_adapter0)
+        assert not gens_are_same(gen_base, gen_adapter1)
+        assert not gens_are_same(gen_adapter0, gen_adapter1)
+
+        # alternate between base model, adapter0, and adapter1
+        adapters = ["__base__", "adapter0", "adapter1"]
+        gen_kwargs["adapter_names"] = [adapters[i % 3] for i in (range(len(dummy_input["input_ids"])))]
+
+        with torch.inference_mode():
+            gen_mixed = model.generate(**gen_kwargs)
+
+        assert gens_are_same(gen_base[::3], gen_mixed[::3])
+        assert gens_are_same(gen_adapter0[1::3], gen_mixed[1::3])
+        assert gens_are_same(gen_adapter1[2::3], gen_mixed[2::3])
 
     def _test_generate(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
@@ -1326,6 +1410,8 @@ class PeftCommonTester:
 
     def _test_unload_adapter(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
+        num_params_base = len(model.state_dict())
+
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -1357,9 +1443,13 @@ class PeftCommonTester:
             model.eval()
             model = model.unload()
             logits_unload = model(**dummy_input)[0]
+            num_params_unloaded = len(model.state_dict())
 
+            # check that PEFT layers are completely removed
+            assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
             assert not torch.allclose(logits_with_adapter, logits_unload, atol=1e-10, rtol=1e-10)
             assert torch.allclose(logits_transformers, logits_unload, atol=1e-4, rtol=1e-4)
+            assert num_params_base == num_params_unloaded
 
     def _test_weighted_combination_of_adapters_lora(self, model, config, adapter_list, weight_list):
         model.add_adapter(adapter_list[1], config)

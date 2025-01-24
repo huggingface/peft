@@ -17,6 +17,8 @@ env:
   # To be able to run tests on CUDA 12.2
   NVIDIA_DISABLE_REQUIRE: "1"
 
+permissions: {}
+
 jobs:
   run_tests_with_compile:
     runs-on:
@@ -25,6 +27,7 @@ jobs:
       PEFT_DEBUG_WITH_TORCH_COMPILE: 1
       CUDA_VISIBLE_DEVICES: "0"
       TEST_TYPE: "single_gpu_huggingface/peft-gpu-bnb-latest:latest"
+      USE_PYTORCH_NIGHTLY: "${{ github.event.inputs.pytorch_nightly }}"
     container:
       image: "huggingface/peft-gpu-bnb-latest:latest"
       options: --gpus all --shm-size "16gb" --ipc host -v /mnt/cache/.cache/huggingface:/mnt/cache/
@@ -36,13 +39,14 @@ jobs:
         with:
           ref: ${{ github.event.inputs.branch }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
+          persist-credentials: false
       - name: Pip install
         run: |
           source activate peft
           pip install -e . --no-deps
           pip install pytest-cov pytest-reportlog parameterized datasets scipy einops
           pip install "pytest>=7.2.0,<8.0.0" # see: https://github.com/huggingface/transformers/blob/ce4fff0be7f6464d713f7ac3e0bbaafbc6959ae5/setup.py#L148C6-L148C26
-          if [ "${{ github.event.inputs.pytorch_nightly }}" = "true" ]; then
+          if [ "${USE_PYTORCH_NIGHTLY}" = "true" ]; then
             python -m pip install --upgrade --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
           fi
       - name: Test compile with pytest

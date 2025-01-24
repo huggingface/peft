@@ -99,7 +99,7 @@ class VeraModel(BaseTuner):
         - **peft_config** ([`VeraConfig`]): The configuration of the Vera model.
     """
 
-    prefix: str = "vera_lambda"
+    prefix: str = "vera_lambda_"
 
     def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
         super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
@@ -340,8 +340,7 @@ class VeraModel(BaseTuner):
             kwargs["is_target_conv_1d_layer"] = True
             if not kwargs["fan_in_fan_out"]:
                 warnings.warn(
-                    "fan_in_fan_out is set to False but the target module is `Conv1D`. "
-                    "Setting fan_in_fan_out to True."
+                    "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
                 )
                 kwargs["fan_in_fan_out"] = vera_config.fan_in_fan_out = True
         else:

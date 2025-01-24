@@ -386,6 +386,8 @@ if is_bnb_4bit_available():
                     kwargs["bnb_quantized"] = False
                 kwargs["requires_grad"] = False
                 kwargs.pop("data", None)
+                # torch.compile can introduce attributes preceded by '_', remove them
+                kwargs = {k: v for k, v in kwargs.items() if not k.startswith("_")}
                 self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), **kwargs).to(weight.device)
                 if self.lora_bias[active_adapter]:
                     bias_data = self.get_base_layer().bias.data + self.lora_B[active_adapter].bias

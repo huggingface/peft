@@ -68,7 +68,7 @@ def get_redpajama_train(tokenizer, percent=10, seed=3, batch_size=128, max_lengt
         return tokenizer(example["text"], truncation=True, max_length=max_length)
 
     if percent != 100:
-        split = f"train[:{int(850000*percent/100)}]"
+        split = f"train[:{int(850000 * percent / 100)}]"
     else:
         split = "train"
     dataset = load_dataset("togethercomputer/RedPajama-Data-1T-Sample", split=split)
@@ -105,7 +105,7 @@ llama_chat_format = """<s>[INST] <<SYS>>
 
 def get_calib_data(name, tokenizer, model_id, nsamples, seqlen=2048, seed=3):
     print(f" get_data_from: {name}, nsamples={nsamples}, seqlen={seqlen}, {seed}")
-    cache_file = f"cache/{name}_{model_id.replace('/','_')}_{nsamples}_{seqlen}_{seed}.pt"
+    cache_file = f"cache/{name}_{model_id.replace('/', '_')}_{nsamples}_{seqlen}_{seed}.pt"
     traindataset = []
     if not os.path.exists("cache"):
         os.makedirs("cache")

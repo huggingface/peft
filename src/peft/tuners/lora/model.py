@@ -232,7 +232,8 @@ class LoraModel(BaseTuner):
                 lora_bias=lora_config.lora_bias,
             )
         else:
-            new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
+            device_map = self.model.hf_device_map if hasattr(self.model, "hf_device_map") else None
+            new_module = self._create_new_module(lora_config, adapter_name, target, device_map=device_map, **kwargs)
             if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
@@ -247,34 +248,20 @@ class LoraModel(BaseTuner):
         if hasattr(child, "base_layer"):
             child = child.base_layer
 
-        if not hasattr(new_module, "base_layer"):
-            if hasattr(new_module, "W_q"):  # HQQ
-                new_module.W_q = child.W_q
-            else:
-                new_module.weight = child.weight
-            if hasattr(child, "bias"):
-                new_module.bias = child.bias
-
-        if getattr(child, "state", None) is not None:
-            if hasattr(new_module, "base_layer"):
-                new_module.base_layer.state = child.state
-            else:
-                new_module.state = child.state
-            new_module.to(child.weight.device)
-
         meta = torch.device("meta")
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if (self.prefix in name) or ("ranknum" in name):
-                weight = (
-                    child.qweight
-                    if hasattr(child, "qweight")
-                    else child.W_q
-                    if hasattr(child, "W_q")
-                    else child.weight
-                    if hasattr(child, "weight")
-                    else next(child.parameters())
-                )
+                if hasattr(child, "qweight"):
+                    weight = child.qweight
+                elif hasattr(child, "W_q"):
+                    weight = child.W_q
+                elif hasattr(child, "weight"):
+                    weight = child.weight
+                elif getattr(child, "in_proj_weight", None) is not None:  # MHA
+                    weight = child.in_proj_weight
+                else:
+                    weight = next(child.parameters())
                 if not any(p.device == meta for p in module.parameters()):
                     module.to(weight.device)
 
@@ -360,7 +347,7 @@ class LoraModel(BaseTuner):
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
                 "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `torch.nn.Conv3d`, "
-                "`transformers.pytorch_utils.Conv1D`."
+                "`transformers.pytorch_utils.Conv1D`, `torch.nn.MultiheadAttention.`."
             )
 
         return new_module
@@ -458,12 +445,35 @@ class LoraModel(BaseTuner):
         if unexpected_adapters:
             raise ValueError(f"Trying to infer with non-existing adapter(s): {', '.join(sorted(unexpected_adapters))}")
 
+        # deal with beam search
+        num_beams = kwargs.get("num_beams", None)
+        uses_beam_search = isinstance(num_beams, int) and (num_beams > 1)
+        original_adapter_names = adapter_names[:]
+        if uses_beam_search:
+            if not isinstance(adapter_names, (list, tuple)):
+                raise TypeError(f"Got adapter names of type {type(adapter_names)}, expected a list of str.")
+            # When there is beam search, the inputs are repeated n times, thus we repeat each adapter name n times and
+            # then flatten the nested list. For encoder-decoder models, this extended list should not be applied to the
+            # encoder part. Further below, the original argument is thus restored for the encoder.
+            adapter_names = sum(([n] * kwargs["num_beams"] for n in adapter_names), [])
+
         hook_handles = []
         for module in self.modules():
             if isinstance(module, LoraLayer) or isinstance(module, ModulesToSaveWrapper):
                 pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
                 handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                 hook_handles.append(handle)
+
+        if uses_beam_search and hasattr(self.model, "get_encoder"):
+            # For encoder-decoder models, even when applying beam search, the encoder part of the model should not use
+            # the extended adapter_names. This is because the encoder still uses the original, non-extended samples.
+            for module in self.model.get_encoder().modules():
+                if isinstance(module, LoraLayer) or isinstance(module, ModulesToSaveWrapper):
+                    # Add another hook to overwrite the kwargs with the original adapter names -- this is easier than
+                    # trying to exclude the encoder.
+                    pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=original_adapter_names)
+                    handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
+                    hook_handles.append(handle)
 
         yield
 
@@ -509,7 +519,13 @@ class LoraModel(BaseTuner):
             except AttributeError:
                 continue
             with onload_layer(target):
-                if hasattr(target, "base_layer"):
+                if hasattr(target, "unload_and_optionally_merge_module"):
+                    # if layers have special unloading method, like MultiheadAttention, use that
+                    unloaded_module = target.unload_and_optionally_merge_module(
+                        merge=merge, safe_merge=safe_merge, adapter_names=adapter_names
+                    )
+                    self._replace_module(parent, target_name, unloaded_module, target)
+                elif hasattr(target, "base_layer"):
                     if merge:
                         target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
                     self._replace_module(parent, target_name, target.get_base_layer(), target)

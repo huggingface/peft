@@ -20,10 +20,9 @@ from typing import Optional
 import torch
 
 from peft.config import PeftConfig
-from peft.mapping import PEFT_TYPE_TO_CONFIG_MAPPING
+from peft.mapping import PEFT_TYPE_TO_CONFIG_MAPPING, PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.tuners.lora import Conv2d, Linear, LoraConfig, LoraLayer
 
-from .constants import PEFT_TYPE_TO_PREFIX_MAPPING
 from .other import get_pattern_key, infer_device
 from .peft_types import PeftType
 from .save_and_load import _insert_adapter_name_into_state_dict, load_peft_weights
