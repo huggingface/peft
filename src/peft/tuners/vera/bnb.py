@@ -294,6 +294,8 @@ if is_bnb_4bit_available():
 
                 weight = self.get_base_layer().weight
                 kwargs = weight.__dict__
+                # torch.compile can introduce attributes preceded by '_', remove them
+                kwargs = {k: v for k, v in kwargs.items() if not k.startswith("_")}
                 w_data = bnb.functional.dequantize_4bit(weight.data, weight.quant_state) + vera_data
 
                 if safe_merge and not torch.isfinite(w_data).all():

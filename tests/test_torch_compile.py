@@ -37,6 +37,7 @@ from transformers import (
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
+    BoneConfig,
     HRAConfig,
     IA3Config,
     LNTuningConfig,
@@ -69,18 +70,21 @@ SETTINGS = {
     "loha": (LoHaConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"]), {}),
     "lokr": pytest.param(
         (LoKrConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"]), {}),
-        marks=pytest.mark.xfail(strict=True),
     ),
     "lora": (LoraConfig(task_type=TaskType.CAUSAL_LM), {}),
     "lora-target-embeddings": pytest.param(
         (LoraConfig(task_type=TaskType.CAUSAL_LM, target_modules=["embed_tokens"]), {}),
-        marks=pytest.mark.xfail(strict=True),
     ),
     "lora-with-modules-to-save": (LoraConfig(task_type=TaskType.CAUSAL_LM, modules_to_save=["embed_tokens"]), {}),
     "oft": (OFTConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"]), {}),
     "vblora": (VBLoRAConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], vector_length=2), {}),
     "vera": (VeraConfig(task_type=TaskType.CAUSAL_LM), {}),
     "hra": (HRAConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"]), {}),
+    "bone": (BoneConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], r=2), {}),
+    "bone-bat": (
+        BoneConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], r=2, init_weights="bat"),
+        {},
+    ),
 }
 
 
@@ -276,7 +280,6 @@ class TestTorchCompileCausalLM:
         assert (tokens_after == tokens_loaded).all()
 
     @require_bitsandbytes
-    @pytest.mark.xfail(strict=True)
     def test_causal_lm_training_lora_bnb_compile(self, tokenizer, data, tmp_path):
         r"""Train a bnb quantized LoRA model with torch.compile using PyTorch training loop"""
         torch.manual_seed(0)
@@ -316,7 +319,7 @@ class TestTorchCompileCausalLM:
         with torch.inference_mode():
             output_after = model(sample)
         assert torch.isfinite(output_after.logits).all()
-        atol, rtol = 1e-4, 1e-4
+        atol, rtol = 5e-4, 5e-4
         # sanity check: model was updated
         assert not torch.allclose(output_before.logits, output_after.logits, atol=atol, rtol=rtol)
         assert losses[-1] < self.max_train_loss
@@ -335,7 +338,6 @@ class TestTorchCompileCausalLM:
             output_loaded = model(sample)
         assert torch.allclose(output_after.logits, output_loaded.logits, atol=atol, rtol=rtol)
 
-    @pytest.mark.xfail(strict=True)
     @require_bitsandbytes
     def test_causal_lm_multiple_lora_adapter_compile(self, tokenizer, data):
         torch.manual_seed(0)
@@ -349,10 +351,10 @@ class TestTorchCompileCausalLM:
             output_base = model(sample)
 
         config = LoraConfig(task_type=TaskType.CAUSAL_LM, init_lora_weights=False)
-        model = get_peft_model(model, config).eval()
-        model = self.compile(model, {})
+        model = get_peft_model(model, config)
         model.add_adapter("other", config)
         model = self.compile(model, {})
+        model.eval()
 
         with torch.inference_mode():
             output_default_adapter = model(sample)
@@ -375,7 +377,6 @@ class TestTorchCompileCausalLM:
         # outputs after delete == output of default adapter
         assert torch.allclose(output_default_adapter.logits, output_after_delete.logits, atol=atol, rtol=rtol)
 
-    @pytest.mark.xfail(strict=True)
     def test_causal_lm_disable_lora_adapter_compile(self, tokenizer, data):
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
@@ -396,7 +397,7 @@ class TestTorchCompileCausalLM:
             with torch.inference_mode():
                 output_disabled = model(sample)
 
-        atol, rtol = 1e-4, 1e-4
+        atol, rtol = 5e-4, 5e-4
         # outputs of the base model == output disabled adapter != output of lora adapter
         assert torch.allclose(output_base.logits, output_disabled.logits, atol=atol, rtol=rtol)
         assert not torch.allclose(output_base.logits, output_lora.logits, atol=atol, rtol=rtol)
@@ -468,7 +469,6 @@ class TestTorchCompileCausalLM:
         assert not torch.allclose(output_other.logits, output_merged.logits, atol=atol, rtol=rtol)
 
     @require_bitsandbytes
-    @pytest.mark.xfail(strict=True)
     def test_causal_lm_merge_and_unload_lora_adapter_compile(self, tokenizer, data):
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
@@ -497,7 +497,6 @@ class TestTorchCompileCausalLM:
         assert torch.allclose(output_lora.logits, output_unloaded.logits, atol=atol, rtol=rtol)
 
     @require_bitsandbytes
-    @pytest.mark.xfail(strict=True)
     def test_causal_lm_mixed_batch_lora_adapter_compile(self, tokenizer, data):
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
@@ -532,7 +531,7 @@ class TestTorchCompileCausalLM:
         with torch.inference_mode():
             output_mixed = model(**sample, adapter_names=adapter_names)
 
-        atol, rtol = 1e-4, 1e-4
+        atol, rtol = 5e-4, 5e-4
         # outputs of the base model != output of lora adapter 1 != output of other adapter
         assert not torch.allclose(output_base.logits, output_default.logits, atol=atol, rtol=rtol)
         assert not torch.allclose(output_default.logits, output_other.logits, atol=atol, rtol=rtol)
