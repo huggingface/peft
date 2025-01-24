@@ -97,7 +97,7 @@ class _BaseAutoPeftModel:
             expected_target_class = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[task_type]
             if cls._target_peft_class.__name__ != expected_target_class.__name__:
                 raise ValueError(
-                    f"Expected target PEFT class: {expected_target_class.__name__}, but you have asked for: {cls._target_peft_class.__name__ }"
+                    f"Expected target PEFT class: {expected_target_class.__name__}, but you have asked for: {cls._target_peft_class.__name__}"
                     " make sure that you are loading the correct model for your task type."
                 )
         elif task_type is None and getattr(peft_config, "auto_mapping", None) is not None:
