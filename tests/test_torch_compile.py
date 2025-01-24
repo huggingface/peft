@@ -176,6 +176,10 @@ class TestTorchCompileCausalLM:
             "output_dir": tmp_dir,
             "seed": 0,
         }
+
+        if isinstance(config, AdaLoraConfig):
+            train_kwargs["learning_rate"] = 1e-2
+
         training_args = TrainingArguments(
             torch_compile=not self.fake_compile,
             torch_compile_backend=compile_kwargs.get("torch_compile_backend", None),
@@ -195,7 +199,6 @@ class TestTorchCompileCausalLM:
                 def on_optimizer_step(self, args, state, control, **kwargs):
                     model.update_and_allocate(state.global_step)
             trainer.add_callback(OptimizerStepCallback())
-            train_kwargs["learning_rate"] = 1e-2
 
         trainer.train()
 
