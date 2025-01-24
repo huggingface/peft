@@ -90,7 +90,7 @@ class TestTorchCompileCausalLM:
     """
     Tests for using torch.compile with causal LM.
 
-    Tip: When adding a new test, set `fake_compile = False` below. With this setting, torch.compile is being skipped.
+    Tip: When adding a new test, set `fake_compile = True` below. With this setting, torch.compile is being skipped.
     This is useful for two reasons:
 
     - compile is slow, so to quickly iterate on the test, it's best to disable it and only enable it at the very end
