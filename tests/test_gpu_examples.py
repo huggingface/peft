@@ -370,9 +370,9 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         peft_config = AdaLoraConfig(
             init_r=6,
             target_r=4,
-            tinit=50,
-            tfinal=100,
-            total_step=200,
+            tinit=2,
+            tfinal=2,
+            total_step=6,
             deltaT=5,
             beta1=0.3,
             beta2=0.3,
@@ -404,7 +404,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                     per_device_train_batch_size=4,
                     gradient_accumulation_steps=4,
                     warmup_steps=2,
-                    max_steps=3,
+                    max_steps=6,
                     learning_rate=2e-4,
                     fp16=True,
                     logging_steps=1,
@@ -443,9 +443,9 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         peft_config = AdaLoraConfig(
             init_r=6,
             target_r=4,
-            tinit=50,
-            tfinal=100,
-            total_step=200,
+            tinit=2,
+            tfinal=2,
+            total_step=6,
             deltaT=5,
             beta1=0.3,
             beta2=0.3,
@@ -477,7 +477,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                     per_device_train_batch_size=4,
                     gradient_accumulation_steps=4,
                     warmup_steps=2,
-                    max_steps=3,
+                    max_steps=6,
                     learning_rate=2e-4,
                     fp16=True,
                     logging_steps=1,
@@ -1494,8 +1494,9 @@ class PeftGPTQGPUTests(unittest.TestCase):
         peft_config = AdaLoraConfig(
             init_r=6,
             target_r=4,
-            tinit=50,
-            tfinal=100,
+            tinit=2,
+            tfinal=2,
+            total_step=6,
             deltaT=5,
             beta1=0.3,
             beta2=0.3,
@@ -1513,6 +1514,12 @@ class PeftGPTQGPUTests(unittest.TestCase):
         batch = tokenizer(data["train"][:3]["quote"], return_tensors="pt", padding=True)
         self._check_inference_finite(model, batch)
 
+        class OptimizerStepCallback(TrainerCallback):
+            def on_optimizer_step(self, args, state, control, **kwargs):
+                model.update_and_allocate(state.global_step)
+
+        step_callback = OptimizerStepCallback()
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             trainer = Trainer(
                 model=model,
@@ -1521,7 +1528,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
                     per_device_train_batch_size=4,
                     gradient_accumulation_steps=4,
                     warmup_steps=2,
-                    max_steps=3,
+                    max_steps=6,
                     learning_rate=2e-4,
                     fp16=True,
                     logging_steps=1,
@@ -1529,6 +1536,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
                 ),
                 data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
             )
+            trainer.add_callback(step_callback)
             model.config.use_cache = False
             trainer.train()
 
