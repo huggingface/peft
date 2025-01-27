@@ -103,6 +103,7 @@ TEST_CASES = [
         LoraConfig,
         {"target_modules": ["emb", "conv1d"], "use_dora": True},
     ),
+    ("Conv1d LoRA", "Conv1d", LoraConfig, {"target_modules": ["conv1d"]}),
     ("Conv2d 1 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
     ("Conv2d 1 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"], "use_dora": True}),
@@ -810,6 +811,25 @@ class ModelEmbWithEmbeddingUtils(nn.Module):
         return None
 
 
+class ModelConv1D(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1d = nn.Conv1d(1, 1, 2)
+        self.relu = nn.ReLU()
+        self.flat = nn.Flatten()
+        self.lin0 = nn.Linear(9, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        X = X.float().reshape(-1, 1, 10)
+        X = self.conv1d(X)
+        X = self.relu(X)
+        X = self.flat(X)
+        X = self.lin0(X)
+        X = self.sm(X)
+        return X
+
+
 class ModelConv2D(nn.Module):
     def __init__(self):
         super().__init__()
@@ -909,6 +929,9 @@ class MockTransformerWrapper:
 
         if model_id == "EmbConv1D":
             return ModelEmbConv1D().to(torch_dtype)
+
+        if model_id == "Conv1d":
+            return ModelConv1D().to(torch_dtype)
 
         if model_id == "Conv2d":
             return ModelConv2D().to(torch_dtype)

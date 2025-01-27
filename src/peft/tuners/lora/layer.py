@@ -67,6 +67,8 @@ class LoraLayer(BaseTunerLayer):
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
             in_features, out_features = base_layer.in_features, base_layer.out_features
+        elif isinstance(base_layer, nn.Conv1d):
+            in_features, out_features = base_layer.in_channels, base_layer.out_channels
         elif isinstance(base_layer, nn.Conv2d):
             in_features, out_features = base_layer.in_channels, base_layer.out_channels
         elif isinstance(base_layer, nn.Conv3d):
@@ -1300,6 +1302,18 @@ class Conv2d(_ConvNd):
         return DoraConv2dLayer
 
 
+class Conv1d(_ConvNd):
+    # Lora implemented in a conv1d layer
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self._kernel_dim == 3:
+            raise ValueError(f"Conv1d layer kernel must have 3 dimensions, not {self._kernel_dim}")
+        self.conv_fn = F.conv1d
+
+    def _get_dora_layer_class(self):
+        raise NotImplementedError
+
+
 class Conv3d(_ConvNd):
     # Lora implemented in a conv3d layer
     def __init__(self, *args, **kwargs):
@@ -1709,6 +1723,9 @@ def dispatch_default(
     elif isinstance(target_base_layer, torch.nn.Conv3d):
         kwargs.update(lora_config.loftq_config)
         new_module = Conv3d(target, adapter_name, **kwargs)
+    elif isinstance(target_base_layer, nn.Conv1d):
+        kwargs.update(lora_config.loftq_config)
+        new_module = Conv1d(target, adapter_name, **kwargs)
     elif isinstance(target_base_layer, torch.nn.MultiheadAttention):
         kwargs.update(lora_config.loftq_config)
         new_module = MultiheadAttention(target, adapter_name, **kwargs)
