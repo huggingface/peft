@@ -413,7 +413,7 @@ class TestPeftConfig:
         with open(tmp_path / "adapter_config.json", "w") as f:
             json.dump(non_peft_json, f)
 
-        msg = f"The config that is trying to be loaded is not a valid {config_class.__name__} config"
+        msg = f"The {config_class.__name__} config that is trying to be loaded is missing required keys: {{'peft_type'}}."
         with pytest.raises(TypeError, match=msg):
             config_class.from_pretrained(tmp_path)
 
