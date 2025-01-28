@@ -4131,11 +4131,10 @@ class TestPrefixTuning:
         model.generate(**inputs)  # does not raise
 
 
-# FIXME temporarily disable skips for CI
-# @pytest.mark.skipif(
-#     not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a hardware accelerator"
-# )
-# @pytest.mark.single_gpu_tests
+@pytest.mark.skipif(
+    not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a hardware accelerator"
+)
+@pytest.mark.single_gpu_tests
 class TestHotSwapping:
     @pytest.mark.parametrize("ranks", ["7,13", "13,7"])  # the ranks of the 2 LoRAs as str
     def test_hotswapping_compiled_model_does_not_trigger_recompilation(self, ranks):

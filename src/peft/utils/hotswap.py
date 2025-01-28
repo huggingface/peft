@@ -54,7 +54,7 @@ def _update_scaling(lora_module, adapter_name, scaling=None):
 
 def _convert_scalings_to_tensor(model):
     """
-    Convert the LoRA scaling values into torch.tensors to prevent recompilation of they change.
+    Convert the LoRA scaling values into torch.tensors to prevent recompilation if they change.
     """
     for module in model.modules():
         if not isinstance(module, LoraLayer):
