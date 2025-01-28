@@ -331,7 +331,7 @@ class PeftCustomKwargsTester(unittest.TestCase):
             assert new_config.target_modules == expected_target_modules
 
     def test_maybe_include_all_linear_layers_diffusion(self):
-        model_id = "hf-internal-testing/tiny-stable-diffusion-torch"
+        model_id = "hf-internal-testing/tiny-sd-pipe"
         model = StableDiffusionPipeline.from_pretrained(model_id)
         config = LoraConfig(base_model_name_or_path=model_id, target_modules="all-linear")
 
