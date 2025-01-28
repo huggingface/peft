@@ -67,6 +67,7 @@ jobs:
           SHASUM=sha256sum
           [ -f "$(which shasum)" ] && SHASUM=shasum
           find "${{ env.HF_HOME }}/hub" -type f -exec "$SHASUM" {} \; > cache_content_initial || true
+          cat cache_content_initial
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v4
         with:
@@ -85,6 +86,9 @@ jobs:
         if: matrix.os == 'windows-latest' || matrix.os == 'macos-13'
         run: |
           pip install --force-reinstall -U "numpy<2.0.0"
+      - name: show HF cache
+        run: |
+          find .cache/huggingface
       - name: Test with pytest
         run: |
           make test
