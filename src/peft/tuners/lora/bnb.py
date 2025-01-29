@@ -204,9 +204,7 @@ if is_bnb_available():
                 requires_conversion = not torch.is_autocast_enabled()
                 if requires_conversion:
                     expected_dtype = result.dtype
-                    compute_dtype = lora_A.weight.dtype
-                    if x.dtype != compute_dtype:
-                        x = x.to(compute_dtype)
+                    x = self._cast_input_dtype(x, lora_A.weight.dtype)
 
                 # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
                 # layer output
@@ -243,9 +241,7 @@ if is_bnb_available():
                     requires_conversion = not torch.is_autocast_enabled()
                     if requires_conversion:
                         expected_dtype = result.dtype
-                        compute_dtype = lora_A.weight.dtype
-                        if x.dtype != compute_dtype:
-                            x = x.to(compute_dtype)
+                        x = self._cast_input_dtype(x, lora_A.weight.dtype)
 
                     if not self.use_dora[active_adapter]:
                         output = lora_B(lora_A(dropout(x))) * scaling
@@ -470,7 +466,7 @@ if is_bnb_4bit_available():
                 requires_conversion = not torch.is_autocast_enabled()
                 if requires_conversion:
                     expected_dtype = result.dtype
-                    x = x.to(lora_A.weight.dtype)
+                    x = self._cast_input_dtype(x, lora_A.weight.dtype)
 
                 # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
                 # layer output
@@ -514,7 +510,7 @@ if is_bnb_4bit_available():
                     requires_conversion = not torch.is_autocast_enabled()
                     if requires_conversion:
                         expected_dtype = result.dtype
-                        x = x.to(lora_A.weight.dtype)
+                        x = self._cast_input_dtype(x, lora_A.weight.dtype)
 
                     if not self.use_dora[active_adapter]:
                         output = lora_B(lora_A(dropout(x))) * scaling

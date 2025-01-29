@@ -180,7 +180,7 @@ class SVDLinear(nn.Module, AdaLoraLayer):
                 scaling = self.scaling[active_adapter]
                 ranknum = self.ranknum[active_adapter] + 1e-5
 
-                x = x.to(lora_A.dtype)
+                x = self._cast_input_dtype(x, lora_A.dtype)
                 result += (dropout(x) @ (lora_A * lora_E).T @ lora_B.T) * scaling / ranknum
 
         return result

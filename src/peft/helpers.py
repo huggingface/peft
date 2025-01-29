@@ -18,6 +18,8 @@ from copy import deepcopy
 from functools import update_wrapper
 from types import MethodType
 
+from torch import nn
+
 from .peft_model import PeftConfig, PeftModel
 from .tuners.lora.layer import LoraLayer
 
@@ -209,3 +211,27 @@ def rescale_adapter_scale(model, multiplier):
         # restore original scaling values after exiting the context
         for module, scaling in original_scaling.items():
             module.scaling = scaling
+
+
+@contextmanager
+def disable_lora_input_dtype_casting(model: nn.Module, disable: bool = True):
+    """TODO"""
+    if not disable:
+        yield
+        return
+
+    original_values = {}
+    for name, module in model.named_modules():
+        if not isinstance(module, LoraLayer):
+            continue
+        original_values[name] = module.cast_input_dtype_enabled
+        module.cast_input_dtype_enabled = False
+
+    try:
+        yield
+    finally:
+        for name, module in model.named_modules():
+            if not isinstance(module, LoraLayer):
+                continue
+            if name in original_values:
+                module.cast_input_dtype_enabled = original_values[name]
