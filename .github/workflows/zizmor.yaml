@@ -23,6 +23,6 @@ jobs:
         with:
           persist-credentials: false
       - name: Install zizmor
-        run: cargo install zizmor
+        run: cargo install --locked zizmor
       - name: Run zizmor
         run: zizmor .github/workflows
