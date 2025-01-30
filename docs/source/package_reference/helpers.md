@@ -18,5 +18,5 @@ A collection of helper functions for PEFT.
 
 ## Context manager to disable input dtype casting in the `forward` method of LoRA layers
 
-[[autodoc]] disable_lora_input_dtype_casting
+[[autodoc]] helpers.disable_input_dtype_casting
     - all
