@@ -451,12 +451,12 @@ class TestDisableInputDtypeCasting:
         assert self.dtype_record == [torch.float32]
 
     def test_no_disable_input_dtype_casting(self, model, inputs):
-        msg = "expected mat1 and mat2 to have the same dtype"
+        msg = r"expected m.*1 and m.*2 to have the same dtype"
         with pytest.raises(RuntimeError, match=msg):
             model(inputs)
 
     def test_disable_input_dtype_casting_inactive(self, model, inputs):
-        msg = "expected mat1 and mat2 to have the same dtype"
+        msg = r"expected m.*1 and m.*2 to have the same dtype"
         with pytest.raises(RuntimeError, match=msg):
             with disable_input_dtype_casting(model, active=False):
                 model(inputs)
@@ -467,6 +467,6 @@ class TestDisableInputDtypeCasting:
             model(inputs)
 
         # after the context exited, we're back to the error
-        msg = "expected mat1 and mat2 to have the same dtype"
+        msg = r"expected m.*1 and m.*2 to have the same dtype"
         with pytest.raises(RuntimeError, match=msg):
             model(inputs)
