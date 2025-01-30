@@ -71,122 +71,166 @@ def _convert_scalings_to_tensor(model):
                 )
 
 
-def _pad_lora_weights(model, target_rank):
+def _get_padded_linear(lora_module: torch.nn.Module, target_rank: int, is_lora_A: bool) -> torch.nn.Linear:
     """
-    Pad LoRA weights in a state dict to a target rank while preserving the original behavior.
+    Get a new Linear layer for LoRA with padded weights according to the target rank.
 
     Args:
-      state_dict (dict): The state dict containing LoRA weights
-      target_rank (int): The target rank to pad to
+        lora_module (nn.Module):
+            The LoRA sub-module (e.g. module.lora_A[adapter_name]).
+        target_rank (int):
+            The desired rank to pad to.
+        is_lora_A (bool):
+            True if this is the LoRA A matrix, False if LoRA B.
 
-    Returns: new_state_dict: A new state dict with padded LoRA weights
+    Returns:
+        nn.Linear:
+            A newly created and padded Linear layer. If the rank already fit, the original layer is returned.
     """
+    weight = lora_module.weight
+    # For LoRA A, the "rank dimension" is weight.size(0) (out_features).
+    # For LoRA B, it is weight.size(1) (in_features).
+    original_rank = weight.size(0) if is_lora_A else weight.size(1)
+
+    # If no padding needed
+    if original_rank == target_rank:
+        return lora_module
+
+    if original_rank > target_rank:
+        raise ValueError(
+            f"Trying to pad the adapter to the target rank {target_rank}, but the original rank is larger "
+            f"({original_rank}). This is not possible."
+        )
+
+    out_features, in_features = weight.shape
+
+    if is_lora_A:
+        # LoRA A affects out_features
+        padded = torch.zeros(target_rank, in_features, device=weight.device, dtype=weight.dtype)
+        padded[:original_rank, :] = weight
+        new_layer = torch.nn.Linear(in_features, target_rank, bias=lora_module.bias)
+    else:
+        # LoRA B affects in_features
+        padded = torch.zeros(out_features, target_rank, device=weight.device, dtype=weight.dtype)
+        padded[:, :original_rank] = weight
+        new_layer = torch.nn.Linear(target_rank, out_features, bias=lora_module.bias)
+
+    # Sanity check
+    if new_layer.weight.shape != padded.shape:
+        raise ValueError(
+            "Something went wrong when trying to pad the LoRA Linear weights, the new shape should be "
+            f"{padded.shape} but {new_layer.weight.shape} was found. Please open an issue on PEFT "
+            "(https://github.com/huggingface/peft/issues) and report this error."
+        )
+
+    new_layer.weight.data = padded
+    # Copy bias if present
+    if lora_module.bias is not None:
+        new_layer.bias.data = lora_module.bias.data
+
+    return new_layer
+
+
+def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A: bool) -> torch.nn.Conv2d:
+    """
+    Get a new Conv2d layer for LoRA with padded weights according to the target rank.
+
+    Args:
+        lora_module (nn.Module):
+            The LoRA sub-module (e.g. module.lora_A[adapter_name]).
+        target_rank (int):
+            The desired rank to pad to.
+        is_lora_A (bool):
+            True if this is the LoRA A matrix, False if LoRA B.
+
+    Returns:
+        nn.Conv2d:
+            A newly created and padded Conv2d layer. If the rank already fit, the original layer is returned.
+    """
+    weight = lora_module.weight
+    # For Conv2d: [out_channels, in_channels, kernel_height, kernel_width]
+    out_channels, in_channels, kh, kw = weight.shape
+    original_rank = out_channels if is_lora_A else in_channels
+
+    if original_rank == target_rank:
+        return lora_module
+
+    if original_rank > target_rank:
+        raise ValueError(
+            f"Trying to pad the adapter to the target rank {target_rank}, but the original rank is larger "
+            f"({original_rank}). This is not possible."
+        )
+
+    if is_lora_A:
+        # LoRA A affects out_channels
+        padded = torch.zeros(target_rank, in_channels, kh, kw, device=weight.device, dtype=weight.dtype)
+        padded[:out_channels, :, :, :] = weight
+        new_layer = torch.nn.Conv2d(
+            in_channels,
+            target_rank,
+            kernel_size=lora_module.kernel_size,
+            stride=lora_module.stride,
+            padding=lora_module.padding,
+            bias=lora_module.bias,
+            groups=lora_module.groups,
+        )
+    else:
+        # LoRA B affects in_channels
+        padded = torch.zeros(out_channels, target_rank, kh, kw, device=weight.device, dtype=weight.dtype)
+        padded[:, :in_channels, :, :] = weight
+        new_layer = torch.nn.Conv2d(
+            target_rank,
+            out_channels,
+            kernel_size=lora_module.kernel_size,
+            stride=lora_module.stride,
+            padding=lora_module.padding,
+            bias=lora_module.bias,
+            groups=lora_module.groups,
+        )
+
+    # Sanity check
+    if new_layer.weight.shape != padded.shape:
+        raise ValueError(
+            "Something went wrong when trying to pad the LoRA  weights, the new shape should be "
+            f"{padded.shape} but {new_layer.weight.shape} was found. Please open an issue on PEFT "
+            "(https://github.com/huggingface/peft/issues) and report this error."
+        )
+
+    new_layer.weight.data = padded
+    # Copy bias if present
+    if lora_module.bias is not None:
+        new_layer.bias.data = lora_module.bias.data
+
+    return new_layer
+
+
+def _pad_lora_weights(model: torch.nn.Module, target_rank: int) -> None:
+    """
+    Pad LoRA weights in a model to a target rank while preserving the original behavior.
+
+    Args:
+      model (nn.Module): The model containing LoRA modules (with lora_A and lora_B).
+      target_rank (int): The target rank to pad to.
+    """
+
     for module in model.modules():
-        if not isinstance(module, (Conv2d, Linear)):
+        # Decide which pad function to call based on module type
+        if isinstance(module, Linear):
+            pad_fn = _get_padded_linear
+        elif isinstance(module, Conv2d):
+            pad_fn = _get_padded_conv2d
+        else:
+            # Skip any other module types
             continue
 
-        is_conv = isinstance(module, Conv2d)
-
-        # LoRA A
-        for adapter_name, lora_module in module.lora_A.items():
-            weight = lora_module.weight
-            original_rank = weight.size(0)
-
-            if original_rank == target_rank:
-                continue
-
-            if original_rank > target_rank:
-                raise ValueError(
-                    f"Trying to pad the adapter to the target rank {target_rank}, but the original rank is larger "
-                    f"({original_rank}), which is not possible. Please choose a target rank that is greater or equal "
-                    "to the largest rank of the adapter."
-                )
-
-            if is_conv:
-                padded = torch.zeros(
-                    target_rank,
-                    weight.size(1),
-                    weight.size(2),
-                    weight.size(3),
-                    device=weight.device,
-                    dtype=weight.dtype,
-                )
-                padded[:original_rank, :, :, :] = weight
-                new_layer = torch.nn.Conv2d(
-                    weight.size(1),
-                    target_rank,
-                    kernel_size=lora_module.kernel_size,
-                    stride=lora_module.stride,
-                    padding=lora_module.padding,
-                    bias=lora_module.bias,
-                )
-            else:
-                padded = torch.zeros(target_rank, weight.size(1), device=weight.device, dtype=weight.dtype)
-                padded[:original_rank, :] = weight
-                new_layer = torch.nn.Linear(weight.size(1), target_rank, bias=lora_module.bias)
-
-            if new_layer.weight.shape != padded.shape:
-                raise ValueError(
-                    "Something went wrong when trying to pad the LoRA weights, the new shape should be "
-                    f"{padded.shape} but {new_layer.weight.shape} was found. Please open an issue on PEFT "
-                    "(https://github.com/huggingface/peft/issues) and report this error."
-                )
-
-            new_layer.weight.data = padded
-            if lora_module.bias:
-                new_layer.bias.data = lora_module.bias.data
+        # Pad LoRA A
+        for adapter_name, lora_A_module in module.lora_A.items():
+            new_layer = pad_fn(lora_A_module, target_rank=target_rank, is_lora_A=True)
             module.lora_A[adapter_name] = new_layer
 
-        # LoRA B
-        for adapter_name, lora_module in module.lora_B.items():
-            weight = lora_module.weight
-            original_rank = weight.size(1)
-
-            if original_rank == target_rank:
-                continue
-
-            if original_rank > target_rank:
-                # TODO: is this necessary or can we just continue???
-                raise ValueError(
-                    f"Trying to pad the adapter to the target rank {target_rank}, but the original rank is larger "
-                    f"({original_rank}), which is not possible. Please choose a target rank that is greater or equal "
-                    "to the largest rank of the adapter."
-                )
-
-            if is_conv:
-                padded = torch.zeros(
-                    weight.size(0),
-                    target_rank,
-                    weight.size(2),
-                    weight.size(3),
-                    device=weight.device,
-                    dtype=weight.dtype,
-                )
-                padded[:, :original_rank, :, :] = weight
-                new_layer = torch.nn.Conv2d(
-                    target_rank,
-                    weight.size(0),
-                    kernel_size=lora_module.kernel_size,
-                    stride=lora_module.stride,
-                    padding=lora_module.padding,
-                    bias=lora_module.bias,
-                )
-                new_layer.weight.data = padded
-            else:
-                padded = torch.zeros(weight.size(0), target_rank, device=weight.device, dtype=weight.dtype)
-                padded[:, :original_rank] = weight
-                new_layer = torch.nn.Linear(target_rank, weight.size(0), bias=lora_module.bias)
-
-            if new_layer.weight.shape != padded.shape:
-                raise ValueError(
-                    "Something went wrong when trying to pad the LoRA weights, the new shape should be "
-                    f"{padded.shape} but {new_layer.weight.shape} was found. Please open an issue on PEFT "
-                    "(https://github.com/huggingface/peft/issues) and report this error."
-                )
-
-            new_layer.weight.data = padded
-            if lora_module.bias:
-                new_layer.bias.data = lora_module.bias.data
+        # Pad LoRA B
+        for adapter_name, lora_B_module in module.lora_B.items():
+            new_layer = pad_fn(lora_B_module, target_rank=target_rank, is_lora_A=False)
             module.lora_B[adapter_name] = new_layer
 
 
