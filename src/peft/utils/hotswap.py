@@ -280,6 +280,7 @@ def prepare_model_for_compiled_hotswap(
         return
 
     if not isinstance(config, dict):
+        # config can be either a PeftConfig, or a dict of PeftConfigs like PeftModel.peft_config
         config = {"dummy": config}
 
     for lora_config in config.values():
@@ -355,6 +356,7 @@ def hotswap_adapter_from_state_dict(
 
     # actual swapping
     for key, new_val in state_dict.items():
+        # get LoRA parent module name by removing the 'lora_*.<adapter-name>.weight' part
         module_name = ".".join(key.split(".")[:-3])
         module = model.get_submodule(module_name)
 
