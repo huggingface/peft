@@ -255,7 +255,7 @@ def prepare_model_for_compiled_hotswap(
     """
     Helper function that prepares the model so that it can later be compiled and then used with hot-swapping.
 
-    It is necessary to call this function on the model for hot-swapping to work if
+    It is necessary to call this function on the model for hot-swapping to work if both of these are true:
 
     - the different LoRA adapters have different ranks and/or different alpha values (i.e. scalings)
     - you plan to torch.compile the model and want to avoid re-compilation
