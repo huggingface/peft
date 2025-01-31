@@ -3218,6 +3218,69 @@ class TestHotSwapping:
         assert model.peft_config["default"].r == new_rank
         assert model.peft_config["default"].rank_pattern == {"lin1": new_rank}
 
+    def test_prepare_model_for_compiled_hotswap_lora_bias(self):
+        # When setting lora_bias=True in the LoraConfig, the LoRA B parameter will have a bias term. Check that padding
+        # still works correctly. Note that the LoRA A parameter still won't have a bias term.
+        old_rank = 8
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=old_rank, lora_bias=True)
+        model = self.get_model()
+        model = get_peft_model(model, config)
+
+        # sanity check
+        for name, param in model.named_parameters():
+            if "lora_A" in name and name.endswith(".weight"):
+                assert param.shape[0] == old_rank
+            elif "lora_B" in name and name.endswith(".weight"):
+                assert param.shape[1] == old_rank
+            elif "lora_A" in name and name.endswith(".bias"):
+                assert False, "LoRA A should not have a bias term"
+            elif "lora_B" in name and name.endswith(".bias"):
+                assert param.shape[0] in (5, 20)  # output shapes of the 2 layers
+
+        new_rank = 13
+        prepare_model_for_compiled_hotswap(model, target_rank=new_rank)
+
+        for name, param in model.named_parameters():
+            if "lora_A" in name and name.endswith(".weight"):
+                assert param.shape[0] == new_rank
+            elif "lora_B" in name and name.endswith(".weight"):
+                assert param.shape[1] == new_rank
+            elif "lora_A" in name and name.endswith(".bias"):
+                assert False, "LoRA A should not have a bias term"
+            elif "lora_B" in name and name.endswith(".bias"):
+                assert param.shape[0] in (5, 20)  # output shapes of the 2 layers
+
+    def test_prepare_model_for_compiled_hotswap_conv2d_lora_bias(self):
+        # same as previous test, but for a Conv2d model
+        old_rank = 8
+        config = LoraConfig(target_modules=["conv"], r=old_rank, lora_bias=True)
+        model = self.get_model_conv2d()
+        model = get_peft_model(model, config)
+
+        # sanity check
+        for name, param in model.named_parameters():
+            if "lora_A" in name and name.endswith(".weight"):
+                assert param.shape[0] == old_rank
+            elif "lora_B" in name and name.endswith(".weight"):
+                assert param.shape[1] == old_rank
+            elif "lora_A" in name and name.endswith(".bias"):
+                assert False, "LoRA A should not have a bias term"
+            elif "lora_B" in name and name.endswith(".bias"):
+                assert param.shape[0] == 10  # output shape of conv layer
+
+        new_rank = 13
+        prepare_model_for_compiled_hotswap(model, target_rank=new_rank)
+
+        for name, param in model.named_parameters():
+            if "lora_A" in name and name.endswith(".weight"):
+                assert param.shape[0] == new_rank
+            elif "lora_B" in name and name.endswith(".weight"):
+                assert param.shape[1] == new_rank
+            elif "lora_A" in name and name.endswith(".bias"):
+                assert False, "LoRA A should not have a bias term"
+            elif "lora_B" in name and name.endswith(".bias"):
+                assert param.shape[0] == 10  # output shape of conv layer
+
 
 def test_import_peft_type_to_model_mapping_deprecation_warning(recwarn):
     # This is for backwards compatibility: In #2282, PEFT_TYPE_TO_MODEL_MAPPING was removed as it was redundant with

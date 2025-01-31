@@ -108,18 +108,24 @@ def _get_padded_linear(lora_module: torch.nn.Module, target_rank: int, is_lora_A
         # LoRA A affects out_features
         padded = torch.zeros(target_rank, in_features, device=weight.device, dtype=weight.dtype)
         padded[:original_rank, :] = weight
-        new_layer = torch.nn.Linear(in_features, target_rank, bias=lora_module.bias)
+        new_layer = torch.nn.Linear(in_features, target_rank, bias=lora_module.bias is not None)
     else:
         # LoRA B affects in_features
         padded = torch.zeros(out_features, target_rank, device=weight.device, dtype=weight.dtype)
         padded[:, :original_rank] = weight
-        new_layer = torch.nn.Linear(target_rank, out_features, bias=lora_module.bias)
+        new_layer = torch.nn.Linear(target_rank, out_features, bias=lora_module.bias is not None)
 
     # Sanity check
     if new_layer.weight.shape != padded.shape:
         raise ValueError(
             "Something went wrong when trying to pad the LoRA Linear weights, the new shape should be "
             f"{padded.shape} but {new_layer.weight.shape} was found. Please open an issue on PEFT "
+            "(https://github.com/huggingface/peft/issues) and report this error."
+        )
+    if (lora_module.bias is not None) and (new_layer.bias.shape != lora_module.bias.shape):
+        raise ValueError(
+            "Something went wrong when trying to pad the LoRA Linear bias, the new shape should be "
+            f"{lora_module.bias.shape} but {new_layer.bias.shape} was found. Please open an issue on PEFT "
             "(https://github.com/huggingface/peft/issues) and report this error."
         )
 
@@ -171,7 +177,7 @@ def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A
             kernel_size=lora_module.kernel_size,
             stride=lora_module.stride,
             padding=lora_module.padding,
-            bias=lora_module.bias,
+            bias=lora_module.bias is not None,
             groups=lora_module.groups,
         )
     else:
@@ -184,7 +190,7 @@ def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A
             kernel_size=lora_module.kernel_size,
             stride=lora_module.stride,
             padding=lora_module.padding,
-            bias=lora_module.bias,
+            bias=lora_module.bias is not None,
             groups=lora_module.groups,
         )
 
@@ -193,6 +199,12 @@ def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A
         raise ValueError(
             "Something went wrong when trying to pad the LoRA  weights, the new shape should be "
             f"{padded.shape} but {new_layer.weight.shape} was found. Please open an issue on PEFT "
+            "(https://github.com/huggingface/peft/issues) and report this error."
+        )
+    if (lora_module.bias is not None) and (new_layer.bias.shape != lora_module.bias.shape):
+        raise ValueError(
+            "Something went wrong when trying to pad the LoRA Conv2d bias, the new shape should be "
+            f"{lora_module.bias.shape} but {new_layer.bias.shape} was found. Please open an issue on PEFT "
             "(https://github.com/huggingface/peft/issues) and report this error."
         )
 
