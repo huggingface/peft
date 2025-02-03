@@ -30,7 +30,7 @@ from huggingface_hub.errors import EntryNotFoundError, HFValidationError
 from packaging import version
 from safetensors.torch import storage_ptr, storage_size
 
-from ..import_utils import is_auto_gptq_available, is_torch_tpu_available
+from ..import_utils import is_auto_gptq_available, is_gptqmodel_available, is_torch_tpu_available
 from .constants import (
     CONFIG_NAME,
     EMBEDDING_LAYER_NAMES,
@@ -275,8 +275,10 @@ class ModulesToSaveWrapper(torch.nn.Module):
 
                 context_manager = deepspeed.zero.GatheredParameters(self.original_module.parameters(), modifier_rank=0)
                 break
-        with context_manager:
-            self.modules_to_save.update(torch.nn.ModuleDict({adapter_name: copy.deepcopy(self.original_module)}))
+
+        if adapter_name not in self.modules_to_save:
+            with context_manager:
+                self.modules_to_save[adapter_name] = copy.deepcopy(self.original_module)
 
         if hasattr(self.modules_to_save[adapter_name], "_hf_hook"):
             old_hook = self.modules_to_save[adapter_name]._hf_hook
@@ -416,10 +418,10 @@ def _freeze_adapter(model, adapter_name):
             p.requires_grad = False
 
 
-def _set_trainable(model, adapter_name):
+def _set_trainable(model, adapter_name, modules_to_save):
     key_list = [key for key, _ in model.named_modules()]
     for key in key_list:
-        target_module_found = any(key.endswith(target_key) for target_key in model.modules_to_save)
+        target_module_found = any(key.endswith(target_key) for target_key in modules_to_save)
         if target_module_found:
             parent, target, target_name = _get_submodules(model, key)
             if isinstance(target, ModulesToSaveWrapper):
@@ -608,30 +610,73 @@ def get_auto_gptq_quant_linear(gptq_quantization_config):
     """
     Get the right AutoGPTQQuantLinear class based on the quantization config file
     """
-    if gptq_quantization_config is not None and is_auto_gptq_available():
-        from auto_gptq.utils.import_utils import dynamically_import_QuantLinear
+    if gptq_quantization_config is None:
+        return None
 
-        desc_act = gptq_quantization_config.desc_act
-        group_size = gptq_quantization_config.group_size
-        bits = gptq_quantization_config.bits
-        if hasattr(gptq_quantization_config, "use_exllama"):
-            use_exllama = gptq_quantization_config.use_exllama
-        else:
-            use_exllama = not gptq_quantization_config.disable_exllama
-        if hasattr(gptq_quantization_config, "exllama_config"):
-            exllama_version = gptq_quantization_config.exllama_config["version"]
-        else:
-            exllama_version = 1
-        AutoGPTQQuantLinear = dynamically_import_QuantLinear(
-            use_triton=False,
-            desc_act=desc_act,
-            group_size=group_size,
-            bits=bits,
-            disable_exllama=not (use_exllama and exllama_version == 1),
-            disable_exllamav2=not (use_exllama and exllama_version == 2),
-        )
-        return AutoGPTQQuantLinear
-    return None
+    if is_auto_gptq_available():
+        from auto_gptq.utils.import_utils import dynamically_import_QuantLinear
+    else:
+        return None
+
+    desc_act = gptq_quantization_config.desc_act
+    group_size = gptq_quantization_config.group_size
+    bits = gptq_quantization_config.bits
+    if hasattr(gptq_quantization_config, "use_exllama"):
+        use_exllama = gptq_quantization_config.use_exllama
+    else:
+        use_exllama = not gptq_quantization_config.disable_exllama
+    if hasattr(gptq_quantization_config, "exllama_config"):
+        exllama_version = gptq_quantization_config.exllama_config["version"]
+    else:
+        exllama_version = 1
+
+    QuantLinear = dynamically_import_QuantLinear(
+        use_triton=False,
+        desc_act=desc_act,
+        group_size=group_size,
+        bits=bits,
+        disable_exllama=not (use_exllama and exllama_version == 1),
+        disable_exllamav2=not (use_exllama and exllama_version == 2),
+    )
+
+    return QuantLinear
+
+
+def get_gptqmodel_quant_linear(gptq_quantization_config, device_map=None):
+    """
+    Get the right GPTQQuantLinear class based on the quantization config file
+    """
+    if gptq_quantization_config is None:
+        return None
+
+    if not is_gptqmodel_available():
+        return None
+
+    from gptqmodel.utils.importer import hf_select_quant_linear
+
+    desc_act = gptq_quantization_config.desc_act
+    group_size = gptq_quantization_config.group_size
+    bits = gptq_quantization_config.bits
+    checkpoint_format = (
+        gptq_quantization_config.checkpoint_format
+        if hasattr(gptq_quantization_config, "checkpoint_format")
+        else "gptq"
+    )
+    sym = gptq_quantization_config.sym
+    meta = gptq_quantization_config.meta if hasattr(gptq_quantization_config, "meta") else None
+
+    QuantLinear = hf_select_quant_linear(
+        bits=bits,
+        group_size=group_size,
+        desc_act=desc_act,
+        sym=sym,
+        device_map=device_map,
+        checkpoint_format=checkpoint_format,
+        meta=meta,
+        backend="auto_trainable",
+    )
+
+    return QuantLinear
 
 
 def id_tensor_storage(tensor: torch.Tensor) -> tuple[torch.device, int, int]:

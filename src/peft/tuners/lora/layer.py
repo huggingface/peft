@@ -67,6 +67,8 @@ class LoraLayer(BaseTunerLayer):
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
             in_features, out_features = base_layer.in_features, base_layer.out_features
+        elif isinstance(base_layer, nn.Conv1d):
+            in_features, out_features = base_layer.in_channels, base_layer.out_channels
         elif isinstance(base_layer, nn.Conv2d):
             in_features, out_features = base_layer.in_channels, base_layer.out_channels
         elif isinstance(base_layer, nn.Conv3d):
@@ -348,6 +350,9 @@ class LoraLayer(BaseTunerLayer):
         weight = weight.data - self.scaling[adapter_name] * lora_B @ lora_A
         weight = weight.to(dtype)
         self.get_base_layer().weight.data = weight
+
+        # Remove redundant fields
+        del linear.eigens
 
     def loftq_init(self, adapter_name):
         from peft.utils.loftq_utils import loftq_init
@@ -1297,6 +1302,18 @@ class Conv2d(_ConvNd):
         return DoraConv2dLayer
 
 
+class Conv1d(_ConvNd):
+    # Lora implemented in a conv1d layer
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self._kernel_dim == 3:
+            raise ValueError(f"Conv1d layer kernel must have 3 dimensions, not {self._kernel_dim}")
+        self.conv_fn = F.conv1d
+
+    def _get_dora_layer_class(self):
+        raise NotImplementedError
+
+
 class Conv3d(_ConvNd):
     # Lora implemented in a conv3d layer
     def __init__(self, *args, **kwargs):
@@ -1401,6 +1418,33 @@ class MultiheadAttention(nn.Module, LoraLayer):
     @property
     def head_dim(self) -> int:
         return self.get_base_layer().head_dim
+
+    @property
+    def in_proj_weight(self) -> nn.Parameter:
+        return self.get_base_layer().in_proj_weight
+
+    @property
+    def in_proj_bias(self) -> nn.Parameter:
+        return self.get_base_layer().in_proj_bias
+
+    @property
+    def out_proj(self) -> nn.Module:
+        return self.get_base_layer().out_proj.get_base_layer()
+
+    @property
+    def bias_k(self) -> Optional[nn.Parameter]:
+        return self.get_base_layer().bias_k
+
+    @property
+    def bias_v(self) -> Optional[nn.Parameter]:
+        return self.get_base_layer().bias_v
+
+    def merge_masks(self, *args, **kwargs) -> tuple[Optional[torch.Tensor], Optional[int]]:
+        return self.get_base_layer().merge_masks(*args, **kwargs)
+
+    @property
+    def add_zero_attn(self) -> bool:
+        return self.get_base_layer().add_zero_attn
 
     def update_layer(self, *args, **kwargs) -> None:
         super().update_layer(*args, **kwargs)
@@ -1679,6 +1723,9 @@ def dispatch_default(
     elif isinstance(target_base_layer, torch.nn.Conv3d):
         kwargs.update(lora_config.loftq_config)
         new_module = Conv3d(target, adapter_name, **kwargs)
+    elif isinstance(target_base_layer, nn.Conv1d):
+        kwargs.update(lora_config.loftq_config)
+        new_module = Conv1d(target, adapter_name, **kwargs)
     elif isinstance(target_base_layer, torch.nn.MultiheadAttention):
         kwargs.update(lora_config.loftq_config)
         new_module = MultiheadAttention(target, adapter_name, **kwargs)
@@ -1694,7 +1741,7 @@ def dispatch_default(
     elif isinstance(target_base_layer, Conv1D):
         if not kwargs["fan_in_fan_out"]:
             warnings.warn(
-                "fan_in_fan_out is set to False but the target module is `Conv1D`. " "Setting fan_in_fan_out to True."
+                "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
             )
             kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = True
         kwargs.update(lora_config.loftq_config)

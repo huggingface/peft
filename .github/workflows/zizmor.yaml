@@ -3,12 +3,12 @@ name: CI security linting
 on:
   push:
     branches: ["main"]
-    paths:
-      - '.github/**'
   pull_request:
     branches: ["*"]
     paths:
       - '.github/**'
+
+permissions: {}
 
 jobs:
   zizmor:
@@ -23,6 +23,6 @@ jobs:
         with:
           persist-credentials: false
       - name: Install zizmor
-        run: cargo install zizmor
+        run: cargo install --locked zizmor
       - name: Run zizmor
         run: zizmor .github/workflows

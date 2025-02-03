@@ -618,9 +618,9 @@ class BasePeftQuantoModelTester:
             and layers[2].mlp.up_proj.lora_A.default.weight.data.storage().data_ptr()
             != layers[3].mlp.up_proj.lora_A.default.weight.data.storage().data_ptr()
         ), "Expected all LoRA adapters to have distinct weights"
-        assert (
-            len([n for n, _ in model.named_parameters() if ".lora_A." in n]) == 8
-        ), "Expected 8 LoRA adapters since we are adding one each for up and down."
+        assert len([n for n, _ in model.named_parameters() if ".lora_A." in n]) == 8, (
+            "Expected 8 LoRA adapters since we are adding one each for up and down."
+        )
         self._test_prepare_for_training(model_id, LoraConfig, config_kwargs)
         self._test_generate(model_id, LoraConfig, config_kwargs)
 

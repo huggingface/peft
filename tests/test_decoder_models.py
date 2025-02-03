@@ -304,6 +304,18 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         self._test_mixed_adapter_batches(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_DECODER_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False]},
+                "task_type": "CAUSAL_LM",
+            },
+        )
+    )
+    def test_generate_with_mixed_adapter_batches(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_generate_with_mixed_adapter_batches_and_beam_search(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(
         PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_oft_or_hra_and_gpt2)
     )
     def test_generate(self, test_name, model_id, config_cls, config_kwargs):
@@ -441,6 +453,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
             "target_modules": None,
             "task_type": "CAUSAL_LM",
             "lora_dropout": 0.0,
+            "total_step": 1,
         }
         self._test_generate(model_id, AdaLoraConfig, config_kwargs)
 
@@ -483,9 +496,9 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
             and layers[2].mlp.up_proj.lora_A.default.weight.data.storage().data_ptr()
             != layers[3].mlp.up_proj.lora_A.default.weight.data.storage().data_ptr()
         ), "Expected all LoRA adapters to have distinct weights"
-        assert (
-            len([n for n, _ in model.named_parameters() if ".lora_A." in n]) == 8
-        ), "Expected 8 LoRA adapters since we are adding one each for up and down."
+        assert len([n for n, _ in model.named_parameters() if ".lora_A." in n]) == 8, (
+            "Expected 8 LoRA adapters since we are adding one each for up and down."
+        )
         self._test_prepare_for_training(model_id, LoraConfig, config_kwargs)
         self._test_generate(model_id, LoraConfig, config_kwargs)
 

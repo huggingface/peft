@@ -9,6 +9,11 @@ on:
     paths-ignore:
       - 'docs/**'
 
+env:
+  HF_HOME: .cache/huggingface
+
+permissions: {}
+
 jobs:
   check_code_quality:
     runs-on: ubuntu-latest
@@ -43,6 +48,25 @@ jobs:
       - uses: actions/checkout@v3
         with:
           persist-credentials: false
+      - name: Model cache
+        uses: actions/cache/restore@v4
+        with:
+          # Avoid caching HF_HOME/modules and Python cache files to prevent interoperability
+          # issues and potential cache poisioning. We also avoid lock files to prevent runs
+          # avoiding re-download because they see a lock file.
+          path: |
+            ${{ env.HF_HOME }}/hub/**
+            !${{ env.HF_HOME }}/**/*.pyc
+          key: model-cache-${{ github.run_id }}
+          restore-keys: model-cache-
+          enableCrossOsArchive: true
+      - name: Dump cache content
+        # TODO: remove this step after 2025-02-15
+        if: matrix.os != 'windows-latest'
+        run: |
+          SHASUM=sha256sum
+          [ -f "$(which shasum)" ] && SHASUM=shasum
+          find "${{ env.HF_HOME }}/hub" -type f -exec "$SHASUM" {} \; > cache_content_initial || true
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v4
         with:
@@ -64,3 +88,28 @@ jobs:
       - name: Test with pytest
         run: |
           make test
+      - name: Dump cache content and diff
+        # This is just debug info so that we can monitor if the model cache diverges substantially
+        # over time and what the diverging model is.
+        # TODO: remove after 2025-02-15
+        if: matrix.os != 'windows-latest'
+        run: |
+          SHASUM=sha256sum
+          [ -f "$(which shasum)" ] && SHASUM=shasum
+          find "${{ env.HF_HOME }}/hub" -type f -exec "$SHASUM" {} \; > cache_content_after || true
+          diff -udp cache_content_initial cache_content_after || true
+      - name: Delete old model cache entries
+        run: |
+          # make sure that cache cleaning doesn't break the pipeline
+          python scripts/ci_clean_cache.py -d || true
+      - name: Update model cache
+        uses: actions/cache/save@v4
+        # Only let one runner (preferably the one that covers most tests) update the model cache
+        # after *every* run. This way we make sure that our cache is never outdated and we don't
+        # have to keep track of hashes.
+        if: always() && matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10'
+        with:
+          path: |
+            ${{ env.HF_HOME }}/hub/**
+            !${{ env.HF_HOME }}/**/*.pyc
+          key: model-cache-${{ github.run_id }}

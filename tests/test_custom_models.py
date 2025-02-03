@@ -103,6 +103,7 @@ TEST_CASES = [
         LoraConfig,
         {"target_modules": ["emb", "conv1d"], "use_dora": True},
     ),
+    ("Conv1d LoRA", "Conv1d", LoraConfig, {"target_modules": ["conv1d"]}),
     ("Conv2d 1 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
     ("Conv2d 1 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"], "use_dora": True}),
@@ -538,15 +539,15 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         "AdaLora Same",
         "adalora",
         AdaLoraConfig,
-        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True},
-        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True},
+        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True, "total_step": 1},
+        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True, "total_step": 1},
     ),
     (
         "AdaLora Different",
         "adalora",
         AdaLoraConfig,
-        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True},
-        {"target_modules": ["lin1"], "init_lora_weights": False, "inference_mode": True},
+        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True, "total_step": 1},
+        {"target_modules": ["lin1"], "init_lora_weights": False, "inference_mode": True, "total_step": 1},
     ),
     (
         "FourierFT Same",
@@ -810,6 +811,25 @@ class ModelEmbWithEmbeddingUtils(nn.Module):
         return None
 
 
+class ModelConv1D(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1d = nn.Conv1d(1, 1, 2)
+        self.relu = nn.ReLU()
+        self.flat = nn.Flatten()
+        self.lin0 = nn.Linear(9, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        X = X.float().reshape(-1, 1, 10)
+        X = self.conv1d(X)
+        X = self.relu(X)
+        X = self.flat(X)
+        X = self.lin0(X)
+        X = self.sm(X)
+        return X
+
+
 class ModelConv2D(nn.Module):
     def __init__(self):
         super().__init__()
@@ -909,6 +929,9 @@ class MockTransformerWrapper:
 
         if model_id == "EmbConv1D":
             return ModelEmbConv1D().to(torch_dtype)
+
+        if model_id == "Conv1d":
+            return ModelConv1D().to(torch_dtype)
 
         if model_id == "Conv2d":
             return ModelConv2D().to(torch_dtype)
@@ -1608,6 +1631,26 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         with pytest.raises(ValueError, match=msg):
             model.add_weighted_adapter(["default", "other"], weights=[1.0, 1.0], adapter_name="merged")
 
+    def test_multiple_adapters_no_needless_copy_modules_to_save(self):
+        # See 2206
+        # The problem was that we keep a "global" modules_to_save on the model which contains all possible
+        # modules_to_save for each adapter. When the first adapter targets embed_tokens with modules_to_save and the
+        # second adapter targets lm_head, then embed_tokens will create a copy of the original module for the second
+        # adapter, even though it's not needed. The copy still acts as expected but uses unnecessary memory.
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
+        config0 = LoraConfig(modules_to_save=["embed_tokens"])
+        config1 = LoraConfig(modules_to_save=["lm_head"])
+        model = get_peft_model(model, config0)
+        model.add_adapter("other", config1)
+
+        lm_head_keys = list(model.base_model.model.lm_head.modules_to_save.keys())
+        assert lm_head_keys == ["other"]
+
+        embed_token_keys = list(model.base_model.model.model.decoder.embed_tokens.modules_to_save.keys())
+        # before the fix, this would be: ['default', 'other']
+        assert embed_token_keys == ["default"]
+
     def test_existing_model_card(self):
         # ensure that if there is already a model card, it is not overwritten
         model = MLP()
@@ -1725,7 +1768,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             LoraConfig(target_modules=["lin0"], init_lora_weights=False),
             LoKrConfig(target_modules=["lin0"], init_weights=False),
             LoHaConfig(target_modules=["lin0"], init_weights=False),
-            AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
+            AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False, total_step=1),
             IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
             OFTConfig(target_modules=["lin0"], init_weights=False, r=2),
             BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
@@ -1939,9 +1982,9 @@ class TestMultiRankAdapter(unittest.TestCase):
                 if isinstance(module, BaseTunerLayer):
                     rank_expected = rank_pattern.get(key, r)
                     rank_current = module.lora_A[adapter].weight.shape[0]
-                    assert (
-                        rank_current == rank_expected
-                    ), f"Rank {rank_current} is not equal to expected {rank_expected}"
+                    assert rank_current == rank_expected, (
+                        f"Rank {rank_current} is not equal to expected {rank_expected}"
+                    )
 
 
 class TestRepr(unittest.TestCase):
@@ -2405,10 +2448,10 @@ class RequiresGradTester(unittest.TestCase):
 
     def test_requires_grad_adalora_different_targets(self):
         # test two different AdaLora adapters that target different modules
-        config0 = AdaLoraConfig(target_modules=["lin0"])
+        config0 = AdaLoraConfig(target_modules=["lin0"], total_step=1)
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = AdaLoraConfig(target_modules=["lin1"], inference_mode=True)
+        config1 = AdaLoraConfig(target_modules=["lin1"], total_step=1, inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -2451,10 +2494,10 @@ class RequiresGradTester(unittest.TestCase):
 
     def test_requires_grad_adalora_same_targets(self):
         # same as previous test, except that AdaLora adapters target the same layer
-        config0 = AdaLoraConfig(target_modules=["lin0"])
+        config0 = AdaLoraConfig(target_modules=["lin0"], total_step=1)
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = AdaLoraConfig(target_modules=["lin0"], inference_mode=True)
+        config1 = AdaLoraConfig(target_modules=["lin0"], total_step=1, inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"

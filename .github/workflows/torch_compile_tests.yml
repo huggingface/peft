@@ -17,6 +17,8 @@ env:
   # To be able to run tests on CUDA 12.2
   NVIDIA_DISABLE_REQUIRE: "1"
 
+permissions: {}
+
 jobs:
   run_tests_with_compile:
     runs-on:

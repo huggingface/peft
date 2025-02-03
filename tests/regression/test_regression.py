@@ -328,6 +328,7 @@ class TestMlp(RegressionTester):
             r=8,
             init_lora_weights=False,
             target_modules=["lin0"],
+            total_step=1,
         )
         model = get_peft_model(base_model, config)
         self.assert_results_equal_or_store(model, "adalora_mlp")
@@ -567,6 +568,7 @@ class TestOpt(RegressionTester):
         config = AdaLoraConfig(
             r=8,
             init_lora_weights=False,
+            total_step=1,
         )
         model = get_peft_model(base_model, config)
         self.assert_results_equal_or_store(model, "adalora_opt-350m")
@@ -621,6 +623,7 @@ class TestOpt8bitBnb(RegressionTester):
             target_r=4,
             tinit=50,
             tfinal=100,
+            total_step=200,
             deltaT=5,
             beta1=0.3,
             beta2=0.3,
@@ -681,6 +684,7 @@ class TestOpt4bitBnb(RegressionTester):
             target_r=4,
             tinit=50,
             tfinal=100,
+            total_step=200,
             deltaT=5,
             beta1=0.3,
             beta2=0.3,

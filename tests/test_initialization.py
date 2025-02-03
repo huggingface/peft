@@ -55,11 +55,11 @@ from peft import (
     inject_adapter_in_model,
     set_peft_model_state_dict,
 )
+from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.tuners.lora.config import CordaConfig
 from peft.tuners.lora.corda import preprocess_corda
 from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
-from peft.utils.constants import PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.utils.hotswap import hotswap_adapter
 
 
@@ -1145,6 +1145,7 @@ class TestLoraInitialization:
             get_peft_model(model, config)
 
     def test_mha_exposes_attributes(self, mha_cls):
+        # MHA requires a bunch of attributes to be exposed, try to check them exhaustively here
         model = mha_cls()
         embed_dim = model.mha.embed_dim
         kdim = model.mha.kdim
@@ -1154,6 +1155,12 @@ class TestLoraInitialization:
         dropout = model.mha.dropout
         batch_first = model.mha.batch_first
         head_dim = model.mha.head_dim
+        in_proj_weight = model.mha.in_proj_weight
+        in_proj_bias = model.mha.in_proj_bias
+        out_proj = model.mha.out_proj
+        bias_k = model.mha.bias_k
+        bias_v = model.mha.bias_v
+        add_zero_attn = model.mha.add_zero_attn
 
         config = LoraConfig(target_modules=["mha"])
         peft_model = get_peft_model(model, config)
@@ -1165,6 +1172,39 @@ class TestLoraInitialization:
         assert peft_model.base_model.mha.dropout == dropout
         assert peft_model.base_model.mha.batch_first == batch_first
         assert peft_model.base_model.mha.head_dim == head_dim
+        if in_proj_weight is not None:
+            assert torch.allclose(peft_model.base_model.mha.in_proj_weight, in_proj_weight)
+        else:
+            assert peft_model.base_model.mha.in_proj_weight is None
+        if in_proj_bias is not None:
+            assert torch.allclose(peft_model.base_model.mha.in_proj_bias, in_proj_bias)
+        else:
+            assert peft_model.base_model.mha.in_proj_bias is None
+        assert peft_model.base_model.mha.out_proj is out_proj
+        if bias_k is not None:
+            assert torch.allclose(peft_model.base_model.mha.bias_k, bias_k)
+        else:
+            assert peft_model.base_model.mha.bias_k is None
+        if bias_v is not None:
+            assert torch.allclose(peft_model.base_model.mha.bias_v, bias_v)
+        else:
+            assert peft_model.base_model.mha.bias_v is None
+        assert peft_model.base_model.mha.add_zero_attn == add_zero_attn
+
+    def test_mha_merge_masks_method(self, mha_cls):
+        # MHA requires a merge_masks method to be exposed, check that it works
+        model = mha_cls()
+        config = LoraConfig(target_modules=["mha"])
+        peft_model = get_peft_model(model, config)
+
+        attn_mask = torch.randint(0, 2, (10, 10))
+        key_padding_mask = torch.randint(0, 2, (10, 10))
+        query = torch.rand(10, 10, 10)
+        merged_mask0, mask_type0 = model.mha.merge_masks(attn_mask, key_padding_mask, query)
+        merged_mask1, mask_type1 = peft_model.base_model.mha.merge_masks(attn_mask, key_padding_mask, query)
+
+        assert torch.allclose(merged_mask0, merged_mask1)
+        assert mask_type0 == mask_type1
 
     def test_lora_with_bias_extra_params(self):
         # lora with lora_bias=True
@@ -1312,16 +1352,16 @@ class TestAdaLoraInitialization:
     torch_device = infer_device()
 
     def test_adalora_target_modules_set(self):
-        config = AdaLoraConfig(target_modules=["linear", "embed", "conv2d"])
+        config = AdaLoraConfig(target_modules=["linear", "embed", "conv2d"], total_step=1)
         assert config.target_modules == {"linear", "embed", "conv2d"}
 
     def test_adalora_use_dora_raises(self):
         with pytest.raises(ValueError, match="ADALORA does not support DoRA"):
-            AdaLoraConfig(use_dora=True)
+            AdaLoraConfig(use_dora=True, total_step=1)
 
     def test_adalora_loftq_config_raises(self):
         with pytest.raises(ValueError, match="ADALORA does not support LOFTQ"):
-            AdaLoraConfig(init_lora_weights="loftq", loftq_config={"loftq": "config"})
+            AdaLoraConfig(init_lora_weights="loftq", loftq_config={"loftq": "config"}, total_step=1)
 
     def get_model(self):
         class MyModule(nn.Module):
@@ -1345,7 +1385,7 @@ class TestAdaLoraInitialization:
 
         model = self.get_model()
         output_before = model(data)
-        config = AdaLoraConfig(target_modules=["linear"])
+        config = AdaLoraConfig(target_modules=["linear"], total_step=1)
         model = get_peft_model(model, config)
         output_after = model(data)
         assert torch.allclose(output_before, output_after)
@@ -1917,12 +1957,45 @@ class TestCordaInitialization:
         return torch.rand(1000, 1000).to(self.torch_device)
 
     @pytest.mark.parametrize("corda_method", ("ipm", "kpm"))
+    def test_lora_corda_no_redundant_fields(self, data, corda_method):
+        original_model = self.get_model()
+        model = deepcopy(original_model)
+
+        corda_config = CordaConfig(
+            corda_method=corda_method,
+        )
+        config = LoraConfig(
+            init_lora_weights="corda",
+            target_modules=["linear"],
+            corda_config=corda_config,
+        )
+        preprocess_corda(
+            model,
+            config,
+            run_model=lambda: model(data),
+            hooked_model=model,
+        )
+        peft_model = get_peft_model(model, config)
+
+        # check if the redundant fields are removed
+        assert not hasattr(peft_model.base_model.linear, "sample_count")
+        assert not hasattr(peft_model.base_model.linear, "covariance_matrix")
+        assert not hasattr(peft_model.base_model.linear, "corda_method")
+        assert not hasattr(peft_model.base_model.linear, "rank")
+        assert not hasattr(peft_model.base_model.linear, "eigens")
+
+        # legacy debug fields
+        assert not hasattr(peft_model.base_model.linear, "mean")
+        assert not hasattr(peft_model.base_model.linear, "std")
+
+    @pytest.mark.parametrize("corda_method", ("ipm", "kpm"))
     def test_lora_corda_sample_count(self, data, corda_method):
         original_model = self.get_model()
         model = deepcopy(original_model)
 
         corda_config = CordaConfig(
             corda_method=corda_method,
+            prune_temporary_fields=False,
         )
         config = LoraConfig(
             init_lora_weights="corda",
@@ -1960,6 +2033,7 @@ class TestCordaInitialization:
 
         corda_config = CordaConfig(
             corda_method=corda_method,
+            prune_temporary_fields=False,
         )
         config = LoraConfig(
             init_lora_weights="corda",
@@ -2961,3 +3035,25 @@ class TestHotSwapping:
         msg = f"Hot swapping the adapter did not succeed. Unexpected keys: {new_key}"
         with pytest.raises(RuntimeError, match=msg):
             hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+
+
+def test_import_peft_type_to_model_mapping_deprecation_warning(recwarn):
+    # This is for backwards compatibility: In #2282, PEFT_TYPE_TO_MODEL_MAPPING was removed as it was redundant with
+    # PEFT_TYPE_TO_TUNER_MAPPING. However, third party code could still use this mapping, e.g.:
+    # https://github.com/AutoGPTQ/AutoGPTQ/blob/6689349625de973b9ee3016c28c11f32acf7f02c/auto_gptq/utils/peft_utils.py#L8
+    # TODO: Remove after 2026-01
+
+    # first check that there is no warning under normal circumstances
+    from peft.peft_model import PeftModel  # noqa
+
+    expected = (
+        "PEFT_TYPE_TO_MODEL_MAPPING is deprecated, please use `from peft import PEFT_TYPE_TO_TUNER_MAPPING` instead"
+    )
+    warnings = (w.message.args[0] for w in recwarn.list)
+    assert not any(w.startswith(expected) for w in warnings)
+
+    from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING  # noqa
+
+    # check that there is a warning with this message after importing the variable
+    warnings = (w.message.args[0] for w in recwarn.list)
+    assert any(w.startswith(expected) for w in warnings)

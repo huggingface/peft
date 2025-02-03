@@ -44,6 +44,7 @@ from transformers import (
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
     Trainer,
+    TrainerCallback,
     TrainingArguments,
     WhisperFeatureExtractor,
     WhisperForConditionalGeneration,
@@ -70,6 +71,7 @@ from peft import (
     replace_lora_weights_loftq,
     set_peft_model_state_dict,
 )
+from peft.import_utils import is_xpu_available
 from peft.tuners import boft
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
 from peft.utils.loftq_utils import NFQuantizer
@@ -82,6 +84,7 @@ from .testing_utils import (
     require_bitsandbytes,
     require_eetq,
     require_hqq,
+    require_multi_accelerator,
     require_non_cpu,
     require_non_xpu,
     require_optimum,
@@ -367,8 +370,9 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         peft_config = AdaLoraConfig(
             init_r=6,
             target_r=4,
-            tinit=50,
-            tfinal=100,
+            tinit=2,
+            tfinal=2,
+            total_step=6,
             deltaT=5,
             beta1=0.3,
             beta2=0.3,
@@ -386,6 +390,12 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         batch = tokenizer(data["train"][:3]["quote"], return_tensors="pt", padding=True)
         self._check_inference_finite(model, batch)
 
+        class OptimizerStepCallback(TrainerCallback):
+            def on_optimizer_step(self, args, state, control, **kwargs):
+                model.update_and_allocate(state.global_step)
+
+        step_callback = OptimizerStepCallback()
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             trainer = Trainer(
                 model=model,
@@ -394,7 +404,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                     per_device_train_batch_size=4,
                     gradient_accumulation_steps=4,
                     warmup_steps=2,
-                    max_steps=3,
+                    max_steps=6,
                     learning_rate=2e-4,
                     fp16=True,
                     logging_steps=1,
@@ -403,6 +413,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
             )
             model.config.use_cache = False
+            trainer.add_callback(step_callback)
             trainer.train()
 
             model.cpu().save_pretrained(tmp_dir)
@@ -432,8 +443,9 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         peft_config = AdaLoraConfig(
             init_r=6,
             target_r=4,
-            tinit=50,
-            tfinal=100,
+            tinit=2,
+            tfinal=2,
+            total_step=6,
             deltaT=5,
             beta1=0.3,
             beta2=0.3,
@@ -451,6 +463,12 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         batch = tokenizer(data["train"][:3]["quote"], return_tensors="pt", padding=True)
         self._check_inference_finite(model, batch)
 
+        class OptimizerStepCallback(TrainerCallback):
+            def on_optimizer_step(self, args, state, control, **kwargs):
+                model.update_and_allocate(state.global_step)
+
+        step_callback = OptimizerStepCallback()
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             trainer = Trainer(
                 model=model,
@@ -459,7 +477,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                     per_device_train_batch_size=4,
                     gradient_accumulation_steps=4,
                     warmup_steps=2,
-                    max_steps=3,
+                    max_steps=6,
                     learning_rate=2e-4,
                     fp16=True,
                     logging_steps=1,
@@ -468,6 +486,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
             )
             model.config.use_cache = False
+            trainer.add_callback(step_callback)
             trainer.train()
 
             model.cpu().save_pretrained(tmp_dir)
@@ -1475,8 +1494,9 @@ class PeftGPTQGPUTests(unittest.TestCase):
         peft_config = AdaLoraConfig(
             init_r=6,
             target_r=4,
-            tinit=50,
-            tfinal=100,
+            tinit=2,
+            tfinal=2,
+            total_step=6,
             deltaT=5,
             beta1=0.3,
             beta2=0.3,
@@ -1494,6 +1514,12 @@ class PeftGPTQGPUTests(unittest.TestCase):
         batch = tokenizer(data["train"][:3]["quote"], return_tensors="pt", padding=True)
         self._check_inference_finite(model, batch)
 
+        class OptimizerStepCallback(TrainerCallback):
+            def on_optimizer_step(self, args, state, control, **kwargs):
+                model.update_and_allocate(state.global_step)
+
+        step_callback = OptimizerStepCallback()
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             trainer = Trainer(
                 model=model,
@@ -1502,7 +1528,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
                     per_device_train_batch_size=4,
                     gradient_accumulation_steps=4,
                     warmup_steps=2,
-                    max_steps=3,
+                    max_steps=6,
                     learning_rate=2e-4,
                     fp16=True,
                     logging_steps=1,
@@ -1510,6 +1536,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
                 ),
                 data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
             )
+            trainer.add_callback(step_callback)
             model.config.use_cache = False
             trainer.train()
 
@@ -2073,7 +2100,10 @@ class TestOLoRA:
         assert torch.isfinite(logits).all()
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+@pytest.mark.skipif(
+    not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a hardware accelerator"
+)
+@require_bitsandbytes
 class TestLoftQ:
     r"""
     Tests for LoftQ to ensure that it reduces the quantization error compared to normal LoRA quantization.
@@ -2083,19 +2113,18 @@ class TestLoftQ:
     # quantization without LoftQ. Thus 1.03 means that the error should be decreased by 3% at least. This is a very
     # conservative value to prevent flakiness, in practice most gains are > 1.5
     error_factor = 1.03
+    device = infer_device()
 
     def get_input(self, model_id, device):
         tokenizer = AutoTokenizer.from_pretrained(model_id)
         inputs = tokenizer("All I want is", padding=True, return_tensors="pt")
-        if device == "cuda":
-            inputs = inputs.to("cuda")
+        inputs = inputs.to(self.device)
         return inputs
 
     def get_base_model(self, model_id, device, **kwargs):
         cls = AutoModelForSeq2SeqLM if "t5" in str(model_id) else AutoModelForCausalLM
         model = cls.from_pretrained(model_id, **kwargs).eval()
-        if device == "cuda":
-            model = model.to("cuda")
+        model = model.to(self.device)
         return model
 
     def get_logits(self, model, inputs):
@@ -3808,28 +3837,30 @@ class TestBOFT:
     Test that we can correctly use half-precision models with BOFT.
     """
 
-    @require_torch_gpu
+    device = infer_device()
+
+    @require_non_cpu
     @pytest.mark.single_gpu_tests
     def test_boft_half_linear(self):
         # Check that we can use BoFT with model loaded in half precision
-        layer = torch.nn.Linear(160, 160).cuda()
+        layer = torch.nn.Linear(160, 160).to(self.device)
         layer = boft.layer.Linear(layer, "layer", boft_n_butterfly_factor=2).to(dtype=torch.bfloat16)
-        x = torch.randn(160, 160, device="cuda", dtype=torch.bfloat16)
+        x = torch.randn(160, 160, device=self.device, dtype=torch.bfloat16)
         layer(x)  # does not raise
 
-    @require_torch_gpu
+    @require_non_cpu
     @pytest.mark.single_gpu_tests
     def test_boft_half_conv(self):
-        conv = torch.nn.Conv2d(1, 1, 4).cuda()
+        conv = torch.nn.Conv2d(1, 1, 4).to(self.device)
         conv = boft.layer.Conv2d(conv, "conv", boft_n_butterfly_factor=2).to(dtype=torch.bfloat16)
-        x = torch.randn(1, 160, 160, device="cuda", dtype=torch.bfloat16)
+        x = torch.randn(1, 160, 160, device=self.device, dtype=torch.bfloat16)
         conv(x)  # does not raise
 
 
-@require_torch_gpu
 class TestPTuningReproducibility:
     device = infer_device()
 
+    @require_non_cpu
     def test_p_tuning_exactly_reproducible_after_loading(self, tmp_path):
         # See: https://github.com/huggingface/peft/issues/2043#issuecomment-2321522577
         # Ensure that after loading a p-tuning checkpoint, results are exactly reproducible (before the patch, they were
@@ -3865,20 +3896,22 @@ class TestPTuningReproducibility:
         torch.testing.assert_close(gen_loaded, gen_peft)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
 @pytest.mark.single_gpu_tests
 class TestLowCpuMemUsageDifferentDevices:
     """Test for the low CPU memory usage option for loading PEFT models.
 
-    There are already tests for this in test_initialization.py but here we want to specifically test diverging devices
-    for the model and state_dict.
+    There are already tests for low_cpu_mem_usage=True in test_initialization.py but here we want to run tests that
+    require a GPU.
 
     """
 
     model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+    device = infer_device()
 
-    @pytest.mark.parametrize("device_model, device_sd", [("cpu", "cuda"), ("cuda", "cpu")])
+    @require_non_cpu
+    @pytest.mark.parametrize("device_model, device_sd", [("cpu", infer_device()), (infer_device(), "cpu")])
     def test_low_cpu_mem_usage_model_model_on_gpu_state_dict_on_cpu_works(self, device_model, device_sd):
+        # specifically test diverging devices for the model and state_dict
         inputs = {"input_ids": torch.randint(0, 100, (1, 10)), "attention_mask": torch.ones(1, 10)}
         inputs = {k: v.to(device_model) for k, v in inputs.items()}
 
@@ -3912,6 +3945,35 @@ class TestLowCpuMemUsageDifferentDevices:
         assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
         assert {p.device.type for p in model.parameters()} == {device_model}
 
+    @require_bitsandbytes
+    @pytest.mark.parametrize("quantization_method", ["bnb-4bit", "bnb-8bit"])
+    def test_low_cpu_mem_usage_with_quantization(self, quantization_method):
+        # Ensure that low_cpu_mem_usage works with quantization
+        # See also https://github.com/huggingface/diffusers/issues/10550
+        if quantization_method == "bnb-4bit":
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.float32,
+                bnb_4bit_quant_storage=torch.float32,
+                bnb_4bit_use_double_quant=True,
+            )
+        elif quantization_method == "bnb-8bit":
+            quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+        else:
+            raise ValueError(f"Unknown quantization method {quantization_method}")
+
+        model = AutoModelForCausalLM.from_pretrained(self.model_id, quantization_config=quantization_config)
+        if model.device.type != self.device:
+            # calling model.to("cuda") with 8 bit bnb raises an error, thus guard against it
+            model = model.to(self.device)
+
+        lora_config = LoraConfig(init_lora_weights=False, target_modules="all-linear")
+
+        # We use get_peft_model with low_cpu_mem_usage=True here. This is not typically done in practice (the option is
+        # mostly interesting for loading trained adapters), but it does the job for testing purposes.
+        model = get_peft_model(model, lora_config, low_cpu_mem_usage=True)  # this should not raise
+        assert {p.device.type for p in model.parameters()} == {self.device, "meta"}
+
 
 class TestEvaInitializationGPU:
     """GPU tests for the Eva initialization method."""
@@ -3923,7 +3985,7 @@ class TestEvaInitializationGPU:
     MAX_LENGTH = 256
     LORA_DIM = 8
     LORA_ALPHA = 1
-    DEVICE = "cuda"
+    DEVICE = infer_device()
 
     @pytest.fixture
     def tokenizer(self):
@@ -3991,7 +4053,8 @@ class TestEvaInitializationGPU:
     def collate_fn(examples):
         return {k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()}
 
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+    @require_non_cpu
+    @require_bitsandbytes
     @pytest.mark.single_gpu_tests
     @pytest.mark.parametrize("model_fixture", ["model", "model_bnb"], indirect=True)
     def test_eva_initialization_consistency(self, model_fixture, dataset, peft_config):
@@ -4029,14 +4092,16 @@ class TestEvaInitializationGPU:
             )
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
 @pytest.mark.multi_gpu_tests
 class TestPrefixTuning:
+    device = infer_device()
+
+    @require_multi_accelerator
     def test_prefix_tuning_multiple_devices_decoder_model(self):
         # See issue 2134
         model_id = "hf-internal-testing/tiny-random-MistralForCausalLM"
         tokenizer = AutoTokenizer.from_pretrained(model_id, padding="left")
-        inputs = tokenizer(["A list of colors: red, blue"], return_tensors="pt").to("cuda")
+        inputs = tokenizer(["A list of colors: red, blue"], return_tensors="pt").to(self.device)
 
         device_map = {
             "model.embed_tokens": 0,
@@ -4056,11 +4121,12 @@ class TestPrefixTuning:
         model = get_peft_model(model, peft_config)
         model.generate(**inputs)  # does not raise
 
+    @require_multi_accelerator
     def test_prefix_tuning_multiple_devices_encoder_decoder_model(self):
         # See issue 2134
         model_id = "hf-internal-testing/tiny-random-T5Model"
         tokenizer = AutoTokenizer.from_pretrained(model_id, padding="left")
-        inputs = tokenizer(["A list of colors: red, blue"], return_tensors="pt").to("cuda")
+        inputs = tokenizer(["A list of colors: red, blue"], return_tensors="pt").to(self.device)
         device_map = {
             "shared": 0,
             "encoder.embed_tokens": 0,
@@ -4090,7 +4156,9 @@ class TestPrefixTuning:
         model.generate(**inputs)  # does not raise
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+@pytest.mark.skipif(
+    not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a hardware accelerator"
+)
 @pytest.mark.single_gpu_tests
 class TestHotSwapping:
     def test_hotswapping_compiled_model_does_not_trigger_recompilation(self):

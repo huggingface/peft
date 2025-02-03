@@ -7,6 +7,8 @@ on:
         description: 'Branch to test on'
         required: true
 
+permissions: {}
+
 jobs:
   run_transformers_integration_tests:
     strategy:

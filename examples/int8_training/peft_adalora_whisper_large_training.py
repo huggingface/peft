@@ -494,7 +494,7 @@ def main():
     raw_datasets = raw_datasets.cast_column("audio", Audio(sampling_rate=16000))
 
     logger.info("Dataset loaded: %s", raw_datasets)
-    logger.info(f'{raw_datasets["train"][0]}')
+    logger.info(f"{raw_datasets['train'][0]}")
 
     vectorized_datasets = raw_datasets.map(
         prepare_dataset,
