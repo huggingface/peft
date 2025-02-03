@@ -2969,8 +2969,8 @@ class TestHotSwapping:
         with pytest.raises(ValueError, match=msg):
             hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
 
-    def test_hotswap_missing_key_raises(self, tmp_path):
-        # When a key is missing, raise
+    def test_hotswap_missing_key_works(self, tmp_path):
+        # When a key is missing, it is fine, the extra weight is zeroed out
         config = LoraConfig(target_modules=["lin0", "lin1"])
 
         model = self.get_model()
@@ -2993,9 +2993,11 @@ class TestHotSwapping:
         model = self.get_model()
         model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
 
-        msg = f"Hot swapping the adapter did not succeed. Missing keys: {key}"
-        with pytest.raises(RuntimeError, match=msg):
-            hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+        # sanity check: the missing weight is not already all zeros
+        assert not (model.base_model.model.lin1.lora_A["default"].weight == 0).all()
+        hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+        # after hotswapping, it is zeroed out
+        assert (model.base_model.model.lin1.lora_A["default"].weight == 0).all()
 
     def test_hotswap_extra_key_raises(self, tmp_path):
         # When there is an extra key, raise
@@ -3021,7 +3023,7 @@ class TestHotSwapping:
         model = self.get_model()
         model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
 
-        msg = f"Hot swapping the adapter did not succeed. Unexpected keys: {new_key}"
+        msg = f"Hot swapping the adapter did not succeed, unexpected keys found: {new_key}"
         with pytest.raises(RuntimeError, match=msg):
             hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
 

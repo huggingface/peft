@@ -34,6 +34,7 @@ from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotsw
 
 
 torch_device = infer_device()
+inputs = torch.arange(10).view(-1, 1)
 
 
 def check_hotswap(do_hotswap=True, ranks=(8, 8), alpha_scalings=(16, 16)):
@@ -42,10 +43,21 @@ def check_hotswap(do_hotswap=True, ranks=(8, 8), alpha_scalings=(16, 16)):
     model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM").to(torch_device)
     rank0, rank1 = ranks
     alpha0, alpha1 = alpha_scalings
-    config0 = LoraConfig(init_lora_weights=False, r=rank0, lora_alpha=alpha0)
-    config1 = LoraConfig(init_lora_weights=False, r=rank1, lora_alpha=alpha1)
+    # note that the 2nd adapter targeting a subset of the 1st adapter is okay, but not the other way round
+    config0 = LoraConfig(init_lora_weights=False, r=rank0, lora_alpha=alpha0, target_modules=["q_proj", "v_proj"])
+    config1 = LoraConfig(init_lora_weights=False, r=rank1, lora_alpha=alpha1, target_modules=["q_proj"])
     model = get_peft_model(model, config0, adapter_name="adapter0").eval()
+    with torch.inference_mode():
+        output0 = model(inputs).logits
+
     model.add_adapter("adapter1", config1)
+    model.set_adapter("adapter1")
+    with torch.inference_mode():
+        output1 = model(inputs).logits
+
+    # sanity check:
+    tol = 1e-5
+    assert not torch.allclose(output0, output1, atol=tol, rtol=tol)
 
     with tempfile.TemporaryDirectory() as tmp_dirname:
         model.save_pretrained(tmp_dirname)
@@ -56,7 +68,8 @@ def check_hotswap(do_hotswap=True, ranks=(8, 8), alpha_scalings=(16, 16)):
         if do_hotswap:
             prepare_model_for_compiled_hotswap(model, config=model.peft_config, target_rank=max(ranks))
         model = torch.compile(model, mode="reduce-overhead")
-        model(inputs).logits
+        output_after0 = model(inputs).logits
+        assert torch.allclose(output0, output_after0, atol=tol, rtol=tol)
 
         # swap and check that we get the output from adapter1
         if do_hotswap:
@@ -66,7 +79,8 @@ def check_hotswap(do_hotswap=True, ranks=(8, 8), alpha_scalings=(16, 16)):
             model.set_adapter("other")
 
         # we need to call forward to potentially trigger recompilation
-        model(inputs).logits
+        output_after1 = model(inputs).logits
+        assert torch.allclose(output1, output_after1, atol=tol, rtol=tol)
 
 
 if __name__ == "__main__":

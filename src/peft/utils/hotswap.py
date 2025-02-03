@@ -277,6 +277,21 @@ def prepare_model_for_compiled_hotswap(
         config (`LoraConfig` or `dict[str, LoraConfig]`, *optional*):
             Optionally pass the `LoraConfig`s of the LoRA adapters. If passed, the rank in the configs will be updated
             to `target_rank`.
+
+    Example:
+
+        ```py
+        base_model = ...
+        model = PeftModel.from_pretrained(base_model, path_adapter_0)
+        # Prepare the model to allow hotswapping even if ranks/scalings of 2nd adapter differ.
+        # You can skip this step if all ranks and scalings are identical.
+        prepare_model_for_compiled_hotswap(model, target_rank=highest_lora_rank)
+        model = torch.compile(model)
+        # do inference with adapter 0
+        # replace the "default" lora adapter with the new one
+        hotswap_adapter(model, path_adapter_1, adapter_name="default", torch_device=device)
+        # do inference with adapter 1
+        ```
     """
     is_compiled = hasattr(model, "_orig_mod")
     if is_compiled:
@@ -343,14 +358,14 @@ def hotswap_adapter_from_state_dict(
     is_compiled = hasattr(model, "_orig_mod")
     # TODO: there is probably a more precise way to identify the adapter keys
     missing_keys = {k for k in model.state_dict() if (parameter_prefix in k) and (adapter_name in k)}
-    unexpected_keys = set()
+    unexpected_keys = []
 
     # first: dry run, not swapping anything
     for key, new_val in state_dict.items():
         try:
             old_val = attrgetter(key)(model)
         except AttributeError:
-            unexpected_keys.add(key)
+            unexpected_keys.append(key)
             continue
 
         if is_compiled:
@@ -358,13 +373,23 @@ def hotswap_adapter_from_state_dict(
         else:
             missing_keys.remove(key)
 
-    if missing_keys or unexpected_keys:
-        msg = "Hot swapping the adapter did not succeed."
-        if missing_keys:
-            msg += f" Missing keys: {', '.join(sorted(missing_keys))}."
-        if unexpected_keys:
-            msg += f" Unexpected keys: {', '.join(sorted(unexpected_keys))}."
+    # Right now, we don't deal with unexpected keys, i.e. if the adapter being swapped in targeting new layers. We could
+    # probably add LoRA to these layers ad hoc, but that would not work with compiled models.
+    if unexpected_keys:
+        msg = f"Hot swapping the adapter did not succeed, unexpected keys found: {', '.join(unexpected_keys)}."
         raise RuntimeError(msg)
+
+    # If the adapter that is being swapped in is missing some keys, this is fine. We just need to ensure that those LoRA
+    # weights from the previous adapter are set to 0 so that they don't influence the output. We don't need to worry
+    # about ranks are alphas.
+    for key in missing_keys:
+        # in case it's a compiled model
+        key = key.removeprefix("_orig_mod.")
+        # get LoRA parent module name by removing the 'lora_*.<adapter-name>.weight' part
+        module_name = ".".join(key.split(".")[:-3])
+        module = model.get_submodule(module_name)
+        old_val = attrgetter(key)(model)
+        old_val.data.fill_(0.0)
 
     # actual swapping
     for key, new_val in state_dict.items():

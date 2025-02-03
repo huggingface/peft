@@ -67,7 +67,7 @@ Hotswapping works with transformers models and diffusers models. However, there 
 
 - Right now, only LoRA is properly supported.
 - It only works for the same PEFT method, so no swapping LoRA and LoHa, for example.
-- The adapters must be compatible (e.g. same target modules).
+- The adapter that is being swapped in must target the same layers as the previous adapter or a subset of those layers. It cannot target new layers. Therefore, if possible, start with the adapter that targets most layers.
 
 [[autodoc]] utils.hotswap.hotswap_adapter
     - all
