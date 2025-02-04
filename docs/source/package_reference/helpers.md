@@ -15,3 +15,8 @@ A collection of helper functions for PEFT.
 
 [[autodoc]] helpers.rescale_adapter_scale
     - all
+
+## Context manager to disable input dtype casting in the `forward` method of LoRA layers
+
+[[autodoc]] helpers.disable_input_dtype_casting
+    - all

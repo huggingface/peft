@@ -75,7 +75,7 @@ class AqlmLoraLinear(torch.nn.Module, LoraLayer):
             requires_conversion = not torch.is_autocast_enabled()
             if requires_conversion:
                 expected_dtype = result.dtype
-                x = x.to(lora_A.weight.dtype)
+                x = self._cast_input_dtype(x, lora_A.weight.dtype)
 
             output = lora_B(lora_A(dropout(x)))
             if requires_conversion:
