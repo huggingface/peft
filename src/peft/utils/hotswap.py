@@ -358,7 +358,9 @@ def hotswap_adapter_from_state_dict(
     # Ensure that all the keys of the new adapter correspond exactly to the keys of the old adapter, otherwise
     # hot-swapping is not possible
 
+    # _orig_mod is for torch.compile(model) and _compiled_call_impl is for model.compile() (not wrapped)
     is_compiled = hasattr(model, "_orig_mod")
+    is_compiled_inplace = bool(getattr(model, "_compiled_call_impl", None))
     # TODO: there is probably a more precise way to identify the adapter keys
     missing_keys = {k for k in model.state_dict() if (parameter_prefix in k) and (adapter_name in k)}
     unexpected_keys = []
@@ -414,7 +416,7 @@ def hotswap_adapter_from_state_dict(
         # swap actual weights
         # no need to account for potential _orig_mod in key here, as torch handles that
         old_val = attrgetter(key)(model)
-        if not is_compiled:
+        if not is_compiled and not is_compiled_inplace:
             torch.utils.swap_tensors(old_val, new_val)
             continue
 

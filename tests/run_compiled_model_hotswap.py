@@ -67,7 +67,7 @@ def check_hotswap(do_hotswap=True, ranks=(8, 8), alpha_scalings=(16, 16)):
         model = PeftModel.from_pretrained(model, os.path.join(tmp_dirname, "adapter0")).eval()
         if do_hotswap:
             prepare_model_for_compiled_hotswap(model, config=model.peft_config, target_rank=max(ranks))
-        model = torch.compile(model, mode="reduce-overhead")
+        model.compile(mode="reduce-overhead")
         output_after0 = model(inputs).logits
         assert torch.allclose(output0, output_after0, atol=tol, rtol=tol)
 
