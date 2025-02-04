@@ -205,7 +205,7 @@ class LoraParallelLinear(nn.Module, LoraLayer):
                 lora_B = self.lora_B[active_adapter]
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
-                x = x.to(lora_A.weight.dtype)
+                x = self._cast_input_dtype(x, lora_A.weight.dtype)
 
                 if not self.use_dora[active_adapter]:
                     result = result + lora_B(lora_A(dropout(x))) * scaling

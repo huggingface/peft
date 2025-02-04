@@ -18,8 +18,10 @@ from copy import deepcopy
 from functools import update_wrapper
 from types import MethodType
 
+from torch import nn
+
 from .peft_model import PeftConfig, PeftModel
-from .tuners.lora.layer import LoraLayer
+from .tuners.lora import LoraLayer
 
 
 def update_forward_signature(model: PeftModel) -> None:
@@ -209,3 +211,42 @@ def rescale_adapter_scale(model, multiplier):
         # restore original scaling values after exiting the context
         for module, scaling in original_scaling.items():
             module.scaling = scaling
+
+
+@contextmanager
+def disable_input_dtype_casting(model: nn.Module, active: bool = True):
+    """
+    Context manager disables input dtype casting to the dtype of the weight.
+
+    Currently specifically works for LoRA.
+
+    Parameters:
+        model (nn.Module):
+            The model containing PEFT modules whose input dtype casting is to be adjusted.
+        active (bool):
+            Whether the context manager is active (default) or inactive.
+
+    """
+    # Additional info: Normally, the dtype of the weight and input need to match, which is why the dtype is cast.
+    # However, in certain circumustances, this is handled by forward hooks, e.g. when using layerwise casting in
+    # diffusers. In that case, PEFT casting the dtype interferes with the layerwise casting, which is why the option to
+    # disable it is given.
+    if not active:
+        yield
+        return
+
+    original_values = {}
+    for name, module in model.named_modules():
+        if not isinstance(module, LoraLayer):
+            continue
+        original_values[name] = module.cast_input_dtype_enabled
+        module.cast_input_dtype_enabled = False
+
+    try:
+        yield
+    finally:
+        for name, module in model.named_modules():
+            if not isinstance(module, LoraLayer):
+                continue
+            if name in original_values:
+                module.cast_input_dtype_enabled = original_values[name]
