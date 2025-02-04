@@ -63,6 +63,7 @@ def _convert_scalings_to_tensor(model):
         scaling = module.scaling
         for key, val in scaling.items():
             if isinstance(val, float):
+                # no need to deal with dtype as scalars are coerced
                 scaling[key] = torch.tensor(val, device=module.weight.device)
             elif not isinstance(val, torch.Tensor):
                 raise ValueError(
@@ -104,6 +105,7 @@ def _get_padded_linear(lora_module: torch.nn.Module, target_rank: int, is_lora_A
 
     out_features, in_features = weight.shape
 
+    # lora_A and lora_B are always nn.Linear
     if is_lora_A:
         # LoRA A affects out_features
         padded = torch.zeros(target_rank, in_features, device=weight.device, dtype=weight.dtype)
@@ -167,6 +169,7 @@ def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A
             f"({original_rank}). This is not possible."
         )
 
+    # lora_A and lora_B are always nn.Conv2d
     if is_lora_A:
         # LoRA A affects out_channels
         padded = torch.zeros(target_rank, in_channels, kh, kw, device=weight.device, dtype=weight.dtype)
