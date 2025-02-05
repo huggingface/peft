@@ -60,7 +60,7 @@ from peft.tuners.lora.config import CordaConfig
 from peft.tuners.lora.corda import preprocess_corda
 from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
-from peft.utils.hotswap import hotswap_adapter
+from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
 
 
 class TestLoraInitialization:
@@ -2842,6 +2842,18 @@ class TestHotSwapping:
         torch.manual_seed(0)
         return MLP().to(self.torch_device)
 
+    def get_model_conv2d(self):
+        class ConvModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(3, 10, kernel_size=3)
+
+            def forward(self, X):
+                return self.conv(X)
+
+        torch.manual_seed(0)
+        return ConvModel().to(self.torch_device)
+
     # this works with all adapters except prompt learning, but we don't test all
     # as it is unnecessary and would be slow
     @pytest.mark.parametrize(
@@ -2911,29 +2923,6 @@ class TestHotSwapping:
         # real check: model now behaves again like adapter 0
         assert torch.allclose(output0, output_loaded_back0, atol=atol, rtol=rtol)
 
-    def test_hotswap_incompatible_config_params_raises(self, tmp_path):
-        # When the configs of the two adapters are incompatible, an error is raised
-        config0 = LoraConfig(target_modules=["lin0"], lora_alpha=1.0)
-        config1 = LoraConfig(target_modules=["lin0"], lora_alpha=2.0)
-
-        model = self.get_model()
-        model = get_peft_model(model, config0)
-        model.save_pretrained(tmp_path / "adapter0")
-        del model
-
-        model = self.get_model()
-        model = get_peft_model(model, config1)
-        model.save_pretrained(tmp_path / "adapter1")
-        del model
-
-        # load adapter 0
-        model = self.get_model()
-        model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
-
-        msg = r"Configs are incompatible: for lora_alpha, 1.0 != 2.0"
-        with pytest.raises(ValueError, match=msg):
-            hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
-
     def test_hotswap_different_peft_types_raises(self, tmp_path):
         # When the configs of the two adapters are different PEFT methods, raise
         config0 = LoraConfig(target_modules=["lin0"])
@@ -2980,8 +2969,8 @@ class TestHotSwapping:
         with pytest.raises(ValueError, match=msg):
             hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
 
-    def test_hotswap_missing_key_raises(self, tmp_path):
-        # When a key is missing, raise
+    def test_hotswap_missing_key_works(self, tmp_path):
+        # When a key is missing, it is fine, the extra weight is zeroed out
         config = LoraConfig(target_modules=["lin0", "lin1"])
 
         model = self.get_model()
@@ -3004,9 +2993,11 @@ class TestHotSwapping:
         model = self.get_model()
         model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
 
-        msg = f"Hot swapping the adapter did not succeed. Missing keys: {key}"
-        with pytest.raises(RuntimeError, match=msg):
-            hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+        # sanity check: the missing weight is not already all zeros
+        assert not (model.base_model.model.lin1.lora_A["default"].weight == 0).all()
+        hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+        # after hotswapping, it is zeroed out
+        assert (model.base_model.model.lin1.lora_A["default"].weight == 0).all()
 
     def test_hotswap_extra_key_raises(self, tmp_path):
         # When there is an extra key, raise
@@ -3032,9 +3023,265 @@ class TestHotSwapping:
         model = self.get_model()
         model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
 
-        msg = f"Hot swapping the adapter did not succeed. Unexpected keys: {new_key}"
+        msg = f"Hot swapping the adapter did not succeed, unexpected keys found: {new_key}"
         with pytest.raises(RuntimeError, match=msg):
             hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+
+    def test_prepare_model_for_compiled_hotswap_scalings_are_tensors(self):
+        config = LoraConfig(target_modules=["lin0", "lin1"])
+        model = self.get_model()
+        model = get_peft_model(model, config)
+
+        # sanity check: all scalings are floats
+        scalings_before = {}
+        for name, module in model.named_modules():
+            if hasattr(module, "scaling"):
+                for key, val in module.scaling.items():
+                    assert isinstance(val, float)
+                    scalings_before[f"{name}.{key}"] = val
+
+        prepare_model_for_compiled_hotswap(model)
+
+        scalings_after = {}
+        for name, module in model.named_modules():
+            if hasattr(module, "scaling"):
+                for key, val in module.scaling.items():
+                    assert isinstance(val, torch.Tensor)
+                    scalings_after[f"{name}.{key}"] = val.item()
+
+        assert scalings_before == scalings_after
+
+    def test_prepare_model_for_compiled_hotswap_rank_padding_works(self):
+        old_rank = 8
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=old_rank)
+        model = self.get_model()
+        model = get_peft_model(model, config)
+
+        # sanity check
+        for name, param in model.named_parameters():
+            if "lora_A" in name:
+                assert param.shape[0] == old_rank
+            elif "lora_B" in name:
+                assert param.shape[1] == old_rank
+
+        new_rank = 13
+        prepare_model_for_compiled_hotswap(model, target_rank=new_rank)
+
+        for name, param in model.named_parameters():
+            if "lora_A" in name:
+                assert param.shape[0] == new_rank
+            elif "lora_B" in name:
+                assert param.shape[1] == new_rank
+
+    def test_prepare_model_for_compiled_hotswap_same_rank_padding_works(self):
+        # same as previous test, but ensure there is no error if the rank to pad to is the same
+        old_rank = 8
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=old_rank)
+        model = self.get_model()
+        model = get_peft_model(model, config)
+        prepare_model_for_compiled_hotswap(model, target_rank=old_rank)
+
+        for name, param in model.named_parameters():
+            if "lora_A" in name:
+                assert param.shape[0] == old_rank
+            elif "lora_B" in name:
+                assert param.shape[1] == old_rank
+
+    def test_prepare_model_for_compiled_hotswap_conv2d_rank_padding_works(self):
+        # same as previous test, but for a Conv2d model
+        old_rank = 8
+        config = LoraConfig(target_modules=["conv"], r=old_rank)
+        model = self.get_model_conv2d()
+        model = get_peft_model(model, config)
+
+        # sanity check
+        for name, param in model.named_parameters():
+            if "lora_A" in name:
+                assert param.shape[0] == old_rank
+            elif "lora_B" in name:
+                assert param.shape[1] == old_rank
+
+        new_rank = 13
+        prepare_model_for_compiled_hotswap(model, target_rank=new_rank)
+
+        for name, param in model.named_parameters():
+            if "lora_A" in name:
+                assert param.shape[0] == new_rank
+            elif "lora_B" in name:
+                assert param.shape[1] == new_rank
+
+    def test_prepare_model_for_compiled_hotswap_lower_rank_padding_raises(self):
+        # when trying to pad to a lower rank, raise an error
+        old_rank0 = 8
+        old_rank1 = 10
+        new_rank = 9
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=old_rank0, rank_pattern={"lin1": old_rank1})
+        model = self.get_model()
+        model = get_peft_model(model, config)
+
+        msg = re.escape("Trying to pad the adapter to the target rank 9, but the original rank is larger (10)")
+        with pytest.raises(ValueError, match=msg):
+            prepare_model_for_compiled_hotswap(model, target_rank=new_rank)
+
+    def test_prepare_model_for_compiled_hotswap_with_rank_pattern(self):
+        old_rank0 = 8
+        old_rank1 = 9
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=old_rank0, rank_pattern={"lin1": old_rank1})
+        model = self.get_model()
+        model = get_peft_model(model, config)
+
+        # sanity check
+        for name, param in model.named_parameters():
+            if "lora_A" in name:
+                if "lin0" in name:
+                    assert param.shape[0] == old_rank0
+                else:
+                    assert param.shape[0] == old_rank1
+            elif "lora_B" in name:
+                if "lin0" in name:
+                    assert param.shape[1] == old_rank0
+                else:
+                    assert param.shape[1] == old_rank1
+
+        new_rank = 13
+        prepare_model_for_compiled_hotswap(model, target_rank=new_rank)
+
+        for name, param in model.named_parameters():
+            if "lora_A" in name:
+                assert param.shape[0] == new_rank
+            elif "lora_B" in name:
+                assert param.shape[1] == new_rank
+
+    def test_prepare_model_for_compiled_hotswap_model_already_compiled_raises(self):
+        config = LoraConfig(target_modules=["lin0"])
+        model = self.get_model()
+        model = get_peft_model(model, config)
+        model = torch.compile(model, mode="reduce-overhead")
+        msg = re.escape("Call prepare_model_for_compiled_hotswap *before* compiling the model")
+        with pytest.raises(ValueError, match=msg):
+            prepare_model_for_compiled_hotswap(model)
+
+    def test_prepare_model_for_compiled_hotswap_does_not_change_output(self):
+        # preparing the model for hotswapping should not change the model output
+        inputs = torch.rand(3, 10).to(self.torch_device)
+        model = self.get_model().eval()
+        with torch.inference_mode():
+            output_base = model(inputs)
+
+        old_rank = 8
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=old_rank, init_lora_weights=False)
+        model = get_peft_model(model, config).eval()
+        with torch.inference_mode():
+            output_before = model(inputs)
+
+        # sanity check: LoRA changed output
+        assert not torch.allclose(output_base, output_before)
+
+        new_rank = 13
+        prepare_model_for_compiled_hotswap(model, target_rank=new_rank)
+        with torch.inference_mode():
+            output_after = model(inputs)
+
+        assert torch.allclose(output_before, output_after)
+
+    def test_prepare_model_for_compiled_hotswap_does_not_change_output_conv2d(self):
+        # preparing the model for hotswapping should not change the model output
+        inputs = torch.rand(3, 3, 10, 10).to(self.torch_device)
+        model = self.get_model_conv2d().eval()
+        with torch.inference_mode():
+            output_base = model(inputs)
+
+        old_rank = 8
+        config = LoraConfig(target_modules=["conv"], r=old_rank, init_lora_weights=False)
+        model = get_peft_model(model, config).eval()
+        with torch.inference_mode():
+            output_before = model(inputs)
+
+        # sanity check: LoRA changed output
+        assert not torch.allclose(output_base, output_before)
+
+        new_rank = 13
+        prepare_model_for_compiled_hotswap(model, target_rank=new_rank)
+        with torch.inference_mode():
+            output_after = model(inputs)
+
+        assert torch.allclose(output_before, output_after)
+
+    def test_prepare_model_for_compiled_hotswap_scalings_update_config(self):
+        old_rank0 = 11
+        old_rank1 = 13
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=old_rank0, rank_pattern={"lin1": old_rank1})
+        model = self.get_model()
+        model = get_peft_model(model, config)
+
+        new_rank = 15
+        prepare_model_for_compiled_hotswap(model, target_rank=new_rank, config=model.peft_config)
+
+        assert model.peft_config["default"].r == new_rank
+        assert model.peft_config["default"].rank_pattern == {"lin1": new_rank}
+
+    def test_prepare_model_for_compiled_hotswap_lora_bias(self):
+        # When setting lora_bias=True in the LoraConfig, the LoRA B parameter will have a bias term. Check that padding
+        # still works correctly. Note that the LoRA A parameter still won't have a bias term.
+        old_rank = 8
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=old_rank, lora_bias=True)
+        model = self.get_model()
+        model = get_peft_model(model, config)
+
+        # sanity check
+        for name, param in model.named_parameters():
+            if "lora_A" in name and name.endswith(".weight"):
+                assert param.shape[0] == old_rank
+            elif "lora_B" in name and name.endswith(".weight"):
+                assert param.shape[1] == old_rank
+            elif "lora_A" in name and name.endswith(".bias"):
+                assert False, "LoRA A should not have a bias term"
+            elif "lora_B" in name and name.endswith(".bias"):
+                assert param.shape[0] in (5, 20)  # output shapes of the 2 layers
+
+        new_rank = 13
+        prepare_model_for_compiled_hotswap(model, target_rank=new_rank)
+
+        for name, param in model.named_parameters():
+            if "lora_A" in name and name.endswith(".weight"):
+                assert param.shape[0] == new_rank
+            elif "lora_B" in name and name.endswith(".weight"):
+                assert param.shape[1] == new_rank
+            elif "lora_A" in name and name.endswith(".bias"):
+                assert False, "LoRA A should not have a bias term"
+            elif "lora_B" in name and name.endswith(".bias"):
+                assert param.shape[0] in (5, 20)  # output shapes of the 2 layers
+
+    def test_prepare_model_for_compiled_hotswap_conv2d_lora_bias(self):
+        # same as previous test, but for a Conv2d model
+        old_rank = 8
+        config = LoraConfig(target_modules=["conv"], r=old_rank, lora_bias=True)
+        model = self.get_model_conv2d()
+        model = get_peft_model(model, config)
+
+        # sanity check
+        for name, param in model.named_parameters():
+            if "lora_A" in name and name.endswith(".weight"):
+                assert param.shape[0] == old_rank
+            elif "lora_B" in name and name.endswith(".weight"):
+                assert param.shape[1] == old_rank
+            elif "lora_A" in name and name.endswith(".bias"):
+                assert False, "LoRA A should not have a bias term"
+            elif "lora_B" in name and name.endswith(".bias"):
+                assert param.shape[0] == 10  # output shape of conv layer
+
+        new_rank = 13
+        prepare_model_for_compiled_hotswap(model, target_rank=new_rank)
+
+        for name, param in model.named_parameters():
+            if "lora_A" in name and name.endswith(".weight"):
+                assert param.shape[0] == new_rank
+            elif "lora_B" in name and name.endswith(".weight"):
+                assert param.shape[1] == new_rank
+            elif "lora_A" in name and name.endswith(".bias"):
+                assert False, "LoRA A should not have a bias term"
+            elif "lora_B" in name and name.endswith(".bias"):
+                assert param.shape[0] == 10  # output shape of conv layer
 
 
 def test_import_peft_type_to_model_mapping_deprecation_warning(recwarn):
