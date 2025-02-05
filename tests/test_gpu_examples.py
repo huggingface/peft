@@ -18,7 +18,6 @@ import re
 import tempfile
 import unittest
 from collections import Counter, defaultdict
-from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, List, Union
@@ -4146,37 +4145,18 @@ class TestHotSwapping:
     """
 
     torch_device = infer_device()
-    used_model_ids = set()
 
-    def _check_model_id(self, model_id):
-        # Unfortunately, when using the same model_id twice in the same process, even if the LoRA params differ, we get
-        # compilation errors from torch. Therefore, we check that the same ID is not used twice.
-        # Other things I tried that didn't help:
-        # - Setting torch._inductor.config.force_disable_caches = True
-        # - Setting TORCHINDUCTOR_FORCE_DISABLE_CACHES=1
-        # - Setting a separate TORCHINDUCTOR_CACHE_DIR for each test
-        if model_id in self.used_model_ids:
-            raise ValueError("Don't reuse the same model_id twice, as this leads to torch.compile using cache")
-        self.used_model_ids.add(model_id)
-
-    @contextmanager
-    def raise_error_on_recompile(self):
-        """Raise an error when torch recompiles in the context.
-
-        Raises a torch._dynamo.exc.RecompileError error.
-        """
-        prev_value = torch._dynamo.config.error_on_recompile
-        torch._dynamo.config.error_on_recompile = True
-        try:
-            yield
-        finally:
-            torch._dynamo.config.error_on_recompile = prev_value
+    @pytest.fixture(autouse=True)
+    def reset_dynamo_cache(self):
+        # It is critical that the dynamo cache is reset for each test. Otherwise, if the test re-uses the same model,
+        # there will be recompilation errors, as torch caches the model when run in the same process.
+        torch._dynamo.reset()
 
     #######
     # LLM #
     #######
 
-    def check_hotswap(self, do_hotswap, model_id, ranks, alpha_scalings):
+    def check_hotswap(self, do_hotswap, ranks, alpha_scalings):
         """
         Test hotswapping with a compiled model.
 
@@ -4184,12 +4164,13 @@ class TestHotSwapping:
         raise an error when recompilation occurs.
 
         """
-        self._check_model_id(model_id)
         torch.manual_seed(0)
         inputs = torch.arange(10).view(-1, 1).to(self.torch_device)
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
         model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
         rank0, rank1 = ranks
         alpha0, alpha1 = alpha_scalings
+
         # note that the 2nd adapter targeting a subset of the 1st adapter is okay, but not the other way round
         config0 = LoraConfig(init_lora_weights=False, r=rank0, lora_alpha=alpha0, target_modules=["q_proj", "v_proj"])
         config1 = LoraConfig(init_lora_weights=False, r=rank1, lora_alpha=alpha1, target_modules=["q_proj"])
@@ -4230,25 +4211,17 @@ class TestHotSwapping:
             assert torch.allclose(output1, output_after1, atol=tol, rtol=tol)
 
     # it is important to check hotswapping small to large ranks and large to small ranks
-    def test_hotswapping_compiled_model_does_not_trigger_recompilation_ranks_small_to_large(self):
-        ranks = 7, 13
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
-        with self.raise_error_on_recompile():
-            self.check_hotswap(do_hotswap=True, model_id=model_id, ranks=ranks, alpha_scalings=ranks)
-
-    def test_hotswapping_compiled_model_does_not_trigger_recompilation_ranks_large_to_small(self):
-        ranks = 13, 7
-        model_id = "hf-internal-testing/tiny-random-MistralForCausalLM"
-        with self.raise_error_on_recompile():
-            self.check_hotswap(do_hotswap=True, model_id=model_id, ranks=ranks, alpha_scalings=ranks)
+    @pytest.mark.parametrize("ranks", [(7, 13), (13, 7)])
+    def test_hotswapping_compiled_model_does_not_trigger_recompilation(self, ranks):
+        with torch._dynamo.config.patch(error_on_recompile=True):  # raise an error on recompilation
+            self.check_hotswap(do_hotswap=True, ranks=ranks, alpha_scalings=ranks)
 
     def test_no_hotswapping_compiled_model_triggers_recompilation(self):
         # contingency test to ensure that hotswapping is actually needed to prevent recompilation
-        model_id = "peft-internal-testing/tiny-dummy-qwen2"
         ranks = 7, 13
-        with self.raise_error_on_recompile():
-            with pytest.raises(torch._dynamo.exc.RecompileError):
-                self.check_hotswap(do_hotswap=False, model_id=model_id, ranks=ranks, alpha_scalings=ranks)
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            with pytest.raises(torch._dynamo.exc.RecompileError):  # raise an error on recompilation
+                self.check_hotswap(do_hotswap=False, ranks=ranks, alpha_scalings=ranks)
 
     ###################
     # DIFFUSION MODEL #
@@ -4352,5 +4325,5 @@ class TestHotSwapping:
     )
     def test_hotswapping_compiled_diffusers_model_does_not_trigger_recompilation(self):
         ranks = 7, 13
-        with self.raise_error_on_recompile():
+        with torch._dynamo.config.patch(error_on_recompile=True):  # raise an error on recompilation
             self.check_hotswap_diffusion(do_hotswap=True, ranks=ranks, alpha_scalings=ranks)
