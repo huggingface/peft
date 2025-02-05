@@ -4150,6 +4150,7 @@ class TestHotSwapping:
     def reset_dynamo_cache(self):
         # It is critical that the dynamo cache is reset for each test. Otherwise, if the test re-uses the same model,
         # there will be recompilation errors, as torch caches the model when run in the same process.
+        yield
         torch._dynamo.reset()
 
     #######
