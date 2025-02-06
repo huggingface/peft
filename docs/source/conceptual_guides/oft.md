@@ -79,8 +79,8 @@ specify either `boft_block_size` or `boft_block_num`, but not both simultaneousl
 For an example of the BOFT method application to various downstream tasks, please refer to the following guides:
 
 Take a look at the following step-by-step guides on how to finetune a model with BOFT:
-- [Dreambooth finetuning with BOFT](../task_guides/boft_dreambooth) 
-- [Controllable generation finetuning with BOFT (ControlNet)](../task_guides/boft_controlnet) 
+- [Dreambooth finetuning with BOFT](https://github.com/huggingface/peft/blob/main/examples/boft_dreambooth/boft_dreambooth.md)
+- [Controllable generation finetuning with BOFT (ControlNet)](https://github.com/huggingface/peft/blob/main/examples/boft_controlnet/boft_controlnet.md)
 
 For the task of image classification, one can initialize the BOFT config for a DinoV2 model as follows:
 
