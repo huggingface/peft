@@ -44,7 +44,8 @@ RUN source activate peft && \
     python3 -m pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ/releases/download/v0.2.7.post2/autoawq-0.2.7.post2-py3-none-any.whl && \
     python3 -m pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ_kernels/releases/download/v0.0.9/autoawq_kernels-0.0.9-cp311-cp311-linux_x86_64.whl && \
     # Add eetq for quantization testing
-    python3 -m pip install git+https://github.com/NetEase-FuXi/EETQ.git
+    # TODO: uncomment once incompatibility with torch is fixed, see https://github.com/NetEase-FuXi/EETQ/pull/36
+    # python3 -m pip install git+https://github.com/NetEase-FuXi/EETQ.git
 
 # Activate the conda env and install transformers + accelerate from source
 RUN source activate peft && \
