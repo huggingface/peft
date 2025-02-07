@@ -296,7 +296,7 @@ def prepare_model_for_compiled_hotswap(
         # do inference with adapter 1
         ```
     """
-    is_compiled = hasattr(model, "_orig_mod")
+    is_compiled = hasattr(model, "_orig_mod") or getattr(model, "_compiled_call_impl", False)
     if is_compiled:
         raise ValueError("Call prepare_model_for_compiled_hotswap *before* compiling the model")
 
@@ -416,9 +416,17 @@ def hotswap_adapter_from_state_dict(
         # swap actual weights
         # no need to account for potential _orig_mod in key here, as torch handles that
         old_val = attrgetter(key)(model)
+        new_val = new_val.to(old_val.data.device)
+
+        # We try to detect if the model is compiled but it does not always work, e.g. if hotswapping is called from
+        # within the model itself. In this case, swap_tensors raises RuntimeError and should continue without
+        # swap_tensors.
         if not is_compiled and not is_compiled_inplace:
-            torch.utils.swap_tensors(old_val, new_val)
-            continue
+            try:
+                torch.utils.swap_tensors(old_val, new_val)
+                continue
+            except RuntimeError:
+                is_compiled = True
 
         # Compiled models don't work with swap_tensors because there are weakrefs for the tensor. It is unclear if
         # this workaround could not cause trouble but the tests indicate that it works.

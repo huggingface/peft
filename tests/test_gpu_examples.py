@@ -4337,10 +4337,10 @@ class TestHotSwapping:
             unet(**dummy_input)["sample"]
 
             if do_hotswap:
-                unet.load_lora_adapter(file_name1, adapter_name="default_0", hotswap=True)
+                unet.load_lora_adapter(file_name1, adapter_name="adapter0", hotswap=True)
             else:
                 # offloading the old and loading the new adapter will result in recompilation
-                self.set_lora_device(unet, adapter_names=["default_0"], device="cpu")
+                self.set_lora_device(unet, adapter_names=["adapter0"], device="cpu")
                 unet.load_lora_adapter(file_name1, adapter_name="other_name", hotswap=False)
 
             # we need to call forward to potentially trigger recompilation
