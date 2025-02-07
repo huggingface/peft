@@ -148,6 +148,34 @@ For inference, load the base model first and resize it the same way you did befo
 
 For a complete example, please check out [this notebook](https://github.com/huggingface/peft/blob/main/examples/causal_language_modeling/peft_lora_clm_with_additional_tokens.ipynb).
 
+### Getting a warning about "weights not being initialized from the model checkpoint"
+
+When you load your PEFT model which has been trained on a classification task, you may get a warning like:
+
+> Some weights of LlamaForSequenceClassification were not initialized from the model checkpoint at meta-llama/Llama-3.2-1B and are newly initialized: ['score.weight']. You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+
+Although this looks scary, it is most likely nothing to worry about. It is in fact not a PEFT specific warning, instead it comes from `transformers`. The reason why you get is probably because you used something like `AutoModelForSequenceClassification`. This will attach a randomly initialized classification head to the base model (called `"score"` in this case). This head must be trained to produce sensible predictions, which is what the warning is telling you.
+
+When you get this warning _before_ training the model, there is thus no cause for concern. PEFT will automatically take care of making the classification head trainable if you correctly passed the `task_type` argument to the PEFT config, e.g. like so:
+
+```python
+from peft import LoraConfig, TaskType
+
+lora_config = LoraConfig(..., task_type=TaskType.SEQ_CLS)
+```
+
+If your classification head does not follow the usual naming conventions from `transformers` (which is rare), you have to explicitly tell PEFT how the head is called using the `modules_to_save` argument:
+
+```python
+lora_config = LoraConfig(..., modules_to_save=["name-of-classification-head"])
+```
+
+To check the name of the classification head, just print the model, it should be the last module.
+
+If you get this warning from you inference code, i.e. _after_ training model, there is also nothing to worry about. When you load the PEFT model, you always first have to load the `transformers` model. Since `transformers` does not know that you will load PEFT weights afterwards, it still gives the warning.
+
+As always, it is best practice to ensure that the model works correctly for inference by running some validation on it. But the fact that you see this warning is no cause for concern.
+
 ### Check layer and model status
 
 Sometimes a PEFT model can end up in a bad state, especially when handling multiple adapters. There can be some confusion around what adapters exist, which one is active, which one is merged, etc. To help investigate this issue, call the [`~peft.PeftModel.get_layer_status`] and the [`~peft.PeftModel.get_model_status`] methods. 
