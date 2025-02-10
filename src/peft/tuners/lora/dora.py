@@ -168,6 +168,10 @@ class _DoraConvNdLayer(DoraLinearLayer):
                 dilation=base_layer.dilation,
                 groups=base_layer.groups,
             )
+        else:
+            bias = base_layer.bias 
+            if bias is not None: 
+                base_result = base_result - bias 
 
         result_dora = (mag_norm_scale - 1) * base_result + mag_norm_scale * lora_B(lora_A(x)) * scaling
         return result_dora
