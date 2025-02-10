@@ -150,13 +150,13 @@ For a complete example, please check out [this notebook](https://github.com/hugg
 
 ### Getting a warning about "weights not being initialized from the model checkpoint"
 
-When you load your PEFT model which has been trained on a classification task, you may get a warning like:
+When you load your PEFT model which has been trained on a task (for example, classification), you may get a warning like:
 
 > Some weights of LlamaForSequenceClassification were not initialized from the model checkpoint at meta-llama/Llama-3.2-1B and are newly initialized: ['score.weight']. You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
 
-Although this looks scary, it is most likely nothing to worry about. It is in fact not a PEFT specific warning, instead it comes from `transformers`. The reason why you get is probably because you used something like `AutoModelForSequenceClassification`. This will attach a randomly initialized classification head to the base model (called `"score"` in this case). This head must be trained to produce sensible predictions, which is what the warning is telling you.
+Although this looks scary, it is most likely nothing to worry about. This warning comes from Transformers, and it isn't a PEFT specific warning. It lets you know that a randomly initialized classification head (`score`) is attached to the base model, and the head must be trained to produce sensible predictions.
 
-When you get this warning _before_ training the model, there is thus no cause for concern. PEFT will automatically take care of making the classification head trainable if you correctly passed the `task_type` argument to the PEFT config, e.g. like so:
+When you get this warning _before_ training the model, PEFT automatically takes care of making the classification head trainable if you correctly passed the `task_type` argument to the PEFT config.
 
 ```python
 from peft import LoraConfig, TaskType
@@ -164,17 +164,17 @@ from peft import LoraConfig, TaskType
 lora_config = LoraConfig(..., task_type=TaskType.SEQ_CLS)
 ```
 
-If your classification head does not follow the usual naming conventions from `transformers` (which is rare), you have to explicitly tell PEFT how the head is called using the `modules_to_save` argument:
+If your classification head does not follow the usual naming conventions from Transformers (which is rare), you have to explicitly tell PEFT the name of the head in `modules_to_save`.
 
 ```python
 lora_config = LoraConfig(..., modules_to_save=["name-of-classification-head"])
 ```
 
-To check the name of the classification head, just print the model, it should be the last module.
+To check the name of the classification head, print the model and it should be the last module.
 
-If you get this warning from you inference code, i.e. _after_ training model, there is also nothing to worry about. When you load the PEFT model, you always first have to load the `transformers` model. Since `transformers` does not know that you will load PEFT weights afterwards, it still gives the warning.
+If you get this warning from your inference code, i.e. _after_ training the model, when you load the PEFT model, you always have to load the Transformers model first. Since Transformers does not know that you will load PEFT weights afterwards, it still gives the warning.
 
-As always, it is best practice to ensure that the model works correctly for inference by running some validation on it. But the fact that you see this warning is no cause for concern.
+As always, it is best practice to ensure the model works correctly for inference by running some validation on it.
 
 ### Check layer and model status
 
