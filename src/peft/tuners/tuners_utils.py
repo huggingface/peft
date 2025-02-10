@@ -464,9 +464,9 @@ class BaseTuner(nn.Module, ABC):
             names_no_target = []
             for name in key_list:
                 parts = name.split('.')
-                key_list_suffixes = ['.'.join(parts[i:]) for i in range(len(parts))]
+                suffixes = ['.'.join(parts[i:]) for i in range(len(parts))]
                 # Check if any of the suffixes (i.e. ['a.b.c', 'b.c', 'c']) are in the target_modules_set
-                if not any(suffix in target_modules_set for suffix in key_list_suffixes):
+                if not any(suffix in target_modules_set for suffix in suffixes):
                     names_no_target.append(name)
 
             new_target_modules = _find_minimal_target_modules(peft_config.target_modules, names_no_target)
