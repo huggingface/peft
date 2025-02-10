@@ -450,7 +450,7 @@ def hotswap_adapter_from_state_dict(
                 )
 
 
-def _check_hotswap_configs_compatible(config0: PeftConfig, config1: PeftConfig) -> None:
+def check_hotswap_configs_compatible(config0: PeftConfig, config1: PeftConfig) -> None:
     """
     Check if two configs are compatible for hot-swapping.
 
@@ -556,7 +556,7 @@ def hotswap_adapter(model, model_name_or_path, adapter_name, torch_device=None, 
     ]
     config = config_cls.from_pretrained(model_name_or_path, **kwargs)
     # config keys that could affect the model output besides what is determined by the state_dict
-    _check_hotswap_configs_compatible(model.active_peft_config, config)
+    check_hotswap_configs_compatible(model.active_peft_config, config)
 
     state_dict = load_peft_weights(model_name_or_path, device=torch_device, **kwargs)
 
