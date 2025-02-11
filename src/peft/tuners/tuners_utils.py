@@ -474,7 +474,7 @@ class BaseTuner(nn.Module, ABC):
                 continue
             # Check for modules_to_save in case
             if _check_for_modules_to_save and any(
-                key.endswith(f"{module_to_save}") for module_to_save in peft_config.modules_to_save
+                key.endswith(module_to_save) for module_to_save in peft_config.modules_to_save
             ):
                 # Optionally set the modules to save
                 parent, target, target_name = _get_submodules(model, key)

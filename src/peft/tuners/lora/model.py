@@ -36,7 +36,7 @@ from peft.tuners.tuners_utils import (
 )
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
-    ModulesToSaveWrapper,
+    AuxiliaryTrainingWrapper,
     _freeze_adapter,
     _get_submodules,
     get_peft_model_state_dict,
@@ -372,7 +372,7 @@ class LoraModel(BaseTuner):
 
     def _set_adapter_layers(self, enabled: bool = True) -> None:
         for module in self.model.modules():
-            if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
+            if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
                 module.enable_adapters(enabled)
 
     def enable_adapter_layers(self) -> None:

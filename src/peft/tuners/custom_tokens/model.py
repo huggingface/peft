@@ -67,7 +67,8 @@ class CustomTokensModel(BaseTuner):
 
         return new_module
 
-    def _replace_module(self, parent, child_name, new_module, child): # see https://github.com/huggingface/peft/blob/e5973883057b723b3f0fe3982bfa9d1e0c0fd8ec/src/peft/tuners/lycoris_utils.py#L300C4-L300C47
+    def _replace_module(self, parent, child_name, new_module, child):
+        # see https://github.com/huggingface/peft/blob/e5973883057b723b3f0fe3982bfa9d1e0c0fd8ec/src/peft/tuners/lycoris_utils.py#L300C4-L300C47
         setattr(parent, child_name, new_module)
         # It's not necessary to set requires_grad here, as that is handled by
         # _mark_only_adapters_as_trainable
@@ -97,3 +98,45 @@ class CustomTokensModel(BaseTuner):
         for n, p in model.named_parameters():
             if self.prefix not in n:
                 p.requires_grad = False
+
+    def _set_adapter_layers(self, enabled: bool = True) -> None:
+        for module in self.model.modules():
+            if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
+                module.enable_adapters(enabled)
+
+    def enable_adapter_layers(self) -> None:
+        """Enable all adapters.
+
+        Call this if you have previously disabled all adapters and want to re-enable them.
+        """
+        self._set_adapter_layers(enabled=True)
+
+    def disable_adapter_layers(self) -> None:
+        """Disable all adapters.
+
+        When disabling all adapters, the model output corresponds to the output of the base model.
+        """
+        self._set_adapter_layers(enabled=False)
+
+    def set_adapter(self, adapter_name: str | list[str]) -> None:
+        """Set the active adapter(s).
+
+        Additionally, this function will set the specified adapters to trainable (i.e., requires_grad=True). If this is
+        not desired, use the following code.
+
+        ```py
+        >>> for name, param in model_peft.named_parameters():
+        ...     if ...:  # some check on name (ex. if 'lora' in name)
+        ...         param.requires_grad = False
+        ```
+
+        Args:
+            adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
+        """
+        for module in self.model.modules():
+            if isinstance(module, CustomTokensLayer):
+                if module.merged:
+                    warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
+                    module.unmerge()
+                module.set_adapter(adapter_name)
+        self.active_adapter = adapter_name

@@ -22,12 +22,13 @@ from peft.utils import PeftType
 class CustomTokensConfig(PeftConfig):
     token_indices: List[int] = field(default_factory=list)
     target_modules: Optional[Union[list[str], str]] = field(
-        default='embedding',
+        default_factory=lambda: ['embedding'],
         metadata={
             "help": (
                 "List of module names or regex expression of the module names to replace with our CustomTokensLayer."
                 "This is by default the `embedding` layer.",
-                "But could be multiple embedding-like layers, such as `encoder.embeddings` or `decoder.embeddings`."
+                "But could be multiple embedding-like layers, such as `embed_tokens`, `encoder.embeddings` or "
+                "`decoder.embeddings`."
             ),
         },
     )
