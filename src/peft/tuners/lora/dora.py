@@ -171,7 +171,9 @@ class _DoraConvNdLayer(DoraLinearLayer):
         else:
             bias = base_layer.bias
             if bias is not None:
-                base_result = base_result - bias
+                # reshape bias to (1, -1, 1, ...)
+                bias_shape = (1, -1) + (1,) * (base_result.dim() - 2)
+                base_result = base_result - bias.view(*bias_shape)
 
         result_dora = (mag_norm_scale - 1) * base_result + mag_norm_scale * lora_B(lora_A(x)) * scaling
         return result_dora
