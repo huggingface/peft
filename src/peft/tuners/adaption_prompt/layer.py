@@ -48,8 +48,13 @@ class AdaptedAttention(nn.Module):
         target_dtype = (
             model.q_proj.weight.dtype if model.q_proj.weight.dtype not in [torch.int8, torch.uint8] else torch.float32
         )
+        if hasattr(self.model, "hidden_size"):
+            # TODO: remove this clause after 2026-01-01
+            hidden_size = self.model.hidden_size
+        else:  # changed in https://github.com/huggingface/transformers/pull/35235
+            hidden_size = self.model.config.hidden_size
         self.adaption_prompt = nn.Parameter(
-            torch.empty(1, adapter_len, self.model.hidden_size, device=device, dtype=target_dtype).normal_()
+            torch.empty(1, adapter_len, hidden_size, device=device, dtype=target_dtype).normal_()
         )
         # Initialize the gate to 0 as this is "zero-init".
         self.adaption_gate = nn.Parameter(torch.zeros(1, device=device, dtype=target_dtype))
@@ -67,38 +72,50 @@ class AdaptedAttention(nn.Module):
         if kwargs.get("output_attention", False):
             raise NotImplementedError("output_attention is not currently supported.")
 
-        output, _, past_key_value = self.model(**kwargs)
+        output, *_ = self.model(**kwargs)
         bsz = output.shape[0]
         q_len = output.shape[1]
         embed_dim = output.shape[2]
         k_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].k_proj_layer
         v_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].v_proj_layer
         o_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].o_proj_layer
+        factor = (
+            self.model.k_proj.in_features // self.model.k_proj.out_features
+        )  # Mistral has different input and output dimension for k_proj and v_proj layers
 
         if k_proj_layer == v_proj_layer:
             _, key, value = getattr(self.model, k_proj_layer)(self.adaption_prompt).split(embed_dim, dim=2)
         else:
             key = getattr(self.model, k_proj_layer)(self.adaption_prompt)
             value = getattr(self.model, v_proj_layer)(self.adaption_prompt)
-        # (bsz, num_heads, adapter_len, head_dim)
-        adapter_k = (
-            key.view(1, self.adapter_len, self.model.num_heads, self.model.head_dim)
-            .repeat(bsz, 1, 1, 1)
-            .transpose(1, 2)
-        )
-        # (bsz, num_heads, adapter_len, head_dim)
-        adapter_v = (
-            value.view(1, self.adapter_len, self.model.num_heads, self.model.head_dim)
-            .repeat(bsz, 1, 1, 1)
-            .transpose(1, 2)
-        )
 
+        if hasattr(self.model, "num_heads"):
+            # TODO: remove this clause after 2026-01-01
+            num_heads = self.model.num_heads
+        else:  # changed in https://github.com/huggingface/transformers/pull/35235
+            num_heads = self.model.config.num_attention_heads
+        # (bsz, num_key_value_heads, adapter_len, head_dim)
+        adapter_k = (
+            key.view(1, self.adapter_len, (num_heads // factor), self.model.head_dim)
+            .repeat(bsz, 1, 1, 1)
+            .transpose(1, 2)
+        )
+        adapter_v = (
+            value.view(1, self.adapter_len, (num_heads // factor), self.model.head_dim)
+            .repeat(bsz, 1, 1, 1)
+            .transpose(1, 2)
+        )
+        # Below is taken from https://github.com/huggingface/transformers/blob/e547458c43dfdbbb8f6a7757237e234c44e20a8f/src/transformers/models/mistral/modeling_mistral.py#L181
+        # (bsz, num_heads, adapter_len, head_dim)
+        adapter_k = torch.repeat_interleave(adapter_k, repeats=factor, dim=1)
+        adapter_v = torch.repeat_interleave(adapter_v, repeats=factor, dim=1)
         # Recompute query states.
         compute_query_states = TRANSFORMERS_MODEL_CONFIG[self.model_type].compute_query_states
         # (bsz, num_heads, q_len, head_dim)
         query_states = compute_query_states(model=self.model, **kwargs)
 
         previous_dtype = query_states.dtype
+
         # (bsz, num_heads, q_len, adapter_len)
         scores = torch.matmul(query_states, adapter_k.transpose(2, 3).to(previous_dtype)) / math.sqrt(
             self.model.head_dim
@@ -108,6 +125,7 @@ class AdaptedAttention(nn.Module):
         scores = self.adaption_gate * F.softmax(scores, dim=-1, dtype=torch.float32).to(previous_dtype)
         # (bsz, q_len, num_heads * head_dim)
         adapter_output = torch.matmul(scores, adapter_v).transpose(1, 2).reshape(bsz, q_len, -1)
+
         # (bsz, q_len, hidden_size)
         if o_proj_layer is not None:
             adapter_output = getattr(self.model, o_proj_layer)(adapter_output)
@@ -117,4 +135,4 @@ class AdaptedAttention(nn.Module):
 
         # Restore original dtype.
         output = output.to(previous_dtype)
-        return output, None, past_key_value
+        return output, *_

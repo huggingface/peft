@@ -56,7 +56,7 @@ from transformers import AutoModelForCausalLM
 model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1", quantization_config=config)
 ```
 
-Next, you should call the [`~peft.utils.prepare_model_for_kbit_training`] function to preprocess the quantized model for traininng.
+Next, you should call the [`~peft.utils.prepare_model_for_kbit_training`] function to preprocess the quantized model for training.
 
 ```py
 from peft import prepare_model_for_kbit_training
@@ -77,7 +77,7 @@ config = LoraConfig(
     r=16,
     lora_alpha=8,
     target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
-    lora_dropout=0.05
+    lora_dropout=0.05,
     bias="none",
     task_type="CAUSAL_LM"
 )
@@ -95,40 +95,9 @@ You're all set for training with whichever training method you prefer!
 
 ### LoftQ initialization
 
-[LoftQ](https://hf.co/papers/2310.08659) initializes LoRA weights such that the quantization error is minimized, and it can improve performance when training quantized models. To get started, create a [`LoftQConfig`] and set `loftq_bits=4` for 4-bit quantization.
+[LoftQ](https://hf.co/papers/2310.08659) initializes LoRA weights such that the quantization error is minimized, and it can improve performance when training quantized models. To get started, follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/loftq_finetuning).
 
-<Tip warning={true}>
-
-LoftQ initialization does not require quantizing the base model with the `load_in_4bits` parameter in the [`~transformers.AutoModelForCausalLM.from_pretrained`] method! Learn more about LoftQ initialization in the [Initialization options](../developer_guides/lora#initialization) section.
-
-Note: You can only perform LoftQ initialization on a GPU.
-
-</Tip>
-
-```py
-from transformers import AutoModelForCausalLM
-from peft import LoftQConfig, LoraConfig, get_peft_model
-
-model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1", device_map="auto")
-loftq_config = LoftQConfig(loftq_bits=4)
-```
-
-Now pass the `loftq_config` to the [`LoraConfig`] to enable LoftQ initialization, and create a [`PeftModel`] for training.
-
-```py
-lora_config = LoraConfig(
-    init_lora_weights="loftq",
-    loftq_config=loftq_config,
-    r=16,
-    lora_alpha=8,
-    target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
-    lora_dropout=0.05,
-    bias="none",
-    task_type="CAUSAL_LM"
-)
-
-model = get_peft_model(model, lora_config)
-```
+In general, for LoftQ to work best, it is recommended to target as many layers with LoRA as possible, since those not targeted cannot have LoftQ applied. This means that passing `LoraConfig(..., target_modules="all-linear")` will most likely give the best results. Also, you should use `nf4` as quant type in your quantization config when using 4bit quantization, i.e. `BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4")`.
 
 ### QLoRA-style training
 
@@ -138,7 +107,33 @@ QLoRA adds trainable weights to all the linear layers in the transformer archite
 config = LoraConfig(target_modules="all-linear", ...)
 ```
 
-## AQLM quantizaion
+## GPTQ quantization
+
+You can learn more about gptq based `[2, 3, 4, 8]` bits quantization at [GPTQModel](https://github.com/ModelCloud/GPTQModel) and the Transformers [GPTQ](https://huggingface.co/docs/transformers/quantization/gptq) doc. Post-quant training, PEFT can use both [GPTQModel](https://github.com/ModelCloud/GPTQModel) or [AutoGPTQ](https://github.com/autogptq/autogptq) libraries, but we recommend GPTQModel because AutoGPTQ will be deprecated in a future release. 
+
+```bash
+# gptqmodel install
+pip install gptqmodel --no-build-isolation
+```
+
+```py
+from transformers import AutoModelForCausalLM, AutoTokenizer, GPTQConfig
+
+model_id = "facebook/opt-125m"
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+gptq_config = GPTQConfig(bits=4, group_size=128, dataset="wikitext2", tokenizer=tokenizer)
+
+quantized_model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto", quantization_config=gptq_config)
+
+# save quantized model
+quantized_model.save_pretrained("./opt-125m-gptq")
+tokenizer.save_pretrained("./opt-125m-gptq")
+```
+
+Once quantized, you can post-train GPTQ models with PEFT APIs.
+
+## AQLM quantization
 
 Additive Quantization of Language Models ([AQLM](https://arxiv.org/abs/2401.06118)) is a Large Language Models compression method. It quantizes multiple weights together and takes advantage of interdependencies between them. AQLM represents groups of 8-16 weights as a sum of multiple vector codes. This allows it to compress models down to as low as 2-bit with considerably low accuracy losses.
 
@@ -159,9 +154,100 @@ quantized_model = get_peft_model(quantized_model, peft_config)
 
 You can refer to the [Google Colab](https://colab.research.google.com/drive/12GTp1FCj5_0SnnNQH18h_2XFh9vS_guX?usp=sharing) example for an overview of AQLM+LoRA finetuning.
 
+## EETQ quantization
+
+You can also perform LoRA fine-tuning on EETQ quantized models. [EETQ](https://github.com/NetEase-FuXi/EETQ) package offers simple and efficient way to perform 8-bit quantization, which is claimed to be faster than the `LLM.int8()` algorithm. First, make sure that you have a transformers version that is compatible with EETQ (e.g. by installing it from latest pypi or from source).
+
+```py
+import torch
+from transformers import EetqConfig
+
+config = EetqConfig("int8")
+```
+
+Pass the `config` to the [`~transformers.AutoModelForCausalLM.from_pretrained`] method.
+
+```py
+from transformers import AutoModelForCausalLM
+
+model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1", quantization_config=config)
+```
+
+and create a `LoraConfig` and pass it to `get_peft_model`:
+
+```py
+from peft import LoraConfig, get_peft_model
+
+config = LoraConfig(
+    r=16,
+    lora_alpha=8,
+    target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+    lora_dropout=0.05,
+    bias="none",
+    task_type="CAUSAL_LM"
+)
+
+model = get_peft_model(model, config)
+```
+
+## HQQ quantization
+
+The models that is quantized using Half-Quadratic Quantization of Large Machine Learning Models ([HQQ](https://mobiusml.github.io/hqq_blog/)) support LoRA adapter tuning. To tune the quantized model, you'll need to install the `hqq` library with: `pip install hqq`.
+
+```python
+from hqq.engine.hf import HQQModelForCausalLM
+
+quantized_model = HQQModelForCausalLM.from_quantized(save_dir_or_hfhub, device='cuda')
+peft_config = LoraConfig(...)
+quantized_model = get_peft_model(quantized_model, peft_config)
+```
+
+Or using transformers version that is compatible with HQQ (e.g. by installing it from latest pypi or from source).
+
+```python
+from transformers import HqqConfig, AutoModelForCausalLM
+
+quant_config = HqqConfig(nbits=4, group_size=64)
+quantized_model = AutoModelForCausalLM.from_pretrained(save_dir_or_hfhub, device_map=device_map, quantization_config=quant_config)
+peft_config = LoraConfig(...)
+quantized_model = get_peft_model(quantized_model, peft_config)
+```
+
+## torchao (PyTorch Architecture Optimization)
+
+PEFT supports models quantized with [torchao](https://github.com/pytorch/ao) ("ao") for int8 quantization.
+
+```python
+from peft import LoraConfig, get_peft_model
+from transformers import AutoModelForCausalLM, TorchAoConfig
+
+model_id = ...
+quantization_config = TorchAoConfig(quant_type="int8_weight_only")
+base_model = AutoModelForCausalLM.from_pretrained(model_id, quantization_config=quantization_config)
+peft_config = LoraConfig(...)
+model = get_peft_model(base_model, peft_config)
+```
+
+### Caveats:
+
+- Use the most recent versions of torchao (>= v0.4.0) and transformers (> 4.42).
+- Only linear layers are currently supported.
+- `quant_type = "int4_weight_only"` is currently not supported.
+- `NF4` is not implemented in transformers as of yet and is thus also not supported.
+- DoRA only works with `quant_type = "int8_weight_only"` at the moment.
+- There is explicit support for torchao when used with LoRA. However, when torchao quantizes a layer, its class does not change, only the type of the underlying tensor. For this reason, PEFT methods other than LoRA will generally also work with torchao, even if not explicitly supported. Be aware, however, that **merging only works correctly with LoRA and with `quant_type = "int8_weight_only"`**. If you use a different PEFT method or dtype, merging will likely result in an error, and even it doesn't, the results will still be incorrect.
+
+## Other Supported PEFT Methods
+
+Besides LoRA, the following PEFT methods also support quantization:
+
+- **VeRA** (supports bitsandbytes quantization)
+- **AdaLoRA** (supports both bitsandbytes and GPTQ quantization)
+- **(IA)³** (supports bitsandbytes quantization)
+
 ## Next steps
 
 If you're interested in learning more about quantization, the following may be helpful:
 
-* Learn more about details about QLoRA and check out some benchmarks on its impact in the [Making LLMs even more accessible with bitsandbytes, 4-bit quantization and QLoRA](https://huggingface.co/blog/4bit-transformers-bitsandbytes) blog post.
+* Learn more details about QLoRA and check out some benchmarks on its impact in the [Making LLMs even more accessible with bitsandbytes, 4-bit quantization and QLoRA](https://huggingface.co/blog/4bit-transformers-bitsandbytes) blog post.
 * Read more about different quantization schemes in the Transformers [Quantization](https://hf.co/docs/transformers/main/quantization) guide.

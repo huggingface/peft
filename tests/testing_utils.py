@@ -17,8 +17,36 @@ from contextlib import contextmanager
 import numpy as np
 import pytest
 import torch
+from accelerate.test_utils.testing import get_backend
 
-from peft.import_utils import is_aqlm_available, is_auto_awq_available, is_auto_gptq_available, is_optimum_available
+from peft.import_utils import (
+    is_aqlm_available,
+    is_auto_awq_available,
+    is_auto_gptq_available,
+    is_eetq_available,
+    is_gptqmodel_available,
+    is_hqq_available,
+    is_optimum_available,
+    is_torchao_available,
+)
+
+
+torch_device, device_count, memory_allocated_func = get_backend()
+
+
+def require_non_cpu(test_case):
+    """
+    Decorator marking a test that requires a hardware accelerator backend. These tests are skipped when there are no
+    hardware accelerator available.
+    """
+    return unittest.skipUnless(torch_device != "cpu", "test requires a hardware accelerator")(test_case)
+
+
+def require_non_xpu(test_case):
+    """
+    Decorator marking a test that should be skipped for XPU.
+    """
+    return unittest.skipUnless(torch_device != "xpu", "test requires a non-XPU")(test_case)
 
 
 def require_torch_gpu(test_case):
@@ -41,6 +69,16 @@ def require_torch_multi_gpu(test_case):
         return test_case
 
 
+def require_multi_accelerator(test_case):
+    """
+    Decorator marking a test that requires multiple hardware accelerators. These tests are skipped on a machine without
+    multiple accelerators.
+    """
+    return unittest.skipUnless(
+        torch_device != "cpu" and device_count > 1, "test requires multiple hardware accelerators"
+    )(test_case)
+
+
 def require_bitsandbytes(test_case):
     """
     Decorator marking a test that requires the bitsandbytes library. Will be skipped when the library is not installed.
@@ -58,7 +96,16 @@ def require_auto_gptq(test_case):
     """
     Decorator marking a test that requires auto-gptq. These tests are skipped when auto-gptq isn't installed.
     """
-    return unittest.skipUnless(is_auto_gptq_available(), "test requires auto-gptq")(test_case)
+    return unittest.skipUnless(is_gptqmodel_available() or is_auto_gptq_available(), "test requires auto-gptq")(
+        test_case
+    )
+
+
+def require_gptqmodel(test_case):
+    """
+    Decorator marking a test that requires gptqmodel. These tests are skipped when gptqmodel isn't installed.
+    """
+    return unittest.skipUnless(is_gptqmodel_available(), "test requires gptqmodel")(test_case)
 
 
 def require_aqlm(test_case):
@@ -68,6 +115,13 @@ def require_aqlm(test_case):
     return unittest.skipUnless(is_aqlm_available(), "test requires aqlm")(test_case)
 
 
+def require_hqq(test_case):
+    """
+    Decorator marking a test that requires aqlm. These tests are skipped when aqlm isn't installed.
+    """
+    return unittest.skipUnless(is_hqq_available(), "test requires hqq")(test_case)
+
+
 def require_auto_awq(test_case):
     """
     Decorator marking a test that requires auto-awq. These tests are skipped when auto-awq isn't installed.
@@ -75,11 +129,25 @@ def require_auto_awq(test_case):
     return unittest.skipUnless(is_auto_awq_available(), "test requires auto-awq")(test_case)
 
 
+def require_eetq(test_case):
+    """
+    Decorator marking a test that requires eetq. These tests are skipped when eetq isn't installed.
+    """
+    return unittest.skipUnless(is_eetq_available(), "test requires eetq")(test_case)
+
+
 def require_optimum(test_case):
     """
     Decorator marking a test that requires optimum. These tests are skipped when optimum isn't installed.
     """
     return unittest.skipUnless(is_optimum_available(), "test requires optimum")(test_case)
+
+
+def require_torchao(test_case):
+    """
+    Decorator marking a test that requires torchao. These tests are skipped when torchao isn't installed.
+    """
+    return unittest.skipUnless(is_torchao_available(), "test requires torchao")(test_case)
 
 
 @contextmanager

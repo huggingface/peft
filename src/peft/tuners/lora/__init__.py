@@ -12,15 +12,33 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_eetq_available
+from peft.utils import register_peft_method
 
-from .config import LoftQConfig, LoraConfig
+from .config import EvaConfig, LoftQConfig, LoraConfig, LoraRuntimeConfig
+from .eva import get_eva_state_dict, initialize_lora_eva_weights
 from .gptq import QuantLinear
-from .layer import Conv2d, Embedding, Linear, LoraLayer
+from .layer import Conv2d, Conv3d, Embedding, Linear, LoraLayer
 from .model import LoraModel
 
 
-__all__ = ["LoraConfig", "LoftQConfig", "Conv2d", "Embedding", "LoraLayer", "Linear", "LoraModel", "QuantLinear"]
+__all__ = [
+    "Conv2d",
+    "Conv3d",
+    "Embedding",
+    "EvaConfig",
+    "Linear",
+    "LoftQConfig",
+    "LoraConfig",
+    "LoraLayer",
+    "LoraModel",
+    "LoraRuntimeConfig",
+    "QuantLinear",
+    "get_eva_state_dict",
+    "initialize_lora_eva_weights",
+]
+
+register_peft_method(name="lora", config_cls=LoraConfig, model_cls=LoraModel, is_mixed_compatible=True)
 
 
 def __getattr__(name):
@@ -33,5 +51,10 @@ def __getattr__(name):
         from .bnb import Linear4bit
 
         return Linear4bit
+
+    if (name == "EetqLoraLinear") and is_eetq_available():
+        from .eetq import EetqLoraLinear
+
+        return EetqLoraLinear
 
     raise AttributeError(f"module {__name__} has no attribute {name}")

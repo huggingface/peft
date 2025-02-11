@@ -6,11 +6,15 @@ on:
     paths-ignore:
         - 'docs/**'
 
+permissions: {}
+
 jobs:
   tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+        with:
+          persist-credentials: false
       - name: Set up Python 3.11
         uses: actions/setup-python@v4
         with:
@@ -26,3 +30,11 @@ jobs:
       - name: Test with pytest
         run: |
           make test
+      - name: Post to Slack
+        if: always()
+        uses: huggingface/hf-workflows/.github/actions/post-slack@main
+        with:
+          slack_channel: ${{ secrets.SLACK_CHANNEL_ID }}
+          title: 🤗 Results of transformers main tests
+          status: ${{ job.status }}
+          slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}

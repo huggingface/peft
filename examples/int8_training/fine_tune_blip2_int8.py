@@ -14,7 +14,7 @@
 import torch
 from datasets import load_dataset
 from torch.utils.data import DataLoader, Dataset
-from transformers import AutoModelForVision2Seq, AutoProcessor
+from transformers import AutoModelForVision2Seq, AutoProcessor, BitsAndBytesConfig
 
 from peft import LoraConfig, get_peft_model
 
@@ -28,7 +28,9 @@ config = LoraConfig(
 )
 
 # We load our model and processor using `transformers`
-model = AutoModelForVision2Seq.from_pretrained("Salesforce/blip2-opt-2.7b", load_in_8bit=True)
+model = AutoModelForVision2Seq.from_pretrained(
+    "Salesforce/blip2-opt-2.7b", quantization_config=BitsAndBytesConfig(load_in_8bit=True)
+)
 processor = AutoProcessor.from_pretrained("Salesforce/blip2-opt-2.7b")
 
 # Get our peft model and print the number of trainable parameters

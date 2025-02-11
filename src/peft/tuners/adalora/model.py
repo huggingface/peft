@@ -17,7 +17,7 @@ import warnings
 import torch
 from transformers.pytorch_utils import Conv1D
 
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_gptqmodel_available
 from peft.tuners.lora import LoraConfig, LoraModel
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import (
@@ -25,8 +25,10 @@ from peft.utils import (
     _freeze_adapter,
     _get_submodules,
     get_auto_gptq_quant_linear,
+    get_gptqmodel_quant_linear,
     get_quantization_config,
 )
+from peft.utils.integrations import gather_params_ctx
 
 from .gptq import SVDQuantLinear
 from .layer import AdaLoraLayer, RankAllocator, SVDLinear
@@ -41,15 +43,17 @@ class AdaLoraModel(LoraModel):
         model ([`transformers.PreTrainedModel`]): The model to be adapted.
         config ([`AdaLoraConfig`]): The configuration of the AdaLora model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
+        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+            Create empty adapter weights on meta device. Useful to speed up the loading process.
 
     Returns:
         `torch.nn.Module`: The AdaLora model.
 
     Example::
 
-        >>> from transformers import AutoModelForSeq2SeqLM, LoraConfig >>> from peft import AdaLoraModel, AdaLoraConfig
+        >>> from transformers import AutoModelForSeq2SeqLM >>> from peft import LoraConfig, AdaLoraModel, AdaLoraConfig
         >>> config = AdaLoraConfig(
-                peft_type="ADALORA", task_type="SEQ_2_SEQ_LM", r=8, lora_alpha=32, target_modules=["q", "v"],
+                peft_type="ADALORA", task_type="SEQ_2_SEQ_LM", init_r=12, lora_alpha=32, target_modules=["q", "v"],
                 lora_dropout=0.01,
             )
         >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base") >>> model = AdaLoraModel(model, config, "default")
@@ -132,8 +136,9 @@ class AdaLoraModel(LoraModel):
 
         # If it is not an AdaLoraLayer, create a new module, else update it with new adapters
         if not isinstance(target, AdaLoraLayer):
-            new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
-            if adapter_name != self.active_adapter:
+            device_map = self.model.hf_device_map if hasattr(self.model, "hf_device_map") else None
+            new_module = self._create_new_module(lora_config, adapter_name, target, device_map=device_map, **kwargs)
+            if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
@@ -147,7 +152,7 @@ class AdaLoraModel(LoraModel):
             )
 
     @staticmethod
-    def _create_new_module(lora_config, adapter_name, target, **kwargs):
+    def _create_new_module(lora_config, adapter_name, target, device_map=None, **kwargs):
         # avoid eager bnb import
         if is_bnb_available():
             import bitsandbytes as bnb
@@ -157,7 +162,11 @@ class AdaLoraModel(LoraModel):
             from .bnb import SVDLinear4bit
 
         gptq_quantization_config = kwargs.get("gptq_quantization_config", None)
-        AutoGPTQQuantLinear = get_auto_gptq_quant_linear(gptq_quantization_config)
+
+        if is_gptqmodel_available():
+            QuantLinear = get_gptqmodel_quant_linear(gptq_quantization_config, device_map=device_map)
+        else:
+            QuantLinear = get_auto_gptq_quant_linear(gptq_quantization_config)
 
         loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
         loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)
@@ -171,7 +180,6 @@ class AdaLoraModel(LoraModel):
             kwargs.update(
                 {
                     "has_fp16_weights": target_base_layer.state.has_fp16_weights,
-                    "memory_efficient_backward": target_base_layer.state.memory_efficient_backward,
                     "threshold": target_base_layer.state.threshold,
                     "index": target_base_layer.index,
                 }
@@ -187,7 +195,7 @@ class AdaLoraModel(LoraModel):
                 }
             )
             new_module = SVDLinear4bit(target, adapter_name, **fourbit_kwargs)
-        elif AutoGPTQQuantLinear is not None and isinstance(target, AutoGPTQQuantLinear):
+        elif QuantLinear is not None and isinstance(target, QuantLinear):
             new_module = SVDQuantLinear(target, adapter_name, **kwargs)
         else:
             if isinstance(target_base_layer, torch.nn.Linear):
@@ -228,6 +236,8 @@ class AdaLoraModel(LoraModel):
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
+            if name == "model":  # see #1892: prevent infinite recursion if class is not initialized
+                raise
             return getattr(self.model, name)
 
     def forward(self, *args, **kwargs):
@@ -244,7 +254,11 @@ class AdaLoraModel(LoraModel):
             num_param = 0
             for n, p in self.model.named_parameters():
                 if ("lora_A" in n or "lora_B" in n) and self.trainable_adapter_name in n:
-                    para_cov = p @ p.T if "lora_A" in n else p.T @ p
+                    if p.shape == torch.Size([0]):
+                        with gather_params_ctx(p, fwd_module=self):
+                            para_cov = p @ p.T if "lora_A" in n else p.T @ p
+                    else:
+                        para_cov = p @ p.T if "lora_A" in n else p.T @ p
                     I = torch.eye(*para_cov.size(), out=torch.empty_like(para_cov))  # noqa: E741
                     I.requires_grad = False
                     num_param += 1
@@ -344,3 +358,7 @@ class AdaLoraModel(LoraModel):
         # Pass the function and do forward propagation
         else:
             return None
+
+    def add_weighted_adapter(self, *args, **kwargs):
+        """This method is not supported for AdaLoRA, use LoRA instead."""
+        raise TypeError(f"{self.__class__.__name__} does not support add_weighted_adapter method.")

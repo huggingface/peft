@@ -22,10 +22,6 @@ from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 
 
-if is_auto_awq_available():
-    from awq.modules.linear import WQLinear_GEMM
-
-
 class AwqLoraLinear(torch.nn.Module, LoraLayer):
     def __init__(
         self,
@@ -36,8 +32,13 @@ class AwqLoraLinear(torch.nn.Module, LoraLayer):
         lora_dropout: float = 0.0,
         init_lora_weights: bool = True,
         use_rslora: bool = False,
+        use_dora: bool = False,
+        lora_bias: bool = False,
         **kwargs,
     ):
+        if use_dora:
+            raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
+
         super().__init__()
         LoraLayer.__init__(self, base_layer)
 
@@ -46,7 +47,16 @@ class AwqLoraLinear(torch.nn.Module, LoraLayer):
         self.quant_linear_module = base_layer
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
+        self.update_layer(
+            adapter_name,
+            r,
+            lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+            init_lora_weights=init_lora_weights,
+            use_rslora=use_rslora,
+            use_dora=use_dora,
+            lora_bias=lora_bias,
+        )
 
     def forward(self, x: torch.Tensor):
         result = self.quant_linear_module(x)
@@ -65,7 +75,7 @@ class AwqLoraLinear(torch.nn.Module, LoraLayer):
             requires_conversion = not torch.is_autocast_enabled()
             if requires_conversion:
                 expected_dtype = result.dtype
-                x = x.to(lora_A.weight.dtype)
+                x = self._cast_input_dtype(x, lora_A.weight.dtype)
 
             output = lora_B(lora_A(dropout(x)))
             if requires_conversion:
@@ -91,18 +101,21 @@ def dispatch_awq(
     else:
         target_base_layer = target
 
-    if is_auto_awq_available() and isinstance(target_base_layer, WQLinear_GEMM):
-        # Raise the error only at the dispatch level
-        AUTOAWQ_MINIMUM_VERSION = packaging.version.parse("0.2.0")
-        version_autoawq = packaging.version.parse(importlib_metadata.version("autoawq"))
+    if is_auto_awq_available():
+        from awq.modules.linear import WQLinear_GEMM
 
-        if AUTOAWQ_MINIMUM_VERSION > version_autoawq:
-            raise ImportError(
-                f"Found an incompatible version of auto-awq. Found version {version_autoawq}, "
-                f"but only versions above {AUTOAWQ_MINIMUM_VERSION} are supported for PEFT."
-            )
+        if isinstance(target_base_layer, WQLinear_GEMM):
+            # Raise the error only at the dispatch level
+            AUTOAWQ_MINIMUM_VERSION = packaging.version.parse("0.2.0")
+            version_autoawq = packaging.version.parse(importlib_metadata.version("autoawq"))
 
-        new_module = AwqLoraLinear(target, adapter_name, **kwargs)
-        target.qweight = target_base_layer.qweight
+            if AUTOAWQ_MINIMUM_VERSION > version_autoawq:
+                raise ImportError(
+                    f"Found an incompatible version of auto-awq. Found version {version_autoawq}, "
+                    f"but only versions above {AUTOAWQ_MINIMUM_VERSION} are supported for PEFT."
+                )
+
+            new_module = AwqLoraLinear(target, adapter_name, **kwargs)
+            target.qweight = target_base_layer.qweight
 
     return new_module

@@ -16,6 +16,7 @@ import torch
 
 from peft.tuners.prompt_tuning import PromptEmbedding
 from peft.utils import TaskType
+from peft.utils.save_and_load import torch_load
 
 from .config import MultitaskPromptTuningConfig, MultitaskPromptTuningInit
 
@@ -66,11 +67,15 @@ class MultitaskPromptEmbedding(PromptEmbedding):
                     "init method"
                 )
 
-            # TODO: There should be an option for safetensors
-            state_dict: dict = torch.load(
-                config.prompt_tuning_init_state_dict_path,
-                map_location=word_embeddings.weight.device,
-            )
+            if config.prompt_tuning_init_state_dict_path.endswith(".safetensors"):
+                from safetensors.torch import load_file
+
+                state_dict: dict = load_file(config.prompt_tuning_init_state_dict_path)
+            else:
+                state_dict: dict = torch_load(
+                    config.prompt_tuning_init_state_dict_path,
+                    map_location=word_embeddings.weight.device,
+                )
 
         if config.prompt_tuning_init in [
             MultitaskPromptTuningInit.AVERAGE_SOURCE_TASKS,

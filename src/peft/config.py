@@ -14,6 +14,7 @@
 import inspect
 import json
 import os
+import warnings
 from dataclasses import asdict, dataclass, field
 from typing import Dict, Optional, Union
 
@@ -21,6 +22,25 @@ from huggingface_hub import hf_hub_download
 from transformers.utils import PushToHubMixin
 
 from .utils import CONFIG_NAME, PeftType, TaskType
+
+
+# we expect at least these keys to be present in a PEFT adapter_config.json
+MIN_EXPECTED_CONFIG_KEYS = {"peft_type"}
+
+
+def _check_and_remove_unused_kwargs(cls, kwargs):
+    """Make PEFT configs forward-compatible by removing unused kwargs that were added in later PEFT versions.
+
+    This assumes that removing the unused kwargs will not affect the default behavior.
+
+    Returns the filtered kwargs and the set of removed keys.
+    """
+    # it's not pretty but eh
+    signature_parameters = inspect.signature(cls.__init__).parameters
+    unexpected_kwargs = set(kwargs.keys()) - set(signature_parameters.keys())
+    for key in unexpected_kwargs:
+        del kwargs[key]
+    return kwargs, unexpected_kwargs
 
 
 @dataclass
@@ -35,10 +55,18 @@ class PeftConfigMixin(PushToHubMixin):
         peft_type (Union[[`~peft.utils.config.PeftType`], `str`]): The type of Peft method to use.
     """
 
+    task_type: Optional[TaskType] = field(default=None, metadata={"help": "The type of task."})
     peft_type: Optional[PeftType] = field(default=None, metadata={"help": "The type of PEFT model."})
     auto_mapping: Optional[dict] = field(
         default=None, metadata={"help": "An auto mapping dict to help retrieve the base model class if needed."}
     )
+
+    def __post_init__(self):
+        # check for invalid task type
+        if (self.task_type is not None) and (self.task_type not in list(TaskType)):
+            raise ValueError(
+                f"Invalid task type: '{self.task_type}'. Must be one of the following task types: {', '.join(TaskType)}."
+            )
 
     def to_dict(self) -> Dict:
         r"""
@@ -63,7 +91,7 @@ class PeftConfigMixin(PushToHubMixin):
         os.makedirs(save_directory, exist_ok=True)
         auto_mapping_dict = kwargs.pop("auto_mapping_dict", None)
 
-        output_dict = asdict(self)
+        output_dict = self.to_dict()
         # converting set type to list
         for key, value in output_dict.items():
             if isinstance(value, set):
@@ -97,7 +125,7 @@ class PeftConfigMixin(PushToHubMixin):
         # TODO: this hack is needed to fix the following issue (on commit 702f937):
         # if someone saves a default config and loads it back with `PeftConfig` class it yields to
         # not loading the correct config class.
-
+        #
         # from peft import AdaLoraConfig, PeftConfig
         # peft_config = AdaLoraConfig()
         # print(peft_config)
@@ -115,7 +143,34 @@ class PeftConfigMixin(PushToHubMixin):
         else:
             config_cls = cls
 
-        return config_cls(**kwargs)
+        try:
+            config = config_cls(**kwargs)
+        except TypeError as exc:
+            # Here we potentially handle forward compatibility. Sometimes new keywords are added to configs, which makes
+            # new configs incompatible with older PEFT versions. We catch these and remove them to allow the program to
+            # continue, but warn the user about it.
+
+            # First check if the error is due to unexpected keyword arguments, we don't want to accidentally catch
+            # other TypeErrors.
+            if "got an unexpected keyword argument" not in str(exc):
+                raise exc
+
+            filtered_kwargs, unexpected_kwargs = _check_and_remove_unused_kwargs(cls, kwargs)
+            if not MIN_EXPECTED_CONFIG_KEYS.issubset(set(filtered_kwargs.keys())):
+                raise TypeError(
+                    f"The {cls.__name__} config that is trying to be loaded is missing required keys: "
+                    f"{MIN_EXPECTED_CONFIG_KEYS}."
+                )
+
+            warnings.warn(
+                f"Unexpected keyword arguments {sorted(unexpected_kwargs)} for class {cls.__name__}, these are "
+                "ignored. This probably means that you're loading a configuration file that was saved using a "
+                "higher version of the library and additional parameters have been introduced since. It is "
+                "highly recommended to upgrade the PEFT version before continuing (e.g. by running `pip install "
+                "-U peft`)."
+            )
+            config = config_cls.from_peft_type(**filtered_kwargs)
+        return config
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: str, subfolder: Optional[str] = None, **kwargs):
@@ -143,11 +198,12 @@ class PeftConfigMixin(PushToHubMixin):
                 config_file = hf_hub_download(
                     pretrained_model_name_or_path, CONFIG_NAME, subfolder=subfolder, **hf_hub_download_kwargs
                 )
-            except Exception:
-                raise ValueError(f"Can't find '{CONFIG_NAME}' at '{pretrained_model_name_or_path}'")
+            except Exception as exc:
+                raise ValueError(f"Can't find '{CONFIG_NAME}' at '{pretrained_model_name_or_path}'") from exc
 
         loaded_attributes = cls.from_json_file(config_file)
         kwargs = {**class_kwargs, **loaded_attributes}
+        kwargs = cls.check_kwargs(**kwargs)
         return cls.from_peft_type(**kwargs)
 
     @classmethod
@@ -161,6 +217,13 @@ class PeftConfigMixin(PushToHubMixin):
         """
         with open(path_json_file) as file:
             json_object = json.load(file)
+
+        # Sanity check that config does not contain a runtime_config
+        if "runtime_config" in json_object:
+            warnings.warn(
+                "The configuration file contains a `runtime_config` key. This is ignored. Runtime configurations are only valid at runtime."
+            )
+            del json_object["runtime_config"]
 
         return json_object
 
@@ -205,6 +268,15 @@ class PeftConfigMixin(PushToHubMixin):
         loaded_attributes = cls.from_json_file(config_file)
         return loaded_attributes["peft_type"]
 
+    @classmethod
+    def check_kwargs(cls, **kwargs):
+        """Check kwargs before initializing the config instance.
+
+        Subclasses can override this method to add specific checks.
+
+        """
+        return kwargs
+
     @property
     def is_prompt_learning(self) -> bool:
         r"""
@@ -232,7 +304,7 @@ class PeftConfig(PeftConfigMixin):
     base_model_name_or_path: Optional[str] = field(
         default=None, metadata={"help": "The name of the base model to use."}
     )
-    revision: Optional[str] = field(default=None, metadata={"help": "The specific model version to use."})
+    revision: Optional[str] = field(default=None, metadata={"help": "The specific base model version to use."})
     peft_type: Optional[Union[str, PeftType]] = field(default=None, metadata={"help": "Peft type"})
     task_type: Optional[Union[str, TaskType]] = field(default=None, metadata={"help": "Task type"})
     inference_mode: bool = field(default=False, metadata={"help": "Whether to use inference mode"})

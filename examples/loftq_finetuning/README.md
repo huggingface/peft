@@ -10,7 +10,7 @@ Steps:
 1. Apply LoftQ to a full-precision pre-trained weight and save.
 2. Load LoftQ initialization and train.
 
-For step 1, we have provided off-the-shelf LoftQ initializations (see [supported model list](#appendix-off-the-shelf-model-table)) 
+For step 1, we have provided off-the-shelf LoftQ initializations (see [supported model list](#appendix-off-the-shelf-model-list)) 
 in [Huggingface Hub LoftQ](https://huggingface.co/LoftQ).
 If you want to do it yourself, jump to [LoftQ DIY](#loftq-diy).
 
@@ -138,3 +138,7 @@ python train_gsm8k_llama.py \
 | BART-large  | 4    | 16    |
 | BART-large  | 4    | 32    |
 | BART-large  | 2    | 8     |
+
+## In-place application of LoftQ initialization
+
+PEFT provides a convenience function `replace_lora_weights_loftq` to apply LoftQ initialization in-place to the quantized model. Check out [this notebook](https://github.com/huggingface/peft/blob/main/examples/loftq_finetuning/LoftQ_weight_replacement.ipynb) for an example.

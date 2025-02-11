@@ -64,7 +64,19 @@ from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 from transformers.pytorch_utils import Conv1D
 
 import peft
-from peft import AdaLoraConfig, IA3Config, LoHaConfig, LoKrConfig, LoraConfig, PeftModel, get_peft_model
+from peft import (
+    AdaLoraConfig,
+    BOFTConfig,
+    IA3Config,
+    LNTuningConfig,
+    LoHaConfig,
+    LoKrConfig,
+    LoraConfig,
+    PeftModel,
+    VBLoRAConfig,
+    VeraConfig,
+    get_peft_model,
+)
 from peft.utils import infer_device
 
 
@@ -176,7 +188,7 @@ def save_model(model, name, force=False):
 
 def load_output(name):
     filename = os.path.join(REGRESSION_DIR, name, "output.pt")
-    return torch.load(filename)
+    return torch.load(filename, map_location=infer_device())
 
 
 @pytest.mark.regression
@@ -299,12 +311,24 @@ class TestMlp(RegressionTester):
         model = get_peft_model(base_model, config)
         self.assert_results_equal_or_store(model, "lora_mlp")
 
+    def test_lora_dora(self):
+        base_model = self.load_base_model()
+        config = LoraConfig(
+            r=8,
+            init_lora_weights=False,
+            target_modules=["lin0"],
+            use_dora=True,
+        )
+        model = get_peft_model(base_model, config)
+        self.assert_results_equal_or_store(model, "lora_dora_mlp")
+
     def test_adalora(self):
         base_model = self.load_base_model()
         config = AdaLoraConfig(
             r=8,
             init_lora_weights=False,
             target_modules=["lin0"],
+            total_step=1,
         )
         model = get_peft_model(base_model, config)
         self.assert_results_equal_or_store(model, "adalora_mlp")
@@ -362,6 +386,37 @@ class TestMlp(RegressionTester):
         )
         model = get_peft_model(base_model, config)
         self.assert_results_equal_or_store(model, "lora_mlp_modules_to_save")
+
+    def test_boft(self):
+        base_model = self.load_base_model()
+        config = BOFTConfig(
+            boft_block_size=2,
+            target_modules=["lin0"],
+        )
+        model = get_peft_model(base_model, config)
+        self.assert_results_equal_or_store(model, "boft_mlp")
+
+    def test_ln_tuning(self):
+        base_model = self.load_base_model()
+        config = LNTuningConfig(target_modules=["lin0"])
+        model = get_peft_model(base_model, config)
+        self.assert_results_equal_or_store(model, "ln_tuning_mlp")
+
+    def test_vera_tuning(self):
+        base_model = self.load_base_model()
+        config = VeraConfig(target_modules=["lin0"])
+        model = get_peft_model(base_model, config)
+        self.assert_results_equal_or_store(model, "vera_tuning_mlp")
+
+    def test_vblora_tuning(self):
+        base_model = self.load_base_model()
+        config = VBLoRAConfig(
+            vector_length=1,
+            num_vectors=2,
+            target_modules=["lin0"],
+        )
+        model = get_peft_model(base_model, config)
+        self.assert_results_equal_or_store(model, "vblora_tuning_mlp")
 
 
 class TestLoraEmbConv1D(RegressionTester):
@@ -478,6 +533,15 @@ class TestLoraConv2D(RegressionTester):
         model = get_peft_model(base_model, config)
         self.assert_results_equal_or_store(model, "lokr_conv2d")
 
+    def test_boft(self):
+        base_model = self.load_base_model()
+        config = BOFTConfig(
+            boft_block_size=3,
+            target_modules=["conv2d"],
+        )
+        model = get_peft_model(base_model, config)
+        self.assert_results_equal_or_store(model, "boft_conv2d")
+
 
 class TestOpt(RegressionTester):
     def get_output(self, model):
@@ -504,6 +568,7 @@ class TestOpt(RegressionTester):
         config = AdaLoraConfig(
             r=8,
             init_lora_weights=False,
+            total_step=1,
         )
         model = get_peft_model(base_model, config)
         self.assert_results_equal_or_store(model, "adalora_opt-350m")
@@ -528,11 +593,14 @@ class TestOpt8bitBnb(RegressionTester):
         self.fix_seed()
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-350m",
-            load_in_8bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
         )
         return model
 
     def test_lora_8bit(self):
+        # Warning: bnb results can vary significantly depending on the GPU. Therefore, if there is a change in GPU used
+        # in the CI, the test can fail without any code change. In that case, delete the regression artifact and create
+        # a new one using the new GPU.
         base_model = self.load_base_model()
         config = LoraConfig(
             r=8,
@@ -546,12 +614,16 @@ class TestOpt8bitBnb(RegressionTester):
         self.skipTest(
             "Skipping AdaLora for now, getting TypeError: unsupported operand type(s) for +=: 'dict' and 'Tensor'"
         )
+        # Warning: bnb results can vary significantly depending on the GPU. Therefore, if there is a change in GPU used
+        # in the CI, the test can fail without any code change. In that case, delete the regression artifact and create
+        # a new one using the new GPU.
         base_model = self.load_base_model()
         config = AdaLoraConfig(
             init_r=6,
             target_r=4,
             tinit=50,
             tfinal=100,
+            total_step=200,
             deltaT=5,
             beta1=0.3,
             beta2=0.3,
@@ -579,7 +651,7 @@ class TestOpt4bitBnb(RegressionTester):
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_use_double_quant=False,
-            bnb_4bit_compute_type=torch.float32,
+            bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-350m",
@@ -589,6 +661,9 @@ class TestOpt4bitBnb(RegressionTester):
         return model
 
     def test_lora_4bit(self):
+        # Warning: bnb results can vary significantly depending on the GPU. Therefore, if there is a change in GPU used
+        # in the CI, the test can fail without any code change. In that case, delete the regression artifact and create
+        # a new one using the new GPU.
         base_model = self.load_base_model()
         config = LoraConfig(
             r=8,
@@ -600,12 +675,16 @@ class TestOpt4bitBnb(RegressionTester):
     def test_adalora(self):
         # TODO
         self.skipTest("Skipping AdaLora for now because of a bug, see #1113")
+        # Warning: bnb results can vary significantly depending on the GPU. Therefore, if there is a change in GPU used
+        # in the CI, the test can fail without any code change. In that case, delete the regression artifact and create
+        # a new one using the new GPU.
         base_model = self.load_base_model()
         config = AdaLoraConfig(
             init_r=6,
             target_r=4,
             tinit=50,
             tfinal=100,
+            total_step=200,
             deltaT=5,
             beta1=0.3,
             beta2=0.3,

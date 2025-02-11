@@ -37,10 +37,14 @@
     title: Adapter injection
   - local: developer_guides/mixed_models
     title: Mixed adapter types
+  - local: developer_guides/torch_compile
+    title: torch.compile
   - local: developer_guides/contributing
     title: Contribute to PEFT
   - local: developer_guides/troubleshooting
     title: Troubleshooting
+  - local: developer_guides/checkpoint
+    title: PEFT checkpoint format
 
 - title: 🤗 Accelerate integrations
   sections:
@@ -57,6 +61,8 @@
     title: Soft prompts
   - local: conceptual_guides/ia3
     title: IA3
+  - local: conceptual_guides/oft
+    title: OFT/BOFT
 
 - sections:
   - sections:
@@ -84,12 +90,16 @@
       title: LoKr
     - local: package_reference/lora
       title: LoRA
+    - local: package_reference/xlora
+      title: X-LoRA
     - local: package_reference/adapter_utils
       title: LyCORIS
     - local: package_reference/multitask_prompt_tuning
       title: Multitask Prompt Tuning
     - local: package_reference/oft
       title: OFT
+    - local: package_reference/boft
+      title: BOFT
     - local: package_reference/poly
       title: Polytropon
     - local: package_reference/p_tuning
@@ -98,10 +108,28 @@
       title: Prefix tuning
     - local: package_reference/prompt_tuning
       title: Prompt tuning
+    - local: package_reference/layernorm_tuning
+      title: Layernorm tuning
+    - local: package_reference/vera
+      title: VeRA
+    - local: package_reference/fourierft
+      title: FourierFT
+    - local: package_reference/vblora
+      title: VB-LoRA
+    - local: package_reference/hra
+      title: HRA
+    - local: package_reference/cpt
+      title: CPT
+    - local: package_reference/bone
+      title: Bone
+
     title: Adapters
   - sections:
     - local: package_reference/merge_utils
       title: Model merge
+    - local: package_reference/helpers
+      title: Helpers
+    - local: package_reference/hotswap
+      title: Hotswapping adapters
     title: Utilities
   title: API reference
-

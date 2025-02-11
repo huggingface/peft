@@ -71,6 +71,7 @@ class LycorisLayer(BaseTunerLayer):
         self.alpha = {}
         self.scaling = {}
         self.rank_dropout = {}
+        self.rank_dropout_scale = {}
         self.module_dropout = {}
 
         # Tuner info
@@ -79,8 +80,7 @@ class LycorisLayer(BaseTunerLayer):
 
     @property
     @abstractmethod
-    def _available_adapters(self) -> set[str]:
-        ...
+    def _available_adapters(self) -> set[str]: ...
 
     def _init_empty_weights(self, cls, *args, **kwargs) -> None:
         # A helper method that allows to initialize the layer of the given class without spending time to initialize the
@@ -95,8 +95,7 @@ class LycorisLayer(BaseTunerLayer):
         self.to_empty(device=final_device)
 
     @abstractmethod
-    def create_adapter_parameters(self, adapter_name: str, r: int, **kwargs):
-        ...
+    def create_adapter_parameters(self, adapter_name: str, r: int, **kwargs): ...
 
     # TODO: refactor LoRA to use the same approach
     @abstractmethod
@@ -104,8 +103,7 @@ class LycorisLayer(BaseTunerLayer):
         """Activations added on top of the base layer output (i.e. after the base layer forward pass)"""
 
     @abstractmethod
-    def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
-        ...
+    def get_delta_weight(self, adapter_name: str) -> torch.Tensor: ...
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -143,8 +141,7 @@ class LycorisLayer(BaseTunerLayer):
                 self.merged_adapters.append(active_adapter)
 
     @abstractmethod
-    def reset_adapter_parameters(self, adapter_name: str):
-        ...
+    def reset_adapter_parameters(self, adapter_name: str): ...
 
     def set_scale(self, adapter, scale):
         if adapter not in self._available_adapters:
@@ -185,26 +182,35 @@ class LycorisLayer(BaseTunerLayer):
                 self.scaling[active_adapter] /= scale
 
     @abstractmethod
-    def update_layer(self, adapter_name: str, r: int, alpha: float, **kwargs):
-        ...
+    def update_layer(self, adapter_name: str, r: int, alpha: float, **kwargs): ...
 
 
 class LycorisTuner(BaseTuner):
     r"""
     A base tuner for LyCORIS like adapters
+
+    Args:
+        model ([`torch.nn.Module`]): The model to be adapted.
+        config ([`LoraConfig`]): The configuration of the Lora model.
+        adapter_name (`str`): The name of the adapter, defaults to `"default"`.
+        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+            Create empty adapter weights on meta device. Useful to speed up the loading process.
+
     """
 
     prefix: str
     layers_mapping: dict[type[torch.nn.Module], type[LycorisLayer]]
 
-    def __init__(self, model, config, adapter_name):
-        super().__init__(model, config, adapter_name)
+    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False):
+        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
+            if name == "model":  # see #1892: prevent infinite recursion if class is not initialized
+                raise
             return getattr(self.model, name)
 
     @staticmethod
@@ -220,8 +226,7 @@ class LycorisTuner(BaseTuner):
         target_name,
         parent,
         current_key,
-    ):
-        ...
+    ): ...
 
     @classmethod
     def _create_new_module(cls, config: LycorisConfig, adapter_name: str, target: nn.Module, **kwargs) -> LycorisLayer:
@@ -294,10 +299,12 @@ class LycorisTuner(BaseTuner):
                 new_module.state = child.state
             new_module.to(child.weight.device)
 
+        meta = torch.device("meta")
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if self.prefix in name:
-                module.to(child.weight.device)
+                if not any(p.device == meta for p in module.parameters()):
+                    module.to(child.weight.device)
 
     def _set_adapter_layers(self, enabled=True):
         for module in self.model.modules():
@@ -404,6 +411,7 @@ class LycorisTuner(BaseTuner):
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
                 module.set_adapter(adapter_name)
+        self.active_adapter = adapter_name
 
     def delete_adapter(self, adapter_name: str) -> None:
         """

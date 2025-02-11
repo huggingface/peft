@@ -35,13 +35,27 @@ class AqlmLoraLinear(torch.nn.Module, LoraLayer):
         lora_dropout: float = 0.0,
         init_lora_weights: bool = True,
         use_rslora: bool = False,
+        use_dora: bool = False,
+        lora_bias: bool = False,
         **kwargs,
     ):
+        if use_dora:
+            raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
+
         super().__init__()
         LoraLayer.__init__(self, base_layer)
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
+        self.update_layer(
+            adapter_name,
+            r,
+            lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+            init_lora_weights=init_lora_weights,
+            use_rslora=use_rslora,
+            use_dora=use_dora,
+            lora_bias=lora_bias,
+        )
 
     def forward(self, x: torch.Tensor):
         # note: logic differs from default Linear because merging is not supported
@@ -61,7 +75,7 @@ class AqlmLoraLinear(torch.nn.Module, LoraLayer):
             requires_conversion = not torch.is_autocast_enabled()
             if requires_conversion:
                 expected_dtype = result.dtype
-                x = x.to(lora_A.weight.dtype)
+                x = self._cast_input_dtype(x, lora_A.weight.dtype)
 
             output = lora_B(lora_A(dropout(x)))
             if requires_conversion:

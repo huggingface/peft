@@ -18,7 +18,7 @@ import torch
 from parameterized import parameterized
 from transformers import AutoModelForSeq2SeqLM, AutoModelForTokenClassification
 
-from peft import LoraConfig, TaskType, get_peft_model
+from peft import LoraConfig, PromptEncoderConfig, TaskType, get_peft_model
 
 from .testing_common import PeftCommonTester, PeftTestConfigManager
 
@@ -82,6 +82,9 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
     def test_save_pretrained_selected_adapters_pickle(self, test_name, model_id, config_cls, config_kwargs):
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs, safe_serialization=False)
 
+    def test_load_model_low_cpu_mem_usage(self):
+        self._test_load_model_low_cpu_mem_usage(PEFT_ENCODER_DECODER_MODELS_TO_TEST[0], LoraConfig, {})
+
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_from_pretrained_config_construction(self, test_name, model_id, config_cls, config_kwargs):
         self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs)
@@ -91,13 +94,41 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
             {
                 "model_ids": PEFT_ENCODER_DECODER_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
+                "adalora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
+                "vera_kwargs": {"init_weights": [False]},
+                "hra_kwargs": {"init_weights": [False]},
+                "bone_kwargs": {"init_weights": [False]},
                 "task_type": "SEQ_2_SEQ_LM",
             },
         )
     )
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
         self._test_merge_layers(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_ENCODER_DECODER_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False]},
+                "task_type": "SEQ_2_SEQ_LM",
+            },
+        )
+    )
+    def test_mixed_adapter_batches(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_mixed_adapter_batches(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_ENCODER_DECODER_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False]},
+                "task_type": "SEQ_2_SEQ_LM",
+            },
+        )
+    )
+    def test_generate_with_mixed_adapter_batches(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_generate_with_mixed_adapter_batches_and_beam_search(model_id, config_cls, config_kwargs)
 
     # skip non lora models - generate does not work for prefix tuning, prompt tuning
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
@@ -157,6 +188,11 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "adalora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
+                "boft_kwargs": {"init_weights": [False]},
+                "oft_kwargs": {"init_weights": [False]},
+                "vera_kwargs": {"init_weights": [False]},
+                "hra_kwargs": {"init_weights": [False]},
+                "bone_kwargs": {"init_weights": [False]},
                 "task_type": "SEQ_2_SEQ_LM",
             },
         )
@@ -169,6 +205,8 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
             {
                 "model_ids": PEFT_ENCODER_DECODER_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
+                "ia3_kwargs": {"init_ia3_weights": [False]},
+                "bone_kwargs": {"init_weights": [False]},
                 "task_type": "SEQ_2_SEQ_LM",
             },
         )
@@ -187,12 +225,25 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "adalora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
+                "boft_kwargs": {"init_weights": [False]},
+                "oft_kwargs": {"init_weights": [False]},
+                "vera_kwargs": {"init_weights": [False]},
+                "hra_kwargs": {"init_weights": [False]},
+                "bone_kwargs": {"init_weights": [False]},
                 "task_type": "SEQ_2_SEQ_LM",
             },
         )
     )
     def test_disable_adapter(self, test_name, model_id, config_cls, config_kwargs):
         self._test_disable_adapter(model_id, config_cls, config_kwargs)
+
+    def test_active_adapters_prompt_learning(self):
+        # see issue https://github.com/huggingface/transformers/pull/30790#issuecomment-2253808249
+        model = AutoModelForSeq2SeqLM.from_pretrained("hf-internal-testing/tiny-random-BartForConditionalGeneration")
+        # any prompt learning method would work here
+        config = PromptEncoderConfig(task_type=TaskType.SEQ_2_SEQ_LM, num_virtual_tokens=10)
+        model = get_peft_model(model, config)
+        assert model.active_adapters == ["default"]
 
 
 class PeftEncoderDecoderCustomModelTester(unittest.TestCase):

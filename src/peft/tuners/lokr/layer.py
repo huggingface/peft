@@ -126,6 +126,23 @@ class LoKrLayer(nn.Module, LycorisLayer):
         if adapter_name in self.lokr_t2:
             nn.init.kaiming_uniform_(self.lokr_t2[adapter_name], a=math.sqrt(5))
 
+    # Initializes weight matrices similar to the way initialized in the LyCORIS repository.
+    def reset_adapter_parameters_lycoris_way(self, adapter_name):
+        if adapter_name in self.lokr_w1:
+            nn.init.kaiming_uniform_(self.lokr_w1[adapter_name], a=math.sqrt(5))
+        else:
+            nn.init.kaiming_uniform_(self.lokr_w1_a[adapter_name], a=math.sqrt(5))
+            nn.init.kaiming_uniform_(self.lokr_w1_b[adapter_name], a=math.sqrt(5))
+
+        if adapter_name in self.lokr_w2:
+            nn.init.zeros_(self.lokr_w2[adapter_name])
+        else:
+            nn.init.zeros_(self.lokr_w2_b[adapter_name])
+            nn.init.kaiming_uniform_(self.lokr_w2_a[adapter_name], a=math.sqrt(5))
+
+        if adapter_name in self.lokr_t2:
+            nn.init.kaiming_uniform_(self.lokr_t2[adapter_name], a=math.sqrt(5))
+
     def update_layer(
         self,
         adapter_name: str,
@@ -160,6 +177,7 @@ class LoKrLayer(nn.Module, LycorisLayer):
         self.scaling[adapter_name] = alpha / r
         self.rank_dropout[adapter_name] = rank_dropout
         self.module_dropout[adapter_name] = module_dropout
+        self.rank_dropout_scale[adapter_name] = kwargs["rank_dropout_scale"]
         base_layer = self.get_base_layer()
 
         # Determine shape of LoKr weights
@@ -192,18 +210,15 @@ class LoKrLayer(nn.Module, LycorisLayer):
 
         # Initialize weights
         if init_weights:
-            self.reset_adapter_parameters(adapter_name)
+            if init_weights == "lycoris":
+                self.reset_adapter_parameters_lycoris_way(adapter_name)
+            else:
+                self.reset_adapter_parameters(adapter_name)
         else:
             self.reset_adapter_parameters_random(adapter_name)
 
         # Move new weights to device
-        weight = getattr(self.get_base_layer(), "weight", None)
-        if weight is not None:
-            # the layer is already completely initialized, this is an update
-            if weight.dtype.is_floating_point or weight.dtype.is_complex:
-                self.to(weight.device, dtype=weight.dtype)
-            else:
-                self.to(weight.device)
+        self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
@@ -221,7 +236,7 @@ class LoKrLayer(nn.Module, LycorisLayer):
             w2 = self.lokr_w2_a[adapter_name] @ self.lokr_w2_b[adapter_name]
 
         # Make weights with Kronecker product
-        weight = make_kron(w1, w2)
+        weight = make_kron(w1, w2, self.scaling[adapter_name])
         weight = weight.reshape(self.get_base_layer().weight.shape)
 
         # Perform rank dropout during training - drop rows of addition weights
@@ -229,7 +244,8 @@ class LoKrLayer(nn.Module, LycorisLayer):
         if self.training and rank_dropout:
             drop = (torch.rand(weight.size(0)) > rank_dropout).float()
             drop = drop.view(-1, *[1] * len(weight.shape[1:])).to(weight.device)
-            drop /= drop.mean()
+            if self.rank_dropout_scale[adapter_name]:
+                drop /= drop.mean()
             weight *= drop
 
         return weight

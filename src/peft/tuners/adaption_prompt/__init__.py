@@ -11,9 +11,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from peft.utils import register_peft_method
+
 from .config import AdaptionPromptConfig
 from .layer import AdaptedAttention
 from .model import AdaptionPromptModel
 
 
-__all__ = ["AdaptionPromptConfig", "AdaptedAttention", "AdaptionPromptModel"]
+__all__ = ["AdaptedAttention", "AdaptionPromptConfig", "AdaptionPromptModel"]
+
+register_peft_method(name="adaption_prompt", config_cls=AdaptionPromptConfig, model_cls=AdaptionPromptModel)

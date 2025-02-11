@@ -71,3 +71,7 @@ A `PeftModel` for mixing different adapter types (e.g. LoRA and LoHa).
 [[autodoc]] utils.get_peft_model_state_dict
 
 [[autodoc]] utils.prepare_model_for_kbit_training
+
+[[autodoc]] get_layer_status
+
+[[autodoc]] get_model_status

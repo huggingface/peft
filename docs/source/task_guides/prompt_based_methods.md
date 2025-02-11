@@ -90,7 +90,7 @@ def preprocess_function(examples, text_column="Tweet text", label_column="text_l
         model_inputs["attention_mask"][i] = [0] * (max_length - len(sample_input_ids)) + model_inputs[
             "attention_mask"
         ][i]
-        labels["input_ids"][i] = [-100] * (max_length - len(sample_input_ids)) + label_input_ids
+        labels["input_ids"][i] = [-100] * (max_length - len(label_input_ids)) + label_input_ids
         model_inputs["input_ids"][i] = torch.tensor(model_inputs["input_ids"][i][:max_length])
         model_inputs["attention_mask"][i] = torch.tensor(model_inputs["attention_mask"][i][:max_length])
         labels["input_ids"][i] = torch.tensor(labels["input_ids"][i][:max_length])
@@ -188,7 +188,7 @@ prompt_tuning_init_text = "Classify if the tweet is a complaint or no complaint.
 peft_config = PromptTuningConfig(
     task_type="CAUSAL_LM",
     prompt_tuning_init=PromptTuningInit.TEXT,
-    num_virtual_tokens=len(tokenizer(prompt_tuning_init_text)["input_ids"]),,
+    num_virtual_tokens=len(tokenizer(prompt_tuning_init_text)["input_ids"]),
     prompt_tuning_init_text=prompt_tuning_init_text,
     tokenizer_name_or_path="bigscience/bloomz-560m",
 )

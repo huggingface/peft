@@ -18,78 +18,19 @@ from typing import TYPE_CHECKING, Any
 
 import torch
 
-from .config import PeftConfig
-from .mixed_model import PeftMixedModel
-from .peft_model import (
-    PeftModel,
-    PeftModelForCausalLM,
-    PeftModelForFeatureExtraction,
-    PeftModelForQuestionAnswering,
-    PeftModelForSeq2SeqLM,
-    PeftModelForSequenceClassification,
-    PeftModelForTokenClassification,
-)
-from .tuners import (
-    AdaLoraConfig,
-    AdaLoraModel,
-    AdaptionPromptConfig,
-    IA3Config,
-    IA3Model,
-    LoHaConfig,
-    LoHaModel,
-    LoKrConfig,
-    LoKrModel,
-    LoraConfig,
-    LoraModel,
-    MultitaskPromptTuningConfig,
-    OFTConfig,
-    OFTModel,
-    PolyConfig,
-    PolyModel,
-    PrefixTuningConfig,
-    PromptEncoderConfig,
-    PromptTuningConfig,
-)
-from .utils import _prepare_prompt_learning_config
+from .utils import PeftType
 
 
 if TYPE_CHECKING:
-    from transformers import PreTrainedModel
+    from .config import PeftConfig
+    from .tuners.tuners_utils import BaseTuner
 
 
-MODEL_TYPE_TO_PEFT_MODEL_MAPPING: dict[str, PeftModel] = {
-    "SEQ_CLS": PeftModelForSequenceClassification,
-    "SEQ_2_SEQ_LM": PeftModelForSeq2SeqLM,
-    "CAUSAL_LM": PeftModelForCausalLM,
-    "TOKEN_CLS": PeftModelForTokenClassification,
-    "QUESTION_ANS": PeftModelForQuestionAnswering,
-    "FEATURE_EXTRACTION": PeftModelForFeatureExtraction,
-}
-
-PEFT_TYPE_TO_CONFIG_MAPPING: dict[str, PeftConfig] = {
-    "ADAPTION_PROMPT": AdaptionPromptConfig,
-    "PROMPT_TUNING": PromptTuningConfig,
-    "PREFIX_TUNING": PrefixTuningConfig,
-    "P_TUNING": PromptEncoderConfig,
-    "LORA": LoraConfig,
-    "LOHA": LoHaConfig,
-    "LOKR": LoKrConfig,
-    "ADALORA": AdaLoraConfig,
-    "IA3": IA3Config,
-    "MULTITASK_PROMPT_TUNING": MultitaskPromptTuningConfig,
-    "OFT": OFTConfig,
-    "POLY": PolyConfig,
-}
-
-PEFT_TYPE_TO_TUNER_MAPPING = {
-    "LORA": LoraModel,
-    "LOHA": LoHaModel,
-    "LOKR": LoKrModel,
-    "ADALORA": AdaLoraModel,
-    "IA3": IA3Model,
-    "OFT": OFTModel,
-    "POLY": PolyModel,
-}
+# these will be filled by the register_peft_method function
+PEFT_TYPE_TO_CONFIG_MAPPING: dict[PeftType, type[PeftConfig]] = {}
+PEFT_TYPE_TO_TUNER_MAPPING: dict[PeftType, type[BaseTuner]] = {}
+PEFT_TYPE_TO_MIXED_MODEL_MAPPING: dict[PeftType, type[BaseTuner]] = {}
+PEFT_TYPE_TO_PREFIX_MAPPING: dict[PeftType, str] = {}
 
 
 def get_peft_config(config_dict: dict[str, Any]) -> PeftConfig:
@@ -103,41 +44,8 @@ def get_peft_config(config_dict: dict[str, Any]) -> PeftConfig:
     return PEFT_TYPE_TO_CONFIG_MAPPING[config_dict["peft_type"]](**config_dict)
 
 
-def get_peft_model(
-    model: PreTrainedModel, peft_config: PeftConfig, adapter_name: str = "default", mixed: bool = False
-) -> PeftModel | PeftMixedModel:
-    """
-    Returns a Peft model object from a model and a config.
-
-    Args:
-        model ([`transformers.PreTrainedModel`]):
-            Model to be wrapped.
-        peft_config ([`PeftConfig`]):
-            Configuration object containing the parameters of the Peft model.
-        adapter_name (`str`, `optional`, defaults to `"default"`):
-            The name of the adapter to be injected, if not provided, the default adapter name is used ("default").
-        mixed (`bool`, `optional`, defaults to `False`):
-            Whether to allow mixing different (compatible) adapter types.
-    """
-    model_config = getattr(model, "config", {"model_type": "custom"})
-    if hasattr(model_config, "to_dict"):
-        model_config = model_config.to_dict()
-
-    peft_config.base_model_name_or_path = model.__dict__.get("name_or_path", None)
-
-    if mixed:
-        return PeftMixedModel(model, peft_config, adapter_name=adapter_name)
-
-    if peft_config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys() and not peft_config.is_prompt_learning:
-        return PeftModel(model, peft_config, adapter_name=adapter_name)
-
-    if peft_config.is_prompt_learning:
-        peft_config = _prepare_prompt_learning_config(peft_config, model_config)
-    return MODEL_TYPE_TO_PEFT_MODEL_MAPPING[peft_config.task_type](model, peft_config, adapter_name=adapter_name)
-
-
 def inject_adapter_in_model(
-    peft_config: PeftConfig, model: torch.nn.Module, adapter_name: str = "default"
+    peft_config: PeftConfig, model: torch.nn.Module, adapter_name: str = "default", low_cpu_mem_usage: bool = False
 ) -> torch.nn.Module:
     r"""
     A simple API to create and inject adapter in-place into a model. Currently the API does not support prompt learning
@@ -151,6 +59,8 @@ def inject_adapter_in_model(
             The input model where the adapter will be injected.
         adapter_name (`str`, `optional`, defaults to `"default"`):
             The name of the adapter to be injected, if not provided, the default adapter name is used ("default").
+        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+            Create empty adapter weights on meta device. Useful to speed up the loading process.
     """
     if peft_config.is_prompt_learning or peft_config.is_adaption_prompt:
         raise ValueError("`create_and_replace` does not support prompt learning and adaption prompt yet.")
@@ -163,6 +73,6 @@ def inject_adapter_in_model(
     tuner_cls = PEFT_TYPE_TO_TUNER_MAPPING[peft_config.peft_type]
 
     # By instantiating a peft model we are injecting randomly initialized LoRA layers into the model's modules.
-    peft_model = tuner_cls(model, peft_config, adapter_name=adapter_name)
+    peft_model = tuner_cls(model, peft_config, adapter_name=adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
     return peft_model.model

@@ -7,6 +7,8 @@ on:
         description: 'Branch to test on'
         required: true
 
+permissions: {}
+
 jobs:
   run_transformers_integration_tests:
     strategy:
@@ -19,6 +21,7 @@ jobs:
         with:
           ref: ${{ github.event.inputs.branch }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -27,8 +30,8 @@ jobs:
           cache-dependency-path: "setup.py"
       - name: print environment variables
         run: |
-          echo "env.CI_BRANCH = ${{ env.CI_BRANCH }}"
-          echo "env.CI_SHA = ${{ env.CI_SHA }}"
+          echo "env.CI_BRANCH = ${CI_BRANCH}"
+          echo "env.CI_SHA = ${CI_SHA}"
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -55,6 +58,7 @@ jobs:
         with:
           ref: ${{ github.event.inputs.branch }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -63,13 +67,13 @@ jobs:
           cache-dependency-path: "setup.py"
       - name: print environment variables
         run: |
-          echo "env.CI_BRANCH = ${{ env.CI_BRANCH }}"
-          echo "env.CI_SHA = ${{ env.CI_SHA }}"
+          echo "env.CI_BRANCH = ${CI_BRANCH}"
+          echo "env.CI_SHA = ${CI_SHA}"
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install .[test]
-          
+
           if [ "${{ matrix.diffusers-version }}" == "main" ]; then
               pip install -U git+https://github.com/huggingface/diffusers.git
           else

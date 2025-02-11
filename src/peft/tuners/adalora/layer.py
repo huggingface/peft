@@ -15,7 +15,9 @@
 import warnings
 from typing import Any, List, Optional
 
+import packaging
 import torch
+import transformers
 from torch import nn
 
 from peft.tuners.lora import LoraLayer
@@ -23,11 +25,18 @@ from peft.tuners.tuners_utils import check_adapters_to_merge
 from peft.utils import transpose
 
 
+if packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.33.0"):
+    from transformers.integrations import deepspeed_config
+else:
+    from transformers.deepspeed import deepspeed_config
+
+
 class AdaLoraLayer(LoraLayer):
     # List all names of layers that may contain adapter weights
     # Note: ranknum doesn't need to be included as it is not an nn.Module
     adapter_layer_names = ("lora_A", "lora_B", "lora_E", "lora_embedding_A", "lora_embedding_B")
-    # other_param_names is defined in LoraLayer
+    # All names of other parameters that may contain adapter-related parameters
+    other_param_names = ("r", "lora_alpha", "scaling", "lora_dropout", "ranknum")
 
     def __init__(self, base_layer: nn.Module) -> None:
         super().__init__(base_layer)
@@ -37,8 +46,9 @@ class AdaLoraLayer(LoraLayer):
         self.ranknum = nn.ParameterDict({})
 
     def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
-        if r <= 0:
-            raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+        if r < 0:
+            # note: r == 0 is allowed for AdaLora, see #1539
+            raise ValueError(f"`r` should be a positive integer or 0, but the value passed is {r}")
 
         self.r[adapter_name] = r
         self.lora_alpha[adapter_name] = lora_alpha
@@ -63,16 +73,12 @@ class AdaLoraLayer(LoraLayer):
         if init_lora_weights:
             self.reset_lora_parameters(adapter_name)
 
-        if hasattr(self.get_base_layer(), "qweight"):
-            # QuantLinear
-            self.to(self.get_base_layer().qweight.device)
-        else:
-            self.to(self.get_base_layer().weight.device)
+        self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
     def reset_lora_parameters(self, adapter_name):
         if adapter_name in self.lora_A.keys():
-            nn.init.normal_(self.lora_E[adapter_name], mean=0.0, std=0.02)
+            nn.init.zeros_(self.lora_E[adapter_name])
             nn.init.normal_(self.lora_A[adapter_name], mean=0.0, std=0.02)
             nn.init.normal_(self.lora_B[adapter_name], mean=0.0, std=0.02)
 
@@ -174,7 +180,7 @@ class SVDLinear(nn.Module, AdaLoraLayer):
                 scaling = self.scaling[active_adapter]
                 ranknum = self.ranknum[active_adapter] + 1e-5
 
-                x = x.to(lora_A.dtype)
+                x = self._cast_input_dtype(x, lora_A.dtype)
                 result += (dropout(x) @ (lora_A * lora_E).T @ lora_B.T) * scaling / ranknum
 
         return result
@@ -252,7 +258,13 @@ class RankAllocator:
                     self.exp_avg_ipt[n] = torch.zeros_like(p)
                     self.exp_avg_unc[n] = torch.zeros_like(p)
                 with torch.no_grad():
-                    self.ipt[n] = (p * p.grad).abs().detach()
+                    if deepspeed_config() is not None:
+                        import deepspeed
+
+                        grad = deepspeed.utils.safe_get_full_grad(p)
+                        self.ipt[n] = (p * grad).abs().detach()
+                    else:
+                        self.ipt[n] = (p * p.grad).abs().detach()
                     # Sensitivity smoothing
                     self.exp_avg_ipt[n] = self.beta1 * self.exp_avg_ipt[n] + (1 - self.beta1) * self.ipt[n]
                     # Uncertainty quantification

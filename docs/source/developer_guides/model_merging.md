@@ -50,6 +50,9 @@ config = PeftConfig.from_pretrained("smangrul/tinyllama_lora_norobots")
 model = AutoModelForCausalLM.from_pretrained(config.base_model_name_or_path, load_in_4bit=True, device_map="auto").eval()
 tokenizer = AutoTokenizer.from_pretrained("smangrul/tinyllama_lora_norobots")
 
+model.config.vocab_size = 32005
+model.resize_token_embeddings(32005)
+
 model = PeftModel.from_pretrained(model, "smangrul/tinyllama_lora_norobots", adapter_name="norobots")
 _ = model.load_adapter("smangrul/tinyllama_lora_sql", adapter_name="sql")
 _ = model.load_adapter("smangrul/tinyllama_lora_adcopy", adapter_name="adcopy")
@@ -138,3 +141,20 @@ print(tokenizer.decode(outputs[0]))
 
 </hfoption>
 </hfoptions>
+
+
+## Merging (IA)³ Models
+The (IA)³ models facilitate linear merging of adapters. To merge adapters in an (IA)³ model, utilize the `add_weighted_adapter` method from the `IA3Model` class. This method is analogous to the `add_weighted_adapter` method used in `LoraModel`, with the key difference being the absence of the `combination_type` parameter. For example, to merge three (IA)³ adapters into a PEFT model, you would proceed as follows:
+
+```py
+adapters = ["adapter1", "adapter2", "adapter3"]
+weights = [0.4, 0.3, 0.3]
+adapter_name = "merge"
+model.add_weighted_adapter(adapters, weights, adapter_name)
+```
+
+It is recommended that the weights sum to 1.0 to preserve the scale of the model. The merged model can then be set as the active model using the `set_adapter` method:
+
+```py
+model.set_adapter("merge")
+```

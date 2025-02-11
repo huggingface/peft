@@ -11,49 +11,68 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
+
 import copy
 import inspect
 import os
+import re
 import warnings
 from contextlib import nullcontext
-from typing import Optional, Tuple
+from typing import Any, Optional
 
 import accelerate
 import torch
 from accelerate.hooks import add_hook_to_module, remove_hook_from_module
 from accelerate.utils import is_npu_available, is_xpu_available
 from huggingface_hub import file_exists
-from huggingface_hub.utils import EntryNotFoundError, HFValidationError
+from huggingface_hub.errors import EntryNotFoundError, HFValidationError
+from packaging import version
 from safetensors.torch import storage_ptr, storage_size
 
-from ..import_utils import is_auto_gptq_available, is_torch_tpu_available
+from ..import_utils import is_auto_gptq_available, is_gptqmodel_available, is_torch_tpu_available
 from .constants import (
     CONFIG_NAME,
     EMBEDDING_LAYER_NAMES,
     INCLUDE_LINEAR_LAYERS_SHORTHAND,
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
+    TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
     WEIGHTS_NAME,
     bloom_model_postprocess_past_key_value,
     starcoder_model_postprocess_past_key_value,
 )
 
 
+mlu_available = False
+if version.parse(accelerate.__version__) >= version.parse("0.29.0"):
+    from accelerate.utils import is_mlu_available
+
+    mlu_available = is_mlu_available()
+
+
 __all__ = [
     "CONFIG_NAME",
     "EMBEDDING_LAYER_NAMES",
+    "INCLUDE_LINEAR_LAYERS_SHORTHAND",
     "SAFETENSORS_WEIGHTS_NAME",
     "TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
+    "TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING",
     "WEIGHTS_NAME",
-    "INCLUDE_LINEAR_LAYERS_SHORTHAND",
     "bloom_model_postprocess_past_key_value",
     "starcoder_model_postprocess_past_key_value",
 ]
@@ -65,6 +84,8 @@ def infer_device() -> str:
         return "cuda"
     elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         return "mps"
+    elif mlu_available:
+        return "mlu"
     elif is_xpu_available():
         return "xpu"
     elif is_npu_available():
@@ -78,7 +99,8 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
 
     This method wraps the entire protocol for preparing a model before running a training. This includes:
         1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
-        head to fp32
+        head to fp32 4- Freezing the base model layers to ensure they are not updated during training
+
 
     Args:
         model (`transformers.PreTrainedModel`):
@@ -93,6 +115,10 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
     loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
     is_gptq_quantized = getattr(model, "quantization_method", None) == "gptq"
     is_aqlm_quantized = getattr(model, "quantization_method", None) == "aqlm"
+    is_eetq_quantized = getattr(model, "quantization_method", None) == "eetq"
+    is_torchao_quantized = getattr(model, "quantization_method", None) == "torchao"
+    is_hqq_quantized = getattr(model, "quantization_method", None) == "hqq" or getattr(model, "hqq_quantized", False)
+
     if gradient_checkpointing_kwargs is None:
         gradient_checkpointing_kwargs = {}
 
@@ -100,13 +126,28 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
         # freeze base model's layers
         param.requires_grad = False
 
-    if not is_gptq_quantized and not is_aqlm_quantized:
+    if (
+        not is_gptq_quantized
+        and not is_aqlm_quantized
+        and not is_eetq_quantized
+        and not is_hqq_quantized
+        and not is_torchao_quantized
+    ):
         # cast all non INT8 parameters to fp32
         for param in model.parameters():
-            if (param.dtype == torch.float16) or (param.dtype == torch.bfloat16):
+            if (
+                (param.dtype == torch.float16) or (param.dtype == torch.bfloat16)
+            ) and param.__class__.__name__ != "Params4bit":
                 param.data = param.data.to(torch.float32)
 
-    if (loaded_in_kbit or is_gptq_quantized or is_aqlm_quantized) and use_gradient_checkpointing:
+    if (
+        loaded_in_kbit
+        or is_gptq_quantized
+        or is_aqlm_quantized
+        or is_eetq_quantized
+        or is_hqq_quantized
+        or is_torchao_quantized
+    ) and use_gradient_checkpointing:
         # When having `use_reentrant=False` + gradient_checkpointing, there is no need for this hack
         if "use_reentrant" not in gradient_checkpointing_kwargs or gradient_checkpointing_kwargs["use_reentrant"]:
             # For backward compatibility
@@ -138,15 +179,6 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
         # enable gradient checkpointing for memory efficiency
         model.gradient_checkpointing_enable(**gc_enable_kwargs)
     return model
-
-
-# For backward compatibility
-def prepare_model_for_int8_training(*args, **kwargs):
-    warnings.warn(
-        "prepare_model_for_int8_training is deprecated and will be removed in a future version. Use prepare_model_for_kbit_training instead.",
-        FutureWarning,
-    )
-    return prepare_model_for_kbit_training(*args, **kwargs)
 
 
 # copied from transformers.models.bart.modeling_bart
@@ -188,7 +220,15 @@ class ModulesToSaveWrapper(torch.nn.Module):
         # ModuleList, even though their forward methods cannot be called
         forbidden_classes = (torch.nn.ModuleDict, torch.nn.ModuleList, torch.nn.ParameterDict, torch.nn.ParameterList)
         if isinstance(self.original_module, forbidden_classes):
-            cls_name = self.original_module.__class__.__name__
+            cls_name = self.original_module.__class__
+            raise TypeError(f"modules_to_save cannot be applied to modules of type {cls_name}")
+
+        # local import to avoid circular import
+        from peft.tuners.tuners_utils import BaseTunerLayer
+
+        if isinstance(self.original_module, BaseTunerLayer):
+            # e.g. applying modules_to_save to a lora layer makes no sense
+            cls_name = self.original_module.__class__
             raise TypeError(f"modules_to_save cannot be applied to modules of type {cls_name}")
 
     @property
@@ -201,11 +241,29 @@ class ModulesToSaveWrapper(torch.nn.Module):
         # use a property to ensure that active_adapter is not set directly, instead use the set_adapter method
         return self._active_adapter
 
-    @property
-    def weight(self):
-        if self.active_adapter not in self.modules_to_save:
-            return self.original_module.weight
-        return self.modules_to_save[self.active_adapter].weight
+    def __getattr__(self, name: str):
+        # Note: This whole method may seem overly complex at first but PyTorch messes with __getattr__ in a way that
+        # requires very careful handling to avoid infinite recursion.
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            pass
+
+        if "_modules" not in self.__dict__:
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
+        # Could not find the attribute the PyTorch way. So let's check if it's an attribute on the
+        # original_module/modules_to_save.
+        modules = self.__dict__["_modules"]
+        if self.disable_adapters:
+            module = modules["original_module"]
+        elif self.active_adapter in modules["modules_to_save"]:
+            module = modules["modules_to_save"][self.active_adapter]
+        else:
+            # For some reason, there is no module corresponding to the active adapter; this should normally not be
+            # reached and exists as a failsafe (otherwise, a KeyError would be raised)
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+        return getattr(module, name)
 
     def update(self, adapter_name):
         context_manager = nullcontext()
@@ -217,8 +275,10 @@ class ModulesToSaveWrapper(torch.nn.Module):
 
                 context_manager = deepspeed.zero.GatheredParameters(self.original_module.parameters(), modifier_rank=0)
                 break
-        with context_manager:
-            self.modules_to_save.update(torch.nn.ModuleDict({adapter_name: copy.deepcopy(self.original_module)}))
+
+        if adapter_name not in self.modules_to_save:
+            with context_manager:
+                self.modules_to_save[adapter_name] = copy.deepcopy(self.original_module)
 
         if hasattr(self.modules_to_save[adapter_name], "_hf_hook"):
             old_hook = self.modules_to_save[adapter_name]._hf_hook
@@ -244,10 +304,62 @@ class ModulesToSaveWrapper(torch.nn.Module):
         new_hook = old_hook_cls(**filtered_old_hook_attr)
         return new_hook
 
-    def forward(self, *args, **kwargs):
+    def _check_forward_args(self, x, *args, **kwargs):
+        """Check if the arguments are compatible with the configs and state of the model"""
+        adapter_names = kwargs.get("adapter_names", None)
+        if adapter_names is None:
+            return
+
+        if len(x) != len(adapter_names):
+            msg = (
+                "Length of `adapter_names` should be the same as the number of inputs, but got "
+                f"{len(adapter_names)} and {len(x)} respectively."
+            )
+            raise ValueError(msg)
+
+    def _mixed_batch_forward(
+        self, input: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
+    ) -> torch.Tensor:
+        # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
+        # extra argument that allows mixing different adapters in the same batch at inference time.
+
+        SUPPORTED_MODULES = (torch.nn.Linear, torch.nn.Embedding, torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d)
+
+        module_names = ", ".join([module.__name__ for module in SUPPORTED_MODULES])
+
+        if not isinstance(self.original_module, SUPPORTED_MODULES):
+            raise TypeError(f"Mixed batching is only supported for the following modules: {module_names}.")
+
+        unique_adapters = set(adapter_names)
+        sub_batch_indices_list = []
+
+        for adapter in unique_adapters:
+            sub_batch_indices_list.append([index for index, item in enumerate(adapter_names) if item == adapter])
+
+        results = [0 for _ in range(len(input))]
+
+        for i, active_adapter in enumerate(unique_adapters):
+            sub_batch = input[sub_batch_indices_list[i]]
+
+            if active_adapter == "__base__":
+                output = self.original_module(sub_batch, *args, **kwargs)
+            else:
+                output = self.modules_to_save[active_adapter](sub_batch, *args, **kwargs)
+
+            for index, j in enumerate(sub_batch_indices_list[i]):
+                results[j] = output[index]
+
+        return torch.stack(results)
+
+    def forward(self, x: torch.Tensor, *args, **kwargs):
+        self._check_forward_args(x, *args, **kwargs)
+        adapter_names = kwargs.pop("adapter_names", None)
+
         if self.disable_adapters or (self.active_adapter not in self.modules_to_save):
-            return self.original_module(*args, **kwargs)
-        return self.modules_to_save[self.active_adapter](*args, **kwargs)
+            return self.original_module(x, *args, **kwargs)
+        if adapter_names is None:
+            return self.modules_to_save[self.active_adapter](x, *args, **kwargs)
+        return self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
 
     def enable_adapters(self, enabled: bool):
         """Toggle the enabling and disabling of adapters
@@ -306,10 +418,10 @@ def _freeze_adapter(model, adapter_name):
             p.requires_grad = False
 
 
-def _set_trainable(model, adapter_name):
+def _set_trainable(model, adapter_name, modules_to_save):
     key_list = [key for key, _ in model.named_modules()]
     for key in key_list:
-        target_module_found = any(key.endswith(target_key) for target_key in model.modules_to_save)
+        target_module_found = any(key.endswith(target_key) for target_key in modules_to_save)
         if target_module_found:
             parent, target, target_name = _get_submodules(model, key)
             if isinstance(target, ModulesToSaveWrapper):
@@ -338,7 +450,13 @@ def _set_adapter(model, adapter_name):
         if isinstance(module, ModulesToSaveWrapper):
             # only check the adapter_name if we actually encounter a ModulesToSaveWrapper, otherwise we don't care
             adapter_name = check_adapter_name(adapter_name)
-            module.set_adapter(adapter_name)
+
+            # if the adapter is found in this module, set it as the active adapter, else disable the adapters of this
+            # module
+            if adapter_name in module.modules_to_save:
+                module.set_adapter(adapter_name)
+            else:
+                module.enable_adapters(False)
 
 
 def _prepare_prompt_learning_config(peft_config, model_config):
@@ -377,6 +495,12 @@ def _prepare_prompt_learning_config(peft_config, model_config):
             raise ValueError("Please specify `num_attention_heads` in `peft_config`")
         peft_config.num_attention_heads = num_attention_heads
 
+    # For grouped-query attention, see #1901.
+    if peft_config.peft_type == "PREFIX_TUNING" and "num_key_value_heads" in model_config:
+        num_key_value_heads = model_config["num_key_value_heads"]
+        peft_config.token_dim = peft_config.token_dim // peft_config.num_attention_heads * num_key_value_heads
+        peft_config.num_attention_heads = num_key_value_heads
+
     if getattr(peft_config, "encoder_hidden_size", None) is None:
         setattr(peft_config, "encoder_hidden_size", peft_config.token_dim)
 
@@ -388,6 +512,11 @@ def fsdp_auto_wrap_policy(model):
     import os
 
     from accelerate import FullyShardedDataParallelPlugin
+
+    if hasattr(FullyShardedDataParallelPlugin, "get_module_class_from_name"):
+        get_module_class_from_name = FullyShardedDataParallelPlugin.get_module_class_from_name
+    else:
+        from accelerate.utils.dataclasses import get_module_class_from_name
     from torch.distributed.fsdp.wrap import _or_policy, lambda_auto_wrap_policy, transformer_auto_wrap_policy
 
     from ..tuners import PrefixEncoder, PromptEmbedding, PromptEncoder
@@ -400,7 +529,9 @@ def fsdp_auto_wrap_policy(model):
     ).split(",")
     transformer_cls_to_wrap = {PrefixEncoder, PromptEncoder, PromptEmbedding}
     for layer_class in transformer_cls_names_to_wrap:
-        transformer_cls = FullyShardedDataParallelPlugin.get_module_class_from_name(model, layer_class)
+        if len(layer_class) == 0:
+            continue
+        transformer_cls = get_module_class_from_name(model, layer_class)
         if transformer_cls is None:
             raise Exception("Could not find the transformer layer class to wrap in the model.")
         else:
@@ -479,33 +610,76 @@ def get_auto_gptq_quant_linear(gptq_quantization_config):
     """
     Get the right AutoGPTQQuantLinear class based on the quantization config file
     """
-    if gptq_quantization_config is not None and is_auto_gptq_available():
+    if gptq_quantization_config is None:
+        return None
+
+    if is_auto_gptq_available():
         from auto_gptq.utils.import_utils import dynamically_import_QuantLinear
+    else:
+        return None
 
-        desc_act = gptq_quantization_config.desc_act
-        group_size = gptq_quantization_config.group_size
-        bits = gptq_quantization_config.bits
-        if hasattr(gptq_quantization_config, "use_exllama"):
-            use_exllama = gptq_quantization_config.use_exllama
-        else:
-            use_exllama = not gptq_quantization_config.disable_exllama
-        if hasattr(gptq_quantization_config, "exllama_config"):
-            exllama_version = gptq_quantization_config.exllama_config["version"]
-        else:
-            exllama_version = 1
-        AutoGPTQQuantLinear = dynamically_import_QuantLinear(
-            use_triton=False,
-            desc_act=desc_act,
-            group_size=group_size,
-            bits=bits,
-            disable_exllama=not (use_exllama and exllama_version == 1),
-            disable_exllamav2=not (use_exllama and exllama_version == 2),
-        )
-        return AutoGPTQQuantLinear
-    return None
+    desc_act = gptq_quantization_config.desc_act
+    group_size = gptq_quantization_config.group_size
+    bits = gptq_quantization_config.bits
+    if hasattr(gptq_quantization_config, "use_exllama"):
+        use_exllama = gptq_quantization_config.use_exllama
+    else:
+        use_exllama = not gptq_quantization_config.disable_exllama
+    if hasattr(gptq_quantization_config, "exllama_config"):
+        exllama_version = gptq_quantization_config.exllama_config["version"]
+    else:
+        exllama_version = 1
+
+    QuantLinear = dynamically_import_QuantLinear(
+        use_triton=False,
+        desc_act=desc_act,
+        group_size=group_size,
+        bits=bits,
+        disable_exllama=not (use_exllama and exllama_version == 1),
+        disable_exllamav2=not (use_exllama and exllama_version == 2),
+    )
+
+    return QuantLinear
 
 
-def id_tensor_storage(tensor: torch.Tensor) -> Tuple[torch.device, int, int]:
+def get_gptqmodel_quant_linear(gptq_quantization_config, device_map=None):
+    """
+    Get the right GPTQQuantLinear class based on the quantization config file
+    """
+    if gptq_quantization_config is None:
+        return None
+
+    if not is_gptqmodel_available():
+        return None
+
+    from gptqmodel.utils.importer import hf_select_quant_linear
+
+    desc_act = gptq_quantization_config.desc_act
+    group_size = gptq_quantization_config.group_size
+    bits = gptq_quantization_config.bits
+    checkpoint_format = (
+        gptq_quantization_config.checkpoint_format
+        if hasattr(gptq_quantization_config, "checkpoint_format")
+        else "gptq"
+    )
+    sym = gptq_quantization_config.sym
+    meta = gptq_quantization_config.meta if hasattr(gptq_quantization_config, "meta") else None
+
+    QuantLinear = hf_select_quant_linear(
+        bits=bits,
+        group_size=group_size,
+        desc_act=desc_act,
+        sym=sym,
+        device_map=device_map,
+        checkpoint_format=checkpoint_format,
+        meta=meta,
+        backend="auto_trainable",
+    )
+
+    return QuantLinear
+
+
+def id_tensor_storage(tensor: torch.Tensor) -> tuple[torch.device, int, int]:
     """
     Unique identifier to a tensor storage. Multiple different tensors can share the same underlying storage. For
     example, "meta" tensors all share the same storage, and thus their identifier will all be equal. This identifier is
@@ -591,3 +765,8 @@ def check_file_exists_on_hf_hub(repo_id: str, filename: str, **kwargs) -> Option
         )
 
     return exists
+
+
+def get_pattern_key(pattern_keys, key_to_match):
+    """Match a substring of key_to_match in pattern keys"""
+    return next(filter(lambda key: re.match(rf".*\.{key}$", key_to_match), pattern_keys), key_to_match)

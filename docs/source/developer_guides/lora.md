@@ -9,7 +9,7 @@ Unless required by applicable law or agreed to in writing, software distributed 
 an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
 specific language governing permissions and limitations under the License.
 
-⚠️ Note that this file is in Markdown but contain specific syntax for our doc-builder (similar to MDX) that may not be
+⚠️ Note that this file is in Markdown but contains specific syntax for our doc-builder (similar to MDX) that may not be
 rendered properly in your Markdown viewer.
 
 -->
@@ -40,18 +40,123 @@ from peft import LoraConfig
 config = LoraConfig(init_lora_weights=False, ...)
 ```
 
+### PiSSA
+[PiSSA](https://arxiv.org/abs/2404.02948) initializes the LoRA adapter using the principal singular values and singular vectors. This straightforward modification allows PiSSA to converge more rapidly than LoRA and ultimately attain superior performance. Moreover, PiSSA reduces the quantization error compared to QLoRA, leading to further enhancements. 
+
+Configure the initialization method to "pissa", which may take several minutes to execute SVD on the pre-trained model:
+```python
+from peft import LoraConfig
+config = LoraConfig(init_lora_weights="pissa", ...)
+```
+Alternatively, execute fast SVD, which takes only a few seconds. The number of iterations determines the trade-off between the error and computation time:
+```python
+lora_config = LoraConfig(init_lora_weights="pissa_niter_[number of iters]", ...) 
+```
+For detailed instruction on using PiSSA, please follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/pissa_finetuning).
+
+### CorDA
+
+[CorDA](https://arxiv.org/pdf/2406.05223) builds task-aware LoRA adapters from weight decomposition oriented by the context of downstream task to learn (instruction-previewed mode, IPM) or world knowledge to maintain (knowledge-preserved mode, KPM).
+The KPM not only achieves better performance than LoRA on fine-tuning tasks, but also mitigates the catastrophic forgetting of pre-trained world knowledge.
+When preserving pre-trained knowledge is not a concern, 
+the IPM is favored because it can further accelerate convergence and enhance the fine-tuning performance. 
+
+You need to configure the initialization method to "corda", and specify the mode of IPM or KPM and the dataset to collect covariance matrices. 
+
+```py
+@torch.no_grad()
+def run_model():
+    # Assume `model` and `dataset` is in context...
+    model.eval()
+    for batch in dataset:
+        model(**batch)
+
+
+corda_config = CordaConfig(
+    corda_method="kpm",
+)
+lora_config = LoraConfig(
+    init_lora_weights="corda",
+    corda_config=corda_config,
+)
+preprocess_corda(model, lora_config, run_model=run_model)
+peft_model = get_peft_model(model, lora_config)
+```
+
+For detailed instruction on using CorDA, please follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/corda_finetuning).
+
+### OLoRA
+[OLoRA](https://arxiv.org/abs/2406.01775) utilizes QR decomposition to initialize the LoRA adapters. OLoRA translates the base weights of the model by a factor of their QR decompositions, i.e., it mutates the weights before performing any training on them. This approach significantly improves stability, accelerates convergence speed, and ultimately achieves superior performance.
+
+You just need to pass a single additional option to use OLoRA:
+```python
+from peft import LoraConfig
+config = LoraConfig(init_lora_weights="olora", ...)
+```
+For more advanced usage, please refer to our [documentation](https://github.com/huggingface/peft/tree/main/examples/olora_finetuning).
+
+### EVA
+[EVA](https://arxiv.org/pdf/2410.07170) performs SVD on the input activations of each layer and uses the right-singular vectors to initialize LoRA weights. It is therefore a data-driven initialization scheme. Furthermore EVA adaptively allocates ranks across layers based on their "explained variance ratio" - a metric derived from the SVD analysis.
+
+You can use EVA by setting `init_lora_weights="eva"` and defining [`EvaConfig`] in [`LoraConfig`]:
+```python
+from peft import LoraConfig, EvaConfig
+peft_config = LoraConfig(
+    init_lora_weights = "eva",
+    eva_config = EvaConfig(rho = 2.0),
+    ...
+)
+```
+The parameter `rho` (≥ 1.0) determines how much redistribution is allowed. When `rho=1.0` and `r=16`, LoRA adapters are limited to exactly 16 ranks, preventing any redistribution from occurring. A recommended value for EVA with redistribution is 2.0, meaning the maximum rank allowed for a layer is 2r.
+
+It is recommended to perform EVA initialization on a GPU as it is much faster. To optimize the amount of available memory for EVA, you can use the `low_cpu_mem_usage` flag in [`get_peft_model`]:
+```python
+peft_model = get_peft_model(model, peft_config, low_cpu_mem_usage=True)
+```
+Then, call [`initialize_lora_eva_weights`] to initialize the EVA weights (in most cases the dataloader used for eva initialization can be the same as the one used for finetuning):
+```python
+initialize_lora_eva_weights(peft_model, dataloader)
+```
+EVA works out of the box with bitsandbytes. Simply initialize the model with `quantization_config` and call [`initialize_lora_eva_weights`] as usual.
+
+<Tip>
+
+For further instructions on using EVA, please refer to our [documentation](https://github.com/huggingface/peft/tree/main/examples/eva_finetuning).
+
+</Tip>
+
 ### LoftQ
 
-When quantizing the base model for QLoRA training, consider using the [LoftQ initialization](https://arxiv.org/abs/2310.08659), which has been shown to improve performance when training quantized models. The idea is that the LoRA weights are initialized such that the quantization error is minimized. If you're using LoftQ, *do not* quantize the base model. You should set up a [`LoftQConfig`] instead:
+#### Standard approach
+
+When quantizing the base model for QLoRA training, consider using the [LoftQ initialization](https://arxiv.org/abs/2310.08659), which has been shown to improve performance when training quantized models. The idea is that the LoRA weights are initialized such that the quantization error is minimized. To use LoftQ, follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/loftq_finetuning).
+
+In general, for LoftQ to work best, it is recommended to target as many layers with LoRA as possible, since those not targeted cannot have LoftQ applied. This means that passing `LoraConfig(..., target_modules="all-linear")` will most likely give the best results. Also, you should use `nf4` as quant type in your quantization config when using 4bit quantization, i.e. `BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4")`.
+
+#### A more convenient way
+
+An easier but more limited way to apply LoftQ initialization is to use the convenience function `replace_lora_weights_loftq`. This takes the quantized PEFT model as input and replaces the LoRA weights in-place with their LoftQ-initialized counterparts.
 
 ```python
-from peft import LoftQConfig, LoraConfig, get_peft_model
+from peft import replace_lora_weights_loftq
+from transformers import BitsAndBytesConfig
 
-base_model = AutoModelForCausalLM.from_pretrained(...)  # don't quantize here
-loftq_config = LoftQConfig(loftq_bits=4, ...)           # set 4bit quantization
-lora_config = LoraConfig(..., init_lora_weights="loftq", loftq_config=loftq_config)
+bnb_config = BitsAndBytesConfig(load_in_4bit=True, ...)
+base_model = AutoModelForCausalLM.from_pretrained(..., quantization_config=bnb_config)
+# note: don't pass init_lora_weights="loftq" or loftq_config!
+lora_config = LoraConfig(task_type="CAUSAL_LM")
 peft_model = get_peft_model(base_model, lora_config)
+replace_lora_weights_loftq(peft_model)
 ```
+
+`replace_lora_weights_loftq` also allows you to pass a `callback` argument to give you more control over which layers should be modified or not, which empirically can improve the results quite a lot. To see a more elaborate example of this, check out [this notebook](https://github.com/huggingface/peft/blob/main/examples/loftq_finetuning/LoftQ_weight_replacement.ipynb).
+
+`replace_lora_weights_loftq` implements only one iteration step of LoftQ. This means that only the LoRA weights are updated, instead of iteratevily updating LoRA weights and quantized base model weights. This may lead to lower performance but has the advantage that we can use the original quantized weights derived from the base model, instead of having to keep an extra copy of modified quantized weights. Whether this tradeoff is worthwhile depends on the use case.
+
+At the moment, `replace_lora_weights_loftq` has these additional limitations:
+
+- Model files must be stored as a `safetensors` file.
+- Only bitsandbytes 4bit quantization is supported.
 
 <Tip>
 
@@ -71,13 +176,47 @@ config = LoraConfig(use_rslora=True, ...)
 
 ### Weight-Decomposed Low-Rank Adaptation (DoRA)
 
-This technique decomposes the updates of the weights into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the magnitude is handled by a separate learnable parameter. This can improve the performance of LoRA, especially at low ranks. Right now, DoRA only supports non-quantized linear layers. DoRA introduces a bigger overhead than pure LoRA, so it is recommended to merge weights for inference, see [`LoraModel.merge_and_unload`]. For more information on DoRA, see  https://arxiv.org/abs/2402.09353.
+This technique decomposes the updates of the weights into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the magnitude is handled by a separate learnable parameter. This can improve the performance of LoRA, especially at low ranks. For more information on DoRA, see  https://arxiv.org/abs/2402.09353.
 
 ```py
 from peft import LoraConfig
 
 config = LoraConfig(use_dora=True, ...)
 ```
+
+If parts of the model or the DoRA adapter are offloaded to CPU you can get a significant speedup at the cost of some temporary (ephemeral) VRAM overhead by using `ephemeral_gpu_offload=True` in `config.runtime_config`.
+
+```py
+from peft import LoraConfig, LoraRuntimeConfig
+
+config = LoraConfig(use_dora=True, runtime_config=LoraRuntimeConfig(ephemeral_gpu_offload=True), ...)
+```
+
+A `PeftModel` with a DoRA adapter can also be loaded with `ephemeral_gpu_offload=True` flag using the `from_pretrained` method as well as the `load_adapter` method.
+
+```py
+from peft import PeftModel
+
+model = PeftModel.from_pretrained(base_model, peft_model_id, ephemeral_gpu_offload=True)
+```
+
+DoRA is optimized (computes faster and takes less memory) for models in the evaluation mode, or when dropout is set to 0. We reuse the
+base result at those times to get the speedup. 
+Running [dora finetuning](https://github.com/huggingface/peft/blob/main/examples/dora_finetuning/dora_finetuning.py)
+with `CUDA_VISIBLE_DEVICES=0 time python examples/dora_finetuning/dora_finetuning.py --quantize --lora_dropout 0 --batch_size 16 --eval_step 2 --use_dora`
+on a 4090 with gradient accumulation set to 2 and max step to 20 resulted with the following observations:
+
+| | Without Optimization | With Optimization |
+| :--: | :--: | :--: |
+| train_runtime | 359.7298 | **279.2676** |
+| train_samples_per_second | 1.779 | **2.292** |
+| train_steps_per_second | 0.056 | **0.072** |
+
+#### Caveats
+
+- DoRA only supports embedding, linear, and Conv2d layers at the moment.
+- DoRA introduces a bigger overhead than pure LoRA, so it is recommended to merge weights for inference, see [`LoraModel.merge_and_unload`]. 
+- DoRA should work with weights quantized with bitsandbytes ("QDoRA"). However, issues have been reported when using QDoRA with DeepSpeed Zero2.
 
 ### QLoRA-style training
 
@@ -87,9 +226,63 @@ The default LoRA settings in PEFT add trainable weights to the query and value l
 config = LoraConfig(target_modules="all-linear", ...)
 ```
 
-## Merge adapters
+### Memory efficient Layer Replication with LoRA
+
+An approach used to improve the performance of models is to expand a model by duplicating layers in the model to build a larger model from a pretrained model of a given size. For example increasing a 7B model to a 10B model as described in the [SOLAR](https://arxiv.org/abs/2312.15166) paper. PEFT LoRA supports this kind of expansion in a memory efficient manner that supports further fine-tuning using LoRA adapters attached to the layers post replication of the layers. The replicated layers do not take additional memory as they share the underlying weights so the only additional memory required is the memory for the adapter weights. To use this feature you would create a config with the `layer_replication` argument.
+
+```py
+config = LoraConfig(layer_replication=[[0,4], [2,5]], ...)
+```
+
+Assuming the original model had 5 layers `[0, 1, 2 ,3, 4]`, this would create a model with 7 layers arranged as `[0, 1, 2, 3, 2, 3, 4]`. This follows the [mergekit](https://github.com/arcee-ai/mergekit) pass through merge convention where sequences of layers specified as start inclusive and end exclusive tuples are stacked to build the final model. Each layer in the final model gets its own distinct set of LoRA adapters.
+
+[Fewshot-Metamath-OrcaVicuna-Mistral-10B](https://huggingface.co/abacusai/Fewshot-Metamath-OrcaVicuna-Mistral-10B) is an example of a model trained using this method on Mistral-7B expanded to 10B. The
+[adapter_config.json](https://huggingface.co/abacusai/Fewshot-Metamath-OrcaVicuna-Mistral-10B/blob/main/adapter_config.json) shows a sample LoRA adapter config applying this method for fine-tuning.
+
+## Optimizers
+
+LoRA training can optionally include special purpose optimizers. Currently the only such optimizer is LoRA+.
+
+### LoRA+ optimized LoRA
+
+LoRA training can be optimized using [LoRA+](https://arxiv.org/abs/2402.12354), which uses different learning rates for the adapter matrices A and B, shown to increase finetuning speed by up to 2x and performance by 1-2%.
+
+```py
+from peft import LoraConfig, get_peft_model
+from peft.optimizers import create_loraplus_optimizer
+from transformers import Trainer
+import bitsandbytes as bnb
+
+base_model = ...
+config = LoraConfig(...)
+model = get_peft_model(base_model, config)
+
+optimizer = create_loraplus_optimizer(
+    model=model,
+    optimizer_cls=bnb.optim.Adam8bit,
+    lr=5e-5,
+    loraplus_lr_ratio=16,
+)
+scheduler = None
+
+...
+trainer = Trainer(
+    ...,
+    optimizers=(optimizer, scheduler),
+)
+```
+
+## Merge LoRA weights into the base model
 
 While LoRA is significantly smaller and faster to train, you may encounter latency issues during inference due to separately loading the base model and the LoRA adapter. To eliminate latency, use the [`~LoraModel.merge_and_unload`] function to merge the adapter weights with the base model. This allows you to use the newly merged model as a standalone model. The [`~LoraModel.merge_and_unload`] function doesn't keep the adapter weights in memory.
+
+Below is a diagram that explains the intuition of LoRA adapter merging:
+
+<div class="flex justify-center">
+    <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/lora_diagram.png"/>
+</div>
+
+We show in the snippets below how to run that using PEFT.
 
 ```py
 from transformers import AutoModelForCausalLM
@@ -200,3 +393,69 @@ model.unload()
 # delete adapter
 model.delete_adapter("dpo")
 ```
+
+## Inference with different LoRA adapters in the same batch
+
+Normally, each inference batch has to use the same adapter(s) in PEFT. This can sometimes be annoying, because we may have batches that contain samples intended to be used with different LoRA adapters. For example, we could have a base model that works well in English and two more LoRA adapters, one for French and one for German. Usually, we would have to split our batches such that each batch only contains samples of one of the languages, we cannot combine different languages in the same batch.
+
+Thankfully, it is possible to mix different LoRA adapters in the same batch using the `adapter_name` argument. Below, we show an example of how this works in practice. First, let's load the base model, English, and the two adapters, French and German, like this:
+
+```python
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from peft import PeftModel
+
+model_id = ...
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+model = AutoModelForCausalLM.from_pretrained(model_id)
+# load the LoRA adapter for French
+peft_model = PeftModel.from_pretrained(model, <path>, adapter_name="adapter_fr")
+# next, load the LoRA adapter for German
+peft_model.load_adapter(<path>, adapter_name="adapter_de")
+```
+
+Now, we want to generate text on a sample that contains all three languages: The first three samples are in English, the next three are in French, and the last three are in German. We can use the `adapter_names` argument to specify which adapter to use for each sample. Since our base model is used for English, we use the special string `"__base__"` for these samples. For the next three samples, we indicate the adapter name of the French LoRA fine-tune, in this case `"adapter_fr"`. For the last three samples, we indicate the adapter name of the German LoRA fine-tune, in this case `"adapter_de"`. This way, we can use the base model and the two adapters in a single batch.
+
+```python
+inputs = tokenizer(
+    [
+        "Hello, my dog is cute",
+        "Hello, my cat is awesome",
+        "Hello, my fish is great",
+        "Salut, mon chien est mignon",
+        "Salut, mon chat est génial",
+        "Salut, mon poisson est super",
+        "Hallo, mein Hund ist süß",
+        "Hallo, meine Katze ist toll",
+        "Hallo, mein Fisch ist großartig",
+    ],
+    return_tensors="pt",
+    padding=True,
+)
+
+adapter_names = [
+    "__base__", "__base__", "__base__",
+    "adapter_fr", "adapter_fr", "adapter_fr",
+    "adapter_de", "adapter_de", "adapter_de",
+]
+output = peft_model.generate(**inputs, adapter_names=adapter_names, max_new_tokens=20)
+```
+
+Note that the order does not matter here, i.e. the samples in the batch don't need to be grouped by adapter as in the example above. We just need to ensure that the `adapter_names` argument is aligned correctly with the samples.
+
+Additionally, the same approach also works with the `modules_to_save` feature, which allows for saving and reusing specific neural network layers, such as custom heads for classification tasks, across different LoRA adapters. 
+
+### Caveats
+
+Using this features has some drawbacks, namely:
+
+- It only works for inference, not for training.
+- Disabling adapters using the `with model.disable_adapter()` context takes precedence over `adapter_names`.
+- You cannot pass `adapter_names` when some adapter weights where merged with base weight using the `merge_adapter` method. Please unmerge all adapters first by calling `model.unmerge_adapter()`.
+- For obvious reasons, this cannot be used after calling `merge_and_unload()`, since all the LoRA adapters will be merged into the base weights in this case.
+- This feature does not currently work with DoRA, so set `use_dora=False` in your `LoraConfig` if you want to use it.
+- The `modules_to_save` feature is currently only supported for the layers of types `Linear`, `Embedding`, `Conv2d` and `Conv1d`.
+- There is an expected overhead for inference with `adapter_names`, especially if the amount of different adapters in the batch is high. This is because the batch size is effectively reduced to the number of samples per adapter. If runtime performance is your top priority, try the following:
+  - Increase the batch size.
+  - Try to avoid having a large number of different adapters in the same batch, prefer homogeneous batches. This can be achieved by buffering samples with the same adapter and only perform inference with a small handfull of different adapters.
+  - Take a look at alternative implementations such as [LoRAX](https://github.com/predibase/lorax), [punica](https://github.com/punica-ai/punica), or [S-LoRA](https://github.com/S-LoRA/S-LoRA), which are specialized to work with a large number of different adapters.

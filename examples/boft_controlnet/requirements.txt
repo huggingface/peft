@@ -1,0 +1,8 @@
+datasets==2.16.1
+diffusers==0.17.1
+transformers==4.36.2
+accelerate==0.25.0
+wandb==0.16.1
+scikit-image==0.22.0
+opencv-python==4.9.0.80
+face-alignment==1.4.1
