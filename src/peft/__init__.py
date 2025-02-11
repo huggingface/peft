@@ -56,6 +56,8 @@ from .tuners import (
     BoneModel,
     CPTConfig,
     CPTEmbedding,
+    CustomTokensConfig,
+    CustomTokensModel,
     EvaConfig,
     FourierFTConfig,
     FourierFTModel,

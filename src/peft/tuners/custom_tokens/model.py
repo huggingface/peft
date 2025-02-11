@@ -1,12 +1,27 @@
+# Copyright 2025-present the HuggingFace Inc. team.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import torch.nn as nn
-from peft import PeftConfig
+
+from peft.config import PeftConfig
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
+
 from .layer import CustomTokensLayer
 
 
-
 class CustomTokensModel(BaseTuner):
-    prefix: str = "custom_tokens"
+    prefix: str = "custom_tokens_"
 
     def __init__(self, model, config, adapter_name):
         super().__init__(model, config, adapter_name)
@@ -17,7 +32,7 @@ class CustomTokensModel(BaseTuner):
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
             return getattr(self.model, name)
-        
+
     def _prepare_adapter_config(self, peft_config, model_config):
         return peft_config
 
@@ -43,7 +58,7 @@ class CustomTokensModel(BaseTuner):
 
     def _check_target_module_exists(self, peft_config: PeftConfig, key: str) -> bool:
         return check_target_module_exists(peft_config, key)
-    
+
     @staticmethod
     def _create_new_module(peft_config, adapter_name, target, **kwargs):
         # Collect dispatcher functions to decide what backend to use for the replaced LoRA layer. The order matters,
@@ -51,7 +66,7 @@ class CustomTokensModel(BaseTuner):
         new_module = CustomTokensLayer(target, adapter_name, **kwargs)
 
         return new_module
-    
+
     def _replace_module(self, parent, child_name, new_module, child): # see https://github.com/huggingface/peft/blob/e5973883057b723b3f0fe3982bfa9d1e0c0fd8ec/src/peft/tuners/lycoris_utils.py#L300C4-L300C47
         setattr(parent, child_name, new_module)
         # It's not necessary to set requires_grad here, as that is handled by
@@ -77,7 +92,7 @@ class CustomTokensModel(BaseTuner):
         for name, module in new_module.named_modules():
             if self.prefix in name:
                 module.to(child.weight.device)
-    
+
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
         for n, p in model.named_parameters():
             if self.prefix not in n:
