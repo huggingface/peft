@@ -160,3 +160,8 @@ def is_xpu_available(check_device=False):
             except RuntimeError:
                 return False
         return hasattr(torch, "xpu") and torch.xpu.is_available()
+
+
+@lru_cache
+def is_diffusers_available():
+    return importlib.util.find_spec("diffusers") is not None

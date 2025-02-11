@@ -28,8 +28,6 @@ from accelerate import infer_auto_device_map
 from accelerate.test_utils.testing import run_command
 from accelerate.utils import patch_environment
 from datasets import Audio, Dataset, DatasetDict, load_dataset
-from diffusers import UNet2DConditionModel
-from diffusers.utils.testing_utils import floats_tensor
 from packaging import version
 from parameterized import parameterized
 from torch.distributed import init_process_group
@@ -71,7 +69,7 @@ from peft import (
     replace_lora_weights_loftq,
     set_peft_model_state_dict,
 )
-from peft.import_utils import is_xpu_available
+from peft.import_utils import is_diffusers_available, is_xpu_available
 from peft.tuners import boft
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
@@ -4255,8 +4253,8 @@ class TestHotSwapping:
 
     def get_small_unet(self):
         # from diffusers UNet2DConditionModelTests
-        # TODO: This appears not to work yet in full pipeline context, see:
-        # https://github.com/huggingface/diffusers/pull/9453#issuecomment-2418508871
+        from diffusers import UNet2DConditionModel
+
         torch.manual_seed(0)
         init_dict = {
             "block_out_channels": (4, 8),
@@ -4286,6 +4284,8 @@ class TestHotSwapping:
 
     def get_dummy_input(self):
         # from UNet2DConditionModelTests
+        from diffusers.utils.testing_utils import floats_tensor
+
         batch_size = 4
         num_channels = 4
         sizes = (16, 16)
@@ -4346,6 +4346,7 @@ class TestHotSwapping:
             # we need to call forward to potentially trigger recompilation
             unet(**dummy_input)["sample"]
 
+    @pytest.mark.skipif(not is_diffusers_available(), reason="Test requires diffusers to be installed")
     @pytest.mark.xfail(
         strict=True, reason="Requires hotswap to be implemented in diffusers", raises=torch._dynamo.exc.RecompileError
     )
