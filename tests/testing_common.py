@@ -129,10 +129,6 @@ CONFIG_TESTING_KWARGS = (
         "target_modules": None,
         "r": 2,
     },
-    # CustomTokens
-    {
-        "token_indices": [0, 1, 2],
-    },
     # CPT tuninig
     {
         "cpt_token_ids": [0, 1, 2, 3, 4, 5, 6, 7],  # Example token IDs for testing
@@ -155,10 +151,9 @@ CLASSES_MAPPING = {
     "vblora": (VBLoRAConfig, CONFIG_TESTING_KWARGS[10]),
     "oft": (OFTConfig, CONFIG_TESTING_KWARGS[11]),
     "bone": (BoneConfig, CONFIG_TESTING_KWARGS[12]),
-    "custom_tokens": (CustomTokensConfig, CONFIG_TESTING_KWARGS[13]),
 }
 
-DECODER_MODELS_EXTRA = {"cpt": (CPTConfig, CONFIG_TESTING_KWARGS[14])}
+DECODER_MODELS_EXTRA = {"cpt": (CPTConfig, CONFIG_TESTING_KWARGS[13])}
 
 
 # Adapted from https://github.com/huggingface/transformers/blob/48327c57182fdade7f7797d1eaad2d166de5c55b/src/transformers/activations.py#LL166C7-L166C22

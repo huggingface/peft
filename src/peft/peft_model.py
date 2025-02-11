@@ -954,18 +954,24 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             _set_trainable(self, adapter_name, modules_to_save=peft_config.modules_to_save, mode='retrain')
 
         if getattr(peft_config, "trainable_token_indices", None) is not None:
-            if 'embedding' in self.modules_to_save:
-                raise ValueError(
-                    'The embedding layer is already marked to be trained fully, either specify '
-                    '`modules_to_save=[..., "embedding", ...]` or `trainable_tokens=x` but not both.'
-                )
-            target_layers = ['embedding']
-            if self.modules_to_save is None:
-                self.modules_to_save = set(target_layers)
+            if not isinstance(peft_config.trainable_token_indices, dict):
+                target_layers = peft_config.trainable_token_indices
             else:
-                self.modules_to_save.update(target_layers)
-            _set_trainable(self, adapter_name, target_layers, mode='new_tokens',
-                           token_indices=peft_config.trainable_token_indices)
+                target_layers = {'embedding': peft_config.trainable_token_indices}
+
+            if self.modules_to_save:
+                for target_layer in target_layers:
+                    if target_layer in self.modules_to_save:
+                        raise ValueError(
+                            'The embedding layer is already marked to be trained fully, either specify '
+                            f'`modules_to_save=[..., "{target_layer}", ...]` or `trainable_tokens=x` but not both.'
+                        )
+
+            # we are not adding this to `self.modules_to_save` as this is strictly reserved for the
+            # `ModulesToSaveWrapper`. There are some places in the PEFT code base where the modules to save
+            # wrapper is applied based on this attribute which would lead to conflicts.
+            for target_layer, token_indices in target_layers.items():
+                _set_trainable(self, adapter_name, [target_layer], mode='new_tokens', token_indices=token_indices)
 
 
     def get_layer_status(self) -> list[TunerLayerStatus]:
