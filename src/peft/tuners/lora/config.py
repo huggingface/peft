@@ -273,6 +273,8 @@ class LoraConfig(PeftConfig):
             parameter when you want to apply LoRA to the ColumnParallelLinear and RowParallelLinear layers of megatron.
         megatron_core (`Optional[str]`):
             The core module from Megatron to use, defaults to `"megatron.core"`.
+        trainable_token_indices (`Union[List[int], dict[str, List[int]]]`)
+            TODO
         loftq_config (`Optional[LoftQConfig]`):
             The configuration of LoftQ. If this is not None, then LoftQ will be used to quantize the backbone weights
             and initialize Lora layers. Also pass `init_lora_weights='loftq'`. Note that you should not pass a
@@ -430,6 +432,14 @@ class LoraConfig(PeftConfig):
                 "Otherwise, it will use the default value `megatron.core`. "
             )
         },
+    )
+    trainable_token_indices: Optional[Union[int, dict]] = field(
+        default_factory=list,
+        metadata={
+            "help": (
+                "TODO",
+            )
+        }
     )
     # dict type is used when loading config.json
     loftq_config: Union[LoftQConfig, dict] = field(

@@ -128,7 +128,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
             with ctx():
                 self.base_model = cls(model, {adapter_name: peft_config}, adapter_name)
-            self.set_additional_trainable_modules(peft_config, adapter_name)
+
+        self.set_additional_trainable_modules(peft_config, adapter_name)
 
         if hasattr(self.base_model, "_cast_adapter_dtype"):
             self.base_model._cast_adapter_dtype(
@@ -950,7 +951,22 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             else:
                 self.modules_to_save.update(peft_config.modules_to_save)
             # this may add a new ModulesToSaveWrapper
-            _set_trainable(self, adapter_name, modules_to_save=peft_config.modules_to_save)
+            _set_trainable(self, adapter_name, modules_to_save=peft_config.modules_to_save, mode='retrain')
+
+        if getattr(peft_config, "trainable_token_indices", None) is not None:
+            if 'embedding' in self.modules_to_save:
+                raise ValueError(
+                    'The embedding layer is already marked to be trained fully, either specify '
+                    '`modules_to_save=[..., "embedding", ...]` or `trainable_tokens=x` but not both.'
+                )
+            target_layers = ['embedding']
+            if self.modules_to_save is None:
+                self.modules_to_save = set(target_layers)
+            else:
+                self.modules_to_save.update(target_layers)
+            _set_trainable(self, adapter_name, target_layers, mode='new_tokens',
+                           token_indices=peft_config.trainable_token_indices)
+
 
     def get_layer_status(self) -> list[TunerLayerStatus]:
         """Get the status of each adapter layer in the model.

@@ -203,10 +203,17 @@ def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: int, decoder_start
     return shifted_input_ids
 
 
-class ModulesToSaveWrapper(torch.nn.Module):
+class AuxiliaryTrainingWrapper(torch.nn.Module):
+    """Wrap a specific module so that it can be trained and saved in a way that is tangential to how
+    PEFT normally works, e.g. fully training a classification layer instead of using an adapter.
+
+    Provides a `modules_to_save` module that contains the (possibly modified) module for each adapter
+    that is used during training (e.g. in case we're using a mixed model).
+    """
     def __init__(self, module_to_save, adapter_name):
         super().__init__()
         self.original_module = module_to_save
+        # we treat each adapter separately, so we have multiple adapters, same (copied) module for each
         self.modules_to_save = torch.nn.ModuleDict({})
         self._active_adapter = adapter_name
         self._disable_adapters = False
@@ -317,6 +324,9 @@ class ModulesToSaveWrapper(torch.nn.Module):
             )
             raise ValueError(msg)
 
+    def _forward_wrapped(self, x: torch.Tensor, active_adpater: str, *args: Any, **kwargs: Any) -> torch.Tensor:
+        raise NotImplementedError
+
     def _mixed_batch_forward(
         self, input: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
     ) -> torch.Tensor:
@@ -344,7 +354,7 @@ class ModulesToSaveWrapper(torch.nn.Module):
             if active_adapter == "__base__":
                 output = self.original_module(sub_batch, *args, **kwargs)
             else:
-                output = self.modules_to_save[active_adapter](sub_batch, *args, **kwargs)
+                output = self._forward_wrapped(sub_batch, active_adapter, *args, **kwargs)
 
             for index, j in enumerate(sub_batch_indices_list[i]):
                 results[j] = output[index]
@@ -358,7 +368,7 @@ class ModulesToSaveWrapper(torch.nn.Module):
         if self.disable_adapters or (self.active_adapter not in self.modules_to_save):
             return self.original_module(x, *args, **kwargs)
         if adapter_names is None:
-            return self.modules_to_save[self.active_adapter](x, *args, **kwargs)
+            return self._forward_wrapped(x, active_adapter, *args, **kwargs)
         return self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
 
     def enable_adapters(self, enabled: bool):
@@ -405,6 +415,53 @@ class ModulesToSaveWrapper(torch.nn.Module):
         self._active_adapter = adapter_name
 
 
+class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
+    """Wraps a module that is supposed to be trained (i.e. `requires_grad_(True)`) and saved after training.
+    """
+    def _forward_wrapped(self, x, active_adapter, *args, **kwargs):
+        return self.modules_to_save[active_adapter](x, *args, **kwargs)
+
+
+class NewTokensWrapper(AuxiliaryTrainingWrapper):
+    """Wraps a module (typically an embedding layer) that is supposed to be re-trained sparsely (i.e.
+    solely updating a few columns) using the `CustomTokensLayer` PEFT method.
+
+    Provides `modules_to_save[adapter] = updated_embedding_layer`.
+    """
+    def __init__(self,
+        module_to_save: nn.Module,
+        adapter_name: str,
+        token_indices: List[int],
+    ) -> None:
+        # use a local import to avoid potential circular imports
+        from peft.tuners.custom_tokens import CustomTokensLayer
+
+        super().__init__(module_to_save, adapter_name)
+
+        self.token_indices = token_indices
+        self.token_adapters = CustomTokensLayer(module_to_save, adapter_name, self.token_indices)
+
+    def _forward_wrapped(self, x, active_adapter, *args, **kwargs):
+        self.token_adapter.set_adapter(active_adapter)
+
+        # make sure that at the end of each forward call the module weights in `self.modules_to_save[adapter_name]`
+        # are up-to-date. Otherwise, at the end of training, we don't store the correctly trained weights.
+        # We need to do this since there is no explicit `merge` call for wrapped layers.
+        self.token_adapter.unmerge()
+        y = self.token_adapter.forward(x)
+        self.token_adapter.merge()
+
+        return y
+
+    def update(self, active_adapter):
+        super().update(active_adapter)
+
+        # TODO this does not support deepspeed/fsdp since it is missing a context manager
+        # see original implementation
+        if adapter_name not in self.modules_to_save:
+            self.token_adapter.update_layer(active_adapter)
+
+
 def _get_submodules(model, key):
     parent = model.get_submodule(".".join(key.split(".")[:-1]))
     target_name = key.split(".")[-1]
@@ -418,17 +475,31 @@ def _freeze_adapter(model, adapter_name):
             p.requires_grad = False
 
 
-def _set_trainable(model, adapter_name, modules_to_save):
+def _set_trainable(model, adapter_name, module_names, mode='retrain', **wrapper_kwargs):
+    """Wraps modules that are supposed to be re-trained either normally, i.e. marking them to require gradients and
+    saving them alongside other modules, or with certain methods that go alongside PEFT methods, such as retraining
+    specific token indices using sparse matrices.
+
+    Note that you need to validate beforehand if there are layers shared between modes, e.g. if the 'embedding'
+    layer is configured for both mode `retrain` and `new_tokens` which would result in conflicts down the line.
+    """
+    if mode == "retrain":
+        target_cls = ModulesToSaveWrapper
+    elif mode == "new_tokens":
+        target_cls = NewTokensWrapper
+    else:
+        raise AttributeError(f"Mode {mode} not support, either use 'normal' or 'new_tokens'.")
+
     key_list = [key for key, _ in model.named_modules()]
     for key in key_list:
-        target_module_found = any(key.endswith(target_key) for target_key in modules_to_save)
+        target_module_found = any(key.endswith(target_key) for target_key in module_names)
         if target_module_found:
             parent, target, target_name = _get_submodules(model, key)
-            if isinstance(target, ModulesToSaveWrapper):
+            if isinstance(target, target_cls):
                 target.update(adapter_name)
                 target.set_adapter(target.active_adapter)
             else:
-                new_module = ModulesToSaveWrapper(target, adapter_name)
+                new_module = target_cls(target, adapter_name, **wrapper_kwargs)
                 new_module.set_adapter(adapter_name)
                 setattr(parent, target_name, new_module)
 
