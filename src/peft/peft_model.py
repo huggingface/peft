@@ -954,7 +954,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             _set_trainable(self, adapter_name, modules_to_save=peft_config.modules_to_save, mode='retrain')
 
         if getattr(peft_config, "trainable_token_indices", None) is not None:
-            if not isinstance(peft_config.trainable_token_indices, dict):
+            if isinstance(peft_config.trainable_token_indices, dict):
                 target_layers = peft_config.trainable_token_indices
             else:
                 target_layers = {'embedding': peft_config.trainable_token_indices}
