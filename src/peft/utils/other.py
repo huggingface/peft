@@ -368,7 +368,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         if self.disable_adapters or (self.active_adapter not in self.modules_to_save):
             return self.original_module(x, *args, **kwargs)
         if adapter_names is None:
-            return self._forward_wrapped(x, active_adapter, *args, **kwargs)
+            return self._forward_wrapped(x, self._active_adapter, *args, **kwargs)
         return self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
 
     def enable_adapters(self, enabled: bool):
@@ -433,13 +433,8 @@ class NewTokensWrapper(AuxiliaryTrainingWrapper):
         adapter_name: str,
         token_indices: List[int],
     ) -> None:
-        # use a local import to avoid potential circular imports
-        from peft.tuners.custom_tokens import CustomTokensLayer
-
-        super().__init__(module_to_save, adapter_name)
-
         self.token_indices = token_indices
-        self.token_adapters = CustomTokensLayer(module_to_save, adapter_name, self.token_indices)
+        super().__init__(module_to_save, adapter_name)
 
     def _forward_wrapped(self, x, active_adapter, *args, **kwargs):
         self.token_adapter.set_adapter(active_adapter)
@@ -447,19 +442,26 @@ class NewTokensWrapper(AuxiliaryTrainingWrapper):
         # make sure that at the end of each forward call the module weights in `self.modules_to_save[adapter_name]`
         # are up-to-date. Otherwise, at the end of training, we don't store the correctly trained weights.
         # We need to do this since there is no explicit `merge` call for wrapped layers.
-        self.token_adapter.unmerge()
+        if self.token_adapter.merged:
+            self.token_adapter.unmerge()
         y = self.token_adapter.forward(x)
         self.token_adapter.merge()
 
         return y
 
     def update(self, active_adapter):
-        super().update(active_adapter)
+        # use a local import to avoid potential circular imports
+        from peft.tuners.custom_tokens import CustomTokensLayer
+
+        if not hasattr(self, 'token_adapter'):
+            self.token_adapter = CustomTokensLayer(self.original_module, active_adapter, self.token_indices)
 
         # TODO this does not support deepspeed/fsdp since it is missing a context manager
         # see original implementation
-        if adapter_name not in self.modules_to_save:
+        if active_adapter not in self.modules_to_save:
             self.token_adapter.update_layer(active_adapter)
+
+        super().update(active_adapter)
 
 
 def _get_submodules(model, key):
