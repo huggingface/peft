@@ -4316,8 +4316,8 @@ class TestHotSwapping:
         unet = self.get_small_unet()
         rank0, rank1 = ranks
         alpha0, alpha1 = alpha_scalings
-        lora_config0 = self.get_unet_lora_config(rank0, alpha0, target_modules=["conv", "conv1", "conv2"])
-        lora_config1 = self.get_unet_lora_config(rank1, alpha1, target_modules=["conv", "conv1", "conv2"])
+        lora_config0 = self.get_unet_lora_config(rank0, alpha0, target_modules=target_modules)
+        lora_config1 = self.get_unet_lora_config(rank1, alpha1, target_modules=target_modules)
         unet.add_adapter(lora_config0, adapter_name="adapter0")
         unet.add_adapter(lora_config1, adapter_name="adapter1")
 
