@@ -28,8 +28,6 @@ from accelerate import infer_auto_device_map
 from accelerate.test_utils.testing import run_command
 from accelerate.utils import patch_environment
 from datasets import Audio, Dataset, DatasetDict, load_dataset
-from diffusers import UNet2DConditionModel
-from diffusers.utils.testing_utils import floats_tensor
 from packaging import version
 from parameterized import parameterized
 from torch.distributed import init_process_group
@@ -71,7 +69,7 @@ from peft import (
     replace_lora_weights_loftq,
     set_peft_model_state_dict,
 )
-from peft.import_utils import is_xpu_available
+from peft.import_utils import is_diffusers_available, is_xpu_available
 from peft.tuners import boft
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
@@ -4237,7 +4235,7 @@ class TestHotSwapping:
             assert torch.allclose(output1, output_after1, atol=tol, rtol=tol)
 
     # it is important to check hotswapping small to large ranks and large to small ranks
-    @pytest.mark.parametrize("ranks", [(7, 13), (13, 7)])
+    @pytest.mark.parametrize("ranks", [(11, 11), (7, 13), (13, 7)])
     def test_hotswapping_compiled_model_does_not_trigger_recompilation(self, ranks):
         with torch._dynamo.config.patch(error_on_recompile=True):  # raise an error on recompilation
             self.check_hotswap(do_hotswap=True, ranks=ranks, alpha_scalings=ranks)
@@ -4255,8 +4253,8 @@ class TestHotSwapping:
 
     def get_small_unet(self):
         # from diffusers UNet2DConditionModelTests
-        # TODO: This appears not to work yet in full pipeline context, see:
-        # https://github.com/huggingface/diffusers/pull/9453#issuecomment-2418508871
+        from diffusers import UNet2DConditionModel
+
         torch.manual_seed(0)
         init_dict = {
             "block_out_channels": (4, 8),
@@ -4273,12 +4271,13 @@ class TestHotSwapping:
         model = UNet2DConditionModel(**init_dict)
         return model.to(self.torch_device)
 
-    def get_unet_lora_config(self, lora_rank, lora_alpha):
+    def get_unet_lora_config(self, lora_rank, lora_alpha, target_modules):
         # from diffusers test_models_unet_2d_condition.py
+        # note that this only targets linear layers by default
         unet_lora_config = LoraConfig(
             r=lora_rank,
             lora_alpha=lora_alpha,
-            target_modules=["to_q", "to_k", "to_v", "to_out.0"],
+            target_modules=target_modules,
             init_lora_weights=False,
             use_dora=False,
         )
@@ -4286,6 +4285,8 @@ class TestHotSwapping:
 
     def get_dummy_input(self):
         # from UNet2DConditionModelTests
+        from diffusers.utils.testing_utils import floats_tensor
+
         batch_size = 4
         num_channels = 4
         sizes = (16, 16)
@@ -4310,13 +4311,13 @@ class TestHotSwapping:
                                 device
                             )
 
-    def check_hotswap_diffusion(self, do_hotswap, ranks, alpha_scalings):
+    def check_hotswap_diffusion(self, do_hotswap, ranks, alpha_scalings, target_modules):
         dummy_input = self.get_dummy_input()
         unet = self.get_small_unet()
         rank0, rank1 = ranks
         alpha0, alpha1 = alpha_scalings
-        lora_config0 = self.get_unet_lora_config(rank0, alpha0)
-        lora_config1 = self.get_unet_lora_config(rank1, alpha1)
+        lora_config0 = self.get_unet_lora_config(rank0, alpha0, target_modules=target_modules)
+        lora_config1 = self.get_unet_lora_config(rank1, alpha1, target_modules=target_modules)
         unet.add_adapter(lora_config0, adapter_name="adapter0")
         unet.add_adapter(lora_config1, adapter_name="adapter1")
 
@@ -4337,19 +4338,31 @@ class TestHotSwapping:
             unet(**dummy_input)["sample"]
 
             if do_hotswap:
-                unet.load_lora_adapter(file_name1, adapter_name="default_0", hotswap=True)
+                unet.load_lora_adapter(file_name1, adapter_name="adapter0", hotswap=True)
             else:
                 # offloading the old and loading the new adapter will result in recompilation
-                self.set_lora_device(unet, adapter_names=["default_0"], device="cpu")
+                self.set_lora_device(unet, adapter_names=["adapter0"], device="cpu")
                 unet.load_lora_adapter(file_name1, adapter_name="other_name", hotswap=False)
 
             # we need to call forward to potentially trigger recompilation
             unet(**dummy_input)["sample"]
 
+    @pytest.mark.skipif(not is_diffusers_available(), reason="Test requires diffusers to be installed")
     @pytest.mark.xfail(
         strict=True, reason="Requires hotswap to be implemented in diffusers", raises=torch._dynamo.exc.RecompileError
     )
-    def test_hotswapping_compiled_diffusers_model_does_not_trigger_recompilation(self):
-        ranks = 7, 13
+    # it is important to check hotswapping small to large ranks and large to small ranks
+    @pytest.mark.parametrize("ranks", [(11, 11), (7, 13), (13, 7)])
+    @pytest.mark.parametrize(
+        "target_modules",
+        [
+            ["to_q", "to_k", "to_v", "to_out.0"],  # Linear layers
+            ["conv", "conv1", "conv2"],  # Conv2d layers
+            ["to_q", "conv"],  # mix of Linear and Conv2d
+        ],
+    )
+    def test_hotswapping_compiled_diffusers_model_does_not_trigger_recompilation(self, ranks, target_modules):
         with torch._dynamo.config.patch(error_on_recompile=True):  # raise an error on recompilation
-            self.check_hotswap_diffusion(do_hotswap=True, ranks=ranks, alpha_scalings=ranks)
+            self.check_hotswap_diffusion(
+                do_hotswap=True, ranks=ranks, alpha_scalings=ranks, target_modules=target_modules
+            )
