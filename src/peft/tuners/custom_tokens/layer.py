@@ -91,12 +91,18 @@ class CustomTokensLayer(nn.Module, BaseTunerLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            W = self.base_layer.weight
+            deltas = None
             for active_adapter in self.active_adapters:
-                W += self.sparse_delta_tokens[active_adapter]
-                
+                delta = self.sparse_delta_tokens[active_adapter]
+                if deltas is None:
+                    deltas = delta
+                else:
+                    deltas += delta
+
+            W = self.base_layer.weight
+
             result = F.embedding(
-            x, W, self.base_layer.padding_idx, self.base_layer.max_norm,
-            self.base_layer.norm_type, self.base_layer.scale_grad_by_freq, self.base_layer.sparse)
+                x, W + deltas, self.base_layer.padding_idx, self.base_layer.max_norm,
+                self.base_layer.norm_type, self.base_layer.scale_grad_by_freq, self.base_layer.sparse)
 
         return result
