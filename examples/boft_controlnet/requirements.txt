@@ -1,6 +1,6 @@
 datasets==2.16.1
 diffusers==0.17.1
-transformers==4.36.2
+transformers=>4.48.0
 accelerate==0.25.0
 wandb==0.16.1
 scikit-image==0.22.0
