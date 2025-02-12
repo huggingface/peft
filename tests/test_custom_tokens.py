@@ -34,19 +34,32 @@ class TestCustomTokens:
             'input_ids': torch.tensor([[0, 1, 2, 3]]),
             'attention_mask': torch.tensor([[1, 1, 1, 1]]),
         }
-        output = peft_model.forward(**X)
+        output_trn = peft_model.forward(output_hidden_states=True, **X)
 
         peft_model.save_pretrained(save_path)
-        del peft_model
+        peft_model_org = peft_model
 
-        # check whether the token indices differ from the base model
+        # check whether the token indices differ from the base model after loading the model
+        # from the checkpoint.
         peft_model = AutoPeftModel.from_pretrained(save_path)
         output_mod = peft_model.forward(output_hidden_states=True, **X)
         output_org = original_model.forward(output_hidden_states=True, **X)
 
+        # on the way, make sure that the embedding matrix itself was not modified
+        assert torch.allclose(
+            peft_model.model.model.embed_tokens.weight,
+            peft_model_org.model.model.embed_tokens.weight,
+        )
+
         W_mod = output_mod.hidden_states[0]
         W_org = output_org.hidden_states[0]
+        W_trn = output_trn.hidden_states[0]
 
+        # all PEFT model embed outputs must equal the outputs during 'training' to make sure
+        # that saving/loading works properly.
+        assert torch.allclose(W_mod, W_trn)
+
+        # token indices that were 'trained' need to differ, all others need to be equal.
         assert not torch.allclose(W_mod[:, :3], W_org[:, :3])
         assert torch.allclose(W_mod[:, 3:], W_org[:, 3:])
 
@@ -65,7 +78,7 @@ class TestCustomTokens:
             'input_ids': torch.tensor([[0, 1, 2, 3]]),
             'attention_mask': torch.tensor([[1, 1, 1, 1]]),
         }
-        output = peft_model.forward(**X)
+        output_trn = peft_model.forward(output_hidden_states=True, **X)
 
         peft_model.save_pretrained(save_path)
         del peft_model
@@ -77,6 +90,11 @@ class TestCustomTokens:
 
         W_mod = output_mod.hidden_states[0]
         W_org = output_org.hidden_states[0]
+        W_trn = output_trn.hidden_states[0]
+
+        # all PEFT model embed outputs must equal the outputs during 'training' to make sure
+        # that saving/loading works properly.
+        assert torch.allclose(W_mod, W_trn)
 
         assert not torch.allclose(W_mod[:, :3], W_org[:, :3])
         assert torch.allclose(W_mod[:, 3:], W_org[:, 3:])

@@ -7,8 +7,8 @@ import warnings
 
 
 class CustomTokensLayer(nn.Module, BaseTunerLayer):
-    def __init__(self, 
-    base_layer: nn.Module, 
+    def __init__(self,
+    base_layer: nn.Module,
     adapter_name: str,
     token_indices: List[int],
     **kwargs,
@@ -21,7 +21,7 @@ class CustomTokensLayer(nn.Module, BaseTunerLayer):
         self.kwargs = kwargs
 
         # we store the delta weight on particular tokens
-        self.delta_tokens = nn.ParameterDict({})
+        self.custom_tokens_delta_tokens = nn.ParameterDict({})
         self.sparse_delta_tokens = {}
 
         # Mark the weight as unmerged
@@ -41,7 +41,7 @@ class CustomTokensLayer(nn.Module, BaseTunerLayer):
         values = torch.rand((self.num_trainable_embeddings * self.base_layer.weight.shape[-1], )) # we initialize the values from a normal distribution N(0, 1), as in https://pytorch.org/docs/stable/generated/torch.nn.Embedding.html
 
         # cause safetensors doesn't support sparse tensors, we need to store the values in a dense tensor and then convert it to a sparse tensor when called
-        self.delta_tokens[adapter_name] = nn.Parameter(values, requires_grad=True)
+        self.custom_tokens_delta_tokens[adapter_name] = nn.Parameter(values, requires_grad=True)
 
         # we created the indices of the sparse tensor
         r = torch.Tensor(self.token_indices).long()
@@ -49,8 +49,11 @@ class CustomTokensLayer(nn.Module, BaseTunerLayer):
         indices = torch.stack([r.repeat(self.embedding_dim), c.repeat(self.num_trainable_embeddings , 1).t().reshape(-1)], dim=1).T
 
         # we create the sparse tensor from our `delta_tokens` and `indices
-        self.sparse_delta_tokens[adapter_name] = torch.sparse_coo_tensor(indices=indices, values=self.delta_tokens[adapter_name], size=(self.num_total_embeddings, self.embedding_dim))
-
+        self.sparse_delta_tokens[adapter_name] = torch.sparse_coo_tensor(
+            indices=indices,
+            values=self.custom_tokens_delta_tokens[adapter_name],
+            size=(self.num_total_embeddings, self.embedding_dim),
+        )
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         adapter_names = check_adapters_to_merge(self, adapter_names)
@@ -75,11 +78,11 @@ class CustomTokensLayer(nn.Module, BaseTunerLayer):
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
-        
+
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             self.base_layer.weight.data -= self.sparse_delta_tokens[active_adapter]
-        
+
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         if self.disable_adapters:
             if self.merged:

@@ -135,7 +135,7 @@ def get_peft_model_state_dict(
             raise NotImplementedError
 
     elif config.peft_type == PeftType.CUSTOM_TOKENS:
-        to_return = {k: state_dict[k] for k in state_dict if "custom_tokens" in k}
+        to_return = {k: state_dict[k] for k in state_dict if "custom_tokens_delta_tokens" in k}
 
     elif config.peft_type == PeftType.ADAPTION_PROMPT:
         to_return = {k: state_dict[k] for k in state_dict if k.split(".")[-1].startswith("adaption_")}
