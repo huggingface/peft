@@ -296,7 +296,7 @@ def prepare_model_for_compiled_hotswap(
         # do inference with adapter 1
         ```
     """
-    is_compiled = hasattr(model, "_orig_mod")
+    is_compiled = hasattr(model, "_orig_mod") or getattr(model, "_compiled_call_impl", False)
     if is_compiled:
         raise ValueError("Call prepare_model_for_compiled_hotswap *before* compiling the model")
 
@@ -416,18 +416,34 @@ def hotswap_adapter_from_state_dict(
         # swap actual weights
         # no need to account for potential _orig_mod in key here, as torch handles that
         old_val = attrgetter(key)(model)
+        new_val = new_val.to(old_val.data.device)
+
+        # We try to detect if the model is compiled but it does not always work, e.g. if hotswapping is called from
+        # within the model itself. In this case, swap_tensors raises RuntimeError and should continue without
+        # swap_tensors.
         if not is_compiled and not is_compiled_inplace:
-            torch.utils.swap_tensors(old_val, new_val)
-            continue
+            try:
+                torch.utils.swap_tensors(old_val, new_val)
+                continue
+            except RuntimeError:
+                is_compiled = True
 
         # Compiled models don't work with swap_tensors because there are weakrefs for the tensor. It is unclear if
         # this workaround could not cause trouble but the tests indicate that it works.
         if old_val.shape == new_val.shape:
+            # either
+            # - adapters had the same rank
+            # - adapters were padded with prepare_model_for_compiled_hotswap and 2nd adapter was larger
             old_val.data = new_val.data
         else:
-            if old_val.dim() != 2:
-                # TODO conv2d
-                raise NotImplementedError
+            # if 2nd adapter was smaller, ensure to fill up to adapter dimension and set the rest to zeros
+            if old_val.dim() not in (2, 4):
+                raise NotImplementedError(
+                    f"Trying to hotswap an adapter whose weight has {old_val.dim()} dimensions, but only Conv2d and "
+                    "Linear are supported"
+                )
+
+            # Linear or Conv2d: the check for dim 0 or 1 works for both of these layer types
             if old_val.shape[0] > new_val.shape[0]:
                 old_val.data.fill_(0)
                 old_val.data[: new_val.shape[0]] = new_val.data
@@ -442,7 +458,7 @@ def hotswap_adapter_from_state_dict(
                 )
 
 
-def _check_hotswap_configs_compatible(config0: PeftConfig, config1: PeftConfig) -> None:
+def check_hotswap_configs_compatible(config0: PeftConfig, config1: PeftConfig) -> None:
     """
     Check if two configs are compatible for hot-swapping.
 
@@ -548,7 +564,7 @@ def hotswap_adapter(model, model_name_or_path, adapter_name, torch_device=None, 
     ]
     config = config_cls.from_pretrained(model_name_or_path, **kwargs)
     # config keys that could affect the model output besides what is determined by the state_dict
-    _check_hotswap_configs_compatible(model.active_peft_config, config)
+    check_hotswap_configs_compatible(model.active_peft_config, config)
 
     state_dict = load_peft_weights(model_name_or_path, device=torch_device, **kwargs)
 
