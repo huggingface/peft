@@ -203,6 +203,8 @@ def get_peft_model_state_dict(
             if any(f"{module_name}.modules_to_save.{adapter_name}" in key for module_name in model.modules_to_save):
                 to_return[key.replace("modules_to_save.", "")] = value
 
+    # TODO: handle AuxiliaryTrainingWrapper
+
     # DEAL WITH EMBEDDINGS
     # check the common embedding layers in `target_modules` to reset `save_embedding_layers` if necessary
     is_embedding_in_target_modules = False

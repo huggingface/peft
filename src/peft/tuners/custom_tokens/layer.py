@@ -61,10 +61,10 @@ class CustomTokensLayer(nn.Module, BaseTunerLayer):
         if not adapter_names:
             # no adapter to merge
             return
-    
+
         for active_adapter in adapter_names:
             orig_weights = self.base_layer.weight.data
-            orig_weights += self.sparse_delta_tokens[active_adapter] 
+            orig_weights += self.sparse_delta_tokens[active_adapter]
 
             if safe_merge and not torch.isfinite(orig_weights).all():
                 raise ValueError(
