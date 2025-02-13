@@ -951,7 +951,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             else:
                 self.modules_to_save.update(peft_config.modules_to_save)
             # this may add a new ModulesToSaveWrapper
-            _set_trainable(self, adapter_name, modules_to_save=peft_config.modules_to_save, mode='retrain')
+            _set_trainable(self, adapter_name, module_names=peft_config.modules_to_save, mode='retrain')
 
         if getattr(peft_config, "trainable_token_indices", None) is not None:
             if isinstance(peft_config.trainable_token_indices, dict):
@@ -967,12 +967,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                             f'`modules_to_save=[..., "{target_layer}", ...]` or `trainable_tokens=x` but not both.'
                         )
 
-            # we are not adding this to `self.modules_to_save` as this is strictly reserved for the
+            # we are not adding these module names to `self.modules_to_save` as this is strictly reserved for the
             # `ModulesToSaveWrapper`. There are some places in the PEFT code base where the modules to save
             # wrapper is applied based on this attribute which would lead to conflicts.
-            for target_layer, token_indices in target_layers.items():
-                _set_trainable(self, adapter_name, [target_layer], mode='new_tokens', token_indices=token_indices)
 
+            for target_layer, token_indices in target_layers.items():
+                new_training_modules = _set_trainable(self, adapter_name, module_names=[target_layer],
+                                                      mode='new_tokens', token_indices=token_indices)
 
     def get_layer_status(self) -> list[TunerLayerStatus]:
         """Get the status of each adapter layer in the model.
@@ -1469,7 +1470,7 @@ class PeftModelForSequenceClassification(PeftModel):
                 break
 
         # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
-        _set_trainable(self, adapter_name, modules_to_save=peft_config.modules_to_save)
+        _set_trainable(self, adapter_name, module_names=peft_config.modules_to_save)
 
     def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """
@@ -2260,7 +2261,7 @@ class PeftModelForTokenClassification(PeftModel):
                 break
 
         # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
-        _set_trainable(self, adapter_name, modules_to_save=peft_config.modules_to_save)
+        _set_trainable(self, adapter_name, module_names=peft_config.modules_to_save)
 
     def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """
@@ -2481,7 +2482,7 @@ class PeftModelForQuestionAnswering(PeftModel):
                 break
 
         # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
-        _set_trainable(self, adapter_name, modules_to_save=peft_config.modules_to_save)
+        _set_trainable(self, adapter_name, module_names=peft_config.modules_to_save)
 
     def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """
