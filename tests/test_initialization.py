@@ -3279,6 +3279,12 @@ class TestHotSwapping:
         with pytest.raises(ValueError, match=msg):
             prepare_model_for_compiled_hotswap(model)
 
+    def test_prepare_model_for_compiled_hotswap_model_no_adapter_raises(self):
+        model = self.get_model()
+        msg = re.escape("No adapter layers found on the model")
+        with pytest.raises(ValueError, match=msg):
+            prepare_model_for_compiled_hotswap(model)
+
     def test_prepare_model_for_compiled_hotswap_does_not_change_output(self):
         # preparing the model for hotswapping should not change the model output
         inputs = torch.rand(3, 10).to(self.torch_device)
