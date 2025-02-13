@@ -122,13 +122,13 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             W = self.base_layer.weight
 
             result = F.embedding(
-                x,
-                W + deltas,
-                self.base_layer.padding_idx,
-                self.base_layer.max_norm,
-                self.base_layer.norm_type,
-                self.base_layer.scale_grad_by_freq,
-                self.base_layer.sparse,
+                input=x,
+                weight=W + deltas,
+                padding_idx=self.base_layer.padding_idx,
+                max_norm=self.base_layer.max_norm,
+                norm_type=self.base_layer.norm_type,
+                scale_grad_by_freq=self.base_layer.scale_grad_by_freq,
+                sparse=self.base_layer.sparse,
             )
 
         return result

@@ -4,10 +4,10 @@ import pytest
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from peft import AutoPeftModel, CustomTokensConfig, LoraConfig, get_peft_model
+from peft import AutoPeftModel, TrainableTokensConfig, LoraConfig, get_peft_model
 
 
-class TestCustomTokens:
+class TestTrainableTokens:
     @pytest.fixture
     def model_id(self):
         return "trl-internal-testing/tiny-random-LlamaForCausalLM"
@@ -22,7 +22,7 @@ class TestCustomTokens:
 
     def test_stand_alone_usage(self, model, tokenizer, tmp_path):
         original_model = copy.deepcopy(model)
-        peft_config = CustomTokensConfig(target_modules=["embed_tokens"], token_indices=[0, 1, 2])
+        peft_config = TrainableTokensConfig(target_modules=["embed_tokens"], token_indices=[0, 1, 2])
         peft_model = get_peft_model(model, peft_config)
         save_path = tmp_path / "stand_alone_usage"
 
