@@ -135,9 +135,9 @@ def get_peft_model_state_dict(
         else:
             raise NotImplementedError
 
-    elif config.peft_type == PeftType.CUSTOM_TOKENS:
+    elif config.peft_type == PeftType.TRAINABLE_TOKENS:
         # TODO maybe add "{adapter_name}." as prefix to the filter string?
-        to_return = {k: state_dict[k] for k in state_dict if "custom_tokens_delta_tokens" in k}
+        to_return = {k: state_dict[k] for k in state_dict if "trainable_tokens_delta_tokens" in k}
 
     elif config.peft_type == PeftType.ADAPTION_PROMPT:
         to_return = {k: state_dict[k] for k in state_dict if k.split(".")[-1].startswith("adaption_")}

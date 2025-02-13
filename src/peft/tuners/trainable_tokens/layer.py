@@ -22,7 +22,7 @@ import torch.nn.functional as F
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
 
-class CustomTokensLayer(nn.Module, BaseTunerLayer):
+class TrainableTokensLayer(nn.Module, BaseTunerLayer):
     def __init__(
         self,
         base_layer: nn.Module,
@@ -38,7 +38,7 @@ class CustomTokensLayer(nn.Module, BaseTunerLayer):
         self.kwargs = kwargs
 
         # we store the delta weight on particular tokens
-        self.custom_tokens_delta_tokens = nn.ParameterDict({})
+        self.trainable_tokens_delta_tokens = nn.ParameterDict({})
         self.sparse_delta_tokens = {}
 
         # Mark the weight as unmerged
@@ -60,7 +60,7 @@ class CustomTokensLayer(nn.Module, BaseTunerLayer):
         )  # we initialize the values from a normal distribution N(0, 1), as in https://pytorch.org/docs/stable/generated/torch.nn.Embedding.html
 
         # cause safetensors doesn't support sparse tensors, we need to store the values in a dense tensor and then convert it to a sparse tensor when called
-        self.custom_tokens_delta_tokens[adapter_name] = nn.Parameter(values, requires_grad=True)
+        self.trainable_tokens_delta_tokens[adapter_name] = nn.Parameter(values, requires_grad=True)
 
         # we created the indices of the sparse tensor
         r = torch.Tensor(self.token_indices).long()
@@ -72,7 +72,7 @@ class CustomTokensLayer(nn.Module, BaseTunerLayer):
         # we create the sparse tensor from our `delta_tokens` and `indices
         self.sparse_delta_tokens[adapter_name] = torch.sparse_coo_tensor(
             indices=indices,
-            values=self.custom_tokens_delta_tokens[adapter_name],
+            values=self.trainable_tokens_delta_tokens[adapter_name],
             size=(self.num_total_embeddings, self.embedding_dim),
         )
 

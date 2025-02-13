@@ -964,7 +964,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     if target_layer in self.modules_to_save:
                         raise ValueError(
                             "The embedding layer is already marked to be trained fully, either specify "
-                            f'`modules_to_save=[..., "{target_layer}", ...]` or `trainable_tokens=x` but not both.'
+                            f'`modules_to_save=[..., "{target_layer}", ...]` or '
+                            f'`trainable_tokens={"{target_layer}": x}` but not both.'
                         )
 
             # we are not adding these module names to `self.modules_to_save` as this is strictly reserved for the

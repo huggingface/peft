@@ -20,11 +20,11 @@ from peft.config import PeftConfig
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
 from peft.utils import AuxiliaryTrainingWrapper
 
-from .layer import CustomTokensLayer
+from .layer import TrainableTokensLayer
 
 
-class CustomTokensModel(BaseTuner):
-    prefix: str = "custom_tokens_"
+class TrainableTokensModel(BaseTuner):
+    prefix: str = "trainable_tokens_"
 
     def __init__(self, model, config, adapter_name):
         super().__init__(model, config, adapter_name)
@@ -53,7 +53,7 @@ class CustomTokensModel(BaseTuner):
         """
         kwargs = peft_config.to_dict()
 
-        if isinstance(target, CustomTokensLayer):
+        if isinstance(target, TrainableTokensLayer):
             target.update_layer(adapter_name, **kwargs)
         else:
             new_module = self._create_new_module(peft_config, adapter_name, target, **kwargs)
@@ -66,7 +66,7 @@ class CustomTokensModel(BaseTuner):
     def _create_new_module(peft_config, adapter_name, target, **kwargs):
         # Collect dispatcher functions to decide what backend to use for the replaced LoRA layer. The order matters,
         # because the first match is always used. Therefore, the default layers should be checked last.
-        new_module = CustomTokensLayer(target, adapter_name, **kwargs)
+        new_module = TrainableTokensLayer(target, adapter_name, **kwargs)
 
         return new_module
 
@@ -137,7 +137,7 @@ class CustomTokensModel(BaseTuner):
             adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
         """
         for module in self.model.modules():
-            if isinstance(module, CustomTokensLayer):
+            if isinstance(module, TrainableTokensLayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()

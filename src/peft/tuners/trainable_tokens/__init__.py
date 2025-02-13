@@ -14,17 +14,17 @@
 
 from peft.utils import register_peft_method
 
-from .config import CustomTokensConfig
-from .layer import CustomTokensLayer
-from .model import CustomTokensModel
+from .config import TrainableTokensConfig
+from .layer import TrainableTokensLayer
+from .model import TrainableTokensModel
 
 
 __all__ = [
-    "CustomTokensConfig",
-    "CustomTokensLayer",
-    "CustomTokensModel",
+    "TrainableTokensConfig",
+    "TrainableTokensLayer",
+    "TrainableTokensModel",
 ]
 
 register_peft_method(
-    name="custom_tokens", config_cls=CustomTokensConfig, model_cls=CustomTokensModel, is_mixed_compatible=False
+    name="trainable_tokens", config_cls=TrainableTokensConfig, model_cls=TrainableTokensModel, is_mixed_compatible=False
 )

@@ -478,7 +478,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 
 class NewTokensWrapper(AuxiliaryTrainingWrapper):
     """Wraps a module (typically an embedding layer) that is supposed to be re-trained sparsely (i.e.
-    solely updating a few columns) using the `CustomTokensLayer` PEFT method.
+    solely updating a few columns) using the `TrainableTokensLayer` PEFT method.
     """
 
     def __init__(
@@ -492,11 +492,11 @@ class NewTokensWrapper(AuxiliaryTrainingWrapper):
 
     def init_modules(self, adapter_name):
         # use a local import to avoid potential circular imports
-        from peft.tuners.custom_tokens import CustomTokensLayer
+        from peft.tuners.trainable_tokens import TrainableTokensLayer
 
         # since super().__init__() calls update before we have a chance to initialise the adapter we would
         # need here, we do the initialization here.
-        self.token_adapter = CustomTokensLayer(self.original_module, adapter_name, self.token_indices)
+        self.token_adapter = TrainableTokensLayer(self.original_module, adapter_name, self.token_indices)
 
     def _forward_wrapped(self, x, active_adapter, *args, **kwargs):
         self.token_adapter.set_adapter(active_adapter)
@@ -516,12 +516,12 @@ class NewTokensWrapper(AuxiliaryTrainingWrapper):
         super().update(active_adapter)
 
     def adapter_state_dict(self, adapter_name):
-        # See the implementation for PeftType.CUSTOM_TOKENS in `get_peft_model_state_dict`
+        # See the implementation for PeftType.TRAINABLE_TOKENS in `get_peft_model_state_dict`
         # TODO if possible, DRY
         return {
             f"token_adapter.{k}": v
             for k, v in self.token_adapter.state_dict().items()
-            if "custom_tokens_delta_tokens" in k
+            if "trainable_tokens_delta_tokens" in k
         }
 
 
