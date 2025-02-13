@@ -1,17 +1,20 @@
+import warnings
 from typing import List, Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
-import warnings
 
 
 class CustomTokensLayer(nn.Module, BaseTunerLayer):
-    def __init__(self,
-    base_layer: nn.Module,
-    adapter_name: str,
-    token_indices: List[int],
-    **kwargs,
+    def __init__(
+        self,
+        base_layer: nn.Module,
+        adapter_name: str,
+        token_indices: List[int],
+        **kwargs,
     ) -> None:
         super().__init__()
 
@@ -29,16 +32,18 @@ class CustomTokensLayer(nn.Module, BaseTunerLayer):
         self.merged_adapters = []
 
         # we set parameters on layer sizing
-        self.num_trainable_embeddings = len(token_indices) # this is similar to `num_embeddings`
-        self.embedding_dim = base_layer.embedding_dim # token from the embedding
-        self.num_total_embeddings = base_layer.num_embeddings # total number of tokens in the vocabulary
+        self.num_trainable_embeddings = len(token_indices)  # this is similar to `num_embeddings`
+        self.embedding_dim = base_layer.embedding_dim  # token from the embedding
+        self.num_total_embeddings = base_layer.num_embeddings  # total number of tokens in the vocabulary
 
         # we set the number of trainable tokens
         self.update_layer(adapter_name)
 
     def update_layer(self, adapter_name):
         # we initialize the delta embedding weights and store them in a trainable parameter
-        values = torch.rand((self.num_trainable_embeddings * self.base_layer.weight.shape[-1], )) # we initialize the values from a normal distribution N(0, 1), as in https://pytorch.org/docs/stable/generated/torch.nn.Embedding.html
+        values = torch.rand(
+            (self.num_trainable_embeddings * self.base_layer.weight.shape[-1],)
+        )  # we initialize the values from a normal distribution N(0, 1), as in https://pytorch.org/docs/stable/generated/torch.nn.Embedding.html
 
         # cause safetensors doesn't support sparse tensors, we need to store the values in a dense tensor and then convert it to a sparse tensor when called
         self.custom_tokens_delta_tokens[adapter_name] = nn.Parameter(values, requires_grad=True)
@@ -46,7 +51,9 @@ class CustomTokensLayer(nn.Module, BaseTunerLayer):
         # we created the indices of the sparse tensor
         r = torch.Tensor(self.token_indices).long()
         c = torch.arange(self.embedding_dim)
-        indices = torch.stack([r.repeat(self.embedding_dim), c.repeat(self.num_trainable_embeddings , 1).t().reshape(-1)], dim=1).T
+        indices = torch.stack(
+            [r.repeat(self.embedding_dim), c.repeat(self.num_trainable_embeddings, 1).t().reshape(-1)], dim=1
+        ).T
 
         # we create the sparse tensor from our `delta_tokens` and `indices
         self.sparse_delta_tokens[adapter_name] = torch.sparse_coo_tensor(
@@ -102,7 +109,13 @@ class CustomTokensLayer(nn.Module, BaseTunerLayer):
             W = self.base_layer.weight
 
             result = F.embedding(
-                x, W + deltas, self.base_layer.padding_idx, self.base_layer.max_norm,
-                self.base_layer.norm_type, self.base_layer.scale_grad_by_freq, self.base_layer.sparse)
+                x,
+                W + deltas,
+                self.base_layer.padding_idx,
+                self.base_layer.max_norm,
+                self.base_layer.norm_type,
+                self.base_layer.scale_grad_by_freq,
+                self.base_layer.sparse,
+            )
 
         return result

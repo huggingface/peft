@@ -34,7 +34,6 @@ from peft import (
     BOFTConfig,
     BoneConfig,
     CPTConfig,
-    CustomTokensConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,

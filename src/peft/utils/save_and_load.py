@@ -30,9 +30,9 @@ from .other import (
     EMBEDDING_LAYER_NAMES,
     SAFETENSORS_WEIGHTS_NAME,
     WEIGHTS_NAME,
+    AuxiliaryTrainingWrapper,
     check_file_exists_on_hf_hub,
     infer_device,
-    AuxiliaryTrainingWrapper,
 )
 from .peft_types import PeftType
 
@@ -363,7 +363,7 @@ def set_peft_model_state_dict(
             for k, _ in module.adapter_state_dict(adapter_name).items():
                 # each saved state dict is adapter specific, i.e. does not contain the adapter name
                 # but the loaded state dict does include adapter names since we can have multiple.
-                k_no_adapter = k.replace(f'.{adapter_name}', '')
+                k_no_adapter = k.replace(f".{adapter_name}", "")
                 store_key = f"{name}.{k}"
                 lookup_key = f"{name}.{k_no_adapter}"
 

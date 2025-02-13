@@ -433,14 +433,7 @@ class LoraConfig(PeftConfig):
             )
         },
     )
-    trainable_token_indices: Optional[Union[int, dict]] = field(
-        default_factory=list,
-        metadata={
-            "help": (
-                "TODO",
-            )
-        }
-    )
+    trainable_token_indices: Optional[Union[int, dict]] = field(default_factory=list, metadata={"help": ("TODO",)})
     # dict type is used when loading config.json
     loftq_config: Union[LoftQConfig, dict] = field(
         default_factory=dict,

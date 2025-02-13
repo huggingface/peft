@@ -15,8 +15,8 @@
 from peft.utils import register_peft_method
 
 from .config import CustomTokensConfig
-from .model import CustomTokensModel
 from .layer import CustomTokensLayer
+from .model import CustomTokensModel
 
 
 __all__ = [
@@ -25,6 +25,6 @@ __all__ = [
     "CustomTokensModel",
 ]
 
-register_peft_method(name="custom_tokens", config_cls=CustomTokensConfig, model_cls=CustomTokensModel,
-                     is_mixed_compatible=False)
-
+register_peft_method(
+    name="custom_tokens", config_cls=CustomTokensConfig, model_cls=CustomTokensModel, is_mixed_compatible=False
+)

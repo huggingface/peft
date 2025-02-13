@@ -4,15 +4,13 @@ import pytest
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from peft import CustomTokensConfig, AutoPeftModel, LoraConfig
-from peft import get_peft_model
+from peft import AutoPeftModel, CustomTokensConfig, LoraConfig, get_peft_model
 
 
 class TestCustomTokens:
-
     @pytest.fixture
     def model_id(self):
-        return     "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        return "trl-internal-testing/tiny-random-LlamaForCausalLM"
 
     @pytest.fixture
     def model(self, model_id):
@@ -24,15 +22,15 @@ class TestCustomTokens:
 
     def test_stand_alone_usage(self, model, tokenizer, tmp_path):
         original_model = copy.deepcopy(model)
-        peft_config = CustomTokensConfig(target_modules=['embed_tokens'], token_indices=[0, 1, 2])
+        peft_config = CustomTokensConfig(target_modules=["embed_tokens"], token_indices=[0, 1, 2])
         peft_model = get_peft_model(model, peft_config)
         save_path = tmp_path / "stand_alone_usage"
 
         # simulate normal use but take care to use the tokens that we expect to be modified
         # (+1 that we don't expect to be modified)
         X = {
-            'input_ids': torch.tensor([[0, 1, 2, 3]]),
-            'attention_mask': torch.tensor([[1, 1, 1, 1]]),
+            "input_ids": torch.tensor([[0, 1, 2, 3]]),
+            "attention_mask": torch.tensor([[1, 1, 1, 1]]),
         }
         output_trn = peft_model.forward(output_hidden_states=True, **X)
 
@@ -65,8 +63,8 @@ class TestCustomTokens:
     def test_combined_with_lora_usage(self, model, tokenizer, tmp_path):
         original_model = copy.deepcopy(model)
         peft_config = LoraConfig(
-            target_modules='all-linear',
-            trainable_token_indices={'embed_tokens': [0, 1, 2]},
+            target_modules="all-linear",
+            trainable_token_indices={"embed_tokens": [0, 1, 2]},
         )
         peft_model = get_peft_model(model, peft_config)
         save_path = tmp_path / "stand_alone_usage"
@@ -74,8 +72,8 @@ class TestCustomTokens:
         # simulate normal use but take care to use the tokens that we expect to be modified
         # (+1 that we don't expect to be modified)
         X = {
-            'input_ids': torch.tensor([[0, 1, 2, 3]]),
-            'attention_mask': torch.tensor([[1, 1, 1, 1]]),
+            "input_ids": torch.tensor([[0, 1, 2, 3]]),
+            "attention_mask": torch.tensor([[1, 1, 1, 1]]),
         }
         output_trn = peft_model.forward(output_hidden_states=True, **X)
 

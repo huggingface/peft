@@ -12,10 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import warnings
+
 import torch.nn as nn
 
 from peft.config import PeftConfig
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
+from peft.utils import AuxiliaryTrainingWrapper
 
 from .layer import CustomTokensLayer
 

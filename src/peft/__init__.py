@@ -136,6 +136,8 @@ __all__ = [
     "BoneModel",
     "CPTConfig",
     "CPTEmbedding",
+    "CustomTokensConfig",
+    "CustomTokensModel",
     "EvaConfig",
     "FourierFTConfig",
     "FourierFTModel",

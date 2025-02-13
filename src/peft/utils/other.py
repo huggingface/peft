@@ -208,12 +208,13 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
     PEFT normally works, e.g. fully training a classification layer instead of using an adapter.
 
     """
+
     def __init__(self, module_to_save, adapter_name):
         super().__init__()
         self.original_module = module_to_save
         self._active_adapter = adapter_name
         self._disable_adapters = False
-        self._adapters = set([])
+        self._adapters = set()
 
         self.init_modules(adapter_name)
 
@@ -390,8 +391,8 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
 
 
 class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
-    """Wraps a module that is supposed to be trained (i.e. `requires_grad_(True)`) and saved after training.
-    """
+    """Wraps a module that is supposed to be trained (i.e. `requires_grad_(True)`) and saved after training."""
+
     def __init__(self, module_to_save, adapter_name):
         super().__init__(module_to_save, adapter_name)
 
@@ -481,10 +482,12 @@ class NewTokensWrapper(AuxiliaryTrainingWrapper):
 
     Provides `modules_to_save[adapter] = updated_embedding_layer`.
     """
-    def __init__(self,
-        module_to_save: nn.Module,
+
+    def __init__(
+        self,
+        module_to_save: torch.nn.Module,
         adapter_name: str,
-        token_indices: List[int],
+        token_indices: list[int],
     ) -> None:
         self.token_indices = token_indices
         super().__init__(module_to_save, adapter_name)
@@ -517,8 +520,11 @@ class NewTokensWrapper(AuxiliaryTrainingWrapper):
     def adapter_state_dict(self, adapter_name):
         # See the implementation for PeftType.CUSTOM_TOKENS in `get_peft_model_state_dict`
         # TODO if possible, DRY
-        return {f"token_adapter.{k}": v for k, v in self.token_adapter.state_dict().items()
-                if 'custom_tokens_delta_tokens' in k}
+        return {
+            f"token_adapter.{k}": v
+            for k, v in self.token_adapter.state_dict().items()
+            if "custom_tokens_delta_tokens" in k
+        }
 
 
 def _get_submodules(model, key):
@@ -534,13 +540,13 @@ def _freeze_adapter(model, adapter_name):
             p.requires_grad = False
 
 
-def _set_trainable(model, adapter_name, module_names, mode='retrain', **wrapper_kwargs):
+def _set_trainable(model, adapter_name, module_names, mode="retrain", **wrapper_kwargs):
     """Wraps modules that are supposed to be re-trained either normally, i.e. marking them to require gradients and
     saving them alongside other modules, or with certain methods that go alongside PEFT methods, such as retraining
     specific token indices using sparse matrices.
 
-    Note that you need to validate beforehand if there are layers shared between modes, e.g. if the 'embedding'
-    layer is configured for both mode `retrain` and `new_tokens` which would result in conflicts down the line.
+    Note that you need to validate beforehand if there are layers shared between modes, e.g. if the 'embedding' layer
+    is configured for both mode `retrain` and `new_tokens` which would result in conflicts down the line.
     """
     if mode == "retrain":
         target_cls = ModulesToSaveWrapper

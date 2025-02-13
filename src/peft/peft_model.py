@@ -951,19 +951,19 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             else:
                 self.modules_to_save.update(peft_config.modules_to_save)
             # this may add a new ModulesToSaveWrapper
-            _set_trainable(self, adapter_name, module_names=peft_config.modules_to_save, mode='retrain')
+            _set_trainable(self, adapter_name, module_names=peft_config.modules_to_save, mode="retrain")
 
         if getattr(peft_config, "trainable_token_indices", None) is not None:
             if isinstance(peft_config.trainable_token_indices, dict):
                 target_layers = peft_config.trainable_token_indices
             else:
-                target_layers = {'embedding': peft_config.trainable_token_indices}
+                target_layers = {"embedding": peft_config.trainable_token_indices}
 
             if self.modules_to_save:
                 for target_layer in target_layers:
                     if target_layer in self.modules_to_save:
                         raise ValueError(
-                            'The embedding layer is already marked to be trained fully, either specify '
+                            "The embedding layer is already marked to be trained fully, either specify "
                             f'`modules_to_save=[..., "{target_layer}", ...]` or `trainable_tokens=x` but not both.'
                         )
 
@@ -972,8 +972,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             # wrapper is applied based on this attribute which would lead to conflicts.
 
             for target_layer, token_indices in target_layers.items():
-                new_training_modules = _set_trainable(self, adapter_name, module_names=[target_layer],
-                                                      mode='new_tokens', token_indices=token_indices)
+                new_training_modules = _set_trainable(
+                    self, adapter_name, module_names=[target_layer], mode="new_tokens", token_indices=token_indices
+                )
 
     def get_layer_status(self) -> list[TunerLayerStatus]:
         """Get the status of each adapter layer in the model.
