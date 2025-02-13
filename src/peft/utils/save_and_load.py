@@ -32,6 +32,7 @@ from .other import (
     WEIGHTS_NAME,
     check_file_exists_on_hf_hub,
     infer_device,
+    AuxiliaryTrainingWrapper,
 )
 from .peft_types import PeftType
 
@@ -135,6 +136,7 @@ def get_peft_model_state_dict(
             raise NotImplementedError
 
     elif config.peft_type == PeftType.CUSTOM_TOKENS:
+        # TODO maybe add "{adapter_name}." as prefix to the filter string?
         to_return = {k: state_dict[k] for k in state_dict if "custom_tokens_delta_tokens" in k}
 
     elif config.peft_type == PeftType.ADAPTION_PROMPT:
@@ -203,7 +205,10 @@ def get_peft_model_state_dict(
             if any(f"{module_name}.modules_to_save.{adapter_name}" in key for module_name in model.modules_to_save):
                 to_return[key.replace("modules_to_save.", "")] = value
 
-    # TODO: handle AuxiliaryTrainingWrapper
+    # ADDITIONAL TRAINING MODULES
+    for name, module in model.named_modules():
+        if isinstance(module, AuxiliaryTrainingWrapper):
+            to_return.update({f"{name}.{k}": v for k, v in module.adapter_state_dict(adapter_name).items()})
 
     # DEAL WITH EMBEDDINGS
     # check the common embedding layers in `target_modules` to reset `save_embedding_layers` if necessary
@@ -338,6 +343,7 @@ def set_peft_model_state_dict(
     """
     config = model.peft_config[adapter_name]
     state_dict = {}
+
     if getattr(model, "modules_to_save", None) is not None:
         for key, value in peft_model_state_dict.items():
             if any(f".{module_name}." in key for module_name in model.modules_to_save):
@@ -349,6 +355,23 @@ def set_peft_model_state_dict(
             state_dict[key] = value
     else:
         state_dict = peft_model_state_dict
+
+    # handle auxiliary training wrappers by getting each of them and translating saved state dict key
+    # (which does not include the adapter name) to loaded state dict key (which includes the adapter name).
+    for name, module in model.named_modules():
+        if isinstance(module, AuxiliaryTrainingWrapper):
+            for k, _ in module.adapter_state_dict(adapter_name).items():
+                # each saved state dict is adapter specific, i.e. does not contain the adapter name
+                # but the loaded state dict does include adapter names since we can have multiple.
+                k_no_adapter = k.replace(f'.{adapter_name}', '')
+                store_key = f"{name}.{k}"
+                lookup_key = f"{name}.{k_no_adapter}"
+
+                state_dict[store_key] = peft_model_state_dict[lookup_key]
+
+                # delete the old key from the previous `state_dict = peft_model_state_dict` statement.
+                # TODO can be removed once the model_to_save code is refactored
+                del state_dict[lookup_key]
 
     if config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT:
         peft_model_state_dict = state_dict

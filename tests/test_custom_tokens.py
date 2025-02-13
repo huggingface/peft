@@ -59,7 +59,6 @@ class TestCustomTokens:
         # that saving/loading works properly.
         assert torch.allclose(W_mod, W_trn)
 
-        # token indices that were 'trained' need to differ, all others need to be equal.
         assert not torch.allclose(W_mod[:, :3], W_org[:, :3])
         assert torch.allclose(W_mod[:, 3:], W_org[:, 3:])
 
@@ -81,7 +80,7 @@ class TestCustomTokens:
         output_trn = peft_model.forward(output_hidden_states=True, **X)
 
         peft_model.save_pretrained(save_path)
-        del peft_model
+        peft_model_org = peft_model
 
         # check whether the token indices differ from the base model
         peft_model = AutoPeftModel.from_pretrained(save_path)

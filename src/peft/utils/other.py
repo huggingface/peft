@@ -207,18 +207,22 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
     """Wrap a specific module so that it can be trained and saved in a way that is tangential to how
     PEFT normally works, e.g. fully training a classification layer instead of using an adapter.
 
-    Provides a `modules_to_save` module that contains the (possibly modified) module for each adapter
-    that is used during training (e.g. in case we're using a mixed model).
     """
     def __init__(self, module_to_save, adapter_name):
         super().__init__()
         self.original_module = module_to_save
-        # we treat each adapter separately, so we have multiple adapters, same (copied) module for each
-        self.modules_to_save = torch.nn.ModuleDict({})
         self._active_adapter = adapter_name
         self._disable_adapters = False
+        self._adapters = set([])
+
+        self.init_modules(adapter_name)
+
         self.update(adapter_name)
         self.check_module()
+
+    def init_modules(self, adapter_name):
+        """A place to initialize PyTorch modules in `__init__` before the call to `self.update()`."""
+        ...
 
     def check_module(self):
         """Perform some sanity checks on the module to ensure that it works"""
@@ -228,15 +232,15 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         forbidden_classes = (torch.nn.ModuleDict, torch.nn.ModuleList, torch.nn.ParameterDict, torch.nn.ParameterList)
         if isinstance(self.original_module, forbidden_classes):
             cls_name = self.original_module.__class__
-            raise TypeError(f"modules_to_save cannot be applied to modules of type {cls_name}")
+            raise TypeError(f"training wrapper cannot be applied to modules of type {cls_name}")
 
         # local import to avoid circular import
         from peft.tuners.tuners_utils import BaseTunerLayer
 
         if isinstance(self.original_module, BaseTunerLayer):
-            # e.g. applying modules_to_save to a lora layer makes no sense
+            # e.g. applying a training wrapper to a lora layer makes no sense
             cls_name = self.original_module.__class__
-            raise TypeError(f"modules_to_save cannot be applied to modules of type {cls_name}")
+            raise TypeError(f"training wrapper cannot be applied to modules of type {cls_name}")
 
     @property
     def disable_adapters(self) -> bool:
@@ -247,6 +251,12 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
     def active_adapter(self) -> str:
         # use a property to ensure that active_adapter is not set directly, instead use the set_adapter method
         return self._active_adapter
+
+    def _hasattr_wrapped(self, name, modules):
+        return False
+
+    def _getattr_wrapped(self, name, modules):
+        return None
 
     def __getattr__(self, name: str):
         # Note: This whole method may seem overly complex at first but PyTorch messes with __getattr__ in a way that
@@ -260,12 +270,12 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
         # Could not find the attribute the PyTorch way. So let's check if it's an attribute on the
-        # original_module/modules_to_save.
+        # original_module or the module further down (e.g., `modules_to_save[active_adapter]`).
         modules = self.__dict__["_modules"]
         if self.disable_adapters:
             module = modules["original_module"]
-        elif self.active_adapter in modules["modules_to_save"]:
-            module = modules["modules_to_save"][self.active_adapter]
+        elif self._hasattr_wrapped(name, modules):
+            module = self._getattr_wrapped(name, modules)
         else:
             # For some reason, there is no module corresponding to the active adapter; this should normally not be
             # reached and exists as a failsafe (otherwise, a KeyError would be raised)
@@ -273,29 +283,11 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         return getattr(module, name)
 
     def update(self, adapter_name):
-        context_manager = nullcontext()
-        for _, param in self.original_module.named_parameters():
-            num_params = param.numel()
-            # if using DS Zero 3 and the weights are initialized empty
-            if num_params == 0 and hasattr(param, "ds_numel"):
-                import deepspeed
-
-                context_manager = deepspeed.zero.GatheredParameters(self.original_module.parameters(), modifier_rank=0)
-                break
-
-        if adapter_name not in self.modules_to_save:
-            with context_manager:
-                self.modules_to_save[adapter_name] = copy.deepcopy(self.original_module)
-
-        if hasattr(self.modules_to_save[adapter_name], "_hf_hook"):
-            old_hook = self.modules_to_save[adapter_name]._hf_hook
-            new_hook = self._create_new_hook(old_hook)
-            remove_hook_from_module(self.modules_to_save[adapter_name])
-            add_hook_to_module(self.modules_to_save[adapter_name], new_hook)
-
-        self.original_module.requires_grad_(False)
-        if adapter_name == self.active_adapter:
-            self.modules_to_save[adapter_name].requires_grad_(True)
+        """Called when this instance should be part of an adapter's training.
+        Adds the given adapter to the list of adapters that this instance is training along with.
+        """
+        if adapter_name not in self._adapters:
+            self._adapters.add(adapter_name)
 
     def _create_new_hook(self, old_hook):
         r"""
@@ -365,7 +357,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         self._check_forward_args(x, *args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
 
-        if self.disable_adapters or (self.active_adapter not in self.modules_to_save):
+        if self.disable_adapters or (self.active_adapter not in self._adapters):
             return self.original_module(x, *args, **kwargs)
         if adapter_names is None:
             return self._forward_wrapped(x, self._active_adapter, *args, **kwargs)
@@ -379,6 +371,71 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         Args:
             enabled (bool): True to enable adapters, False to disable adapters
         """
+        ...
+
+    def set_adapter(self, adapter_name: str):
+        """Set the active adapter
+
+        Args:
+            adapter_name (str): The name of the adapter to set as active
+        """
+        if adapter_name not in self._adapters:
+            raise ValueError(f"Adapter {adapter_name} not found in {self._adapters}")
+
+        self._active_adapter = adapter_name
+
+    def adapter_state_dict(self, adapter_name):
+        """Return the state dict of this module for a given adapter."""
+        ...
+
+
+class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
+    """Wraps a module that is supposed to be trained (i.e. `requires_grad_(True)`) and saved after training.
+    """
+    def __init__(self, module_to_save, adapter_name):
+        super().__init__(module_to_save, adapter_name)
+
+    def init_modules(self, adapter_name):
+        # we treat each adapter separately, so we have multiple adapters, same (copied) module for each
+        self.modules_to_save = torch.nn.ModuleDict({})
+
+    def _forward_wrapped(self, x, active_adapter, *args, **kwargs):
+        return self.modules_to_save[active_adapter](x, *args, **kwargs)
+
+    def _hasattr_wrapped(self, name, modules):
+        return self.active_adapter in modules["modules_to_save"]
+
+    def _getattr_wrapped(self, name, modules):
+        return modules["modules_to_save"][self.active_adapter]
+
+    def update(self, adapter_name):
+        super().update(adapter_name)
+
+        context_manager = nullcontext()
+        for _, param in self.original_module.named_parameters():
+            num_params = param.numel()
+            # if using DS Zero 3 and the weights are initialized empty
+            if num_params == 0 and hasattr(param, "ds_numel"):
+                import deepspeed
+
+                context_manager = deepspeed.zero.GatheredParameters(self.original_module.parameters(), modifier_rank=0)
+                break
+
+        if adapter_name not in self.modules_to_save:
+            with context_manager:
+                self.modules_to_save[adapter_name] = copy.deepcopy(self.original_module)
+
+        if hasattr(self.modules_to_save[adapter_name], "_hf_hook"):
+            old_hook = self.modules_to_save[adapter_name]._hf_hook
+            new_hook = self._create_new_hook(old_hook)
+            remove_hook_from_module(self.modules_to_save[adapter_name])
+            add_hook_to_module(self.modules_to_save[adapter_name], new_hook)
+
+        self.original_module.requires_grad_(False)
+        if adapter_name == self.active_adapter:
+            self.modules_to_save[adapter_name].requires_grad_(True)
+
+    def enable_adapters(self, enabled: bool):
         if self._disable_adapters is not enabled:
             # already in the desired state, do nothing
             return
@@ -407,19 +464,15 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         Args:
             adapter_name (str): The name of the adapter to set as active
         """
-        if adapter_name not in self.modules_to_save:
-            raise ValueError(f"Adapter {adapter_name} not found in {self.modules_to_save.keys()}")
+        if adapter_name not in self._adapters:
+            raise ValueError(f"Adapter {adapter_name} not found in {self._adapters}")
 
         self.modules_to_save[self.active_adapter].requires_grad_(False)
         self.modules_to_save[adapter_name].requires_grad_(True)
         self._active_adapter = adapter_name
 
-
-class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
-    """Wraps a module that is supposed to be trained (i.e. `requires_grad_(True)`) and saved after training.
-    """
-    def _forward_wrapped(self, x, active_adapter, *args, **kwargs):
-        return self.modules_to_save[active_adapter](x, *args, **kwargs)
+    def adapter_state_dict(self, adapter_name):
+        return self.modules_to_save[adapter_name].state_dict()
 
 
 class NewTokensWrapper(AuxiliaryTrainingWrapper):
@@ -436,32 +489,36 @@ class NewTokensWrapper(AuxiliaryTrainingWrapper):
         self.token_indices = token_indices
         super().__init__(module_to_save, adapter_name)
 
+    def init_modules(self, adapter_name):
+        # use a local import to avoid potential circular imports
+        from peft.tuners.custom_tokens import CustomTokensLayer
+
+        # since super().__init__() calls update before we have a chance to initialise the adapter we would
+        # need here, we do the initialization here.
+        self.token_adapter = CustomTokensLayer(self.original_module, adapter_name, self.token_indices)
+
     def _forward_wrapped(self, x, active_adapter, *args, **kwargs):
         self.token_adapter.set_adapter(active_adapter)
 
-        # make sure that at the end of each forward call the module weights in `self.modules_to_save[adapter_name]`
-        # are up-to-date. Otherwise, at the end of training, we don't store the correctly trained weights.
-        # We need to do this since there is no explicit `merge` call for wrapped layers.
-        if self.token_adapter.merged:
-            self.token_adapter.unmerge()
         y = self.token_adapter.forward(x)
-        self.token_adapter.merge()
 
         return y
 
     def update(self, active_adapter):
-        # use a local import to avoid potential circular imports
-        from peft.tuners.custom_tokens import CustomTokensLayer
-
-        if not hasattr(self, 'token_adapter'):
-            self.token_adapter = CustomTokensLayer(self.original_module, active_adapter, self.token_indices)
-
         # TODO this does not support deepspeed/fsdp since it is missing a context manager
-        # see original implementation
-        if active_adapter not in self.modules_to_save:
+        # see ModulesToSaveWrapper implementation
+        if active_adapter not in self._adapters:
             self.token_adapter.update_layer(active_adapter)
 
+        # TODO this does not support hooks, see ModulesToSaveWrapper implementation
+
         super().update(active_adapter)
+
+    def adapter_state_dict(self, adapter_name):
+        # See the implementation for PeftType.CUSTOM_TOKENS in `get_peft_model_state_dict`
+        # TODO if possible, DRY
+        return {f"token_adapter.{k}": v for k, v in self.token_adapter.state_dict().items()
+                if 'custom_tokens_delta_tokens' in k}
 
 
 def _get_submodules(model, key):
@@ -492,6 +549,7 @@ def _set_trainable(model, adapter_name, module_names, mode='retrain', **wrapper_
     else:
         raise AttributeError(f"Mode {mode} not support, either use 'normal' or 'new_tokens'.")
 
+    trainable_modules = []
     key_list = [key for key, _ in model.named_modules()]
     for key in key_list:
         target_module_found = any(key.endswith(target_key) for target_key in module_names)
@@ -504,6 +562,8 @@ def _set_trainable(model, adapter_name, module_names, mode='retrain', **wrapper_
                 new_module = target_cls(target, adapter_name, **wrapper_kwargs)
                 new_module.set_adapter(adapter_name)
                 setattr(parent, target_name, new_module)
+                trainable_modules.append(new_module)
+    return trainable_modules
 
 
 def _set_adapter(model, adapter_name):
