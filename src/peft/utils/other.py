@@ -479,8 +479,6 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 class NewTokensWrapper(AuxiliaryTrainingWrapper):
     """Wraps a module (typically an embedding layer) that is supposed to be re-trained sparsely (i.e.
     solely updating a few columns) using the `CustomTokensLayer` PEFT method.
-
-    Provides `modules_to_save[adapter] = updated_embedding_layer`.
     """
 
     def __init__(
