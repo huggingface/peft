@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -29,7 +29,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         self,
         base_layer: nn.Module,
         adapter_name: str,
-        token_indices: List[int],
+        token_indices: list[int],
         **kwargs,
     ) -> None:
         super().__init__()
@@ -78,7 +78,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             size=(self.num_total_embeddings, self.embedding_dim),
         )
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         adapter_names = check_adapters_to_merge(self, adapter_names)
 
         if not adapter_names:
