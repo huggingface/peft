@@ -505,6 +505,7 @@ def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_down
     elif huggingface_hub.constants.HF_HUB_OFFLINE:
         # if in offline mode, check if we can find the adapter file locally
         hub_filename = get_hub_filename(use_safetensors=True)
+        hf_hub_download_kwargs.pop("local_files_only", None)
         try:
             filename = hf_hub_download(model_id, hub_filename, local_files_only=True, **hf_hub_download_kwargs)
             use_safetensors = True
