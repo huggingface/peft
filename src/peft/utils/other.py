@@ -532,6 +532,13 @@ class NewTokensWrapper(AuxiliaryTrainingWrapper):
             if "trainable_tokens_delta_tokens" in k
         }
 
+    def enable_adapters(self, enabled: bool):
+        self.token_adapter.enable_adapters(enabled)
+
+    def set_adapter(self, adapter_name: str):
+        super().set_adapter(adapter_name)
+        self.token_adapter.set_adapter(adapter_name)
+
 
 def _get_submodules(model, key):
     parent = model.get_submodule(".".join(key.split(".")[:-1]))
