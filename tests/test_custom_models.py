@@ -103,6 +103,12 @@ TEST_CASES = [
         LoraConfig,
         {"target_modules": ["emb", "conv1d"], "use_dora": True},
     ),
+    (
+        "Embedding + transformers Conv1D 1 LoRA trainable_tokens",
+        "EmbConv1D",
+        LoraConfig,
+        {"target_modules": ["conv1d"], "trainable_token_indices": {"emb": [0, 10]}},
+    ),
     ("Conv1d LoRA", "Conv1d", LoraConfig, {"target_modules": ["conv1d"]}),
     ("Conv2d 1 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
