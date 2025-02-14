@@ -1564,10 +1564,9 @@ class TestNoInfiniteRecursionDeepspeed:
 
 
 class TestLoadAdapterOfflineMode:
-    
     base_model = "hf-internal-testing/tiny-random-OPTForCausalLM"
     peft_model_id = "peft-internal-testing/tiny-OPTForCausalLM-lora"
-    
+
     # make sure that PEFT honors offline mode
     @contextmanager
     def hub_offline_ctx(self):
@@ -1591,14 +1590,14 @@ class TestLoadAdapterOfflineMode:
         with self.hub_offline_ctx():
             # does not raise
             PeftModel.from_pretrained(base_model, self.peft_model_id)
-    
+
     @pytest.fixture
     def changed_default_cache_dir(self, tmp_path, monkeypatch):
         # ensure that this test does not interact with other tests that may use the HF cache
         monkeypatch.setattr("huggingface_hub.constants.HF_HOME", tmp_path)
         monkeypatch.setattr("huggingface_hub.constants.HF_HUB_CACHE", tmp_path / "hub")
         monkeypatch.setattr("huggingface_hub.constants.HF_TOKEN_PATH", tmp_path / "token")
-    
+
     def load_checkpoints(self, cache_dir):
         # download model and lora checkpoint to a specific cache dir
         snapshot_download(self.base_model, cache_dir=cache_dir)
