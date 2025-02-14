@@ -505,14 +505,15 @@ def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_down
     elif huggingface_hub.constants.HF_HUB_OFFLINE:
         # if in offline mode, check if we can find the adapter file locally
         hub_filename = get_hub_filename(use_safetensors=True)
+        hf_hub_download_kwargs.pop("local_files_only", None)
         try:
-            filename = hf_hub_download(model_id, hub_filename, local_files_only=True)
+            filename = hf_hub_download(model_id, hub_filename, local_files_only=True, **hf_hub_download_kwargs)
             use_safetensors = True
         except LocalEntryNotFoundError:
             # Could not find safetensors, try pickle. If this also fails, it's fine to let the error be raised here, as
             # it means that the user tried to load a non-cached model in offline mode.
             hub_filename = get_hub_filename(use_safetensors=False)
-            filename = hf_hub_download(model_id, hub_filename, local_files_only=True)
+            filename = hf_hub_download(model_id, hub_filename, local_files_only=True, **hf_hub_download_kwargs)
             use_safetensors = False
     else:
         token = hf_hub_download_kwargs.get("token", None)
