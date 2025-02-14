@@ -273,8 +273,12 @@ class LoraConfig(PeftConfig):
             parameter when you want to apply LoRA to the ColumnParallelLinear and RowParallelLinear layers of megatron.
         megatron_core (`Optional[str]`):
             The core module from Megatron to use, defaults to `"megatron.core"`.
-        trainable_token_indices (`Union[List[int], dict[str, List[int]]]`)
-            TODO
+        trainable_token_indices (`Optional[Union[List[int], dict[str, List[int]]]]`)
+            Lets you specify which token indices to selectively fine-tune without requiring to re-train the whole
+            embedding matrix using the `peft.TrainableTokensModel` method. You can either specify a list of indices
+            which will then target the `embedding` layer or, if your model is using a different layer for embedding,
+            you can specify a dictionary where the key is the module's name and the values are the list of token
+            indices.
         loftq_config (`Optional[LoftQConfig]`):
             The configuration of LoftQ. If this is not None, then LoftQ will be used to quantize the backbone weights
             and initialize Lora layers. Also pass `init_lora_weights='loftq'`. Note that you should not pass a
@@ -433,7 +437,18 @@ class LoraConfig(PeftConfig):
             )
         },
     )
-    trainable_token_indices: Optional[Union[int, dict]] = field(default_factory=list, metadata={"help": ("TODO",)})
+    trainable_token_indices: Optional[Union[list[int], dict[str, list[int]]]] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Selectively trains specific token indices without requiring to tuning the whole embedding matrix."
+                "You can specify a list of token indices which will then target the `embedding` layer of the model, or, "
+                "if your model uses a different layer to contain the embeddings you can supply a dictionary where the key "
+                'is the module name of the embedding matrix, e.g. `{"embed_tokens": [0, 1, ...]}`.'
+                "This feature uses `peft.TrainableTokensModel` under the hood."
+            )
+        },
+    )
     # dict type is used when loading config.json
     loftq_config: Union[LoftQConfig, dict] = field(
         default_factory=dict,
