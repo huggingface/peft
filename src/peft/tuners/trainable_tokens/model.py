@@ -14,6 +14,7 @@
 
 import warnings
 
+import torch
 import torch.nn as nn
 
 from peft.config import PeftConfig
@@ -64,14 +65,11 @@ class TrainableTokensModel(BaseTuner):
 
     @staticmethod
     def _create_new_module(peft_config, adapter_name, target, **kwargs):
-        # Collect dispatcher functions to decide what backend to use for the replaced LoRA layer. The order matters,
-        # because the first match is always used. Therefore, the default layers should be checked last.
         new_module = TrainableTokensLayer(target, adapter_name, **kwargs)
 
         return new_module
 
     def _replace_module(self, parent, child_name, new_module, child):
-        # see https://github.com/huggingface/peft/blob/e5973883057b723b3f0fe3982bfa9d1e0c0fd8ec/src/peft/tuners/lycoris_utils.py#L300C4-L300C47
         setattr(parent, child_name, new_module)
         # It's not necessary to set requires_grad here, as that is handled by
         # _mark_only_adapters_as_trainable
@@ -92,10 +90,12 @@ class TrainableTokensModel(BaseTuner):
                 new_module.state = child.state
             new_module.to(child.weight.device)
 
+        meta = torch.device("meta")
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if self.prefix in name:
-                module.to(child.weight.device)
+                if not any(p.device == meta for p in module.parameters()):
+                    module.to(child.weight.device)
 
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
         for n, p in model.named_parameters():

@@ -24,16 +24,17 @@ class TrainableTokensConfig(PeftConfig):
     """
     Configuration for the `TrainableTokens` method.
 
-    Since this method attempts to make certain tokens (identified by their indices) trainable without
-    as large a memory footprint as training the target matrix fully the following arguments are need.
+    Since this method attempts to make certain tokens (identified by their indices) trainable without as large a memory
+    footprint as training the target matrix fully the following arguments are need.
 
     Args:
         token_indices (`list[int]`):
-            Indices of the tokens that are supposed to be trainable. The closer the amount of indices
-            is to the total amount of tokens, the less efficient this method gets.
+            Indices of the tokens that are supposed to be trainable. The closer the amount of indices is to the total
+            amount of tokens, the less efficient this method gets.
         target_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to target. Defaults to 'embedding'.
     """
+
     token_indices: List[int] = field(
         default_factory=list,
         metadata={

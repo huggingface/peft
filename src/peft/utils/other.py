@@ -223,7 +223,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
 
     def init_modules(self, adapter_name):
         """A place to initialize PyTorch modules in `__init__` before the call to `self.update()`."""
-        ...
+        raise NotImplementedError
 
     def check_module(self):
         """Perform some sanity checks on the module to ensure that it works"""
@@ -254,9 +254,17 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         return self._active_adapter
 
     def _hasattr_wrapped(self, name, modules):
+        """Infrastructure to enable the implementing class to delegate attributes to other modules.
+        Returns True if the implementing class knows how to handle attribute `name`.
+
+        Gets passed `modules` which is PyTorch's internal list of assigned modules from `nn.Module`.
+        """
         return False
 
     def _getattr_wrapped(self, name, modules):
+        """If `_hasattr_wrapped` returns True for `name`, then this function should return the corresponding
+        value associated with `name`.
+        """
         return None
 
     def __getattr__(self, name: str):
@@ -372,7 +380,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         Args:
             enabled (bool): True to enable adapters, False to disable adapters
         """
-        ...
+        raise NotImplementedError
 
     def set_adapter(self, adapter_name: str):
         """Set the active adapter
@@ -387,7 +395,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
 
     def adapter_state_dict(self, adapter_name):
         """Return the state dict of this module for a given adapter."""
-        ...
+        raise NotImplementedError
 
 
 class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
@@ -501,7 +509,7 @@ class NewTokensWrapper(AuxiliaryTrainingWrapper):
     def _forward_wrapped(self, x, active_adapter, *args, **kwargs):
         self.token_adapter.set_adapter(active_adapter)
 
-        y = self.token_adapter.forward(x)
+        y = self.token_adapter(x)
 
         return y
 
@@ -538,20 +546,21 @@ def _freeze_adapter(model, adapter_name):
             p.requires_grad = False
 
 
-def _set_trainable(model, adapter_name, module_names, mode="retrain", **wrapper_kwargs):
+def _set_trainable(
+    model, adapter_name, module_names, wrapper_cls: Optional[AuxiliaryTrainingWrapper] = None, **wrapper_kwargs
+):
     """Wraps modules that are supposed to be re-trained either normally, i.e. marking them to require gradients and
     saving them alongside other modules, or with certain methods that go alongside PEFT methods, such as retraining
     specific token indices using sparse matrices.
 
-    Note that you need to validate beforehand if there are layers shared between modes, e.g. if the 'embedding' layer
-    is configured for both mode `retrain` and `new_tokens` which would result in conflicts down the line.
+    Note that you need to validate beforehand if there are layers targeted by multiple wrappers, e.g. if the
+    'embedding' layer is configured for both `ModulesToSaveWrapper` and `NewTokensWrapper` there would be conflicts
+    down the line.
+
+    The default is to wrap the module in a `ModulesToSaveWrapper` wrapper.
     """
-    if mode == "retrain":
-        target_cls = ModulesToSaveWrapper
-    elif mode == "new_tokens":
-        target_cls = NewTokensWrapper
-    else:
-        raise AttributeError(f"Mode {mode} not support, either use 'normal' or 'new_tokens'.")
+    if wrapper_cls is None:
+        wrapper_cls = ModulesToSaveWrapper
 
     trainable_modules = []
     key_list = [key for key, _ in model.named_modules()]
@@ -559,11 +568,11 @@ def _set_trainable(model, adapter_name, module_names, mode="retrain", **wrapper_
         target_module_found = any(key.endswith(target_key) for target_key in module_names)
         if target_module_found:
             parent, target, target_name = _get_submodules(model, key)
-            if isinstance(target, target_cls):
+            if isinstance(target, wrapper_cls):
                 target.update(adapter_name)
                 target.set_adapter(target.active_adapter)
             else:
-                new_module = target_cls(target, adapter_name, **wrapper_kwargs)
+                new_module = wrapper_cls(target, adapter_name, **wrapper_kwargs)
                 new_module.set_adapter(adapter_name)
                 setattr(parent, target_name, new_module)
                 trainable_modules.append(new_module)

@@ -135,10 +135,6 @@ def get_peft_model_state_dict(
         else:
             raise NotImplementedError
 
-    elif config.peft_type == PeftType.TRAINABLE_TOKENS:
-        # TODO maybe add "{adapter_name}." as prefix to the filter string?
-        to_return = {k: state_dict[k] for k in state_dict if "trainable_tokens_delta_tokens" in k}
-
     elif config.peft_type == PeftType.ADAPTION_PROMPT:
         to_return = {k: state_dict[k] for k in state_dict if k.split(".")[-1].startswith("adaption_")}
 
@@ -360,7 +356,7 @@ def set_peft_model_state_dict(
     # (which does not include the adapter name) to loaded state dict key (which includes the adapter name).
     for name, module in model.named_modules():
         if isinstance(module, AuxiliaryTrainingWrapper):
-            for k, _ in module.adapter_state_dict(adapter_name).items():
+            for k in module.adapter_state_dict(adapter_name):
                 # each saved state dict is adapter specific, i.e. does not contain the adapter name
                 # but the loaded state dict does include adapter names since we can have multiple.
                 k_no_adapter = k.replace(f".{adapter_name}", "")

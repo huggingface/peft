@@ -26,5 +26,8 @@ __all__ = [
 ]
 
 register_peft_method(
-    name="trainable_tokens", config_cls=TrainableTokensConfig, model_cls=TrainableTokensModel, is_mixed_compatible=False
+    name="trainable_tokens",
+    config_cls=TrainableTokensConfig,
+    model_cls=TrainableTokensModel,
+    is_mixed_compatible=False,
 )

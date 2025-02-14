@@ -104,7 +104,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             self.base_layer.weight.data -= self.sparse_delta_tokens[active_adapter]
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        if self.disable_adapters:
+        if self.disable_adapters or not self.active_adapters:
             if self.merged:
                 self.unmerge()
             result = self.base_layer(x, *args, **kwargs)

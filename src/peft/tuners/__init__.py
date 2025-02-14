@@ -17,7 +17,6 @@ from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
 from .boft import BOFTConfig, BOFTModel
 from .bone import BoneConfig, BoneModel
 from .cpt import CPTConfig, CPTEmbedding
-from .trainable_tokens import TrainableTokensConfig, TrainableTokensModel
 from .fourierft import FourierFTConfig, FourierFTModel
 from .hra import HRAConfig, HRAModel
 from .ia3 import IA3Config, IA3Model
@@ -40,6 +39,7 @@ from .p_tuning import PromptEncoder, PromptEncoderConfig, PromptEncoderReparamet
 from .poly import PolyConfig, PolyModel
 from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
 from .prompt_tuning import PromptEmbedding, PromptTuningConfig, PromptTuningInit
+from .trainable_tokens import TrainableTokensConfig, TrainableTokensModel
 from .vblora import VBLoRAConfig, VBLoRAModel
 from .vera import VeraConfig, VeraModel
 from .xlora import XLoraConfig, XLoraModel
@@ -56,8 +56,6 @@ __all__ = [
     "BoneModel",
     "CPTConfig",
     "CPTEmbedding",
-    "TrainableTokensConfig",
-    "TrainableTokensModel",
     "EvaConfig",
     "FourierFTConfig",
     "FourierFTModel",
@@ -91,6 +89,8 @@ __all__ = [
     "PromptEncoderReparameterizationType",
     "PromptTuningConfig",
     "PromptTuningInit",
+    "TrainableTokensConfig",
+    "TrainableTokensModel",
     "VBLoRAConfig",
     "VBLoRAModel",
     "VeraConfig",

@@ -41,6 +41,7 @@ from transformers.utils import PushToHubMixin
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils.constants import DUMMY_MODEL_CONFIG
 from peft.utils.integrations import init_empty_weights
+from peft.utils.other import NewTokensWrapper
 
 from . import __version__
 from .config import PeftConfig
@@ -951,7 +952,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             else:
                 self.modules_to_save.update(peft_config.modules_to_save)
             # this may add a new ModulesToSaveWrapper
-            _set_trainable(self, adapter_name, module_names=peft_config.modules_to_save, mode="retrain")
+            _set_trainable(self, adapter_name, module_names=peft_config.modules_to_save)
 
         if getattr(peft_config, "trainable_token_indices", None) is not None:
             if isinstance(peft_config.trainable_token_indices, dict):
@@ -965,7 +966,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         raise ValueError(
                             "The embedding layer is already marked to be trained fully, either specify "
                             f'`modules_to_save=[..., "{target_layer}", ...]` or '
-                            f'`trainable_tokens={"{target_layer}": x}` but not both.'
+                            f"`trainable_tokens={'{target_layer}': x}` but not both."
                         )
 
             # we are not adding these module names to `self.modules_to_save` as this is strictly reserved for the
@@ -974,7 +975,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
             for target_layer, token_indices in target_layers.items():
                 new_training_modules = _set_trainable(
-                    self, adapter_name, module_names=[target_layer], mode="new_tokens", token_indices=token_indices
+                    self,
+                    adapter_name,
+                    module_names=[target_layer],
+                    wrapper_cls=NewTokensWrapper,
+                    token_indices=token_indices,
                 )
 
     def get_layer_status(self) -> list[TunerLayerStatus]:
