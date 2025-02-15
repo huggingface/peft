@@ -125,3 +125,85 @@ class TestTrainableTokens:
 
         assert not torch.allclose(W_load[:, idcs_to_modify], W_orig[:, idcs_to_modify])
         assert torch.allclose(W_load[:, idcs_to_keep], W_orig[:, idcs_to_keep])
+
+    def test_basic_training(self, model, tokenizer):
+        # ensure that the model can be trained and backpropagation works
+        config = TrainableTokensConfig(
+            target_modules=['embed_tokens'],
+            token_indices=[0, 10],
+        )
+
+        model = get_peft_model(model, config)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=1)
+
+        X = {
+            "input_ids": torch.tensor([[0, 1, 2, 3, 4]]),
+            "attention_mask": torch.tensor([[1, 1, 1, 1, 1]]),
+        }
+
+        for step in range(3):
+            optimizer.zero_grad()
+            y_pred = model(**X)
+            loss = y_pred.logits.mean()
+            loss.backward()
+            optimizer.step()
+
+    @pytest.mark.parametrize(
+        "peft_config",
+        [
+            LoraConfig(
+                target_modules="all-linear",
+                trainable_token_indices={"embed_tokens": [0, 1, 3]},
+            ),
+        ],
+    )
+    def test_disable_adapters_with_merging(self, model, tokenizer, peft_config):
+        X = {
+            "input_ids": torch.tensor([[0, 1, 2, 3, 4]]),
+            "attention_mask": torch.tensor([[1, 1, 1, 1, 1]]),
+        }
+
+        model = get_peft_model(model, peft_config)
+        model.eval()
+
+        outputs_before = model(**X).logits
+
+        model.train()
+        lr = 0.01
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+        # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
+        # breaking of some LoRA layers that are initialized with constants)
+        for _ in range(3):
+            optimizer.zero_grad()
+            y_pred = model(**X)
+            loss = y_pred.logits.mean()
+            loss.backward()
+            optimizer.step()
+
+        model.eval()
+        outputs_unmerged = model(**X).logits
+        model.merge_adapter()
+        outputs_after = model(**X).logits
+
+        with model.disable_adapter():
+            print('during disable_adapter')
+            outputs_disabled = model(**X).logits
+            print('after disable_adapter')
+
+        # check that after leaving the disable_adapter context, everything is enabled again
+        outputs_enabled_after_disable = model(**X).logits
+
+        atol, rtol = 1e-5, 1e-5  # tolerances higher than defaults since merging introduces some numerical instability
+
+        # check that there is a difference in results after training
+        assert not torch.allclose(outputs_before, outputs_after, atol=atol, rtol=rtol)
+
+        # unmerged or merged should make no difference
+        assert torch.allclose(outputs_after, outputs_unmerged, atol=atol, rtol=rtol)
+
+        # check that disabling adapters gives the same results as before training
+        assert torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol)
+
+        # check that enabling + disabling adapters does not change the results
+        assert torch.allclose(outputs_after, outputs_enabled_after_disable, atol=atol, rtol=rtol)

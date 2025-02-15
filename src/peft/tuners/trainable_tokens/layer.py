@@ -41,10 +41,8 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
 
         # we store the delta weight on particular tokens
         self.trainable_tokens_delta_tokens = nn.ParameterDict({})
-        self.sparse_delta_tokens = {}
 
         # Mark the weight as unmerged
-        self._disable_adapters = False
         self.merged_adapters = []
 
         # we set parameters on layer sizing
@@ -57,13 +55,17 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
 
     def update_layer(self, adapter_name):
         # we initialize the delta embedding weights and store them in a trainable parameter
-        values = torch.rand(
-            (self.num_trainable_embeddings * self.base_layer.weight.shape[-1],)
-        )  # we initialize the values from a normal distribution N(0, 1), as in https://pytorch.org/docs/stable/generated/torch.nn.Embedding.html
+        #
+        # TODO use existing embedding layer values for initialization? there is the problem
+        # that some tests assume that after init should be the same as disabled adapters.
+        # so either we let this break the assumptions or we initialize the deltas to zero.
+        # since we're adding on top of the existing embeddings, I think that zero is sensible.
+        values = torch.zeros(self.num_trainable_embeddings * self.base_layer.weight.shape[-1])
 
         # cause safetensors doesn't support sparse tensors, we need to store the values in a dense tensor and then convert it to a sparse tensor when called
         self.trainable_tokens_delta_tokens[adapter_name] = nn.Parameter(values, requires_grad=True)
 
+    def get_sparse_delta_tokens(self, adapter_name):
         # we created the indices of the sparse tensor
         r = torch.Tensor(self.token_indices).long()
         c = torch.arange(self.embedding_dim)
@@ -72,7 +74,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         ).T
 
         # we create the sparse tensor from our `delta_tokens` and `indices
-        self.sparse_delta_tokens[adapter_name] = torch.sparse_coo_tensor(
+        return torch.sparse_coo_tensor(
             indices=indices,
             values=self.trainable_tokens_delta_tokens[adapter_name],
             size=(self.num_total_embeddings, self.embedding_dim),
@@ -85,16 +87,17 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             # no adapter to merge
             return
 
-        for active_adapter in adapter_names:
+        for adapter_name in adapter_names:
             orig_weights = self.base_layer.weight.data
-            merged = orig_weights + self.sparse_delta_tokens[active_adapter]
+            merged = orig_weights + self.get_sparse_delta_tokens(adapter_name)
 
             if safe_merge and not torch.isfinite(merged).all():
                 raise ValueError(
-                    f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                    f"NaNs detected in the merged weights. The adapter {adapter_name} seems to be broken"
                 )
             else:
                 self.base_layer.weight.data = merged
+                self.merged_adapters.append(adapter_name)
 
     def unmerge(self) -> None:
         if not self.merged:
@@ -102,8 +105,8 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             return
 
         while len(self.merged_adapters) > 0:
-            active_adapter = self.merged_adapters.pop()
-            self.base_layer.weight.data -= self.sparse_delta_tokens[active_adapter]
+            adapter_name = self.merged_adapters.pop()
+            self.base_layer.weight.data -= self.get_sparse_delta_tokens(adapter_name)
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         if self.disable_adapters or not self.active_adapters:
@@ -115,7 +118,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         else:
             deltas = None
             for active_adapter in self.active_adapters:
-                delta = self.sparse_delta_tokens[active_adapter]
+                delta = self.get_sparse_delta_tokens(active_adapter)
                 if deltas is None:
                     deltas = delta
                 else:
