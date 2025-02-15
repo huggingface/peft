@@ -328,6 +328,12 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
     def _forward_wrapped(self, x: torch.Tensor, active_adpater: str, *args: Any, **kwargs: Any) -> torch.Tensor:
         raise NotImplementedError
 
+    def _forward_disabled(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        """The forward call when all 'adapters' are disabled. For example this could entail
+        restoring (unmerging) a base model and returning its forward return values.
+        """
+        raise NotImplementedError
+
     def _mixed_batch_forward(
         self, input: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
     ) -> torch.Tensor:
@@ -367,7 +373,8 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         adapter_names = kwargs.pop("adapter_names", None)
 
         if self.disable_adapters or (self.active_adapter not in self._adapters):
-            return self.original_module(x, *args, **kwargs)
+            return self._forward_wrapped_disabled(x, *args, **kwargs)
+
         if adapter_names is None:
             return self._forward_wrapped(x, self._active_adapter, *args, **kwargs)
         return self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
@@ -375,12 +382,17 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
     def enable_adapters(self, enabled: bool):
         """Toggle the enabling and disabling of adapters
 
-        Takes care of setting the requires_grad flag for the adapter weights.
-
         Args:
             enabled (bool): True to enable adapters, False to disable adapters
         """
-        raise NotImplementedError
+        if self._disable_adapters is not enabled:
+            # already in the desired state, do nothing
+            return
+
+        if enabled:
+            self._disable_adapters = False
+        else:
+            self._disable_adapters = True
 
     def set_adapter(self, adapter_name: str):
         """Set the active adapter
@@ -410,6 +422,9 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 
     def _forward_wrapped(self, x, active_adapter, *args, **kwargs):
         return self.modules_to_save[active_adapter](x, *args, **kwargs)
+
+    def _forward_wrapped_disabled(self, x, *args, **kwargs):
+        return self.original_module(x, *args, **kwargs)
 
     def _hasattr_wrapped(self, name, modules):
         return self.active_adapter in modules["modules_to_save"]
@@ -445,6 +460,11 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
             self.modules_to_save[adapter_name].requires_grad_(True)
 
     def enable_adapters(self, enabled: bool):
+        """Takes care of setting the required_grad flag on the wrapped module.
+        If adapters are enabled, gradients for the module are required as well.
+        """
+        super().enable_adapters(enabled)
+
         if self._disable_adapters is not enabled:
             # already in the desired state, do nothing
             return
@@ -452,11 +472,9 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         if enabled:
             self.original_module.requires_grad_(False)
             self.modules_to_save[self.active_adapter].requires_grad_(True)
-            self._disable_adapters = False
         else:
             self.original_module.requires_grad_(True)
             self.modules_to_save.requires_grad_(False)
-            self._disable_adapters = True
 
     def set_adapter(self, adapter_name: str):
         """Set the active adapter
@@ -513,6 +531,11 @@ class NewTokensWrapper(AuxiliaryTrainingWrapper):
 
         return y
 
+    def _forward_wrapped_disabled(self, x, *args, **kwargs):
+        # we already disabled the adapter so we can safely forward call to the adapter
+        # since it will know best what to do when being disabled.
+        return self.token_adapter(x, *args, **kwargs)
+
     def update(self, active_adapter):
         # TODO this does not support deepspeed/fsdp since it is missing a context manager
         # see ModulesToSaveWrapper implementation
@@ -533,6 +556,10 @@ class NewTokensWrapper(AuxiliaryTrainingWrapper):
         }
 
     def enable_adapters(self, enabled: bool):
+        """Enables/disables the underlying `TrainableTokens` adapter.
+        Also handles the internal adapter disable flag.
+        """
+        super().enable_adapters(enabled)
         self.token_adapter.enable_adapters(enabled)
 
     def set_adapter(self, adapter_name: str):

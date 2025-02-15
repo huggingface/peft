@@ -36,6 +36,16 @@ class TestTrainableTokens:
     def tokenizer(self, model_id):
         return AutoTokenizer.from_pretrained(model_id)
 
+    def simulate_training(self, trainable_tokens_layer, adapter_name='default'):
+        """Simulates training of trainable_tokens adapter layer by assigning random
+        values to the delta tokens.
+        """
+        trained_values = torch.rand(
+            trainable_tokens_layer.num_trainable_embeddings *
+            trainable_tokens_layer.base_layer.weight.shape[-1]
+        )
+        trainable_tokens_layer.trainable_tokens_delta_tokens[adapter_name].data = trained_values
+
     def test_stand_alone_usage(self, model, tokenizer, tmp_path):
         original_model = copy.deepcopy(model)
 
@@ -53,6 +63,7 @@ class TestTrainableTokens:
         idcs_to_modify = peft_config.token_indices
         idcs_to_keep = [i for i in X["input_ids"][0].tolist() if i not in idcs_to_modify]
 
+        self.simulate_training(peft_model.model.model.embed_tokens)
         output_train = peft_model.forward(output_hidden_states=True, **X)
 
         peft_model.save_pretrained(save_path)
@@ -105,6 +116,7 @@ class TestTrainableTokens:
         idcs_to_modify = peft_config.trainable_token_indices["embed_tokens"]
         idcs_to_keep = [i for i in X["input_ids"][0].tolist() if i not in idcs_to_modify]
 
+        self.simulate_training(peft_model.model.model.embed_tokens.token_adapter)
         output_train = peft_model.forward(output_hidden_states=True, **X)
 
         peft_model.save_pretrained(save_path)
