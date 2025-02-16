@@ -574,12 +574,10 @@ class NewTokensWrapper(AuxiliaryTrainingWrapper):
         super().update(active_adapter)
 
     def adapter_state_dict(self, adapter_name):
-        # See the implementation for PeftType.TRAINABLE_TOKENS in `get_peft_model_state_dict`
-        # TODO if possible, DRY
         return {
             f"token_adapter.{k}": v
             for k, v in self.token_adapter.state_dict().items()
-            if "trainable_tokens_delta_tokens" in k
+            if k.startswith("trainable_tokens_") and k.endswith(f".{adapter_name}")
         }
 
     def enable_adapters(self, enabled: bool):

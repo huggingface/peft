@@ -20,7 +20,7 @@ import pytest
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from peft import AutoPeftModel, LoraConfig, TrainableTokensConfig, get_peft_model
+from peft import AutoPeftModel, LoraConfig, TrainableTokensConfig, get_peft_model, PeftModel
 
 
 class TestTrainableTokens:
@@ -249,3 +249,28 @@ class TestTrainableTokens:
 
         # check that the logits are the same after unloading
         assert torch.allclose(logits_peft, logits_unloaded, atol=atol, rtol=rtol)
+
+    @pytest.mark.parametrize(
+        "peft_config",
+        [
+            LoraConfig(
+                target_modules="all-linear",
+                trainable_token_indices={"embed_tokens": [0, 1, 3]},
+            ),
+        ],
+    )
+    def test_load_multiple_adapters(self, model, peft_config, tmp_path):
+        # tests if having more than one adpater (even with just the same config) works
+        original_model = copy.deepcopy(model)
+        model = get_peft_model(model, peft_config)
+
+        model.save_pretrained(tmp_path)
+        del model
+
+        model = original_model
+        model = PeftModel.from_pretrained(model, tmp_path)
+        load_result1 = model.load_adapter(tmp_path, adapter_name="other")
+        load_result2 = model.load_adapter(tmp_path, adapter_name="yet-another")
+
+        assert load_result1.missing_keys == []
+        assert load_result2.missing_keys == []
