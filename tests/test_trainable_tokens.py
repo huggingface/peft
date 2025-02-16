@@ -219,3 +219,33 @@ class TestTrainableTokens:
 
         # check that enabling + disabling adapters does not change the results
         assert torch.allclose(outputs_after, outputs_enabled_after_disable, atol=atol, rtol=rtol)
+
+
+    @pytest.mark.parametrize(
+        "peft_config",
+        [
+            LoraConfig(
+                target_modules="all-linear",
+                trainable_token_indices={"embed_tokens": [0, 1, 3]},
+            ),
+        ],
+    )
+    def test_safe_merge_with_adapter(self, model, tokenizer, peft_config):
+        X = {
+            "input_ids": torch.tensor([[0, 1, 2, 3]]),
+            "attention_mask": torch.tensor([[1, 1, 1, 1]]),
+        }
+
+        model = model.eval()
+        logits_base = model(**X).logits
+
+        model = get_peft_model(model, peft_config).eval()
+        logits_peft = model(**X).logits
+
+        atol, rtol = 1e-6, 1e-6  # default
+
+        model_unloaded = model.merge_and_unload(safe_merge=True)
+        logits_unloaded = model_unloaded(**X).logits
+
+        # check that the logits are the same after unloading
+        assert torch.allclose(logits_peft, logits_unloaded, atol=atol, rtol=rtol)

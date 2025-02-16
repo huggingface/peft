@@ -409,6 +409,14 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         """Return the state dict of this module for a given adapter."""
         raise NotImplementedError
 
+    def unload_and_optionally_merge_module(
+        self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]
+    ) -> torch.nn.Module:
+        """Handles unloading when called from PEFT models. Returns the wrapped module
+        and handles merging onto the wrapped module if requested.
+        """
+        raise NotImplementedError
+
 
 class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
     """Wraps a module that is supposed to be trained (i.e. `requires_grad_(True)`) and saved after training."""
@@ -501,6 +509,25 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
     def adapter_state_dict(self, adapter_name):
         return self.modules_to_save[adapter_name].state_dict()
 
+    def unload_and_optionally_merge_module(
+        self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]
+    ) -> torch.nn.Module:
+        """Unloading in case of `ModulesToSave` means to simply return the wrapped module.
+
+        However, if the wrapped module is itself a tuner, we'll call merge on it before.
+        """
+        new_module = self.modules_to_save[self.active_adapter]
+
+        # TODO: not sure if this is still a sensible thing to do. We would basically have to
+        # do the same checks as `_unload_and_optionally_merge` to support MHA, for example.
+        if hasattr(new_module, "base_layer"):
+            # check if the module is itself a tuner layer
+            if merge:
+                new_module.merge(safe_merge=safe_merge, adapter_names=adapter_names)
+            new_module = new_module.get_base_layer()
+
+        return new_module
+
 
 class NewTokensWrapper(AuxiliaryTrainingWrapper):
     """Wraps a module (typically an embedding layer) that is supposed to be re-trained sparsely (i.e.
@@ -565,6 +592,16 @@ class NewTokensWrapper(AuxiliaryTrainingWrapper):
     def set_adapter(self, adapter_name: str):
         super().set_adapter(adapter_name)
         self.token_adapter.set_adapter(adapter_name)
+
+    def unload_and_optionally_merge_module(
+        self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]
+    ) -> torch.nn.Module:
+        """Unloading for `NewTokensWrapper` means to return the wrapped module, e.g. the embedding layer and,
+        if requested, merging the `TrainableTokens` adapter onto the wrapped module.
+        """
+        if merge:
+            self.token_adapter.merge(safe_merge=safe_merge, adapter_names=adapter_names)
+        return self.token_adapter.base_layer
 
 
 def _get_submodules(model, key):
