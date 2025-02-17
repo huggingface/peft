@@ -471,8 +471,6 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         """Takes care of setting the required_grad flag on the wrapped module.
         If adapters are enabled, gradients for the module are required as well.
         """
-        super().enable_adapters(enabled)
-
         if self._disable_adapters is not enabled:
             # already in the desired state, do nothing
             return
@@ -483,6 +481,8 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         else:
             self.original_module.requires_grad_(True)
             self.modules_to_save.requires_grad_(False)
+
+        super().enable_adapters(enabled)
 
     def set_adapter(self, adapter_name: str):
         """Set the active adapter
@@ -584,8 +584,8 @@ class NewTokensWrapper(AuxiliaryTrainingWrapper):
         """Enables/disables the underlying `TrainableTokens` adapter.
         Also handles the internal adapter disable flag.
         """
-        super().enable_adapters(enabled)
         self.token_adapter.enable_adapters(enabled)
+        super().enable_adapters(enabled)
 
     def set_adapter(self, adapter_name: str):
         super().set_adapter(adapter_name)
