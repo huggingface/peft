@@ -194,11 +194,6 @@ jobs:
           status: ${{ steps.import.outcome }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
 
-      - name: Run core GPU tests on multi-gpu
-        if: always()
-        run: |
-          source activate peft
-
       - name: Run examples on multi GPU
         id: examples_tests
         if: always()
