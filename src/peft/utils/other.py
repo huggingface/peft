@@ -385,10 +385,6 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         Args:
             enabled (bool): True to enable adapters, False to disable adapters
         """
-        if self._disable_adapters is not enabled:
-            # already in the desired state, do nothing
-            return
-
         if enabled:
             self._disable_adapters = False
         else:
@@ -471,9 +467,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         """Takes care of setting the required_grad flag on the wrapped module.
         If adapters are enabled, gradients for the module are required as well.
         """
-        if self._disable_adapters is not enabled:
-            # already in the desired state, do nothing
-            return
+        super().enable_adapters(enabled)
 
         if enabled:
             self.original_module.requires_grad_(False)
@@ -481,8 +475,6 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         else:
             self.original_module.requires_grad_(True)
             self.modules_to_save.requires_grad_(False)
-
-        super().enable_adapters(enabled)
 
     def set_adapter(self, adapter_name: str):
         """Set the active adapter
@@ -599,8 +591,9 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         """Enables/disables the underlying `TrainableTokens` adapter.
         Also handles the internal adapter disable flag.
         """
-        self.token_adapter.enable_adapters(enabled)
         super().enable_adapters(enabled)
+
+        self.token_adapter.enable_adapters(enabled)
 
     def set_adapter(self, adapter_name: str):
         super().set_adapter(adapter_name)
