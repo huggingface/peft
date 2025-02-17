@@ -511,7 +511,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         # The state dict includes, as it would normally, all the adapter specific
         # parameters for, e.g. `modules_to_save` and `original_module`.
         wrapper_state_dict = {
-            f'modules_to_save.{adapter_name}.{k}': v
+            f"modules_to_save.{adapter_name}.{k}": v
             for k, v in self.modules_to_save[adapter_name].state_dict().items()
         }
 
@@ -614,7 +614,7 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         """
         if merge:
             self.token_adapter.merge(safe_merge=safe_merge, adapter_names=adapter_names)
-        return self.token_adapter.base_layer
+        return self.token_adapter.get_base_layer()
 
 
 def _get_submodules(model, key):
