@@ -26,8 +26,8 @@ class TrainableTokensConfig(PeftConfig):
     """
     Configuration for the `TrainableTokens` method.
 
-    This method makes certain tokens (identified by their indices) trainable without as large a memory
-    footprint as training the target matrix fully. The following arguments are need.
+    This method makes certain tokens (identified by their indices) trainable without as large a memory footprint as
+    training the target matrix fully. The following arguments are need.
 
     Args:
         token_indices (`list[int]`):
