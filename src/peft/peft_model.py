@@ -41,7 +41,7 @@ from transformers.utils import PushToHubMixin
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils.constants import DUMMY_MODEL_CONFIG
 from peft.utils.integrations import init_empty_weights
-from peft.utils.other import NewTokensWrapper
+from peft.utils.other import TrainableTokensWrapper
 
 from . import __version__
 from .config import PeftConfig
@@ -978,7 +978,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     self,
                     adapter_name,
                     module_names=[target_layer],
-                    wrapper_cls=NewTokensWrapper,
+                    wrapper_cls=TrainableTokensWrapper,
                     token_indices=token_indices,
                 )
 

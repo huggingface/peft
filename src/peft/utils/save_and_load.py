@@ -334,7 +334,7 @@ def set_peft_model_state_dict(
     config = model.peft_config[adapter_name]
     state_dict = peft_model_state_dict
 
-    # handle auxiliary training wrappers such as ModulesToSaveWrapper and NewTokensWrapper by getting each of them and
+    # handle auxiliary training wrappers such as ModulesToSaveWrapper and TrainableTokensWrapper by getting each of them and
     # translating saved state dict key (which does not include the adapter name) to loaded state dict key (which
     # includes the adapter name).
     for name, module in model.named_modules():

@@ -544,7 +544,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         return new_module
 
 
-class NewTokensWrapper(AuxiliaryTrainingWrapper):
+class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
     """Wraps a module (typically an embedding layer) that is supposed to be re-trained sparsely (i.e.
     solely updating a few columns) using the `TrainableTokensLayer` PEFT method.
     """
@@ -609,7 +609,7 @@ class NewTokensWrapper(AuxiliaryTrainingWrapper):
     def unload_and_optionally_merge_module(
         self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]
     ) -> torch.nn.Module:
-        """Unloading for `NewTokensWrapper` means to return the wrapped module, e.g. the embedding layer and,
+        """Unloading for `TrainableTokensWrapper` means to return the wrapped module, e.g. the embedding layer and,
         if requested, merging the `TrainableTokens` adapter onto the wrapped module.
         """
         if merge:
@@ -638,8 +638,8 @@ def _set_trainable(
     specific token indices using sparse matrices.
 
     Note that you need to validate beforehand if there are layers targeted by multiple wrappers, e.g. if the
-    'embedding' layer is configured for both `ModulesToSaveWrapper` and `NewTokensWrapper` there would be conflicts
-    down the line.
+    'embedding' layer is configured for both `ModulesToSaveWrapper` and `TrainableTokensWrapper` there would be
+    conflicts down the line.
 
     The default is to wrap the module in a `ModulesToSaveWrapper` wrapper.
     """
