@@ -405,6 +405,14 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         """Return the state dict of this module for a given adapter."""
         raise NotImplementedError
 
+    def adapter_state_dict_load_map(self, adapter_name):
+        """Return a mapping from the key present in disk-loaded state dict
+        and how it should be represented in the loaded model's state dict.
+
+        If a key is not present here, it is assumed to be mapped 1:1.
+        """
+        return {}
+
     def unload_and_optionally_merge_module(
         self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]
     ) -> torch.nn.Module:
@@ -498,23 +506,11 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         self.modules_to_save[adapter_name].requires_grad_(True)
         self._active_adapter = adapter_name
 
-    def adapter_state_dict(self, adapter_name):
-        # ModulesToSaveWrapper is special in the way its state dict is built.
-        # The state dict includes, as it would normally, all the adapter specific
-        # parameters for, e.g. `modules_to_save` and `original_module`.
-        wrapper_state_dict = {
-            f"modules_to_save.{adapter_name}.{k}": v
-            for k, v in self.modules_to_save[adapter_name].state_dict().items()
-        }
+    def adapter_state_dict_load_map(self, adapter_name):
+        return {k: f"modules_to_save.{adapter_name}.{k}" for k in self.adapter_state_dict(adapter_name)}
 
-        # in addition to the normal parameters we also include the parameters
-        # from the module to save in the state dict of the wrapper to OVERWRITE the
-        # parameters of the wrapped module. this is done to make sure that when you
-        # specify `modules_to_save=['embedding']` that `model.embedding.weight`
-        # is set to `model.embeddings.modules_to_save[<adapter_name].weight`
-        # in the end.
-        wrapper_state_dict.update(self.modules_to_save[adapter_name].state_dict())
-        return wrapper_state_dict
+    def adapter_state_dict(self, adapter_name):
+        return self.modules_to_save[adapter_name].state_dict()
 
     def unload_and_optionally_merge_module(
         self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]

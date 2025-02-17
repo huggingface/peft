@@ -334,16 +334,22 @@ def set_peft_model_state_dict(
     config = model.peft_config[adapter_name]
     state_dict = peft_model_state_dict
 
-    # handle auxiliary training wrappers such as ModulesToSaveWrapper and TrainableTokensWrapper by getting each of them and
-    # translating saved state dict key (which does not include the adapter name) to loaded state dict key (which
-    # includes the adapter name).
+    # handle auxiliary training wrappers such as ModulesToSaveWrapper and TrainableTokensWrapper by getting each of
+    # them and translating saved state dict key (which does not include the adapter name) to loaded state dict key
+    # (which includes the adapter name).
     for name, module in model.named_modules():
         if isinstance(module, AuxiliaryTrainingWrapper):
+            # Not every module has a 1:1 mapping. ModulesToSaveWrapper, for example, removes the
+            # `modules_to_save.{adapter_name}.` prefix. This prefix must be restored when loading the model from the
+            # saved state dict which is why we fetch a load key map from the wrapper.
+            key_map = module.adapter_state_dict_load_map(adapter_name)
+
             for k in module.adapter_state_dict(adapter_name):
                 # each saved state dict is adapter specific, i.e. does not contain the adapter name
                 # but the loaded state dict does include adapter names since we can have multiple.
                 k_no_adapter = k.replace(f".{adapter_name}", "")
-                store_key = f"{name}.{k}"
+
+                store_key = f"{name}.{key_map.get(k, k)}"
                 lookup_key = f"{name}.{k_no_adapter}"
 
                 state_dict[store_key] = peft_model_state_dict[lookup_key]
