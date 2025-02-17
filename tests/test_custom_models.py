@@ -52,6 +52,7 @@ from peft import (
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import infer_device
+from peft.utils.constants import FULLY_QUALIFIED_PATTERN_KEY_PREFIX
 
 from .testing_common import PeftCommonTester
 from .testing_utils import get_state_dict, require_non_cpu
@@ -1919,7 +1920,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is True
 
 
-class TestMultiRankAdapter(unittest.TestCase):
+class TestMultiRankAdapter:
     """Tests related to multirank LoRA adapters"""
 
     def test_multirank(self):
@@ -1985,6 +1986,116 @@ class TestMultiRankAdapter(unittest.TestCase):
                     assert rank_current == rank_expected, (
                         f"Rank {rank_current} is not equal to expected {rank_expected}"
                     )
+
+    #################
+    # NESTED MODELS #
+    #################
+
+    # see https://github.com/huggingface/diffusers/pull/10808 for discussion
+
+    # We have an issue if one key of the rank_pattern the suffix of both a key of a module that needs the specific rank
+    # and the key of a module that does NOT need the specific rank. In general, most real world models are nested, but
+    # not all have sub-modules that share the same name. For some diffusion models, however, this is a possible issue,
+    # so we add the possibility to indicate that a key should be considered "fully qualified" as opposed to a pattern to
+    # be matched.
+
+    def get_nested_model(self):
+        class Inner(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(3, 4)
+                self.lin1 = nn.Linear(4, 3)
+
+        class Outer(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(5, 6)  # same name as for Inner
+                self.lin1 = nn.Linear(6, 5)  # same name as for Inner
+                self.inner = Inner()
+
+        return Outer()
+
+    def test_nested_adapter_rank_pattern_applied_inner_and_outer(self):
+        # first sanity check that the r from rank_pattern can be applied to both "lin0" modules
+        model = self.get_nested_model()
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 16})
+        model = get_peft_model(model, config)
+
+        assert model.base_model.model.lin0.lora_A["default"].weight.shape[0] == 16
+        assert model.base_model.model.lin0.lora_B["default"].weight.shape[1] == 16
+        assert model.base_model.model.lin1.lora_A["default"].weight.shape[0] == 8
+        assert model.base_model.model.lin1.lora_B["default"].weight.shape[1] == 8
+        assert model.base_model.model.inner.lin0.lora_A["default"].weight.shape[0] == 16
+        assert model.base_model.model.inner.lin0.lora_B["default"].weight.shape[1] == 16
+        assert model.base_model.model.inner.lin1.lora_A["default"].weight.shape[0] == 8
+        assert model.base_model.model.inner.lin1.lora_B["default"].weight.shape[1] == 8
+
+    def test_nested_adapter_rank_pattern_applied_only_inner(self):
+        # applying the special rank to the inner module is possible by prefixing the name of the inner module
+        model = self.get_nested_model()
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"inner.lin0": 16})
+        model = get_peft_model(model, config)
+        assert model.base_model.model.lin0.lora_A["default"].weight.shape[0] == 8
+        assert model.base_model.model.lin0.lora_B["default"].weight.shape[1] == 8
+        assert model.base_model.model.lin1.lora_A["default"].weight.shape[0] == 8
+        assert model.base_model.model.lin1.lora_B["default"].weight.shape[1] == 8
+        assert model.base_model.model.inner.lin0.lora_A["default"].weight.shape[0] == 16
+        assert model.base_model.model.inner.lin0.lora_B["default"].weight.shape[1] == 16
+        assert model.base_model.model.inner.lin1.lora_A["default"].weight.shape[0] == 8
+        assert model.base_model.model.inner.lin1.lora_B["default"].weight.shape[1] == 8
+
+    def test_nested_adapter_rank_pattern_applied_only_outer(self):
+        # This used to be impossible before, as the inner key would also match the key of the outer module. With the
+        # addition of the prefix, this is now possible.
+        model = self.get_nested_model()
+        config = LoraConfig(
+            target_modules=["lin0", "lin1"], r=8, rank_pattern={FULLY_QUALIFIED_PATTERN_KEY_PREFIX + "lin0": 16}
+        )
+        model = get_peft_model(model, config)
+        assert model.base_model.model.lin0.lora_A["default"].weight.shape[0] == 16
+        assert model.base_model.model.lin0.lora_B["default"].weight.shape[1] == 16
+        assert model.base_model.model.lin1.lora_A["default"].weight.shape[0] == 8
+        assert model.base_model.model.lin1.lora_B["default"].weight.shape[1] == 8
+        assert model.base_model.model.inner.lin0.lora_A["default"].weight.shape[0] == 8
+        assert model.base_model.model.inner.lin0.lora_B["default"].weight.shape[1] == 8
+        assert model.base_model.model.inner.lin1.lora_A["default"].weight.shape[0] == 8
+        assert model.base_model.model.inner.lin1.lora_B["default"].weight.shape[1] == 8
+
+    def test_nested_adapter_rank_pattern_applied_to_all(self):
+        # This used to be impossible before, as the inner key would also match the key of the outer module. With the
+        # addition of the prefix, this is now possible.
+        model = self.get_nested_model()
+        rank_pattern = {
+            FULLY_QUALIFIED_PATTERN_KEY_PREFIX + "lin0": 10,
+            FULLY_QUALIFIED_PATTERN_KEY_PREFIX + "lin1": 11,
+            FULLY_QUALIFIED_PATTERN_KEY_PREFIX + "inner.lin0": 12,
+            FULLY_QUALIFIED_PATTERN_KEY_PREFIX + "inner.lin1": 13,
+        }
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern=rank_pattern)
+        model = get_peft_model(model, config)
+        assert model.base_model.model.lin0.lora_A["default"].weight.shape[0] == 10
+        assert model.base_model.model.lin0.lora_B["default"].weight.shape[1] == 10
+        assert model.base_model.model.lin1.lora_A["default"].weight.shape[0] == 11
+        assert model.base_model.model.lin1.lora_B["default"].weight.shape[1] == 11
+        assert model.base_model.model.inner.lin0.lora_A["default"].weight.shape[0] == 12
+        assert model.base_model.model.inner.lin0.lora_B["default"].weight.shape[1] == 12
+        assert model.base_model.model.inner.lin1.lora_A["default"].weight.shape[0] == 13
+        assert model.base_model.model.inner.lin1.lora_B["default"].weight.shape[1] == 13
+
+    def test_nested_adapter_alpha_pattern_applied_only_outer(self):
+        # The same test as above but using alpha pattern. As the two patterns use the same logic, they should work
+        # equally well, but let's test explicitly to be sure
+        model = self.get_nested_model()
+        config = LoraConfig(
+            target_modules=["lin0", "lin1"],
+            lora_alpha=8,
+            alpha_pattern={FULLY_QUALIFIED_PATTERN_KEY_PREFIX + "lin0": 16},
+        )
+        model = get_peft_model(model, config)
+        assert model.base_model.model.lin0.lora_alpha["default"] == 16
+        assert model.base_model.model.lin1.lora_alpha["default"] == 8
+        assert model.base_model.model.inner.lin0.lora_alpha["default"] == 8
+        assert model.base_model.model.inner.lin0.lora_alpha["default"] == 8
 
 
 class TestRepr(unittest.TestCase):

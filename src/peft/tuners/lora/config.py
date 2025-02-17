@@ -262,10 +262,13 @@ class LoraConfig(PeftConfig):
             `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
         rank_pattern (`dict`):
             The mapping from layer names or regexp expression to ranks which are different from the default rank
-            specified by `r`.
+            specified by `r`. Note that the keys in the keys in the dict are interpreted as pattern, so `"bar"` will
+            also match `"foo.bar"`. To prevent this, add a special prefix before the key: `f"FULL-NAME-{key}"`.
         alpha_pattern (`dict`):
             The mapping from layer names or regexp expression to alphas which are different from the default alpha
-            specified by `lora_alpha`.
+            specified by `lora_alpha`. Note that the keys in the keys in the dict are interpreted as pattern, so
+            `"bar"` will also match `"foo.bar"`. To prevent this, add a special prefix before the key:
+            `f"FULL-NAME-{key}"`.
         megatron_config (`Optional[dict]`):
             The TransformerConfig arguments for Megatron. It is used to create LoRA's parallel linear layer. You can
             get it like this, `core_transformer_config_from_args(get_args())`, these two functions being from Megatron.
@@ -391,8 +394,10 @@ class LoraConfig(PeftConfig):
         default_factory=dict,
         metadata={
             "help": (
-                "The mapping from layer names or regexp expression to ranks which are different from the default rank specified by `r`. "
-                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 8`}"
+                "The mapping from layer names or regexp expression to ranks which are different from the default rank "
+                "specified by `r`. For example, `{model.decoder.layers.0.encoder_attn.k_proj: 8`}. Note that the keys "
+                "in the keys in the dict are interpreted as pattern, so `'bar'` will also match `'foo.bar'`. To "
+                "prevent this, add a special prefix before the key: `f'FULL-NAME-{key}'`."
             )
         },
     )
@@ -400,8 +405,10 @@ class LoraConfig(PeftConfig):
         default_factory=dict,
         metadata={
             "help": (
-                "The mapping from layer names or regexp expression to alphas which are different from the default alpha specified by `lora_alpha`. "
-                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 32`}"
+                "The mapping from layer names or regexp expression to alphas which are different from the default alpha "
+                "specified by `lora_alpha`. For example, `{model.decoder.layers.0.encoder_attn.k_proj: 32`} Note that the keys "
+                "in the keys in the dict are interpreted as pattern, so `'bar'` will also match `'foo.bar'`. To "
+                "prevent this, add a special prefix before the key: `f'FULL-NAME-{key}'`."
             )
         },
     )

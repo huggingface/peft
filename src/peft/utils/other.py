@@ -34,6 +34,7 @@ from ..import_utils import is_auto_gptq_available, is_gptqmodel_available, is_to
 from .constants import (
     CONFIG_NAME,
     EMBEDDING_LAYER_NAMES,
+    FULLY_QUALIFIED_PATTERN_KEY_PREFIX,
     INCLUDE_LINEAR_LAYERS_SHORTHAND,
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
@@ -769,4 +770,14 @@ def check_file_exists_on_hf_hub(repo_id: str, filename: str, **kwargs) -> Option
 
 def get_pattern_key(pattern_keys, key_to_match):
     """Match a substring of key_to_match in pattern keys"""
+    # handling of a special case: Users can prefix the key in rank_pattern or alpha_pattern with this special prefix to
+    # indicate that this key is supposed to be the full name, not a pattern. That way, the key "foo" can be matched
+    # without inadvertently matching bar.foo as well.
+    for key in pattern_keys:
+        if (
+            key.startswith(FULLY_QUALIFIED_PATTERN_KEY_PREFIX)
+            and key[len(FULLY_QUALIFIED_PATTERN_KEY_PREFIX) :] == key_to_match
+        ):
+            return key
+
     return next(filter(lambda key: re.match(rf".*\.{key}$", key_to_match), pattern_keys), key_to_match)
