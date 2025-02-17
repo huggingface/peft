@@ -1149,8 +1149,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         prefix = PREFIXES[config_cls]
         for name, param_before in params_before.items():
             param_after = params_after[name]
-            if (prefix in name) or ("modules_to_save" in name):
-                # target_modules and modules_to_save _are_ updated
+            if (prefix in name) or ("modules_to_save" in name) or ("token_adapter.trainable_tokens" in name):
+                # target_modules, modules_to_save and modules of `NewTokensWrapper` _are_ updated
                 assert not torch.allclose(param_before, param_after, atol=tol, rtol=tol)
             else:
                 assert torch.allclose(param_before, param_after, atol=tol, rtol=tol)

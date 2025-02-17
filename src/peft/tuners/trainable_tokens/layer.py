@@ -92,9 +92,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             merged = orig_weights + self.get_sparse_delta_tokens(adapter_name)
 
             if safe_merge and not torch.isfinite(merged).all():
-                raise ValueError(
-                    f"NaNs detected in the merged weights. The adapter {adapter_name} seems to be broken"
-                )
+                raise ValueError(f"NaNs detected in the merged weights. The adapter {adapter_name} seems to be broken")
             else:
                 self.base_layer.weight.data = merged
                 self.merged_adapters.append(adapter_name)

@@ -1114,7 +1114,7 @@ class PeftCommonTester:
         loss.backward()
         parameter_prefix = model.prefix
         for n, param in model.named_parameters():
-            if (parameter_prefix in n) or ("modules_to_save" in n):
+            if (parameter_prefix in n) or ("modules_to_save" in n) or ("token_adapter.trainable_tokens" in n):
                 assert param.grad is not None
             else:
                 assert param.grad is None

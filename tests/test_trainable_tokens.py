@@ -20,7 +20,7 @@ import pytest
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from peft import AutoPeftModel, LoraConfig, TrainableTokensConfig, get_peft_model, PeftModel
+from peft import AutoPeftModel, LoraConfig, PeftModel, TrainableTokensConfig, get_peft_model
 
 
 class TestTrainableTokens:
@@ -36,13 +36,12 @@ class TestTrainableTokens:
     def tokenizer(self, model_id):
         return AutoTokenizer.from_pretrained(model_id)
 
-    def simulate_training(self, trainable_tokens_layer, adapter_name='default'):
+    def simulate_training(self, trainable_tokens_layer, adapter_name="default"):
         """Simulates training of trainable_tokens adapter layer by assigning random
         values to the delta tokens.
         """
         trained_values = torch.rand(
-            trainable_tokens_layer.num_trainable_embeddings *
-            trainable_tokens_layer.base_layer.weight.shape[-1]
+            trainable_tokens_layer.num_trainable_embeddings * trainable_tokens_layer.base_layer.weight.shape[-1]
         )
         trainable_tokens_layer.trainable_tokens_delta_tokens[adapter_name].data = trained_values
 
@@ -141,7 +140,7 @@ class TestTrainableTokens:
     def test_basic_training(self, model, tokenizer):
         # ensure that the model can be trained and backpropagation works
         config = TrainableTokensConfig(
-            target_modules=['embed_tokens'],
+            target_modules=["embed_tokens"],
             token_indices=[0, 10],
         )
 
@@ -199,9 +198,7 @@ class TestTrainableTokens:
         outputs_after = model(**X).logits
 
         with model.disable_adapter():
-            print('during disable_adapter')
             outputs_disabled = model(**X).logits
-            print('after disable_adapter')
 
         # check that after leaving the disable_adapter context, everything is enabled again
         outputs_enabled_after_disable = model(**X).logits
@@ -219,7 +216,6 @@ class TestTrainableTokens:
 
         # check that enabling + disabling adapters does not change the results
         assert torch.allclose(outputs_after, outputs_enabled_after_disable, atol=atol, rtol=rtol)
-
 
     @pytest.mark.parametrize(
         "peft_config",
