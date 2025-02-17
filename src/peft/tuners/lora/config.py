@@ -441,7 +441,7 @@ class LoraConfig(PeftConfig):
         default=None,
         metadata={
             "help": (
-                "Selectively trains specific token indices without requiring to tuning the whole embedding matrix."
+                "Selectively trains specific token indices without requiring to tuning the whole embedding matrix. "
                 "You can specify a list of token indices which will then target the `embedding` layer of the model, or, "
                 "if your model uses a different layer to contain the embeddings you can supply a dictionary where the key "
                 'is the module name of the embedding matrix, e.g. `{"embed_tokens": [0, 1, ...]}`.'
