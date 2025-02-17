@@ -40,7 +40,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         self.kwargs = kwargs
 
         # we store the delta weight on particular tokens
-        self.trainable_tokens_delta_tokens = nn.ParameterDict({})
+        self.trainable_tokens_delta = nn.ParameterDict({})
 
         # Mark the weight as unmerged
         self.merged_adapters = []
@@ -62,10 +62,11 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         # since we're adding on top of the existing embeddings, I think that zero is sensible.
         values = torch.zeros(self.num_trainable_embeddings * self.base_layer.weight.shape[-1])
 
-        # cause safetensors doesn't support sparse tensors, we need to store the values in a dense tensor and then convert it to a sparse tensor when called
-        self.trainable_tokens_delta_tokens[adapter_name] = nn.Parameter(values, requires_grad=True)
+        # cause safetensors doesn't support sparse tensors, we need to store the values in a dense tensor and then
+        # convert it to a sparse tensor when called
+        self.trainable_tokens_delta[adapter_name] = nn.Parameter(values, requires_grad=True)
 
-    def get_sparse_delta_tokens(self, adapter_name):
+    def get_sparse_delta(self, adapter_name):
         # we created the indices of the sparse tensor
         r = torch.Tensor(self.token_indices).long()
         c = torch.arange(self.embedding_dim)
@@ -73,10 +74,10 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             [r.repeat(self.embedding_dim), c.repeat(self.num_trainable_embeddings, 1).t().reshape(-1)], dim=1
         ).T
 
-        # we create the sparse tensor from our `delta_tokens` and `indices
+        # we create the sparse tensor from our `delta` and `indices
         return torch.sparse_coo_tensor(
             indices=indices,
-            values=self.trainable_tokens_delta_tokens[adapter_name],
+            values=self.trainable_tokens_delta[adapter_name],
             size=(self.num_total_embeddings, self.embedding_dim),
         )
 
@@ -89,7 +90,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
 
         for adapter_name in adapter_names:
             orig_weights = self.base_layer.weight.data
-            merged = orig_weights + self.get_sparse_delta_tokens(adapter_name)
+            merged = orig_weights + self.get_sparse_delta(adapter_name)
 
             if safe_merge and not torch.isfinite(merged).all():
                 raise ValueError(f"NaNs detected in the merged weights. The adapter {adapter_name} seems to be broken")
@@ -104,7 +105,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
 
         while len(self.merged_adapters) > 0:
             adapter_name = self.merged_adapters.pop()
-            self.base_layer.weight.data -= self.get_sparse_delta_tokens(adapter_name)
+            self.base_layer.weight.data -= self.get_sparse_delta(adapter_name)
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         if self.disable_adapters or not self.active_adapters:
@@ -116,7 +117,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         else:
             deltas = None
             for active_adapter in self.active_adapters:
-                delta = self.get_sparse_delta_tokens(active_adapter)
+                delta = self.get_sparse_delta(active_adapter)
                 if deltas is None:
                     deltas = delta
                 else:

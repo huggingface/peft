@@ -43,7 +43,7 @@ class TestTrainableTokens:
         trained_values = torch.rand(
             trainable_tokens_layer.num_trainable_embeddings * trainable_tokens_layer.base_layer.weight.shape[-1]
         )
-        trainable_tokens_layer.trainable_tokens_delta_tokens[adapter_name].data = trained_values
+        trainable_tokens_layer.trainable_tokens_delta[adapter_name].data = trained_values
 
     def test_stand_alone_usage(self, model, tokenizer, tmp_path):
         original_model = copy.deepcopy(model)
