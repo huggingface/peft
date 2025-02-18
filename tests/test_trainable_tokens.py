@@ -41,7 +41,7 @@ class TestTrainableTokens:
         values to the delta tokens.
         """
         trained_values = torch.rand(
-            trainable_tokens_layer.num_trainable_embeddings * trainable_tokens_layer.base_layer.weight.shape[-1]
+            trainable_tokens_layer.num_trainable_embeddings(adapter_name) * trainable_tokens_layer.base_layer.weight.shape[-1]
         )
         trainable_tokens_layer.trainable_tokens_delta[adapter_name].data = trained_values
 
@@ -270,3 +270,62 @@ class TestTrainableTokens:
 
         assert load_result1.missing_keys == []
         assert load_result2.missing_keys == []
+
+    @pytest.mark.parametrize(
+        "peft_config_factory",
+        [
+            lambda token_indices: LoraConfig(
+                target_modules="all-linear",
+                trainable_token_indices={"embed_tokens": token_indices},
+            ),
+        ],
+    )
+    def test_multiple_adapters_different_token_indices(self, model, peft_config_factory, tmp_path):
+        # tests if multiple adapters with different token indices work
+        original_model = copy.deepcopy(model)
+
+        token_indices_1 = [0, 1, 2]
+        token_indices_2 = [2, 3, 4]
+
+        peft_config_1 = peft_config_factory(token_indices_1)
+        peft_config_2 = peft_config_factory(token_indices_2)
+
+        model = get_peft_model(model, peft_config_1, adapter_name="adapter_1")
+        model.add_adapter("adapter_2", peft_config_2)
+
+        # "train" adapter 1
+        model.set_adapter("adapter_1")
+        self.simulate_training(model.model.model.embed_tokens.token_adapter, "adapter_1")
+
+        # "train" adapter 2
+        model.set_adapter("adapter_2")
+        self.simulate_training(model.model.model.embed_tokens.token_adapter, "adapter_2")
+
+        # now we infer on adapter 1 and on adapter 2 and check if the requested indices are changed for
+        # each adapter. e.g., for adapter 1, only token indices 1 should be changed.
+        X = {
+            "input_ids": torch.tensor([list(set(token_indices_1 + token_indices_2))]),
+            "attention_mask": torch.tensor([[1] * (len(set(token_indices_1 + token_indices_2)))]),
+        }
+
+        original_output = original_model.forward(output_hidden_states=True, **X).hidden_states[0]
+
+        # infer with adapter 1, embeddings for token indices 1 should be changed, no others.
+        model.set_adapter("adapter_1")
+        adapter_1_output = model.forward(output_hidden_states=True, **X).hidden_states[0]
+
+        idcs_to_modify = token_indices_1
+        idcs_to_keep = [i for i in X["input_ids"][0].tolist() if i not in idcs_to_modify]
+
+        assert not torch.allclose(adapter_1_output[:, idcs_to_modify], original_output[:, idcs_to_modify])
+        assert torch.allclose(adapter_1_output[:, idcs_to_keep], original_output[:, idcs_to_keep])
+
+        # infer with adapter 2, embeddings for token indices 2 should be changed, no others.
+        model.set_adapter("adapter_2")
+        adapter_2_output = model.forward(output_hidden_states=True, **X).hidden_states[0]
+
+        idcs_to_modify = token_indices_2
+        idcs_to_keep = [i for i in X["input_ids"][0].tolist() if i not in idcs_to_modify]
+
+        assert not torch.allclose(adapter_2_output[:, idcs_to_modify], original_output[:, idcs_to_modify])
+        assert torch.allclose(adapter_2_output[:, idcs_to_keep], original_output[:, idcs_to_keep])

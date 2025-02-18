@@ -36,7 +36,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
 
         self.base_layer = base_layer
         self._active_adapter = adapter_name
-        self.token_indices = token_indices
+        self.token_indices = {}
         self.kwargs = kwargs
 
         # we store the delta weight on particular tokens
@@ -45,40 +45,43 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         # Mark the weight as unmerged
         self.merged_adapters = []
 
-        # we set parameters on layer sizing
-        self.num_trainable_embeddings = len(token_indices)  # this is similar to `num_embeddings`
-        self.embedding_dim = base_layer.embedding_dim  # token from the embedding
-        self.num_total_embeddings = base_layer.num_embeddings  # total number of tokens in the vocabulary
-
         # we set the number of trainable tokens
-        self.update_layer(adapter_name)
+        self.update_layer(adapter_name, token_indices=token_indices)
 
-    def update_layer(self, adapter_name):
+    def num_trainable_embeddings(self, adapter_name):
+        return len(self.token_indices[adapter_name])
+
+    def update_layer(self, adapter_name, **kwargs):
+        self.token_indices[adapter_name] = kwargs['token_indices']
+
         # we initialize the delta embedding weights and store them in a trainable parameter
         #
         # TODO use existing embedding layer values for initialization? there is the problem
         # that some tests assume that after init should be the same as disabled adapters.
         # so either we let this break the assumptions or we initialize the deltas to zero.
         # since we're adding on top of the existing embeddings, I think that zero is sensible.
-        values = torch.zeros(self.num_trainable_embeddings * self.base_layer.weight.shape[-1])
+        values = torch.zeros(self.num_trainable_embeddings(adapter_name) * self.base_layer.weight.shape[-1])
 
         # cause safetensors doesn't support sparse tensors, we need to store the values in a dense tensor and then
         # convert it to a sparse tensor when called
         self.trainable_tokens_delta[adapter_name] = nn.Parameter(values, requires_grad=True)
 
     def get_sparse_delta(self, adapter_name):
+        embedding_dim = self.base_layer.embedding_dim  # token from the embedding
+        num_total_embeddings = self.base_layer.num_embeddings  # total number of tokens in the vocabulary
+
         # we created the indices of the sparse tensor
-        r = torch.Tensor(self.token_indices).long()
-        c = torch.arange(self.embedding_dim)
+        r = torch.Tensor(self.token_indices[adapter_name]).long()
+        c = torch.arange(embedding_dim)
         indices = torch.stack(
-            [r.repeat(self.embedding_dim), c.repeat(self.num_trainable_embeddings, 1).t().reshape(-1)], dim=1
+            [r.repeat(embedding_dim), c.repeat(self.num_trainable_embeddings(adapter_name), 1).t().reshape(-1)], dim=1
         ).T
 
         # we create the sparse tensor from our `delta` and `indices
         return torch.sparse_coo_tensor(
             indices=indices,
             values=self.trainable_tokens_delta[adapter_name],
-            size=(self.num_total_embeddings, self.embedding_dim),
+            size=(num_total_embeddings, embedding_dim),
         )
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:

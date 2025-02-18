@@ -209,19 +209,20 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
 
     """
 
-    def __init__(self, module_to_save, adapter_name):
+    def __init__(self, module_to_save, adapter_name, **kwargs):
+        """Extra kwargs will be passed to `self.init_modules` and `self.update`."""
         super().__init__()
         self.original_module = module_to_save
         self._active_adapter = adapter_name
         self._disable_adapters = False
         self._adapters = set()
 
-        self.init_modules(adapter_name)
+        self.init_modules(adapter_name, **kwargs)
 
-        self.update(adapter_name)
+        self.update(adapter_name, **kwargs)
         self.check_module()
 
-    def init_modules(self, adapter_name):
+    def init_modules(self, adapter_name, **kwargs):
         """A place to initialize PyTorch modules in `__init__` before the call to `self.update()`."""
         raise NotImplementedError
 
@@ -298,9 +299,11 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
         return getattr(module, name)
 
-    def update(self, adapter_name):
+    def update(self, adapter_name, **kwargs):
         """Called when this instance should be part of an adapter's training.
         Adds the given adapter to the list of adapters that this instance is training along with.
+
+        Additional kwargs are expected to be the same kwargs that are also passed for initializing this class.
         """
         if adapter_name not in self._adapters:
             self._adapters.add(adapter_name)
@@ -454,7 +457,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
     def _getattr_wrapped(self, name, modules):
         return modules["modules_to_save"][self.active_adapter]
 
-    def update(self, adapter_name):
+    def update(self, adapter_name, **kwargs):
         super().update(adapter_name)
 
         context_manager = nullcontext()
@@ -554,16 +557,15 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         adapter_name: str,
         token_indices: list[int],
     ) -> None:
-        self.token_indices = token_indices
-        super().__init__(module_to_save, adapter_name)
+        super().__init__(module_to_save, adapter_name, token_indices=token_indices)
 
-    def init_modules(self, adapter_name):
+    def init_modules(self, adapter_name, token_indices):
         # use a local import to avoid potential circular imports
         from peft.tuners.trainable_tokens import TrainableTokensLayer
 
         # since super().__init__() calls update before we have a chance to initialise the adapter we would
         # need here, we do the initialization here.
-        self.token_adapter = TrainableTokensLayer(self.original_module, adapter_name, self.token_indices)
+        self.token_adapter = TrainableTokensLayer(self.original_module, adapter_name, token_indices)
 
     def _error_message_name(self):
         return "trainable_token_indices"
@@ -580,13 +582,11 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         # since it will know best what to do when being disabled.
         return self.token_adapter(x, *args, **kwargs)
 
-    def update(self, active_adapter):
+    def update(self, active_adapter, **kwargs):
         # TODO this does not support deepspeed/fsdp since it is missing a context manager
         # see ModulesToSaveWrapper implementation
         if active_adapter not in self._adapters:
-            self.token_adapter.update_layer(active_adapter)
-
-        # TODO this does not support hooks, see ModulesToSaveWrapper implementation
+            self.token_adapter.update_layer(active_adapter, **kwargs)
 
         super().update(active_adapter)
 
@@ -656,7 +656,7 @@ def _set_trainable(
         if target_module_found:
             parent, target, target_name = _get_submodules(model, key)
             if isinstance(target, wrapper_cls):
-                target.update(adapter_name)
+                target.update(adapter_name, **wrapper_kwargs)
                 target.set_adapter(target.active_adapter)
             else:
                 new_module = wrapper_cls(target, adapter_name, **wrapper_kwargs)
@@ -680,13 +680,13 @@ def _set_adapter(model, adapter_name):
         return adapter_name
 
     for module in model.modules():
-        if isinstance(module, ModulesToSaveWrapper):
-            # only check the adapter_name if we actually encounter a ModulesToSaveWrapper, otherwise we don't care
+        if isinstance(module, AuxiliaryTrainingWrapper):
+            # only check the adapter_name if we actually encounter a AuxiliaryTrainingWrapper, otherwise we don't care
             adapter_name = check_adapter_name(adapter_name)
 
             # if the adapter is found in this module, set it as the active adapter, else disable the adapters of this
             # module
-            if adapter_name in module.modules_to_save:
+            if adapter_name in module._adapters:
                 module.set_adapter(adapter_name)
             else:
                 module.enable_adapters(False)
