@@ -14,10 +14,10 @@
 
 from peft.utils import register_peft_method
 
-from .config import XLoraConfig
+from .config import XLORA_TRANSFORMERS_MAX_VERSION, XLoraConfig
 from .model import XLoraModel
 
 
-__all__ = ["XLoraConfig", "XLoraModel"]
+__all__ = ["XLORA_TRANSFORMERS_MAX_VERSION", "XLoraConfig", "XLoraModel"]
 
 register_peft_method(name="xlora", config_cls=XLoraConfig, model_cls=XLoraModel)

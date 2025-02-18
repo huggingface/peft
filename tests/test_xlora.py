@@ -12,19 +12,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import importlib
 import os
 
 import huggingface_hub
 import pytest
 import torch
+from packaging import version
 from safetensors.torch import load_file
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import LoraConfig, PeftType, TaskType, XLoraConfig, get_peft_model
 from peft.peft_model import PeftModel
+from peft.tuners.xlora import XLORA_TRANSFORMERS_MAX_VERSION
 from peft.utils import infer_device
 
 
+TRANSFORMERS_VERSION = version.parse(importlib.metadata.version("transformers"))
+
+
+@pytest.mark.skipif(
+    TRANSFORMERS_VERSION >= version.parse(XLORA_TRANSFORMERS_MAX_VERSION),
+    reason="X-LoRA is currently broken with the given transformers version, thus skipping tests",
+)
 class TestXlora:
     torch_device = infer_device()
 

@@ -13,12 +13,18 @@
 # limitations under the License.
 from __future__ import annotations
 
+import importlib
 import warnings
 from dataclasses import dataclass
 from typing import Optional
 
+from packaging import version
+
 from peft.config import PeftConfig
 from peft.utils.peft_types import PeftType
+
+
+XLORA_TRANSFORMERS_MAX_VERSION = "4.49.0"
 
 
 @dataclass
@@ -78,6 +84,12 @@ class XLoraConfig(PeftConfig):
     def __post_init__(self):
         super().__post_init__()
         self.peft_type = PeftType.XLORA
+
+        if version.parse(importlib.metadata.version("transformers")) >= version.parse(XLORA_TRANSFORMERS_MAX_VERSION):
+            warnings.warn(
+                f"X-LoRA is currently broken with transformers {XLORA_TRANSFORMERS_MAX_VERSION}, it is recommended to "
+                "use an older transformers version or a different PEFT method"
+            )
 
         if self.hidden_size is None:
             warnings.warn(
