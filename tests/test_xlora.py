@@ -28,6 +28,7 @@ from peft.utils import infer_device
 
 def flaky(num_tries: int):
     """Decorator for test functions that are flaky"""
+
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -38,7 +39,9 @@ def flaky(num_tries: int):
                     print(f"Failed test {func.__name__} with error: {e}")
                     continue
             raise AssertionError(f"Failed test {func.__name__} after {num_tries} tries")
+
         return wrapper
+
     return decorator
 
 
