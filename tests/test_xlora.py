@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import os
+from functools import wraps
 
 import huggingface_hub
 import pytest
@@ -23,6 +24,25 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import LoraConfig, PeftType, TaskType, XLoraConfig, get_peft_model
 from peft.peft_model import PeftModel
 from peft.utils import infer_device
+
+
+def flaky(num_tries: int):
+    """Decorator for test functions that are flaky"""
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for _ in range(num_tries):
+                try:
+                    return func(*args, **kwargs)
+                except AssertionError as e:
+                    print(f"Failed test {func.__name__} with error: {e}")
+                    continue
+            raise AssertionError(f"Failed test {func.__name__} after {num_tries} tries")
+
+        return wrapper
+
+    return decorator
 
 
 class TestXlora:
@@ -128,8 +148,6 @@ class TestXlora:
         )
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
 
-    # TODO: fix the xfailing test
-    @pytest.mark.xfail
     def test_scalings_logging_methods(self, tokenizer, model):
         model.enable_scalings_logging()
 
@@ -182,8 +200,8 @@ class TestXlora:
 
         assert str(model) is not None
 
-    # TODO: On CI (but not locally), this test seems to have become flaky with the latest transformers changes (v4.45).
-    @pytest.mark.xfail
+    # On CI (but not locally), this test is flaky since transformers v4.45.0.
+    @flaky(num_tries=5)
     def test_save_load_functional(self, tokenizer, model, tmp_path):
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
