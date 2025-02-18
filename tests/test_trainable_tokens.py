@@ -41,7 +41,8 @@ class TestTrainableTokens:
         values to the delta tokens.
         """
         trained_values = torch.rand(
-            trainable_tokens_layer.num_trainable_embeddings(adapter_name) * trainable_tokens_layer.base_layer.weight.shape[-1]
+            trainable_tokens_layer.num_trainable_embeddings(adapter_name)
+            * trainable_tokens_layer.base_layer.weight.shape[-1]
         )
         trainable_tokens_layer.trainable_tokens_delta[adapter_name].data = trained_values
 

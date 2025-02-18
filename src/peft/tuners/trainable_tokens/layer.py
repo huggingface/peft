@@ -52,7 +52,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         return len(self.token_indices[adapter_name])
 
     def update_layer(self, adapter_name, **kwargs):
-        self.token_indices[adapter_name] = kwargs['token_indices']
+        self.token_indices[adapter_name] = kwargs["token_indices"]
 
         # we initialize the delta embedding weights and store them in a trainable parameter
         #
