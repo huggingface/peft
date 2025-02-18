@@ -225,6 +225,13 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         """A place to initialize PyTorch modules in `__init__` before the call to `self.update()`."""
         raise NotImplementedError
 
+    def _error_message_name(self):
+        """Returns a user friendly identifier for error messages, e.g. for type compatibility error messages from
+        `check_module()` so that the user can backtrack where the error comes from. A generic "training wrapper" is
+        less helpful than "modules_to_save", for example.
+        """
+        return "training wrapper"
+
     def check_module(self):
         """Perform some sanity checks on the module to ensure that it works"""
         # Try to anticipate some modules that users could try to target that would not work.
@@ -233,7 +240,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         forbidden_classes = (torch.nn.ModuleDict, torch.nn.ModuleList, torch.nn.ParameterDict, torch.nn.ParameterList)
         if isinstance(self.original_module, forbidden_classes):
             cls_name = self.original_module.__class__
-            raise TypeError(f"training wrapper cannot be applied to modules of type {cls_name}")
+            raise TypeError(f"{self._error_message_name()} cannot be applied to modules of type {cls_name}")
 
         # local import to avoid circular import
         from peft.tuners.tuners_utils import BaseTunerLayer
@@ -241,7 +248,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         if isinstance(self.original_module, BaseTunerLayer):
             # e.g. applying a training wrapper to a lora layer makes no sense
             cls_name = self.original_module.__class__
-            raise TypeError(f"training wrapper cannot be applied to modules of type {cls_name}")
+            raise TypeError(f"{self._error_message_name()} cannot be applied to modules of type {cls_name}")
 
     @property
     def disable_adapters(self) -> bool:
@@ -432,6 +439,9 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         # we treat each adapter separately, so we have multiple adapters, same (copied) module for each
         self.modules_to_save = torch.nn.ModuleDict({})
 
+    def _error_message_name(self):
+        return "modules_to_save"
+
     def _forward_wrapped(self, x, active_adapter, *args, **kwargs):
         return self.modules_to_save[active_adapter](x, *args, **kwargs)
 
@@ -507,6 +517,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         self._active_adapter = adapter_name
 
     def adapter_state_dict_load_map(self, adapter_name):
+        # The state dict returned by ModulesToSaveWrapper
         return {k: f"modules_to_save.{adapter_name}.{k}" for k in self.adapter_state_dict(adapter_name)}
 
     def adapter_state_dict(self, adapter_name):
@@ -553,6 +564,9 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         # since super().__init__() calls update before we have a chance to initialise the adapter we would
         # need here, we do the initialization here.
         self.token_adapter = TrainableTokensLayer(self.original_module, adapter_name, self.token_indices)
+
+    def _error_message_name(self):
+        return "trainable_token_indices"
 
     def _forward_wrapped(self, x, active_adapter, *args, **kwargs):
         self.token_adapter.set_adapter(active_adapter)
