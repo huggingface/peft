@@ -64,6 +64,54 @@ from peft.utils import infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
 
 
+class TestLoadAdapterOfflineMode:
+    base_model = "hf-internal-testing/tiny-random-OPTForCausalLM"
+    peft_model_id = "peft-internal-testing/tiny-OPTForCausalLM-lora"
+
+    # make sure that PEFT honors offline mode
+    @contextmanager
+    def hub_offline_ctx(self):
+        # this is required to simulate offline mode, setting the env var dynamically inside the test does not work
+        # because the value is checked only once at the start of the session
+        with patch("huggingface_hub.constants.HF_HUB_OFFLINE", True):
+            reset_sessions()
+            yield
+        reset_sessions()
+
+    def test_load_from_hub_then_offline_model(self):
+        # this uses LoRA but it's the same mechanism for other methods
+        base_model = AutoModelForCausalLM.from_pretrained(self.base_model)
+
+        # first ensure that the adapter model has been downloaded
+        PeftModel.from_pretrained(base_model, self.peft_model_id)
+
+        del base_model
+
+        base_model = AutoModelForCausalLM.from_pretrained(self.base_model)
+        with self.hub_offline_ctx():
+            # does not raise
+            PeftModel.from_pretrained(base_model, self.peft_model_id)
+
+    @pytest.fixture
+    def changed_default_cache_dir(self, tmp_path, monkeypatch):
+        # ensure that this test does not interact with other tests that may use the HF cache
+        monkeypatch.setattr("huggingface_hub.constants.HF_HOME", tmp_path)
+        monkeypatch.setattr("huggingface_hub.constants.HF_HUB_CACHE", tmp_path / "hub")
+        monkeypatch.setattr("huggingface_hub.constants.HF_TOKEN_PATH", tmp_path / "token")
+
+    def load_checkpoints(self, cache_dir):
+        # download model and lora checkpoint to a specific cache dir
+        snapshot_download(self.base_model, cache_dir=cache_dir)
+        snapshot_download(self.peft_model_id, cache_dir=cache_dir)
+
+    def test_load_checkpoint_offline_non_default_cache_dir(self, changed_default_cache_dir, tmp_path):
+        # See #2373 for context
+        self.load_checkpoints(tmp_path)
+        with self.hub_offline_ctx():
+            base_model = AutoModelForCausalLM.from_pretrained(self.base_model, cache_dir=tmp_path)
+            PeftModel.from_pretrained(base_model, self.peft_model_id, cache_dir=tmp_path)
+
+
 class TestLoraInitialization:
     """Test class to check the initialization of LoRA adapters."""
 
@@ -1561,54 +1609,6 @@ class TestNoInfiniteRecursionDeepspeed:
         finally:
             # ensure there are no side effects of this test
             cls.__init__ = original_init
-
-
-class TestLoadAdapterOfflineMode:
-    base_model = "hf-internal-testing/tiny-random-OPTForCausalLM"
-    peft_model_id = "peft-internal-testing/tiny-OPTForCausalLM-lora"
-
-    # make sure that PEFT honors offline mode
-    @contextmanager
-    def hub_offline_ctx(self):
-        # this is required to simulate offline mode, setting the env var dynamically inside the test does not work
-        # because the value is checked only once at the start of the session
-        with patch("huggingface_hub.constants.HF_HUB_OFFLINE", True):
-            reset_sessions()
-            yield
-        reset_sessions()
-
-    def test_load_from_hub_then_offline_model(self):
-        # this uses LoRA but it's the same mechanism for other methods
-        base_model = AutoModelForCausalLM.from_pretrained(self.base_model)
-
-        # first ensure that the adapter model has been downloaded
-        PeftModel.from_pretrained(base_model, self.peft_model_id)
-
-        del base_model
-
-        base_model = AutoModelForCausalLM.from_pretrained(self.base_model)
-        with self.hub_offline_ctx():
-            # does not raise
-            PeftModel.from_pretrained(base_model, self.peft_model_id)
-
-    @pytest.fixture
-    def changed_default_cache_dir(self, tmp_path, monkeypatch):
-        # ensure that this test does not interact with other tests that may use the HF cache
-        monkeypatch.setattr("huggingface_hub.constants.HF_HOME", tmp_path)
-        monkeypatch.setattr("huggingface_hub.constants.HF_HUB_CACHE", tmp_path / "hub")
-        monkeypatch.setattr("huggingface_hub.constants.HF_TOKEN_PATH", tmp_path / "token")
-
-    def load_checkpoints(self, cache_dir):
-        # download model and lora checkpoint to a specific cache dir
-        snapshot_download(self.base_model, cache_dir=cache_dir)
-        snapshot_download(self.peft_model_id, cache_dir=cache_dir)
-
-    def test_load_checkpoint_offline_non_default_cache_dir(self, changed_default_cache_dir, tmp_path):
-        # See #2373 for context
-        self.load_checkpoints(tmp_path)
-        with self.hub_offline_ctx():
-            base_model = AutoModelForCausalLM.from_pretrained(self.base_model, cache_dir=tmp_path)
-            PeftModel.from_pretrained(base_model, self.peft_model_id, cache_dir=tmp_path)
 
 
 class TestCustomModelConfigWarning:
