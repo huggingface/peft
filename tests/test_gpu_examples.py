@@ -4210,7 +4210,7 @@ class TestHotSwapping:
             output1 = model(inputs).logits
 
         # sanity check:
-        tol = 1e-5
+        tol = 1e-4
         assert not torch.allclose(output0, output1, atol=tol, rtol=tol)
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
@@ -4351,7 +4351,9 @@ class TestHotSwapping:
 
     @pytest.mark.skipif(not is_diffusers_available(), reason="Test requires diffusers to be installed")
     @pytest.mark.xfail(
-        strict=True, reason="Requires hotswap to be implemented in diffusers", raises=torch._dynamo.exc.RecompileError
+        strict=True,
+        reason="Requires hotswap to be implemented in diffusers",
+        raises=ValueError,
     )
     # it is important to check hotswapping small to large ranks and large to small ranks
     @pytest.mark.parametrize("ranks", [(11, 11), (7, 13), (13, 7)])
