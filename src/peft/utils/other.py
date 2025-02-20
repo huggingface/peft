@@ -213,7 +213,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         """Extra kwargs will be passed to `self.init_modules` and `self.update`."""
         super().__init__()
         self.original_module = module_to_save
-        self._active_adapter = adapter_name
+        self._active_adapter = [adapter_name]
         self._disable_adapters = False
         self._adapters = set()
 
@@ -259,6 +259,12 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
     @property
     def active_adapter(self) -> str:
         # use a property to ensure that active_adapter is not set directly, instead use the set_adapter method
+        return self._active_adapter
+
+    @property
+    def active_adapters(self) -> list[str]:
+        if isinstance(self._active_adapter, str):
+            return [self._active_adapter]
         return self._active_adapter
 
     def _hasattr_wrapped(self, name, modules):
@@ -385,7 +391,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         self._check_forward_args(x, *args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
 
-        if self.disable_adapters or (self.active_adapter not in self._adapters):
+        if self.disable_adapters or any(adapter not in self._adapters for adapter in self.active_adapters):
             return self._forward_wrapped_disabled(x, *args, **kwargs)
 
         if adapter_names is None:
@@ -403,16 +409,21 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         else:
             self._disable_adapters = True
 
-    def set_adapter(self, adapter_name: str):
+    def set_adapter(self, adapter_names: Union[str, list[str]]):
         """Set the active adapter
 
         Args:
             adapter_name (str): The name of the adapter to set as active
         """
-        if adapter_name not in self._adapters:
-            raise ValueError(f"Adapter {adapter_name} not found in {self._adapters}")
+        if isinstance(adapter_names, str):
+            self._active_adapter = adapter_names
+        else:
+            self._active_adapter = []
+            for adapter_name in adapter_names:
+                if adapter_name not in self._adapters:
+                    raise ValueError(f"Adapter {adapter_name} not found in {self._adapters}")
 
-        self._active_adapter = adapter_name
+                self._active_adapter.append(adapter_name)
 
     def adapter_state_dict(self, adapter_name):
         """Return the state dict of this module for a given adapter."""
@@ -449,7 +460,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         return "modules_to_save"
 
     def _forward_wrapped(self, x, *args, **kwargs):
-        return self.modules_to_save[self._active_adapter](x, *args, **kwargs)
+        return self.modules_to_save[self._active_adapter[0]](x, *args, **kwargs)
 
     def _forward_wrapped_mixed_batch(self, x, active_adapter, *args, **kwargs):
         return self.modules_to_save[active_adapter](x, *args, **kwargs)
@@ -503,7 +514,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
             self.original_module.requires_grad_(True)
             self.modules_to_save.requires_grad_(False)
 
-    def set_adapter(self, adapter_name: str):
+    def set_adapter(self, adapter_names: str):
         """Set the active adapter
 
         Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True). If this is
@@ -518,12 +529,18 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         Args:
             adapter_name (str): The name of the adapter to set as active
         """
+        if isinstance(adapter_names, str):
+            adapter_names = [adapter_names]
+
+        if len(adapter_names) > 1:
+            raise ValueError(f"Attempted to set multiple ({adapter_names}) adapters at once for modules_to_save.")
+
         if adapter_name not in self._adapters:
             raise ValueError(f"Adapter {adapter_name} not found in {self._adapters}")
 
-        self.modules_to_save[self.active_adapter].requires_grad_(False)
-        self.modules_to_save[adapter_name].requires_grad_(True)
-        self._active_adapter = adapter_name
+        self.modules_to_save[self.active_adapter[0]].requires_grad_(False)
+        self.modules_to_save[adapter_names[0]].requires_grad_(True)
+        self._active_adapter = adapter_names
 
     def adapter_state_dict_load_map(self, adapter_name):
         # The state dict returned by ModulesToSaveWrapper
@@ -611,9 +628,9 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
 
         self.token_adapter.enable_adapters(enabled)
 
-    def set_adapter(self, adapter_name: str):
-        super().set_adapter(adapter_name)
-        self.token_adapter.set_adapter(adapter_name)
+    def set_adapter(self, adapter_names: Union[str, list[str]]):
+        super().set_adapter(adapter_names)
+        self.token_adapter.set_adapter(adapter_names)
 
     def unload_and_optionally_merge_module(
         self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]

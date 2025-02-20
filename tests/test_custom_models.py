@@ -51,7 +51,7 @@ from peft import (
     get_peft_model,
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
-from peft.utils import infer_device
+from peft.utils import infer_device, AuxiliaryTrainingWrapper
 
 from .testing_common import PeftCommonTester
 from .testing_utils import get_state_dict, require_non_cpu
@@ -510,6 +510,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         LoraConfig,
         {"target_modules": ["lin0"], "init_lora_weights": False},
         {"target_modules": ["lin1"], "init_lora_weights": False},
+    ),
+    (
+        "LoRA + trainable tokens Same",
+        "lora+trainable_tokens",
+        LoraConfig,
+        {"target_modules": ["lin0"], "init_lora_weights": False, "trainable_token_indices": {"emb": [0, 1, 2]}},
+        {"target_modules": ["lin0"], "init_lora_weights": False, "trainable_token_indices": {"emb": [3, 4, 5, 6]}},
+    ),
+    (
+        "LoRA + trainable tokens Different",
+        "lora+trainable_tokens",
+        LoraConfig,
+        {"target_modules": ["lin0"], "init_lora_weights": False, "trainable_token_indices": {"emb": [0, 1, 2]}},
+        {"target_modules": ["lin1"], "init_lora_weights": False, "trainable_token_indices": {"emb": [3, 4, 5, 6]}},
     ),
     (
         "IA3 Same",
@@ -2057,15 +2071,26 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
 
     def set_multiple_active_adapters(self, model, adapter_names):
         for module in model.modules():
-            if isinstance(module, BaseTunerLayer):
+            if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
                 module.set_adapter(adapter_names)
+
+    def resolve_model_cls(self, tuner_method):
+        if tuner_method == "lora+trainable_tokens":
+            # for this method we need an Embedding layer to target
+            return ModelEmbConv1D()
+        if tuner_method == "ia3":
+            return MLP(bias=False)
+        return MLP(bias=True)
 
     @parameterized.expand(MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES)
     def test_multiple_active_adapters_forward(
         self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
     ):
         torch.manual_seed(0)
-        model = MLP(bias=tuner_method != "ia3").to(self.torch_device).eval()
+
+        model = self.resolve_model_cls(tuner_method)
+        model = model.to(self.torch_device).eval()
+
         X = self.prepare_inputs_for_testing()
 
         config_1 = config_cls(**config_kwargs_1)
@@ -2073,6 +2098,17 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
 
         peft_model = get_peft_model(model, config_1, adapter_name="adapter_1")
         peft_model.add_adapter("adapter_2", config_2)
+
+        # the assumption that the output of the combined output of two adapters is != to the output of one
+        # adapter is not true for unmodified trainable tokens as they just mimic the existing embedding matrix.
+        # therefore, we modify the weights so that the adapter weights differs from the embedding weights.
+        if 'trainable_tokens' in tuner_method:
+            peft_model.emb.token_adapter.trainable_tokens_delta['adapter_1'].data = (
+                torch.rand_like(peft_model.emb.token_adapter.trainable_tokens_delta['adapter_1'].data)
+            )
+            peft_model.emb.token_adapter.trainable_tokens_delta['adapter_2'].data = (
+                torch.rand_like(peft_model.emb.token_adapter.trainable_tokens_delta['adapter_2'].data)
+            )
 
         # set adapter_1
         peft_model.set_adapter("adapter_1")
