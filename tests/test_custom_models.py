@@ -51,7 +51,7 @@ from peft import (
     get_peft_model,
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
-from peft.utils import infer_device, AuxiliaryTrainingWrapper
+from peft.utils import AuxiliaryTrainingWrapper, infer_device
 
 from .testing_common import PeftCommonTester
 from .testing_utils import get_state_dict, require_non_cpu
@@ -2102,12 +2102,12 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
         # the assumption that the output of the combined output of two adapters is != to the output of one
         # adapter is not true for unmodified trainable tokens as they just mimic the existing embedding matrix.
         # therefore, we modify the weights so that the adapter weights differs from the embedding weights.
-        if 'trainable_tokens' in tuner_method:
-            peft_model.emb.token_adapter.trainable_tokens_delta['adapter_1'].data = (
-                torch.rand_like(peft_model.emb.token_adapter.trainable_tokens_delta['adapter_1'].data)
+        if "trainable_tokens" in tuner_method:
+            peft_model.emb.token_adapter.trainable_tokens_delta["adapter_1"].data = torch.rand_like(
+                peft_model.emb.token_adapter.trainable_tokens_delta["adapter_1"].data
             )
-            peft_model.emb.token_adapter.trainable_tokens_delta['adapter_2'].data = (
-                torch.rand_like(peft_model.emb.token_adapter.trainable_tokens_delta['adapter_2'].data)
+            peft_model.emb.token_adapter.trainable_tokens_delta["adapter_2"].data = torch.rand_like(
+                peft_model.emb.token_adapter.trainable_tokens_delta["adapter_2"].data
             )
 
         # set adapter_1

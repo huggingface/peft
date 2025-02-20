@@ -76,8 +76,8 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
 
     def _check_overlapping_tokens(self, adapter_names):
         """Raises an error if the token indices of the given adapter names are overlapping.
-        This is currently not supported and can lead to undefined behavior of the model if
-        no specific merging between the overlapping indices' values is applied.
+        This is currently not supported and can lead to undefined behavior of the model if no specific merging between
+        the overlapping indices' values is applied.
         """
         if len(adapter_names) <= 1:
             return

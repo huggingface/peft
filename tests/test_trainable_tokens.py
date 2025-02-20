@@ -40,8 +40,8 @@ class TestTrainableTokens:
         """Simulates training of trainable_tokens adapter layer by assigning random
         values to the delta tokens.
         """
-        trainable_tokens_layer.trainable_tokens_delta[adapter_name].data = (
-            torch.rand_like(trainable_tokens_layer.trainable_tokens_delta[adapter_name].data)
+        trainable_tokens_layer.trainable_tokens_delta[adapter_name].data = torch.rand_like(
+            trainable_tokens_layer.trainable_tokens_delta[adapter_name].data
         )
 
     def test_stand_alone_usage(self, model, tokenizer, tmp_path):
@@ -353,8 +353,8 @@ class TestTrainableTokens:
         model.add_adapter("adapter_2", peft_config_2)
 
         with pytest.raises(ValueError) as e:
-            model.merge_and_unload(adapter_names=['adapter_1', 'adapter_2'])
-        assert 'are already defined and would result in undefined merging behavior' in str(e)
+            model.merge_and_unload(adapter_names=["adapter_1", "adapter_2"])
+        assert "are already defined and would result in undefined merging behavior" in str(e)
 
     @pytest.mark.parametrize(
         "peft_config_factory",

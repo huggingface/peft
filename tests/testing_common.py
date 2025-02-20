@@ -1334,7 +1334,7 @@ class PeftCommonTester:
         if config.peft_type not in supported_peft_types:
             return pytest.skip(f"Test not applicable for {config.peft_type}")
 
-        if hasattr(config, 'trainable_token_indices'):
+        if hasattr(config, "trainable_token_indices"):
             return pytest.skip("This is currently not supported. See https://github.com/huggingface/peft/issues/2381")
 
         model = self.transformers_class.from_pretrained(model_id)
@@ -1386,7 +1386,7 @@ class PeftCommonTester:
         if config.peft_type not in supported_peft_types:
             return pytest.skip(f"Test not applicable for {config.peft_type}")
 
-        if hasattr(config, 'trainable_token_indices'):
+        if hasattr(config, "trainable_token_indices"):
             return pytest.skip("This is currently not supported. See https://github.com/huggingface/peft/issues/2381")
 
         model = self.transformers_class.from_pretrained(model_id)
