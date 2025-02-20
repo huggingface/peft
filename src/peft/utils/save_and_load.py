@@ -207,6 +207,7 @@ def get_peft_model_state_dict(
         save_embedding_layers == "auto"
         and hasattr(config, "target_modules")
         and any(k in config.target_modules for k in EMBEDDING_LAYER_NAMES)
+        and config.peft_type != PeftType.TRAINABLE_TOKENS
     ):
         warnings.warn("Setting `save_embedding_layers` to `True` as embedding layers found in `target_modules`.")
         save_embedding_layers = is_embedding_in_target_modules = True
