@@ -188,6 +188,18 @@ class LoraLayer(BaseTunerLayer):
                 nn.init.kaiming_uniform_(self.lora_A[adapter_name].weight, a=math.sqrt(5))
             elif init_lora_weights.lower() == "gaussian":
                 nn.init.normal_(self.lora_A[adapter_name].weight, std=1 / self.r[adapter_name])
+            elif init_lora_weights.lower() == "orthogonal":
+                with torch.no_grad():
+                    rank = self.r[adapter_name]
+                    X = torch.randn(rank, rank)
+                    Q, _ = torch.linalg.qr(X)
+                    set1 = Q[0::2,:]  # Odd rows
+                    set2 = Q[1::2,:]  # Even rows
+                    dtype = self.get_base_layer().weight.dtype
+                    a_wt = torch.randn(self.in_features, rank//2).mm(set1).to(dtype).T/10.0
+                    b_wt = torch.randn(rank//2, self.out_features).T.mm(set2).to(dtype)/10.0
+                    self.lora_A[adapter_name].weight = nn.Parameter(a_wt.contiguous())
+                    self.lora_B[adapter_name].weight = nn.Parameter(b_wt.contiguous())
             else:
                 raise ValueError(f"Unknown initialization {init_lora_weights=}")
             nn.init.zeros_(self.lora_B[adapter_name].weight)
