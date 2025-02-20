@@ -40,11 +40,9 @@ class TestTrainableTokens:
         """Simulates training of trainable_tokens adapter layer by assigning random
         values to the delta tokens.
         """
-        trained_values = torch.rand(
-            trainable_tokens_layer.num_trainable_embeddings(adapter_name)
-            * trainable_tokens_layer.base_layer.weight.shape[-1]
+        trainable_tokens_layer.trainable_tokens_delta[adapter_name].data = (
+            torch.rand_like(trainable_tokens_layer.trainable_tokens_delta[adapter_name].data)
         )
-        trainable_tokens_layer.trainable_tokens_delta[adapter_name].data = trained_values
 
     def test_stand_alone_usage(self, model, tokenizer, tmp_path):
         original_model = copy.deepcopy(model)
@@ -330,6 +328,33 @@ class TestTrainableTokens:
 
         assert not torch.allclose(adapter_2_output[:, idcs_to_modify], original_output[:, idcs_to_modify])
         assert torch.allclose(adapter_2_output[:, idcs_to_keep], original_output[:, idcs_to_keep])
+
+    @pytest.mark.parametrize(
+        "peft_config_factory",
+        [
+            lambda token_indices: LoraConfig(
+                target_modules="all-linear",
+                trainable_token_indices={"embed_tokens": token_indices},
+            ),
+        ],
+    )
+    def test_multiple_adapters_overlapping_token_indices_merging(self, model, peft_config_factory, tmp_path):
+        # tests that merging multiple adapters that have overlapping indices is not defined at the moment
+        # and would yield undefined behavior. note that merging a single adapter is fine.
+        original_model = copy.deepcopy(model)
+
+        token_indices_1 = [0, 1, 2]
+        token_indices_2 = [2, 3, 4]
+
+        peft_config_1 = peft_config_factory(token_indices_1)
+        peft_config_2 = peft_config_factory(token_indices_2)
+
+        model = get_peft_model(model, peft_config_1, adapter_name="adapter_1")
+        model.add_adapter("adapter_2", peft_config_2)
+
+        with pytest.raises(ValueError) as e:
+            model.merge_and_unload(adapter_names=['adapter_1', 'adapter_2'])
+        assert 'are already defined and would result in undefined merging behavior' in str(e)
 
     @pytest.mark.parametrize(
         "peft_config_factory",
