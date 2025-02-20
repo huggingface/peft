@@ -29,6 +29,8 @@ class TrainableTokensConfig(PeftConfig):
     This method makes certain tokens (identified by their indices) trainable without as large a memory footprint as
     training the target matrix fully. The following arguments are need.
 
+    Note that training with FSDP/DeepSpeed might not yet be fully supported.
+
     Args:
         token_indices (`list[int]`):
             List of integers, signifying the indices of the tokens you want to be trainable. To find the index of a
