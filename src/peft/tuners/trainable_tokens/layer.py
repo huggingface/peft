@@ -26,10 +26,10 @@ from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
 class TrainableTokensLayer(nn.Module, BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
-    #adapter_layer_names = ("trainable_tokens_delta",)
+    adapter_layer_names = ("trainable_tokens_delta",)
 
     # All names of other parameters that may contain adapter-related parameters
-    #other_param_names = ("token_indices", "trainable_tokens_original")
+    other_param_names = ("token_indices", "trainable_tokens_original")
 
     def __init__(
         self,
