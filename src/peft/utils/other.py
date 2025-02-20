@@ -335,7 +335,10 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
             )
             raise ValueError(msg)
 
-    def _forward_wrapped(self, x: torch.Tensor, active_adpater: str, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def _forward_wrapped(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        raise NotImplementedError
+
+    def _forward_wrapped_mixed_batch(self, x: torch.Tensor, active_adapter: str, *args: Any, **kwargs: Any) -> torch.Tensor:
         raise NotImplementedError
 
     def _forward_disabled(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
@@ -371,7 +374,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
             if active_adapter == "__base__":
                 output = self.original_module(sub_batch, *args, **kwargs)
             else:
-                output = self._forward_wrapped(sub_batch, active_adapter, *args, **kwargs)
+                output = self._forward_wrapped_mixed_batch(sub_batch, active_adapter, *args, **kwargs)
 
             for index, j in enumerate(sub_batch_indices_list[i]):
                 results[j] = output[index]
@@ -386,7 +389,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
             return self._forward_wrapped_disabled(x, *args, **kwargs)
 
         if adapter_names is None:
-            return self._forward_wrapped(x, self._active_adapter, *args, **kwargs)
+            return self._forward_wrapped(x, *args, **kwargs)
         return self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
 
     def enable_adapters(self, enabled: bool):
@@ -445,7 +448,10 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
     def _error_message_name(self):
         return "modules_to_save"
 
-    def _forward_wrapped(self, x, active_adapter, *args, **kwargs):
+    def _forward_wrapped(self, x, *args, **kwargs):
+        return self.modules_to_save[self._active_adapter](x, *args, **kwargs)
+
+    def _forward_wrapped_mixed_batch(self, x, active_adapter, *args, **kwargs):
         return self.modules_to_save[active_adapter](x, *args, **kwargs)
 
     def _forward_wrapped_disabled(self, x, *args, **kwargs):
@@ -570,12 +576,12 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
     def _error_message_name(self):
         return "trainable_token_indices"
 
-    def _forward_wrapped(self, x, active_adapter, *args, **kwargs):
-        self.token_adapter.set_adapter(active_adapter)
+    def _forward_wrapped(self, x, *args, **kwargs):
+        return self.token_adapter(x)
 
-        y = self.token_adapter(x)
-
-        return y
+    def _forward_wrapped_mixed_batch(self, x, active_adapter, *args, **kwargs):
+        print(f'_forward_wrapped_mixed_batch({active_adapter})')
+        return self.token_adapter.forward_adapters(x, [active_adapter])
 
     def _forward_wrapped_disabled(self, x, *args, **kwargs):
         # we already disabled the adapter so we can safely forward call to the adapter

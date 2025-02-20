@@ -330,3 +330,68 @@ class TestTrainableTokens:
 
         assert not torch.allclose(adapter_2_output[:, idcs_to_modify], original_output[:, idcs_to_modify])
         assert torch.allclose(adapter_2_output[:, idcs_to_keep], original_output[:, idcs_to_keep])
+
+    @pytest.mark.parametrize(
+        "peft_config_factory",
+        [
+            lambda targets, token_indices: LoraConfig(
+                target_modules=targets,
+                trainable_token_indices={"embed_tokens": token_indices},
+            ),
+        ],
+    )
+    def test_multiple_adapters_mixed_forward(self, model, peft_config_factory, tmp_path):
+        # tests if multiple adapters with different token indices work
+        original_model = copy.deepcopy(model)
+
+        token_indices_1 = [0, 1, 2]
+        token_indices_2 = [2, 3, 4]
+
+        peft_config_1 = peft_config_factory(".*q_proj", token_indices_1)
+        peft_config_2 = peft_config_factory(".*o_proj", token_indices_2)
+
+        model = get_peft_model(model, peft_config_1, adapter_name="adapter_1")
+        model.add_adapter("adapter_2", peft_config_2)
+
+        # "train" adapter 1
+        model.set_adapter("adapter_1")
+        self.simulate_training(model.model.model.embed_tokens.token_adapter, "adapter_1")
+
+        # "train" adapter 2
+        model.set_adapter("adapter_2")
+        self.simulate_training(model.model.model.embed_tokens.token_adapter, "adapter_2")
+
+        # forward(adapter_names=...) is not available in train mode
+        model.eval()
+
+        # Build a batch of 2 items, each the same input sequence but each sequence will be passed to a different
+        # adapter via mixed batch forward.
+        input_sequence = list(set(token_indices_1 + token_indices_2))
+        X = {
+            "input_ids": torch.tensor([input_sequence, input_sequence]),
+            "attention_mask": torch.tensor([[1] * len(input_sequence), [1] * len(input_sequence)]),
+        }
+        batch_adapter_names = ["adapter_1", "adapter_2"]
+
+        original_output = original_model.forward(output_hidden_states=True, **X)
+        mixed_output = model.forward(output_hidden_states=True, adapter_names=batch_adapter_names, **X)
+
+        # check that the active adapter is still the last activated adapter, adapter_2
+        assert model.model.model.embed_tokens.token_adapter.active_adapter == ["adapter_2"]
+
+        adapter_1_output = mixed_output.hidden_states[0][0:1]
+        original_output_1 = original_output.hidden_states[0][0:1]
+        adapter_2_output = mixed_output.hidden_states[0][1:2]
+        original_output_2 = original_output.hidden_states[0][1:2]
+
+        idcs_to_modify = token_indices_1
+        idcs_to_keep = [i for i in X["input_ids"][0].tolist() if i not in idcs_to_modify]
+
+        assert not torch.allclose(adapter_1_output[:, idcs_to_modify], original_output_1[:, idcs_to_modify])
+        assert torch.allclose(adapter_1_output[:, idcs_to_keep], original_output_1[:, idcs_to_keep])
+
+        idcs_to_modify = token_indices_2
+        idcs_to_keep = [i for i in X["input_ids"][0].tolist() if i not in idcs_to_modify]
+
+        assert not torch.allclose(adapter_2_output[:, idcs_to_modify], original_output_2[:, idcs_to_modify])
+        assert torch.allclose(adapter_2_output[:, idcs_to_keep], original_output_2[:, idcs_to_keep])
