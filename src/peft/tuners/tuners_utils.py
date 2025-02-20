@@ -1043,10 +1043,19 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
         return peft_config
 
     linear_classes = (torch.nn.Linear, Conv1D)
+    linear_names = ("Linear",)
     linear_module_names = set()
     for name, module in model.named_modules():
         # match with all linear classes.
         if isinstance(module, linear_classes):
+            linear_module_names.add(name)
+        elif isinstance(module, BaseTunerLayer) and any(n in type(module).__name__ for n in linear_names):
+            # If the model already has adapter layers applied, then the "linear" layer is actually an adapter layer,
+            # e.g. lora.Linear, and not nn.Linear. To target this layer, we don't want to check the layer type, as there
+            # are many possible layer types (one for each PEFT method) and the list would quickly get out of date. Thus
+            # we rely on the name of the layer class, which by convention is something like "Linear", "Linear4bit",
+            # "HqqLoraLinear", ... in PEFT. It's not pretty but should generally work.
+            # See 2390
             linear_module_names.add(name)
 
     # Try to remove linear layers that should not be targeted as best as possible. We have to rely on convention as
@@ -1067,6 +1076,14 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
                     last_module_name = [name for name, module in model.named_modules() if module is cls_head][0]
                     module_names_to_exclude.add(last_module_name)
                     break
+
+    # we don't want nested LoRA layers, i.e. LoRA being applied to possibly existing lora_A, lora_B, etc.
+    # see 2390
+    for prefix, module in model.named_modules():
+        if isinstance(module, BaseTunerLayer):
+            for suffix, child in module.named_modules():
+                if suffix:
+                    module_names_to_exclude.add(f"{prefix}.{suffix}")
 
     linear_module_names -= module_names_to_exclude
     peft_config.target_modules = linear_module_names
