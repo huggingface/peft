@@ -151,6 +151,12 @@ class TrainableTokensModel(BaseTuner):
                 module.set_adapter(adapter_name)
         self.active_adapter = adapter_name
 
+    def unload(self) -> torch.nn.Module:
+        """
+        Gets back the base model by removing all the trainable tokens modules without merging.
+        """
+        return self._unload_and_optionally_merge(merge=False)
+
     def merge_and_unload(
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ) -> torch.nn.Module:
