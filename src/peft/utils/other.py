@@ -699,8 +699,7 @@ def _set_trainable(
     not_found = set(module_names).difference(found_modules)
     if not_found:
         raise ValueError(
-            f"Target modules {not_found} not found in the base model. Please check the target modules "
-            "and try again."
+            f"Target modules {not_found} not found in the base model. Please check the target modules and try again."
         )
 
     return trainable_modules
