@@ -2197,11 +2197,11 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
         # the assumption that the output of the combined output of two adapters is != to the output of one
         # adapter is not true for unmodified trainable tokens as they just mimic the existing embedding matrix.
         # therefore, we modify the weights so that the adapter weights differs from the embedding weights. in this
-        # case we even use 2*rand to be very distinct to adapter 2 since we're comparing outputs and not embeddings
+        # case we even use 20*rand to be very distinct to adapter 2 since we're comparing outputs and not embeddings
         # with rather high tolerance values. this is also the reason why `init_weights` is not sufficient here and
         # when using `<peft method>.trainable_token_indices` we do not have the utility of `init_weights` anyway.
         if "trainable_tokens" in tuner_method:
-            model.emb.token_adapter.trainable_tokens_delta["default"].data = 2 * torch.rand_like(
+            model.emb.token_adapter.trainable_tokens_delta["default"].data = 20 * torch.rand_like(
                 model.emb.token_adapter.trainable_tokens_delta["default"].data
             )
 
