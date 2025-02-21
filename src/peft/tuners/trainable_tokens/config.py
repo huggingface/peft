@@ -41,9 +41,9 @@ class TrainableTokensConfig(PeftConfig):
             This is by default the `embedding` layer. But could be multiple embedding-like layers, such as
             `embed_tokens`, `encoder.embeddings` or `decoder.embeddings`.
         init_weights (`bool`):
-            By default the new token weights are initialized to be the same as the respective token embeddings.
-            This makes TrainableTokens a no-op when not trained. If set to `False` the weights will be random values.
-            Do not change this setting unless you know exactly what you're doing.
+            By default the new token weights are initialized to be the same as the respective token embeddings. This
+            makes TrainableTokens a no-op when not trained. If set to `False` the weights will be random values. Do not
+            change this setting unless you know exactly what you're doing.
     """
 
     token_indices: list[int] = field(

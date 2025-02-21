@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import warnings
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -69,7 +70,9 @@ class TrainableTokensModel(BaseTuner):
     @staticmethod
     def _create_new_module(peft_config, adapter_name, target, **kwargs):
         new_module = TrainableTokensLayer(target, adapter_name, **kwargs)
-        new_module.update_layer(adapter_name, init_weights=kwargs['init_weights'], token_indices=kwargs["token_indices"])
+        new_module.update_layer(
+            adapter_name, init_weights=kwargs["init_weights"], token_indices=kwargs["token_indices"]
+        )
 
         return new_module
 
@@ -152,8 +155,8 @@ class TrainableTokensModel(BaseTuner):
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ) -> torch.nn.Module:
         r"""
-        This method merges the trained tokens into the targeted embedding layer(s) of the base model. This is needed
-        if someone wants to use the base model as a standalone model.
+        This method merges the trained tokens into the targeted embedding layer(s) of the base model. This is needed if
+        someone wants to use the base model as a standalone model.
 
         Args:
             progressbar (`bool`):

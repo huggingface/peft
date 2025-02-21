@@ -56,7 +56,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
 
     def update_layer(self, adapter_name, **kwargs):
         self.token_indices[adapter_name] = kwargs["token_indices"]
-        init_weights = kwargs.get('init_weights', True)
+        init_weights = kwargs.get("init_weights", True)
 
         # we initialize the delta embedding weights from the base embedding matrix and replace values instead of
         # adding/subtracting deltas. we do it this way and use `embedding.weight.index_copy()` to write the updated
