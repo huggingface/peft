@@ -442,7 +442,7 @@ class TestTrainableTokens:
         config = TrainableTokensConfig(target_modules=["doesnt_exist"], token_indices=[0, 1, 3])
         with pytest.raises(ValueError) as e:
             model = get_peft_model(model, config)
-        assert 'No modules were targeted for adaption' in str(e)
+        assert "Target modules ['doesnt_exist'] not found in the base model." in str(e)
 
     def test_multiple_targets(self, model_multi_embedding):
         # tests the ability of targeting two modules with the same token indices
