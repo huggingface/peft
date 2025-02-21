@@ -586,6 +586,9 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
     ) -> None:
         super().__init__(module_to_save, adapter_name, token_indices=token_indices)
 
+        #
+        self.original_module = self.token_adapter.base_layer
+
     def init_modules(self, adapter_name, token_indices):
         # use a local import to avoid potential circular imports
         from peft.tuners.trainable_tokens import TrainableTokensLayer

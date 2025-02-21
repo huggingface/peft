@@ -21,8 +21,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.tuners._buffer_dict import BufferDict
+from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
 
 class TrainableTokensLayer(nn.Module, BaseTunerLayer):
@@ -56,6 +56,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
 
     def update_layer(self, adapter_name, **kwargs):
         self.token_indices[adapter_name] = kwargs["token_indices"]
+        init_weights = kwargs.get('init_weights', True)
 
         # we initialize the delta embedding weights from the base embedding matrix and replace values instead of
         # adding/subtracting deltas. we do it this way and use `embedding.weight.index_copy()` to write the updated
@@ -65,7 +66,10 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         # onto the new values, we would get undefined behavior. By replacing the specific token values we always
         # get defined behavior.
         #
-        values = self.get_base_layer().weight[self.token_indices[adapter_name]]
+        if init_weights:
+            values = self.get_base_layer().weight[self.token_indices[adapter_name]]
+        else:
+            values = torch.rand_like(self.get_base_layer().weight[self.token_indices[adapter_name]])
 
         self.trainable_tokens_delta[adapter_name] = nn.Parameter(values.clone(), requires_grad=True)
         self.trainable_tokens_original[adapter_name] = values.clone()

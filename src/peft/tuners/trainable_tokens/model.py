@@ -18,10 +18,11 @@ import warnings
 
 import torch
 import torch.nn as nn
+from tqdm import tqdm
 
 from peft.config import PeftConfig
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
-from peft.utils import AuxiliaryTrainingWrapper
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists, onload_layer
+from peft.utils import AuxiliaryTrainingWrapper, _get_submodules
 
 from .layer import TrainableTokensLayer
 
@@ -29,8 +30,8 @@ from .layer import TrainableTokensLayer
 class TrainableTokensModel(BaseTuner):
     prefix: str = "trainable_tokens_"
 
-    def __init__(self, model, config, adapter_name):
-        super().__init__(model, config, adapter_name)
+    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False):
+        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
@@ -68,7 +69,7 @@ class TrainableTokensModel(BaseTuner):
     @staticmethod
     def _create_new_module(peft_config, adapter_name, target, **kwargs):
         new_module = TrainableTokensLayer(target, adapter_name, **kwargs)
-        new_module.update_layer(adapter_name, token_indices=kwargs['token_indices'])
+        new_module.update_layer(adapter_name, init_weights=kwargs['init_weights'], token_indices=kwargs["token_indices"])
 
         return new_module
 
@@ -146,3 +147,52 @@ class TrainableTokensModel(BaseTuner):
                     module.unmerge()
                 module.set_adapter(adapter_name)
         self.active_adapter = adapter_name
+
+    def merge_and_unload(
+        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
+    ) -> torch.nn.Module:
+        r"""
+        This method merges the trained tokens into the targeted embedding layer(s) of the base model. This is needed
+        if someone wants to use the base model as a standalone model.
+
+        Args:
+            progressbar (`bool`):
+                whether to show a progressbar indicating the unload and merge process
+            safe_merge (`bool`):
+                whether to activate the safe merging check to check if there is any potential Nan in the adapter
+                weights
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
+        """
+        return self._unload_and_optionally_merge(
+            progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
+        )
+
+    def _unload_and_optionally_merge(
+        self,
+        merge=True,
+        progressbar: bool = False,
+        safe_merge: bool = False,
+        adapter_names: Optional[list[str]] = None,
+    ):
+        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
+        desc = "Unloading " + ("and merging " if merge else "") + "model"
+        for key in tqdm(key_list, disable=not progressbar, desc=desc):
+            try:
+                parent, target, target_name = _get_submodules(self.model, key)
+            except AttributeError:
+                continue
+            with onload_layer(target):
+                if hasattr(target, "unload_and_optionally_merge_module"):
+                    # if layers have special unloading method, like MultiheadAttention, use that
+                    unloaded_module = target.unload_and_optionally_merge_module(
+                        merge=merge, safe_merge=safe_merge, adapter_names=adapter_names
+                    )
+                    self._replace_module(parent, target_name, unloaded_module, target)
+                elif hasattr(target, "base_layer"):
+                    if merge:
+                        target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
+                    self._replace_module(parent, target_name, target.get_base_layer(), target)
+
+        return self.model

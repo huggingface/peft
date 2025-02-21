@@ -46,6 +46,7 @@ from peft import (
     OFTConfig,
     PeftModel,
     TaskType,
+    TrainableTokensConfig,
     VBLoRAConfig,
     VeraConfig,
     get_peft_model,
@@ -487,6 +488,15 @@ TEST_CASES = [
         VBLoRAConfig,
         {"target_modules": ["conv1d"], "vector_length": 1, "num_vectors": 2},
     ),
+    ###################
+    # TrainableTokens #
+    ###################
+    (
+        "Embedding + transformers Conv1D 1 trainable_tokens",
+        "EmbConv1D",
+        TrainableTokensConfig,
+        {"target_modules": ["emb"], "token_indices": [0, 1, 3], "init_weights": False},
+    ),
 ]
 
 # For this test matrix, each tuple consists of:
@@ -664,6 +674,7 @@ PREFIXES = {
     HRAConfig: "hra_",
     VBLoRAConfig: "vblora_",
     BoneConfig: "bone_",
+    TrainableTokensConfig: "trainable_tokens_",
 }
 
 
@@ -1036,6 +1047,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             pass
         elif issubclass(config_cls, VBLoRAConfig):
             pass
+        elif issubclass(config_cls, TrainableTokensConfig):
+            pass
         else:
             config_kwargs["init_weights"] = False
         self._test_merge_layers(model_id, config_cls, config_kwargs)
@@ -1072,6 +1085,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             pass
         elif issubclass(config_cls, VBLoRAConfig):
             # VBLoRA do not take init_weights
+            pass
+        elif issubclass(config_cls, TrainableTokensConfig):
+            # TrainableTokens does not take init_weights
             pass
         else:
             config_kwargs["init_weights"] = False
@@ -1221,7 +1237,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device).eval()
         outputs_base = model(**X)
-        if issubclass(config_cls, FourierFTConfig):
+        if issubclass(config_cls, (FourierFTConfig, TrainableTokensConfig)):
             config_kwargs = config_kwargs.copy()
             config_kwargs["init_weights"] = True
         config = config_cls(
