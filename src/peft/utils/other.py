@@ -257,7 +257,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         return self._disable_adapters
 
     @property
-    def active_adapter(self) -> str:
+    def active_adapter(self) -> Union[list[str], str]:
         # use a property to ensure that active_adapter is not set directly, instead use the set_adapter method
         return self._active_adapter
 
@@ -462,7 +462,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         return "modules_to_save"
 
     def _forward_wrapped(self, x, *args, **kwargs):
-        return self.modules_to_save[self._active_adapter[0]](x, *args, **kwargs)
+        return self.modules_to_save[self.active_adapters[0]](x, *args, **kwargs)
 
     def _forward_wrapped_mixed_batch(self, x, active_adapter, *args, **kwargs):
         return self.modules_to_save[active_adapter](x, *args, **kwargs)
@@ -471,10 +471,10 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         return self.original_module(x, *args, **kwargs)
 
     def _hasattr_wrapped(self, name, modules):
-        return self.active_adapter in modules["modules_to_save"]
+        return self.active_adapters[0] in modules["modules_to_save"]
 
     def _getattr_wrapped(self, name, modules):
-        return modules["modules_to_save"][self.active_adapter]
+        return modules["modules_to_save"][self.active_adapters[0]]
 
     def update(self, adapter_name, **kwargs):
         super().update(adapter_name)

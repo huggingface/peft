@@ -125,7 +125,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             adapter_name = self.merged_adapters.pop()
 
             index = torch.tensor(self.token_indices[adapter_name]).to(self.base_layer.weight.device)
-            originals = self.trainable_tokens_original[adapter_name]
+            originals = self.trainable_tokens_original[adapter_name].to(self.base_layer.weight.device)
             self.base_layer.weight.data.index_copy_(dim=0, index=index, source=originals)
 
     def forward_adapters(self, x: torch.Tensor, active_adapters, *args, **kwargs) -> torch.Tensor:
