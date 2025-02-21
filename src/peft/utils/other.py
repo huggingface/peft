@@ -542,7 +542,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         if adapter_name not in self._adapters:
             raise ValueError(f"Adapter {adapter_name} not found in {self._adapters}")
 
-        self.modules_to_save[self.active_adapter[0]].requires_grad_(False)
+        self.modules_to_save[self.active_adapters[0]].requires_grad_(False)
         self.modules_to_save[adapter_name].requires_grad_(True)
         self._active_adapter = adapter_name
 
@@ -601,7 +601,6 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         return self.token_adapter(x)
 
     def _forward_wrapped_mixed_batch(self, x, active_adapter, *args, **kwargs):
-        print(f"_forward_wrapped_mixed_batch({active_adapter})")
         return self.token_adapter.forward_adapters(x, [active_adapter])
 
     def _forward_wrapped_disabled(self, x, *args, **kwargs):
