@@ -107,7 +107,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
 
         for adapter_name in adapter_names:
             index = torch.tensor(self.token_indices[adapter_name]).to(merged.device)
-            deltas = self.trainable_tokens_delta[adapter_name]
+            deltas = self.trainable_tokens_delta[adapter_name].to(merged)
             merged = merged.index_copy(dim=0, index=index, source=deltas)
 
             if safe_merge and not torch.isfinite(merged).all():
@@ -125,7 +125,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             adapter_name = self.merged_adapters.pop()
 
             index = torch.tensor(self.token_indices[adapter_name]).to(self.base_layer.weight.device)
-            originals = self.trainable_tokens_original[adapter_name].to(self.base_layer.weight.device)
+            originals = self.trainable_tokens_original[adapter_name].to(self.base_layer.weight)
             self.base_layer.weight.data.index_copy_(dim=0, index=index, source=originals)
 
     def forward_adapters(self, x: torch.Tensor, active_adapters, *args, **kwargs) -> torch.Tensor:
@@ -142,7 +142,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
 
             for adapter_name in active_adapters:
                 index = torch.tensor(self.token_indices[adapter_name]).to(W.device)
-                deltas = self.trainable_tokens_delta[adapter_name]
+                deltas = self.trainable_tokens_delta[adapter_name].to(W)
                 W = W.index_copy(dim=0, index=index, source=deltas)
 
             result = F.embedding(
