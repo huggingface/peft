@@ -444,6 +444,16 @@ class TestTrainableTokens:
             model = get_peft_model(model, config)
         assert "Target modules ['doesnt_exist'] not found in the base model." in str(e)
 
+    @pytest.mark.parametrize('peft_config, target_layer_name', [
+        (LoraConfig(trainable_token_indices=[0, 1, 2]), 'embedding'), # default layer 'embedding'
+        (LoraConfig(trainable_token_indices={"does-not-exist": [0, 1, 2]}), 'does-not-exist'),
+    ])
+    def test_combined_with_peft_raises_target_layer_not_found(self, model, peft_config, target_layer_name):
+        # same as test_stand_alone_raises_target_layer_not_found but tests the peft method integration
+        with pytest.raises(ValueError) as e:
+            model = get_peft_model(model, peft_config)
+        assert f"Target modules {{{repr(target_layer_name)}}} not found in the base model." in str(e)
+
     def test_multiple_targets(self, model_multi_embedding):
         # tests the ability of targeting two modules with the same token indices
         original_model = copy.deepcopy(model_multi_embedding)

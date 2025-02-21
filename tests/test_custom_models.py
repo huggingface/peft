@@ -2141,7 +2141,10 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
         self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
     ):
         torch.manual_seed(0)
-        model = MLP(bias=tuner_method != "ia3").to(self.torch_device).eval()
+
+        model = self.resolve_model_cls(tuner_method)
+        model = model.to(self.torch_device).eval()
+
         X = self.prepare_inputs_for_testing()
         base_output = model(**X)
 
@@ -2169,12 +2172,23 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
     @parameterized.expand(MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES)
     def test_merge_layers_multi(self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2):
         torch.manual_seed(0)
-        model = MLP(bias=tuner_method != "ia3").to(self.torch_device).eval()
+
+        model = self.resolve_model_cls(tuner_method)
+        model = model.to(self.torch_device).eval()
 
         config_1 = config_cls(**config_kwargs_1)
         config_2 = config_cls(**config_kwargs_2)
 
         model = get_peft_model(model, config_1)
+
+        # the assumption that the output of the combined output of two adapters is != to the output of one
+        # adapter is not true for unmodified trainable tokens as they just mimic the existing embedding matrix.
+        # therefore, we modify the weights so that the adapter weights differs from the embedding weights. in this
+        # case we even use 2*rand to be very distinct to adapter 2 since we're comparing outputs and not embeddings.
+        if "trainable_tokens" in tuner_method:
+            model.emb.token_adapter.trainable_tokens_delta["default"].data = torch.rand_like(
+                model.emb.token_adapter.trainable_tokens_delta["default"].data
+            )
 
         dummy_input = self.prepare_inputs_for_testing()
         model.eval()
@@ -2184,6 +2198,13 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
 
         model.add_adapter("adapter-2", config_2)
         model.set_adapter("adapter-2")
+
+        # same as above but for adapter 2
+        if "trainable_tokens" in tuner_method:
+            model.emb.token_adapter.trainable_tokens_delta["adapter-2"].data = 2 * torch.rand_like(
+                model.emb.token_adapter.trainable_tokens_delta["adapter-2"].data
+            )
+
         model.eval()
 
         with torch.inference_mode():

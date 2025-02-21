@@ -672,11 +672,15 @@ def _set_trainable(
     conflicts down the line.
 
     The default is to wrap the module in a `ModulesToSaveWrapper` wrapper.
+
+    This method raises an ValueError, similar to BaseTuner.inject_adapter when the requested module in `module_names`
+    is not found in the model.
     """
     if wrapper_cls is None:
         wrapper_cls = ModulesToSaveWrapper
 
     trainable_modules = []
+    found_modules = set()
     key_list = [key for key, _ in model.named_modules()]
     for key in key_list:
         target_module_found = any(key.endswith(target_key) for target_key in module_names)
@@ -690,6 +694,15 @@ def _set_trainable(
                 new_module.set_adapter(adapter_name)
                 setattr(parent, target_name, new_module)
                 trainable_modules.append(new_module)
+            found_modules.add(target_name)
+
+    not_found = set(module_names).difference(found_modules)
+    if not_found:
+        raise ValueError(
+            f"Target modules {not_found} not found in the base model. Please check the target modules "
+            "and try again."
+        )
+
     return trainable_modules
 
 
