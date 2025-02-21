@@ -48,7 +48,6 @@ from peft import (
     PromptEncoderConfig,
     PromptLearningConfig,
     PromptTuningConfig,
-    TrainableTokensConfig,
     VBLoRAConfig,
     VeraConfig,
     get_peft_model,
@@ -672,7 +671,7 @@ class PeftCommonTester:
             model = model.merge_and_unload(safe_merge=True)
 
     def _test_merge_layers(self, model_id, config_cls, config_kwargs):
-        if issubclass(config_cls, (PromptLearningConfig, TrainableTokensConfig)):
+        if issubclass(config_cls, PromptLearningConfig):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
         if issubclass(config_cls, (OFTConfig, BOFTConfig)):
