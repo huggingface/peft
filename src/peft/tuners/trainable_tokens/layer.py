@@ -22,6 +22,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.tuners._buffer_dict import BufferDict
 
 
 class TrainableTokensLayer(nn.Module, BaseTunerLayer):
@@ -48,7 +49,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         # we store the updated weights of particular tokens and their originals. we assume
         # that the count of new tokens is far smaller than the number of total tokens.
         self.trainable_tokens_delta = nn.ParameterDict({})
-        self.trainable_tokens_original = {}
+        self.trainable_tokens_original = BufferDict({})
 
         # Mark the weight as unmerged
         self.merged_adapters = []
