@@ -29,6 +29,23 @@ class TestTrainableTokens:
         return "trl-internal-testing/tiny-random-LlamaForCausalLM"
 
     @pytest.fixture
+    def model_multi_embedding(self):
+        class MultiEmbeddingMLP(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb_text = torch.nn.Embedding(10, 5)
+                self.emb_image = torch.nn.Embedding(8, 5)
+                self.lin0 = torch.nn.Linear(5, 10)
+                self.lin1 = torch.nn.Linear(10, 20)
+            def forward(self, x_text, x_image):
+                x_text = self.emb_text(x_text)
+                x_image = self.emb_image(x_image)
+                y = self.lin0(torch.concat([x_text, x_image], dim=1).view(-1, 5))
+                y = self.lin1(y)
+                return y, (x_text, x_image)
+        return MultiEmbeddingMLP()
+
+    @pytest.fixture
     def model(self, model_id):
         return AutoModelForCausalLM.from_pretrained(model_id)
 
@@ -420,3 +437,31 @@ class TestTrainableTokens:
 
         assert not torch.allclose(adapter_2_output[:, idcs_to_modify], original_output_2[:, idcs_to_modify])
         assert torch.allclose(adapter_2_output[:, idcs_to_keep], original_output_2[:, idcs_to_keep])
+
+    def test_stand_alone_raises_target_layer_not_found(self, model):
+        config = TrainableTokensConfig(target_modules=["doesnt_exist"], token_indices=[0, 1, 3])
+        with pytest.raises(ValueError) as e:
+            model = get_peft_model(model, config)
+        assert 'No modules were targeted for adaption' in str(e)
+
+    def test_multiple_targets(self, model_multi_embedding):
+        # tests the ability of targeting two modules with the same token indices
+        original_model = copy.deepcopy(model_multi_embedding)
+        config = TrainableTokensConfig(target_modules=["emb_text", "emb_image"], token_indices=[0, 1])
+        peft_model = get_peft_model(model_multi_embedding, config)
+
+        self.simulate_training(peft_model.model.emb_text)
+        self.simulate_training(peft_model.model.emb_image)
+
+        X = {
+            'x_text': torch.tensor([[0, 1, 2]]),
+            'x_image': torch.tensor([[0, 1, 2]]),
+        }
+
+        _, (emb_text_orig, emb_image_orig) = original_model.forward(**X)
+        _, (emb_text_peft, emb_image_peft) = peft_model.forward(**X)
+
+        assert not torch.allclose(emb_text_orig[:, [0, 1]], emb_text_peft[:, [0, 1]])
+        assert torch.allclose(emb_text_orig[:, [2]], emb_text_peft[:, [2]])
+        assert not torch.allclose(emb_image_orig[:, [0, 1]], emb_image_peft[:, [0, 1]])
+        assert torch.allclose(emb_image_orig[:, [2]], emb_image_peft[:, [2]])
