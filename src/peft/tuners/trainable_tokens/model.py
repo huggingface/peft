@@ -68,6 +68,7 @@ class TrainableTokensModel(BaseTuner):
     @staticmethod
     def _create_new_module(peft_config, adapter_name, target, **kwargs):
         new_module = TrainableTokensLayer(target, adapter_name, **kwargs)
+        new_module.update_layer(adapter_name, token_indices=kwargs['token_indices'])
 
         return new_module
 

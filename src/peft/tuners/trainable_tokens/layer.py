@@ -54,9 +54,6 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         # Mark the weight as unmerged
         self.merged_adapters = []
 
-        # we set the number of trainable tokens
-        self.update_layer(adapter_name, token_indices=token_indices)
-
     def update_layer(self, adapter_name, **kwargs):
         self.token_indices[adapter_name] = kwargs["token_indices"]
 
