@@ -480,3 +480,26 @@ class TestTrainableTokens:
         assert torch.allclose(emb_text_orig[:, [2]], emb_text_peft[:, [2]])
         assert not torch.allclose(emb_image_orig[:, [0, 1]], emb_image_peft[:, [0, 1]])
         assert torch.allclose(emb_image_orig[:, [2]], emb_image_peft[:, [2]])
+
+    @pytest.mark.parametrize(
+        "peft_config",
+        [
+            LoraConfig(
+                target_modules="all-linear",
+                trainable_token_indices={"embed_tokens": [0, 1, 3]},
+            ),
+        ],
+    )
+    def test_no_embeddings_in_save_with_combined_usage(self, model, tokenizer, peft_config, tmp_path):
+        # make sure that in combined use the only state dict key is that of the token deltas and nothing more
+        from peft.utils import get_peft_model_state_dict
+
+        peft_model = get_peft_model(model, peft_config)
+        state_dict = get_peft_model_state_dict(
+            model=peft_model,
+            state_dict=None,
+            adapter_name="default",
+        )
+
+        embedding_keys = [n for n in state_dict.keys() if "embed_tokens" in n]
+        assert embedding_keys == ["base_model.model.model.embed_tokens.token_adapter.trainable_tokens_delta"]
