@@ -978,6 +978,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     self,
                     adapter_name,
                     module_names=[target_layer],
+                    strict_module_check=True,
                     wrapper_cls=TrainableTokensWrapper,
                     token_indices=token_indices,
                 )

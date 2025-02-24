@@ -663,7 +663,12 @@ def _freeze_adapter(model, adapter_name):
 
 
 def _set_trainable(
-    model, adapter_name, module_names, wrapper_cls: Optional[AuxiliaryTrainingWrapper] = None, **wrapper_kwargs
+    model,
+    adapter_name,
+    module_names,
+    strict_module_check=False,
+    wrapper_cls: Optional[AuxiliaryTrainingWrapper] = None,
+    **wrapper_kwargs,
 ):
     """Wraps modules that are supposed to be re-trained either normally, i.e. marking them to require gradients and
     saving them alongside other modules, or with certain methods that go alongside PEFT methods, such as retraining
@@ -675,8 +680,8 @@ def _set_trainable(
 
     The default is to wrap the module in a `ModulesToSaveWrapper` wrapper.
 
-    This method raises an ValueError, similar to BaseTuner.inject_adapter when the requested module in `module_names`
-    is not found in the model.
+    If `strict_module_check` is set, this method raises an ValueError, similar to BaseTuner.inject_adapter when none of
+    the requested modules in `module_names` is not found in the model.
     """
     if wrapper_cls is None:
         wrapper_cls = ModulesToSaveWrapper
@@ -699,7 +704,7 @@ def _set_trainable(
             found_modules.add(target_name)
 
     not_found = set(module_names).difference(found_modules)
-    if not_found:
+    if strict_module_check and not found_modules:
         raise ValueError(
             f"Target modules {not_found} not found in the base model. Please check the target modules and try again."
         )
