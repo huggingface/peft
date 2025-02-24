@@ -1587,7 +1587,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
                 lora_dropout=0.05,
                 bias="none",
                 task_type="CAUSAL_LM",
-                trainable_token_indices={"embed_tokens": trainable_token_indices}
+                trainable_token_indices={"embed_tokens": trainable_token_indices},
             )
 
             model = get_peft_model(model, config)
@@ -4485,7 +4485,7 @@ class TestLoraWithTrainableTokens:
                 lora_dropout=0.05,
                 bias="none",
                 task_type="CAUSAL_LM",
-                trainable_token_indices={"embed_tokens": trainable_token_indices}
+                trainable_token_indices={"embed_tokens": trainable_token_indices},
             )
 
             model = get_peft_model(model, config)
