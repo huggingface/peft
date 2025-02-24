@@ -24,6 +24,7 @@ from unittest.mock import patch
 import pytest
 import torch
 from datasets import Dataset, load_dataset
+from huggingface_hub import snapshot_download
 from huggingface_hub.utils import reset_sessions
 from safetensors.torch import load_file
 from scipy import stats
@@ -1563,8 +1564,10 @@ class TestNoInfiniteRecursionDeepspeed:
 
 
 class TestLoadAdapterOfflineMode:
-    # make sure that PEFT honors offline mode
+    base_model = "hf-internal-testing/tiny-random-OPTForCausalLM"
+    peft_model_id = "peft-internal-testing/tiny-OPTForCausalLM-lora"
 
+    # make sure that PEFT honors offline mode
     @contextmanager
     def hub_offline_ctx(self):
         # this is required to simulate offline mode, setting the env var dynamically inside the test does not work
@@ -1576,18 +1579,36 @@ class TestLoadAdapterOfflineMode:
 
     def test_load_from_hub_then_offline_model(self):
         # this uses LoRA but it's the same mechanism for other methods
-        peft_model_id = "peft-internal-testing/gpt2-lora-random"
-        base_model = AutoModelForCausalLM.from_pretrained("gpt2")
+        base_model = AutoModelForCausalLM.from_pretrained(self.base_model)
 
         # first ensure that the adapter model has been downloaded
-        PeftModel.from_pretrained(base_model, peft_model_id)
+        PeftModel.from_pretrained(base_model, self.peft_model_id)
 
         del base_model
 
-        base_model = AutoModelForCausalLM.from_pretrained("gpt2")
+        base_model = AutoModelForCausalLM.from_pretrained(self.base_model)
         with self.hub_offline_ctx():
             # does not raise
-            PeftModel.from_pretrained(base_model, peft_model_id)
+            PeftModel.from_pretrained(base_model, self.peft_model_id)
+
+    @pytest.fixture
+    def changed_default_cache_dir(self, tmp_path, monkeypatch):
+        # ensure that this test does not interact with other tests that may use the HF cache
+        monkeypatch.setattr("huggingface_hub.constants.HF_HOME", tmp_path)
+        monkeypatch.setattr("huggingface_hub.constants.HF_HUB_CACHE", tmp_path / "hub")
+        monkeypatch.setattr("huggingface_hub.constants.HF_TOKEN_PATH", tmp_path / "token")
+
+    def load_checkpoints(self, cache_dir):
+        # download model and lora checkpoint to a specific cache dir
+        snapshot_download(self.base_model, cache_dir=cache_dir)
+        snapshot_download(self.peft_model_id, cache_dir=cache_dir)
+
+    def test_load_checkpoint_offline_non_default_cache_dir(self, changed_default_cache_dir, tmp_path):
+        # See #2373 for context
+        self.load_checkpoints(tmp_path)
+        with self.hub_offline_ctx():
+            base_model = AutoModelForCausalLM.from_pretrained(self.base_model, cache_dir=tmp_path)
+            PeftModel.from_pretrained(base_model, self.peft_model_id, cache_dir=tmp_path)
 
 
 class TestCustomModelConfigWarning:
@@ -3275,7 +3296,45 @@ class TestHotSwapping:
         model = self.get_model()
         model = get_peft_model(model, config)
         model = torch.compile(model, mode="reduce-overhead")
+
         msg = re.escape("Call prepare_model_for_compiled_hotswap *before* compiling the model")
+        with pytest.raises(ValueError, match=msg):
+            prepare_model_for_compiled_hotswap(model)
+
+    def test_prepare_model_for_compiled_hotswap_model_already_compiled_warns(self, recwarn):
+        config = LoraConfig(target_modules=["lin0"])
+        model = self.get_model()
+        model = get_peft_model(model, config)
+        model = torch.compile(model, mode="reduce-overhead")
+
+        msg = "prepare_model_for_compiled_hotswap was called with a model that is already compiled"
+        prepare_model_for_compiled_hotswap(model, check_compiled="warn")
+        assert any(msg in str(w.message) for w in recwarn)
+
+    def test_prepare_model_for_compiled_hotswap_model_already_compiled_ignore(self, recwarn):
+        config = LoraConfig(target_modules=["lin0"])
+        model = self.get_model()
+        model = get_peft_model(model, config)
+        model = torch.compile(model, mode="reduce-overhead")
+
+        msg = "prepare_model_for_compiled_hotswap was called with a model that is already compiled"
+        prepare_model_for_compiled_hotswap(model, check_compiled="ignore")
+        # no error, no warning
+        assert not any(msg in str(w.message) for w in recwarn)
+
+    def test_prepare_model_for_compiled_hotswap_model_already_compiled_wrong_argument(self, recwarn):
+        config = LoraConfig(target_modules=["lin0"])
+        model = self.get_model()
+        model = get_peft_model(model, config)
+        model = torch.compile(model, mode="reduce-overhead")
+
+        msg = re.escape("check_compiles should be one of 'error', 'warn', or 'ignore', got 'wrong-option' instead.")
+        with pytest.raises(ValueError, match=msg):
+            prepare_model_for_compiled_hotswap(model, check_compiled="wrong-option")
+
+    def test_prepare_model_for_compiled_hotswap_model_no_adapter_raises(self):
+        model = self.get_model()
+        msg = re.escape("No adapter layers found on the model")
         with pytest.raises(ValueError, match=msg):
             prepare_model_for_compiled_hotswap(model)
 

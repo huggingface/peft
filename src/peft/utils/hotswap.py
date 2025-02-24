@@ -14,8 +14,9 @@
 from __future__ import annotations
 
 import math
+import warnings
 from operator import attrgetter
-from typing import Optional
+from typing import Literal, Optional
 
 import torch
 
@@ -52,14 +53,20 @@ def _update_scaling(lora_module, adapter_name, scaling=None):
         )
 
 
-def _convert_scalings_to_tensor(model):
+def _convert_scalings_to_tensor(model) -> bool:
     """
     Convert the LoRA scaling values into torch.tensors to prevent recompilation if they change.
+
+    Returns:
+        bool:
+            Returns `True` if an appropriate adapter was found, else `False`.
     """
+    found_adapter = False
     for module in model.modules():
         if not isinstance(module, LoraLayer):
             continue
 
+        found_adapter = True
         scaling = module.scaling
         for key, val in scaling.items():
             if isinstance(val, float):
@@ -70,6 +77,7 @@ def _convert_scalings_to_tensor(model):
                     "Something went wrong while trying to convert the scalings, expected to find values of type float "
                     f"but found {type(val)} instead."
                 )
+    return found_adapter
 
 
 def _get_padded_linear(lora_module: torch.nn.Module, target_rank: int, is_lora_A: bool) -> torch.nn.Linear:
@@ -219,14 +227,19 @@ def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A
     return new_layer
 
 
-def _pad_lora_weights(model: torch.nn.Module, target_rank: int) -> None:
+def _pad_lora_weights(model: torch.nn.Module, target_rank: int) -> bool:
     """
     Pad LoRA weights in a model to a target rank while preserving the original behavior.
 
     Args:
       model (nn.Module): The model containing LoRA modules (with lora_A and lora_B).
       target_rank (int): The target rank to pad to.
+
+    Returns:
+        bool:
+            Returns `True` if an appropriate adapter was found, else `False`.
     """
+    found_adapter = False
 
     for module in model.modules():
         # Decide which pad function to call based on module type
@@ -248,12 +261,16 @@ def _pad_lora_weights(model: torch.nn.Module, target_rank: int) -> None:
             new_layer = pad_fn(lora_B_module, target_rank=target_rank, is_lora_A=False)
             module.lora_B[adapter_name] = new_layer
 
+        found_adapter = True
+    return found_adapter
+
 
 def prepare_model_for_compiled_hotswap(
     model: torch.nn.Module,
     *,
     target_rank: Optional[int] = None,
     config: Optional[LoraConfig | dict[str, LoraConfig]] = None,
+    check_compiled: Literal["error", "warn", "ignore"] = "error",
 ) -> None:
     """
     Helper function that prepares the model so that it can later be compiled and then used with hot-swapping.
@@ -280,6 +297,16 @@ def prepare_model_for_compiled_hotswap(
         config (`LoraConfig` or `dict[str, LoraConfig]`, *optional*):
             Optionally pass the `LoraConfig`s of the LoRA adapters. If passed, the rank in the configs will be updated
             to `target_rank`.
+        check_compiled (`str`, *optional*, defaults to `"error"`):
+            How to handle the case when the model is already compiled, which should generally be avoided. The options
+            are:
+              - "error" (default): raise an error
+              - "warn": issue a warning
+              - "ignore": do nothing
+
+    Raises:
+        ValueError
+            If the model is already compiled or if no adpater layer was found, raise an error.
 
     Example:
 
@@ -295,14 +322,33 @@ def prepare_model_for_compiled_hotswap(
         hotswap_adapter(model, path_adapter_1, adapter_name="default", torch_device=device)
         # do inference with adapter 1
         ```
+
     """
     is_compiled = hasattr(model, "_orig_mod") or getattr(model, "_compiled_call_impl", False)
     if is_compiled:
-        raise ValueError("Call prepare_model_for_compiled_hotswap *before* compiling the model")
+        if check_compiled == "error":
+            raise ValueError("Call prepare_model_for_compiled_hotswap *before* compiling the model")
+        elif check_compiled == "warn":
+            warnings.warn(
+                "prepare_model_for_compiled_hotswap was called with a model that is already compiled. This will likely "
+                "result in re-compilation, hurting performance. Call the function before compiling the model."
+            )
+        elif check_compiled != "ignore":
+            raise ValueError(
+                f"check_compiles should be one of 'error', 'warn', or 'ignore', got '{check_compiled}' instead."
+            )
 
-    _convert_scalings_to_tensor(model)
+    conversion_found_adapter = _convert_scalings_to_tensor(model)
     if target_rank is not None:
-        _pad_lora_weights(model, target_rank=target_rank)
+        padding_found_adapter = _pad_lora_weights(model, target_rank=target_rank)
+    else:
+        padding_found_adapter = False
+
+    if not (conversion_found_adapter or padding_found_adapter):
+        raise ValueError(
+            "No adapter layers found on the model, make sure call `prepare_model_for_compiled_hotswap` after loading "
+            "the first adapter and before loading the second adapter."
+        )
 
     if not config:
         return
