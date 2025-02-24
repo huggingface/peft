@@ -3296,9 +3296,41 @@ class TestHotSwapping:
         model = self.get_model()
         model = get_peft_model(model, config)
         model = torch.compile(model, mode="reduce-overhead")
+
         msg = re.escape("Call prepare_model_for_compiled_hotswap *before* compiling the model")
         with pytest.raises(ValueError, match=msg):
             prepare_model_for_compiled_hotswap(model)
+
+    def test_prepare_model_for_compiled_hotswap_model_already_compiled_warns(self, recwarn):
+        config = LoraConfig(target_modules=["lin0"])
+        model = self.get_model()
+        model = get_peft_model(model, config)
+        model = torch.compile(model, mode="reduce-overhead")
+
+        msg = "prepare_model_for_compiled_hotswap was called with a model that is already compiled"
+        prepare_model_for_compiled_hotswap(model, check_compiled="warn")
+        assert any(msg in str(w.message) for w in recwarn)
+
+    def test_prepare_model_for_compiled_hotswap_model_already_compiled_ignore(self, recwarn):
+        config = LoraConfig(target_modules=["lin0"])
+        model = self.get_model()
+        model = get_peft_model(model, config)
+        model = torch.compile(model, mode="reduce-overhead")
+
+        msg = "prepare_model_for_compiled_hotswap was called with a model that is already compiled"
+        prepare_model_for_compiled_hotswap(model, check_compiled="ignore")
+        # no error, no warning
+        assert not any(msg in str(w.message) for w in recwarn)
+
+    def test_prepare_model_for_compiled_hotswap_model_already_compiled_wrong_argument(self, recwarn):
+        config = LoraConfig(target_modules=["lin0"])
+        model = self.get_model()
+        model = get_peft_model(model, config)
+        model = torch.compile(model, mode="reduce-overhead")
+
+        msg = re.escape("check_compiles should be one of 'error', 'warn', or 'ignore', got 'wrong-option' instead.")
+        with pytest.raises(ValueError, match=msg):
+            prepare_model_for_compiled_hotswap(model, check_compiled="wrong-option")
 
     def test_prepare_model_for_compiled_hotswap_model_no_adapter_raises(self):
         model = self.get_model()

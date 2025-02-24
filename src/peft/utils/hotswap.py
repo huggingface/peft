@@ -14,8 +14,9 @@
 from __future__ import annotations
 
 import math
+import warnings
 from operator import attrgetter
-from typing import Optional
+from typing import Literal, Optional
 
 import torch
 
@@ -269,6 +270,7 @@ def prepare_model_for_compiled_hotswap(
     *,
     target_rank: Optional[int] = None,
     config: Optional[LoraConfig | dict[str, LoraConfig]] = None,
+    check_compiled: Literal["error", "warn", "ignore"] = "error",
 ) -> None:
     """
     Helper function that prepares the model so that it can later be compiled and then used with hot-swapping.
@@ -295,6 +297,12 @@ def prepare_model_for_compiled_hotswap(
         config (`LoraConfig` or `dict[str, LoraConfig]`, *optional*):
             Optionally pass the `LoraConfig`s of the LoRA adapters. If passed, the rank in the configs will be updated
             to `target_rank`.
+        check_compiled (`str`, *optional*, defaults to `"error"`):
+            How to handle the case when the model is already compiled, which should generally be avoided. The options
+            are:
+              - "error" (default): raise an error
+              - "warn": issue a warning
+              - "ignore": do nothing
 
     Raises:
         ValueError
@@ -314,10 +322,21 @@ def prepare_model_for_compiled_hotswap(
         hotswap_adapter(model, path_adapter_1, adapter_name="default", torch_device=device)
         # do inference with adapter 1
         ```
+
     """
     is_compiled = hasattr(model, "_orig_mod") or getattr(model, "_compiled_call_impl", False)
     if is_compiled:
-        raise ValueError("Call prepare_model_for_compiled_hotswap *before* compiling the model")
+        if check_compiled == "error":
+            raise ValueError("Call prepare_model_for_compiled_hotswap *before* compiling the model")
+        elif check_compiled == "warn":
+            warnings.warn(
+                "prepare_model_for_compiled_hotswap was called with a model that is already compiled. This will likely "
+                "result in re-compilation, hurting performance. Call the function before compiling the model."
+            )
+        elif check_compiled != "ignore":
+            raise ValueError(
+                f"check_compiles should be one of 'error', 'warn', or 'ignore', got '{check_compiled}' instead."
+            )
 
     conversion_found_adapter = _convert_scalings_to_tensor(model)
     if target_rank is not None:
