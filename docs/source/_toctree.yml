@@ -122,6 +122,8 @@
       title: CPT
     - local: package_reference/bone
       title: Bone
+    - local: package_reference/trainable_tokens
+      title: Trainable Tokens
 
     title: Adapters
   - sections:

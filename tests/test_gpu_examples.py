@@ -1550,6 +1550,98 @@ class PeftGPTQGPUTests(unittest.TestCase):
             # assert loss is not None
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_lora_resize_embeddings_trainable_tokens(self):
+        r"""
+        Test LoRA with trainable tokens on a resized embedding matrix
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_quant_storage=torch.float16,
+                bnb_4bit_use_double_quant=True,
+            )
+
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                quantization_config=bnb_config,
+                device_map="auto",
+            )
+
+            # add 2 new tokens
+            tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+            new_tokens = ["<think>", "</think>"]
+            tokenizer.add_special_tokens({"additional_special_tokens": new_tokens})
+            trainable_token_indices = [tokenizer.vocab[token] for token in new_tokens]
+
+            cur_emb_size = model.model.decoder.embed_tokens.weight.shape[0]
+            model.resize_token_embeddings(max(tokenizer.vocab_size, cur_emb_size))
+            model = prepare_model_for_kbit_training(model)
+
+            config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                target_modules=["q_proj", "v_proj"],
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+                trainable_token_indices={"embed_tokens": trainable_token_indices}
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("ybelkada/english_quotes_copy")
+
+            def tokenize(samples):
+                # add new tokens to samples
+                samples = [f"<think>{row}</think>" for row in samples["quote"]]
+                return tokenizer(samples)
+
+            data = data.map(tokenize, batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    # higher learning rate, as embeddings are a bit slow to update
+                    learning_rate=1e-3,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            # ensure that the new trainable tokens have been updated
+            embedding = model.base_model.model.model.decoder.embed_tokens
+            tol = 1e-4
+            assert not torch.allclose(
+                embedding.token_adapter.trainable_tokens_delta["default"],
+                embedding.original_module.weight[trainable_token_indices],
+                atol=tol,
+                rtol=tol,
+            )
+
+            # check size of the checkpoint, should be small since the embedding matrix does not need to be stored
+            stat = os.stat(os.path.join(tmp_dir, SAFETENSORS_WEIGHTS_NAME))
+            embed_params = model.base_model.model.model.decoder.embed_tokens.original_module.weight.numel()
+            # fp32 -> 4x
+            emb_file_size = 4 * embed_params
+            assert stat.st_size < emb_file_size
+
+            # sanity check: assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_gpu
     def test_causal_lm_training_multi_gpu(self):
@@ -4353,3 +4445,97 @@ class TestHotSwapping:
         ranks = 7, 13
         with torch._dynamo.config.patch(error_on_recompile=True):  # raise an error on recompilation
             self.check_hotswap_diffusion(do_hotswap=True, ranks=ranks, alpha_scalings=ranks)
+
+
+class TestLoraWithTrainableTokens:
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_lora_resize_embeddings_trainable_tokens(self):
+        r"""
+        Test LoRA with trainable tokens on a resized embedding matrix
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_quant_storage=torch.float16,
+                bnb_4bit_use_double_quant=True,
+            )
+
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                quantization_config=bnb_config,
+                device_map="auto",
+            )
+
+            # add 2 new tokens
+            tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+            new_tokens = ["<think>", "</think>"]
+            tokenizer.add_special_tokens({"additional_special_tokens": new_tokens})
+            trainable_token_indices = [tokenizer.vocab[token] for token in new_tokens]
+
+            cur_emb_size = model.model.decoder.embed_tokens.weight.shape[0]
+            model.resize_token_embeddings(max(tokenizer.vocab_size, cur_emb_size))
+            model = prepare_model_for_kbit_training(model)
+
+            config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                target_modules=["q_proj", "v_proj"],
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+                trainable_token_indices={"embed_tokens": trainable_token_indices}
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("ybelkada/english_quotes_copy")
+
+            def tokenize(samples):
+                # add new tokens to samples
+                samples = [f"<think>{row}</think>" for row in samples["quote"]]
+                return tokenizer(samples)
+
+            data = data.map(tokenize, batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    # higher learning rate, as embeddings are a bit slow to update
+                    learning_rate=1e-3,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            # ensure that the new trainable tokens have been updated
+            embedding = model.base_model.model.model.decoder.embed_tokens
+            tol = 1e-4
+            assert not torch.allclose(
+                embedding.token_adapter.trainable_tokens_delta["default"],
+                embedding.original_module.weight[trainable_token_indices],
+                atol=tol,
+                rtol=tol,
+            )
+
+            # check size of the checkpoint, should be small since the embedding matrix does not need to be stored
+            stat = os.stat(os.path.join(tmp_dir, SAFETENSORS_WEIGHTS_NAME))
+            embed_params = model.base_model.model.model.decoder.embed_tokens.original_module.weight.numel()
+            # fp32 -> 4x
+            emb_file_size = 4 * embed_params
+            assert stat.st_size < emb_file_size
+
+            # sanity check: assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
