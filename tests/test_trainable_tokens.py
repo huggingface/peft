@@ -547,3 +547,18 @@ class TestTrainableTokens:
             peft_model = get_peft_model(model_weight_tied, peft_config)
 
         assert "The model uses weight-tying which is currently not supported" in str(e)
+
+    @pytest.mark.parametrize(
+        "peft_config",
+        [
+            LoraConfig(
+                target_modules="all-linear",
+                trainable_token_indices={"embed_tokens": [0, 1, 3]},
+                modules_to_save=['embed_tokens'],
+            ),
+        ],
+    )
+    def test_modules_to_save_excludes_trainable_tokens(self, model, peft_config):
+        with pytest.raises(ValueError) as e:
+            get_peft_model(model, peft_config)
+        assert 'The embedding layer is already marked to be trained fully' in str(e)
