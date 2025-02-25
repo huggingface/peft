@@ -983,6 +983,16 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     token_indices=token_indices,
                 )
 
+            # Handle weight-tying of output and input embeddings. Currently this only consists of failing.
+            model_config = BaseTuner.get_model_config(self)
+            if model_config.get("tie_word_embeddings", False) and isinstance(
+                self.model.get_input_embeddings(), TrainableTokensWrapper
+            ):
+                raise ValueError(
+                    "The model uses weight-tying which is currently not supported with `trainable_token_indices`. "
+                    "You can try disabling weight-tying but you must expect an increased memory usage."
+                )
+
     def get_layer_status(self) -> list[TunerLayerStatus]:
         """Get the status of each adapter layer in the model.
 

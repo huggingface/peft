@@ -503,3 +503,47 @@ class TestTrainableTokens:
 
         embedding_keys = [n for n in state_dict.keys() if "embed_tokens" in n]
         assert embedding_keys == ["base_model.model.model.embed_tokens.token_adapter.trainable_tokens_delta"]
+
+    @pytest.fixture()
+    def model_id_weight_tied(self):
+        return "facebook/opt-125m"
+
+    @pytest.fixture()
+    def model_weight_tied(self, model_id_weight_tied):
+        return AutoModelForCausalLM.from_pretrained(model_id_weight_tied)
+
+    @pytest.mark.parametrize(
+        "peft_config",
+        [
+            LoraConfig(
+                target_modules="all-linear",
+                trainable_token_indices={"embed_tokens": [0, 1, 3]},
+            ),
+        ],
+    )
+    def test_weight_tying_raises_when_detected_combined(self, model_weight_tied, peft_config):
+        # since weight tying is currently not supported make sure that an error is raised when attempting
+        # to use a model that has tied input/output embeddings
+        assert model_weight_tied._tied_weights_keys
+        assert model_weight_tied.config.tie_word_embeddings
+
+        with pytest.raises(ValueError) as e:
+            peft_model = get_peft_model(model_weight_tied, peft_config)
+
+        assert "The model uses weight-tying which is currently not supported" in str(e)
+
+    def test_weight_tying_raises_when_detected_standalone(self, model_weight_tied):
+        # since weight tying is currently not supported make sure that an error is raised when attempting
+        # to use a model that has tied input/output embeddings
+        assert model_weight_tied._tied_weights_keys
+        assert model_weight_tied.config.tie_word_embeddings
+
+        peft_config = TrainableTokensConfig(
+            target_modules=["embed_tokens"],
+            token_indices=[0, 1, 3],
+        )
+
+        with pytest.raises(ValueError) as e:
+            peft_model = get_peft_model(model_weight_tied, peft_config)
+
+        assert "The model uses weight-tying which is currently not supported" in str(e)

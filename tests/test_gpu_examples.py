@@ -4445,5 +4445,3 @@ class TestHotSwapping:
         ranks = 7, 13
         with torch._dynamo.config.patch(error_on_recompile=True):  # raise an error on recompilation
             self.check_hotswap_diffusion(do_hotswap=True, ranks=ranks, alpha_scalings=ranks)
-
-

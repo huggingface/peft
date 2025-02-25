@@ -41,6 +41,20 @@ class TrainableTokensModel(BaseTuner):
         except AttributeError:
             return getattr(self.model, name)
 
+    def inject_adapter(self, *args, **kwargs):
+        super().inject_adapter(*args, **kwargs)
+
+        # In case of weight-tying we need to raise an error since we do not support that right now.
+        model_config = self.get_model_config(self)
+
+        if model_config.get("tie_word_embeddings", False) and isinstance(
+            self.model.get_input_embeddings(), TrainableTokensLayer
+        ):
+            raise ValueError(
+                "The model uses weight-tying which is currently not supported with `TrainableTokens`. "
+                "You can try disabling weight-tying but you must expect an increased memory usage."
+            )
+
     def _prepare_adapter_config(self, peft_config, model_config):
         return peft_config
 
