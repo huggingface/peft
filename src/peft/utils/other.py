@@ -574,7 +574,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 
 
 class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
-    """Wraps a module (typically an embedding layer) that is supposed to be re-trained sparsely (i.e.
+    """Wraps a module (typically an embedding layer) that is supposed to be re-trained selectively (i.e.
     solely updating a few columns) using the `TrainableTokensLayer` PEFT method.
     """
 
