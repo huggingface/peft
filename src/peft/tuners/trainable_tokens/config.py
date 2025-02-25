@@ -26,10 +26,10 @@ class TrainableTokensConfig(PeftConfig):
     """
     Configuration for the `TrainableTokens` method.
 
-    Allows for training new tokens (and re-training existing ones) without training the full embedding matrix.
-    By marking a few select tokens (identified by their indices) trainable and leaving the rest untouched, this method
-    can be used to add new tokens or changing the embedding of existing tokens while saving on memory. Both storage
-    as well as working memory usage are reduced in contrast to training the embedding matrix fully.
+    Allows for training new tokens (and re-training existing ones) without training the full embedding matrix. By
+    marking a few select tokens (identified by their indices) trainable and leaving the rest untouched, this method can
+    be used to add new tokens or changing the embedding of existing tokens while saving on memory. Both storage as well
+    as working memory usage are reduced in contrast to training the embedding matrix fully.
 
     Note that training with FSDP/DeepSpeed might not yet be fully supported. Also note that models using weight tying
     are currently not supported and will raise an error.

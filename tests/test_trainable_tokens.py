@@ -554,22 +554,22 @@ class TestTrainableTokens:
             LoraConfig(
                 target_modules="all-linear",
                 trainable_token_indices={"embed_tokens": [0, 1, 3]},
-                modules_to_save=['embed_tokens'],
+                modules_to_save=["embed_tokens"],
             ),
         ],
     )
     def test_modules_to_save_excludes_trainable_tokens(self, model, peft_config):
         with pytest.raises(ValueError) as e:
             get_peft_model(model, peft_config)
-        assert 'The embedding layer is already marked to be trained fully' in str(e)
+        assert "The embedding layer is already marked to be trained fully" in str(e)
 
     def test_merge_and_unload_standalone(self, model):
         # test basic functionality of merge_and_unload for standalone TrainableTokens
         token_indices = [0, 1, 3]
 
         peft_config = TrainableTokensConfig(
-                target_modules=['embed_tokens'],
-                token_indices=token_indices,
+            target_modules=["embed_tokens"],
+            token_indices=token_indices,
         )
 
         peft_model = get_peft_model(model, peft_config)
@@ -583,10 +583,7 @@ class TestTrainableTokens:
             assert not isinstance(module, TrainableTokensLayer)
 
         # make sure that deltas are applied to the embedding matrix
-        assert torch.allclose(
-            merged_model.model.embed_tokens.weight.data[token_indices],
-            expected_changed_weights
-        )
+        assert torch.allclose(merged_model.model.embed_tokens.weight.data[token_indices], expected_changed_weights)
 
     def test_original_module_not_in_state_dict(self, model):
         # Every AuxiliaryTrainingWrapper has an original_module attribute. Since the TrainableTokensWrapper is wrapping
@@ -594,9 +591,9 @@ class TestTrainableTokens:
         # and so it should not come up in the state dict to save memory.
 
         peft_config = LoraConfig(
-                target_modules='all-linear',
-                trainable_token_indices={'embed_tokens': [0, 1, 3]},
-            )
+            target_modules="all-linear",
+            trainable_token_indices={"embed_tokens": [0, 1, 3]},
+        )
 
         peft_model = get_peft_model(model, peft_config)
 
@@ -606,7 +603,7 @@ class TestTrainableTokens:
 
         state_dict = get_peft_model_state_dict(peft_model)
 
-        assert not [k for k in state_dict if '.original_module.weight' in k]
+        assert not [k for k in state_dict if ".original_module.weight" in k]
 
         state_dict = peft_model.state_dict()
-        assert not [k for k in state_dict if '.original_module.weight' in k]
+        assert not [k for k in state_dict if ".original_module.weight" in k]
