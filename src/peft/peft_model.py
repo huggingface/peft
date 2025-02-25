@@ -970,8 +970,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         )
 
             # we are not adding these module names to `self.modules_to_save` as this is strictly reserved for the
-            # `ModulesToSaveWrapper`. There are some places in the PEFT code base where the modules to save
-            # wrapper is applied based on this attribute which would lead to conflicts.
+            # `ModulesToSaveWrapper`.
 
             for target_layer, token_indices in target_layers.items():
                 new_training_modules = _set_trainable(

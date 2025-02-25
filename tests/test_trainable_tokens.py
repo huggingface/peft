@@ -21,6 +21,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import AutoPeftModel, LoraConfig, PeftModel, TrainableTokensConfig, get_peft_model
+from peft.tuners.trainable_tokens.layer import TrainableTokensLayer
 
 
 class TestTrainableTokens:
@@ -562,3 +563,28 @@ class TestTrainableTokens:
         with pytest.raises(ValueError) as e:
             get_peft_model(model, peft_config)
         assert 'The embedding layer is already marked to be trained fully' in str(e)
+
+    def test_merge_and_unload_standalone(self, model):
+        # test basic functionality of merge_and_unload for standalone TrainableTokens
+        token_indices = [0, 1, 3]
+
+        peft_config = TrainableTokensConfig(
+                target_modules=['embed_tokens'],
+                token_indices=token_indices,
+        )
+
+        peft_model = get_peft_model(model, peft_config)
+
+        self.simulate_training(peft_model.model.model.embed_tokens)
+        expected_changed_weights = peft_model.model.model.embed_tokens.trainable_tokens_delta.default.data.clone()
+
+        # make sure no TrainableTokensLayer is in the module
+        merged_model = peft_model.merge_and_unload()
+        for _, module in merged_model.named_modules():
+            assert not isinstance(module, TrainableTokensLayer)
+
+        # make sure that deltas are applied to the embedding matrix
+        assert torch.allclose(
+            merged_model.model.embed_tokens.weight.data[token_indices],
+            expected_changed_weights
+        )
