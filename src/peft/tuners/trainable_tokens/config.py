@@ -39,8 +39,8 @@ class TrainableTokensConfig(PeftConfig):
             amount of indices is to the total amount of tokens, the less efficient this method gets.
         target_modules (`Optional[Union[list[str], str]]`):
             List of module names or regex expression of the module names to replace with our `TrainableTokensLayer`.
-            This is by default the `embedding` layer. But could be multiple embedding-like layers, such as
-            `embed_tokens`, `encoder.embeddings` or `decoder.embeddings`.
+            This is by default the `embed_tokens` layer. But could be multiple embedding-like layers, such as
+            `embedding`, `encoder.embeddings` or `decoder.embeddings`.
         init_weights (`bool`):
             By default the new token weights are initialized to be the same as the respective token embeddings. This
             makes TrainableTokens a no-op when not trained. If set to `False` the weights will be random values. Do not
@@ -59,12 +59,12 @@ class TrainableTokensConfig(PeftConfig):
         },
     )
     target_modules: Optional[Union[list[str], str]] = field(
-        default_factory=lambda: ["embedding"],
+        default_factory=lambda: ["embed_tokens"],
         metadata={
             "help": (
                 "List of module names or regex expression of the module names to replace with our "
-                "`TrainableTokensLayer`. This is by default the `embedding` layer. "
-                "But could be multiple embedding-like layers, such as `embed_tokens`, `encoder.embeddings` or "
+                "`TrainableTokensLayer`. This is by default the `embed_tokens` layer. "
+                "But could be multiple embedding-like layers, such as `embedding`, `encoder.embeddings` or "
                 "`decoder.embeddings`."
             ),
         },

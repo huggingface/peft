@@ -958,7 +958,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if isinstance(peft_config.trainable_token_indices, dict):
                 target_layers = peft_config.trainable_token_indices
             else:
-                target_layers = {"embedding": peft_config.trainable_token_indices}
+                target_layers = {"embed_tokens": peft_config.trainable_token_indices}
 
             if self.modules_to_save:
                 for target_layer in target_layers:
