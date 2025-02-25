@@ -83,7 +83,7 @@ class TestTrainableTokens:
         idcs_to_keep = [i for i in X["input_ids"][0].tolist() if i not in idcs_to_modify]
 
         self.simulate_training(peft_model.model.model.embed_tokens)
-        output_train = peft_model.forward(output_hidden_states=True, **X)
+        output_train = peft_model(output_hidden_states=True, **X)
 
         peft_model.save_pretrained(save_path)
         peft_model_org = peft_model
@@ -91,8 +91,8 @@ class TestTrainableTokens:
         # check whether the token indices differ from the base model after loading the model
         # from the checkpoint.
         peft_model = AutoPeftModel.from_pretrained(save_path)
-        output_load = peft_model.forward(output_hidden_states=True, **X)
-        output_orig = original_model.forward(output_hidden_states=True, **X)
+        output_load = peft_model(output_hidden_states=True, **X)
+        output_orig = original_model(output_hidden_states=True, **X)
 
         # on the way, make sure that the embedding matrix itself was not modified
         assert torch.allclose(
@@ -136,15 +136,15 @@ class TestTrainableTokens:
         idcs_to_keep = [i for i in X["input_ids"][0].tolist() if i not in idcs_to_modify]
 
         self.simulate_training(peft_model.model.model.embed_tokens.token_adapter)
-        output_train = peft_model.forward(output_hidden_states=True, **X)
+        output_train = peft_model(output_hidden_states=True, **X)
 
         peft_model.save_pretrained(save_path)
         peft_model_org = peft_model
 
         # check whether the token indices differ from the base model
         peft_model = AutoPeftModel.from_pretrained(save_path)
-        output_load = peft_model.forward(output_hidden_states=True, **X)
-        output_orig = original_model.forward(output_hidden_states=True, **X)
+        output_load = peft_model(output_hidden_states=True, **X)
+        output_orig = original_model(output_hidden_states=True, **X)
 
         W_load = output_load.hidden_states[0]
         W_orig = output_orig.hidden_states[0]
@@ -328,11 +328,11 @@ class TestTrainableTokens:
             "attention_mask": torch.tensor([[1] * (len(set(token_indices_1 + token_indices_2)))]),
         }
 
-        original_output = original_model.forward(output_hidden_states=True, **X).hidden_states[0]
+        original_output = original_model(output_hidden_states=True, **X).hidden_states[0]
 
         # infer with adapter 1, embeddings for token indices 1 should be changed, no others.
         model.set_adapter("adapter_1")
-        adapter_1_output = model.forward(output_hidden_states=True, **X).hidden_states[0]
+        adapter_1_output = model(output_hidden_states=True, **X).hidden_states[0]
 
         idcs_to_modify = token_indices_1
         idcs_to_keep = [i for i in X["input_ids"][0].tolist() if i not in idcs_to_modify]
@@ -342,7 +342,7 @@ class TestTrainableTokens:
 
         # infer with adapter 2, embeddings for token indices 2 should be changed, no others.
         model.set_adapter("adapter_2")
-        adapter_2_output = model.forward(output_hidden_states=True, **X).hidden_states[0]
+        adapter_2_output = model(output_hidden_states=True, **X).hidden_states[0]
 
         idcs_to_modify = token_indices_2
         idcs_to_keep = [i for i in X["input_ids"][0].tolist() if i not in idcs_to_modify]
@@ -419,8 +419,8 @@ class TestTrainableTokens:
         }
         batch_adapter_names = ["adapter_1", "adapter_2"]
 
-        original_output = original_model.forward(output_hidden_states=True, **X)
-        mixed_output = model.forward(output_hidden_states=True, adapter_names=batch_adapter_names, **X)
+        original_output = original_model(output_hidden_states=True, **X)
+        mixed_output = model(output_hidden_states=True, adapter_names=batch_adapter_names, **X)
 
         # check that the active adapter is still the last activated adapter, adapter_2
         assert model.model.model.embed_tokens.token_adapter.active_adapter == ["adapter_2"]
@@ -474,8 +474,8 @@ class TestTrainableTokens:
             "x_image": torch.tensor([[0, 1, 2]]),
         }
 
-        _, (emb_text_orig, emb_image_orig) = original_model.forward(**X)
-        _, (emb_text_peft, emb_image_peft) = peft_model.forward(**X)
+        _, (emb_text_orig, emb_image_orig) = original_model(**X)
+        _, (emb_text_peft, emb_image_peft) = peft_model(**X)
 
         assert not torch.allclose(emb_text_orig[:, [0, 1]], emb_text_peft[:, [0, 1]])
         assert torch.allclose(emb_text_orig[:, [2]], emb_text_peft[:, [2]])
