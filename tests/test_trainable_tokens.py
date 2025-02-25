@@ -167,6 +167,9 @@ class TestTrainableTokens:
         model = get_peft_model(model, config)
         optimizer = torch.optim.AdamW(model.parameters(), lr=1)
 
+        initial_delta = model.model.model.embed_tokens.trainable_tokens_delta.default.clone()
+        initial_originals = model.model.model.embed_tokens.trainable_tokens_original.default.clone()
+
         X = {
             "input_ids": torch.tensor([[0, 1, 2, 3, 4]]),
             "attention_mask": torch.tensor([[1, 1, 1, 1, 1]]),
@@ -178,6 +181,15 @@ class TestTrainableTokens:
             loss = y_pred.logits.mean()
             loss.backward()
             optimizer.step()
+
+        assert torch.allclose(
+            model.model.model.embed_tokens.trainable_tokens_original.default,
+            initial_originals,
+        )
+        assert not torch.allclose(
+            model.model.model.embed_tokens.trainable_tokens_delta.default,
+            initial_delta,
+        )
 
     @pytest.mark.parametrize(
         "peft_config",
