@@ -1378,6 +1378,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         card.text = "\n".join(lines)
         card.save(filename)
 
+    def gradient_checkpointing_enable(self):
+        if hasattr(self.base_model, "gradient_checkpointing_enable"):
+            self.base_model.gradient_checkpointing_enable()
+            self.base_model = self._prepare_model_for_gradient_checkpointing(self.base_model)
+        else:
+            raise AttributeError("gradient_checkpointing_enable is not defined")
+
 
 class PeftModelForSequenceClassification(PeftModel):
     """
