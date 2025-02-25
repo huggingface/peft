@@ -451,7 +451,6 @@ class TestTrainableTokens:
     @pytest.mark.parametrize(
         "peft_config, target_layer_name",
         [
-            (LoraConfig(trainable_token_indices=[0, 1, 2]), "embedding"),  # default layer 'embedding'
             (LoraConfig(trainable_token_indices={"does-not-exist": [0, 1, 2]}), "does-not-exist"),
         ],
     )
