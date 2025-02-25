@@ -274,7 +274,7 @@ trainer = Trainer(
 
 ## Efficiently train tokens alongside LoRA
 
-Sometimes it is necessary to not only change some layer's weights but to add new tokens as well. With larger models this can be a memory-costly endeavour. PEFT LoRA adapters support the `trainable_token_indices` parameter which allows tuning of specific tokens alongside fine-tuning of specific layers with LoRA. This method only trains the tokens you specify and leaves all other tokens untouched which saves memory and doesn't throw away learned context of existing token embeddings in contrast to when training the whole embedding matrix. Under the hood this method uses the [`~TrainableTokenLayer`].
+Sometimes it is necessary to not only change some layer's weights but to add new tokens as well. With larger models this can be a memory-costly endeavour. PEFT LoRA adapters support the `trainable_token_indices` parameter which allows tuning of other tokens alongside fine-tuning of specific layers with LoRA. This method only trains the tokens you specify and leaves all other tokens untouched. This saves memory and doesn't throw away learned context of existing token embeddings in contrast to when training the whole embedding matrix. Under the hood this method uses the [`~TrainableTokenLayer`].
 
 ```py
 # for layer 'embedding'
@@ -297,8 +297,8 @@ tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-v0.1")
 special_tokens = ['<|start_think|>', '<|stop_think|>']
 tokenizer.add_special_tokens({'additional_special_tokens': special_tokens})
 
-# make room for new tokens in the embedding matrix
-base_model.resize_token_embeddings(len(tokenizer))
+# make room for new tokens in the embedding matrix if it isn't big enough already
+base_model.resize_token_embeddings(max(len(tokenizer), base_model.model.embed_tokens.num_embeddings)
 
 # typical LoRA config with `trainable_token_indices` targeting embedding layer `embed_tokens`
 # and specifically our new tokens we just added
@@ -313,6 +313,7 @@ peft_model = get_peft_model(base_model, lora_config)
 ```
 
 The token weights are part of your adapter state dict and saved alongside the LoRA weights.
+If we would have used full fine-tuning with `modules_to_save=['embed_tokens']` we would have stored the full embedding matrix in the checkpoint, leading to a much bigger file.
 
 
 ## Merge LoRA weights into the base model

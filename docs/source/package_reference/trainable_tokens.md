@@ -17,15 +17,15 @@ rendered properly in your Markdown viewer.
 # Trainable Tokens
 
 The Trainable Tokens method provides a way to target specific token embeddings for fine-tuning without resorting to
-training the full embedding matrix or using a low-rank adapter. It is based on the initial implementation from
+training the full embedding matrix or using an adapter on the embedding matrix. It is based on the initial implementation from
 [here](https://github.com/huggingface/peft/pull/1541).
 
 The method only targets specific tokens and selectively trains the token indices you specify. Consequently the
-required disk memory is also significantly lower than storing the full fine-tuned embedding matrix.
+required RAM will be lower and disk memory is also significantly lower than storing the full fine-tuned embedding matrix.
 
 Some preliminary benchmarks acquired with [this script](https://github.com/huggingface/peft/blob/main/scripts/train_memory.py)
 suggest that for `gemma-2-2b` (which has a rather large embedding matrix) you can save 4.8GiB VRAM with Trainable Tokens
-over fully fine-tuning. While LoRA will use even less memory (-6.3GiB total over fine-tuning) it might also target
+over fully fine-tuning the embedding matrix. While LoRA will use even less memory (-6.3GiB total over fine-tuning) it might also target
 tokens you don't want to be changed. With less extreme embedding matrixes the difference might come out shorter as well.
 
 Note that this method does not add tokens for you, you have to add tokens to the tokenizer yourself and resize the
