@@ -678,7 +678,7 @@ def _set_trainable(
 ):
     """Wraps modules that are supposed to be re-trained either normally, i.e. marking them to require gradients and
     saving them alongside other modules, or with certain methods that go alongside PEFT methods, such as retraining
-    specific token indices using sparse matrices.
+    specific token indices using selective read/write.
 
     Note that you need to validate beforehand if there are layers targeted by multiple wrappers, e.g. if the
     'embedding' layer is configured for both `ModulesToSaveWrapper` and `TrainableTokensWrapper` there would be
