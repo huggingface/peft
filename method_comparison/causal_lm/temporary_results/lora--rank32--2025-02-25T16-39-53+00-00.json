@@ -1,0 +1,47 @@
+{
+  "run_info": {
+    "created_at": "2025-02-25T16:39:53+00:00",
+    "total_time": 7.109975468978519,
+    "experiment_name": "lora/rank32",
+    "peft_branch": "ben-method-comparison",
+    "train_params_sha": "c9983ccde8233a74c1d67126e45cf43440cde83a224cfe9f9aac89136715489c",
+    "peft_config_sha": "3b1a995103b79579ce90b7d46b2138bfb070d60281cdfbdc91d6cbddaaf7e939"
+  },
+  "train_info": {
+    "cuda_memory_avg": 2650153676,
+    "cuda_memory_max": 9621824000,
+    "cuda_memory_90th": 2738772070,
+    "train_time": 2.14472757501062,
+    "file_size": 13640008,
+    "status": "success",
+    "metrics": [],
+    "losses": [
+      5.732011318206787,
+      3.821676254272461,
+      4.096625328063965,
+      4.529172420501709,
+      3.2956929206848145,
+      3.893981456756592,
+      4.66800594329834,
+      5.82646369934082,
+      3.189246892929077,
+      3.522594690322876
+    ]
+  },
+  "meta_info": {
+    "model_sha": "4e20de362430cd3b72f300e6b0f18e50e7166e08",
+    "model_created_at": "2024-09-18T15:03:14+00:00",
+    "dataset_sha": "c424633b80984fa0e838f0ee5be01dda13e34b19",
+    "dataset_created_at": "2023-04-04T06:13:24+00:00",
+    "package_info": null,
+    "system_info": {
+      "system": "Linux",
+      "release": "6.11.0-17-generic",
+      "version": "#17~24.04.2-Ubuntu SMP PREEMPT_DYNAMIC Mon Jan 20 22:48:29 UTC 2",
+      "machine": "x86_64",
+      "processor": "x86_64",
+      "gpu": "NVIDIA GeForce RTX 4090"
+    },
+    "pytorch_info": "PyTorch built with:\n  - GCC 9.3\n  - C++ Version: 201703\n  - Intel(R) oneAPI Math Kernel Library Version 2024.2-Product Build 20240605 for Intel(R) 64 architecture applications\n  - Intel(R) MKL-DNN v3.5.3 (Git Hash 66f0cb9eb66affd2da3bf5f8d897376f04aae6af)\n  - OpenMP 201511 (a.k.a. OpenMP 4.5)\n  - LAPACK is enabled (usually provided by MKL)\n  - NNPACK is enabled\n  - CPU capability usage: AVX512\n  - CUDA Runtime 12.4\n  - NVCC architecture flags: -gencode;arch=compute_50,code=sm_50;-gencode;arch=compute_60,code=sm_60;-gencode;arch=compute_70,code=sm_70;-gencode;arch=compute_75,code=sm_75;-gencode;arch=compute_80,code=sm_80;-gencode;arch=compute_86,code=sm_86;-gencode;arch=compute_90,code=sm_90\n  - CuDNN 90.1\n  - Magma 2.6.1\n  - Build settings: BLAS_INFO=mkl, BUILD_TYPE=Release, COMMIT_SHA=2236df1770800ffea5697b11b0bb0d910b2e59e1, CUDA_VERSION=12.4, CUDNN_VERSION=9.1.0, CXX_COMPILER=/opt/rh/devtoolset-9/root/usr/bin/c++, CXX_FLAGS= -D_GLIBCXX_USE_CXX11_ABI=0 -fabi-version=11 -fvisibility-inlines-hidden -DUSE_PTHREADPOOL -DNDEBUG -DUSE_KINETO -DLIBKINETO_NOROCTRACER -DLIBKINETO_NOXPUPTI=ON -DUSE_FBGEMM -DUSE_PYTORCH_QNNPACK -DUSE_XNNPACK -DSYMBOLICATE_MOBILE_DEBUG_HANDLE -O2 -fPIC -Wall -Wextra -Werror=return-type -Werror=non-virtual-dtor -Werror=bool-operation -Wnarrowing -Wno-missing-field-initializers -Wno-type-limits -Wno-array-bounds -Wno-unknown-pragmas -Wno-unused-parameter -Wno-strict-overflow -Wno-strict-aliasing -Wno-stringop-overflow -Wsuggest-override -Wno-psabi -Wno-error=old-style-cast -Wno-missing-braces -fdiagnostics-color=always -faligned-new -Wno-unused-but-set-variable -Wno-maybe-uninitialized -fno-math-errno -fno-trapping-math -Werror=format -Wno-stringop-overflow, LAPACK_INFO=mkl, PERF_WITH_AVX=1, PERF_WITH_AVX2=1, TORCH_VERSION=2.6.0, USE_CUDA=ON, USE_CUDNN=ON, USE_CUSPARSELT=1, USE_EXCEPTION_PTR=1, USE_GFLAGS=OFF, USE_GLOG=OFF, USE_GLOO=ON, USE_MKL=ON, USE_MKLDNN=ON, USE_MPI=OFF, USE_NCCL=1, USE_NNPACK=ON, USE_OPENMP=ON, USE_ROCM=OFF, USE_ROCM_KERNEL_ASSERT=OFF, \n"
+  }
+}

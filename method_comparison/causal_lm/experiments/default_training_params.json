@@ -1,0 +1,9 @@
+{
+  "model_id": null,
+  "dtype": "bfloat16",
+  "max_seq_length": 1024,
+  "batch_size": 4,
+  "max_steps": 50,
+  "learning_rate": 1e-05,
+  "compile": false
+}
