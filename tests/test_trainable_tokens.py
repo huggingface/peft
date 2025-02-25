@@ -22,6 +22,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import AutoPeftModel, LoraConfig, PeftModel, TrainableTokensConfig, get_peft_model
 from peft.tuners.trainable_tokens.layer import TrainableTokensLayer
+from peft.utils import get_peft_model_state_dict
 
 
 class TestTrainableTokens:
@@ -493,7 +494,6 @@ class TestTrainableTokens:
     )
     def test_no_embeddings_in_save_with_combined_usage(self, model, tokenizer, peft_config, tmp_path):
         # make sure that in combined use the only state dict key is that of the token deltas and nothing more
-        from peft.utils import get_peft_model_state_dict
 
         peft_model = get_peft_model(model, peft_config)
         state_dict = get_peft_model_state_dict(
@@ -588,3 +588,26 @@ class TestTrainableTokens:
             merged_model.model.embed_tokens.weight.data[token_indices],
             expected_changed_weights
         )
+
+    def test_original_module_not_in_state_dict(self, model):
+        # Every AuxiliaryTrainingWrapper has an original_module attribute. Since the TrainableTokensWrapper is wrapping
+        # a TrainableTokensLayer and it already has a base layer which serves as the original module, we don't need that
+        # and so it should not come up in the state dict to save memory.
+
+        peft_config = LoraConfig(
+                target_modules='all-linear',
+                trainable_token_indices={'embed_tokens': [0, 1, 3]},
+            )
+
+        peft_model = get_peft_model(model, peft_config)
+
+        # make sure that the original module is present and accessible even though
+        # we want to exclude it from the state dict.
+        assert peft_model.model.model.embed_tokens.original_module
+
+        state_dict = get_peft_model_state_dict(peft_model)
+
+        assert not [k for k in state_dict if '.original_module.weight' in k]
+
+        state_dict = peft_model.state_dict()
+        assert not [k for k in state_dict if '.original_module.weight' in k]
