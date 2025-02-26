@@ -30,7 +30,7 @@ tokens you don't want to be changed. With less extreme embedding matrixes the di
 
 Note that this method does not add tokens for you, you have to add tokens to the tokenizer yourself and resize the
 embedding matrix of the model accordingly. This method will only re-train the embeddings for the tokens you specify.
-This method can also be used in conjunction with LoRA layers! See [`~peft.LoraConfig.trainable_token_indices`].
+This method can also be used in conjunction with LoRA layers! See [the LoRA developer guide](../developer_guides/lora#efficiently-train-tokens-alongside-lora).
 
 ## TrainableTokensConfig
 
