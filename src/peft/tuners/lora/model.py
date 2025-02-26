@@ -36,6 +36,7 @@ from peft.tuners.tuners_utils import (
 )
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
+    AuxiliaryTrainingWrapper,
     ModulesToSaveWrapper,
     _freeze_adapter,
     _get_submodules,
@@ -372,7 +373,7 @@ class LoraModel(BaseTuner):
 
     def _set_adapter_layers(self, enabled: bool = True) -> None:
         for module in self.model.modules():
-            if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
+            if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
                 module.enable_adapters(enabled)
 
     def enable_adapter_layers(self) -> None:
@@ -459,7 +460,7 @@ class LoraModel(BaseTuner):
 
         hook_handles = []
         for module in self.modules():
-            if isinstance(module, LoraLayer) or isinstance(module, ModulesToSaveWrapper):
+            if isinstance(module, LoraLayer) or isinstance(module, AuxiliaryTrainingWrapper):
                 pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
                 handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                 hook_handles.append(handle)
@@ -468,7 +469,7 @@ class LoraModel(BaseTuner):
             # For encoder-decoder models, even when applying beam search, the encoder part of the model should not use
             # the extended adapter_names. This is because the encoder still uses the original, non-extended samples.
             for module in self.model.get_encoder().modules():
-                if isinstance(module, LoraLayer) or isinstance(module, ModulesToSaveWrapper):
+                if isinstance(module, LoraLayer) or isinstance(module, AuxiliaryTrainingWrapper):
                     # Add another hook to overwrite the kwargs with the original adapter names -- this is easier than
                     # trying to exclude the encoder.
                     pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=original_adapter_names)
@@ -529,15 +530,6 @@ class LoraModel(BaseTuner):
                     if merge:
                         target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
                     self._replace_module(parent, target_name, target.get_base_layer(), target)
-                elif isinstance(target, ModulesToSaveWrapper):
-                    # save any additional trainable modules part of `modules_to_save`
-                    new_module = target.modules_to_save[target.active_adapter]
-                    if hasattr(new_module, "base_layer"):
-                        # check if the module is itself a tuner layer
-                        if merge:
-                            new_module.merge(safe_merge=safe_merge, adapter_names=adapter_names)
-                        new_module = new_module.get_base_layer()
-                    setattr(parent, target_name, new_module)
 
         return self.model
 

@@ -474,7 +474,7 @@ class BaseTuner(nn.Module, ABC):
                 continue
             # Check for modules_to_save in case
             if _check_for_modules_to_save and any(
-                key.endswith(f"{module_to_save}") for module_to_save in peft_config.modules_to_save
+                key.endswith(module_to_save) for module_to_save in peft_config.modules_to_save
             ):
                 # Optionally set the modules to save
                 parent, target, target_name = _get_submodules(model, key)
@@ -513,9 +513,9 @@ class BaseTuner(nn.Module, ABC):
                     f"Target modules {peft_config.target_modules} not found in the base model. "
                     f"Please check the target modules and try again."
                 )
-                if peft_config.layers_to_transform is not None:
+                if getattr(peft_config, "layers_to_transform", None) is not None:
                     error_msg += f" Note: You specified 'layers_to_transform': {peft_config.layers_to_transform}."
-                if peft_config.layers_pattern is not None:
+                if getattr(peft_config, "layers_pattern", None) is not None:
                     error_msg += f" You also specified 'layers_pattern': {peft_config.layers_pattern}."
                 raise ValueError(error_msg)
             else:
@@ -525,9 +525,9 @@ class BaseTuner(nn.Module, ABC):
                     "This might be caused by a combination of mismatched target modules and excluded modules. "
                     "Please check your `target_modules` and `exclude_modules` configuration."
                 )
-                if peft_config.layers_to_transform is not None:
+                if getattr(peft_config, "layers_to_transform", None) is not None:
                     error_msg += f" Note: You specified 'layers_to_transform': {peft_config.layers_to_transform}."
-                if peft_config.layers_pattern is not None:
+                if getattr(peft_config, "layers_pattern", None) is not None:
                     error_msg += f" You also specified 'layers_pattern': {peft_config.layers_pattern}."
                 raise ValueError(error_msg)
 
