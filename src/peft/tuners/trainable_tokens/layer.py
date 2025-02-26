@@ -37,24 +37,40 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         base_layer: nn.Module,
         adapter_name: str,
         token_indices: list[int],
+        tied_adapter: Optional[TrainableTokensLayer] = None,
         **kwargs,
     ) -> None:
         super().__init__()
 
         self.base_layer = base_layer
         self._active_adapter = adapter_name
-        self.token_indices = {}
         self.kwargs = kwargs
+
+        self.tied_adapter = tied_adapter
 
         # we store the updated weights of particular tokens and their originals. we assume
         # that the count of new tokens is far smaller than the number of total tokens.
-        self.trainable_tokens_delta = nn.ParameterDict({})
-        self.trainable_tokens_original = BufferDict({})
+        #
+        # In case we have weight tying with another token adapter, we'll have no actual
+        # references on our own but use everything from the tied adapter.
+        if not self.tied_adapter:
+            self.trainable_tokens_delta = nn.ParameterDict({})
+            self.trainable_tokens_original = BufferDict({})
+            self.token_indices = {}
+        else:
+            self.trainable_tokens_delta = self.tied_adapter.trainable_tokens_delta
+            self.trainable_tokens_original = self.tied_adapter.trainable_tokens_original
+            self.token_indices = self.tied_adapter.token_indices
 
         # Mark the weight as unmerged
         self.merged_adapters = []
 
     def update_layer(self, adapter_name, **kwargs):
+        if kwargs.get("tied_adapter", None):
+            # in this case we don't have any say, we're just following whatever the tied
+            # adpater does, so we'll just return here.
+            return
+
         self.token_indices[adapter_name] = kwargs["token_indices"]
         init_weights = kwargs.get("init_weights", True)
 
@@ -147,15 +163,23 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
                 deltas = self.trainable_tokens_delta[adapter_name].to(W)
                 W = W.index_copy(dim=0, index=index, source=deltas)
 
-            result = F.embedding(
-                input=x,
-                weight=W,
-                padding_idx=self.base_layer.padding_idx,
-                max_norm=self.base_layer.max_norm,
-                norm_type=self.base_layer.norm_type,
-                scale_grad_by_freq=self.base_layer.scale_grad_by_freq,
-                sparse=self.base_layer.sparse,
-            )
+            if not self.tied_adapter:
+                result = F.embedding(
+                    input=x,
+                    weight=W,
+                    padding_idx=self.base_layer.padding_idx,
+                    max_norm=self.base_layer.max_norm,
+                    norm_type=self.base_layer.norm_type,
+                    scale_grad_by_freq=self.base_layer.scale_grad_by_freq,
+                    sparse=self.base_layer.sparse,
+                )
+            else:
+                # in case we're the tied weights we are probably currently wrapping a LM head
+                # or something similar. therefore we'll just mimic a linear.
+                result = F.linear(
+                    input=x,
+                    weight=W,
+                )
 
         return result
 

@@ -583,8 +583,12 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         module_to_save: torch.nn.Module,
         adapter_name: str,
         token_indices: list[int],
+        tied_adapter=None,
     ) -> None:
-        super().__init__(module_to_save, adapter_name, token_indices=token_indices)
+        """Supports weight-tying to another adapter when passed a `tied_adapter` which is expected to be a
+        `TrainableTokensLayer`.
+        """
+        super().__init__(module_to_save, adapter_name, token_indices=token_indices, tied_adapter=tied_adapter)
 
         # unset the original_module attribute since we're using a property to remove this from the state dict.
         self.original_module = None
@@ -595,13 +599,13 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         # to make sure that it will not be saved.
         return self.token_adapter.base_layer
 
-    def init_modules(self, adapter_name, token_indices):
+    def init_modules(self, adapter_name, token_indices, tied_adapter):
         # use a local import to avoid potential circular imports
         from peft.tuners.trainable_tokens import TrainableTokensLayer
 
         # since super().__init__() calls update before we have a chance to initialise the adapter we would
         # need here, we do the initialization here.
-        self.token_adapter = TrainableTokensLayer(self.original_module, adapter_name, token_indices)
+        self.token_adapter = TrainableTokensLayer(self.original_module, adapter_name, token_indices, tied_adapter)
 
     def _error_message_name(self):
         return "trainable_token_indices"
@@ -626,6 +630,12 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         super().update(active_adapter)
 
     def adapter_state_dict(self, adapter_name):
+        if self.token_adapter.tied_adapter:
+            # storing of weight-tied layers is not up to us and will be handled by
+            # transformers. we're just here to keep those layers in sync during training.
+            # therefore we return an empty state dict.
+            return {}
+
         return {
             f"token_adapter.{k}": v
             for k, v in self.token_adapter.state_dict().items()
