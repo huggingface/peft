@@ -118,11 +118,6 @@ class TestTrainableTokens:
                 target_modules="all-linear",
                 trainable_token_indices={"embed_tokens": [0, 1, 3]},
             ),
-            LoraConfig(
-                target_modules="all-linear",
-                trainable_token_indices={"embed_tokens": [0, 1, 3]},
-            ),
-            # TODO add a test with LoRA + trainable tokens + low cpu mem usage
         ],
     )
     def test_combined_with_peft_method_usage(self, model, tokenizer, peft_config, tmp_path):
