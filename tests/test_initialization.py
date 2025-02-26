@@ -1564,7 +1564,10 @@ class TestNoInfiniteRecursionDeepspeed:
 
 
 class TestLoadAdapterOfflineMode:
-    base_model = "hf-internal-testing/tiny-random-OPTForCausalLM"
+    # Some of the tests here sidestep the HF Hub cache, thus leading to more requests against HF Hub. Thus use different
+    # base models for each test to avoid hammering the exact same endpoint too frequently and getting rate limited.
+    base_model = "HuggingFaceH4/tiny-random-LlamaForCausalLM"
+    base_model2 = "hf-internal-testing/tiny-random-OPTForCausalLM"
     peft_model_id = "peft-internal-testing/tiny-OPTForCausalLM-lora"
 
     # make sure that PEFT honors offline mode
@@ -1600,14 +1603,14 @@ class TestLoadAdapterOfflineMode:
 
     def load_checkpoints(self, cache_dir):
         # download model and lora checkpoint to a specific cache dir
-        snapshot_download(self.base_model, cache_dir=cache_dir)
+        snapshot_download(self.base_model2, cache_dir=cache_dir)
         snapshot_download(self.peft_model_id, cache_dir=cache_dir)
 
     def test_load_checkpoint_offline_non_default_cache_dir(self, changed_default_cache_dir, tmp_path):
         # See #2373 for context
         self.load_checkpoints(tmp_path)
         with self.hub_offline_ctx():
-            base_model = AutoModelForCausalLM.from_pretrained(self.base_model, cache_dir=tmp_path)
+            base_model = AutoModelForCausalLM.from_pretrained(self.base_model2, cache_dir=tmp_path)
             PeftModel.from_pretrained(base_model, self.peft_model_id, cache_dir=tmp_path)
 
 
