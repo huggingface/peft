@@ -364,6 +364,60 @@ class PeftCustomKwargsTester(unittest.TestCase):
         num_lora = sum(isinstance(module, LoraLayer) for module in model.modules())
         assert num_lora == num_linear - 1
 
+    @parameterized.expand(MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES)
+    def test_all_linear_nested_targets_correct_layers(
+        self, model_id, model_type, initial_target_modules, expected_target_modules
+    ):
+        # See 2390
+        # Ensure that if adapter layers are already applied, we don't get nested adapter layers (e.g. LoRA targeting the
+        # lora_A, lora_B layers)
+        model = self.transformers_class_map[model_type].from_pretrained(model_id)
+        config_cls = LoraConfig
+        self._check_match_with_expected_target_modules(
+            model_id, model, config_cls, initial_target_modules, expected_target_modules
+        )
+        # re-use the same model, i.e. the adapter is already applied
+        self._check_match_with_expected_target_modules(
+            model_id, model, config_cls, initial_target_modules, expected_target_modules
+        )
+
+    def test_add_second_adapter_with_all_linear_works(self):
+        # See 2390 Similar test to test_all_linear_nested_targets_correct_layers above, but using add_adapter instead of
+        # calling get_peft_model in an already adapted model
+        model_id = "HuggingFaceH4/tiny-random-LlamaForCausalLM"
+        model = AutoModelForCausalLM.from_pretrained(model_id)
+
+        # important: don't reuse the first config, since config.target_modules will be overwritten, which would make the
+        # test pass trivially.
+        config0 = LoraConfig(target_modules=INCLUDE_LINEAR_LAYERS_SHORTHAND)
+        config1 = LoraConfig(target_modules=INCLUDE_LINEAR_LAYERS_SHORTHAND)
+
+        model = get_peft_model(model, config0)
+        model.add_adapter(adapter_name="other", peft_config=config1)
+
+        # both configs should result in the same target modules being chosen (remember that config.target_modules will
+        # be replaced by the actual set of target_modules)
+        assert config0.target_modules == config1.target_modules
+
+        for layer in model.base_model.model.model.layers:
+            projs = (
+                layer.self_attn.q_proj,
+                layer.self_attn.v_proj,
+                layer.self_attn.k_proj,
+                layer.mlp.gate_proj,
+                layer.mlp.up_proj,
+                layer.mlp.down_proj,
+            )
+            for proj in projs:
+                # the targted layer itself, which in the base model was the nn.Linear layer, is now a LoraLayer
+                assert isinstance(proj, LoraLayer)
+                # all children of that layer are still normal nn.Linear layers
+                assert isinstance(proj.base_layer, nn.Linear)
+                assert isinstance(proj.lora_A["default"], nn.Linear)
+                assert isinstance(proj.lora_B["default"], nn.Linear)
+                assert isinstance(proj.lora_A["other"], nn.Linear)
+                assert isinstance(proj.lora_B["other"], nn.Linear)
+
 
 class MLP(nn.Module):
     def __init__(self, bias=True):
