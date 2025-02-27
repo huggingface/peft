@@ -23,6 +23,51 @@ from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokeni
 from peft import AutoPeftModel, LoraConfig, PeftModel, TrainableTokensConfig, get_peft_model
 from peft.tuners.trainable_tokens.layer import TrainableTokensLayer
 from peft.utils import get_peft_model_state_dict
+from peft.utils.other import TrainableTokensWrapper
+
+
+class ModelEmb(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.emb = torch.nn.Embedding(100, 10)
+        self.lin0 = torch.nn.Linear(10, 1)
+    def forward(self, x):
+        return self.lin0(self.emb(x))
+    def get_input_embeddings(self):
+        return self.emb
+
+
+class ModelEmbedIn(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.embed_in = torch.nn.Embedding(100, 10)
+        self.lin0 = torch.nn.Linear(10, 1)
+    def forward(self, x):
+        return self.lin0(self.embed_in(x))
+    def get_input_embeddings(self):
+        return self.embed_in
+
+
+
+class ModelEmbedMultiple(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.embed_in = torch.nn.Embedding(100, 10)
+        self.embed_in_2 = torch.nn.Embedding(100, 10)
+        self.lin0 = torch.nn.Linear(10, 1)
+    def forward(self, x):
+        return self.lin0(self.embed_in(x) + self.embed_in_2(x))
+    def get_input_embeddings(self):
+        return self.embed_in
+
+
+class ModelEmbedInNoGet(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.embed_in = torch.nn.Embedding(100, 10)
+        self.lin0 = torch.nn.Linear(10, 1)
+    def forward(self, x):
+        return self.lin0(self.embed_in(x))
 
 
 class TestTrainableTokens:
@@ -675,7 +720,6 @@ class TestTrainableTokens:
         assert merged_model.encoder.embed_tokens.weight.data_ptr() == merged_model.lm_head.weight.data_ptr()
         assert merged_model.encoder.embed_tokens.weight.data_ptr() == merged_model.decoder.embed_tokens.weight.data_ptr()
 
-
     @pytest.mark.parametrize(
         "peft_config",
         [
@@ -735,3 +779,72 @@ class TestTrainableTokens:
 
         state_dict = peft_model.state_dict()
         assert not [k for k in state_dict if ".original_module.weight" in k]
+
+    @pytest.fixture
+    def model_emb(self):
+        return ModelEmb()
+
+    @pytest.fixture
+    def model_embed_in(self):
+        return ModelEmbedIn()
+
+    @pytest.fixture
+    def model_embed_in_no_get(self):
+        return ModelEmbedInNoGet()
+
+    @pytest.fixture
+    def model_embed_multiple(self):
+        return ModelEmbedMultiple()
+
+    @pytest.mark.parametrize('model_fixture_name, getter', [
+        ('model_emb', lambda model: model.emb),
+        ('model_embed_in', lambda model: model.embed_in),
+        ('model', lambda model: model.model.model.embed_tokens),
+    ])
+    def test_default_embedding_name_is_inferred_standalone(self, model_fixture_name, getter, request):
+        # make sure that the auto targeting works when `target_module=None`
+        base_model = request.getfixturevalue(model_fixture_name)
+
+        peft_config = TrainableTokensConfig(target_modules=None, token_indices=[0, 1, 3])
+        peft_model = get_peft_model(base_model, peft_config)
+
+        assert isinstance(getter(peft_model), TrainableTokensLayer)
+
+    @pytest.mark.parametrize('model_fixture_name, getter', [
+        ('model_emb', lambda model: model.emb),
+        ('model_embed_in', lambda model: model.embed_in),
+        ('model', lambda model: model.model.model.embed_tokens),
+    ])
+    def test_default_embedding_name_is_inferred_combined(self, model_fixture_name, getter, request):
+        # make sure that the auto targeting works when `target_module=None`
+        base_model = request.getfixturevalue(model_fixture_name)
+
+        peft_config = LoraConfig(target_modules='all-linear', trainable_token_indices=[0, 1, 3])
+        peft_model = get_peft_model(base_model, peft_config)
+
+        assert isinstance(getter(peft_model), TrainableTokensWrapper)
+
+    def test_default_embedding_name_cannot_be_inferred(self, model_embed_in_no_get):
+        # should default to default value `embed_tokens` which is not present in this model
+        base_model = model_embed_in_no_get
+
+        peft_config = TrainableTokensConfig(target_modules=None, token_indices=[0, 1, 3])
+
+        with pytest.raises(ValueError) as e:
+            peft_model = get_peft_model(base_model, peft_config)
+
+        assert "Target modules ['embed_tokens'] not found in the base model." in str(e)
+
+    def test_embedding_name_is_used_when_given_standalone(self, model_embed_multiple):
+        peft_config = TrainableTokensConfig(target_modules="embed_in_2", token_indices=[0, 1, 3])
+        peft_model = get_peft_model(model_embed_multiple, peft_config)
+
+        assert isinstance(peft_model.model.embed_in_2, TrainableTokensLayer)
+        assert not isinstance(peft_model.model.embed_in, TrainableTokensLayer)
+
+    def test_embedding_name_is_used_when_given_combined(self, model_embed_multiple):
+        peft_config = LoraConfig(target_modules="all-linear", trainable_token_indices={'embed_in_2': [0, 1, 3]})
+        peft_model = get_peft_model(model_embed_multiple, peft_config)
+
+        assert isinstance(peft_model.model.embed_in_2, TrainableTokensWrapper)
+        assert not isinstance(peft_model.model.embed_in, TrainableTokensWrapper)

@@ -23,7 +23,7 @@ from tqdm import tqdm
 
 from peft.config import PeftConfig
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists, onload_layer
-from peft.utils import AuxiliaryTrainingWrapper, _get_submodules
+from peft.utils import AuxiliaryTrainingWrapper, _get_submodules, _get_input_embeddings_name
 
 from .layer import TrainableTokensLayer
 
@@ -42,6 +42,10 @@ class TrainableTokensModel(BaseTuner):
             return getattr(self.model, name)
 
     def _prepare_adapter_config(self, peft_config, model_config):
+        # target_modules can be none which prompts us to infer the embedding layer name ourselves.
+        if peft_config.target_modules is None:
+            peft_config.target_modules = _get_input_embeddings_name(self.model) or ["embed_tokens"]
+
         return peft_config
 
     def inject_adapter(

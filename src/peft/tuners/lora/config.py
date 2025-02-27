@@ -274,13 +274,14 @@ class LoraConfig(PeftConfig):
         megatron_core (`Optional[str]`):
             The core module from Megatron to use, defaults to `"megatron.core"`.
         trainable_token_indices (`Optional[Union[List[int], dict[str, List[int]]]]`)
-            Lets you specify which token indices to selectively fine-tune without requiring to re-train the whole
-            embedding matrix using the `peft.TrainableTokensModel` method. You can either specify a list of indices
-            which will then target the `embed_tokens` layer, or, if your model is using a different layer for
-            embedding, you can specify a dictionary where the key is the name of the embedding module and the values
-            are the list of token indices, e.g. `{'embed_tokens': [0, 1, ...]}`. Note that training with FSDP/DeepSpeed
-            might not yet be fully supported with this option enabled. Also note that models using weight-tying are
-            currently not supported.
+            Lets you specify which token indices to selectively fine-tune without requiring to re-train the
+            whole embedding matrix using the `peft.TrainableTokensModel` method. You can specify token indices
+            in two ways. Either you specify a list of indices which will then target the model's input embedding
+            layer (or, if not found, `embed_tokens`). Alternatively, you can specify a dictionary where the key
+            is the name of the embedding module and the values are the list of token indices, e.g.
+            `{'embed_tokens': [0, 1, ...]}`.
+            Note that training with FSDP/DeepSpeed might not yet be fully supported with this option enabled.
+            Also note that models using weight-tying are currently not supported.
         loftq_config (`Optional[LoftQConfig]`):
             The configuration of LoftQ. If this is not None, then LoftQ will be used to quantize the backbone weights
             and initialize Lora layers. Also pass `init_lora_weights='loftq'`. Note that you should not pass a
@@ -444,10 +445,11 @@ class LoraConfig(PeftConfig):
         metadata={
             "help": (
                 "Lets you specify which token indices to selectively fine-tune without requiring to re-train the "
-                "whole embedding matrix using the `peft.TrainableTokensModel` method. You can either specify a list "
-                "of indices which will then target the `embed_tokens` layer, or, if your model is using a different "
-                "layer for embedding, you can specify a dictionary where the key is the name of the embedding module "
-                "and the values are the list of token indices, e.g. `{'embed_tokens': [0, 1, ...]}`. "
+                "whole embedding matrix using the `peft.TrainableTokensModel` method. You can specify token indices "
+                "in two ways. Either you specify a list of indices which will then target the model's input embedding "
+                "layer (or, if not found, `embed_tokens`). Alternatively, you can specify a dictionary where the key "
+                "is the name of the embedding module and the values are the list of token indices, e.g. "
+                "`{'embed_tokens': [0, 1, ...]}`. "
                 "Note that training with FSDP/DeepSpeed might not yet be fully supported with this option enabled. "
                 "Also note that models using weight-tying are currently not supported."
             )

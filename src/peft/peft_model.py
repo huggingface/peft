@@ -53,6 +53,7 @@ from .utils import (
     PeftType,
     TaskType,
     _get_batch_size,
+    _get_input_embeddings_name,
     _prepare_prompt_learning_config,
     _set_adapter,
     _set_trainable,
@@ -958,9 +959,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if isinstance(peft_config.trainable_token_indices, dict):
                 target_layers = peft_config.trainable_token_indices
             else:
-                target_layers = {"embed_tokens": peft_config.trainable_token_indices}
-
-            # TODO viable to use model.get_input_embeddings() to find the correct name?
+                layer_name = _get_input_embeddings_name(self.model) or "embed_tokens"
+                target_layers = {layer_name: peft_config.trainable_token_indices}
 
             if self.modules_to_save:
                 for target_layer in target_layers:

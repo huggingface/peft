@@ -665,6 +665,18 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         return self.token_adapter.get_base_layer()
 
 
+def _get_input_embeddings_name(model):
+    if not hasattr(model, 'get_input_embeddings'):
+        return None
+
+    input_embeddings = model.get_input_embeddings()
+    for name, module in model.named_modules():
+        if module == input_embeddings:
+            return name
+
+    return None
+
+
 def _get_submodules(model, key):
     parent = model.get_submodule(".".join(key.split(".")[:-1]))
     target_name = key.split(".")[-1]

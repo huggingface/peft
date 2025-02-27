@@ -33,6 +33,7 @@ from .other import (
     _freeze_adapter,
     _get_batch_size,
     _get_submodules,
+    _get_input_embeddings_name,
     _is_valid_match,
     _prepare_prompt_learning_config,
     _set_adapter,
