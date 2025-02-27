@@ -1061,7 +1061,7 @@ class _ConvNd(nn.Module, LoraLayer):
         conv_layer = type(base_layer)
         out_kernel = out_stride = (1,) * (self._kernel_dim - 2)
         self.lora_A[adapter_name] = conv_layer(self.in_features, r, kernel_size, stride, padding, bias=False)
-        self.lora_B[adapter_name] = conv_layer(r, self.out_features, out_kernel, out_stride, bias=lora_bias)
+        self.lora_B[adapter_name] = conv_layer(r, self.out_features // self.base_layer.groups, out_kernel, out_stride, bias=lora_bias)
         self.lora_bias[adapter_name] = lora_bias
 
         if use_rslora:
