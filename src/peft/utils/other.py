@@ -296,14 +296,13 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         # original_module or the module further down (e.g., `modules_to_save[active_adapter]`).
         modules = self.__dict__["_modules"]
         if self.disable_adapters:
-            module = modules["original_module"]
+            return getattr(self.original_module, name)
         elif self._hasattr_wrapped(name, modules):
-            module = self._getattr_wrapped(name, modules)
-        else:
-            # For some reason, there is no module corresponding to the active adapter; this should normally not be
-            # reached and exists as a failsafe (otherwise, a KeyError would be raised)
-            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
-        return getattr(module, name)
+            return self._getattr_wrapped(name, modules)
+
+        # For some reason, there is no module corresponding to the active adapter; this should normally not be
+        # reached and exists as a failsafe (otherwise, a KeyError would be raised)
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
     def update(self, adapter_name, **kwargs):
         """Called when this instance should be part of an adapter's training.
@@ -474,7 +473,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         return self.active_adapters[0] in modules["modules_to_save"]
 
     def _getattr_wrapped(self, name, modules):
-        return modules["modules_to_save"][self.active_adapters[0]]
+        return getattr(modules["modules_to_save"][self.active_adapters[0]], name)
 
     def update(self, adapter_name, **kwargs):
         super().update(adapter_name)
@@ -609,6 +608,17 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
 
     def _error_message_name(self):
         return "trainable_token_indices"
+
+    def _hasattr_wrapped(self, name, modules):
+        return name == "weight"
+
+    def _getattr_wrapped(self, name, modules):
+        # some models query self.wte.weight.dtype, some may query the weights directly. for the first case it is not
+        # necessary to do anything special but we don't know if is going to be `.dtype`. so we need to get the merged
+        # weits from the adapter.
+        if name == "weight":
+            return modules["token_adapter"].get_merged_weights(self.token_adapter.active_adapters)
+        assert False, f"should never be reached, bad check in _hasattr_wrapped for {name}"
 
     def _forward_wrapped(self, x, *args, **kwargs):
         return self.token_adapter(x)

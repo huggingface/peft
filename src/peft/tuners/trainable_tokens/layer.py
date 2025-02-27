@@ -146,6 +146,16 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             originals = self.trainable_tokens_original[adapter_name].to(self.base_layer.weight)
             self.base_layer.weight.data.index_copy_(dim=0, index=index, source=originals)
 
+    def get_merged_weights(self, active_adapters):
+        W = self.base_layer.weight
+
+        for adapter_name in active_adapters:
+            index = torch.tensor(self.token_indices[adapter_name]).to(W.device)
+            deltas = self.trainable_tokens_delta[adapter_name].to(W)
+            W = W.index_copy(dim=0, index=index, source=deltas)
+
+        return W
+
     def forward_adapters(self, x: torch.Tensor, active_adapters, *args, **kwargs) -> torch.Tensor:
         if self.disable_adapters or not active_adapters:
             if self.merged:
@@ -156,12 +166,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         else:
             self._check_overlapping_tokens(active_adapters)
 
-            W = self.base_layer.weight
-
-            for adapter_name in active_adapters:
-                index = torch.tensor(self.token_indices[adapter_name]).to(W.device)
-                deltas = self.trainable_tokens_delta[adapter_name].to(W)
-                W = W.index_copy(dim=0, index=index, source=deltas)
+            W = self.get_merged_weights(active_adapters)
 
             # Normally it should be very clear that we're wrapping Embedding layers but there are cases, such as
             # tying weights with an LM head where the layer we wrap is a Linear layer. Therefore we must choose
