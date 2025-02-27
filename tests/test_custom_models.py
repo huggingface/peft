@@ -115,6 +115,8 @@ TEST_CASES = [
     ("Conv2d 2 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
     ("Conv2d 1 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"], "use_dora": True}),
     ("Conv2d 2 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"], "use_dora": True}),
+    ("Conv2d Groups LoRA", "Conv2dGroups", LoraConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d Groups LoRA with DoRA", "Conv2dGroups", LoraConfig, {"target_modules": ["conv2d"], "use_dora": True}),
     ("Conv3d 1 LoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d"]}),
     ("Conv3d 2 LoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d", "lin0"]}),
     ("Conv3d 1 LoRA with DoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d"], "use_dora": True}),
@@ -903,6 +905,25 @@ class ModelConv2D2(nn.Module):
         return X
 
 
+class ModelConv2DGroups(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv2d = nn.Conv2d(5, 10, 3, groups=5)
+        self.relu = nn.ReLU()
+        self.flat = nn.Flatten()
+        self.lin0 = nn.Linear(10, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        X = X.float().reshape(-1, 5, 3, 3)
+        X = self.conv2d(X)
+        X = self.relu(X)
+        X = self.flat(X)
+        X = self.lin0(X)
+        X = self.sm(X)
+        return X
+
+
 class ModelConv3D(nn.Module):
     def __init__(self):
         super().__init__()
@@ -966,6 +987,9 @@ class MockTransformerWrapper:
 
         if model_id == "Conv2d":
             return ModelConv2D().to(torch_dtype)
+
+        if model_id == "Conv2dGroups":
+            return ModelConv2DGroups().to(torch_dtype)
 
         if model_id == "Conv3d":
             return ModelConv3D().to(torch_dtype)
