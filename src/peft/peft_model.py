@@ -988,8 +988,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             # In that case we will tie any module that wants tied weights to the token adapter to make sure that
             # any modification is reflected in the tied layers as well.
             model_config = BaseTuner.get_model_config(self)
-            if model_config.get("tie_word_embeddings", False) and isinstance(
-                self.model.get_input_embeddings(), TrainableTokensWrapper
+            if (
+                model_config.get("tie_word_embeddings", False)
+                and self.model._tied_weights_keys is not None
+                and isinstance(self.model.get_input_embeddings(), TrainableTokensWrapper)
             ):
                 # the embedding layer is modified and we want weight tying.
                 module_keys = [".".join(n.split(".")[:-1]) for n in self.model._tied_weights_keys]

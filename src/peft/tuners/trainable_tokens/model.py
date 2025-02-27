@@ -66,8 +66,10 @@ class TrainableTokensModel(BaseTuner):
         # not do any changes on its own but solely rely on the weights from the tied adapter. We will search for the
         # tied weights and put tied TrainableTokensLayer adapters on them, all tied to the adapter of the embedding
         # matrix.
-        if model_config.get("tie_word_embeddings", False) and isinstance(
-            self.model.get_input_embeddings(), TrainableTokensLayer
+        if (
+            model_config.get("tie_word_embeddings", False)
+            and self.model._tied_weights_keys is not None
+            and isinstance(self.model.get_input_embeddings(), TrainableTokensLayer)
         ):
             module_keys = [".".join(n.split(".")[:-1]) for n in self.model._tied_weights_keys]
             # disable removing of duplicates since we're essentially only dealing with duplicates (i.e. tied weights)
