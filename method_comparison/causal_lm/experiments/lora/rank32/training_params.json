@@ -1,9 +1,0 @@
-{
-  "model_id": "meta-llama/Llama-3.2-1B",
-  "dtype": "bfloat16",
-  "max_seq_length": 1024,
-  "batch_size": 4,
-  "max_steps": 10,
-  "learning_rate": 1e-05,
-  "compile": false
-}

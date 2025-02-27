@@ -21,11 +21,10 @@ import os
 import platform
 import subprocess
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 import huggingface_hub
 import torch
-from datasets import load_dataset
 from torch import nn
 from transformers import (
     AutoModelForCausalLM,
@@ -44,7 +43,7 @@ if not torch.cuda.is_available():
 device = "cuda"
 CUDA_MEMORY_INIT_THRESHOLD = 500 * 2**20  # 500MB
 FILE_NAME_TRAIN_PARAMS = "training_params.json"
-DATASET_NAME = "ybelkada/english_quotes_copy"
+DATASET_NAME = "meta-math/MetaMathQA"
 hf_api = huggingface_hub.HfApi()
 
 
@@ -57,8 +56,13 @@ class TrainConfig:
     max_seq_length: int
     batch_size: int
     max_steps: int
+    eval_steps: int
     compile: bool
-    learning_rate: float
+    query_template: str
+    max_generation_length: int
+    seed: int
+    grad_norm_clip: float
+    optimizer_kwargs: dict[str, Any]
 
     def __post_init__(self):
         if not isinstance(self.model_id, str):
@@ -71,8 +75,16 @@ class TrainConfig:
             raise ValueError(f"Invalid batch_size: {self.batch_size}")
         if self.max_steps <= 0:
             raise ValueError(f"Invalid max_steps: {self.max_steps}")
-        if self.learning_rate <= 0:
-            raise ValueError(f"Invalid learning_rate: {self.learning_rate}")
+        if self.eval_steps <= 0:
+            raise ValueError(f"Invalid eval_steps: {self.eval_steps}")
+        if self.eval_steps > self.max_steps:
+            raise ValueError(f"Invalid eval_steps: {self.eval_steps} > max_steps: {self.max_steps}")
+        if self.max_generation_length <= 0:
+            raise ValueError(f"Invalid max_generation_length: {self.max_generation_length}")
+        if self.grad_norm_clip <= 0:
+            raise ValueError(f"Invalid grad_norm_clip: {self.grad_norm_clip}")
+        if "{query}" not in self.query_template:
+            raise ValueError("Invalid query_template, must contain '{query}'")
 
 
 def validate_experiment_path(path: str) -> tuple[str, str, str]:
@@ -131,26 +143,6 @@ def init_cuda() -> int:
     return cuda_memory_init
 
 
-def get_data(*, tokenizer):
-    def tokenize(samples):
-        # For some reason, the max sequence length is not honored by the tokenizer, resulting in IndexErrors. Thus,
-        # manually ensure that sequences are not too long.
-        tokenized = tokenizer(samples["quote"])
-        tokenized["input_ids"] = [input_ids[: tokenizer.model_max_length] for input_ids in tokenized["input_ids"]]
-        tokenized["attention_mask"] = [
-            input_ids[: tokenizer.model_max_length] for input_ids in tokenized["attention_mask"]
-        ]
-        return tokenized
-
-    data = load_dataset(DATASET_NAME)
-    data = data.map(tokenize, batched=True)
-    # We need to manually remove unused columns. This is because we cannot use remove_unused_columns=True in the
-    # Trainer, as this leads to errors with torch.compile. We also cannot just leave them in, as they contain
-    # strings. Therefore, manually remove all unused columns.
-    data = data.remove_columns(["quote", "author", "tags"])
-    return data
-
-
 def get_tokenizer(*, model_id: str, max_seq_length: int):
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.model_max_length = max_seq_length
@@ -196,6 +188,51 @@ def get_model(
     base_model = get_base_model(model_id=model_id, dtype=dtype, compile=compile)
     model = get_peft_model(base_model, peft_config)
     return model
+
+
+def parse_answer(text: str) -> Optional[str]:
+    """
+    A label/prediction can look like this:
+
+    Question: If the magnitude of vector v is equal to 4, what is the dot product of vector v with itself?. Think step
+    by step
+    Answer: The dot product of a vector with itself is equal to the square of its magnitude. So, the dot product of
+    vector v with itself is equal to $4^2 = \boxed{16}$.The answer is: 16
+
+    We want to extract '16' from this string.
+
+    """
+    # This implementation is based on sampling meta-llama/Llama-3.1-8B-Instruct. It may not work for other models.
+    candidate_delimiters = ["The answer is: ", "The answer is ", "The final answer is: ", "The final answer is "]
+    text = text.strip()
+    text = text.rstrip(".!?")
+    for delimiter in candidate_delimiters:
+        if delimiter in text:
+            break
+    else:  # no match
+        return None
+
+    text = text.rpartition(delimiter)[-1].strip()
+    # if a new paragraph follows after the final answer, we want to remove it
+    text = text.split("\n", 1)[0]
+    text = text.strip(" .!?")
+    return text
+
+
+def get_accuracy(*, predictions: list[str], responses: list[str]) -> float:
+    if len(predictions) != len(responses):
+        raise ValueError(f"Prediction length mismatch: {len(predictions)} != {len(responses)}")
+
+    correct = 0
+    for prediction, response in zip(predictions, responses):
+        parsed_prediction = parse_answer(prediction)
+        parsed_response = parse_answer(response)
+        if parsed_response is None:
+            raise ValueError(f"Error encountered while trying to parse response: {response}")
+        if parsed_prediction is not None:
+            correct += int(parsed_prediction == parsed_response)
+
+    return correct / len(predictions)
 
 
 def get_base_model_info(model_id: str) -> huggingface_hub.ModelInfo:

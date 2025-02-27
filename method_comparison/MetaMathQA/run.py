@@ -24,6 +24,7 @@ import json
 import os
 import sys
 import tempfile
+import textwrap
 import time
 
 # import warnings
@@ -34,11 +35,17 @@ import huggingface_hub
 import numpy as np
 import torch
 from torch import nn
+from transformers import set_seed
+
+from peft import PeftConfig
+from peft.utils import SAFETENSORS_WEIGHTS_NAME
+
+from data import get_dataset, get_filtered_dataset, get_train_valid_test_datasets
 from utils import (
     DATASET_NAME,
     FILE_NAME_TRAIN_PARAMS,
+    get_accuracy,
     get_base_model_info,
-    get_data,
     get_dataset_info,
     get_meta_info,
     get_model,
@@ -48,9 +55,6 @@ from utils import (
     init_cuda,
     validate_experiment_path,
 )
-
-from peft import PeftConfig
-from peft.utils import SAFETENSORS_WEIGHTS_NAME
 
 
 # # suppress all warnings
@@ -63,6 +67,10 @@ RESULT_PATH = os.path.join(os.path.dirname(__file__), "results")
 RESULT_PATH_TEST = os.path.join(os.path.dirname(__file__), "temporary_results")
 # cancelled results
 RESULT_PATH_CANCELLED = os.path.join(os.path.dirname(__file__), "cancelled_results")
+
+# train/valid/test split
+VALID_SIZE = 40  # FIXME small, as it is performed every couple of steps
+TEST_SIZE = 1000  # FIXME can be larger
 
 
 class TrainStatus(enum.Enum):
@@ -80,54 +88,144 @@ class TrainResult:
     metrics: list[Any]  # TODO
 
 
+def evaluate(model, tokenizer, ds, batch_size, generate_kwargs) -> tuple[list[str], list[str]]:
+    with torch.no_grad():
+        predictions = []
+        responses = []
+        for j in range(0, len(ds), batch_size):
+            sliced = ds[j : j + batch_size]
+            responses += sliced.pop("response")
+            batch = tokenizer.pad(sliced, return_tensors="pt", padding_side="left").to(model.device)
+            outputs = model.generate(**batch, **generate_kwargs)
+            predictions += tokenizer.batch_decode(outputs, skip_special_tokens=True)
+    return predictions, responses
+
+
 def train(
     *,
     model: nn.Module,
     max_steps: int,
     batch_size: int,
-    learning_rate: float,
-    data: Any,
+    ds: Any,
     tokenizer: Any,
     cuda_memory_init: int,
+    eval_steps: int,
+    max_generation_length: int,
+    grad_norm_clip: float,
+    optimizer_kwargs: dict[str, Any],
 ) -> TrainResult:
+
     cuda_memory_log = []
     losses = []
     metrics = []
-    sample = 0
-    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    sample = 0  # keep count of the current sample
+    total_samples = 0  # total number of samples over all epochs
+    optimizer = torch.optim.AdamW(model.parameters(), **optimizer_kwargs)
     status = TrainStatus.FAILED
     tic_train = time.perf_counter()
+    eval_time = 0
+    ds_train, ds_valid, ds_test = get_train_valid_test_datasets(
+        ds=ds, valid_size=VALID_SIZE, test_size=TEST_SIZE, print_fn=print_verbose
+    )
 
-    for i in range(0, max_steps):
-        tic = time.perf_counter()
-        try:
-            batch = tokenizer.pad(data["train"][sample : sample + batch_size], return_tensors="pt").to(model.device)
+    try:
+        for i in range(1, max_steps + 1):
+            tic = time.perf_counter()
+            batch = tokenizer.pad(ds_train[sample : sample + batch_size], return_tensors="pt").to(model.device)
+            actual_batch_size = len(batch["input_ids"])
+            total_samples += actual_batch_size
             sample += batch_size
+            if sample >= len(ds_train):  # new epoch
+                sample = 0
+            accuracy = None
 
-            # add targets
-            batch["labels"] = batch["input_ids"].clone()
+            # add labels, they are automatically shifted by transformers
+            labels = batch["input_ids"].clone()
+            labels[batch["attention_mask"] == 0] = -100
+            batch["labels"] = labels
+            num_items_in_batch = batch["attention_mask"].sum()
+
             optimizer.zero_grad()
-            outputs = model(**batch)
+            outputs = model(**batch, num_items_in_batch=num_items_in_batch)
             loss = outputs.loss
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_norm_clip)
             optimizer.step()
             losses.append(loss.item())
             cuda_memory_log.append(torch.cuda.memory_allocated() - cuda_memory_init)
+
+            toc = time.perf_counter()
+            log_dict = {
+                "step": f"{i:5d}",
+                "loss": f"{loss.item():>6.3f}",
+                "train time": f"{toc - tic:.2f}s",
+                "samples": f"{total_samples:7d}",
+            }
+
+            if i % eval_steps == 0:
+                tic_eval = time.perf_counter()
+                loss_avg = sum(losses[-eval_steps:]) / eval_steps
+                log_dict["loss avg"] = f"{loss_avg:.4f}"
+
+                # evaluate
+                model.eval()
+                predictions, responses = evaluate(
+                    model=model,
+                    tokenizer=tokenizer,
+                    ds=ds_valid,
+                    batch_size=batch_size,
+                    generate_kwargs={"max_length": max_generation_length, "pad_token_id": tokenizer.eos_token_id},
+                )
+
+                print_verbose(f"\nExample prediction:\n{textwrap.indent(predictions[0], '    ')}\n")
+                accuracy = get_accuracy(predictions=predictions, responses=responses)
+                metrics.append(
+                    {"step": i, "valid accuracy": accuracy, "train loss": loss_avg, "train samples": total_samples}
+                )
+                model.train()
+                toc_eval = time.perf_counter()
+                eval_time += toc_eval - tic_eval
+                log_dict["valid acc"] = f"{accuracy:.3f}"
+                log_dict["eval time"] = f"{toc_eval - tic_eval:.2f}s"
+                elapsed = time.perf_counter() - tic_train
+                log_dict["elapsed time"] = f"{elapsed // 60:.0f}min {elapsed % 60:.0f}s"
+
             torch.cuda.empty_cache()
             gc.collect()
-            toc = time.perf_counter()
-            print_verbose(f"step {i:3d} loss {loss.item():.6f} time {toc - tic:.2f}s")
-        except KeyboardInterrupt:
-            print_verbose("canceled training")
-            status = TrainStatus.CANCELED
-            break
+
+            print_verbose(json.dumps(log_dict))
+
+        print_verbose(f"Training finished after {max_steps} steps, evaluation on test set follows.")
+        # test set evaluation
+        model.eval()
+        predictions, responses = evaluate(
+            model=model,
+            tokenizer=tokenizer,
+            ds=ds_test,
+            batch_size=batch_size,
+            generate_kwargs={"max_length": max_generation_length, "pad_token_id": tokenizer.eos_token_id},
+        )
+        accuracy = get_accuracy(predictions=predictions, responses=responses)
+        metrics.append({
+            "step": i,
+            "test accuracy": accuracy,
+            "train loss": sum(losses[-eval_steps:]) / eval_steps,
+            "train samples": total_samples,
+            })
+        print_verbose(f"Test accuracy: {accuracy:.3f}")
+
+    except KeyboardInterrupt:
+        print_verbose("canceled training")
+        status = TrainStatus.CANCELED
 
     toc_train = time.perf_counter()
+    train_time = toc_train - tic_train - eval_time
+
     if status != TrainStatus.CANCELED:
         status = TrainStatus.SUCCESS
     train_result = TrainResult(
         status=status,
-        train_time=toc_train - tic_train,
+        train_time=train_time,
         cuda_memory_log=cuda_memory_log,
         losses=losses,
         metrics=metrics,
@@ -138,26 +236,25 @@ def train(
 def log_to_console(log_data: dict) -> None:
     cuda_memory_max = log_data["train_info"]["cuda_memory_max"]
     cuda_memory_avg = log_data["train_info"]["cuda_memory_avg"]
-    cuda_memory_90th = log_data["train_info"]["cuda_memory_90th"]
+    cuda_memory_99th = log_data["train_info"]["cuda_memory_99th"]
     time_train = log_data["train_info"]["train_time"]
     time_total = log_data["run_info"]["total_time"]
     file_size = log_data["train_info"]["file_size"]
 
     print(f"cuda memory max: {cuda_memory_max // 2**20}MB")
     print(f"cuda memory avg: {cuda_memory_avg // 2**20}MB")
-    print(f"cuda memory 90th percentile: {cuda_memory_90th // 2**20}MB")
+    print(f"cuda memory 90th percentile: {cuda_memory_99th // 2**20}MB")
     print(f"train time: {time_train}s")
     print(f"total time: {time_total:.2f}s")
     print(f"file size of checkpoint: {file_size / 2**20:.1f}MB")
 
 
 def log_to_file(*, log_data: dict, save_dir: str, experiment_name: str, timestamp: str) -> None:
-    os.makedirs(save_dir, exist_ok=True)
     file_name = f"{experiment_name.replace(os.path.sep, '--')}--{timestamp.replace(':', '-')}.json"
     file_name = os.path.join(save_dir, file_name)
     with open(file_name, "w") as f:
         json.dump(log_data, f, indent=2)
-    print_verbose(f"Saved log to {file_name}")
+    print_verbose(f"Saved log to: {file_name}")
 
 
 def log_results(
@@ -176,7 +273,7 @@ def log_results(
     # collect results
     cuda_memory_final = torch.cuda.max_memory_allocated()
     cuda_memory_avg = int(sum(train_result.cuda_memory_log) / len(train_result.cuda_memory_log))
-    cuda_memory_90th = int(np.percentile(train_result.cuda_memory_log, 90))
+    cuda_memory_99th = int(np.percentile(train_result.cuda_memory_log, 99))
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         model.save_pretrained(tmp_dir)
@@ -195,7 +292,7 @@ def log_results(
     if train_result.status == TrainStatus.CANCELED:
         save_dir = RESULT_PATH_CANCELLED
         print_verbose("Experiment run was categorized as canceled")
-    if peft_branch != "main":
+    elif peft_branch != "main":
         save_dir = RESULT_PATH_TEST
         print_verbose(f"Experiment run was categorized as a test run on branch {peft_branch}")
     elif train_result.status == TrainStatus.SUCCESS:
@@ -214,12 +311,11 @@ def log_results(
         "train_info": {
             "cuda_memory_avg": cuda_memory_avg,
             "cuda_memory_max": (cuda_memory_final - cuda_memory_init),
-            "cuda_memory_90th": cuda_memory_90th,
+            "cuda_memory_99th": cuda_memory_99th,
             "train_time": train_result.train_time,
             "file_size": file_size,
             "status": train_result.status.value,
             "metrics": train_result.metrics,
-            "losses": train_result.losses,
         },
         "meta_info": {
             "model_sha": model_sha,
@@ -242,11 +338,14 @@ def main(*, path_experiment: str, experiment_name: str, train_params_sha: str, p
     peft_config = PeftConfig.from_pretrained(path_experiment)
     path_train_config = os.path.join(path_experiment, FILE_NAME_TRAIN_PARAMS)
     train_config = get_train_config(path_train_config)
+    set_seed(train_config.seed)
 
     # initialize objects
     cuda_memory_init = init_cuda()
     tokenizer = get_tokenizer(model_id=train_config.model_id, max_seq_length=train_config.max_seq_length)
-    data = get_data(tokenizer=tokenizer)
+    ds = get_dataset(dataset_name=DATASET_NAME, tokenizer=tokenizer, template=train_config.query_template)
+    ds = get_filtered_dataset(ds=ds, print_fn=print_verbose)
+
     model_info = get_base_model_info(train_config.model_id)
     dataset_info = get_dataset_info(DATASET_NAME)
     model = get_model(
@@ -263,10 +362,13 @@ def main(*, path_experiment: str, experiment_name: str, train_params_sha: str, p
             model=model,
             max_steps=train_config.max_steps,
             batch_size=train_config.batch_size,
-            learning_rate=train_config.learning_rate,
-            data=data,
+            ds=ds,
             tokenizer=tokenizer,
             cuda_memory_init=cuda_memory_init,
+            eval_steps=train_config.eval_steps,
+            max_generation_length=train_config.max_generation_length,
+            grad_norm_clip=train_config.grad_norm_clip,
+            optimizer_kwargs=train_config.optimizer_kwargs,
         )
     except Exception as e:
         print_verbose(f"Training failed with error: {e}")
