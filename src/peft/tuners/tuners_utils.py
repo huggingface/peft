@@ -460,11 +460,15 @@ class BaseTuner(nn.Module, ABC):
             isinstance(peft_config.target_modules, (list, set))
             and len(peft_config.target_modules) >= MIN_TARGET_MODULES_FOR_OPTIMIZATION
         ):
-            names_no_target = [
-                name
-                for name in key_list
-                if not any((name == suffix) or name.endswith("." + suffix) for suffix in peft_config.target_modules)
-            ]
+            target_modules_set = set(peft_config.target_modules)
+            names_no_target = []
+            for name in key_list:
+                parts = name.split('.')
+                suffixes = ['.'.join(parts[i:]) for i in range(len(parts))]
+                # Check if any of the suffixes (i.e. ['a.b.c', 'b.c', 'c']) are in the target_modules_set
+                if not any(suffix in target_modules_set for suffix in suffixes):
+                    names_no_target.append(name)
+
             new_target_modules = _find_minimal_target_modules(peft_config.target_modules, names_no_target)
             if len(new_target_modules) < len(peft_config.target_modules):
                 peft_config.target_modules = new_target_modules
