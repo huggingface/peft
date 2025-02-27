@@ -1243,13 +1243,12 @@ class _ConvNd(nn.Module, LoraLayer):
                 3
             ) * self.scaling[adapter]
         else:
-            output_tensor = (
-                self.conv_fn(
-                    weight_A.transpose(0, 1),
-                    weight_B,
-                ).transpose(0, 1)
-                * self.scaling[adapter]
-            )
+            output_tensor = self.conv_fn(weight_A.transpose(0, 1), weight_B)
+
+            if self.base_layer.groups > 1:
+                output_tensor = output_tensor * self.scaling[adapter]
+            else:
+                output_tensor = output_tensor.transpose(0, 1) * self.scaling[adapter]
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
