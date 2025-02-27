@@ -40,11 +40,10 @@ class TrainableTokensConfig(PeftConfig):
             token with a tokenizer, you can tokenize the string and look at the returned `input_ids`. The closer the
             amount of indices is to the total amount of tokens, the less efficient this method gets.
         target_modules (`Optional[Union[list[str], str]]`):
-            List of module names or regex expression of the module names to replace with our
-            `TrainableTokensLayer`. If not defined, it will attempt to get the model's input embedding layer if
-            the model has a `get_input_embeddings` method (transformer models usually do), if that fails the
-            default is 'embed_tokens'. Other example targets are `embedding`, `encoder.embeddings` or
-            `decoder.embeddings`.
+            List of module names or regex expression of the module names to replace with our `TrainableTokensLayer`. If
+            not defined, it will attempt to get the model's input embedding layer if the model has a
+            `get_input_embeddings` method (transformer models usually do), if that fails the default is 'embed_tokens'.
+            Other example targets are `embedding`, `encoder.embeddings` or `decoder.embeddings`.
         init_weights (`bool`):
             By default the new token weights are initialized to be the same as the respective token embeddings. This
             makes TrainableTokens a no-op when not trained. If set to `False` the weights will be random values. Do not

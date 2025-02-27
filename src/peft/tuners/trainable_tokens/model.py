@@ -23,7 +23,7 @@ from tqdm import tqdm
 
 from peft.config import PeftConfig
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists, onload_layer
-from peft.utils import AuxiliaryTrainingWrapper, _get_submodules, _get_input_embeddings_name
+from peft.utils import AuxiliaryTrainingWrapper, _get_input_embeddings_name, _get_submodules
 
 from .layer import TrainableTokensLayer
 

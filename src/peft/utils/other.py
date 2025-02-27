@@ -666,7 +666,7 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
 
 
 def _get_input_embeddings_name(model):
-    if not hasattr(model, 'get_input_embeddings'):
+    if not hasattr(model, "get_input_embeddings"):
         return None
 
     input_embeddings = model.get_input_embeddings()
