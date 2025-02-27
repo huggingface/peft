@@ -18,7 +18,7 @@ import copy
 
 import pytest
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer
 
 from peft import AutoPeftModel, LoraConfig, PeftModel, TrainableTokensConfig, get_peft_model
 from peft.tuners.trainable_tokens.layer import TrainableTokensLayer
@@ -630,19 +630,51 @@ class TestTrainableTokens:
         warnings = [msg for msg in warnings if "Model with `tie_word_embeddings=True` and the" in msg]
         assert warnings
 
-    #    @pytest.mark.parametrize(
-    #        "peft_config",
-    #        [
-    #            LoraConfig(
-    #                target_modules="all-linear",
-    #                trainable_token_indices={"embed_tokens": [0, 1, 3]},
-    #                modules_to_save=["embed_tokens"],
-    #            ),
-    #        ],
-    #    )
-    #    def test_weight_tying_applied_when_model_is_tied_encoder_decoder(self, peft_config, tmp_path):
-    #        # TODO use an encoder/decoder model
-    #        assert False
+    @pytest.mark.parametrize(
+        "peft_config",
+        [
+            LoraConfig(
+                target_modules="all-linear",
+                trainable_token_indices={"shared": [0, 1, 3]},
+            ),
+        ],
+    )
+    def test_weight_tying_applied_when_model_is_tied_encoder_decoder(self, peft_config):
+        model_id = "hf-internal-testing/tiny-random-t5"
+        base_model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
+
+        peft_model = get_peft_model(base_model, peft_config)
+
+        # make it so that the input embeddings diverge. when the weights are tied this should
+        # reflect in the output embeddings as well.
+        self.simulate_training(peft_model.model.shared.token_adapter)
+
+        # we have to find out if the input embedding tying is doing its job during forward.
+        # for this we can leverage the fact that  emb_out(1/emb_in(x))  is  embed_dim  on the
+        # diagonal iff  emb_in.weight == emb_out.weight.
+        token_indices = [0, 1, 2, 3]
+        emb_dim = base_model.config.d_model
+        emb_in = peft_model.model.encoder.embed_tokens(torch.tensor([token_indices]))
+        emb_out = peft_model.model.lm_head(1 / emb_in)
+
+        assert all(torch.diag(emb_out[0]) == torch.tensor([emb_dim] * len(token_indices)))
+
+        # T5 has a decoder embedding layer, we can simply check if it's forward is equal to the encoder
+        # embedding forward.
+        emb_out = peft_model.model.decoder.embed_tokens(torch.tensor([token_indices]))
+
+        assert torch.allclose(emb_in, emb_out)
+
+        # make sure that the state dict does not include weight-tied weights.
+        state_dict = get_peft_model_state_dict(peft_model)
+        assert not [key for key in state_dict if any(tied_key in key for tied_key in peft_model._tied_weights_keys)]
+
+        # make sure that merging and unloading restores the weight-tying.
+        merged_model = peft_model.merge_and_unload()
+
+        assert merged_model.encoder.embed_tokens.weight.data_ptr() == merged_model.lm_head.weight.data_ptr()
+        assert merged_model.encoder.embed_tokens.weight.data_ptr() == merged_model.decoder.embed_tokens.weight.data_ptr()
+
 
     @pytest.mark.parametrize(
         "peft_config",

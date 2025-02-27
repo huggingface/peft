@@ -163,7 +163,10 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
                 deltas = self.trainable_tokens_delta[adapter_name].to(W)
                 W = W.index_copy(dim=0, index=index, source=deltas)
 
-            if not self.tied_adapter:
+            # Normally it should be very clear that we're wrapping Embedding layers but there are cases, such as
+            # tying weights with an LM head where the layer we wrap is a Linear layer. Therefore we must choose
+            # accordingly.
+            if isinstance(self.base_layer, torch.nn.Embedding):
                 result = F.embedding(
                     input=x,
                     weight=W,
@@ -173,12 +176,15 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
                     scale_grad_by_freq=self.base_layer.scale_grad_by_freq,
                     sparse=self.base_layer.sparse,
                 )
-            else:
-                # in case we're the tied weights we are probably currently wrapping a LM head
-                # or something similar. therefore we'll just mimic a linear.
+            elif isinstance(self.base_layer, torch.nn.Linear):
+                # Probably a tied adapter that wraps an LM head.
                 result = F.linear(
                     input=x,
                     weight=W,
+                )
+            else:
+                raise ValueError(
+                    "TrainableTokensLayer wraps an unknown layer type, maybe you are targeting the wrong layer?"
                 )
 
         return result

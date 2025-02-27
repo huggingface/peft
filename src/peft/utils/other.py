@@ -704,7 +704,8 @@ def _set_trainable(
 
     trainable_modules = []
     found_modules = set()
-    key_list = [key for key, _ in model.named_modules()]
+    # disable removal of duplicates to support targeting tied weights
+    key_list = [key for key, _ in model.named_modules(remove_duplicate=False)]
     for key in key_list:
         target_module_found = any(key.endswith(target_key) for target_key in module_names)
         if target_module_found:

@@ -66,7 +66,8 @@ class TrainableTokensModel(BaseTuner):
             self.model.get_input_embeddings(), TrainableTokensLayer
         ):
             module_keys = [".".join(n.split(".")[:-1]) for n in self.model._tied_weights_keys]
-            for name, module in self.model.named_modules():
+            # disable removing of duplicates since we're essentially only dealing with duplicates (i.e. tied weights)
+            for name, module in self.model.named_modules(remove_duplicate=False):
                 matched_keys = [target_key for target_key in module_keys if name.endswith(target_key)]
                 if matched_keys:
                     parent, target, target_name = _get_submodules(model, name)
