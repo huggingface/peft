@@ -184,7 +184,10 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
             output = lora_B(lora_A(dropout(x)))
             if requires_conversion:
                 output = output.to(expected_dtype)
-            output = output * scaling
+
+            if scaling != 1:
+                output = output * scaling
+
             result = result + output
         return result
 
