@@ -21,6 +21,7 @@ import datetime as dt
 import gc
 import json
 import os
+import random
 import sys
 import textwrap
 import time
@@ -66,7 +67,8 @@ dtype_to_bytes_linear = {"float32": 4, "float16": 2, "bfloat16": 2, "int8": 1, "
 # if lr scheduler with warmup is used, the ratio of warmup steps to total steps
 WARMUP_STEP_RATIO = 0.1
 
-# train/valid/test split
+# train/valid/test split -- note that evaluation takes quite long, so don't choose too large sizes for the valid set,
+# since it's run multiple times during training; test is only run once at the end and thus can be larger
 VALID_SIZE = 50
 TEST_SIZE = 1000
 
@@ -167,11 +169,12 @@ def train(
     ds_test = ds_test.map(tokenize_wo_answer_, batched=True).remove_columns(["type", "query", "original_question"])
 
     try:
-        for i in tqdm(range(1, max_steps + 1)):
+        for step in tqdm(range(1, max_steps + 1)):
             tic = time.perf_counter()
 
             # create the batch
             sliced = ds_train[sample : sample + batch_size]
+            tokens_per_sample = [len(i) for i in sliced["input_ids"]]
             del sliced["response"]
             batch = tokenizer.pad(sliced, return_tensors="pt").to(model.device)
             actual_batch_size = len(batch["input_ids"])
@@ -182,7 +185,12 @@ def train(
 
             # add labels, they are automatically shifted by transformers
             labels = batch["input_ids"].clone()
-            labels[batch["attention_mask"] == 0] = -100
+            # We want to ignore the padding tokens except for the first EOS token; if we don't ignore them, the loss
+            # will be dominated by padding tokens; if we ignore all, the model will not learn to predict the EOS token.
+            # TODO: Note that the longest sequence in the batch won't have any PAD/EOS token at the end, this is fine if
+            # the batch size is > 1 but should still be fixed eventually.
+            for i, num_tokens in enumerate(tokens_per_sample):
+                labels[i, num_tokens + 1:] = -100
             batch["labels"] = labels
             num_items_in_batch = batch["attention_mask"].sum().item()
 
@@ -200,12 +208,13 @@ def train(
             lr_scheduler.step()
 
             losses.append(loss.item())
+            tqdm.set_postfix({"loss": loss.item()})
             cuda_memory_log.append(torch.cuda.memory_allocated() - cuda_memory_init)
             toc = time.perf_counter()
             durations.append(toc - tic)
 
             # every couple of steps, evaluate; this can be slow due to generation
-            if i % eval_steps == 0:
+            if step % eval_steps == 0:
                 tic_eval = time.perf_counter()
                 loss_avg = sum(losses[-eval_steps:]) / eval_steps
                 dur_train = sum(durations[-eval_steps:])
@@ -219,14 +228,14 @@ def train(
                     generate_kwargs={"max_length": max_generation_length, "pad_token_id": tokenizer.eos_token_id},
                 )
 
-                example = predictions[0]
+                example = random.choice(predictions)
                 example = textwrap.shorten(example, width=750)
                 example = textwrap.indent(example, "    ")
                 print_verbose(f"\nExample prediction:\n{example}\n")
 
                 accuracy = get_accuracy(predictions=predictions, responses=responses)
                 metrics.append(
-                    {"step": i, "valid accuracy": accuracy, "train loss": loss_avg, "train samples": total_samples}
+                    {"step": step, "valid accuracy": accuracy, "train loss": loss_avg, "train samples": total_samples}
                 )
                 model.train()
                 toc_eval = time.perf_counter()
@@ -234,7 +243,7 @@ def train(
                 elapsed = time.perf_counter() - tic_train
 
                 log_dict = {
-                    "step": f"{i:5d}",
+                    "step": f"{step:5d}",
                     "samples": f"{total_samples:7d}",
                     "lr": f"{lr_scheduler.get_last_lr()[0]:.2e}",
                     "loss avg": f"{loss_avg:.4f}",
@@ -262,7 +271,7 @@ def train(
         accuracy = get_accuracy(predictions=predictions, responses=responses)
         metrics.append(
             {
-                "step": i,
+                "step": step,
                 "test accuracy": accuracy,
                 "train loss": sum(losses[-eval_steps:]) / eval_steps,
                 "train samples": total_samples,

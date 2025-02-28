@@ -115,5 +115,8 @@ Python 3.11+ is recommended
 
 ## Open tasks
 
+- double check calculation of durations, also log eval time and test time
 - consider using `DataLoader`
 - consider adding https://github.com/huggingface/Math-Verify
+- consider adding `weight` argument to cross entropy calculation to downweight the EOS token, but it would require calculating the loss manually instead of relying on transformers (see https://github.com/huggingface/transformers/blob/6a876462c308bd7cd7d3ca8e93abaa7d5b02e90e/src/transformers/loss/loss_utils.py#L24-L48)
+- do a sanity check against/comparison with transformers Trainer
