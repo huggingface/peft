@@ -934,7 +934,7 @@ def get_gptqmodel_quant_linear(gptq_quantization_config, device_map=None):
     if gptq_quantization_config is None:
         return None
 
-    if not is_gptqmodel_available(prompt_install=True):
+    if not is_gptqmodel_available():
         return None
 
     from gptqmodel.utils.importer import hf_select_quant_linear

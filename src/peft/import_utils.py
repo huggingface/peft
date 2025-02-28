@@ -13,15 +13,11 @@
 # limitations under the License.
 import importlib
 import importlib.metadata as importlib_metadata
-import logging
 import platform
 from functools import lru_cache
 
 import packaging.version
 import torch
-
-
-log = logging.getLogger(__name__)
 
 
 @lru_cache
@@ -54,7 +50,7 @@ def is_auto_gptq_available():
 
 
 @lru_cache
-def is_gptqmodel_available(prompt_install: bool = False):
+def is_gptqmodel_available():
     if importlib.util.find_spec("gptqmodel") is not None:
         GPTQMODEL_MINIMUM_VERSION = packaging.version.parse("1.9.0")
         OPTIMUM_MINIMUM_VERSION = packaging.version.parse("1.23.99")
@@ -78,10 +74,6 @@ def is_gptqmodel_available(prompt_install: bool = False):
                 f"Found an incompatible version of gptqmodel. Found version `{version_gptqmodel}`, "
                 f"but only versions above `{GPTQMODEL_MINIMUM_VERSION}` are supported"
             )
-    elif prompt_install:
-        log.info(
-            "Please install GPTQModel for required functionality: `pip install -U gptqmodel --no-build-isolation -v`."
-        )
 
 
 @lru_cache

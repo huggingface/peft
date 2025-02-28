@@ -124,7 +124,7 @@ def dispatch_gptq(
 
     cfg = kwargs.get("gptq_quantization_config", None)
 
-    if is_gptqmodel_available(prompt_install=True):
+    if is_gptqmodel_available():
         from gptqmodel.nn_modules.qlinear import BaseQuantLinear
 
         if isinstance(target_base_layer, BaseQuantLinear):
