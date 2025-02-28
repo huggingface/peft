@@ -26,6 +26,7 @@ import sys
 import tempfile
 import textwrap
 import time
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from functools import partial
 from typing import Any, Literal, Optional
@@ -34,6 +35,7 @@ import huggingface_hub
 import numpy as np
 import torch
 from torch import nn
+from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
 from transformers import set_seed, get_cosine_schedule_with_warmup
 
@@ -118,6 +120,21 @@ class DummyScheduler:
         pass
 
 
+class DummyGradScaler:
+    # if no mixed precision is being used
+    def scale(self, loss):
+        return loss
+
+    def unscale_(self, optimizer):
+        pass
+
+    def step(self, optimizer):
+        optimizer.step()
+
+    def update(self):
+        pass
+
+
 def train(
     *,
     model: nn.Module,
@@ -132,6 +149,7 @@ def train(
     optimizer_kwargs: dict[str, Any],
     query_template: str,
     lr_scheduler: Optional[Literal["cosine"]],
+    use_amp: bool,
 ) -> TrainResult:
 
     cuda_memory_log = []
@@ -140,6 +158,12 @@ def train(
     metrics = []
     sample = 0  # keep count of the current sample
     total_samples = 0  # total number of samples over all epochs
+    if use_amp:
+        grad_scaler = GradScaler()
+        autocast_ctx = autocast
+    else:
+        grad_scaler = DummyGradScaler()
+        autocast_ctx = nullcontext
     optimizer = torch.optim.AdamW(model.parameters(), **optimizer_kwargs)
     if lr_scheduler == "cosine":
         warmup_steps = int(WARMUP_STEP_RATIO * max_steps)
@@ -178,20 +202,23 @@ def train(
             labels = batch["input_ids"].clone()
             labels[batch["attention_mask"] == 0] = -100
             batch["labels"] = labels
-            num_items_in_batch = batch["attention_mask"].sum()
+            num_items_in_batch = batch["attention_mask"].sum().item()
 
             # train step
             optimizer.zero_grad()
-            outputs = model(**batch, num_items_in_batch=num_items_in_batch)
-            loss = outputs.loss
-            loss.backward()
+            with autocast_ctx():
+                outputs = model(**batch, num_items_in_batch=num_items_in_batch)
+                loss = outputs.loss
+            grad_scaler.scale(loss).backward()
             if grad_norm_clip:
+                grad_scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_norm_clip)
-            optimizer.step()
-            losses.append(loss.item())
+            grad_scaler.step(optimizer)
+            grad_scaler.update()
             lr_scheduler.step()
-            cuda_memory_log.append(torch.cuda.memory_allocated() - cuda_memory_init)
 
+            losses.append(loss.item())
+            cuda_memory_log.append(torch.cuda.memory_allocated() - cuda_memory_init)
             toc = time.perf_counter()
             durations.append(toc - tic)
 
@@ -417,6 +444,7 @@ def main(*, path_experiment: str, experiment_name: str, train_params_sha: str, p
             optimizer_kwargs=train_config.optimizer_kwargs,
             query_template=train_config.query_template,
             lr_scheduler=train_config.lr_scheduler,
+            use_amp=train_config.use_amp,
         )
     except Exception as e:
         print_verbose(f"Training failed with error: {e}")

@@ -65,6 +65,7 @@ class TrainConfig:
         grad_norm_clip: The gradient norm clipping value (set to 0 to skip)
         optimizer_kwargs: The optimizer keyword arguments (lr etc.)
         lr_scheduler: The learning rate scheduler (currently only None or 'cosine' are supported)
+        use_amp: Whether to use automatic mixed precision
     """
 
     model_id: str
@@ -80,6 +81,7 @@ class TrainConfig:
     grad_norm_clip: float  # set to 0 to skip
     optimizer_kwargs: dict[str, Any]
     lr_scheduler: Optional[Literal["cosine"]]
+    use_amp: bool
 
     def __post_init__(self):
         if not isinstance(self.model_id, str):
@@ -98,7 +100,7 @@ class TrainConfig:
             raise ValueError(f"Invalid eval_steps: {self.eval_steps} > max_steps: {self.max_steps}")
         if self.max_generation_length <= 0:
             raise ValueError(f"Invalid max_generation_length: {self.max_generation_length}")
-        if self.grad_norm_clip <= 0:
+        if self.grad_norm_clip < 0:
             raise ValueError(f"Invalid grad_norm_clip: {self.grad_norm_clip}")
         if self.lr_scheduler not in [None, "cosine"]:
             raise ValueError(f"Invalid lr_scheduler: {self.lr_scheduler}, must be None or 'cosine'")
@@ -189,7 +191,6 @@ def get_base_model(
         model = AutoModelForCausalLM.from_pretrained(model_id, device_map=device)
     else:
         raise ValueError(f"Invalid dtype: {dtype}")
-    # model.config.use_cache = False # FIXME needed?
 
     if compile:
         model = torch.compile(model)

@@ -14,5 +14,6 @@
     "weight_decay": 0.1
   },
   "lr_scheduler": "cosine",
+  "use_amp": false,
   "query_template": "Question: {query} Think step by step.\nAnswer:"
 }
