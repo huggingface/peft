@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """
-TODO
+Main entry point to run the experiments. Contains general setup and the proper training code.
 """
 
 import argparse

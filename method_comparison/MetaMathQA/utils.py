@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """
-TODO
+All utilities not related to data handling.
 """
 
 import enum
