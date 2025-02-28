@@ -61,8 +61,9 @@ class TrainConfig:
     query_template: str
     max_generation_length: int
     seed: int
-    grad_norm_clip: float
+    grad_norm_clip: float  # set to 0 to skip
     optimizer_kwargs: dict[str, Any]
+    lr_scheduler: Optional[Literal["cosine"]]
 
     def __post_init__(self):
         if not isinstance(self.model_id, str):
@@ -83,6 +84,8 @@ class TrainConfig:
             raise ValueError(f"Invalid max_generation_length: {self.max_generation_length}")
         if self.grad_norm_clip <= 0:
             raise ValueError(f"Invalid grad_norm_clip: {self.grad_norm_clip}")
+        if self.lr_scheduler not in [None, "cosine"]:
+            raise ValueError(f"Invalid lr_scheduler: {self.lr_scheduler}, must be None or 'cosine'")
         if "{query}" not in self.query_template:
             raise ValueError("Invalid query_template, must contain '{query}'")
 

@@ -26,21 +26,21 @@ import sys
 import tempfile
 import textwrap
 import time
-
-# import warnings
 from dataclasses import asdict, dataclass
-from typing import Any
+from functools import partial
+from typing import Any, Literal, Optional
 
 import huggingface_hub
 import numpy as np
 import torch
 from torch import nn
-from transformers import set_seed
+from tqdm import tqdm
+from transformers import set_seed, get_cosine_schedule_with_warmup
 
 from peft import PeftConfig
 from peft.utils import SAFETENSORS_WEIGHTS_NAME
 
-from data import get_dataset, get_filtered_dataset, get_train_valid_test_datasets
+from data import get_dataset, get_filtered_dataset, get_train_valid_test_datasets, tokenize_with_answer, tokenize_wo_answer
 from utils import (
     DATASET_NAME,
     FILE_NAME_TRAIN_PARAMS,
@@ -67,6 +67,8 @@ RESULT_PATH = os.path.join(os.path.dirname(__file__), "results")
 RESULT_PATH_TEST = os.path.join(os.path.dirname(__file__), "temporary_results")
 # cancelled results
 RESULT_PATH_CANCELLED = os.path.join(os.path.dirname(__file__), "cancelled_results")
+# if lr scheduler with warmup is used, the ratio of warmup steps to total steps
+WARMUP_STEP_RATIO = 0.1
 
 # train/valid/test split
 VALID_SIZE = 40  # FIXME small, as it is performed every couple of steps
@@ -88,17 +90,32 @@ class TrainResult:
     metrics: list[Any]  # TODO
 
 
-def evaluate(model, tokenizer, ds, batch_size, generate_kwargs) -> tuple[list[str], list[str]]:
+def evaluate(model, tokenizer, ds, batch_size, generate_kwargs, use_tqdm=False) -> tuple[list[str], list[str]]:
     with torch.no_grad():
         predictions = []
         responses = []
-        for j in range(0, len(ds), batch_size):
+        iter_ = range(0, len(ds), batch_size)
+        if use_tqdm:
+            iter_ = tqdm(iter_)
+        for j in iter_:
             sliced = ds[j : j + batch_size]
             responses += sliced.pop("response")
             batch = tokenizer.pad(sliced, return_tensors="pt", padding_side="left").to(model.device)
             outputs = model.generate(**batch, **generate_kwargs)
             predictions += tokenizer.batch_decode(outputs, skip_special_tokens=True)
     return predictions, responses
+
+
+class DummyScheduler:
+    # if no lr scheduler is being used
+    def __init__(self, lr):
+        self.lr = lr
+
+    def get_last_lr(self):
+        return [self.lr]
+
+    def step(self):
+        pass
 
 
 def train(
@@ -113,31 +130,49 @@ def train(
     max_generation_length: int,
     grad_norm_clip: float,
     optimizer_kwargs: dict[str, Any],
+    query_template: str,
+    lr_scheduler: Optional[Literal["cosine"]],
 ) -> TrainResult:
 
     cuda_memory_log = []
     losses = []
+    durations = []
     metrics = []
     sample = 0  # keep count of the current sample
     total_samples = 0  # total number of samples over all epochs
     optimizer = torch.optim.AdamW(model.parameters(), **optimizer_kwargs)
+    if lr_scheduler == "cosine":
+        warmup_steps = int(WARMUP_STEP_RATIO * max_steps)
+        lr_scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=max_steps)
+    else:
+        lr_scheduler = DummyScheduler(optimizer_kwargs["lr"])
+
     status = TrainStatus.FAILED
     tic_train = time.perf_counter()
     eval_time = 0
+
     ds_train, ds_valid, ds_test = get_train_valid_test_datasets(
         ds=ds, valid_size=VALID_SIZE, test_size=TEST_SIZE, print_fn=print_verbose
     )
+    tokenize_with_answer_ = partial(tokenize_with_answer, tokenizer=tokenizer, template=query_template)
+    tokenize_wo_answer_ = partial(tokenize_wo_answer, tokenizer=tokenizer, template=query_template)
+    ds_train = ds_train.map(tokenize_with_answer_, batched=True).remove_columns(['type', 'query', 'original_question'])
+    ds_valid = ds_valid.map(tokenize_wo_answer_, batched=True).remove_columns(['type', 'query', 'original_question'])
+    ds_test = ds_test.map(tokenize_wo_answer_, batched=True).remove_columns(['type', 'query', 'original_question'])
 
     try:
-        for i in range(1, max_steps + 1):
+        for i in tqdm(range(1, max_steps + 1)):
             tic = time.perf_counter()
-            batch = tokenizer.pad(ds_train[sample : sample + batch_size], return_tensors="pt").to(model.device)
+
+            # create the batch
+            sliced = ds_train[sample : sample + batch_size]
+            del sliced["response"]
+            batch = tokenizer.pad(sliced, return_tensors="pt").to(model.device)
             actual_batch_size = len(batch["input_ids"])
             total_samples += actual_batch_size
             sample += batch_size
             if sample >= len(ds_train):  # new epoch
                 sample = 0
-            accuracy = None
 
             # add labels, they are automatically shifted by transformers
             labels = batch["input_ids"].clone()
@@ -145,29 +180,27 @@ def train(
             batch["labels"] = labels
             num_items_in_batch = batch["attention_mask"].sum()
 
+            # train step
             optimizer.zero_grad()
             outputs = model(**batch, num_items_in_batch=num_items_in_batch)
             loss = outputs.loss
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_norm_clip)
+            if grad_norm_clip:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_norm_clip)
             optimizer.step()
             losses.append(loss.item())
+            lr_scheduler.step()
             cuda_memory_log.append(torch.cuda.memory_allocated() - cuda_memory_init)
 
             toc = time.perf_counter()
-            log_dict = {
-                "step": f"{i:5d}",
-                "loss": f"{loss.item():>6.3f}",
-                "train time": f"{toc - tic:.2f}s",
-                "samples": f"{total_samples:7d}",
-            }
+            durations.append(toc - tic)
 
+            # every couple of steps, evaluate; this can be slow due to generation
             if i % eval_steps == 0:
                 tic_eval = time.perf_counter()
                 loss_avg = sum(losses[-eval_steps:]) / eval_steps
-                log_dict["loss avg"] = f"{loss_avg:.4f}"
+                dur_train = sum(durations[-eval_steps:])
 
-                # evaluate
                 model.eval()
                 predictions, responses = evaluate(
                     model=model,
@@ -177,7 +210,11 @@ def train(
                     generate_kwargs={"max_length": max_generation_length, "pad_token_id": tokenizer.eos_token_id},
                 )
 
-                print_verbose(f"\nExample prediction:\n{textwrap.indent(predictions[0], '    ')}\n")
+                example = predictions[0]
+                example = textwrap.shorten(example, width=750)
+                example = textwrap.indent(example, "    ")
+                print_verbose(f"\nExample prediction:\n{example}\n")
+
                 accuracy = get_accuracy(predictions=predictions, responses=responses)
                 metrics.append(
                     {"step": i, "valid accuracy": accuracy, "train loss": loss_avg, "train samples": total_samples}
@@ -185,15 +222,23 @@ def train(
                 model.train()
                 toc_eval = time.perf_counter()
                 eval_time += toc_eval - tic_eval
-                log_dict["valid acc"] = f"{accuracy:.3f}"
-                log_dict["eval time"] = f"{toc_eval - tic_eval:.2f}s"
                 elapsed = time.perf_counter() - tic_train
-                log_dict["elapsed time"] = f"{elapsed // 60:.0f}min {elapsed % 60:.0f}s"
+
+                log_dict = {
+                    "step": f"{i:5d}",
+                    "samples": f"{total_samples:7d}",
+                    "lr": f"{lr_scheduler.get_last_lr()[0]:.2e}",
+                    "loss avg": f"{loss_avg:.4f}",
+                    "valid acc": f"{accuracy:.3f}",
+                    "train time": f"{dur_train:.2f}s",
+                    "eval time": f"{toc_eval - tic_eval:.2f}s",
+                    "elapsed time": f"{elapsed // 60:.0f}min {elapsed % 60:.0f}s",
+                }
+                print_verbose(json.dumps(log_dict))
 
             torch.cuda.empty_cache()
             gc.collect()
 
-            print_verbose(json.dumps(log_dict))
 
         print_verbose(f"Training finished after {max_steps} steps, evaluation on test set follows.")
         # test set evaluation
@@ -204,6 +249,7 @@ def train(
             ds=ds_test,
             batch_size=batch_size,
             generate_kwargs={"max_length": max_generation_length, "pad_token_id": tokenizer.eos_token_id},
+            use_tqdm=len(ds_test) > 100,
         )
         accuracy = get_accuracy(predictions=predictions, responses=responses)
         metrics.append({
@@ -343,7 +389,7 @@ def main(*, path_experiment: str, experiment_name: str, train_params_sha: str, p
     # initialize objects
     cuda_memory_init = init_cuda()
     tokenizer = get_tokenizer(model_id=train_config.model_id, max_seq_length=train_config.max_seq_length)
-    ds = get_dataset(dataset_name=DATASET_NAME, tokenizer=tokenizer, template=train_config.query_template)
+    ds = get_dataset(dataset_name=DATASET_NAME)
     ds = get_filtered_dataset(ds=ds, print_fn=print_verbose)
 
     model_info = get_base_model_info(train_config.model_id)
@@ -369,6 +415,8 @@ def main(*, path_experiment: str, experiment_name: str, train_params_sha: str, p
             max_generation_length=train_config.max_generation_length,
             grad_norm_clip=train_config.grad_norm_clip,
             optimizer_kwargs=train_config.optimizer_kwargs,
+            query_template=train_config.query_template,
+            lr_scheduler=train_config.lr_scheduler,
         )
     except Exception as e:
         print_verbose(f"Training failed with error: {e}")

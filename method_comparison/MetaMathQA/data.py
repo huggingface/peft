@@ -23,7 +23,9 @@ from sklearn.model_selection import StratifiedKFold
 import numpy as np
 
 
-CHAR_LIMIT = 550
+# 1800 would cover ~99% of text+reply, which should ~ correspond to < 768 tokens
+# going a bit lower (~97%) to have wiggle room
+CHAR_LIMIT = 1500
 
 
 def get_filtered_dataset(*, ds: datasets.Dataset, print_fn: Callable[[Any, ...], None]) -> Dataset:
@@ -34,8 +36,8 @@ def get_filtered_dataset(*, ds: datasets.Dataset, print_fn: Callable[[Any, ...],
     model, but we want the same filter for each model.
 
     """
-    char_lengths = [len(x) for x in ds["query"]]
-    idx_filtered = [i for i, l in enumerate(char_lengths) if l <= CHAR_LIMIT]
+    char_lengths = [len(f"{q} {r}") for q, r in zip(ds['query'], ds['response'])]
+    idx_filtered = [i for i, length in enumerate(char_lengths) if length <= CHAR_LIMIT]
     print_fn(f"Filtered dataset: {100 * len(idx_filtered) / len(ds):.1f}% of the original dataset")
     return ds.select(idx_filtered)
 
@@ -71,28 +73,37 @@ def get_train_valid_test_datasets(
     idx_test = idx_rest[idx_test]
     idx_valid = idx_rest[idx_valid]
     print_fn(f"Valid size: {len(idx_valid)}")
+    print_fn(f"Test size: {len(idx_test)}")
 
-    # unused columns must be removed; now we don't need them anymore
-    ds_train = ds.select(idx_train).remove_columns(['type', 'query', 'original_question', 'response'])
-    ds_valid = ds.select(idx_valid).remove_columns(['type', 'query', 'original_question'])
-    ds_test = ds.select(idx_test).remove_columns(['type', 'query', 'original_question'])
+    ds_train = ds.select(idx_train)
+    ds_valid = ds.select(idx_valid)
+    ds_test = ds.select(idx_test)
 
     assert set(idx_test) | set(idx_valid) | set(idx_train) == set(range(total_size))
     return ds_train, ds_valid, ds_test
 
 
-def get_dataset(*, dataset_name, tokenizer, template) -> Dataset:
-    def tokenize(samples):
-        # For some reason, the max sequence length is not honored by the tokenizer, resulting in IndexErrors. Thus,
-        # manually ensure that sequences are not too long.
-        queries = [template.format(query=sample) for sample in samples["query"]]
-        tokenized = tokenizer(queries)
-        tokenized["input_ids"] = [input_ids[: tokenizer.model_max_length] for input_ids in tokenized["input_ids"]]
-        tokenized["attention_mask"] = [
-            input_ids[: tokenizer.model_max_length] for input_ids in tokenized["attention_mask"]
-        ]
-        return tokenized
+def tokenize_with_answer(samples, tokenizer, template):
+    # fixme
+    queries = [template.format(query=sample) + answer for sample, answer in zip(samples["query"], samples["response"])]
+    tokenized = tokenizer(queries)
+    tokenized["input_ids"] = [input_ids[: tokenizer.model_max_length] for input_ids in tokenized["input_ids"]]
+    tokenized["attention_mask"] = [
+        input_ids[: tokenizer.model_max_length] for input_ids in tokenized["attention_mask"]
+    ]
+    return tokenized
 
+
+def tokenize_wo_answer(samples, tokenizer, template):
+    queries = [template.format(query=sample) for sample in samples["query"]]
+    tokenized = tokenizer(queries)
+    tokenized["input_ids"] = [input_ids[: tokenizer.model_max_length] for input_ids in tokenized["input_ids"]]
+    tokenized["attention_mask"] = [
+        input_ids[: tokenizer.model_max_length] for input_ids in tokenized["attention_mask"]
+    ]
+    return tokenized
+
+
+def get_dataset(*, dataset_name) -> Dataset:
     ds = load_dataset(dataset_name)["train"]
-    ds = ds.map(tokenize, batched=True)
     return ds
