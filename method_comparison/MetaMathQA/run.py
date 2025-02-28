@@ -30,13 +30,9 @@ from typing import Any, Literal, Optional
 
 import torch
 from torch import nn
-from torch.cuda.amp import autocast, GradScaler
+from torch.cuda.amp import GradScaler, autocast
 from tqdm import tqdm
-from transformers import set_seed, get_cosine_schedule_with_warmup
-
-from peft import PeftConfig
-
-from data import get_dataset, get_filtered_dataset, get_train_valid_test_datasets, tokenize_with_answer, tokenize_wo_answer
+from transformers import get_cosine_schedule_with_warmup, set_seed
 from utils import (
     DATASET_NAME,
     FILE_NAME_TRAIN_PARAMS,
@@ -52,6 +48,15 @@ from utils import (
     log_results,
     validate_experiment_path,
 )
+
+from data import (
+    get_dataset,
+    get_filtered_dataset,
+    get_train_valid_test_datasets,
+    tokenize_with_answer,
+    tokenize_wo_answer,
+)
+from peft import PeftConfig
 
 
 # # suppress all warnings
@@ -125,7 +130,6 @@ def train(
     lr_scheduler_arg: Optional[Literal["cosine"]],
     use_amp: bool,
 ) -> TrainResult:
-
     cuda_memory_log = []
     losses = []
     durations = []
@@ -141,7 +145,9 @@ def train(
     optimizer = torch.optim.AdamW(model.parameters(), **optimizer_kwargs)
     if lr_scheduler_arg == "cosine":
         warmup_steps = int(WARMUP_STEP_RATIO * max_steps)
-        lr_scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=max_steps)
+        lr_scheduler = get_cosine_schedule_with_warmup(
+            optimizer, num_warmup_steps=warmup_steps, num_training_steps=max_steps
+        )
     elif lr_scheduler_arg is None:
         lr_scheduler = DummyScheduler(optimizer_kwargs["lr"])
     else:
@@ -156,9 +162,9 @@ def train(
     )
     tokenize_with_answer_ = partial(tokenize_with_answer, tokenizer=tokenizer, template=query_template)
     tokenize_wo_answer_ = partial(tokenize_wo_answer, tokenizer=tokenizer, template=query_template)
-    ds_train = ds_train.map(tokenize_with_answer_, batched=True).remove_columns(['type', 'query', 'original_question'])
-    ds_valid = ds_valid.map(tokenize_wo_answer_, batched=True).remove_columns(['type', 'query', 'original_question'])
-    ds_test = ds_test.map(tokenize_wo_answer_, batched=True).remove_columns(['type', 'query', 'original_question'])
+    ds_train = ds_train.map(tokenize_with_answer_, batched=True).remove_columns(["type", "query", "original_question"])
+    ds_valid = ds_valid.map(tokenize_wo_answer_, batched=True).remove_columns(["type", "query", "original_question"])
+    ds_test = ds_test.map(tokenize_wo_answer_, batched=True).remove_columns(["type", "query", "original_question"])
 
     try:
         for i in tqdm(range(1, max_steps + 1)):
@@ -242,7 +248,6 @@ def train(
             torch.cuda.empty_cache()
             gc.collect()
 
-
         print_verbose(f"Training finished after {max_steps} steps, evaluation on test set follows.")
         # test set evaluation
         model.eval()
@@ -255,12 +260,14 @@ def train(
             use_tqdm=len(ds_test) > 100,
         )
         accuracy = get_accuracy(predictions=predictions, responses=responses)
-        metrics.append({
-            "step": i,
-            "test accuracy": accuracy,
-            "train loss": sum(losses[-eval_steps:]) / eval_steps,
-            "train samples": total_samples,
-            })
+        metrics.append(
+            {
+                "step": i,
+                "test accuracy": accuracy,
+                "train loss": sum(losses[-eval_steps:]) / eval_steps,
+                "train samples": total_samples,
+            }
+        )
         print_verbose(f"Test accuracy: {accuracy:.3f}")
 
     except KeyboardInterrupt:

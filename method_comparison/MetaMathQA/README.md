@@ -46,6 +46,7 @@ Apart from the normal PEFT dependencies, ensure that the packages in the `requir
 python -m pip install -r requirements.txt
 ```
 
+Python 3.11+ is recommended
 
 ## Open tasks
 

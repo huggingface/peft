@@ -265,6 +265,7 @@ def get_accuracy(*, predictions: list[str], responses: list[str]) -> float:
 # LOGGING #
 ###########
 
+
 def get_base_model_info(model_id: str) -> huggingface_hub.ModelInfo:
     return hf_api.model_info(model_id)
 
@@ -286,6 +287,7 @@ def get_package_info() -> dict[str, Optional[str]]:
     import datasets
     import torch
     import transformers
+
     import peft
 
     package_info = {
@@ -370,7 +372,9 @@ def log_to_console(log_data: dict[str, Any], print_fn: Callable[..., None]) -> N
     print_fn(f"file size of checkpoint: {file_size / 2**20:.1f}MB")
 
 
-def log_to_file(*, log_data: dict, save_dir: str, experiment_name: str, timestamp: str, print_fn: Callable[..., None]) -> None:
+def log_to_file(
+    *, log_data: dict, save_dir: str, experiment_name: str, timestamp: str, print_fn: Callable[..., None]
+) -> None:
     file_name = f"{experiment_name.replace(os.path.sep, '--')}--{timestamp.replace(':', '-')}.json"
     file_name = os.path.join(save_dir, file_name)
     with open(file_name, "w") as f:
@@ -449,4 +453,6 @@ def log_results(
     }
 
     log_to_console(log_data, print_fn=print)  # use normal print to be able to redirect if so desired
-    log_to_file(log_data=log_data, save_dir=save_dir, experiment_name=experiment_name, timestamp=start_date, print_fn=print_fn)
+    log_to_file(
+        log_data=log_data, save_dir=save_dir, experiment_name=experiment_name, timestamp=start_date, print_fn=print_fn
+    )

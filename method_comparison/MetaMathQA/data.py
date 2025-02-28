@@ -15,12 +15,13 @@
 """
 TODO
 """
-from typing import Any, Callable
+
+from typing import Callable
 
 import datasets
+import numpy as np
 from datasets import Dataset, load_dataset
 from sklearn.model_selection import StratifiedKFold
-import numpy as np
 
 
 # 1800 would cover ~99% of text+reply, which should ~ correspond to < 768 tokens
@@ -36,7 +37,7 @@ def get_filtered_dataset(*, ds: datasets.Dataset, print_fn: Callable[..., None])
     model, but we want the same filter for each model.
 
     """
-    char_lengths = [len(f"{q} {r}") for q, r in zip(ds['query'], ds['response'])]
+    char_lengths = [len(f"{q} {r}") for q, r in zip(ds["query"], ds["response"])]
     idx_filtered = [i for i, length in enumerate(char_lengths) if length <= CHAR_LIMIT]
     print_fn(f"Filtered dataset: {100 * len(idx_filtered) / len(ds):.1f}% of the original dataset")
     return ds.select(idx_filtered)
@@ -69,7 +70,9 @@ def get_train_valid_test_datasets(
 
     n_splits_test = (valid_size + test_size) // valid_size
     kfold = StratifiedKFold(n_splits_test, shuffle=True, random_state=0)
-    idx_test, idx_valid  = next(iter(kfold.split(np.arange(len(idx_rest)).reshape(-1, 1), y=np.array(dataset_types)[idx_rest])))
+    idx_test, idx_valid = next(
+        iter(kfold.split(np.arange(len(idx_rest)).reshape(-1, 1), y=np.array(dataset_types)[idx_rest]))
+    )
     idx_test = idx_rest[idx_test]
     idx_valid = idx_rest[idx_valid]
     print_fn(f"Valid size: {len(idx_valid)}")
