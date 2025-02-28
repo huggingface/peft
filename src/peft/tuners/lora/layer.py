@@ -490,7 +490,7 @@ class LoraLayer(BaseTunerLayer):
             # layer output
             sub_batch = x[sub_batch_indices_list[i]].to(lora_A.weight.dtype)
 
-            if scaling == 1: # no scaling
+            if scaling == 1:  # no scaling
                 lora_output = lora_B(lora_A(dropout(sub_batch)))
             else:
                 lora_output = lora_B(lora_A(dropout(sub_batch))) * scaling
@@ -726,7 +726,7 @@ class Linear(nn.Module, LoraLayer):
                 x = self._cast_input_dtype(x, lora_A.weight.dtype)
 
                 if not self.use_dora[active_adapter]:
-                    if scaling == 1: # no scaling
+                    if scaling == 1:  # no scaling
                         result = result + lora_B(lora_A(dropout(x)))
                     else:
                         result = result + lora_B(lora_A(dropout(x))) * scaling

@@ -20,7 +20,9 @@ from functools import lru_cache
 import packaging.version
 import torch
 
+
 log = logging.getLogger(__name__)
+
 
 @lru_cache
 def is_bnb_available() -> bool:
@@ -77,8 +79,9 @@ def is_gptqmodel_available(prompt_install: bool = False):
                 f"but only versions above `{GPTQMODEL_MINIMUM_VERSION}` are supported"
             )
     elif prompt_install:
-        log.info("Please install GPTQModel for required functionality: `pip install -U gptqmodel --no-build-isolation -v`.")
-
+        log.info(
+            "Please install GPTQModel for required functionality: `pip install -U gptqmodel --no-build-isolation -v`."
+        )
 
 
 @lru_cache
