@@ -736,15 +736,9 @@ class Linear(nn.Module, LoraLayer):
                 if not self.use_dora[active_adapter]:
                     # Loras such as EoRA will always be scaling == 1 so we can skip the no-op math
                     if scaling == 1:
-                        if isinstance(dropout, nn.Dropout):
-                            result = result + lora_B(lora_A(dropout(x)))
-                        else:
-                            result = result + lora_B(lora_A(x))
+                        result = result + lora_B(lora_A(dropout(x)))
                     else:
-                        if isinstance(dropout, nn.Dropout):
-                            result = result + lora_B(lora_A(dropout(x))) * scaling
-                        else:
-                            result = result + lora_B(lora_A(x)) * scaling
+                        result = result + lora_B(lora_A(dropout(x))) * scaling
                 else:
                     if isinstance(dropout, nn.Identity) or not self.training:
                         base_result = result

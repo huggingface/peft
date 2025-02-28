@@ -83,12 +83,7 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
                 expected_dtype = result.dtype
                 x = self._cast_input_dtype(x, lora_A.weight.dtype)
 
-            # lora_dropout float value is not stored so we need to check for cls
-            if isinstance(dropout, torch.nn.Dropout):
-                output = lora_B(lora_A(dropout(x)))
-            else:
-                # dropout == Identity which is no-op if lora_dropout == 0.0
-                output = lora_B(lora_A(x))
+            output = lora_B(lora_A(dropout(x)))
 
             if requires_conversion:
                 output = output.to(expected_dtype)

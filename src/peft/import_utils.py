@@ -52,7 +52,7 @@ def is_auto_gptq_available():
 @lru_cache
 def is_gptqmodel_available():
     if importlib.util.find_spec("gptqmodel") is not None:
-        GPTQMODEL_MINIMUM_VERSION = packaging.version.parse("1.9.0")
+        GPTQMODEL_MINIMUM_VERSION = packaging.version.parse("1.9.99")
         OPTIMUM_MINIMUM_VERSION = packaging.version.parse("1.23.99")
         version_gptqmodel = packaging.version.parse(importlib_metadata.version("gptqmodel"))
         if GPTQMODEL_MINIMUM_VERSION <= version_gptqmodel:
