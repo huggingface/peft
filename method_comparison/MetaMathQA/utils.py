@@ -156,9 +156,6 @@ def get_train_config(path: str) -> TrainConfig:
 
 def init_cuda() -> int:
     torch.manual_seed(0)
-    if device == "cpu":
-        return
-
     torch.cuda.reset_peak_memory_stats()
     torch.cuda.manual_seed_all(0)
     # might not be necessary, but just to be sure
@@ -289,7 +286,6 @@ def get_package_info() -> dict[str, Optional[str]]:
     import datasets
     import torch
     import transformers
-
     import peft
 
     package_info = {
@@ -304,6 +300,7 @@ def get_package_info() -> dict[str, Optional[str]]:
         "torch-version": torch.__version__,
         "torch-commit-hash": get_git_hash(torch),
     }
+    return package_info
 
 
 def get_system_info() -> dict[str, str]:
@@ -357,7 +354,7 @@ class TrainResult:
     metrics: list[Any]  # TODO
 
 
-def log_to_console(log_data: dict[str, str], print_fn: Callable[[Any, ...], None]) -> None:
+def log_to_console(log_data: dict[str, Any], print_fn: Callable[..., None]) -> None:
     cuda_memory_max = log_data["train_info"]["cuda_memory_max"]
     cuda_memory_avg = log_data["train_info"]["cuda_memory_avg"]
     cuda_memory_99th = log_data["train_info"]["cuda_memory_99th"]
@@ -373,7 +370,7 @@ def log_to_console(log_data: dict[str, str], print_fn: Callable[[Any, ...], None
     print_fn(f"file size of checkpoint: {file_size / 2**20:.1f}MB")
 
 
-def log_to_file(*, log_data: dict, save_dir: str, experiment_name: str, timestamp: str, print_fn: Callable[[Any, ...], None]) -> None:
+def log_to_file(*, log_data: dict, save_dir: str, experiment_name: str, timestamp: str, print_fn: Callable[..., None]) -> None:
     file_name = f"{experiment_name.replace(os.path.sep, '--')}--{timestamp.replace(':', '-')}.json"
     file_name = os.path.join(save_dir, file_name)
     with open(file_name, "w") as f:
@@ -393,7 +390,7 @@ def log_results(
     start_date: str,
     peft_config_sha: str,
     train_params_sha: str,
-    print_fn: Callable[[Any, ...], None],
+    print_fn: Callable[..., None],
 ):
     # collect results
     cuda_memory_final = torch.cuda.max_memory_allocated()

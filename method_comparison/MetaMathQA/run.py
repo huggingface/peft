@@ -122,7 +122,7 @@ def train(
     grad_norm_clip: float,
     optimizer_kwargs: dict[str, Any],
     query_template: str,
-    lr_scheduler: Optional[Literal["cosine"]],
+    lr_scheduler_arg: Optional[Literal["cosine"]],
     use_amp: bool,
 ) -> TrainResult:
 
@@ -133,21 +133,23 @@ def train(
     sample = 0  # keep count of the current sample
     total_samples = 0  # total number of samples over all epochs
     if use_amp:
-        grad_scaler = GradScaler()
-        autocast_ctx = autocast
+        grad_scaler: GradScaler | DummyGradScaler = GradScaler()
+        autocast_ctx: type[autocast] | type[nullcontext[None]] = autocast
     else:
         grad_scaler = DummyGradScaler()
         autocast_ctx = nullcontext
     optimizer = torch.optim.AdamW(model.parameters(), **optimizer_kwargs)
-    if lr_scheduler == "cosine":
+    if lr_scheduler_arg == "cosine":
         warmup_steps = int(WARMUP_STEP_RATIO * max_steps)
         lr_scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=max_steps)
-    else:
+    elif lr_scheduler_arg is None:
         lr_scheduler = DummyScheduler(optimizer_kwargs["lr"])
+    else:
+        raise ValueError(f"Invalid lr_scheduler argument: {lr_scheduler_arg}")
 
     status = TrainStatus.FAILED
     tic_train = time.perf_counter()
-    eval_time = 0
+    eval_time = 0.0
 
     ds_train, ds_valid, ds_test = get_train_valid_test_datasets(
         ds=ds, valid_size=VALID_SIZE, test_size=TEST_SIZE, print_fn=print_verbose
@@ -320,7 +322,7 @@ def main(*, path_experiment: str, experiment_name: str, train_params_sha: str, p
             grad_norm_clip=train_config.grad_norm_clip,
             optimizer_kwargs=train_config.optimizer_kwargs,
             query_template=train_config.query_template,
-            lr_scheduler=train_config.lr_scheduler,
+            lr_scheduler_arg=train_config.lr_scheduler,
             use_amp=train_config.use_amp,
         )
     except Exception as e:

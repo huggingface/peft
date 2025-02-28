@@ -28,7 +28,7 @@ import numpy as np
 CHAR_LIMIT = 1500
 
 
-def get_filtered_dataset(*, ds: datasets.Dataset, print_fn: Callable[[Any, ...], None]) -> Dataset:
+def get_filtered_dataset(*, ds: datasets.Dataset, print_fn: Callable[..., None]) -> Dataset:
     """Return the filtered dataset, with long queries removed.
 
     We determined that 99% of queries have 529 or fewer characters. Characters roughly correspond to tokens, so this is
@@ -47,7 +47,7 @@ def get_train_valid_test_datasets(
     ds: datasets.Dataset,
     valid_size: int,
     test_size: int,
-    print_fn: Callable[[Any, ...], None],
+    print_fn: Callable[..., None],
 ) -> tuple[Dataset, Dataset, Dataset]:
     """
     Return the indices of the train, valid, and test splits of the dataset.
