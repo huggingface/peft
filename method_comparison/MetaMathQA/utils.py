@@ -16,14 +16,17 @@
 TODO
 """
 
+import enum
 import json
 import os
 import platform
 import subprocess
-from dataclasses import dataclass
-from typing import Any, Literal, Optional
+import tempfile
+from dataclasses import asdict, dataclass
+from typing import Any, Callable, Literal, Optional
 
 import huggingface_hub
+import numpy as np
 import torch
 from torch import nn
 from transformers import (
@@ -34,7 +37,7 @@ from transformers import (
 
 import peft
 from peft import PeftConfig, get_peft_model, prepare_model_for_kbit_training
-from peft.utils import CONFIG_NAME
+from peft.utils import CONFIG_NAME, SAFETENSORS_WEIGHTS_NAME
 
 
 if not torch.cuda.is_available():
@@ -44,6 +47,12 @@ device = "cuda"
 CUDA_MEMORY_INIT_THRESHOLD = 500 * 2**20  # 500MB
 FILE_NAME_TRAIN_PARAMS = "training_params.json"
 DATASET_NAME = "meta-math/MetaMathQA"
+# main results
+RESULT_PATH = os.path.join(os.path.dirname(__file__), "results")
+# testing results
+RESULT_PATH_TEST = os.path.join(os.path.dirname(__file__), "temporary_results")
+# cancelled results
+RESULT_PATH_CANCELLED = os.path.join(os.path.dirname(__file__), "cancelled_results")
 hf_api = huggingface_hub.HfApi()
 
 
@@ -255,6 +264,10 @@ def get_accuracy(*, predictions: list[str], responses: list[str]) -> float:
     return correct / len(predictions)
 
 
+###########
+# LOGGING #
+###########
+
 def get_base_model_info(model_id: str) -> huggingface_hub.ModelInfo:
     return hf_api.model_info(model_id)
 
@@ -327,3 +340,116 @@ def get_peft_branch() -> str:
         .decode()
         .strip()
     )
+
+
+class TrainStatus(enum.Enum):
+    FAILED = "failed"
+    SUCCESS = "success"
+    CANCELED = "canceled"
+
+
+@dataclass
+class TrainResult:
+    status: TrainStatus
+    train_time: float
+    cuda_memory_log: list[int]
+    losses: list[float]
+    metrics: list[Any]  # TODO
+
+
+def log_to_console(log_data: dict[str, str], print_fn: Callable[[Any, ...], None]) -> None:
+    cuda_memory_max = log_data["train_info"]["cuda_memory_max"]
+    cuda_memory_avg = log_data["train_info"]["cuda_memory_avg"]
+    cuda_memory_99th = log_data["train_info"]["cuda_memory_99th"]
+    time_train = log_data["train_info"]["train_time"]
+    time_total = log_data["run_info"]["total_time"]
+    file_size = log_data["train_info"]["file_size"]
+
+    print_fn(f"cuda memory max: {cuda_memory_max // 2**20}MB")
+    print_fn(f"cuda memory avg: {cuda_memory_avg // 2**20}MB")
+    print_fn(f"cuda memory 90th percentile: {cuda_memory_99th // 2**20}MB")
+    print_fn(f"train time: {time_train}s")
+    print_fn(f"total time: {time_total:.2f}s")
+    print_fn(f"file size of checkpoint: {file_size / 2**20:.1f}MB")
+
+
+def log_to_file(*, log_data: dict, save_dir: str, experiment_name: str, timestamp: str, print_fn: Callable[[Any, ...], None]) -> None:
+    file_name = f"{experiment_name.replace(os.path.sep, '--')}--{timestamp.replace(':', '-')}.json"
+    file_name = os.path.join(save_dir, file_name)
+    with open(file_name, "w") as f:
+        json.dump(log_data, f, indent=2)
+    print_fn(f"Saved log to: {file_name}")
+
+
+def log_results(
+    *,
+    experiment_name: str,
+    train_result: TrainResult,
+    cuda_memory_init: int,
+    time_total: float,
+    model: nn.Module,
+    model_info: huggingface_hub.ModelInfo,
+    dataset_info: huggingface_hub.DatasetInfo,
+    start_date: str,
+    peft_config_sha: str,
+    train_params_sha: str,
+    print_fn: Callable[[Any, ...], None],
+):
+    # collect results
+    cuda_memory_final = torch.cuda.max_memory_allocated()
+    cuda_memory_avg = int(sum(train_result.cuda_memory_log) / len(train_result.cuda_memory_log))
+    cuda_memory_99th = int(np.percentile(train_result.cuda_memory_log, 99))
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        model.save_pretrained(tmp_dir)
+        stat = os.stat(os.path.join(tmp_dir, SAFETENSORS_WEIGHTS_NAME))
+        file_size = stat.st_size
+        print(f"Saved PEFT checkpoint to {tmp_dir}")
+
+    meta_info = get_meta_info()
+    model_sha = model_info.sha
+    model_created_at = model_info.created_at.isoformat()
+    dataset_sha = dataset_info.sha
+    dataset_created_at = dataset_info.created_at.isoformat()
+
+    peft_branch = get_peft_branch()
+
+    if train_result.status == TrainStatus.CANCELED:
+        save_dir = RESULT_PATH_CANCELLED
+        print_fn("Experiment run was categorized as canceled")
+    elif peft_branch != "main":
+        save_dir = RESULT_PATH_TEST
+        print_fn(f"Experiment run was categorized as a test run on branch {peft_branch}")
+    elif train_result.status == TrainStatus.SUCCESS:
+        save_dir = RESULT_PATH
+        print_fn("Experiment run was categorized as successful run")
+
+    log_data = {
+        "run_info": {
+            "created_at": start_date,
+            "total_time": time_total,
+            "experiment_name": experiment_name,
+            "peft_branch": peft_branch,
+            "train_params_sha": train_params_sha,
+            "peft_config_sha": peft_config_sha,
+        },
+        "train_info": {
+            "cuda_memory_avg": cuda_memory_avg,
+            "cuda_memory_max": (cuda_memory_final - cuda_memory_init),
+            "cuda_memory_99th": cuda_memory_99th,
+            "train_time": train_result.train_time,
+            "file_size": file_size,
+            "status": train_result.status.value,
+            "metrics": train_result.metrics,
+        },
+        "meta_info": {
+            "model_sha": model_sha,
+            "model_created_at": model_created_at,
+            "dataset_sha": dataset_sha,
+            "dataset_created_at": dataset_created_at,
+            **asdict(meta_info),
+        },
+    }
+
+    log_to_console(log_data, print_fn=print)  # use normal print to be able to redirect if so desired
+    log_to_file(log_data=log_data, save_dir=save_dir, experiment_name=experiment_name, timestamp=start_date, print_fn=print_fn)
