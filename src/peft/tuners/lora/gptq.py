@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+from functools import lru_cache
 from typing import Any, Optional
 
 import torch
@@ -22,7 +22,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import get_auto_gptq_quant_linear
 
 
-class QuantLinear(torch.nn.Module, LoraLayer):
+class GPTQLoraLinear(torch.nn.Module, LoraLayer):
     def __init__(
         self,
         base_layer,
@@ -57,6 +57,11 @@ class QuantLinear(torch.nn.Module, LoraLayer):
             lora_bias=lora_bias,
         )
 
+    @lru_cache
+    def _adapter_in_lora_keys(self, adapter):
+        # only need to check lora_A as result is same for lora_B
+        return adapter in self.lora_A.keys()
+
     def forward(self, x: torch.Tensor):
         # note: logic differs from default Linear because merging is not supported
         result = self.quant_linear_module(x)
@@ -65,8 +70,9 @@ class QuantLinear(torch.nn.Module, LoraLayer):
             return result
 
         for active_adapter in self.active_adapters:
-            if active_adapter not in self.lora_A.keys():
+            if not self._adapter_in_lora_keys(active_adapter):
                 continue
+
             lora_A = self.lora_A[active_adapter]
             lora_B = self.lora_B[active_adapter]
             dropout = self.lora_dropout[active_adapter]
@@ -77,10 +83,19 @@ class QuantLinear(torch.nn.Module, LoraLayer):
                 expected_dtype = result.dtype
                 x = self._cast_input_dtype(x, lora_A.weight.dtype)
 
-            output = lora_B(lora_A(dropout(x)))
+            # lora_dropout float value is not stored so we need to check for cls
+            if isinstance(dropout, torch.nn.Dropout):
+                output = lora_B(lora_A(dropout(x)))
+            else:
+                # dropout == Identity which is no-op if lora_dropout == 0.0
+                output = lora_B(lora_A(x))
+
             if requires_conversion:
                 output = output.to(expected_dtype)
-            output = output * scaling
+
+            if scaling != 1:  # skip scaling == 1 no-op
+                output = output * scaling
+
             result += output
         return result
 
@@ -119,77 +134,7 @@ def dispatch_gptq(
         quant_linear = get_auto_gptq_quant_linear(cfg)
 
         if quant_linear is not None and isinstance(target_base_layer, quant_linear):
-            new_module = QuantLinear(target, adapter_name, **kwargs)
+            new_module = GPTQLoraLinear(target, adapter_name, **kwargs)
             target.qweight = target_base_layer.qweight
 
     return new_module
-
-
-class GPTQLoraLinear(torch.nn.Module, LoraLayer):
-    def __init__(
-        self,
-        base_layer,
-        adapter_name,
-        r: int = 0,
-        lora_alpha: int = 1,
-        lora_dropout: float = 0.0,
-        init_lora_weights: bool = True,
-        use_rslora: bool = False,
-        use_dora: bool = False,
-        lora_bias: bool = False,
-        **kwargs,
-    ):
-        if use_dora:
-            raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
-
-        super().__init__()
-        LoraLayer.__init__(self, base_layer)
-
-        # self.base_layer and self.quant_linear_module are the same; we need the former for consistency and the latter
-        # for backwards compatibility
-        self.quant_linear_module = base_layer
-
-        self._active_adapter = adapter_name
-        self.update_layer(
-            adapter_name,
-            r,
-            lora_alpha=lora_alpha,
-            lora_dropout=lora_dropout,
-            init_lora_weights=init_lora_weights,
-            use_rslora=use_rslora,
-            use_dora=use_dora,
-            lora_bias=lora_bias,
-        )
-
-    def forward(self, x: torch.Tensor):
-        result = self.quant_linear_module(x)
-
-        if self.disable_adapters:
-            return result
-
-        for active_adapter in self.active_adapters:
-            if active_adapter not in self.lora_A.keys():
-                continue
-            lora_A = self.lora_A[active_adapter]
-            lora_B = self.lora_B[active_adapter]
-            dropout = self.lora_dropout[active_adapter]
-            scaling = self.scaling[active_adapter]
-
-            requires_conversion = not torch.is_autocast_enabled()
-            if requires_conversion:
-                expected_dtype = result.dtype
-                x = self._cast_input_dtype(x, lora_A.weight.dtype)
-
-            output = lora_B(lora_A(dropout(x)))
-            if requires_conversion:
-                output = output.to(expected_dtype)
-
-            if scaling != 1:
-                output = output * scaling
-
-            result = result + output
-        return result
-
-    def __repr__(self) -> str:
-        rep = super().__repr__()
-        return "lora." + rep
