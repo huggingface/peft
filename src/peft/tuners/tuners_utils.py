@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import copy
-import logging
 import os
 import re
 import textwrap
@@ -44,9 +43,6 @@ from peft.utils.peft_types import PeftType, TaskType
 from ..config import PeftConfig
 from ..utils import ModulesToSaveWrapper, _get_submodules
 from ._buffer_dict import BufferDict
-
-
-logger = logging.getLogger(__name__)
 
 
 @contextmanager
@@ -168,7 +164,7 @@ class BaseTuner(nn.Module, ABC):
         if not hasattr(self, "peft_config"):
             self.peft_config = {adapter_name: peft_config} if isinstance(peft_config, PeftConfig) else peft_config
         else:
-            logger.warning(
+            warnings.warn(
                 "Already found a `peft_config` attribute in the model. This will lead to having multiple adapters"
                 " in the model. Make sure to know what you are doing!"
             )
