@@ -58,6 +58,7 @@ from peft import (
 from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import _get_submodules, infer_device
+from peft.utils.other import TrainableTokensWrapper
 
 from .testing_utils import get_state_dict
 
@@ -128,6 +129,15 @@ CONFIG_TESTING_KWARGS = (
         "target_modules": None,
         "r": 2,
     },
+    # LoRA + trainable_tokens
+    {
+        "r": 8,
+        "lora_alpha": 32,
+        "target_modules": None,
+        "lora_dropout": 0.05,
+        "bias": "none",
+        "trainable_token_indices": [0, 1, 3],
+    },
     # CPT tuninig
     {
         "cpt_token_ids": [0, 1, 2, 3, 4, 5, 6, 7],  # Example token IDs for testing
@@ -150,9 +160,10 @@ CLASSES_MAPPING = {
     "vblora": (VBLoRAConfig, CONFIG_TESTING_KWARGS[10]),
     "oft": (OFTConfig, CONFIG_TESTING_KWARGS[11]),
     "bone": (BoneConfig, CONFIG_TESTING_KWARGS[12]),
+    "lora+trainable_tokens": (LoraConfig, CONFIG_TESTING_KWARGS[13]),
 }
 
-DECODER_MODELS_EXTRA = {"cpt": (CPTConfig, CONFIG_TESTING_KWARGS[13])}
+DECODER_MODELS_EXTRA = {"cpt": (CPTConfig, CONFIG_TESTING_KWARGS[14])}
 
 
 # Adapted from https://github.com/huggingface/transformers/blob/48327c57182fdade7f7797d1eaad2d166de5c55b/src/transformers/activations.py#LL166C7-L166C22
@@ -263,6 +274,31 @@ class PeftCommonTester:
         if hasattr(model, "config"):  # custom models don't have a config attribute
             assert config["base_model_name_or_path"] == model.config.to_dict()["_name_or_path"]
 
+    def perturb_trainable_token_weights_if_used(self, model, config, adapter_name="default", weight=1.):
+        """TrainableTokensLayer is initialized to be a no-op by default. Since there's currently no way to pass
+        `init_weights=False` to the trainable tokens layer when used in conjunction with LoRA, we have to do it
+        like this to make sure that it is *not* a no-op (essentially simulating "training" of the adapter).
+        """
+        if getattr(config, "trainable_token_indices", None) is None:
+            return
+
+        token_wrapper = None
+
+        if hasattr(model, "get_input_embeddings"):
+            token_wrapper = model.get_input_embeddings()
+        else:
+            for module in model.modules():
+                if isinstance(module, TrainableTokensWrapper):
+                    token_wrapper = module
+                    break
+
+        # for a model with trainable_token_indices there should always be a trainable token wrapper somewhere.
+        # if not, then there's something broken.
+        assert token_wrapper is not None
+
+        token_wrapper.token_adapter.trainable_tokens_delta[adapter_name].data = torch.rand_like(
+            token_wrapper.token_adapter.trainable_tokens_delta[adapter_name].data) * weight
+
     def _test_model_attr(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
@@ -291,6 +327,10 @@ class PeftCommonTester:
         assert correctly_converted
 
     def _test_prepare_for_training(self, model_id, config_cls, config_kwargs):
+        if config_kwargs.get("trainable_token_indices", None) is not None:
+            # incompatible because trainable tokens is marking embeddings as trainable
+            self.skipTest("Trainable tokens is incompatible with this test.")
+
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -595,6 +635,8 @@ class PeftCommonTester:
         # This should simply work
         _ = model.merge_and_unload()
 
+
+
     def _test_merge_layers_nan(self, model_id, config_cls, config_kwargs):
         if config_cls not in (
             LoraConfig,
@@ -615,8 +657,11 @@ class PeftCommonTester:
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
+
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
+
+        self.perturb_trainable_token_weights_if_used(model, config)
 
         dummy_input = self.prepare_inputs_for_testing()
 
@@ -685,8 +730,11 @@ class PeftCommonTester:
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
+
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
+
+        self.perturb_trainable_token_weights_if_used(model, config)
 
         dummy_input = self.prepare_inputs_for_testing()
         model.eval()
@@ -759,6 +807,10 @@ class PeftCommonTester:
         if ("gpt2" in model_id.lower()) and (config_cls == IA3Config):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
 
+        if config_kwargs.get("trainable_token_indices", None) is not None:
+            self.skipTest("Merging two adapters with trainable tokens is tested elsewhere since adapters with "
+                          "the same token indices cannot be merged.")
+
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -769,7 +821,6 @@ class PeftCommonTester:
 
         model = self.transformers_class.from_pretrained(model_id)
         model = get_peft_model(model, config)
-
         model = model.to(self.torch_device)
 
         dummy_input = self.prepare_inputs_for_testing()
@@ -964,6 +1015,11 @@ class PeftCommonTester:
         for name, param in model.named_parameters():
             if model.base_model.prefix in name:
                 param.data.mul_(10.0)
+
+        # In case we have a config that enables trainable tokens, we would need to do something similar for the
+        # trainable tokens layer.
+        self.perturb_trainable_token_weights_if_used(model, config, adapter_name="adapter0")
+        self.perturb_trainable_token_weights_if_used(model, config, adapter_name="adapter1")
 
         model = model.to(self.torch_device).eval()
 
@@ -1179,10 +1235,11 @@ class PeftCommonTester:
         loss = output.sum()
         loss.backward()
 
+        has_trainable_tokens = config_kwargs.get("trainable_token_indices", None) is not None
         nb_trainable = 0
 
         for n, param in model.named_parameters():
-            if "lora" in n:
+            if "lora" in n or (has_trainable_tokens and "trainable_tokens" in n):
                 assert param.grad is not None
                 nb_trainable += 1
             else:
@@ -1206,7 +1263,7 @@ class PeftCommonTester:
         nb_trainable_all = 0
 
         for n, param in model.named_parameters():
-            if "lora" in n:
+            if "lora" in n or (has_trainable_tokens and "trainable_tokens" in n):
                 nb_trainable_all += 1
 
         assert nb_trainable < nb_trainable_all
@@ -1254,6 +1311,8 @@ class PeftCommonTester:
                 ):  # delta_embedding is the embedding that should be updated with grads in CPT
                     assert param.grad is not None
             elif hasattr(model, "prefix") and (model.prefix in n):  # non-prompt tuning methods
+                assert param.grad is not None
+            elif "trainable_tokens_" in n: # trainable tokens layer
                 assert param.grad is not None
             else:
                 assert param.grad is None
@@ -1441,6 +1500,8 @@ class PeftCommonTester:
             with pytest.raises(AttributeError):
                 model = model.unload()
         else:
+            self.perturb_trainable_token_weights_if_used(model, config)
+
             dummy_input = self.prepare_inputs_for_testing()
             logits_with_adapter = model(**dummy_input)[0]
 
@@ -1741,6 +1802,9 @@ class PeftCommonTester:
                 **config_kwargs,
             )
             peft_model = get_peft_model(model, config)
+
+        # trainable_token_indices doesn't have support for `init_weights` so we have to do this manually
+        self.perturb_trainable_token_weights_if_used(model, config)
 
         output_peft = get_output(peft_model)
 
