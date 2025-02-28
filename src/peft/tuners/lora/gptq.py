@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from functools import lru_cache
 from typing import Any, Optional
 
 import torch
@@ -57,11 +56,6 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
             lora_bias=lora_bias,
         )
 
-    @lru_cache
-    def _adapter_in_lora_keys(self, adapter: str):
-        # only need to check lora_A as result is same for lora_B
-        return adapter in self.lora_A.keys()
-
     def forward(self, x: torch.Tensor):
         # note: logic differs from default Linear because merging is not supported
         result = self.quant_linear_module(x)
@@ -69,8 +63,9 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
         if self.disable_adapters:
             return result
 
+        lora_A_keys = self.lora_A.keys()
         for active_adapter in self.active_adapters:
-            if not self._adapter_in_lora_keys(active_adapter):
+            if active_adapter not in lora_A_keys:
                 continue
 
             lora_A = self.lora_A[active_adapter]

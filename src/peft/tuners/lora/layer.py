@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import math
 import warnings
-from functools import lru_cache
 from typing import Any, Optional, Union
 
 import torch
@@ -703,11 +702,6 @@ class Linear(nn.Module, LoraLayer):
 
         return output_tensor
 
-    @lru_cache
-    def _adapter_in_lora_keys(self, adapter: str):
-        # only need to check lora_A as result is same for lora_B
-        return adapter in self.lora_A.keys()
-
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         self._check_forward_args(x, *args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
@@ -723,8 +717,10 @@ class Linear(nn.Module, LoraLayer):
         else:
             result = self.base_layer(x, *args, **kwargs)
             torch_result_dtype = result.dtype
+
+            lora_A_keys = self.lora_A.keys()
             for active_adapter in self.active_adapters:
-                if not self._adapter_in_lora_keys(active_adapter):
+                if active_adapter not in lora_A_keys:
                     continue
 
                 lora_A = self.lora_A[active_adapter]
