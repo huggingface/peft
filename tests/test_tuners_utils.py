@@ -57,7 +57,7 @@ from peft.tuners.tuners_utils import (
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND, ModulesToSaveWrapper, infer_device
 from peft.utils.constants import DUMMY_MODEL_CONFIG, MIN_TARGET_MODULES_FOR_OPTIMIZATION
 
-from .testing_utils import require_bitsandbytes, require_non_cpu, require_torch_gpu
+from .testing_utils import require_bitsandbytes, require_non_cpu
 
 
 # Implements tests for regex matching logic common for all BaseTuner subclasses, and
@@ -271,7 +271,7 @@ class PeftCustomKwargsTester(unittest.TestCase):
         )
 
     @parameterized.expand(BNB_TEST_CASES)
-    @require_torch_gpu
+    @require_non_cpu
     @require_bitsandbytes
     def test_maybe_include_all_linear_layers_lora_bnb(
         self, model_id, model_type, initial_target_modules, expected_target_modules, quantization
