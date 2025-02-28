@@ -58,7 +58,7 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
         )
 
     @lru_cache
-    def _adapter_in_lora_keys(self, adapter):
+    def _adapter_in_lora_keys(self, adapter: str):
         # only need to check lora_A as result is same for lora_B
         return adapter in self.lora_A.keys()
 

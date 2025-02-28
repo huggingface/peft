@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import math
 import warnings
+from functools import lru_cache
 from typing import Any, Optional, Union
 
 import torch
@@ -701,6 +702,11 @@ class Linear(nn.Module, LoraLayer):
 
         return output_tensor
 
+    @lru_cache
+    def _adapter_in_lora_keys(self, adapter: str):
+        # only need to check lora_A as result is same for lora_B
+        return adapter in self.lora_A.keys()
+
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         self._check_forward_args(x, *args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
@@ -717,8 +723,9 @@ class Linear(nn.Module, LoraLayer):
             result = self.base_layer(x, *args, **kwargs)
             torch_result_dtype = result.dtype
             for active_adapter in self.active_adapters:
-                if active_adapter not in self.lora_A.keys():
+                if not self._adapter_in_lora_keys(active_adapter):
                     continue
+
                 lora_A = self.lora_A[active_adapter]
                 lora_B = self.lora_B[active_adapter]
                 dropout = self.lora_dropout[active_adapter]
@@ -727,9 +734,15 @@ class Linear(nn.Module, LoraLayer):
 
                 if not self.use_dora[active_adapter]:
                     if scaling == 1:  # no scaling
-                        result = result + lora_B(lora_A(dropout(x)))
+                        if isinstance(dropout, nn.Dropout):
+                            result = result + lora_B(lora_A(dropout(x)))
+                        else:
+                            result = result + lora_B(lora_A(x))
                     else:
-                        result = result + lora_B(lora_A(dropout(x))) * scaling
+                        if isinstance(dropout, nn.Dropout):
+                            result = result + lora_B(lora_A(dropout(x))) * scaling
+                        else:
+                            result = result + lora_B(lora_A(x)) * scaling
                 else:
                     if isinstance(dropout, nn.Identity) or not self.training:
                         base_result = result
