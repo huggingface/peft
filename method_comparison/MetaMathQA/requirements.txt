@@ -1,0 +1,5 @@
+bitsandbytes
+datasets
+numpy
+scikit-learn
+tqdm

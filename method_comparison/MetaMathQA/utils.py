@@ -49,7 +49,23 @@ hf_api = huggingface_hub.HfApi()
 
 @dataclass
 class TrainConfig:
-    """All configuration parameters associated with training the model"""
+    """All configuration parameters associated with training the model
+
+    Args:
+        model_id: The model identifier
+        dtype: The data type to use for the model
+        max_seq_length: The maximum sequence length
+        batch_size: The batch size
+        max_steps: The maximum number of steps to train for
+        eval_steps: The number of steps between evaluations
+        compile: Whether to compile the model
+        query_template: The template for the query
+        max_generation_length: The maximum generation length
+        seed: The random seed
+        grad_norm_clip: The gradient norm clipping value (set to 0 to skip)
+        optimizer_kwargs: The optimizer keyword arguments (lr etc.)
+        lr_scheduler: The learning rate scheduler (currently only None or 'cosine' are supported)
+    """
 
     model_id: str
     dtype: Literal["float32", "float16", "bfloat16", "int8", "int4"]
