@@ -36,6 +36,7 @@ from peft import (
     get_peft_model,
     prepare_model_for_kbit_training,
 )
+from peft.tuners.lora import GPTQLoraLinear
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
 
 from .testing_utils import (
@@ -347,3 +348,30 @@ class PeftGPTQModelTests(unittest.TestCase):
         # sanity check
         assert n_trainable_default == n_trainable_other
         assert n_total_default == n_total_other
+
+    @staticmethod
+    def test_load_lora():
+        model_id = "ModelCloud/Llama-3.2-1B-gptqmodel-ci-4bit"
+        adapter_id = "ModelCloud/Llama-3.2-1B-gptqmodel-ci-4bit-lora"
+
+        model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto")
+        model.load_adapter(adapter_id)
+
+        print("peft model", model)
+
+        # assert dynamic rank
+        v_proj_module = model.model.layers[5].self_attn.v_proj
+        assert isinstance(v_proj_module, GPTQLoraLinear)
+        assert v_proj_module.lora_A["default"].weight.data.shape[0] == 128
+        assert v_proj_module.lora_B["default"].weight.data.shape[1] == 128
+        gate_proj_module = model.model.layers[5].mlp.gate_proj
+        assert isinstance(gate_proj_module, GPTQLoraLinear)
+        assert gate_proj_module.lora_A["default"].weight.data.shape[0] == 256
+        assert gate_proj_module.lora_B["default"].weight.data.shape[1] == 256
+
+        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        inp = tokenizer("Capital of France is", return_tensors="pt").to(model.device)
+        tokens = model.generate(**inp)[0]
+        result = tokenizer.decode(tokens)
+
+        print("result: ", result)
