@@ -908,10 +908,10 @@ class ModelConv2D2(nn.Module):
 class ModelConv2DGroups(nn.Module):
     def __init__(self):
         super().__init__()
-        self.conv2d = nn.Conv2d(5, 10, 3, groups=5)
+        self.conv2d = nn.Conv2d(5, 5, 3, groups=5)
         self.relu = nn.ReLU()
         self.flat = nn.Flatten()
-        self.lin0 = nn.Linear(10, 2)
+        self.lin0 = nn.Linear(5, 2)
         self.sm = nn.LogSoftmax(dim=-1)
 
     def forward(self, X):
