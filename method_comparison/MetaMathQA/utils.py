@@ -45,7 +45,8 @@ if not torch.cuda.is_available():
 
 device = "cuda"
 CUDA_MEMORY_INIT_THRESHOLD = 500 * 2**20  # 500MB
-FILE_NAME_TRAIN_PARAMS = "training_params.json"
+FILE_NAME_DEFAULT_TRAIN_PARAMS = os.path.join(os.path.dirname(__file__), "default_training_params.json")
+FILE_NAME_TRAIN_PARAMS = "training_params.json"  # specific params for this experiment
 DATASET_NAME = "meta-math/MetaMathQA"
 # main results
 RESULT_PATH = os.path.join(os.path.dirname(__file__), "results")
@@ -123,6 +124,10 @@ def validate_experiment_path(path: str) -> tuple[str, str, str]:
     # it should contain:
     # - training_params.json
     # - adapter_config.json
+    if not os.path.exists(FILE_NAME_DEFAULT_TRAIN_PARAMS):
+        raise FileNotFoundError(
+            f"Missing default training params file '{FILE_NAME_DEFAULT_TRAIN_PARAMS}' in the ./experiments directory"
+        )
     if not os.path.exists(path):
         raise FileNotFoundError(f"Path {path} does not exist")
     if not os.path.exists(os.path.join(path, FILE_NAME_TRAIN_PARAMS)):
@@ -148,9 +153,13 @@ def validate_experiment_path(path: str) -> tuple[str, str, str]:
 
 
 def get_train_config(path: str) -> TrainConfig:
+    # first, load the default params, then update with experiment-specific params
+    with open(FILE_NAME_DEFAULT_TRAIN_PARAMS) as f:
+        default_config_kwargs = json.load(f)
     with open(path) as f:
         config_kwargs = json.load(f)
 
+    config_kwargs = {**default_config_kwargs, **config_kwargs}
     return TrainConfig(**config_kwargs)
 
 

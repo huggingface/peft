@@ -15,5 +15,6 @@
   },
   "lr_scheduler": "cosine",
   "use_amp": false,
+  "attn_implementation": null,
   "query_template": "Question: {query} Think step by step.\nAnswer:"
 }

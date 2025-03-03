@@ -15,7 +15,7 @@ For the model to attain good accuracy, it needs to learn to adhere to the output
 Create an experiment in the `experiment/<peft-method>` folder of your choice and give it a name (the name itself does not matter but helps identify the experiment). An example would be `experiments/lora/llama-3.2-3B-rank32/`. Inside that directory, create 2 files:
 
 - `adapter_config.json`
-- `training_parameters.json`
+- Optional: `training_parameters.json`
 
 ### `adapter_config.json`
 
@@ -30,7 +30,9 @@ config.save_pretrained(<path-to-experiment>)
 
 ### `training_parameters.json`
 
-This contains all the other parameters that are relevant for training, e.g. the base model id, number of steps, batch size, learning rate, etc. It is easiest to copy an existing config and adapt it for your use. For an overview of all possible arguments, you can also check the `TrainConfig` `dataclass` in `utils.py`.
+There is a default file for the non-PEFT parameters: `default_training_params.json`. This contains all the other parameters that are relevant for training, e.g. the base model id, number of steps, batch size, learning rate, etc. If parameters that differ from the defaults are needed for a specific experiment, place a `training_parameters.json` into the experiment directory and adjust the parameters that need changing. The other parametes are taken from the aforementioned default config.
+
+For an overview of all possible arguments, you can also check the `TrainConfig` `dataclass` in `utils.py`.
 
 ### Start a run
 
