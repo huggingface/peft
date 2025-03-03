@@ -17,7 +17,7 @@ from peft.utils import register_peft_method
 
 from .config import EvaConfig, LoftQConfig, LoraConfig, LoraRuntimeConfig
 from .eva import get_eva_state_dict, initialize_lora_eva_weights
-from .gptq import QuantLinear
+from .gptq import GPTQLoraLinear
 from .layer import Conv2d, Conv3d, Embedding, Linear, LoraLayer
 from .model import LoraModel
 
@@ -27,13 +27,13 @@ __all__ = [
     "Conv3d",
     "Embedding",
     "EvaConfig",
+    "GPTQLoraLinear",
     "Linear",
     "LoftQConfig",
     "LoraConfig",
     "LoraLayer",
     "LoraModel",
     "LoraRuntimeConfig",
-    "QuantLinear",
     "get_eva_state_dict",
     "initialize_lora_eva_weights",
 ]
