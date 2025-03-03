@@ -132,8 +132,6 @@ def validate_experiment_path(path: str) -> tuple[str, str, str]:
         )
     if not os.path.exists(path):
         raise FileNotFoundError(f"Path {path} does not exist")
-    if not os.path.exists(os.path.join(path, FILE_NAME_TRAIN_PARAMS)):
-        raise FileNotFoundError(os.path.join(path, FILE_NAME_TRAIN_PARAMS))
     if not os.path.exists(os.path.join(path, CONFIG_NAME)):
         raise FileNotFoundError(os.path.join(path, CONFIG_NAME))
 
@@ -145,9 +143,15 @@ def validate_experiment_path(path: str) -> tuple[str, str, str]:
         )
 
     experiment_name = os.path.join(*path_parts[-2:])
-    train_params_sha = (
-        subprocess.check_output(f"sha256sum {os.path.join(path, FILE_NAME_TRAIN_PARAMS)}".split()).decode().split()[0]
-    )
+
+    if not os.path.exists(os.path.join(path, FILE_NAME_TRAIN_PARAMS)):
+        # no specific train params, default parameters are used
+        train_params_sha = "default"
+    else:
+        train_params_sha = (
+            subprocess.check_output(f"sha256sum {os.path.join(path, FILE_NAME_TRAIN_PARAMS)}".split()).decode().split()[0]
+        )
+
     peft_config_sha = (
         subprocess.check_output(f"sha256sum {os.path.join(path, CONFIG_NAME)}".split()).decode().split()[0]
     )
@@ -158,8 +162,11 @@ def get_train_config(path: str) -> TrainConfig:
     # first, load the default params, then update with experiment-specific params
     with open(FILE_NAME_DEFAULT_TRAIN_PARAMS) as f:
         default_config_kwargs = json.load(f)
-    with open(path) as f:
-        config_kwargs = json.load(f)
+
+    config_kwargs = {}
+    if os.path.exists(path):
+        with open(path) as f:
+            config_kwargs = json.load(f)
 
     config_kwargs = {**default_config_kwargs, **config_kwargs}
     return TrainConfig(**config_kwargs)
