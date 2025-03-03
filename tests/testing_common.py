@@ -274,10 +274,10 @@ class PeftCommonTester:
         if hasattr(model, "config"):  # custom models don't have a config attribute
             assert config["base_model_name_or_path"] == model.config.to_dict()["_name_or_path"]
 
-    def perturb_trainable_token_weights_if_used(self, model, config, adapter_name="default", weight=1.):
+    def perturb_trainable_token_weights_if_used(self, model, config, adapter_name="default", weight=1.0):
         """TrainableTokensLayer is initialized to be a no-op by default. Since there's currently no way to pass
-        `init_weights=False` to the trainable tokens layer when used in conjunction with LoRA, we have to do it
-        like this to make sure that it is *not* a no-op (essentially simulating "training" of the adapter).
+        `init_weights=False` to the trainable tokens layer when used in conjunction with LoRA, we have to do it like
+        this to make sure that it is *not* a no-op (essentially simulating "training" of the adapter).
         """
         if getattr(config, "trainable_token_indices", None) is None:
             return
@@ -296,8 +296,9 @@ class PeftCommonTester:
         # if not, then there's something broken.
         assert token_wrapper is not None
 
-        token_wrapper.token_adapter.trainable_tokens_delta[adapter_name].data = torch.rand_like(
-            token_wrapper.token_adapter.trainable_tokens_delta[adapter_name].data) * weight
+        token_wrapper.token_adapter.trainable_tokens_delta[adapter_name].data = (
+            torch.rand_like(token_wrapper.token_adapter.trainable_tokens_delta[adapter_name].data) * weight
+        )
 
     def _test_model_attr(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
@@ -635,8 +636,6 @@ class PeftCommonTester:
         # This should simply work
         _ = model.merge_and_unload()
 
-
-
     def _test_merge_layers_nan(self, model_id, config_cls, config_kwargs):
         if config_cls not in (
             LoraConfig,
@@ -808,8 +807,10 @@ class PeftCommonTester:
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
 
         if config_kwargs.get("trainable_token_indices", None) is not None:
-            self.skipTest("Merging two adapters with trainable tokens is tested elsewhere since adapters with "
-                          "the same token indices cannot be merged.")
+            self.skipTest(
+                "Merging two adapters with trainable tokens is tested elsewhere since adapters with "
+                "the same token indices cannot be merged."
+            )
 
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -1315,7 +1316,7 @@ class PeftCommonTester:
                     assert param.grad is not None
             elif hasattr(model, "prefix") and (model.prefix in n):  # non-prompt tuning methods
                 assert param.grad is not None
-            elif "trainable_tokens_" in n: # trainable tokens layer
+            elif "trainable_tokens_" in n:  # trainable tokens layer
                 assert param.grad is not None
             else:
                 assert param.grad is None
