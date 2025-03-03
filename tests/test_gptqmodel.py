@@ -349,15 +349,12 @@ class PeftGPTQModelTests(unittest.TestCase):
         assert n_trainable_default == n_trainable_other
         assert n_total_default == n_total_other
 
-    @staticmethod
-    def test_load_lora():
+    def test_load_lora(self):
         model_id = "ModelCloud/Llama-3.2-1B-gptqmodel-ci-4bit"
         adapter_id = "ModelCloud/Llama-3.2-1B-gptqmodel-ci-4bit-lora"
 
         model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto")
         model.load_adapter(adapter_id)
-
-        print("peft model", model)
 
         # assert dynamic rank
         v_proj_module = model.model.layers[5].self_attn.v_proj
@@ -374,4 +371,4 @@ class PeftGPTQModelTests(unittest.TestCase):
         tokens = model.generate(**inp)[0]
         result = tokenizer.decode(tokens)
 
-        print("result: ", result)
+        assert "paris" in result.lower()
