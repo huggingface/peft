@@ -70,12 +70,12 @@ class TrainConfig:
         eval_steps: The number of steps between evaluations
         compile: Whether to compile the model
         query_template: The template for the query
-        max_generation_length: The maximum generation length
         seed: The random seed
         grad_norm_clip: The gradient norm clipping value (set to 0 to skip)
         optimizer_kwargs: The optimizer keyword arguments (lr etc.)
         lr_scheduler: The learning rate scheduler (currently only None or 'cosine' are supported)
         use_amp: Whether to use automatic mixed precision
+        generation_kwargs: Arguments passed to transformers GenerationConfig (used in evaluation)
         attn_implementation: The attention implementation to use (if any), see transformers docs
     """
 
@@ -87,12 +87,12 @@ class TrainConfig:
     eval_steps: int
     compile: bool
     query_template: str
-    max_generation_length: int
     seed: int
     grad_norm_clip: float  # set to 0 to skip
     optimizer_kwargs: dict[str, Any]
     lr_scheduler: Optional[Literal["cosine"]]
     use_amp: bool
+    generation_kwargs: dict[str, Any]
     attn_implementation: Optional[str]
 
     def __post_init__(self):
@@ -110,8 +110,6 @@ class TrainConfig:
             raise ValueError(f"Invalid eval_steps: {self.eval_steps}")
         if self.eval_steps > self.max_steps:
             raise ValueError(f"Invalid eval_steps: {self.eval_steps} > max_steps: {self.max_steps}")
-        if self.max_generation_length <= 0:
-            raise ValueError(f"Invalid max_generation_length: {self.max_generation_length}")
         if self.grad_norm_clip < 0:
             raise ValueError(f"Invalid grad_norm_clip: {self.grad_norm_clip}")
         if self.lr_scheduler not in [None, "cosine"]:

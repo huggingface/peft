@@ -33,7 +33,7 @@ import torch
 from torch import nn
 from torch.cuda.amp import GradScaler, autocast
 from tqdm import tqdm
-from transformers import get_cosine_schedule_with_warmup, set_seed
+from transformers import GenerationConfig, get_cosine_schedule_with_warmup, set_seed
 from utils import (
     DATASET_NAME,
     FILE_NAME_TRAIN_PARAMS,
@@ -74,7 +74,8 @@ TEST_SIZE = 1000
 
 
 def evaluate(model, tokenizer, ds, batch_size, generate_kwargs, use_tqdm=False) -> tuple[list[str], list[str]]:
-    with torch.no_grad():
+    generation_config = GenerationConfig(**generate_kwargs)
+    with torch.inference_mode():
         predictions = []
         responses = []
         pbar = range(0, len(ds), batch_size)
@@ -84,7 +85,7 @@ def evaluate(model, tokenizer, ds, batch_size, generate_kwargs, use_tqdm=False) 
             sliced = ds[j : j + batch_size]
             responses += sliced.pop("response")
             batch = tokenizer.pad(sliced, return_tensors="pt", padding_side="left").to(model.device)
-            outputs = model.generate(**batch, **generate_kwargs)
+            outputs = model.generate(**batch, generation_config=generation_config, pad_token_id=tokenizer.eos_token_id)
             predictions += tokenizer.batch_decode(outputs, skip_special_tokens=True)
     return predictions, responses
 
@@ -125,7 +126,7 @@ def train(
     tokenizer: Any,
     cuda_memory_init: int,
     eval_steps: int,
-    max_generation_length: int,
+    generation_kwargs: dict[str, Any],
     grad_norm_clip: float,
     optimizer_kwargs: dict[str, Any],
     query_template: str,
@@ -230,7 +231,7 @@ def train(
                     tokenizer=tokenizer,
                     ds=ds_valid,
                     batch_size=batch_size,
-                    generate_kwargs={"max_length": max_generation_length, "pad_token_id": tokenizer.eos_token_id},
+                    generate_kwargs={**generation_kwargs},
                 )
 
                 example = random.choice(predictions)
@@ -271,7 +272,7 @@ def train(
             tokenizer=tokenizer,
             ds=ds_test,
             batch_size=batch_size,
-            generate_kwargs={"max_length": max_generation_length, "pad_token_id": tokenizer.eos_token_id},
+            generate_kwargs={**generation_kwargs, "pad_token_id": tokenizer.eos_token_id},
             use_tqdm=len(ds_test) > 100,
         )
         accuracy = get_accuracy(predictions=predictions, responses=responses)
@@ -341,7 +342,7 @@ def main(*, path_experiment: str, experiment_name: str, train_params_sha: str, p
             tokenizer=tokenizer,
             cuda_memory_init=cuda_memory_init,
             eval_steps=train_config.eval_steps,
-            max_generation_length=train_config.max_generation_length,
+            generation_kwargs=train_config.generation_kwargs,
             grad_norm_clip=train_config.grad_norm_clip,
             optimizer_kwargs=train_config.optimizer_kwargs,
             query_template=train_config.query_template,
