@@ -138,6 +138,7 @@ def train(
     metrics = []
     sample = 0  # keep count of the current sample
     total_samples = 0  # total number of samples over all epochs
+    total_tokens = []  # total number of tokens over all epochs
     if use_amp:
         grad_scaler: GradScaler | DummyGradScaler = GradScaler()
         autocast_ctx: type[autocast] | type[nullcontext[None]] = autocast
@@ -176,6 +177,7 @@ def train(
             # create the batch
             sliced = ds_train[sample : sample + batch_size]
             tokens_per_sample = [len(i) for i in sliced["input_ids"]]
+            total_tokens.append(sum(tokens_per_sample) + len(tokens_per_sample))  # add EOS token
             del sliced["response"]
             batch = tokenizer.pad(sliced, return_tensors="pt").to(model.device)
             actual_batch_size = len(batch["input_ids"])
@@ -218,7 +220,9 @@ def train(
             if step % eval_steps == 0:
                 tic_eval = time.perf_counter()
                 loss_avg = sum(losses[-eval_steps:]) / eval_steps
+                token_sum = sum(total_tokens[-eval_steps:])
                 dur_train = sum(durations[-eval_steps:])
+                tokens_per_sec = token_sum / dur_train
 
                 model.eval()
                 predictions, responses = evaluate(
@@ -251,6 +255,7 @@ def train(
                     "valid acc": f"{accuracy:.3f}",
                     "train time": f"{dur_train:.2f}s",
                     "eval time": f"{toc_eval - tic_eval:.2f}s",
+                    "tokens per sec": f"{tokens_per_sec:.0f}",
                     "elapsed time": f"{elapsed // 60:.0f}min {elapsed % 60:.0f}s",
                 }
                 print_verbose(json.dumps(log_dict))
