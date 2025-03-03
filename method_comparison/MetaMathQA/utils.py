@@ -76,6 +76,7 @@ class TrainConfig:
         optimizer_kwargs: The optimizer keyword arguments (lr etc.)
         lr_scheduler: The learning rate scheduler (currently only None or 'cosine' are supported)
         use_amp: Whether to use automatic mixed precision
+        attn_implementation: The attention implementation to use (if any), see transformers docs
     """
 
     model_id: str
@@ -92,6 +93,7 @@ class TrainConfig:
     optimizer_kwargs: dict[str, Any]
     lr_scheduler: Optional[Literal["cosine"]]
     use_amp: bool
+    attn_implementation: Optional[str]
 
     def __post_init__(self):
         if not isinstance(self.model_id, str):
@@ -188,24 +190,34 @@ def get_tokenizer(*, model_id: str, max_seq_length: int):
 
 
 def get_base_model(
-    *, model_id: str, dtype: Literal["float32", "float16", "bfloat16", "int8", "int4"], compile: bool
+    *,
+    model_id: str,
+    dtype: Literal["float32", "float16", "bfloat16", "int8", "int4"],
+    compile: bool,
+    attn_implementation: Optional[str],
 ) -> nn.Module:
+    kwargs: dict[str, Any] = {
+        "pretrained_model_name_or_path": model_id,
+        "device_map": device,
+        "attn_implementation": attn_implementation,
+    }
     if dtype == "int4":
         quant_config = BitsAndBytesConfig(load_in_4bit=True)
-        model = AutoModelForCausalLM.from_pretrained(model_id, device_map=device, quantization_config=quant_config)
-        model = prepare_model_for_kbit_training(model)
+        kwargs["quantization_config"] = quant_config
     elif dtype == "int8":
         quant_config = BitsAndBytesConfig(load_in_8bit=True)
-        model = AutoModelForCausalLM.from_pretrained(model_id, device_map=device, quantization_config=quant_config)
-        model = prepare_model_for_kbit_training(model)
+        kwargs["quantization_config"] = quant_config
     elif dtype == "bfloat16":
-        model = AutoModelForCausalLM.from_pretrained(model_id, device_map=device, torch_dtype=torch.bfloat16)
+        kwargs["torch_dtype"] = torch.bfloat16
     elif dtype == "float16":
-        model = AutoModelForCausalLM.from_pretrained(model_id, device_map=device, torch_dtype=torch.float16)
-    elif dtype == "float32":
-        model = AutoModelForCausalLM.from_pretrained(model_id, device_map=device)
-    else:
+        kwargs["torch_dtype"] = torch.float16
+    elif dtype != "float32":
         raise ValueError(f"Invalid dtype: {dtype}")
+
+    model = AutoModelForCausalLM.from_pretrained(**kwargs)
+
+    if dtype in ["int8", "int4"]:
+        model = prepare_model_for_kbit_training(model)
 
     if compile:
         model = torch.compile(model)
@@ -218,9 +230,12 @@ def get_model(
     model_id: str,
     dtype: Literal["float32", "float16", "bfloat16", "int8", "int4"],
     compile: bool,
+    attn_implementation: Optional[str],
     peft_config: PeftConfig,
 ) -> nn.Module:
-    base_model = get_base_model(model_id=model_id, dtype=dtype, compile=compile)
+    base_model = get_base_model(
+        model_id=model_id, dtype=dtype, compile=compile, attn_implementation=attn_implementation
+    )
     model = get_peft_model(base_model, peft_config)
     return model
 

@@ -325,8 +325,9 @@ def main(*, path_experiment: str, experiment_name: str, train_params_sha: str, p
     model = get_model(
         model_id=train_config.model_id,
         dtype=train_config.dtype,
-        peft_config=peft_config,
         compile=train_config.compile,
+        attn_implementation=train_config.attn_implementation,
+        peft_config=peft_config,
     )
     print_verbose(model)
 
