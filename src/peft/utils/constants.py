@@ -299,3 +299,11 @@ DUMMY_MODEL_CONFIG = {"model_type": "custom"}
 # otherwise there is no point in optimizing and there is a small chance of bugs in the optimization algorithm, so no
 # point in taking unnecessary risks. See #2045 for more context.
 MIN_TARGET_MODULES_FOR_OPTIMIZATION = 20
+
+# Use this prefix for rank_pattern or alpha_pattern if the key is meant to be the fully qualified key, not a pattern. So
+# e.g.:
+# `rank_pattern = {"foo": 16}`
+# would match model.foo but also model.inner_model.foo. This can be avoided by setting the key as:
+# `rank_pattern = {f"{FULLY_QUALIFIED_PATTERN_KEY_PREFIX}foo": 16}`
+# This is only for rank_pattern or alpha_pattern, it is not intended for target_modules
+FULLY_QUALIFIED_PATTERN_KEY_PREFIX = "FULL-NAME-"
