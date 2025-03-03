@@ -274,12 +274,12 @@ class PeftCommonTester:
         if hasattr(model, "config"):  # custom models don't have a config attribute
             assert config["base_model_name_or_path"] == model.config.to_dict()["_name_or_path"]
 
-    def perturb_trainable_token_weights_if_used(self, model, config, adapter_name="default", weight=1.0):
+    def perturb_trainable_token_weights_if_used(self, model, config_kwargs, adapter_name="default", weight=1.0):
         """TrainableTokensLayer is initialized to be a no-op by default. Since there's currently no way to pass
         `init_weights=False` to the trainable tokens layer when used in conjunction with LoRA, we have to do it like
         this to make sure that it is *not* a no-op (essentially simulating "training" of the adapter).
         """
-        if getattr(config, "trainable_token_indices", None) is None:
+        if "trainable_token_indices" not in config_kwargs:
             return
 
         token_wrapper = None
@@ -660,7 +660,7 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        self.perturb_trainable_token_weights_if_used(model, config)
+        self.perturb_trainable_token_weights_if_used(model, config_kwargs)
 
         dummy_input = self.prepare_inputs_for_testing()
 
@@ -733,7 +733,7 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        self.perturb_trainable_token_weights_if_used(model, config)
+        self.perturb_trainable_token_weights_if_used(model, config_kwargs)
 
         dummy_input = self.prepare_inputs_for_testing()
         model.eval()
@@ -949,8 +949,8 @@ class PeftCommonTester:
         model.add_adapter("adapter1", config)
         model = model.to(self.torch_device).eval()
 
-        self.perturb_trainable_token_weights_if_used(model, config, adapter_name="adapter0")
-        self.perturb_trainable_token_weights_if_used(model, config, adapter_name="adapter1")
+        self.perturb_trainable_token_weights_if_used(model, config_kwargs, adapter_name="adapter0")
+        self.perturb_trainable_token_weights_if_used(model, config_kwargs, adapter_name="adapter1")
 
         dummy_input = self.prepare_inputs_for_testing()
         # ensure that we have at least 3 samples for this test
@@ -1504,7 +1504,7 @@ class PeftCommonTester:
             with pytest.raises(AttributeError):
                 model = model.unload()
         else:
-            self.perturb_trainable_token_weights_if_used(model, config)
+            self.perturb_trainable_token_weights_if_used(model, config_kwargs)
 
             dummy_input = self.prepare_inputs_for_testing()
             logits_with_adapter = model(**dummy_input)[0]
@@ -1808,7 +1808,7 @@ class PeftCommonTester:
             peft_model = get_peft_model(model, config)
 
         # trainable_token_indices doesn't have support for `init_weights` so we have to do this manually
-        self.perturb_trainable_token_weights_if_used(model, config)
+        self.perturb_trainable_token_weights_if_used(model, config_kwargs)
 
         output_peft = get_output(peft_model)
 
