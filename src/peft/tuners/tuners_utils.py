@@ -626,7 +626,8 @@ class BaseTuner(nn.Module, ABC):
         model_config = self.get_model_config(model)
         if model_config.get("tie_word_embeddings"):
             for target_module in self.targeted_module_names:
-                if target_module in EMBEDDING_LAYER_NAMES:
+                # TODO discuss in PR if reasonable change
+                if target_module.split(".")[-1] in EMBEDDING_LAYER_NAMES:
                     tied_target_modules.append(target_module)
         return tied_target_modules
 
