@@ -63,7 +63,6 @@ from .testing_utils import (
     require_multi_accelerator,
     require_non_cpu,
     require_torch_gpu,
-    require_torch_multi_gpu,
 )
 
 
@@ -594,7 +593,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         # this should work without any problem
         _ = model.generate(input_ids=input_ids)
 
-    @require_torch_multi_gpu
+    @require_multi_accelerator
     @pytest.mark.multi_gpu_tests
     @require_bitsandbytes
     def test_lora_seq2seq_lm_multi_gpu_inference(self):
@@ -622,7 +621,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         # this should work without any problem
         _ = model.generate(input_ids=input_ids)
 
-    @require_torch_multi_gpu
+    @require_multi_accelerator
     @pytest.mark.multi_gpu_tests
     @require_bitsandbytes
     def test_adaption_prompt_8bit(self):
@@ -645,7 +644,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
         _ = model(random_input)
 
-    @require_torch_multi_gpu
+    @require_multi_accelerator
     @pytest.mark.multi_gpu_tests
     @require_bitsandbytes
     def test_adaption_prompt_4bit(self):
@@ -668,7 +667,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
         _ = model(random_input)
 
-    @require_torch_gpu
+    @require_non_cpu
     @pytest.mark.single_gpu_tests
     @require_bitsandbytes
     def test_print_4bit_expected(self):
@@ -778,7 +777,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, bnb.nn.Linear8bitLt)
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, bnb.nn.Linear8bitLt)
 
-    @require_torch_gpu
+    @require_non_cpu
     @pytest.mark.single_gpu_tests
     @require_bitsandbytes
     def test_8bit_merge_and_disable_lora(self):
@@ -814,7 +813,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, LoraLinear8bitLt)
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear8bitLt)
 
-    @require_torch_gpu
+    @require_non_cpu
     @pytest.mark.single_gpu_tests
     @require_bitsandbytes
     def test_8bit_merge_lora_with_bias(self):
@@ -846,7 +845,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert not torch.allclose(out_base, out_before_merge, atol=atol, rtol=rtol)
         assert torch.allclose(out_before_merge, out_after_merge, atol=atol, rtol=rtol)
 
-    @require_torch_gpu
+    @require_non_cpu
     @pytest.mark.single_gpu_tests
     @require_bitsandbytes
     def test_4bit_merge_lora(self):
@@ -888,7 +887,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, bnb.nn.Linear4bit)
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, bnb.nn.Linear4bit)
 
-    @require_torch_gpu
+    @require_non_cpu
     @pytest.mark.single_gpu_tests
     @require_bitsandbytes
     def test_4bit_merge_and_disable_lora(self):
@@ -930,7 +929,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, LoraLinear4bit)
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear4bit)
 
-    @require_torch_gpu
+    @require_non_cpu
     @pytest.mark.single_gpu_tests
     @require_bitsandbytes
     def test_4bit_merge_lora_with_bias(self):
@@ -971,7 +970,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert not torch.allclose(out_base, out_before_merge, atol=atol, rtol=rtol)
         assert torch.allclose(out_before_merge, out_after_merge, atol=atol, rtol=rtol)
 
-    @require_torch_gpu
+    @require_non_cpu
     @pytest.mark.single_gpu_tests
     @require_bitsandbytes
     def test_4bit_lora_mixed_adapter_batches_lora(self):
@@ -1042,7 +1041,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert torch.allclose(out_adapter0[1::3], out_mixed[1::3], atol=atol, rtol=rtol)
         assert torch.allclose(out_adapter1[2::3], out_mixed[2::3], atol=atol, rtol=rtol)
 
-    @require_torch_gpu
+    @require_non_cpu
     @pytest.mark.single_gpu_tests
     @require_bitsandbytes
     def test_8bit_lora_mixed_adapter_batches_lora(self):
@@ -1124,7 +1123,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model.save_pretrained(tmp_dir, safe_serialization=True)
 
-    @require_torch_gpu
+    @require_non_cpu
     @pytest.mark.single_gpu_tests
     @require_bitsandbytes
     def test_4bit_dora_inference(self):
@@ -1163,7 +1162,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, LoraLinear4bit)
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear4bit)
 
-    @require_torch_gpu
+    @require_non_cpu
     @pytest.mark.single_gpu_tests
     @require_bitsandbytes
     def test_8bit_dora_inference(self):
@@ -1197,7 +1196,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, LoraLinear8bitLt)
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear8bitLt)
 
-    @require_torch_gpu
+    @require_non_cpu
     @pytest.mark.single_gpu_tests
     @require_bitsandbytes
     def test_4bit_dora_merging(self):
