@@ -77,10 +77,10 @@ def evaluate(model, tokenizer, ds, batch_size, generate_kwargs, use_tqdm=False) 
     with torch.no_grad():
         predictions = []
         responses = []
-        iter_ = range(0, len(ds), batch_size)
+        pbar = range(0, len(ds), batch_size)
         if use_tqdm:
-            iter_ = tqdm(iter_)
-        for j in iter_:
+            pbar = tqdm(pbar)
+        for j in pbar:
             sliced = ds[j : j + batch_size]
             responses += sliced.pop("response")
             batch = tokenizer.pad(sliced, return_tensors="pt", padding_side="left").to(model.device)
@@ -169,7 +169,8 @@ def train(
     ds_test = ds_test.map(tokenize_wo_answer_, batched=True).remove_columns(["type", "query", "original_question"])
 
     try:
-        for step in tqdm(range(1, max_steps + 1)):
+        pbar = tqdm(range(1, max_steps + 1))
+        for step in pbar:
             tic = time.perf_counter()
 
             # create the batch
@@ -208,7 +209,7 @@ def train(
             lr_scheduler.step()
 
             losses.append(loss.item())
-            tqdm.set_postfix({"loss": loss.item()})
+            pbar.set_postfix({"loss": loss.item()})
             cuda_memory_log.append(torch.cuda.memory_allocated() - cuda_memory_init)
             toc = time.perf_counter()
             durations.append(toc - tic)
