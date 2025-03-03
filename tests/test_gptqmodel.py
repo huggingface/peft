@@ -203,10 +203,11 @@ class PeftGPTQModelTests(unittest.TestCase):
         model = prepare_model_for_kbit_training(model)
 
         peft_config = AdaLoraConfig(
+            total_step=40,
             init_r=6,
             target_r=4,
-            tinit=50,
-            tfinal=100,
+            tinit=10,
+            tfinal=20,
             deltaT=5,
             beta1=0.3,
             beta2=0.3,
