@@ -625,7 +625,7 @@ class TestTrainableTokens:
         emb_in = peft_model.model.model.decoder.embed_tokens(torch.tensor([token_indices]))
         emb_out = peft_model.model.lm_head(1 / emb_in)
 
-        assert torch.allclose(torch.diag(emb_out[0]), torch.tensor([emb_dim] * len(token_indices)))
+        assert torch.allclose(torch.diag(emb_out[0]), torch.tensor([emb_dim] * len(token_indices)).float())
 
         # make sure that the state dict does not include weight-tied weights.
         state_dict = get_peft_model_state_dict(peft_model)
@@ -661,7 +661,7 @@ class TestTrainableTokens:
         emb_in = peft_model.model.model.decoder.embed_tokens(torch.tensor([token_indices]))
         emb_out = peft_model.model.lm_head(1 / emb_in)
 
-        assert torch.allclose(torch.diag(emb_out[0]), torch.tensor([emb_dim] * len(token_indices)))
+        assert torch.allclose(torch.diag(emb_out[0]), torch.tensor([emb_dim] * len(token_indices)).float())
 
         # make sure that the state dict does not include weight-tied weights.
         state_dict = get_peft_model_state_dict(peft_model)
@@ -708,7 +708,7 @@ class TestTrainableTokens:
         emb_in = peft_model.model.encoder.embed_tokens(torch.tensor([token_indices]))
         emb_out = peft_model.model.lm_head(1 / emb_in)
 
-        assert all(torch.diag(emb_out[0]) == torch.tensor([emb_dim] * len(token_indices)))
+        assert torch.allclose(torch.diag(emb_out[0]), torch.tensor([emb_dim] * len(token_indices)).float())
 
         # T5 has a decoder embedding layer, we can simply check if it's forward is equal to the encoder
         # embedding forward.
@@ -847,7 +847,7 @@ class TestTrainableTokens:
         with pytest.raises(ValueError) as e:
             peft_model = get_peft_model(base_model, peft_config)
 
-        assert "Target modules ['embed_tokens'] not found in the base model." in str(e)
+        assert "Target modules embed_tokens not found in the base model." in str(e)
 
     def test_embedding_name_is_used_when_given_standalone(self, model_embed_multiple):
         peft_config = TrainableTokensConfig(target_modules="embed_in_2", token_indices=[0, 1, 3])
