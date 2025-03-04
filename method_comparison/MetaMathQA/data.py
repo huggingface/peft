@@ -24,9 +24,9 @@ from datasets import Dataset, load_dataset
 from sklearn.model_selection import StratifiedKFold
 
 
-# 1800 would cover ~99% of text+reply, which should ~ correspond to < 768 tokens
-# going a bit lower (~97%) to have wiggle room
-CHAR_LIMIT = 1500
+# with a token limit of 768 for query + response, we have to exclude all texts with length > 1304; this leaves 93.8% of
+# the dataset
+CHAR_LIMIT = 1300
 
 
 def get_filtered_dataset(*, ds: datasets.Dataset, print_fn: Callable[..., None]) -> Dataset:

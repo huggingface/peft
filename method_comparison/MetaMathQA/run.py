@@ -264,6 +264,7 @@ def train(
                 }
                 print_verbose(json.dumps(log_dict))
 
+            # # TODO is this needed?
             torch.cuda.empty_cache()
             gc.collect()
 
@@ -291,6 +292,10 @@ def train(
 
     except KeyboardInterrupt:
         print_verbose("canceled training")
+        status = TrainStatus.CANCELED
+    except torch.OutOfMemoryError:
+        # ouch, still let's try to log some results
+        print_verbose("out of memory error encountered")
         status = TrainStatus.CANCELED
 
     toc_train = time.perf_counter()
