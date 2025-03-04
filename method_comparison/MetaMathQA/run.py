@@ -74,6 +74,8 @@ TEST_SIZE = 1000
 
 
 def evaluate(model, tokenizer, ds, batch_size, generate_kwargs, use_tqdm=False) -> tuple[list[str], list[str]]:
+    # filter out None values so that we don't depend on setting correct defaults in the config
+    generation_kwargs = {k: v for k, v in generate_kwargs.items() if v is not None}
     generation_config = GenerationConfig(**generate_kwargs)
     with torch.inference_mode():
         predictions = []
@@ -122,6 +124,7 @@ def train(
     model: nn.Module,
     max_steps: int,
     batch_size: int,
+    batch_size_eval: int,
     ds: Any,
     tokenizer: Any,
     cuda_memory_init: int,
@@ -230,7 +233,7 @@ def train(
                     model=model,
                     tokenizer=tokenizer,
                     ds=ds_valid,
-                    batch_size=batch_size,
+                    batch_size=batch_size_eval,
                     generate_kwargs={**generation_kwargs},
                 )
 
@@ -271,7 +274,7 @@ def train(
             model=model,
             tokenizer=tokenizer,
             ds=ds_test,
-            batch_size=batch_size,
+            batch_size=batch_size_eval,
             generate_kwargs={**generation_kwargs, "pad_token_id": tokenizer.eos_token_id},
             use_tqdm=len(ds_test) > 100,
         )
@@ -338,6 +341,7 @@ def main(*, path_experiment: str, experiment_name: str, train_params_sha: str, p
             model=model,
             max_steps=train_config.max_steps,
             batch_size=train_config.batch_size,
+            batch_size_eval=train_config.batch_size_eval,
             ds=ds,
             tokenizer=tokenizer,
             cuda_memory_init=cuda_memory_init,
