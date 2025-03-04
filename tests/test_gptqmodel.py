@@ -187,6 +187,7 @@ class PeftGPTQModelTests(unittest.TestCase):
             # assert loss is not None
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
+    @pytest.mark.single_gpu_tests
     def test_adalora_causalLM(self):
         r"""
         Tests the gptq training with adalora
