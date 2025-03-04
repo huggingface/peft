@@ -619,7 +619,7 @@ class TestTrainableTokens:
 
         # we have to find out if the input embedding tying is doing its job during forward.
         # for this we can leverage the fact that  emb_out(1/emb_in(x))  is  embed_dim  on the
-        # diagonal iff  emb_in.weight == emb_out.weight.
+        # diagonal iff emb_in.weight == emb_out.weight.
         token_indices = [0, 1, 2, 3]
         emb_dim = 768
         emb_in = peft_model.model.model.decoder.embed_tokens(torch.tensor([token_indices]))

@@ -685,7 +685,7 @@ def _get_input_embeddings_name(model, default=None):
 
     input_embeddings = model.get_input_embeddings()
     for name, module in model.named_modules():
-        if module == input_embeddings:
+        if module is input_embeddings:
             return name
 
     return default
