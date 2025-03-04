@@ -1949,7 +1949,7 @@ class TestPiSSA:
         assert not torch.allclose(output_finetuned_pissa, output_converted, atol=tol, rtol=tol)
 
 
-@pytest.mark.skipif(not (torch.cuda.is_available() or torch.xpu.is_available()), reason="test requires a GPU")
+@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU")
 @pytest.mark.single_gpu_tests
 class TestOLoRA:
     r"""
@@ -3869,8 +3869,7 @@ class TestPTuningReproducibility:
 
         model.save_pretrained(tmp_path)
         del model
-        torch.xpu.empty_cache()
-        gc.collect()
+        clear_device_cache(garbage_collection=True)
 
         model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
         model = PeftModel.from_pretrained(model, tmp_path)
