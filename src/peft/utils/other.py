@@ -615,10 +615,14 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
     def _getattr_wrapped(self, name, modules):
         # some models query self.wte.weight.dtype, some may query the weights directly. for the first case it is not
         # necessary to do anything special but we don't know if is going to be `.dtype`. so we need to get the merged
-        # weits from the adapter.
+        # weights from the adapter.
         if name == "weight":
             return modules["token_adapter"].get_merged_weights(self.token_adapter.active_adapters)
-        assert False, f"should never be reached, bad check in _hasattr_wrapped for {name}"
+
+        raise RuntimeError(
+            f"This code should've never been reached, probably a bad check in `_hasattr_wrapped` for {name}. "
+            "Please file an issue under https://github.com/huggingface/peft/issues."
+        )
 
     def _forward_wrapped(self, x, *args, **kwargs):
         return self.token_adapter(x)
@@ -675,16 +679,16 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         return self.token_adapter.get_base_layer()
 
 
-def _get_input_embeddings_name(model):
+def _get_input_embeddings_name(model, default=None):
     if not hasattr(model, "get_input_embeddings"):
-        return None
+        return default
 
     input_embeddings = model.get_input_embeddings()
     for name, module in model.named_modules():
         if module == input_embeddings:
             return name
 
-    return None
+    return default
 
 
 def _get_submodules(model, key):

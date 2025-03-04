@@ -67,8 +67,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
 
     def update_layer(self, adapter_name, **kwargs):
         if kwargs.get("tied_adapter", None):
-            # in this case we don't have any say, we're just following whatever the tied
-            # adpater does, so we'll just return here.
+            # as a tied adapter, we're just following whatever the adpater we're tied to does, we don't update anything.
             return
 
         self.token_indices[adapter_name] = kwargs["token_indices"]

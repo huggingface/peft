@@ -31,8 +31,7 @@ class TrainableTokensConfig(PeftConfig):
     be used to add new tokens or changing the embedding of existing tokens while saving on memory. Both storage as well
     as working memory usage are reduced in contrast to training the embedding matrix fully.
 
-    Note that training with FSDP/DeepSpeed might not yet be fully supported. Also note that models using weight tying
-    are currently not supported and will raise an error.
+    Note that training with FSDP/DeepSpeed might not yet be fully supported.
 
     Args:
         token_indices (`list[int]`):

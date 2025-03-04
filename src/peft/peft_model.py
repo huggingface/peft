@@ -959,7 +959,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if isinstance(peft_config.trainable_token_indices, dict):
                 target_layers = peft_config.trainable_token_indices
             else:
-                layer_name = _get_input_embeddings_name(self.model) or "embed_tokens"
+                layer_name = _get_input_embeddings_name(self.model, "embed_tokens")
                 target_layers = {layer_name: peft_config.trainable_token_indices}
 
             if self.modules_to_save:
@@ -990,6 +990,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             model_config = BaseTuner.get_model_config(self)
             if (
                 model_config.get("tie_word_embeddings", False)
+                # some models may be misconfigured to have weight tying enabled but don't define tied weights keys
                 and self.model._tied_weights_keys is not None
                 and isinstance(self.model.get_input_embeddings(), TrainableTokensWrapper)
             ):

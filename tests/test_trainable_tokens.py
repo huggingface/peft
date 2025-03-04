@@ -625,7 +625,7 @@ class TestTrainableTokens:
         emb_in = peft_model.model.model.decoder.embed_tokens(torch.tensor([token_indices]))
         emb_out = peft_model.model.lm_head(1 / emb_in)
 
-        assert all(torch.diag(emb_out[0]) == torch.tensor([emb_dim] * len(token_indices)))
+        assert torch.allclose(torch.diag(emb_out[0]), torch.tensor([emb_dim] * len(token_indices)))
 
         # make sure that the state dict does not include weight-tied weights.
         state_dict = get_peft_model_state_dict(peft_model)
@@ -661,7 +661,7 @@ class TestTrainableTokens:
         emb_in = peft_model.model.model.decoder.embed_tokens(torch.tensor([token_indices]))
         emb_out = peft_model.model.lm_head(1 / emb_in)
 
-        assert all(torch.diag(emb_out[0]) == torch.tensor([emb_dim] * len(token_indices)))
+        assert torch.allclose(torch.diag(emb_out[0]), torch.tensor([emb_dim] * len(token_indices)))
 
         # make sure that the state dict does not include weight-tied weights.
         state_dict = get_peft_model_state_dict(peft_model)

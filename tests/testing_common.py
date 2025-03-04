@@ -274,7 +274,7 @@ class PeftCommonTester:
         if hasattr(model, "config"):  # custom models don't have a config attribute
             assert config["base_model_name_or_path"] == model.config.to_dict()["_name_or_path"]
 
-    def perturb_trainable_token_weights_if_used(self, model, config_kwargs, adapter_name="default", weight=1.0):
+    def perturb_trainable_token_weights_if_used(self, model, config_kwargs, adapter_name="default", scale=1.0):
         """TrainableTokensLayer is initialized to be a no-op by default. Since there's currently no way to pass
         `init_weights=False` to the trainable tokens layer when used in conjunction with LoRA, we have to do it like
         this to make sure that it is *not* a no-op (essentially simulating "training" of the adapter).
@@ -297,7 +297,7 @@ class PeftCommonTester:
         assert token_wrapper is not None
 
         token_wrapper.token_adapter.trainable_tokens_delta[adapter_name].data = (
-            torch.rand_like(token_wrapper.token_adapter.trainable_tokens_delta[adapter_name].data) * weight
+            torch.rand_like(token_wrapper.token_adapter.trainable_tokens_delta[adapter_name].data) * scale
         )
 
     def _test_model_attr(self, model_id, config_cls, config_kwargs):
