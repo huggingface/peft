@@ -22,6 +22,7 @@ import os
 import platform
 import subprocess
 import tempfile
+import warnings
 from dataclasses import asdict, dataclass
 from typing import Any, Callable, Literal, Optional
 
@@ -300,11 +301,20 @@ def get_accuracy(*, predictions: list[str], responses: list[str]) -> float:
 
 
 def get_base_model_info(model_id: str) -> huggingface_hub.ModelInfo:
-    return hf_api.model_info(model_id)
+    try:
+        return hf_api.model_info(model_id)
+    except Exception as exc:
+        warnings.warn(f"Could not retrieve model info, failed with error {exc}")
+        return None
+
 
 
 def get_dataset_info(dataset_id: str) -> huggingface_hub.DatasetInfo:
-    return hf_api.dataset_info(dataset_id)
+    try:
+        return hf_api.dataset_info(dataset_id)
+    except Exception as exc:
+        warnings.warn(f"Could not retrieve dataset info, failed with error {exc}")
+        return None
 
 
 def get_git_hash(module) -> Optional[str]:
@@ -422,8 +432,8 @@ def log_results(
     cuda_memory_init: int,
     time_total: float,
     model: nn.Module,
-    model_info: huggingface_hub.ModelInfo,
-    dataset_info: huggingface_hub.DatasetInfo,
+    model_info: Optional[huggingface_hub.ModelInfo],
+    dataset_info: Optional[huggingface_hub.DatasetInfo],
     start_date: str,
     peft_config_sha: str,
     train_params_sha: str,
@@ -441,10 +451,18 @@ def log_results(
         print(f"Saved PEFT checkpoint to {tmp_dir}")
 
     meta_info = get_meta_info()
-    model_sha = model_info.sha
-    model_created_at = model_info.created_at.isoformat()
-    dataset_sha = dataset_info.sha
-    dataset_created_at = dataset_info.created_at.isoformat()
+    if model_info is not None:
+        model_sha = model_info.sha
+        model_created_at = model_info.created_at.isoformat()
+    else:
+        model_sha = None
+        model_created_at = None
+    if dataset_info is not None:
+        dataset_sha = dataset_info.sha
+        dataset_created_at = dataset_info.created_at.isoformat()
+    else:
+        dataset_sha = None
+        dataset_created_at = None
 
     peft_branch = get_peft_branch()
 
