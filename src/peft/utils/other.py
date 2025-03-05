@@ -575,6 +575,9 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
     """Wraps a module (typically an embedding layer) that is supposed to be re-trained selectively (i.e.
     solely updating a few columns) using the `TrainableTokensLayer` PEFT method.
+
+    Supports weight-tying to another adapter when passed a `tied_adapter` which is expected to be a
+    `TrainableTokensLayer`.
     """
 
     def __init__(
@@ -584,9 +587,6 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         token_indices: list[int],
         tied_adapter=None,
     ) -> None:
-        """Supports weight-tying to another adapter when passed a `tied_adapter` which is expected to be a
-        `TrainableTokensLayer`.
-        """
         super().__init__(module_to_save, adapter_name, token_indices=token_indices, tied_adapter=tied_adapter)
 
         # unset the original_module attribute since we're using a property to remove this from the state dict.
