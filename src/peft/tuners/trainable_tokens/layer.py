@@ -46,7 +46,9 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         self._active_adapter = adapter_name
         self.kwargs = kwargs
 
-        self.tied_adapter = tied_adapter
+        # wrap the tied adapter in a list so that it is excluded from .(named_)modules() and, therefore,
+        # not included in the state dict since it would be a copy of the tied adapter anyway.
+        self._tied_adapter = [tied_adapter] if tied_adapter else []
 
         # we store the updated weights of particular tokens and their originals. we assume
         # that the count of new tokens is far smaller than the number of total tokens.
@@ -64,6 +66,12 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
 
         # Mark the weight as unmerged
         self.merged_adapters = []
+
+    @property
+    def tied_adapter(self):
+        if self._tied_adapter:
+            return self._tied_adapter[0]
+        return None
 
     def update_layer(self, adapter_name, **kwargs):
         if kwargs.get("tied_adapter", None):

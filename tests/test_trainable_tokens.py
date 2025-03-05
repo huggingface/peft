@@ -681,6 +681,29 @@ class TestTrainableTokens:
         warnings = [msg for msg in warnings if "Model with `tie_word_embeddings=True` and the" in msg]
         assert warnings
 
+    def test_weight_tying_state_dict_ignores_tied_weights(self, model_weight_tied):
+        # since weight tying is currently not supported make sure that an error is raised when attempting
+        # to use a model that has tied input/output embeddings
+        assert model_weight_tied._tied_weights_keys
+        assert model_weight_tied.config.tie_word_embeddings
+
+        peft_config = TrainableTokensConfig(
+            target_modules=["embed_tokens"],
+            token_indices=[0, 1, 3],
+        )
+
+        peft_model = get_peft_model(model_weight_tied, peft_config)
+
+        state_dict = peft_model.state_dict()
+        peft_state_dict = get_peft_model_state_dict(peft_model)
+
+        # the state dict or the peft model state dict must not include tied adapter weights
+        state_dict_keys = [n for n, _ in state_dict.items() if "tied_adapter." in n]
+        peft_state_dict_keys = [n for n, _ in peft_state_dict.items() if "tied_adapter." in n]
+
+        assert not state_dict_keys
+        assert not peft_state_dict_keys
+
     @pytest.mark.parametrize(
         "peft_config",
         [
