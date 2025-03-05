@@ -57,7 +57,7 @@ from data import (
     tokenize_with_answer,
     tokenize_wo_answer,
 )
-from peft import PeftConfig
+from peft import AdaLoraConfig, PeftConfig
 
 
 # # suppress all warnings
@@ -135,6 +135,7 @@ def train(
     query_template: str,
     lr_scheduler_arg: Optional[Literal["cosine"]],
     use_amp: bool,
+    is_adalora: bool,
 ) -> TrainResult:
     cuda_memory_allocated_log = []
     cuda_memory_reserved_log = []
@@ -214,6 +215,9 @@ def train(
             grad_scaler.step(optimizer)
             grad_scaler.update()
             lr_scheduler.step()
+
+            if is_adalora:
+                model.base_model.update_and_allocate(step)
 
             losses.append(loss.item())
             pbar.set_postfix({"loss": loss.item()})
@@ -369,6 +373,7 @@ def main(*, path_experiment: str, experiment_name: str) -> None:
             query_template=train_config.query_template,
             lr_scheduler_arg=train_config.lr_scheduler,
             use_amp=train_config.use_amp,
+            is_adalora=isinstance(peft_config, AdaLoraConfig),
         )
     except Exception as e:
         print_verbose(f"Training failed with error: {e}")
