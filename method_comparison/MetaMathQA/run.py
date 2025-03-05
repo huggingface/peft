@@ -136,7 +136,8 @@ def train(
     lr_scheduler_arg: Optional[Literal["cosine"]],
     use_amp: bool,
 ) -> TrainResult:
-    cuda_memory_log = []
+    cuda_memory_allocated_log = []
+    cuda_memory_reserved_log = []
     losses = []
     durations = []
     metrics = []
@@ -216,7 +217,8 @@ def train(
 
             losses.append(loss.item())
             pbar.set_postfix({"loss": loss.item()})
-            cuda_memory_log.append(torch.cuda.memory_allocated() - cuda_memory_init)
+            cuda_memory_allocated_log.append(torch.cuda.memory_allocated() - cuda_memory_init)
+            cuda_memory_reserved_log.append(torch.cuda.memory_reserved() - cuda_memory_init)
             toc = time.perf_counter()
             durations.append(toc - tic)
 
@@ -224,6 +226,8 @@ def train(
             if step % eval_steps == 0:
                 tic_eval = time.perf_counter()
                 loss_avg = sum(losses[-eval_steps:]) / eval_steps
+                memory_allocated_avg = sum(cuda_memory_allocated_log[-eval_steps:]) / eval_steps
+                memory_reserved_avg = sum(cuda_memory_reserved_log[-eval_steps:]) / eval_steps
                 token_sum = sum(total_tokens[-eval_steps:])
                 dur_train = sum(durations[-eval_steps:])
                 tokens_per_sec = token_sum / dur_train
@@ -259,7 +263,9 @@ def train(
                     "valid acc": f"{accuracy:.3f}",
                     "train time": f"{dur_train:.2f}s",
                     "eval time": f"{toc_eval - tic_eval:.2f}s",
-                    "tokens per sec": f"{tokens_per_sec:.0f}",
+                    "tokens / sec": f"{tokens_per_sec:.0f}",
+                    "mem allocated avg": f"{memory_allocated_avg:.0f}",
+                    "mem reserved avg": f"{memory_reserved_avg:.0f}",
                     "elapsed time": f"{elapsed // 60:.0f}min {elapsed % 60:.0f}s",
                 }
                 print_verbose(json.dumps(log_dict))
@@ -306,7 +312,7 @@ def train(
     train_result = TrainResult(
         status=status,
         train_time=train_time,
-        cuda_memory_log=cuda_memory_log,
+        cuda_memory_reserved_log=cuda_memory_reserved_log,
         losses=losses,
         metrics=metrics,
     )

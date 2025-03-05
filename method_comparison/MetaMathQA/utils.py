@@ -182,12 +182,15 @@ def init_cuda() -> int:
     # might not be necessary, but just to be sure
     nn.Linear(1, 1).to(device)
 
-    cuda_memory_init = torch.cuda.max_memory_allocated()
+    cuda_memory_init = torch.cuda.max_memory_reserved()
     if cuda_memory_init > CUDA_MEMORY_INIT_THRESHOLD:
         raise RuntimeError(
             f"CUDA memory usage at start is too high: {cuda_memory_init // 2**20}MB, please ensure that no other "
             f"processes are running on {device}."
         )
+
+    torch.cuda.reset_peak_memory_stats()
+    cuda_memory_init = torch.cuda.max_memory_reserved()
     return cuda_memory_init
 
 
@@ -394,22 +397,22 @@ class TrainStatus(enum.Enum):
 class TrainResult:
     status: TrainStatus
     train_time: float
-    cuda_memory_log: list[int]
+    cuda_memory_reserved_log: list[int]
     losses: list[float]
     metrics: list[Any]  # TODO
 
 
 def log_to_console(log_data: dict[str, Any], print_fn: Callable[..., None]) -> None:
     cuda_memory_max = log_data["train_info"]["cuda_memory_max"]
-    cuda_memory_avg = log_data["train_info"]["cuda_memory_avg"]
-    cuda_memory_99th = log_data["train_info"]["cuda_memory_99th"]
+    cuda_memory_avg = log_data["train_info"]["cuda_memory_reserved_avg"]
+    cuda_memory_reserved_99th = log_data["train_info"]["cuda_memory_reserved_99th"]
     time_train = log_data["train_info"]["train_time"]
     time_total = log_data["run_info"]["total_time"]
     file_size = log_data["train_info"]["file_size"]
 
     print_fn(f"cuda memory max: {cuda_memory_max // 2**20}MB")
-    print_fn(f"cuda memory avg: {cuda_memory_avg // 2**20}MB")
-    print_fn(f"cuda memory 90th percentile: {cuda_memory_99th // 2**20}MB")
+    print_fn(f"cuda memory reserved avg: {cuda_memory_avg // 2**20}MB")
+    print_fn(f"cuda memory reserved 99th percentile: {cuda_memory_reserved_99th // 2**20}MB")
     print_fn(f"train time: {time_train}s")
     print_fn(f"total time: {time_total:.2f}s")
     print_fn(f"file size of checkpoint: {file_size / 2**20:.1f}MB")
@@ -438,11 +441,11 @@ def log_results(
     peft_config_sha: str,
     train_params_sha: str,
     print_fn: Callable[..., None],
-):
+) -> None:
     # collect results
-    cuda_memory_final = torch.cuda.max_memory_allocated()
-    cuda_memory_avg = int(sum(train_result.cuda_memory_log) / len(train_result.cuda_memory_log))
-    cuda_memory_99th = int(np.percentile(train_result.cuda_memory_log, 99))
+    cuda_memory_final = torch.cuda.max_memory_reserved()
+    cuda_memory_avg = int(sum(train_result.cuda_memory_reserved_log) / len(train_result.cuda_memory_reserved_log))
+    cuda_memory_reserved_99th = int(np.percentile(train_result.cuda_memory_reserved_log, 99))
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         model.save_pretrained(tmp_dir)
@@ -486,9 +489,9 @@ def log_results(
             "peft_config_sha": peft_config_sha,
         },
         "train_info": {
-            "cuda_memory_avg": cuda_memory_avg,
+            "cuda_memory_reserved_avg": cuda_memory_avg,
             "cuda_memory_max": (cuda_memory_final - cuda_memory_init),
-            "cuda_memory_99th": cuda_memory_99th,
+            "cuda_memory_reserved_99th": cuda_memory_reserved_99th,
             "train_time": train_result.train_time,
             "file_size": file_size,
             "status": train_result.status.value,
