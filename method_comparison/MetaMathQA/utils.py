@@ -123,12 +123,12 @@ class TrainConfig:
             raise ValueError("Invalid query_template, must contain '{query}'")
 
 
-def validate_experiment_path(path: str) -> tuple[str, str, str]:
+def validate_experiment_path(path: str) -> str:
     # the experiment path should take the form of ./experiments/<peft-method>/<experiment-name>
     # e.g. ./experiments/lora/rank32
     # it should contain:
-    # - training_params.json
     # - adapter_config.json
+    # - optional: training_params.json
     if not os.path.exists(FILE_NAME_DEFAULT_TRAIN_PARAMS):
         raise FileNotFoundError(
             f"Missing default training params file '{FILE_NAME_DEFAULT_TRAIN_PARAMS}' in the ./experiments directory"
@@ -146,19 +146,7 @@ def validate_experiment_path(path: str) -> tuple[str, str, str]:
         )
 
     experiment_name = os.path.join(*path_parts[-2:])
-
-    if not os.path.exists(os.path.join(path, FILE_NAME_TRAIN_PARAMS)):
-        # no specific train params, default parameters are used
-        train_params_sha = "default"
-    else:
-        train_params_sha = (
-            subprocess.check_output(f"sha256sum {os.path.join(path, FILE_NAME_TRAIN_PARAMS)}".split()).decode().split()[0]
-        )
-
-    peft_config_sha = (
-        subprocess.check_output(f"sha256sum {os.path.join(path, CONFIG_NAME)}".split()).decode().split()[0]
-    )
-    return experiment_name, train_params_sha, peft_config_sha
+    return experiment_name
 
 
 def get_train_config(path: str) -> TrainConfig:
@@ -311,7 +299,6 @@ def get_base_model_info(model_id: str) -> Optional[huggingface_hub.ModelInfo]:
         return None
 
 
-
 def get_dataset_info(dataset_id: str) -> Optional[huggingface_hub.DatasetInfo]:
     try:
         return hf_api.dataset_info(dataset_id)
@@ -438,8 +425,8 @@ def log_results(
     model_info: Optional[huggingface_hub.ModelInfo],
     dataset_info: Optional[huggingface_hub.DatasetInfo],
     start_date: str,
-    peft_config_sha: str,
-    train_params_sha: str,
+    train_config: TrainConfig,
+    peft_config: PeftConfig,
     print_fn: Callable[..., None],
 ) -> None:
     # collect results
@@ -451,7 +438,7 @@ def log_results(
         model.save_pretrained(tmp_dir)
         stat = os.stat(os.path.join(tmp_dir, SAFETENSORS_WEIGHTS_NAME))
         file_size = stat.st_size
-        print(f"Saved PEFT checkpoint to {tmp_dir}")
+        print_fn(f"Saved PEFT checkpoint to {tmp_dir}")
 
     meta_info = get_meta_info()
     if model_info is not None:
@@ -479,14 +466,19 @@ def log_results(
         save_dir = RESULT_PATH
         print_fn("Experiment run was categorized as successful run")
 
+    peft_config_dict = peft_config.to_dict()
+    for key, value in peft_config_dict.items():
+        if isinstance(value, set):
+            peft_config_dict[key] = list(value)
+
     log_data = {
         "run_info": {
             "created_at": start_date,
             "total_time": time_total,
             "experiment_name": experiment_name,
             "peft_branch": peft_branch,
-            "train_params_sha": train_params_sha,
-            "peft_config_sha": peft_config_sha,
+            "train_config": asdict(train_config),
+            "peft_config": peft_config_dict,
         },
         "train_info": {
             "cuda_memory_reserved_avg": cuda_memory_avg,

@@ -198,7 +198,7 @@ def train(
             # TODO: Note that the longest sequence in the batch won't have any PAD/EOS token at the end, this is fine if
             # the batch size is > 1 but should still be fixed eventually.
             for i, num_tokens in enumerate(tokens_per_sample):
-                labels[i, num_tokens + 1:] = -100
+                labels[i, num_tokens + 1 :] = -100
             batch["labels"] = labels
             num_items_in_batch = batch["attention_mask"].sum().item()
 
@@ -320,7 +320,7 @@ def train(
     return train_result
 
 
-def main(*, path_experiment: str, experiment_name: str, train_params_sha: str, peft_config_sha: str) -> None:
+def main(*, path_experiment: str, experiment_name: str) -> None:
     tic_total = time.perf_counter()
     start_date = dt.datetime.now(tz=dt.timezone.utc).replace(microsecond=0).isoformat()
 
@@ -385,8 +385,8 @@ def main(*, path_experiment: str, experiment_name: str, train_params_sha: str, p
         model_info=model_info,
         dataset_info=dataset_info,
         start_date=start_date,
-        train_params_sha=train_params_sha,
-        peft_config_sha=peft_config_sha,
+        train_config=train_config,
+        peft_config=peft_config,
         print_fn=print_verbose,
     )
 
@@ -397,7 +397,7 @@ if __name__ == "__main__":
     parser.add_argument("path_experiment", type=str, help="Path to the experiment directory")
     args = parser.parse_args()
 
-    experiment_name, train_params_sha, peft_config_sha = validate_experiment_path(args.path_experiment)
+    experiment_name = validate_experiment_path(args.path_experiment)
 
     if args.verbose:
 
@@ -412,6 +412,4 @@ if __name__ == "__main__":
     main(
         path_experiment=args.path_experiment,
         experiment_name=experiment_name,
-        train_params_sha=train_params_sha,
-        peft_config_sha=peft_config_sha,
     )
