@@ -59,32 +59,80 @@ Results are stored in one of the result directories. An example output could loo
 ```js
 {
   "run_info": {
-    "created_at": "2025-02-28T14:06:32+00:00",
-    "total_time": 268.78478554499816,
-    "experiment_name": "lora/llama-3.2-3B-rank32",
+    "created_at": "2025-03-05T13:50:05+00:00",
+    "total_time": 2711.0915009640157,
+    "experiment_name": "ia3/lr_0.001",
     "peft_branch": "ben-method-comparison",
-    "train_params_sha": "a02ef88ef774afcceb7796f451a2831ea0aa1fac7530ecb0b319f88d2e24f1f1",
-    "peft_config_sha": "3b1a995103b79579ce90b7d46b2138bfb070d60281cdfbdc91d6cbddaaf7e939"
+    "train_config": {
+      "model_id": "meta-llama/Llama-3.2-3B",
+      "dtype": "bfloat16",
+      "max_seq_length": 768,
+      "batch_size": 4,
+      "batch_size_eval": 51,
+      "max_steps": 5000,
+      "eval_steps": 250,
+      "compile": false,
+      "query_template": "Question: {query} Think step by step.\nAnswer:",
+      "seed": 0,
+      "grad_norm_clip": 1.0,
+      "optimizer_kwargs": {
+        "lr": 0.001
+      },
+      "lr_scheduler": "cosine",
+      "use_amp": false,
+      "generation_kwargs": {
+        "max_length": 800
+      },
+      "attn_implementation": null
+    },
+    "peft_config": {
+      "task_type": null,
+      "peft_type": "IA3",
+      "auto_mapping": null,
+      "base_model_name_or_path": "meta-llama/Llama-3.2-3B",
+      "revision": null,
+      "inference_mode": false,
+      "target_modules": [
+        "v_proj",
+        "k_proj",
+        "down_proj"
+      ],
+      "exclude_modules": null,
+      "feedforward_modules": [
+        "down_proj"
+      ],
+      "fan_in_fan_out": false,
+      "modules_to_save": null,
+      "init_ia3_weights": true
+    }
   },
   "train_info": {
-    "cuda_memory_avg": 7053282512,
-    "cuda_memory_max": 19338018816,
-    "cuda_memory_99th": 7411898951,
-    "train_time": 226.14555068000482,
-    "file_size": 36715216,
+    "cuda_memory_reserved_avg": 14229219940,
+    "cuda_memory_max": 24847056896,
+    "cuda_memory_reserved_99th": 19115624366,
+    "train_time": 2238.65277833899,
+    "file_size": 1157064,
     "status": "success",
     "metrics": [
       {
-        "step": 100,
-        "valid accuracy": 0.09523809523809523,
-        "train loss": 0.8747109097242355,
-        "train samples": 400
+        "step": 250,
+        "valid accuracy": 0.0784313725490196,
+        "train loss": 1.1336498007774354,
+        "train samples": 1000
+      },
+      [...]
+      {
+        "step": 5000,
+        "valid accuracy": 0.21568627450980393,
+        "train loss": 0.6345920492410659,
+        "train samples": 20000
       },
       {
-        "step": 123,
-        "test accuracy": 0.21,
-        "train loss": 0.7670372170209885,
-        "train samples": 492
+        "step": 5000,
+        "test accuracy": 0.35129740518962077,
+        "train loss": 0.6345920492410659,
+        "train samples": 20000,
+        "train total tokens": 4197579
       }
     ]
   },
@@ -93,7 +141,18 @@ Results are stored in one of the result directories. An example output could loo
     "model_created_at": "2024-09-18T15:23:48+00:00",
     "dataset_sha": "aa4f34d3d2d3231299b5b03d9b3e5a20da45aa18",
     "dataset_created_at": "2023-09-21T17:22:46+00:00",
-    "package_info": null,
+    "package_info": {
+      "transformers-version": "4.50.0.dev0",
+      "transformers-commit-hash": "752ef3fd4e70869626ec70657a770a85c0ad9219",
+      "peft-version": "0.14.1.dev0",
+      "peft-commit-hash": "a447a4e5ecd87b7d57733f4df9616a328cf130f4",
+      "datasets-version": "3.3.2",
+      "datasets-commit-hash": null,
+      "bitsandbytes-version": "0.45.2",
+      "bitsandbytes-commit-hash": null,
+      "torch-version": "2.6.0+cu124",
+      "torch-commit-hash": null
+    },
     "system_info": {
       "system": "Linux",
       "release": "6.11.0-17-generic",
@@ -127,3 +186,4 @@ Python 3.11+ is recommended
 - consider using vLLM to potentially speed up generations, at least for the test set
 - using `torch.compile` leads to a huge slowdown, investigate (maybe recompiles), although it does save memory
 - AMP does not appear to help, investigate
+- packing of sequences (but this probably requires adjusting the attention matrix)
