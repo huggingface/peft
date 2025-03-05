@@ -87,7 +87,6 @@ def get_train_valid_test_datasets(
 
 
 def tokenize_with_answer(samples, tokenizer, template):
-    # fixme
     queries = [template.format(query=sample) + answer for sample, answer in zip(samples["query"], samples["response"])]
     tokenized = tokenizer(queries)
     tokenized["input_ids"] = [input_ids[: tokenizer.model_max_length] for input_ids in tokenized["input_ids"]]
@@ -107,6 +106,6 @@ def tokenize_wo_answer(samples, tokenizer, template):
     return tokenized
 
 
-def get_dataset(*, dataset_name) -> Dataset:
+def get_dataset(*, dataset_name: str) -> Dataset:
     ds = load_dataset(dataset_name)["train"]
     return ds

@@ -98,7 +98,7 @@ class TrainConfig:
     generation_kwargs: dict[str, Any]
     attn_implementation: Optional[str]
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.model_id, str):
             raise ValueError(f"Invalid model_id: {self.model_id}")
         if self.dtype not in ["float32", "float16", "bfloat16", "int8", "int4"]:
@@ -303,7 +303,7 @@ def get_accuracy(*, predictions: list[str], responses: list[str]) -> float:
 ###########
 
 
-def get_base_model_info(model_id: str) -> huggingface_hub.ModelInfo:
+def get_base_model_info(model_id: str) -> Optional[huggingface_hub.ModelInfo]:
     try:
         return hf_api.model_info(model_id)
     except Exception as exc:
@@ -312,7 +312,7 @@ def get_base_model_info(model_id: str) -> huggingface_hub.ModelInfo:
 
 
 
-def get_dataset_info(dataset_id: str) -> huggingface_hub.DatasetInfo:
+def get_dataset_info(dataset_id: str) -> Optional[huggingface_hub.DatasetInfo]:
     try:
         return hf_api.dataset_info(dataset_id)
     except Exception as exc:
@@ -370,7 +370,7 @@ class MetaInfo:
     pytorch_info: str
 
 
-def get_meta_info():
+def get_meta_info() -> MetaInfo:
     meta_info = MetaInfo(
         package_info=get_package_info(),
         system_info=get_system_info(),

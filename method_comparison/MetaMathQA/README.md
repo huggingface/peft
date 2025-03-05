@@ -119,8 +119,11 @@ Python 3.11+ is recommended
 
 ## Open tasks
 
-- double check calculation of durations, also log eval time and test time
+- using DoRA gives empty generations?!
 - consider using `DataLoader`
 - consider adding https://github.com/huggingface/Math-Verify
 - consider adding `weight` argument to cross entropy calculation to downweight the EOS token, but it would require calculating the loss manually instead of relying on transformers (see https://github.com/huggingface/transformers/blob/6a876462c308bd7cd7d3ca8e93abaa7d5b02e90e/src/transformers/loss/loss_utils.py#L24-L48)
 - do a sanity check against/comparison with transformers Trainer
+- consider using vLLM to potentially speed up generations, at least for the test set
+- using `torch.compile` leads to a huge slowdown, investigate (maybe recompiles), although it does save memory
+- AMP does not appear to help, investigate

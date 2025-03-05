@@ -292,6 +292,7 @@ def train(
                 "test accuracy": accuracy,
                 "train loss": sum(losses[-eval_steps:]) / eval_steps,
                 "train samples": total_samples,
+                "train total tokens": sum(total_tokens),
             }
         )
         print_verbose(f"Test accuracy: {accuracy:.3f}")
@@ -400,12 +401,12 @@ if __name__ == "__main__":
 
     if args.verbose:
 
-        def print_verbose(*args, **kwargs):
+        def print_verbose(*args, **kwargs) -> None:
             kwargs["file"] = sys.stderr
             print(*args, **kwargs)
     else:
 
-        def print_verbose(*args, **kwargs):
+        def print_verbose(*args, **kwargs) -> None:
             pass
 
     main(

@@ -17,8 +17,7 @@
   "use_amp": false,
   "attn_implementation": null,
   "generation_kwargs": {
-    "cache_implementation": "static",
-    "max_length": 768
+    "max_length": 800
   },
   "query_template": "Question: {query} Think step by step.\nAnswer:"
 }
