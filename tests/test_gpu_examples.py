@@ -4263,6 +4263,15 @@ class TestHotSwapping:
 
     torch_device = infer_device()
 
+    @pytest.fixture(scope="class", autouse=True)
+    def reset_float32_matmul_precision(self):
+        # Earlier tests may run torchao, which, at the time this was added, sets the float32 matmul precision to 'high'.
+        # This in turn results in some models producing different outputs when compiled (but only for some seeds).
+        # Therefore, we need to ensure that the precision is reset to "highest", which is the default.
+        # TODO: if torchao removes the side effect, this fixture can be deleted.
+        # https://github.com/pytorch/ao/blob/ffb4350640e76c7e7f449dd1e36d33f19fe384c8/torchao/quantization/utils.py#L589
+        torch.set_float32_matmul_precision("highest")
+
     @pytest.fixture(autouse=True)
     def reset_dynamo_cache(self):
         # It is critical that the dynamo cache is reset for each test. Otherwise, if the test re-uses the same model,
