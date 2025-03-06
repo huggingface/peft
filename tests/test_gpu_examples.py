@@ -1737,7 +1737,7 @@ class OffloadSaveTests(unittest.TestCase):
         assert torch.allclose(post_unload_merge_olayer, pre_merge_olayer)
 
 
-@pytest.mark.skipif(not (torch.cuda.is_available() or torch.xpu.is_available()), reason="test requires a GPU")
+@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU")
 @pytest.mark.single_gpu_tests
 class TestPiSSA:
     r"""
