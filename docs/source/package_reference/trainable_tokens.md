@@ -24,9 +24,10 @@ The method only targets specific tokens and selectively trains the token indices
 required RAM will be lower and disk memory is also significantly lower than storing the full fine-tuned embedding matrix.
 
 Some preliminary benchmarks acquired with [this script](https://github.com/huggingface/peft/blob/main/scripts/train_memory.py)
-suggest that for `gemma-2-2b` (which has a rather large embedding matrix) you can save 4.8GiB VRAM with Trainable Tokens
-over fully fine-tuning the embedding matrix. While LoRA will use even less memory (-6.3GiB total over fine-tuning) it might also target
-tokens you don't want to be changed. With less extreme embedding matrixes the difference might come out shorter as well.
+suggest that for `gemma-2-2b` (which has a rather large embedding matrix) you can save ~4 GiB VRAM with Trainable Tokens
+over fully fine-tuning the embedding matrix. While LoRA will use comparable amounts of VRAM it might also target
+tokens you don't want to be changed. Note that these are just indications and varying embedding matrix sizes might skew
+these numbers a bit.
 
 Note that this method does not add tokens for you, you have to add tokens to the tokenizer yourself and resize the
 embedding matrix of the model accordingly. This method will only re-train the embeddings for the tokens you specify.

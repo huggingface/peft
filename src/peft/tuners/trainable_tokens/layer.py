@@ -37,24 +37,47 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         base_layer: nn.Module,
         adapter_name: str,
         token_indices: list[int],
+        tied_adapter: Optional[TrainableTokensLayer] = None,
         **kwargs,
     ) -> None:
         super().__init__()
 
         self.base_layer = base_layer
         self._active_adapter = adapter_name
-        self.token_indices = {}
         self.kwargs = kwargs
+
+        # wrap the tied adapter in a list so that it is excluded from .(named_)modules() and, therefore,
+        # not included in the state dict since it would be a copy of the tied adapter anyway.
+        self._tied_adapter = [tied_adapter] if tied_adapter else []
 
         # we store the updated weights of particular tokens and their originals. we assume
         # that the count of new tokens is far smaller than the number of total tokens.
-        self.trainable_tokens_delta = nn.ParameterDict({})
-        self.trainable_tokens_original = BufferDict({})
+        #
+        # In case we have weight tying with another token adapter, we'll have no actual
+        # references on our own but use everything from the tied adapter.
+        if not self.tied_adapter:
+            self.trainable_tokens_delta = nn.ParameterDict({})
+            self.trainable_tokens_original = BufferDict({})
+            self.token_indices = {}
+        else:
+            self.trainable_tokens_delta = self.tied_adapter.trainable_tokens_delta
+            self.trainable_tokens_original = self.tied_adapter.trainable_tokens_original
+            self.token_indices = self.tied_adapter.token_indices
 
         # Mark the weight as unmerged
         self.merged_adapters = []
 
+    @property
+    def tied_adapter(self):
+        if self._tied_adapter:
+            return self._tied_adapter[0]
+        return None
+
     def update_layer(self, adapter_name, **kwargs):
+        if kwargs.get("tied_adapter", None):
+            # as a tied adapter, we're just following whatever the adpater we're tied to does, we don't update anything.
+            return
+
         self.token_indices[adapter_name] = kwargs["token_indices"]
         init_weights = kwargs.get("init_weights", True)
 
@@ -130,6 +153,16 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             originals = self.trainable_tokens_original[adapter_name].to(self.base_layer.weight)
             self.base_layer.weight.data.index_copy_(dim=0, index=index, source=originals)
 
+    def get_merged_weights(self, active_adapters):
+        W = self.base_layer.weight
+
+        for adapter_name in active_adapters:
+            index = torch.tensor(self.token_indices[adapter_name]).to(W.device)
+            deltas = self.trainable_tokens_delta[adapter_name].to(W)
+            W = W.index_copy(dim=0, index=index, source=deltas)
+
+        return W
+
     def forward_adapters(self, x: torch.Tensor, active_adapters, *args, **kwargs) -> torch.Tensor:
         if self.disable_adapters or not active_adapters:
             if self.merged:
@@ -140,22 +173,34 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         else:
             self._check_overlapping_tokens(active_adapters)
 
-            W = self.base_layer.weight
+            W = self.get_merged_weights(active_adapters)
 
-            for adapter_name in active_adapters:
-                index = torch.tensor(self.token_indices[adapter_name]).to(W.device)
-                deltas = self.trainable_tokens_delta[adapter_name].to(W)
-                W = W.index_copy(dim=0, index=index, source=deltas)
-
-            result = F.embedding(
-                input=x,
-                weight=W,
-                padding_idx=self.base_layer.padding_idx,
-                max_norm=self.base_layer.max_norm,
-                norm_type=self.base_layer.norm_type,
-                scale_grad_by_freq=self.base_layer.scale_grad_by_freq,
-                sparse=self.base_layer.sparse,
-            )
+            # Normally it should be very clear that we're wrapping Embedding layers but there are cases, such as
+            # tying weights with an LM head where the layer we wrap is a Linear layer. Therefore we must choose
+            # accordingly.
+            #
+            # TODO: the isinstance checks, especially the one for nn.Linear, may not hold for quantized layers;
+            # TODO: we may need to find a better way to detect quantized layers.
+            if isinstance(self.base_layer, torch.nn.Embedding):
+                result = F.embedding(
+                    input=x,
+                    weight=W,
+                    padding_idx=self.base_layer.padding_idx,
+                    max_norm=self.base_layer.max_norm,
+                    norm_type=self.base_layer.norm_type,
+                    scale_grad_by_freq=self.base_layer.scale_grad_by_freq,
+                    sparse=self.base_layer.sparse,
+                )
+            elif isinstance(self.base_layer, torch.nn.Linear):
+                # Probably a tied adapter that wraps an LM head.
+                result = F.linear(
+                    input=x,
+                    weight=W,
+                )
+            else:
+                raise ValueError(
+                    "TrainableTokensLayer wraps an unknown layer type, maybe you are targeting the wrong layer?"
+                )
 
         return result
 
