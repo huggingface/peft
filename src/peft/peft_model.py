@@ -53,6 +53,7 @@ from .utils import (
     PeftType,
     TaskType,
     _get_batch_size,
+    _get_input_embeddings_name,
     _prepare_prompt_learning_config,
     _set_adapter,
     _set_trainable,
@@ -958,7 +959,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if isinstance(peft_config.trainable_token_indices, dict):
                 target_layers = peft_config.trainable_token_indices
             else:
-                target_layers = {"embed_tokens": peft_config.trainable_token_indices}
+                layer_name = _get_input_embeddings_name(self.model, "embed_tokens")
+                target_layers = {layer_name: peft_config.trainable_token_indices}
 
             if self.modules_to_save:
                 for target_layer in target_layers:
@@ -973,7 +975,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             # `ModulesToSaveWrapper`.
 
             for target_layer, token_indices in target_layers.items():
-                new_training_modules = _set_trainable(
+                _set_trainable(
                     self,
                     adapter_name,
                     module_names=[target_layer],
@@ -982,14 +984,28 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     token_indices=token_indices,
                 )
 
-            # Handle weight-tying of output and input embeddings. Currently this only consists of failing.
+            # There might be the possibility that we have output weights that are tied to the input weights.
+            # In that case we will tie any module that wants tied weights to the token adapter to make sure that
+            # any modification is reflected in the tied layers as well.
             model_config = BaseTuner.get_model_config(self)
-            if model_config.get("tie_word_embeddings", False) and isinstance(
-                self.model.get_input_embeddings(), TrainableTokensWrapper
+            if (
+                model_config.get("tie_word_embeddings", False)
+                # some models may be misconfigured to have weight tying enabled but don't define tied weights keys
+                and self.model._tied_weights_keys is not None
+                and isinstance(self.model.get_input_embeddings(), TrainableTokensWrapper)
             ):
-                raise ValueError(
-                    "The model uses weight-tying which is currently not supported with `trainable_token_indices`. "
-                    "You can try disabling weight-tying but you must expect an increased memory usage."
+                # the embedding layer is modified and we want weight tying.
+                module_keys = [".".join(n.split(".")[:-1]) for n in self.model._tied_weights_keys]
+
+                token_adapter = self.model.get_input_embeddings().token_adapter
+                _set_trainable(
+                    self,
+                    adapter_name,
+                    module_names=module_keys,
+                    strict_module_check=True,
+                    wrapper_cls=TrainableTokensWrapper,
+                    token_indices=token_adapter.token_indices[adapter_name],
+                    tied_adapter=self.model.get_input_embeddings().token_adapter,
                 )
 
     def get_layer_status(self) -> list[TunerLayerStatus]:

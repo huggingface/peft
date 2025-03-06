@@ -296,14 +296,13 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         # original_module or the module further down (e.g., `modules_to_save[active_adapter]`).
         modules = self.__dict__["_modules"]
         if self.disable_adapters:
-            module = modules["original_module"]
+            return getattr(self.original_module, name)
         elif self._hasattr_wrapped(name, modules):
-            module = self._getattr_wrapped(name, modules)
-        else:
-            # For some reason, there is no module corresponding to the active adapter; this should normally not be
-            # reached and exists as a failsafe (otherwise, a KeyError would be raised)
-            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
-        return getattr(module, name)
+            return self._getattr_wrapped(name, modules)
+
+        # For some reason, there is no module corresponding to the active adapter; this should normally not be
+        # reached and exists as a failsafe (otherwise, a KeyError would be raised)
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
     def update(self, adapter_name, **kwargs):
         """Called when this instance should be part of an adapter's training.
@@ -474,7 +473,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         return self.active_adapters[0] in modules["modules_to_save"]
 
     def _getattr_wrapped(self, name, modules):
-        return modules["modules_to_save"][self.active_adapters[0]]
+        return getattr(modules["modules_to_save"][self.active_adapters[0]], name)
 
     def update(self, adapter_name, **kwargs):
         super().update(adapter_name)
@@ -576,6 +575,9 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
     """Wraps a module (typically an embedding layer) that is supposed to be re-trained selectively (i.e.
     solely updating a few columns) using the `TrainableTokensLayer` PEFT method.
+
+    Supports weight-tying to another adapter when passed a `tied_adapter` which is expected to be a
+    `TrainableTokensLayer`.
     """
 
     def __init__(
@@ -583,8 +585,9 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         module_to_save: torch.nn.Module,
         adapter_name: str,
         token_indices: list[int],
+        tied_adapter=None,
     ) -> None:
-        super().__init__(module_to_save, adapter_name, token_indices=token_indices)
+        super().__init__(module_to_save, adapter_name, token_indices=token_indices, tied_adapter=tied_adapter)
 
         # unset the original_module attribute since we're using a property to remove this from the state dict.
         self.original_module = None
@@ -595,16 +598,31 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         # to make sure that it will not be saved.
         return self.token_adapter.base_layer
 
-    def init_modules(self, adapter_name, token_indices):
+    def init_modules(self, adapter_name, token_indices, tied_adapter):
         # use a local import to avoid potential circular imports
         from peft.tuners.trainable_tokens import TrainableTokensLayer
 
         # since super().__init__() calls update before we have a chance to initialise the adapter we would
         # need here, we do the initialization here.
-        self.token_adapter = TrainableTokensLayer(self.original_module, adapter_name, token_indices)
+        self.token_adapter = TrainableTokensLayer(self.original_module, adapter_name, token_indices, tied_adapter)
 
     def _error_message_name(self):
         return "trainable_token_indices"
+
+    def _hasattr_wrapped(self, name, modules):
+        return name == "weight"
+
+    def _getattr_wrapped(self, name, modules):
+        # some models query self.wte.weight.dtype, some may query the weights directly. for the first case it is not
+        # necessary to do anything special but we don't know if is going to be `.dtype`. so we need to get the merged
+        # weights from the adapter.
+        if name == "weight":
+            return modules["token_adapter"].get_merged_weights(self.token_adapter.active_adapters)
+
+        raise RuntimeError(
+            f"This code should've never been reached, probably a bad check in `_hasattr_wrapped` for {name}. "
+            "Please file an issue under https://github.com/huggingface/peft/issues."
+        )
 
     def _forward_wrapped(self, x, *args, **kwargs):
         return self.token_adapter(x)
@@ -626,6 +644,12 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         super().update(active_adapter)
 
     def adapter_state_dict(self, adapter_name):
+        if self.token_adapter.tied_adapter:
+            # storing of weight-tied layers is not up to us and will be handled by
+            # transformers. we're just here to keep those layers in sync during training.
+            # therefore we return an empty state dict.
+            return {}
+
         return {
             f"token_adapter.{k}": v
             for k, v in self.token_adapter.state_dict().items()
@@ -653,6 +677,18 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         if merge:
             self.token_adapter.merge(safe_merge=safe_merge, adapter_names=adapter_names)
         return self.token_adapter.get_base_layer()
+
+
+def _get_input_embeddings_name(model, default=None):
+    if not hasattr(model, "get_input_embeddings"):
+        return default
+
+    input_embeddings = model.get_input_embeddings()
+    for name, module in model.named_modules():
+        if module is input_embeddings:
+            return name
+
+    return default
 
 
 def _get_submodules(model, key):
@@ -694,7 +730,8 @@ def _set_trainable(
 
     trainable_modules = []
     found_modules = set()
-    key_list = [key for key, _ in model.named_modules()]
+    # disable removal of duplicates to support targeting tied weights
+    key_list = [key for key, _ in model.named_modules(remove_duplicate=False)]
     for key in key_list:
         target_module_found = any(key.endswith(target_key) for target_key in module_names)
         if target_module_found:

@@ -18,11 +18,62 @@ import copy
 
 import pytest
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer
 
 from peft import AutoPeftModel, LoraConfig, PeftModel, TrainableTokensConfig, get_peft_model
 from peft.tuners.trainable_tokens.layer import TrainableTokensLayer
 from peft.utils import get_peft_model_state_dict
+from peft.utils.other import TrainableTokensWrapper
+
+
+class ModelEmb(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.emb = torch.nn.Embedding(100, 10)
+        self.lin0 = torch.nn.Linear(10, 1)
+
+    def forward(self, x):
+        return self.lin0(self.emb(x))
+
+    def get_input_embeddings(self):
+        return self.emb
+
+
+class ModelEmbedIn(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.embed_in = torch.nn.Embedding(100, 10)
+        self.lin0 = torch.nn.Linear(10, 1)
+
+    def forward(self, x):
+        return self.lin0(self.embed_in(x))
+
+    def get_input_embeddings(self):
+        return self.embed_in
+
+
+class ModelEmbedMultiple(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.embed_in = torch.nn.Embedding(100, 10)
+        self.embed_in_2 = torch.nn.Embedding(100, 10)
+        self.lin0 = torch.nn.Linear(10, 1)
+
+    def forward(self, x):
+        return self.lin0(self.embed_in(x) + self.embed_in_2(x))
+
+    def get_input_embeddings(self):
+        return self.embed_in
+
+
+class ModelEmbedInNoGet(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.embed_in = torch.nn.Embedding(100, 10)
+        self.lin0 = torch.nn.Linear(10, 1)
+
+    def forward(self, x):
+        return self.lin0(self.embed_in(x))
 
 
 class TestTrainableTokens:
@@ -517,6 +568,10 @@ class TestTrainableTokens:
         assert embedding_keys == ["base_model.model.model.embed_tokens.token_adapter.trainable_tokens_delta"]
 
     @pytest.fixture()
+    def model_weight_untied(self, model):
+        return model
+
+    @pytest.fixture()
     def model_id_weight_tied(self):
         return "facebook/opt-125m"
 
@@ -533,18 +588,55 @@ class TestTrainableTokens:
             ),
         ],
     )
-    def test_weight_tying_raises_when_detected_combined(self, model_weight_tied, peft_config):
-        # since weight tying is currently not supported make sure that an error is raised when attempting
-        # to use a model that has tied input/output embeddings
+    def test_weight_tying_noop_when_model_is_untied(self, model_weight_untied, peft_config, tmp_path):
+        # test if the weight tying is affected as well when we modified the embedding.
+        assert model_weight_untied._tied_weights_keys
+        assert not model_weight_untied.config.tie_word_embeddings
+
+        peft_model = get_peft_model(model_weight_untied, peft_config)
+        assert hasattr(peft_model.model.model.embed_tokens, "token_adapter")
+        assert not hasattr(peft_model.model.lm_head, "token_adapter")
+
+    @pytest.mark.parametrize(
+        "peft_config",
+        [
+            LoraConfig(
+                target_modules="all-linear",
+                trainable_token_indices={"embed_tokens": [0, 1, 3]},
+            ),
+        ],
+    )
+    def test_weight_tying_applied_when_model_is_tied(self, model_weight_tied, peft_config, tmp_path):
+        # test if the weight tying is affected as well when we modified the embedding.
         assert model_weight_tied._tied_weights_keys
         assert model_weight_tied.config.tie_word_embeddings
 
-        with pytest.raises(ValueError) as e:
-            peft_model = get_peft_model(model_weight_tied, peft_config)
+        peft_model = get_peft_model(model_weight_tied, peft_config)
 
-        assert "The model uses weight-tying which is currently not supported" in str(e)
+        # make it so that the input embeddings diverge. when the weights are tied this should
+        # reflect in the output embeddings as well.
+        self.simulate_training(peft_model.model.model.decoder.embed_tokens.token_adapter)
 
-    def test_weight_tying_raises_when_detected_standalone(self, model_weight_tied):
+        # we have to find out if the input embedding tying is doing its job during forward.
+        # for this we can leverage the fact that  emb_out(1/emb_in(x))  is  embed_dim  on the
+        # diagonal iff emb_in.weight == emb_out.weight.
+        token_indices = [0, 1, 2, 3]
+        emb_dim = 768
+        emb_in = peft_model.model.model.decoder.embed_tokens(torch.tensor([token_indices]))
+        emb_out = peft_model.model.lm_head(1 / emb_in)
+
+        assert torch.allclose(torch.diag(emb_out[0]), torch.tensor([emb_dim] * len(token_indices)).float())
+
+        # make sure that the state dict does not include weight-tied weights.
+        state_dict = get_peft_model_state_dict(peft_model)
+        assert not [key for key in state_dict if any(tied_key in key for tied_key in peft_model._tied_weights_keys)]
+
+        # make sure that merging and unloading restores the weight-tying.
+        merged_model = peft_model.merge_and_unload()
+
+        assert merged_model.model.decoder.embed_tokens.weight.data_ptr() == merged_model.lm_head.weight.data_ptr()
+
+    def test_weight_tying_applied_when_model_is_tied_standalone(self, model_weight_tied):
         # since weight tying is currently not supported make sure that an error is raised when attempting
         # to use a model that has tied input/output embeddings
         assert model_weight_tied._tied_weights_keys
@@ -555,10 +647,109 @@ class TestTrainableTokens:
             token_indices=[0, 1, 3],
         )
 
-        with pytest.raises(ValueError) as e:
-            peft_model = get_peft_model(model_weight_tied, peft_config)
+        peft_model = get_peft_model(model_weight_tied, peft_config)
 
-        assert "The model uses weight-tying which is currently not supported" in str(e)
+        # make it so that the input embeddings diverge. when the weights are tied this should
+        # reflect in the output embeddings as well.
+        self.simulate_training(peft_model.model.model.decoder.embed_tokens)
+
+        # we have to find out if the input embedding tying is doing its job during forward.
+        # for this we can leverage the fact that  emb_out(1/emb_in(x))  is  embed_dim  on the
+        # diagonal iff  emb_in.weight == emb_out.weight.
+        token_indices = [0, 1, 2, 3]
+        emb_dim = 768
+        emb_in = peft_model.model.model.decoder.embed_tokens(torch.tensor([token_indices]))
+        emb_out = peft_model.model.lm_head(1 / emb_in)
+
+        assert torch.allclose(torch.diag(emb_out[0]), torch.tensor([emb_dim] * len(token_indices)).float())
+
+        # make sure that the state dict does not include weight-tied weights.
+        state_dict = get_peft_model_state_dict(peft_model)
+        assert not [key for key in state_dict if any(tied_key in key for tied_key in peft_model._tied_weights_keys)]
+
+        # make sure that merging and unloading restores the weight-tying.
+        merged_model = peft_model.merge_and_unload()
+
+        assert merged_model.model.decoder.embed_tokens.weight.data_ptr() == merged_model.lm_head.weight.data_ptr()
+
+    def test_weight_tying_normally_issues_warning(self, model_weight_tied, recwarn):
+        # When using models with weight tying and targeting the embedding or the tied layer should raise a warning.
+        peft_config = LoraConfig(target_modules=["embed_tokens"])
+        peft_model = get_peft_model(model_weight_tied, peft_config)
+
+        warnings = [w.message.args[0] for w in recwarn]
+        warnings = [msg for msg in warnings if "Model with `tie_word_embeddings=True` and the" in msg]
+        assert warnings
+
+    def test_weight_tying_state_dict_ignores_tied_weights(self, model_weight_tied):
+        # since weight tying is currently not supported make sure that an error is raised when attempting
+        # to use a model that has tied input/output embeddings
+        assert model_weight_tied._tied_weights_keys
+        assert model_weight_tied.config.tie_word_embeddings
+
+        peft_config = TrainableTokensConfig(
+            target_modules=["embed_tokens"],
+            token_indices=[0, 1, 3],
+        )
+
+        peft_model = get_peft_model(model_weight_tied, peft_config)
+
+        state_dict = peft_model.state_dict()
+        peft_state_dict = get_peft_model_state_dict(peft_model)
+
+        # the state dict or the peft model state dict must not include tied adapter weights
+        state_dict_keys = [n for n, _ in state_dict.items() if "tied_adapter." in n]
+        peft_state_dict_keys = [n for n, _ in peft_state_dict.items() if "tied_adapter." in n]
+
+        assert not state_dict_keys
+        assert not peft_state_dict_keys
+
+    @pytest.mark.parametrize(
+        "peft_config",
+        [
+            LoraConfig(
+                target_modules="all-linear",
+                trainable_token_indices={"shared": [0, 1, 3]},
+            ),
+        ],
+    )
+    def test_weight_tying_applied_when_model_is_tied_encoder_decoder(self, peft_config):
+        model_id = "hf-internal-testing/tiny-random-t5"
+        base_model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
+
+        peft_model = get_peft_model(base_model, peft_config)
+
+        # make it so that the input embeddings diverge. when the weights are tied this should
+        # reflect in the output embeddings as well.
+        self.simulate_training(peft_model.model.shared.token_adapter)
+
+        # we have to find out if the input embedding tying is doing its job during forward.
+        # for this we can leverage the fact that  emb_out(1/emb_in(x))  is  embed_dim  on the
+        # diagonal iff  emb_in.weight == emb_out.weight.
+        token_indices = [0, 1, 2, 3]
+        emb_dim = base_model.config.d_model
+        emb_in = peft_model.model.encoder.embed_tokens(torch.tensor([token_indices]))
+        emb_out = peft_model.model.lm_head(1 / emb_in)
+
+        assert torch.allclose(torch.diag(emb_out[0]), torch.tensor([emb_dim] * len(token_indices)).float())
+
+        # T5 has a decoder embedding layer, we can simply check if it's forward is equal to the encoder
+        # embedding forward.
+        emb_out = peft_model.model.decoder.embed_tokens(torch.tensor([token_indices]))
+
+        assert torch.allclose(emb_in, emb_out)
+
+        # make sure that the state dict does not include weight-tied weights.
+        state_dict = get_peft_model_state_dict(peft_model)
+        assert not [key for key in state_dict if any(tied_key in key for tied_key in peft_model._tied_weights_keys)]
+
+        # make sure that merging and unloading restores the weight-tying.
+        merged_model = peft_model.merge_and_unload()
+
+        assert merged_model.encoder.embed_tokens.weight.data_ptr() == merged_model.lm_head.weight.data_ptr()
+        assert (
+            merged_model.encoder.embed_tokens.weight.data_ptr() == merged_model.decoder.embed_tokens.weight.data_ptr()
+        )
 
     @pytest.mark.parametrize(
         "peft_config",
@@ -619,3 +810,78 @@ class TestTrainableTokens:
 
         state_dict = peft_model.state_dict()
         assert not [k for k in state_dict if ".original_module.weight" in k]
+
+    @pytest.fixture
+    def model_emb(self):
+        return ModelEmb()
+
+    @pytest.fixture
+    def model_embed_in(self):
+        return ModelEmbedIn()
+
+    @pytest.fixture
+    def model_embed_in_no_get(self):
+        return ModelEmbedInNoGet()
+
+    @pytest.fixture
+    def model_embed_multiple(self):
+        return ModelEmbedMultiple()
+
+    @pytest.mark.parametrize(
+        "model_fixture_name, getter",
+        [
+            ("model_emb", lambda model: model.emb),
+            ("model_embed_in", lambda model: model.embed_in),
+            ("model", lambda model: model.model.model.embed_tokens),
+        ],
+    )
+    def test_default_embedding_name_is_inferred_standalone(self, model_fixture_name, getter, request):
+        # make sure that the auto targeting works when `target_module=None`
+        base_model = request.getfixturevalue(model_fixture_name)
+
+        peft_config = TrainableTokensConfig(target_modules=None, token_indices=[0, 1, 3])
+        peft_model = get_peft_model(base_model, peft_config)
+
+        assert isinstance(getter(peft_model), TrainableTokensLayer)
+
+    @pytest.mark.parametrize(
+        "model_fixture_name, getter",
+        [
+            ("model_emb", lambda model: model.emb),
+            ("model_embed_in", lambda model: model.embed_in),
+            ("model", lambda model: model.model.model.embed_tokens),
+        ],
+    )
+    def test_default_embedding_name_is_inferred_combined(self, model_fixture_name, getter, request):
+        # make sure that the auto targeting works when `target_module=None`
+        base_model = request.getfixturevalue(model_fixture_name)
+
+        peft_config = LoraConfig(target_modules="all-linear", trainable_token_indices=[0, 1, 3])
+        peft_model = get_peft_model(base_model, peft_config)
+
+        assert isinstance(getter(peft_model), TrainableTokensWrapper)
+
+    def test_default_embedding_name_cannot_be_inferred(self, model_embed_in_no_get):
+        # should default to default value `embed_tokens` which is not present in this model
+        base_model = model_embed_in_no_get
+
+        peft_config = TrainableTokensConfig(target_modules=None, token_indices=[0, 1, 3])
+
+        with pytest.raises(ValueError) as e:
+            peft_model = get_peft_model(base_model, peft_config)
+
+        assert "Target modules embed_tokens not found in the base model." in str(e)
+
+    def test_embedding_name_is_used_when_given_standalone(self, model_embed_multiple):
+        peft_config = TrainableTokensConfig(target_modules="embed_in_2", token_indices=[0, 1, 3])
+        peft_model = get_peft_model(model_embed_multiple, peft_config)
+
+        assert isinstance(peft_model.model.embed_in_2, TrainableTokensLayer)
+        assert not isinstance(peft_model.model.embed_in, TrainableTokensLayer)
+
+    def test_embedding_name_is_used_when_given_combined(self, model_embed_multiple):
+        peft_config = LoraConfig(target_modules="all-linear", trainable_token_indices={"embed_in_2": [0, 1, 3]})
+        peft_model = get_peft_model(model_embed_multiple, peft_config)
+
+        assert isinstance(peft_model.model.embed_in_2, TrainableTokensWrapper)
+        assert not isinstance(peft_model.model.embed_in, TrainableTokensWrapper)
