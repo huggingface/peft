@@ -27,6 +27,7 @@ import torch
 from accelerate import infer_auto_device_map
 from accelerate.test_utils.testing import run_command
 from accelerate.utils import patch_environment
+from accelerate.utils.memory import clear_device_cache
 from datasets import Audio, Dataset, DatasetDict, load_dataset
 from packaging import version
 from parameterized import parameterized
@@ -91,6 +92,7 @@ from .testing_utils import (
     require_torch_gpu,
     require_torch_multi_gpu,
     require_torchao,
+    torch_device,
 )
 
 
@@ -131,7 +133,7 @@ class DataCollatorSpeechSeq2SeqWithPadding:
         return batch
 
 
-@require_torch_gpu
+@require_non_cpu
 @require_bitsandbytes
 class PeftBnbGPUExampleTests(unittest.TestCase):
     r"""
@@ -160,10 +162,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        gc.collect()
+        clear_device_cache(garbage_collection=True)
 
     def _check_inference_finite(self, model, batch):
         # try inference without Trainer class
@@ -351,7 +350,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.single_gpu_tests
-    @require_torch_gpu
+    @require_non_cpu
     def test_4bit_adalora_causalLM(self):
         r"""
         Tests the 4bit training with adalora
@@ -1504,8 +1503,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
     def _check_inference_finite(self, model, batch):
         # try inference without Trainer class
@@ -1752,8 +1750,7 @@ class OffloadSaveTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
     def test_offload_load(self):
         r"""
@@ -1832,7 +1829,7 @@ class OffloadSaveTests(unittest.TestCase):
         assert torch.allclose(post_unload_merge_olayer, pre_merge_olayer)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU")
 @pytest.mark.single_gpu_tests
 class TestPiSSA:
     r"""
@@ -1888,8 +1885,7 @@ class TestPiSSA:
         qlora_model = qlora_model.merge_and_unload()
         qlora_error = self.nuclear_norm(base_model, qlora_model)
         del qlora_model
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
         # logits from quantized LoRA model using PiSSA
         lora_config = LoraConfig(
@@ -1908,8 +1904,7 @@ class TestPiSSA:
         pissa_model.save_pretrained(tmp_path / "residual_model")
 
         del pissa_model
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
         # now load quantized model and apply PiSSA-initialized weights on top
         qpissa_model = self.quantize_model(
@@ -1919,8 +1914,7 @@ class TestPiSSA:
         qpissa_model = qpissa_model.merge_and_unload()
         qpissa_error = self.nuclear_norm(base_model, qpissa_model)
         del qpissa_model
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
         assert qlora_error > 0.0
         assert qpissa_error > 0.0
@@ -1928,7 +1922,7 @@ class TestPiSSA:
         # next, check that PiSSA quantization errors are smaller than LoRA errors by a certain margin
         assert qpissa_error < (qlora_error / self.error_factor)
 
-    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_bloomz_pissa_4bit(self, device, tmp_path):
         # In this test, we compare the logits of the base model, the quantized LoRA model, and the quantized model
         # using PiSSA. When quantizing, we expect a certain level of error. However, we expect the PiSSA quantized
@@ -1938,25 +1932,25 @@ class TestPiSSA:
 
         self.get_errors(bits=4, device=device, tmp_path=tmp_path)
 
-    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_bloomz_pissa_8bit(self, device, tmp_path):
         # Same test as test_bloomz_pissa_4bit but with 8 bits.
         self.get_errors(bits=8, device=device, tmp_path=tmp_path)
 
-    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_t5_pissa_4bit(self, device, tmp_path):
         self.get_errors(bits=4, device=device, model_id="t5-small", tmp_path=tmp_path)
 
-    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_t5_pissa_8bit(self, device, tmp_path):
         self.get_errors(bits=8, device=device, model_id="t5-small", tmp_path=tmp_path)
 
-    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_gpt2_pissa_4bit(self, device, tmp_path):
         # see 2104
         self.get_errors(bits=4, device=device, model_id="gpt2", tmp_path=tmp_path)
 
-    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_gpt2_pissa_8bit(self, device, tmp_path):
         # see 2104
         self.get_errors(bits=8, device=device, model_id="gpt2", tmp_path=tmp_path)
@@ -1968,7 +1962,7 @@ class TestPiSSA:
         import bitsandbytes as bnb
 
         torch.manual_seed(0)
-        data = torch.rand(10, 1000).to("cuda")
+        data = torch.rand(10, 1000).to(torch_device)
 
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -1983,7 +1977,7 @@ class TestPiSSA:
                 x_4d = x.flatten().reshape(1, 100, 10, 10)
                 return self.linear(x), self.embed(x_int), self.conv2d(x_4d)
 
-        model = MyModule().to("cuda")
+        model = MyModule().to(torch_device)
         output_base = model(data)[0]
 
         config = LoraConfig(init_lora_weights="pissa", target_modules=["linear"], r=8)
@@ -2047,7 +2041,7 @@ class TestPiSSA:
         assert not torch.allclose(output_finetuned_pissa, output_converted, atol=tol, rtol=tol)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU")
 @pytest.mark.single_gpu_tests
 class TestOLoRA:
     r"""
@@ -2103,8 +2097,7 @@ class TestOLoRA:
         qlora_model = qlora_model.merge_and_unload()
         qlora_error = self.nuclear_norm(base_model, qlora_model)
         del qlora_model
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
         # logits from quantized LoRA model using OLoRA
         lora_config = LoraConfig(
@@ -2123,8 +2116,7 @@ class TestOLoRA:
         olora_model.save_pretrained(tmp_path / "residual_model")
 
         del olora_model
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
         # now load quantized model and apply OLoRA-initialized weights on top
         qolora_model = self.quantize_model(
@@ -2134,8 +2126,7 @@ class TestOLoRA:
         qolora_model = qolora_model.merge_and_unload()
         qolora_error = self.nuclear_norm(base_model, qolora_model)
         del qolora_model
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
         assert qlora_error > 0.0
         assert qolora_error > 0.0
@@ -2143,7 +2134,7 @@ class TestOLoRA:
         # next, check that OLoRA quantization errors are smaller than LoRA errors by a certain margin
         assert qolora_error < (qlora_error / self.error_factor)
 
-    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_bloomz_olora_4bit(self, device, tmp_path):
         # In this test, we compare the logits of the base model, the quantized LoRA model, and the quantized model
         # using OLoRA. When quantizing, we expect a certain level of error. However, we expect the OLoRA quantized
@@ -2153,7 +2144,7 @@ class TestOLoRA:
 
         self.get_errors(bits=4, device=device, tmp_path=tmp_path)
 
-    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_bloomz_olora_8bit(self, device, tmp_path):
         # Same test as test_bloomz_olora_4bit but with 8 bits.
         self.get_errors(bits=8, device=device, tmp_path=tmp_path)
@@ -2248,8 +2239,7 @@ class TestLoftQ:
         logits_base = self.get_logits(model, inputs)
         # clean up
         del model
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
         # logits from the normal quantized LoRA model
         target_modules = "all-linear" if task_type != TaskType.SEQ_2_SEQ_LM else ["o", "k", "wi", "q", "v"]
@@ -2269,8 +2259,7 @@ class TestLoftQ:
         torch.manual_seed(0)
         logits_quantized = self.get_logits(quantized_model, inputs)
         del quantized_model
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
         # logits from quantized LoRA model using LoftQ
         loftq_config = LoftQConfig(loftq_bits=bits, loftq_iter=loftq_iter)
@@ -2282,11 +2271,11 @@ class TestLoftQ:
             target_modules=target_modules,
         )
         model = self.get_base_model(model_id, device)
-        if device == "cuda":
-            model = model.to("cuda")
+        if device != "cpu":
+            model = model.to(torch_device)
         loftq_model = get_peft_model(model, lora_config)
-        if device == "cuda":
-            loftq_model = loftq_model.to("cuda")
+        if device != "cpu":
+            loftq_model = loftq_model.to(torch_device)
 
         # save LoRA weights, they should be initialized such that they minimize the quantization error
         loftq_model.base_model.peft_config["default"].init_lora_weights = True
@@ -2296,8 +2285,7 @@ class TestLoftQ:
         loftq_model.save_pretrained(tmp_path / "base_model")
 
         del loftq_model
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
         # now load quantized model and apply LoftQ-initialized weights on top
         base_model = self.get_base_model(tmp_path / "base_model", device=None, **kwargs, torch_dtype=torch.float32)
@@ -2308,8 +2296,7 @@ class TestLoftQ:
         torch.manual_seed(0)
         logits_loftq = self.get_logits(loftq_model, inputs)
         del loftq_model
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
         mae_quantized = torch.abs(logits_base - logits_quantized).mean()
         mse_quantized = torch.pow(logits_base - logits_quantized, 2).mean()
@@ -2317,7 +2304,7 @@ class TestLoftQ:
         mse_loftq = torch.pow(logits_base - logits_loftq, 2).mean()
         return mae_quantized, mse_quantized, mae_loftq, mse_loftq
 
-    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_bloomz_loftq_4bit(self, device, tmp_path):
         # In this test, we compare the logits of the base model, the quantized LoRA model, and the quantized model
         # using LoftQ. When quantizing, we expect a certain level of error. However, we expect the LoftQ quantized
@@ -2336,7 +2323,7 @@ class TestLoftQ:
         assert mse_loftq < (mse_quantized / self.error_factor)
         assert mae_loftq < (mae_quantized / self.error_factor)
 
-    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_bloomz_loftq_4bit_iter_5(self, device, tmp_path):
         # Same test as the previous one but with 5 iterations. We should expect the error to be even smaller with more
         # iterations, but in practice the difference is not that large, at least not for this small base model.
@@ -2353,7 +2340,7 @@ class TestLoftQ:
         assert mse_loftq < (mse_quantized / self.error_factor)
         assert mae_loftq < (mae_quantized / self.error_factor)
 
-    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_bloomz_loftq_8bit(self, device, tmp_path):
         # Same test as test_bloomz_loftq_4bit but with 8 bits.
         mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=8, device=device, tmp_path=tmp_path)
@@ -2368,7 +2355,7 @@ class TestLoftQ:
         assert mse_loftq < (mse_quantized / self.error_factor)
         assert mae_loftq < (mae_quantized / self.error_factor)
 
-    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_bloomz_loftq_8bit_iter_5(self, device, tmp_path):
         # Same test as test_bloomz_loftq_4bit_iter_5 but with 8 bits.
         mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(
@@ -2385,7 +2372,7 @@ class TestLoftQ:
         assert mse_loftq < (mse_quantized / self.error_factor)
         assert mae_loftq < (mae_quantized / self.error_factor)
 
-    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_t5_loftq_4bit(self, device, tmp_path):
         mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(
             bits=4, device=device, model_id="t5-small", tmp_path=tmp_path
@@ -2400,7 +2387,7 @@ class TestLoftQ:
         assert mse_loftq < (mse_quantized / self.error_factor)
         assert mae_loftq < (mae_quantized / self.error_factor)
 
-    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_t5_loftq_8bit(self, device, tmp_path):
         mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(
             bits=8, device=device, model_id="t5-small", tmp_path=tmp_path
@@ -2416,7 +2403,7 @@ class TestLoftQ:
         assert mae_loftq < (mae_quantized / self.error_factor)
 
     @pytest.mark.xfail  # failing for now, but having DoRA pass is only a nice-to-have, not a must, so we're good
-    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_bloomz_loftq_4bit_dora(self, device, tmp_path):
         # same as test_bloomz_loftq_4bit but with DoRA
         mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(
@@ -2433,7 +2420,7 @@ class TestLoftQ:
         assert mae_loftq < (mae_quantized / factor)
         assert mse_loftq < (mse_quantized / factor)
 
-    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_bloomz_loftq_8bit_dora(self, device, tmp_path):
         # same as test_bloomz_loftq_8bit but with DoRA
         mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(
@@ -2462,7 +2449,7 @@ class TestLoftQ:
         """
         torch.manual_seed(0)
         model_id = "bigscience/bloomz-560m"
-        device = "cuda"
+        device = torch_device
         tokenizer = AutoTokenizer.from_pretrained(model_id)
         inputs = tokenizer("The dog was", padding=True, return_tensors="pt").to(device)
 
@@ -2513,15 +2500,13 @@ class TestLoftQ:
             assert not all(logs)
 
         del model
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        gc.collect()
+        clear_device_cache(garbage_collection=True)
 
     def test_replace_lora_weights_with_local_model(self):
         # see issue 2020
         torch.manual_seed(0)
         model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
-        device = "cuda"
+        device = torch_device
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             # save base model locally
@@ -2552,9 +2537,7 @@ class TestLoftQ:
                 replace_lora_weights_loftq(model)
 
         del model
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        gc.collect()
+        clear_device_cache(garbage_collection=True)
 
     def test_config_no_loftq_init(self):
         with pytest.warns(
@@ -2600,6 +2583,8 @@ class MixedPrecisionTests(unittest.TestCase):
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+        elif is_xpu_available():
+            torch.xpu.empty_cache()
         gc.collect()
 
     @pytest.mark.single_gpu_tests
@@ -3976,8 +3961,7 @@ class TestPTuningReproducibility:
 
         model.save_pretrained(tmp_path)
         del model
-        torch.cuda.empty_cache()
-        gc.collect()
+        clear_device_cache(garbage_collection=True)
 
         model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
         model = PeftModel.from_pretrained(model, tmp_path)
