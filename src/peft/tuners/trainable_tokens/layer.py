@@ -178,6 +178,9 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             # Normally it should be very clear that we're wrapping Embedding layers but there are cases, such as
             # tying weights with an LM head where the layer we wrap is a Linear layer. Therefore we must choose
             # accordingly.
+            #
+            # TODO: the isinstance checks, especially the one for nn.Linear, may not hold for quantized layers;
+            # TODO: we may need to find a better way to detect quantized layers.
             if isinstance(self.base_layer, torch.nn.Embedding):
                 result = F.embedding(
                     input=x,
