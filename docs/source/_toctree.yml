@@ -54,6 +54,7 @@
     title: Fully Sharded Data Parallel
 
 - title: Conceptual guides
+  local: conceptual_guides/intro
   sections:
   - local: conceptual_guides/adapter
     title: Adapters
