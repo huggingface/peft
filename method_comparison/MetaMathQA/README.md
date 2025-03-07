@@ -10,6 +10,8 @@ More details about the `meta-math/MetaMathQA` dataset can be found [here](https:
 
 For the model to attain good accuracy, it needs to learn to adhere to the output format and it must express basic chain of thought reasoning capabilities to get to the correct result in the first place. The dataset is challenging for models in the sub 7B parameter range.
 
+There is no offical train/valid/test split. Therefore, validation and test sets are split from the training set using a stratified split based on the "type" column.
+
 ## Running
 
 Create an experiment in the `experiment/<peft-method>` folder of your choice and give it a name (the name itself does not matter but helps identify the experiment). An example would be `experiments/lora/llama-3.2-3B-rank32/`. Inside that directory, create 2 files:
