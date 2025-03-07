@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import copy
-import logging
 import os
 import re
 import textwrap
@@ -44,9 +43,6 @@ from peft.utils.peft_types import PeftType, TaskType
 from ..config import PeftConfig
 from ..utils import ModulesToSaveWrapper, _get_submodules
 from ._buffer_dict import BufferDict
-
-
-logger = logging.getLogger(__name__)
 
 
 @contextmanager
@@ -168,7 +164,7 @@ class BaseTuner(nn.Module, ABC):
         if not hasattr(self, "peft_config"):
             self.peft_config = {adapter_name: peft_config} if isinstance(peft_config, PeftConfig) else peft_config
         else:
-            logger.info(
+            warnings.warn(
                 "Already found a `peft_config` attribute in the model. This will lead to having multiple adapters"
                 " in the model. Make sure to know what you are doing!"
             )
@@ -474,7 +470,7 @@ class BaseTuner(nn.Module, ABC):
                 continue
             # Check for modules_to_save in case
             if _check_for_modules_to_save and any(
-                key.endswith(f"{module_to_save}") for module_to_save in peft_config.modules_to_save
+                key.endswith(module_to_save) for module_to_save in peft_config.modules_to_save
             ):
                 # Optionally set the modules to save
                 parent, target, target_name = _get_submodules(model, key)
@@ -513,9 +509,9 @@ class BaseTuner(nn.Module, ABC):
                     f"Target modules {peft_config.target_modules} not found in the base model. "
                     f"Please check the target modules and try again."
                 )
-                if peft_config.layers_to_transform is not None:
+                if getattr(peft_config, "layers_to_transform", None) is not None:
                     error_msg += f" Note: You specified 'layers_to_transform': {peft_config.layers_to_transform}."
-                if peft_config.layers_pattern is not None:
+                if getattr(peft_config, "layers_pattern", None) is not None:
                     error_msg += f" You also specified 'layers_pattern': {peft_config.layers_pattern}."
                 raise ValueError(error_msg)
             else:
@@ -525,9 +521,9 @@ class BaseTuner(nn.Module, ABC):
                     "This might be caused by a combination of mismatched target modules and excluded modules. "
                     "Please check your `target_modules` and `exclude_modules` configuration."
                 )
-                if peft_config.layers_to_transform is not None:
+                if getattr(peft_config, "layers_to_transform", None) is not None:
                     error_msg += f" Note: You specified 'layers_to_transform': {peft_config.layers_to_transform}."
-                if peft_config.layers_pattern is not None:
+                if getattr(peft_config, "layers_pattern", None) is not None:
                     error_msg += f" You also specified 'layers_pattern': {peft_config.layers_pattern}."
                 raise ValueError(error_msg)
 
@@ -626,7 +622,10 @@ class BaseTuner(nn.Module, ABC):
         model_config = self.get_model_config(model)
         if model_config.get("tie_word_embeddings"):
             for target_module in self.targeted_module_names:
-                if target_module in EMBEDDING_LAYER_NAMES:
+                # This potentially yields false positives since we're just looking at the layer names. So if we use a
+                # model that uses weight-tying of lm_head and embed_tokens, a third, unrelated, layer which is
+                # unfortunately named so that it is in EMBEDDING_LAYER_NAMES will be falsely reported here as well.
+                if target_module.split(".")[-1] in EMBEDDING_LAYER_NAMES:
                     tied_target_modules.append(target_module)
         return tied_target_modules
 
@@ -1043,10 +1042,19 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
         return peft_config
 
     linear_classes = (torch.nn.Linear, Conv1D)
+    linear_names = ("Linear",)
     linear_module_names = set()
     for name, module in model.named_modules():
         # match with all linear classes.
         if isinstance(module, linear_classes):
+            linear_module_names.add(name)
+        elif isinstance(module, BaseTunerLayer) and any(n in type(module).__name__ for n in linear_names):
+            # If the model already has adapter layers applied, then the "linear" layer is actually an adapter layer,
+            # e.g. lora.Linear, and not nn.Linear. To target this layer, we don't want to check the layer type, as there
+            # are many possible layer types (one for each PEFT method) and the list would quickly get out of date. Thus
+            # we rely on the name of the layer class, which by convention is something like "Linear", "Linear4bit",
+            # "HqqLoraLinear", ... in PEFT. It's not pretty but should generally work.
+            # See 2390
             linear_module_names.add(name)
 
     # Try to remove linear layers that should not be targeted as best as possible. We have to rely on convention as
@@ -1067,6 +1075,14 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
                     last_module_name = [name for name, module in model.named_modules() if module is cls_head][0]
                     module_names_to_exclude.add(last_module_name)
                     break
+
+    # we don't want nested LoRA layers, i.e. LoRA being applied to possibly existing lora_A, lora_B, etc.
+    # see 2390
+    for prefix, module in model.named_modules():
+        if isinstance(module, BaseTunerLayer):
+            for suffix, child in module.named_modules():
+                if suffix:
+                    module_names_to_exclude.add(f"{prefix}.{suffix}")
 
     linear_module_names -= module_names_to_exclude
     peft_config.target_modules = linear_module_names

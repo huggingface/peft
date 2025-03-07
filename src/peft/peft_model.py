@@ -41,6 +41,7 @@ from transformers.utils import PushToHubMixin
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils.constants import DUMMY_MODEL_CONFIG
 from peft.utils.integrations import init_empty_weights
+from peft.utils.other import TrainableTokensWrapper
 
 from . import __version__
 from .config import PeftConfig
@@ -52,6 +53,7 @@ from .utils import (
     PeftType,
     TaskType,
     _get_batch_size,
+    _get_input_embeddings_name,
     _prepare_prompt_learning_config,
     _set_adapter,
     _set_trainable,
@@ -128,7 +130,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
             with ctx():
                 self.base_model = cls(model, {adapter_name: peft_config}, adapter_name)
-            self.set_additional_trainable_modules(peft_config, adapter_name)
+
+        self.set_additional_trainable_modules(peft_config, adapter_name)
 
         if hasattr(self.base_model, "_cast_adapter_dtype"):
             self.base_model._cast_adapter_dtype(
@@ -950,7 +953,60 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             else:
                 self.modules_to_save.update(peft_config.modules_to_save)
             # this may add a new ModulesToSaveWrapper
-            _set_trainable(self, adapter_name, modules_to_save=peft_config.modules_to_save)
+            _set_trainable(self, adapter_name, module_names=peft_config.modules_to_save)
+
+        if getattr(peft_config, "trainable_token_indices", None) is not None:
+            if isinstance(peft_config.trainable_token_indices, dict):
+                target_layers = peft_config.trainable_token_indices
+            else:
+                layer_name = _get_input_embeddings_name(self.model, "embed_tokens")
+                target_layers = {layer_name: peft_config.trainable_token_indices}
+
+            if self.modules_to_save:
+                for target_layer in target_layers:
+                    if target_layer in self.modules_to_save:
+                        raise ValueError(
+                            "The embedding layer is already marked to be trained fully, either specify "
+                            f'`modules_to_save=[..., "{target_layer}", ...]` or '
+                            f"`trainable_tokens={{'{target_layer}': x}}` but not both."
+                        )
+
+            # we are not adding these module names to `self.modules_to_save` as this is strictly reserved for the
+            # `ModulesToSaveWrapper`.
+
+            for target_layer, token_indices in target_layers.items():
+                _set_trainable(
+                    self,
+                    adapter_name,
+                    module_names=[target_layer],
+                    strict_module_check=True,
+                    wrapper_cls=TrainableTokensWrapper,
+                    token_indices=token_indices,
+                )
+
+            # There might be the possibility that we have output weights that are tied to the input weights.
+            # In that case we will tie any module that wants tied weights to the token adapter to make sure that
+            # any modification is reflected in the tied layers as well.
+            model_config = BaseTuner.get_model_config(self)
+            if (
+                model_config.get("tie_word_embeddings", False)
+                # some models may be misconfigured to have weight tying enabled but don't define tied weights keys
+                and self.model._tied_weights_keys is not None
+                and isinstance(self.model.get_input_embeddings(), TrainableTokensWrapper)
+            ):
+                # the embedding layer is modified and we want weight tying.
+                module_keys = [".".join(n.split(".")[:-1]) for n in self.model._tied_weights_keys]
+
+                token_adapter = self.model.get_input_embeddings().token_adapter
+                _set_trainable(
+                    self,
+                    adapter_name,
+                    module_names=module_keys,
+                    strict_module_check=True,
+                    wrapper_cls=TrainableTokensWrapper,
+                    token_indices=token_adapter.token_indices[adapter_name],
+                    tied_adapter=self.model.get_input_embeddings().token_adapter,
+                )
 
     def get_layer_status(self) -> list[TunerLayerStatus]:
         """Get the status of each adapter layer in the model.
@@ -1447,7 +1503,7 @@ class PeftModelForSequenceClassification(PeftModel):
                 break
 
         # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
-        _set_trainable(self, adapter_name, modules_to_save=peft_config.modules_to_save)
+        _set_trainable(self, adapter_name, module_names=peft_config.modules_to_save)
 
     def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """
@@ -2238,7 +2294,7 @@ class PeftModelForTokenClassification(PeftModel):
                 break
 
         # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
-        _set_trainable(self, adapter_name, modules_to_save=peft_config.modules_to_save)
+        _set_trainable(self, adapter_name, module_names=peft_config.modules_to_save)
 
     def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """
@@ -2459,7 +2515,7 @@ class PeftModelForQuestionAnswering(PeftModel):
                 break
 
         # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
-        _set_trainable(self, adapter_name, modules_to_save=peft_config.modules_to_save)
+        _set_trainable(self, adapter_name, module_names=peft_config.modules_to_save)
 
     def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """
