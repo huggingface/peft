@@ -730,9 +730,13 @@ class Linear(nn.Module, LoraLayer):
                 x = self._cast_input_dtype(x, lora_A.weight.dtype)
 
                 if not self.use_dora[active_adapter]:
-                    # Loras such as EoRA will always be scaling == 1 so we can skip the no-op math
-                    if scaling == 1:
-                        result = result + lora_B(lora_A(dropout(x)))
+                    if (hasattr(lora_A, 'bias') and lora_A.bias is not None) or (hasattr(lora_B, 'bias') and lora_B.bias is not None):
+                        result = result + lora_B(lora_A(dropout(x))) * scaling
+                    elif len(x.shape) == 3:
+                        # In-place fused operations use less memory
+                        result.baddbmm_(dropout(x) @ lora_A.weight.T, lora_B.weight.T.expand(x.size(0), -1, -1), beta=1.0, alpha=scaling)
+                    elif len(x.shape) == 2:
+                        result.addmm_(dropout(x) @ lora_A.weight.T, lora_B.weight.T, beta=1.0, alpha=scaling)
                     else:
                         result = result + lora_B(lora_A(dropout(x))) * scaling
                 else:
