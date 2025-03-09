@@ -1062,6 +1062,12 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
     @parameterized.expand(TEST_CASES)
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
+        # https://github.com/huggingface/peft/pull/2403
+        if model_id in ["Conv2dGroups"]:
+            pytest.skip(
+                f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
+            )
+
         config_kwargs = config_kwargs.copy()
         if issubclass(config_cls, LoraConfig):
             config_kwargs["init_lora_weights"] = False
@@ -1079,6 +1085,12 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
     @parameterized.expand(TEST_CASES)
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
+        # https://github.com/huggingface/peft/pull/2403
+        if model_id in ["Conv2dGroups"]:
+            pytest.skip(
+                f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
+            )
+
         config_kwargs = config_kwargs.copy()
         if issubclass(config_cls, LoraConfig):
             config_kwargs["init_lora_weights"] = False
@@ -1088,6 +1100,12 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
     @parameterized.expand(TEST_CASES)
     def test_merge_layers_is_idempotent(self, test_name, model_id, config_cls, config_kwargs):
+        # https://github.com/huggingface/peft/pull/2403
+        if model_id in ["Conv2dGroups"]:
+            pytest.skip(
+                f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
+            )
+
         # calling merge twice with the same arguments should not change the output
         config_kwargs = config_kwargs.copy()
         if issubclass(config_cls, LoraConfig):
@@ -1098,6 +1116,12 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
     @parameterized.expand(TEST_CASES)
     def test_safe_merge(self, test_name, model_id, config_cls, config_kwargs):
+        # https://github.com/huggingface/peft/pull/2403
+        if model_id in ["Conv2dGroups"]:
+            pytest.skip(
+                f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
+            )
+
         # calling merge twice with the same arguments should not change the output
         config_kwargs = config_kwargs.copy()
         if issubclass(config_cls, LoraConfig):
@@ -1314,6 +1338,12 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
     @parameterized.expand(TEST_CASES)
     def test_disable_adapters_with_merging(self, test_name, model_id, config_cls, config_kwargs):
+        # https://github.com/huggingface/peft/pull/2403
+        if model_id in ["Conv2dGroups"]:
+            pytest.skip(
+                f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
+            )
+
         # same as test_disable_adapters, but with merging
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
