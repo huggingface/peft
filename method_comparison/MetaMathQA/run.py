@@ -334,7 +334,7 @@ def main(*, path_experiment: str, experiment_name: str) -> None:
     num_trainable_params, num_params = model.get_nb_trainable_parameters()
     print_verbose(
         f"trainable params: {num_trainable_params:,d} || all params: {num_params:,d} || "
-        f"trainable%: {100 * num_trainable_params / num_params:.4f}%"
+        f"trainable: {100 * num_trainable_params / num_params:.4f}%"
     )
 
     # train model

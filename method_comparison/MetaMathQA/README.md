@@ -189,3 +189,4 @@ Python 3.11+ is recommended
 - using `torch.compile` leads to a huge slowdown, investigate (maybe recompiles), although it does save memory
 - AMP does not appear to help, investigate
 - packing of sequences (but this probably requires adjusting the attention matrix)
+- clean up what gets printed and where (stdout, stderr)

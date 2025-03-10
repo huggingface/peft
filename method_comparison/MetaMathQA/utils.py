@@ -24,6 +24,7 @@ import subprocess
 import tempfile
 import warnings
 from dataclasses import asdict, dataclass
+from decimal import Decimal, DivisionByZero, InvalidOperation
 from typing import Any, Callable, Literal, Optional
 
 import huggingface_hub
@@ -278,24 +279,82 @@ def parse_answer(text: str) -> Optional[str]:
     text = text.rpartition(delimiter)[-1].strip()
     # if a new paragraph follows after the final answer, we want to remove it
     text = text.split("\n", 1)[0]
-    text = text.strip(" .!?")
+    # note: we can just remove % here since the GSM8K dataset just omits it, i.e. 50% -> 50, no need to divide by 100
+    text = text.strip(" .!?$%")
     return text
+
+
+def convert_to_decimal(s: Optional[str]) -> Optional[Decimal]:
+    """
+    Converts a string representing a number to a Decimal.
+
+    The string may be:
+      - A simple number (e.g., "13", "65.33")
+      - A fraction (e.g., "20/14")
+    """
+    if s is None:
+        return None
+
+    try:
+        s = s.strip()
+        # Check if the string represents a fraction.
+        if "/" in s:
+            parts = s.split("/")
+            if len(parts) != 2:
+                return None
+            numerator = Decimal(parts[0].strip())
+            denominator = Decimal(parts[1].strip())
+            if denominator == 0:
+                return None
+            value = numerator / denominator
+        else:
+            # Parse as a regular decimal or integer string.
+            value = Decimal(s)
+        return value
+    except (DivisionByZero, InvalidOperation, ValueError):
+        return None
 
 
 def get_accuracy(*, predictions: list[str], responses: list[str]) -> float:
     if len(predictions) != len(responses):
         raise ValueError(f"Prediction length mismatch: {len(predictions)} != {len(responses)}")
 
-    correct = 0
+    y_true: list[str | float | None] = []
+    y_pred: list[str | float | None] = []
+
     for prediction, response in zip(predictions, responses):
         parsed_prediction = parse_answer(prediction)
         parsed_response = parse_answer(response)
         if parsed_response is None:
             raise ValueError(f"Error encountered while trying to parse response: {response}")
-        if parsed_prediction is not None:
-            correct += int(parsed_prediction == parsed_response)
 
-    return correct / len(predictions)
+        decimal_prediction = convert_to_decimal(parsed_prediction)
+        decimal_answer = convert_to_decimal(parsed_response)
+        if decimal_prediction is not None:
+            y_pred.append(float(decimal_prediction))
+        elif parsed_prediction is not None:
+            y_pred.append(parsed_prediction)
+        else:
+            y_pred.append(None)
+
+        # we convert decimals to float so that stuff like this works:
+        # float(convert_to_decimal('20/35')) == float(convert_to_decimal('0.5714285714285714'))
+        if decimal_answer is not None:
+            y_true.append(float(decimal_answer))
+        elif parsed_prediction is not None:
+            y_true.append(parsed_response)
+        else:
+            y_true.append(None)
+
+    correct: list[bool] = []
+    for true, pred in zip(y_true, y_pred):
+        if (true is not None) and (pred is not None):
+            correct.append(true == pred)
+        else:
+            correct.append(False)
+
+    accuracy = sum(correct) / len(correct)
+    return accuracy
 
 
 ###########
