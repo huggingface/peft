@@ -71,7 +71,9 @@ def prepare_config(
 ) -> AdaptionPromptConfig:
     """Prepare the config based on the llama model type."""
     if model.config.model_type not in TRANSFORMERS_MODEL_CONFIG:
-        raise ValueError("Unsupported model type for adaption prompt: '{model.config.model_type}'.")
+        raise ValueError(
+            f"Unsupported model type for adaption prompt: '{model.config.model_type}'."
+        )
 
     model_config = TRANSFORMERS_MODEL_CONFIG[model.config.model_type]
 
