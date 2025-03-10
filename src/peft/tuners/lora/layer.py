@@ -489,13 +489,7 @@ class LoraLayer(BaseTunerLayer):
             # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
             # layer output
             sub_batch = x[sub_batch_indices_list[i]].to(lora_A.weight.dtype)
-
-            # Loras such as EoRA will always be scaling == 1 so we can skip the no-op math
-            if scaling == 1:
-                lora_output = lora_B(lora_A(dropout(sub_batch)))
-            else:
-                lora_output = lora_B(lora_A(dropout(sub_batch))) * scaling
-
+            lora_output = lora_B(lora_A(dropout(sub_batch))) * scaling
             result[sub_batch_indices_list[i]] += lora_output.to(torch_result_dtype)
 
         return result
@@ -730,11 +724,7 @@ class Linear(nn.Module, LoraLayer):
                 x = self._cast_input_dtype(x, lora_A.weight.dtype)
 
                 if not self.use_dora[active_adapter]:
-                    # Loras such as EoRA will always be scaling == 1 so we can skip the no-op math
-                    if scaling == 1:
-                        result = result + lora_B(lora_A(dropout(x)))
-                    else:
-                        result = result + lora_B(lora_A(dropout(x))) * scaling
+                    result = result + lora_B(lora_A(dropout(x))) * scaling
                 else:
                     if isinstance(dropout, nn.Identity) or not self.training:
                         base_result = result
