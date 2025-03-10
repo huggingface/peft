@@ -48,7 +48,6 @@ device = "cuda"
 CUDA_MEMORY_INIT_THRESHOLD = 500 * 2**20  # 500MB
 FILE_NAME_DEFAULT_TRAIN_PARAMS = os.path.join(os.path.dirname(__file__), "default_training_params.json")
 FILE_NAME_TRAIN_PARAMS = "training_params.json"  # specific params for this experiment
-DATASET_NAME = "meta-math/MetaMathQA"
 # main results
 RESULT_PATH = os.path.join(os.path.dirname(__file__), "results")
 # testing results
@@ -241,6 +240,11 @@ def get_model(
     return model
 
 
+##################
+# ANSWER PARSING #
+##################
+
+
 def parse_answer(text: str) -> Optional[str]:
     """
     A label/prediction can look like this:
@@ -254,7 +258,15 @@ def parse_answer(text: str) -> Optional[str]:
 
     """
     # This implementation is based on sampling meta-llama/Llama-3.1-8B-Instruct. It may not work for other models.
-    candidate_delimiters = ["The answer is: ", "The answer is ", "The final answer is: ", "The final answer is "]
+    candidate_delimiters = [
+        # MetaMath:
+        "The answer is: ",
+        "The answer is ",
+        "The final answer is: ",
+        "The final answer is ",
+        # GSM8K:
+        "#### ",
+    ]
     text = text.strip()
     text = text.rstrip(".!?")
     for delimiter in candidate_delimiters:
@@ -423,7 +435,7 @@ def log_results(
     time_total: float,
     model: nn.Module,
     model_info: Optional[huggingface_hub.ModelInfo],
-    dataset_info: Optional[huggingface_hub.DatasetInfo],
+    datasets_info: dict[str, Optional[huggingface_hub.DatasetInfo]],
     start_date: str,
     train_config: TrainConfig,
     peft_config: PeftConfig,
@@ -447,12 +459,16 @@ def log_results(
     else:
         model_sha = None
         model_created_at = None
-    if dataset_info is not None:
-        dataset_sha = dataset_info.sha
-        dataset_created_at = dataset_info.created_at.isoformat()
-    else:
-        dataset_sha = None
-        dataset_created_at = None
+
+    dataset_info_log = {}
+    for key, dataset_info in datasets_info.items():
+        if dataset_info is not None:
+            dataset_sha = dataset_info.sha
+            dataset_created_at = dataset_info.created_at.isoformat()
+        else:
+            dataset_sha = None
+            dataset_created_at = None
+        dataset_info_log[key] = {"sha": dataset_sha, "created_at": dataset_created_at}
 
     peft_branch = get_peft_branch()
 
@@ -490,10 +506,8 @@ def log_results(
             "metrics": train_result.metrics,
         },
         "meta_info": {
-            "model_sha": model_sha,
-            "model_created_at": model_created_at,
-            "dataset_sha": dataset_sha,
-            "dataset_created_at": dataset_created_at,
+            "model_info": {"sha": model_sha, "created_at": model_created_at},
+            "dataset_info": dataset_info_log,
             **asdict(meta_info),
         },
     }

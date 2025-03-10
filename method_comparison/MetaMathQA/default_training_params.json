@@ -3,7 +3,7 @@
   "dtype": "bfloat16",
   "max_seq_length": 768,
   "batch_size": 4,
-  "batch_size_eval": 51,
+  "batch_size_eval": 50,
   "max_steps": 5000,
   "eval_steps": 250,
   "compile": false,

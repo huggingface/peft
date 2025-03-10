@@ -1,4 +1,4 @@
-# PEFT method comparison on the MetaMathQA dataset
+# PEFT method comparison on the MetaMathQA and GSM8K datasets
 
 ## Goal
 
@@ -6,11 +6,11 @@ This goal is to provide a benchmarking framework for the different PEFT methods 
 
 ## Dataset
 
-More details about the `meta-math/MetaMathQA` dataset can be found [here](https://huggingface.co/datasets/meta-math/MetaMathQA).
+This task trains on the [MetaMathQA]((https://huggingface.co/datasets/meta-math/MetaMathQA)) dataset and validates/tests on the [GSM8K](https://huggingface.co/datasets/openai/gsm8k) dataset ("main").
 
-For the model to attain good accuracy, it needs to learn to adhere to the output format and it must express basic chain of thought reasoning capabilities to get to the correct result in the first place. The dataset is challenging for models in the sub 7B parameter range.
+For the model to attain good accuracy, it needs to learn to adhere to the output format and it must express basic chain of thought reasoning capabilities to get to the correct result in the first place. The task is challenging for models in the sub 7B parameter range.
 
-There is no offical train/valid/test split. Therefore, validation and test sets are split from the training set using a stratified split based on the "type" column.
+The train set uses the whole of MetaMathQA. The validation set is a random sample from the train set of GSM8K. The test set is the whole of the GSM8K test set.
 
 ## Running
 
@@ -34,7 +34,7 @@ config.save_pretrained(<path-to-experiment>)
 
 There is a default file for the non-PEFT parameters: `default_training_params.json`. This contains all the other parameters that are relevant for training, e.g. the base model id, number of steps, batch size, learning rate, etc. If parameters that differ from the defaults are needed for a specific experiment, place a `training_parameters.json` into the experiment directory and adjust the parameters that need changing. The other parametes are taken from the aforementioned default config.
 
-Regarding the `batch_size_eval` parameter, it is quite critical since evaluation takes up a significant portion of the training time and batching helps with reducing that. It should be possible to choose a value that is multiple times higher than the batch size used for training (`batch_size`). You should also pay attention to the size of the validation set -- e.g. if it's 50, don't choose a `batch_size_eval` of 40, as that results in a large batch of 30 and a small batch of 10. 25 might be a better choice.
+Regarding the `batch_size_eval` parameter, it is quite critical since evaluation takes up a significant portion of the training time and batching helps with reducing that. It should be possible to choose a value that is multiple times higher than the batch size used for training (`batch_size`). You should also pay attention to the size of the validation set -- e.g. if it's 50, don't choose a `batch_size_eval` of 40, as that results in a large batch of 30 and a small batch of 10. 25 might be a better choice. Also, ensure via a quick train run that the batch size does not lead to out of memory errors -- getting this error at the very end on evaluating the test set would be quite a loss of time.
 
 For an overview of all possible arguments, you can also check the `TrainConfig` `dataclass` in `utils.py`.
 

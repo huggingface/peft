@@ -34,7 +34,6 @@ from torch.cuda.amp import GradScaler, autocast
 from tqdm import tqdm
 from transformers import GenerationConfig, get_cosine_schedule_with_warmup, set_seed
 from utils import (
-    DATASET_NAME,
     FILE_NAME_TRAIN_PARAMS,
     TrainResult,
     TrainStatus,
@@ -322,7 +321,8 @@ def main(*, path_experiment: str, experiment_name: str) -> None:
     tokenizer = get_tokenizer(model_id=train_config.model_id, max_seq_length=train_config.max_seq_length)
 
     model_info = get_base_model_info(train_config.model_id)
-    dataset_info = get_dataset_info(DATASET_NAME)
+    metamath_info = get_dataset_info("meta-math/MetaMathQA")
+    gsm8k_info = get_dataset_info("openai/gsm8k")
     model = get_model(
         model_id=train_config.model_id,
         dtype=train_config.dtype,
@@ -373,7 +373,7 @@ def main(*, path_experiment: str, experiment_name: str) -> None:
         time_total=time_total,
         model=model,
         model_info=model_info,
-        dataset_info=dataset_info,
+        datasets_info={"metamath": metamath_info, "gsm8k": gsm8k_info},
         start_date=start_date,
         train_config=train_config,
         peft_config=peft_config,
