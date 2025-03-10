@@ -21,7 +21,7 @@ from peft.import_utils import is_auto_awq_available
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 
-from awq.utils.packing_utils import unpack_awq, reverse_awq_order, dequantize_gemm
+from awq.utils.packing_utils import unpack_awq, reverse_awq_order
 from awq.modules.linear.gemm import WQLinear_GEMM
 
 
