@@ -21,6 +21,27 @@ from peft.import_utils import is_auto_awq_available
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 
+from awq.utils.packing_utils import unpack_awq, reverse_awq_order, dequantize_gemm
+from awq.modules.linear.gemm import WQLinear_GEMM
+
+
+def dequantize(qweight, qzeros, scales, bits, group_size):
+    # Unpack the qweight and qzeros tensors
+    iweight, izeros = unpack_awq(qweight, qzeros, bits)
+    # Reverse the order of the iweight and izeros tensors
+    iweight, izeros = reverse_awq_order(iweight, izeros, bits)
+
+    # overflow checks
+    iweight = torch.bitwise_and(iweight, (2**bits) - 1)
+    izeros = torch.bitwise_and(izeros, (2**bits) - 1)
+
+    # fp16 weights
+    scales = scales.repeat_interleave(group_size, dim=0)
+    izeros = izeros.repeat_interleave(group_size, dim=0)
+    iweight = (iweight - izeros) * scales
+
+    return iweight, izeros, scales
+
 
 class AwqLoraLinear(torch.nn.Module, LoraLayer):
     def __init__(
@@ -75,7 +96,7 @@ class AwqLoraLinear(torch.nn.Module, LoraLayer):
             requires_conversion = not torch.is_autocast_enabled()
             if requires_conversion:
                 expected_dtype = result.dtype
-                x = self._cast_input_dtype(x, lora_A.weight.dtype)
+                x = x.to(lora_A.weight.dtype)
 
             output = lora_B(lora_A(dropout(x)))
             if requires_conversion:
@@ -83,6 +104,104 @@ class AwqLoraLinear(torch.nn.Module, LoraLayer):
             output = output * scaling
             result = result + output
         return result
+
+    def get_delta_weight(self, adapter) -> torch.Tensor:
+        """
+        Compute the delta weight for the given adapter.
+
+        Args:
+            adapter (str):
+                The name of the adapter for which the delta weight should be computed.
+        """
+        from peft.utils.other import transpose
+        device = self.lora_B[adapter].weight.device
+        dtype = self.lora_B[adapter].weight.dtype
+
+        # In case users wants to merge the adapter weights that are in
+        # (b)float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
+        # (b)float16 because some CPUs have slow bf16/fp16 matmuls.
+        cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
+
+        weight_A = self.lora_A[adapter].weight
+        weight_B = self.lora_B[adapter].weight
+
+        if cast_to_fp32:
+            weight_A = weight_A.float()
+            weight_B = weight_B.float()
+
+        output_tensor = transpose(weight_B @ weight_A, True) * self.scaling[adapter]
+
+        if cast_to_fp32:
+            output_tensor = output_tensor.to(dtype=dtype)
+
+            # cast back the weights
+            self.lora_A[adapter].weight.data = weight_A.to(dtype)
+            self.lora_B[adapter].weight.data = weight_B.to(dtype)
+
+        return output_tensor
+
+
+
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+        """
+        Merge the active adapter weights into the base weights
+
+        Args:
+            safe_merge (`bool`, *optional*):
+                If True, the merge operation will be performed in a copy of the original weights and check for NaNs
+                before merging the weights. This is useful if you want to check if the merge operation will produce
+                NaNs. Defaults to `False`.
+            adapter_names (`list[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
+        """
+        from peft.tuners.tuners_utils import check_adapters_to_merge
+        adapter_names = check_adapters_to_merge(self, adapter_names)
+        if not adapter_names:
+            # no adapter to merge
+            return
+
+        for active_adapter in adapter_names:
+            if active_adapter in self.lora_A.keys():
+                base_layer = self.get_base_layer()
+                delta_weight = self.get_delta_weight(active_adapter)
+                original_linear_layer, zeros, scales = dequantize(
+                    base_layer.qweight,
+                    base_layer.qzeros,
+                    base_layer.scales,
+                    base_layer.w_bit,
+                    base_layer.group_size,
+                )
+                unquantized_weights = delta_weight + original_linear_layer
+                if safe_merge:
+                    if not torch.isfinite(unquantized_weights).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                        )
+                l = torch.nn.Linear(
+                    original_linear_layer.shape[0],
+                    original_linear_layer.shape[1]
+                )
+                l.weight.data = unquantized_weights.T
+
+                # re-quantize
+                new_layer = WQLinear_GEMM.from_linear(
+                    linear=l,
+                    w_bit=base_layer.w_bit,
+                    group_size=base_layer.group_size,
+                    scales=scales,
+                    zeros=zeros,
+                )
+                
+                if not self.use_dora[active_adapter]:
+                    base_layer.qweight.data = new_layer.qweight.data
+                else:
+                    raise NotImplementedError("Dora merge is not supported for DoRA yet")
+
+                if self.lora_bias[active_adapter]:
+                    raise NotImplementedError("Dora merge is not supported for bias yet")
+
+                self.merged_adapters.append(active_adapter)
 
     def __repr__(self) -> str:
         rep = super().__repr__()
