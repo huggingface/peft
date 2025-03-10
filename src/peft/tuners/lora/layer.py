@@ -489,7 +489,7 @@ class LoraLayer(BaseTunerLayer):
             # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
             # layer output
             sub_batch = x[sub_batch_indices_list[i]].to(lora_A.weight.dtype)
-            lora_output = result + lora_B(lora_A(dropout(x))) * scaling
+            lora_output = lora_B(lora_A(dropout(sub_batch))) * scaling
             result[sub_batch_indices_list[i]] += lora_output.to(torch_result_dtype)
 
         return result
