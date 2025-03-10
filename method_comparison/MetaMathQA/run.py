@@ -26,7 +26,6 @@ import sys
 import textwrap
 import time
 from contextlib import nullcontext
-from functools import partial
 from typing import Any, Literal, Optional
 
 import torch
@@ -51,11 +50,7 @@ from utils import (
 )
 
 from data import (
-    get_dataset,
-    get_filtered_dataset,
     get_train_valid_test_datasets,
-    tokenize_with_answer,
-    tokenize_wo_answer,
 )
 from peft import AdaLoraConfig, PeftConfig
 
@@ -66,11 +61,6 @@ from peft import AdaLoraConfig, PeftConfig
 dtype_to_bytes_linear = {"float32": 4, "float16": 2, "bfloat16": 2, "int8": 1, "int4": 0.5}
 # if lr scheduler with warmup is used, the ratio of warmup steps to total steps
 WARMUP_STEP_RATIO = 0.1
-
-# train/valid/test split -- note that evaluation takes quite long, so don't choose too large sizes for the valid set,
-# since it's run multiple times during training; test is only run once at the end and thus can be larger
-VALID_SIZE = 50
-TEST_SIZE = 1000
 
 
 def evaluate(model, tokenizer, ds, batch_size, generate_kwargs, use_tqdm=False) -> tuple[list[str], list[str]]:
@@ -125,7 +115,6 @@ def train(
     max_steps: int,
     batch_size: int,
     batch_size_eval: int,
-    ds: Any,
     tokenizer: Any,
     cuda_memory_init: int,
     eval_steps: int,
@@ -167,14 +156,8 @@ def train(
     eval_time = 0.0
 
     ds_train, ds_valid, ds_test = get_train_valid_test_datasets(
-        ds=ds, valid_size=VALID_SIZE, test_size=TEST_SIZE, print_fn=print_verbose
+        tokenizer=tokenizer, query_template=query_template, print_fn=print_verbose
     )
-    tokenize_with_answer_ = partial(tokenize_with_answer, tokenizer=tokenizer, template=query_template)
-    tokenize_wo_answer_ = partial(tokenize_wo_answer, tokenizer=tokenizer, template=query_template)
-    ds_train = ds_train.map(tokenize_with_answer_, batched=True).remove_columns(["type", "query", "original_question"])
-    ds_valid = ds_valid.map(tokenize_wo_answer_, batched=True).remove_columns(["type", "query", "original_question"])
-    ds_test = ds_test.map(tokenize_wo_answer_, batched=True).remove_columns(["type", "query", "original_question"])
-
     try:
         pbar = tqdm(range(1, max_steps + 1))
         for step in pbar:
@@ -337,8 +320,6 @@ def main(*, path_experiment: str, experiment_name: str) -> None:
     # initialize objects
     cuda_memory_init = init_cuda()
     tokenizer = get_tokenizer(model_id=train_config.model_id, max_seq_length=train_config.max_seq_length)
-    ds = get_dataset(dataset_name=DATASET_NAME)
-    ds = get_filtered_dataset(ds=ds, print_fn=print_verbose)
 
     model_info = get_base_model_info(train_config.model_id)
     dataset_info = get_dataset_info(DATASET_NAME)
@@ -363,7 +344,6 @@ def main(*, path_experiment: str, experiment_name: str) -> None:
             max_steps=train_config.max_steps,
             batch_size=train_config.batch_size,
             batch_size_eval=train_config.batch_size_eval,
-            ds=ds,
             tokenizer=tokenizer,
             cuda_memory_init=cuda_memory_init,
             eval_steps=train_config.eval_steps,

@@ -16,17 +16,23 @@
 All utilities related to data handling.
 """
 
+from functools import partial
 from typing import Callable
 
 import datasets
 import numpy as np
 from datasets import Dataset, load_dataset
 from sklearn.model_selection import StratifiedKFold
+from utils import DATASET_NAME
 
 
 # with a token limit of 768 for query + response, we have to exclude all texts with length > 1304; this leaves 93.8% of
 # the dataset
 CHAR_LIMIT = 1300
+# train/valid/test split -- note that evaluation takes quite long, so don't choose too large sizes for the valid set,
+# since it's run multiple times during training; test is only run once at the end and thus can be larger
+VALID_SIZE = 50
+TEST_SIZE = 1000
 
 
 def get_filtered_dataset(*, ds: datasets.Dataset, print_fn: Callable[..., None]) -> Dataset:
@@ -44,11 +50,7 @@ def get_filtered_dataset(*, ds: datasets.Dataset, print_fn: Callable[..., None])
 
 
 def get_train_valid_test_datasets(
-    *,
-    ds: datasets.Dataset,
-    valid_size: int,
-    test_size: int,
-    print_fn: Callable[..., None],
+    *, tokenizer, query_template: str, print_fn: Callable[..., None]
 ) -> tuple[Dataset, Dataset, Dataset]:
     """
     Return the indices of the train, valid, and test splits of the dataset.
@@ -59,16 +61,19 @@ def get_train_valid_test_datasets(
 
     even after calling ds_filtered.class_encode_column("type"). Thus, using sklearn's StratifiedKFold instead.
     """
+    ds = get_dataset(dataset_name=DATASET_NAME)
+    ds = get_filtered_dataset(ds=ds, print_fn=print_fn)
+
     dataset_types = ds["type"]
     total_size = len(ds)
-    assert valid_size + test_size < total_size
+    assert VALID_SIZE + TEST_SIZE < total_size
 
-    n_splits_train = total_size // (test_size + valid_size)
+    n_splits_train = total_size // (TEST_SIZE + VALID_SIZE)
     kfold = StratifiedKFold(n_splits_train, shuffle=True, random_state=0)
     idx_train, idx_rest = next(iter(kfold.split(np.arange(total_size).reshape(-1, 1), y=np.array(dataset_types))))
     print_fn(f"Train size: {len(idx_train)}")
 
-    n_splits_test = (valid_size + test_size) // valid_size
+    n_splits_test = (VALID_SIZE + TEST_SIZE) // VALID_SIZE
     kfold = StratifiedKFold(n_splits_test, shuffle=True, random_state=0)
     idx_test, idx_valid = next(
         iter(kfold.split(np.arange(len(idx_rest)).reshape(-1, 1), y=np.array(dataset_types)[idx_rest]))
@@ -83,6 +88,13 @@ def get_train_valid_test_datasets(
     ds_test = ds.select(idx_test)
 
     assert set(idx_test) | set(idx_valid) | set(idx_train) == set(range(total_size))
+
+    tokenize_with_answer_ = partial(tokenize_with_answer, tokenizer=tokenizer, template=query_template)
+    tokenize_wo_answer_ = partial(tokenize_wo_answer, tokenizer=tokenizer, template=query_template)
+    ds_train = ds_train.map(tokenize_with_answer_, batched=True).remove_columns(["type", "query", "original_question"])
+    ds_valid = ds_valid.map(tokenize_wo_answer_, batched=True).remove_columns(["type", "query", "original_question"])
+    ds_test = ds_test.map(tokenize_wo_answer_, batched=True).remove_columns(["type", "query", "original_question"])
+
     return ds_train, ds_valid, ds_test
 
 
