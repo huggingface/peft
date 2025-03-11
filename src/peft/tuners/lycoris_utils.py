@@ -42,7 +42,7 @@ class LycorisConfig(PeftConfig):
         metadata={
             "help": (
                 "The mapping from layer names or regexp expression to ranks which are different from the default rank specified by `r`. "
-                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 8`}"
+                "For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`."
             )
         },
     )
@@ -51,7 +51,7 @@ class LycorisConfig(PeftConfig):
         metadata={
             "help": (
                 "The mapping from layer names or regexp expression to alphas which are different from the default alpha specified by `alpha`. "
-                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 32`}"
+                "For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`."
             )
         },
     )
