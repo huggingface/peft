@@ -1687,7 +1687,9 @@ class TestRankAndAlphaPattern:
 
     def test_rank_pattern_target_outer_middle_inner_with_caret(self, model):
         # indicate each layer with a different rank and use the caret in the regex
-        config = LoraConfig(target_modules="all-linear", rank_pattern={"^foo": 16, "^module.foo": 24, "^module.module.foo": 32})
+        config = LoraConfig(
+            target_modules="all-linear", rank_pattern={"^foo": 16, "^module.foo": 24, "^module.module.foo": 32}
+        )
         model = get_peft_model(model, config).base_model.model
         assert model.foo.r["default"] == 16
         assert model.bar.r["default"] == 8
@@ -1698,7 +1700,9 @@ class TestRankAndAlphaPattern:
 
     def test_rank_pattern_target_outer_middle_inner_with_caret_dict_order(self, model):
         # same as before, but change the order of the rank_pattern dict
-        config = LoraConfig(target_modules="all-linear", rank_pattern={"^module.module.foo": 32, "^module.foo": 24, "^foo": 16})
+        config = LoraConfig(
+            target_modules="all-linear", rank_pattern={"^module.module.foo": 32, "^module.foo": 24, "^foo": 16}
+        )
         model = get_peft_model(model, config).base_model.model
         assert model.foo.r["default"] == 16
         assert model.bar.r["default"] == 8
@@ -1815,7 +1819,9 @@ class TestRankAndAlphaPattern:
 
     def test_alpha_pattern_target_outer_middle_inner_with_caret(self, model):
         # indicate each layer with a different alpha and use the caret in the regex
-        config = LoraConfig(target_modules="all-linear", alpha_pattern={"^foo": 4, "^module.foo": 2, "^module.module.foo": 1})
+        config = LoraConfig(
+            target_modules="all-linear", alpha_pattern={"^foo": 4, "^module.foo": 2, "^module.module.foo": 1}
+        )
         model = get_peft_model(model, config).base_model.model
         assert model.foo.scaling["default"] == 0.5
         assert model.bar.scaling["default"] == 1.0
@@ -1826,7 +1832,9 @@ class TestRankAndAlphaPattern:
 
     def test_alpha_pattern_target_outer_middle_inner_with_caret_dict_order(self, model):
         # same as before, but change the order of the alpha_pattern dict
-        config = LoraConfig(target_modules="all-linear", alpha_pattern={"^module.module.foo": 1, "^module.foo": 2, "^foo": 4})
+        config = LoraConfig(
+            target_modules="all-linear", alpha_pattern={"^module.module.foo": 1, "^module.foo": 2, "^foo": 4}
+        )
         model = get_peft_model(model, config).base_model.model
         assert model.foo.scaling["default"] == 0.5
         assert model.bar.scaling["default"] == 1.0
