@@ -43,6 +43,7 @@ When adding a new experiment, please consider the following points:
 2. Avoid suggesting configurations that are very close to existing ones. For example, if there is already an experiment with LoRA and rank 123, do not add an experiment with LoRA and rank 124.
 3. Experiments for less-tested methods are more valuable than additional experiments for widely tested methods.
 4. Do not edit existing experiments, always create new ones.
+5. If you found hyper parameters that work especially well with a given method but are not trivial to find out, consider updating the PEFT documentation of that method so that other users can benefit from your findings.
 
 ### Updating the Training Script
 
@@ -72,7 +73,7 @@ After adding the dataset, ensure it functions correctly and produces meaningful 
 #### Considerations When Adding a New Dataset
 
 1. Before beginning, it is best to open an [issue on PEFT](https://github.com/huggingface/peft/issues) to share your plans. This allows for early feedback and prevents wasted effort on impractical ideas.
-2. The most valuable new datasets are those that test different capabilities than those already present. For example, if all existing datasets focus on language models, adding an image task would be more useful than another language modeling task.
+2. The most valuable new datasets are those that test different capabilities than those already present. For example, if all existing datasets focus on language models, adding an image task would be more useful than another language modeling task. Also bonus points if the task is similar to what users may face in the real world.
 3. Training should be reasonably fast. Running dozens of experiments is impractical if each one takes multiple days and incurs high costs. Ideally, training should take a few hours at most on high-end consumer hardware.
 4. The chosen base model should not be too large, to avoid VRAM constraints. Morevoer, if the base model is too powerful, there is little room for improvement through further fine-tuning.
 5. Test scores should be informative and have a broad range:
