@@ -776,6 +776,7 @@ def _set_adapter(model, adapter_name):
             # if the adapter is found in this module, set it as the active adapter, else disable the adapters of this
             # module
             if adapter_name in module._adapters:
+                module.enable_adapters(True)
                 module.set_adapter(adapter_name)
             else:
                 module.enable_adapters(False)
