@@ -126,7 +126,28 @@ def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
 
     return (query_states * cos) + (llama_rotate_half(query_states) * sin)
 
-
+def gpt2_compute_query_states(
+        model:nn.Module, 
+        hidden_states: Optional[Tuple[torch.FloatTensor]], 
+        encoder_hidden_states: Optional[torch.Tensor] = None)-> torch.Tensor:
+    """
+    Compute query states for GPT2 models. They need to be recomputed as the forward() method of the
+    GPT@ in the transformers library does not return them. See the related discussion in the PR:
+    """
+    if encoder_hidden_states is not None:
+        if not hasattr(model, "q_attn"):
+                raise ValueError(
+                    "If class is used as cross attention, the weights `q_attn` have to be defined. "
+                    "Please make sure to instantiate class with `GPT2Attention(..., is_cross_attention=True)`."
+                )
+        query = model.q_attn(hidden_states)
+    else:
+        query, _, _ = model.c_attn(hidden_states).split(model.split_size, dim=2)
+    
+    query_states = model._split_heads(query, model.num_heads, model.head_dim)
+        
+    return query_states
+    
 def is_adaption_prompt_trainable(params: str) -> bool:
     """Return True if module is trainable under adaption prompt fine-tuning."""
     return params.split(".")[-1].startswith("adaption_")

@@ -62,6 +62,13 @@ TRANSFORMERS_MODEL_CONFIG = {
         v_proj_layer="v_proj",
         o_proj_layer="o_proj",
     ),
+    "gpt2" : ModelTypeConfig(   # piggybacking of off the prior definitions, GPTs attention calculation is different
+        compute_query_states=gpt2_compute_query_states,
+        target_modules="attn",
+        k_proj_layer="c_attn",
+        v_proj_layer=None,
+        o_proj_layer=None,
+    ),
 }
 
 
