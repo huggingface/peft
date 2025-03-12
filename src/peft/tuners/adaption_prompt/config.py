@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from peft.config import PeftConfig
 from peft.utils import PeftType
 
-from .utils import llama_compute_query_states
+from .utils import llama_compute_query_states, gpt2_compute_query_states
 
 
 @dataclass

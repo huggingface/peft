@@ -15,6 +15,7 @@ import inspect
 
 import torch
 import torch.nn as nn
+from typing import Optional, Tuple
 
 
 def llama_rotate_half(x: torch.Tensor) -> torch.Tensor:
@@ -147,7 +148,7 @@ def gpt2_compute_query_states(
     query_states = model._split_heads(query, model.num_heads, model.head_dim)
         
     return query_states
-    
+
 def is_adaption_prompt_trainable(params: str) -> bool:
     """Return True if module is trainable under adaption prompt fine-tuning."""
     return params.split(".")[-1].startswith("adaption_")
