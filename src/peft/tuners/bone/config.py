@@ -51,9 +51,6 @@ class BoneConfig(PeftConfig):
             layer at this index.
         layers_pattern (`str`):
             The layer pattern name, used only if `layers_to_transform` is different from `None`.
-        rank_pattern (`dict`):
-            The mapping from layer names or regexp expression to ranks which are different from the default rank
-            specified by `r`.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
     """

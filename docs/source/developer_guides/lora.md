@@ -239,6 +239,36 @@ Assuming the original model had 5 layers `[0, 1, 2 ,3, 4]`, this would create a 
 [Fewshot-Metamath-OrcaVicuna-Mistral-10B](https://huggingface.co/abacusai/Fewshot-Metamath-OrcaVicuna-Mistral-10B) is an example of a model trained using this method on Mistral-7B expanded to 10B. The
 [adapter_config.json](https://huggingface.co/abacusai/Fewshot-Metamath-OrcaVicuna-Mistral-10B/blob/main/adapter_config.json) shows a sample LoRA adapter config applying this method for fine-tuning.
 
+### Fine grained control over ranks and alpha (scaling)
+
+By default, all layers targeted with LoRA will have the same rank `r` and the same `lora_alpha` (which determines the LoRA scaling), depending on what was specified in the [`LoraConfig`]. In same cases, however, you may want to indicate different values for different layers. This is possible by passing the `rank_pattern` and `alpha_pattern` arguments to [`LoraConfig`]. These arguments should be dictionaries with the key being the layer name and the value being the rank/alpha value. The keys can be [regular expressesions](https://docs.python.org/3/library/re.html) (regex). All LoRA layers that are not explicitly mentioned in `rank_pattern` and `alpha_pattern` will take the default `r` and `lora_alpha` values.
+
+To give an examples, let's assume that we have a model with the following structure:
+
+```python
+>>> print(model)
+Outer(
+  (foo): Linear(...)
+  (module): Middle(
+    (foo): Linear(...)
+    (foobar): Linear(...)
+    (module): Inner(
+      (foo): Linear(...)
+      (barfoo): Linear(...)
+    )
+  )
+)
+```
+
+- `rank_pattern={"foo": 42}` will match all 3 `foo` layers. Neither `foobar` nor `barfoo` are matched.
+- `rank_pattern={"^foo": 42}` will only match the `foo` layer of the model, but neither `module.foo` nor `module.module.foo`. This is because the `^` means "start of string" when using regular expressions, and only `foo` starts with `"foo"`, the other layer names have prefixes.
+- `rank_pattern={"^module.foo": 42}` matches only `module.foo`, but not `module.module.foo`, for the same reason.
+- `rank_pattern={"module.foo": 42}` matches both `module.foo` and `module.module.foo`, but not `foo`.
+- `rank_pattern={"^foo": 42, "^module.module.foo": 55}` matches `foo` and `module.module.foo`, respectively, but not `module.foo`.
+- There is no need to indicate `$` to mark the end of the match, as this is added automatically by PEFT.
+
+The same logic applies to `alpha_pattern`. If you're in doubt, don't try to get fancy with regular expressions -- just pass the full name for each module with a different rank/alpha, preceded by the `^` prefix, and you should be good.
+
 ## Optimizers
 
 LoRA training can optionally include special purpose optimizers. Currently the only such optimizer is LoRA+.
