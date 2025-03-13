@@ -17,7 +17,8 @@
   "use_amp": false,
   "attn_implementation": null,
   "generation_kwargs": {
-    "max_length": 800
+    "max_length": 800,
+    "max_new_tokens": 300
   },
   "query_template": "Question: {query} Think step by step.\nAnswer:"
 }

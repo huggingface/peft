@@ -34,9 +34,21 @@ config.save_pretrained(<path-to-experiment>)
 
 There is a default file for the non-PEFT parameters: `default_training_params.json`. This contains all the other parameters that are relevant for training, e.g. the base model id, number of steps, batch size, learning rate, etc. If parameters that differ from the defaults are needed for a specific experiment, place a `training_parameters.json` into the experiment directory and adjust the parameters that need changing. The other parametes are taken from the aforementioned default config.
 
+For an overview of all possible arguments, you can also check the `TrainConfig` `dataclass` in `utils.py`.
+
+### Runtime performance
+
+Several factors should be considered to achieve a fast runtime performance. Besides the obvious factors like `max_steps` or the base model size, we found the following factors to have a significant impact:
+
+#### Eval batch size
+
 Regarding the `batch_size_eval` parameter, it is quite critical since evaluation takes up a significant portion of the training time and batching helps with reducing that. It should be possible to choose a value that is multiple times higher than the batch size used for training (`batch_size`). You should also pay attention to the size of the validation set -- e.g. if it's 50, don't choose a `batch_size_eval` of 40, as that results in a large batch of 30 and a small batch of 10. 25 might be a better choice. Also, ensure via a quick train run that the batch size does not lead to out of memory errors -- getting this error at the very end on evaluating the test set would be quite a loss of time.
 
-For an overview of all possible arguments, you can also check the `TrainConfig` `dataclass` in `utils.py`.
+#### Generation length
+
+During testing, we discovered that the validation time is greatly inflated by just a few very long generations. Those can inflate the validation time by a factor of 3 or more. At the same time, we discovered that these long generations do not help with accuracy -- in fact, if they exceed the maximum configured length, they're just cut off mid sentence and would thus produce an accuracy of 0 anyway.
+
+To remedy this, we now set both `max_length` and `max_new_tokens` for the generation kwargs in the default training parameters. Normally, this is not possible when using transformers, as the latter argument overrides the former. However, we have added special logic inside of `get_generation_config` which takes both and chooses the smaller of the two. This way, we can get rid of these excessively long generations, thus considerably reducing eval times, while still guaranteeing a maximum total generation length to guard against OOM errors. Testing showed that this does not hamper test accuracy. It is therefore recommended not to change these settings.
 
 ### Start a run
 
@@ -180,7 +192,6 @@ Python 3.11+ is recommended
 
 ## Open tasks
 
-- using DoRA gives empty generations?!
 - consider using `DataLoader`
 - consider adding https://github.com/huggingface/Math-Verify
 - consider adding `weight` argument to cross entropy calculation to downweight the EOS token, but it would require calculating the loss manually instead of relying on transformers (see https://github.com/huggingface/transformers/blob/6a876462c308bd7cd7d3ca8e93abaa7d5b02e90e/src/transformers/loss/loss_utils.py#L24-L48)
