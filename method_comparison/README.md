@@ -80,3 +80,19 @@ After adding the dataset, ensure it functions correctly and produces meaningful 
    - Besides loss, there should ideally be at least one additional metric, such as accuracy.
    - Comparisons are not meaningful if all methods score near 0% or near 100%. The dataset should yield a range of scores to facilitate meaningful differentiation between methods.
 6. The dataset should be publicly available and have a track record as a useful dataset. The license should permit the intended usage.
+
+## Result dashboard
+
+For convenience, we included a [Gradio](https://www.gradio.app/) app that shows the results of the experiments. It allows you to filter down the task and base model and show the experiment results for this selection. Give it a try!
+
+This demo requires additional packages to be installed, please install the packages listed in `demo-requirements.txt`, e.g. via:
+
+```sh
+python -m pip install -r demo-requirements.txt
+```
+
+To launch the demo, run:
+
+```sh
+python app.py
+```
