@@ -226,20 +226,35 @@ def train(
                     batch_size=batch_size_eval,
                     generate_kwargs={**generation_kwargs},
                 )
+                model.train()
 
                 example = random.choice(predictions)
                 example = textwrap.shorten(example, width=750)
                 example = textwrap.indent(example, "    ")
                 print_verbose(f"\nExample prediction:\n{example}\n")
-
                 accuracy = get_accuracy(predictions=predictions, responses=responses)
-                metrics.append(
-                    {"step": step, "valid accuracy": accuracy, "train loss": loss_avg, "train samples": total_samples}
-                )
-                model.train()
+                num_tokens_generated = sum(sum(mask) for mask in tokenizer(predictions)["attention_mask"])
+
                 toc_eval = time.perf_counter()
+                dur_eval = toc_eval - tic_eval
                 eval_time += toc_eval - tic_eval
                 elapsed = time.perf_counter() - tic_train
+
+                metrics.append(
+                    {
+                        "step": step,
+                        "valid accuracy": accuracy,
+                        "train loss": loss_avg,
+                        "train samples": total_samples,
+                        "loss avg": loss_avg,
+                        "train time": dur_train,
+                        "eval time": dur_eval,
+                        "tokens / sec": tokens_per_sec,
+                        "mem allocated avg": memory_allocated_avg,
+                        "mem reserved avg": memory_reserved_avg,
+                        "elapsed time": elapsed,
+                    }
+                )
 
                 log_dict = {
                     "step": f"{step:5d}",
@@ -247,11 +262,12 @@ def train(
                     "lr": f"{lr_scheduler.get_last_lr()[0]:.2e}",
                     "loss avg": f"{loss_avg:.4f}",
                     "valid acc": f"{accuracy:.3f}",
-                    "train time": f"{dur_train:.2f}s",
-                    "eval time": f"{toc_eval - tic_eval:.2f}s",
-                    "tokens / sec": f"{tokens_per_sec:.0f}",
-                    "mem allocated avg": f"{memory_allocated_avg:.0f}",
-                    "mem reserved avg": f"{memory_reserved_avg:.0f}",
+                    "gen valid tokens": num_tokens_generated,
+                    "train time": f"{dur_train:.1f}s",
+                    "eval time": f"{dur_eval:.1f}s",
+                    "train tokens / sec": f"{tokens_per_sec:.0f}",
+                    "mem allocated": f"{memory_allocated_avg:.0f}",
+                    "mem reserved": f"{memory_reserved_avg:.0f}",
                     "elapsed time": f"{elapsed // 60:.0f}min {elapsed % 60:.0f}s",
                 }
                 print_verbose(json.dumps(log_dict))
