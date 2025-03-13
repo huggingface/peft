@@ -11,6 +11,7 @@ on:
 
 env:
   HF_HOME: .cache/huggingface
+  PYTORCH_MPS_HIGH_WATERMARK_RATIO: 0.0
 
 permissions: {}
 
@@ -39,7 +40,8 @@ jobs:
     needs: check_code_quality
     strategy:
       # TODO: remove 'fail-fast' line once timeout issue from the Hub is solved
-      fail-fast: false
+      # FIXME
+      fail-fast: true
       matrix:
         python-version: ["3.9", "3.10", "3.11", "3.12"]
         # FIXME
