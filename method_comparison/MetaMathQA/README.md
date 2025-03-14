@@ -50,6 +50,14 @@ During testing, we discovered that the validation time is greatly inflated by ju
 
 To remedy this, we now set both `max_length` and `max_new_tokens` for the generation kwargs in the default training parameters. Normally, this is not possible when using transformers, as the latter argument overrides the former. However, we have added special logic inside of `get_generation_config` which takes both and chooses the smaller of the two. This way, we can get rid of these excessively long generations, thus considerably reducing eval times, while still guaranteeing a maximum total generation length to guard against OOM errors. Testing showed that this does not hamper test accuracy. It is therefore recommended not to change these settings.
 
+#### Bucketing
+
+The length of the sequences in the training data can vary a lot. Therefore, if samples are taken randomly from the training dataset, we will end up with batches containing very short and very long sequences. This is bad because the batch will be padded to the longest sequence, slowing down training. The obvious solution would be to sort the whole dataset by sequence length, but this is also bad because it introduces an order bias (e.g. first training on only short and then on only long answers).
+
+The solution is to find a trade off between the two factors. This is achieved by the `BucketIterator`. It first creates buckets that contain multiple batches, e.g. 20x the batch size. The bucket is then sorted by sequence length and then batches are yielded from the bucket. Therefore, we have a small order bias within a bucket but not between buckets, stricking a good balance between training speed and training loss.
+
+From practical experiments, for a batch size of 4, a bucket size of 80 provides a good balance with only slightly lower training loss but cutting training time by 25%. For eval, we don't use the iterator since there, the batch size is relatively big and thus there is little upside.
+
 ### Start a run
 
 Once everything is set up properly, start a run by using the `run.py` script. Pass `-v` for verbose output to the console (recommended if observing the progress is desired). As an example, for `experiments/lora/llama-3.2-3B-rank32/` the invocation would be:

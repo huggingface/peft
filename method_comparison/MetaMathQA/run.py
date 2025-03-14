@@ -35,6 +35,7 @@ from tqdm import tqdm
 from transformers import GenerationConfig, get_cosine_schedule_with_warmup, set_seed
 from utils import (
     FILE_NAME_TRAIN_PARAMS,
+    BucketIterator,
     TrainResult,
     TrainStatus,
     get_accuracy,
@@ -60,6 +61,7 @@ from peft import AdaLoraConfig, PeftConfig
 dtype_to_bytes_linear = {"float32": 4, "float16": 2, "bfloat16": 2, "int8": 1, "int4": 0.5}
 # if lr scheduler with warmup is used, the ratio of warmup steps to total steps
 WARMUP_STEP_RATIO = 0.1
+BUCKET_FACTOR = 20  # number of batches per bucket, increasing this further has diminishing returns
 
 
 def get_generation_config(*, seq_len, generate_kwargs) -> GenerationConfig:
@@ -169,17 +171,23 @@ def train(
     ds_train, ds_valid, ds_test = get_train_valid_test_datasets(
         tokenizer=tokenizer, query_template=query_template, print_fn=print_verbose
     )
+    # note: bucketing by length is only really worth it for the train dataset, since it's length is big compared to the
+    # batch size
+    iterator_train = BucketIterator(
+        ds_train,
+        batch_size=batch_size,
+        bucket_factor=BUCKET_FACTOR,
+        delete_cols=["response"],
+    )
     try:
         pbar = tqdm(range(1, max_steps + 1))
-        for step in pbar:
+        for step, batch in zip(pbar, iterator_train):
             tic = time.perf_counter()
 
             # create the batch
-            sliced = ds_train[sample : sample + batch_size]
-            tokens_per_sample = [len(i) for i in sliced["input_ids"]]
+            tokens_per_sample = [len(i) for i in batch["input_ids"]]
             total_tokens.append(sum(tokens_per_sample) + len(tokens_per_sample))  # add EOS token
-            del sliced["response"]
-            batch = tokenizer.pad(sliced, return_tensors="pt").to(model.device)
+            batch = tokenizer.pad(batch, return_tensors="pt").to(model.device)
             actual_batch_size = len(batch["input_ids"])
             total_samples += actual_batch_size
             sample += batch_size

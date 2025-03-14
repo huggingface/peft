@@ -241,6 +241,51 @@ def get_model(
     return model
 
 
+class BucketIterator:
+    """
+    Iterator that yields batches of data from a torch Dataset, grouped in buckets by sequence length
+
+    The iterator will yield batches of size `batch_size`, where the samples in each batch are sorted by sequence length.
+    This is done to minimize the amount of padding required for each batch. To avoid sorting the entire dataset and thus
+    introducing a bias, the dataset is first split into buckets of size `batch_size * bucket_factor`.
+
+    Args:
+        ds: The torch Dataset to iterate over
+        batch_size: The batch size
+        bucket_factor: The factor by which to multiply the batch size to determine the bucket size
+        delete_cols: The columns to delete from the dataset before yielding a batch
+    """
+
+    def __init__(self, ds, *, batch_size: int, bucket_factor: int, delete_cols: list[str]) -> None:
+        self.ds = ds
+        self.batch_size = batch_size
+        self.bucket_factor = bucket_factor
+        self.delete_cols = set(delete_cols)
+
+        assert self.bucket_factor > 0, "bucket_factor must be greater than 0"
+
+    def _batch_iterator(self, bucket):
+        tokens_per_sample_bucket = torch.tensor([len(i) for i in bucket["input_ids"]])
+        # sort long to short instead to encounter possible OOM errors as early as possible
+        sorted = torch.argsort(tokens_per_sample_bucket, descending=True)
+        bucket = {k: [v[i] for i in sorted] for k, v in bucket.items() if k not in self.delete_cols}
+        num_samples = len(bucket["input_ids"])
+        for j in range(0, num_samples, self.batch_size):
+            batch = {k: v[j : j + self.batch_size] for k, v in bucket.items()}
+            yield type(bucket)(batch)
+
+    def __iter__(self):
+        bucket_size = self.batch_size * self.bucket_factor
+        for i in range(0, len(self.ds), bucket_size):
+            bucket = self.ds[i : i + bucket_size]
+            yield from self._batch_iterator(bucket)
+
+        # if there is a remainder, we yield the last batch
+        if len(self.ds) % bucket_size != 0:
+            bucket = self.ds[-(len(self.ds) % bucket_size) :]
+            yield from self._batch_iterator(bucket)
+
+
 ##################
 # ANSWER PARSING #
 ##################
