@@ -85,10 +85,10 @@ After adding the dataset, ensure it functions correctly and produces meaningful 
 
 For convenience, we included a [Gradio](https://www.gradio.app/) app that shows the results of the experiments. It allows you to filter down the task and base model and show the experiment results for this selection. Give it a try!
 
-This demo requires additional packages to be installed, please install the packages listed in `demo-requirements.txt`, e.g. via:
+This app requires additional packages to be installed, please install the packages listed in `requirements-app.txt`, e.g. via:
 
 ```sh
-python -m pip install -r demo-requirements.txt
+python -m pip install -r requirements-app.txt
 ```
 
 To launch the demo, run:
