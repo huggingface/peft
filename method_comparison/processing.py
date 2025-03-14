@@ -14,8 +14,8 @@
 
 """Data processing used for analyzing and presenting the results"""
 
-import os
 import json
+import os
 
 import pandas as pd
 
@@ -133,7 +133,6 @@ def load_df(path, task_name, print_fn=print):
     ]
     other_columns = [col for col in df if col not in important_columns]
     df = df[important_columns + other_columns]
-
 
     size_before_drop_dups = len(df)
     columns = ["experiment_name", "model_id", "peft_type", "created_at"]

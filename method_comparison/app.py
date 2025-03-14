@@ -19,7 +19,6 @@ import tempfile
 
 import gradio as gr
 import plotly.express as px
-
 from processing import load_df
 
 
@@ -129,6 +128,12 @@ def export_csv(df):
 def build_app(df):
     with gr.Blocks(theme=gr.themes.Soft()) as demo:
         gr.Markdown("# PEFT method comparison")
+        gr.Markdown(
+            "Find more information [on the PEFT GitHub repo](https://github.com/huggingface/peft/tree/main/method_comparison)"
+        )
+
+        # Hidden state to store the current filter query.
+        filter_state = gr.State("")
 
         gr.Markdown("## Choose the task and base model")
         with gr.Row():
@@ -142,6 +147,15 @@ def build_app(df):
             )
 
         data_table = gr.DataFrame(label="Results", value=df, interactive=False)
+
+        with gr.Row():
+            filter_textbox = gr.Textbox(
+                label="Filter DataFrame",
+                placeholder="Enter filter (e.g.: peft_type=='LORA')",
+                interactive=True,
+            )
+            apply_filter_button = gr.Button("Apply Filter")
+            reset_filter_button = gr.Button("Reset Filter")
 
         gr.Markdown("## Pareto plot")
         gr.Markdown(
@@ -171,32 +185,92 @@ def build_app(df):
         summary_box = gr.Textbox(label="Summary Statistics", lines=6)
         csv_output = gr.File(label="Export Filtered Data as CSV")
 
-        # When task is changed, update model_id dropdown choices and table.
-        def update_on_task(task_name):
+        def update_on_task(task_name, current_filter):
             new_models = get_model_ids(task_name, df)
             filtered = filter_data(task_name, new_models[0] if new_models else "", df)
+            if current_filter.strip():
+                try:
+                    df_queried = filtered.query(current_filter)
+                    if not df_queried.empty:
+                        filtered = df_queried
+                except Exception:
+                    # invalid filter query
+                    pass
             return gr.update(choices=new_models, value=new_models[0] if new_models else None), filtered
 
-        task_dropdown.change(fn=update_on_task, inputs=task_dropdown, outputs=[model_dropdown, data_table])
+        task_dropdown.change(
+            fn=update_on_task, inputs=[task_dropdown, filter_state], outputs=[model_dropdown, data_table]
+        )
 
-        # When model_id changes, update the table.
-        def update_on_model(task_name, model_id):
+        def update_on_model(task_name, model_id, current_filter):
             filtered = filter_data(task_name, model_id, df)
+            if current_filter.strip():
+                try:
+                    filtered = filtered.query(current_filter)
+                except Exception:
+                    pass
             return filtered
 
-        model_dropdown.change(fn=update_on_model, inputs=[task_dropdown, model_dropdown], outputs=data_table)
+        model_dropdown.change(
+            fn=update_on_model, inputs=[task_dropdown, model_dropdown, filter_state], outputs=data_table
+        )
 
-        # Update Pareto plot and summary when metrics or filtering change.
-        def update_pareto_plot_and_summary(task_name, model_id, metric_x, metric_y):
+        def update_pareto_plot_and_summary(task_name, model_id, metric_x, metric_y, current_filter):
             filtered = filter_data(task_name, model_id, df)
+            if current_filter.strip():
+                try:
+                    filtered = filtered.query(current_filter)
+                except Exception as e:
+                    return generate_pareto_plot(filtered, metric_x, metric_y), f"Filter error: {e}"
             pareto_df = compute_pareto_frontier(filtered, metric_x, metric_y)
             fig = generate_pareto_plot(pareto_df, metric_x, metric_y)
             summary = compute_pareto_summary(filtered, pareto_df, metric_x, metric_y)
             return fig, summary
 
-        inputs = [task_dropdown, model_dropdown, metric_x_dropdown, metric_y_dropdown]
         for comp in [model_dropdown, metric_x_dropdown, metric_y_dropdown]:
-            comp.change(fn=update_pareto_plot_and_summary, inputs=inputs, outputs=[pareto_plot, summary_box])
+            comp.change(
+                fn=update_pareto_plot_and_summary,
+                inputs=[task_dropdown, model_dropdown, metric_x_dropdown, metric_y_dropdown, filter_state],
+                outputs=[pareto_plot, summary_box],
+            )
+
+        def apply_filter(filter_query, task_name, model_id, metric_x, metric_y):
+            filtered = filter_data(task_name, model_id, df)
+            if filter_query.strip():
+                try:
+                    filtered = filtered.query(filter_query)
+                except Exception as e:
+                    # Update the table, plot, and summary even if there is a filter error.
+                    return (
+                        filter_query,
+                        filtered,
+                        generate_pareto_plot(filtered, metric_x, metric_y),
+                        f"Filter error: {e}",
+                    )
+            pareto_df = compute_pareto_frontier(filtered, metric_x, metric_y)
+            fig = generate_pareto_plot(pareto_df, metric_x, metric_y)
+            summary = compute_pareto_summary(filtered, pareto_df, metric_x, metric_y)
+            return filter_query, filtered, fig, summary
+
+        apply_filter_button.click(
+            fn=apply_filter,
+            inputs=[filter_textbox, task_dropdown, model_dropdown, metric_x_dropdown, metric_y_dropdown],
+            outputs=[filter_state, data_table, pareto_plot, summary_box],
+        )
+
+        def reset_filter(task_name, model_id, metric_x, metric_y):
+            filtered = filter_data(task_name, model_id, df)
+            pareto_df = compute_pareto_frontier(filtered, metric_x, metric_y)
+            fig = generate_pareto_plot(pareto_df, metric_x, metric_y)
+            summary = compute_pareto_summary(filtered, pareto_df, metric_x, metric_y)
+            # Return empty strings to clear the filter state and textbox.
+            return "", "", filtered, fig, summary
+
+        reset_filter_button.click(
+            fn=reset_filter,
+            inputs=[task_dropdown, model_dropdown, metric_x_dropdown, metric_y_dropdown],
+            outputs=[filter_state, filter_textbox, data_table, pareto_plot, summary_box],
+        )
 
         gr.Markdown("## Export data")
         # Export button for CSV download.
@@ -209,7 +283,7 @@ def build_app(df):
 
         demo.load(
             fn=update_pareto_plot_and_summary,
-            inputs=[task_dropdown, model_dropdown, metric_x_dropdown, metric_y_dropdown],
+            inputs=[task_dropdown, model_dropdown, metric_x_dropdown, metric_y_dropdown, filter_state],
             outputs=[pareto_plot, summary_box],
         )
 
