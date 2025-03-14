@@ -469,6 +469,13 @@ class BaseTuner(nn.Module, ABC):
             if not key:
                 continue
             # Check for modules_to_save in case
+            #
+            # Note that this is redundant with PeftModel.set_additional_trainable_models but might be necessary
+            # when calling inject_adapter without a PEFT model. This is outdated as it only focuses on
+            # ModulesToSaveWrapper and ignores other potentially configured AuxiliaryTrainingWrapper instances.
+            #
+            # TODO: determine if there's a good reason for this and refactor to support AuxiliaryTrainingWrapper,
+            # or remove if superfluous.
             if _check_for_modules_to_save and any(
                 key.endswith(module_to_save) for module_to_save in peft_config.modules_to_save
             ):

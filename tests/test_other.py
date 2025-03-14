@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
 
 import pytest
 import torch
@@ -105,6 +106,84 @@ def test_get_peft_model_revision_warning(tmp_path):
     overwrite_warning = f"peft config has already set base model revision to {base_revision}, overwriting with revision {overwrite_revision}"
     with pytest.warns(UserWarning, match=overwrite_warning):
         _ = get_peft_model(base_model, lora_config, revision=overwrite_revision)
+
+
+def test_load_multiple_adapters_different_modules_to_save(tmp_path):
+    # This tests the error described in #2422 where loading multiple adapters with different modules_to_save
+    # attributes fails (due to a regression from #2376.
+
+    model = AutoModelForCausalLM.from_pretrained("trl-internal-testing/tiny-random-LlamaForCausalLM")
+
+    def peft_config(**kwargs):
+        return LoraConfig(target_modules="all-linear", **kwargs)
+
+    original_model = copy.deepcopy(model)
+
+    peft_config_0 = peft_config(modules_to_save=["0.post_attention_layernorm"])
+    peft_config_1 = peft_config(modules_to_save=["0.post_attention_layernorm"])
+    peft_config_2 = peft_config(modules_to_save=["1.post_attention_layernorm"])
+
+    # Save adapter 0, nothing fancy, should be equal to base model weighs
+    peft_model = get_peft_model(copy.deepcopy(original_model), peft_config_0)
+    peft_model.save_pretrained(tmp_path / "adapter_0")
+
+    # Save adapter 1, modules to save weights are modified randomly, should be unique to adapter 1
+    peft_model = get_peft_model(copy.deepcopy(original_model), peft_config_1)
+    peft_model.model.model.layers[0].post_attention_layernorm.weight.data = torch.rand_like(
+        peft_model.model.model.layers[0].post_attention_layernorm.weight.data
+    )
+    adapter_1_saved = peft_model.model.model.layers[0].post_attention_layernorm.weight.data.clone()
+    peft_model.save_pretrained(tmp_path / "adapter_1")
+
+    # Save adapter 2, modules to save weights are modified randomly, should be unique to adapter 2
+    peft_model = get_peft_model(copy.deepcopy(original_model), peft_config_2)
+    peft_model.model.model.layers[1].post_attention_layernorm.weight.data = torch.rand_like(
+        peft_model.model.model.layers[1].post_attention_layernorm.weight.data
+    )
+    adapter_2_saved = peft_model.model.model.layers[1].post_attention_layernorm.weight.data.clone()
+    peft_model.save_pretrained(tmp_path / "adapter_2")
+
+    del peft_model
+
+    combined_model = PeftModel.from_pretrained(original_model, tmp_path / "adapter_0", adapter_name="adapter_0")
+    combined_model.load_adapter(tmp_path / "adapter_1", adapter_name="adapter_1")
+    combined_model.load_adapter(tmp_path / "adapter_2", adapter_name="adapter_2")
+
+    # For adapter 0 we expect every mentioned modules to save layer of this test to be equal to the original model
+    # since we didn't modify it for adapter 0 and only adapter 0 is active.
+    combined_model.set_adapter("adapter_0")
+    assert torch.allclose(
+        combined_model.model.model.layers[0].post_attention_layernorm.weight,
+        original_model.model.layers[0].post_attention_layernorm.weight,
+    )
+    assert torch.allclose(
+        combined_model.model.model.layers[1].post_attention_layernorm.weight,
+        original_model.model.layers[1].post_attention_layernorm.weight,
+    )
+
+    # For adapter 1 we expect that the modified module to save 0.post_attention_layernorm is modified, the other
+    # module to save layers mentioned above should be untouched.
+    combined_model.set_adapter("adapter_1")
+    assert torch.allclose(
+        combined_model.model.model.layers[0].post_attention_layernorm.weight,
+        adapter_1_saved,
+    )
+    assert torch.allclose(
+        combined_model.model.model.layers[1].post_attention_layernorm.weight,
+        original_model.model.layers[1].post_attention_layernorm.weight,
+    )
+
+    # For adapter 2 we expect its module to save layer (1.post_attention_layernorm) to be modified but the other
+    # module to save weights should be kept original.
+    combined_model.set_adapter("adapter_2")
+    assert torch.allclose(
+        combined_model.model.model.layers[0].post_attention_layernorm.weight,
+        original_model.model.layers[0].post_attention_layernorm.weight,
+    )
+    assert torch.allclose(
+        combined_model.model.model.layers[1].post_attention_layernorm.weight,
+        adapter_2_saved,
+    )
 
 
 class TestModulesToSaveAttributeAccess:
