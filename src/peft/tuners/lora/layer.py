@@ -1028,6 +1028,9 @@ class _ConvNd(nn.Module, LoraLayer):
         super().__init__()
         LoraLayer.__init__(self, base_layer)
 
+        if base_layer.groups > 1:
+            warnings.warn("LoRA adapter added to ConvNd layer with groups > 1. Merging is not supported.")
+
         self._active_adapter = adapter_name
         self._kernel_dim = base_layer.weight.dim()
 
@@ -1064,7 +1067,9 @@ class _ConvNd(nn.Module, LoraLayer):
         conv_layer = type(base_layer)
         out_kernel = out_stride = (1,) * (self._kernel_dim - 2)
         self.lora_A[adapter_name] = conv_layer(self.in_features, r, kernel_size, stride, padding, bias=False)
-        self.lora_B[adapter_name] = conv_layer(r, self.out_features, out_kernel, out_stride, bias=lora_bias)
+        self.lora_B[adapter_name] = conv_layer(
+            r, self.out_features // base_layer.groups, out_kernel, out_stride, bias=lora_bias
+        )
         self.lora_bias[adapter_name] = lora_bias
 
         if use_rslora:
@@ -1129,6 +1134,11 @@ class _ConvNd(nn.Module, LoraLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.lora_A.keys():
                 base_layer = self.get_base_layer()
+
+                if base_layer.groups > 1:
+                    # https://github.com/huggingface/peft/pull/2403
+                    raise NotImplementedError("Merging is not supported for _ConvNd layers with groups > 1!")
+
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
@@ -1246,13 +1256,12 @@ class _ConvNd(nn.Module, LoraLayer):
                 3
             ) * self.scaling[adapter]
         else:
-            output_tensor = (
-                self.conv_fn(
-                    weight_A.transpose(0, 1),
-                    weight_B,
-                ).transpose(0, 1)
-                * self.scaling[adapter]
-            )
+            output_tensor = self.conv_fn(weight_A.transpose(0, 1), weight_B)
+
+            if self.get_base_layer().groups > 1:
+                output_tensor = output_tensor * self.scaling[adapter]
+            else:
+                output_tensor = output_tensor.transpose(0, 1) * self.scaling[adapter]
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
