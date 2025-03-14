@@ -499,6 +499,10 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
             add_hook_to_module(self.modules_to_save[adapter_name], new_hook)
 
         self.original_module.requires_grad_(False)
+
+        # note that there currently cannot be more than one active adapter for the same layer with modules to save
+        # since there would be no clear way to decide which adapter's weights are the correct ones. therefore we
+        # assume that there is only one active adapter. this precondition is enforced by _set_adapter.
         if adapter_name == self.active_adapter:
             self.modules_to_save[adapter_name].requires_grad_(True)
 
@@ -550,6 +554,10 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         return {k: f"modules_to_save.{adapter_name}.{k}" for k in self.adapter_state_dict(adapter_name)}
 
     def adapter_state_dict(self, adapter_name):
+        if adapter_name not in self._adapters:
+            # In caes of multiple adapters, each bringing their own modules to save, each
+            # ModulesToSaveWrapper will be queried but not every wrapper is obliged to serve the same adapters.
+            return {}
         return self.modules_to_save[adapter_name].state_dict()
 
     def unload_and_optionally_merge_module(
@@ -732,6 +740,7 @@ def _set_trainable(
     found_modules = set()
     # disable removal of duplicates to support targeting tied weights
     key_list = [key for key, _ in model.named_modules(remove_duplicate=False)]
+
     for key in key_list:
         target_module_found = any(key.endswith(target_key) for target_key in module_names)
         if target_module_found:
@@ -776,6 +785,7 @@ def _set_adapter(model, adapter_name):
             # if the adapter is found in this module, set it as the active adapter, else disable the adapters of this
             # module
             if adapter_name in module._adapters:
+                module.enable_adapters(True)
                 module.set_adapter(adapter_name)
             else:
                 module.enable_adapters(False)
