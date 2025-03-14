@@ -73,7 +73,13 @@ After adding the dataset, ensure it functions correctly and produces meaningful 
 #### Considerations When Adding a New Dataset
 
 1. Before beginning, it is best to open an [issue on PEFT](https://github.com/huggingface/peft/issues) to share your plans. This allows for early feedback and prevents wasted effort on impractical ideas.
-2. The most valuable new datasets are those that test different capabilities than those already present. For example, if all existing datasets focus on language models, adding an image task would be more useful than another language modeling task. Also bonus points if the task is similar to what users may face in the real world.
+2. The most valuable new datasets are those that test different capabilities than those already present. Bonus points if the task is similar to what users may face in the real world. Task ideas that would be great to add:
+    - A task involving both language and  image modalities.
+    - An image generation task (like stable diffusion)
+    - A task involving audio (like whisper)
+    - A task that requires knowledge preservation (checked, for instance, via an auxiliary test set)
+    - Learning something completely new (e.g. a new language)
+    - A reinforcement learning task (e.g. using [trl](https://github.com/huggingface/trl))
 3. Training should be reasonably fast. Running dozens of experiments is impractical if each one takes multiple days and incurs high costs. Ideally, training should take a few hours at most on high-end consumer hardware.
 4. The chosen base model should not be too large, to avoid VRAM constraints. Morevoer, if the base model is too powerful, there is little room for improvement through further fine-tuning.
 5. Test scores should be informative and have a broad range:
