@@ -114,6 +114,26 @@ def load_df(path, task_name, print_fn=print):
     df["created_at"] = pd.to_datetime(df["created_at"])
     # round training time to nearest second
     df["train_time"] = df["train_time"].round().astype(int)
+    df["total_time"] = df["total_time"].round().astype(int)
+
+    # reorder columns for better viewing, pinned_columns arg in Gradio seems not to work correctly
+    important_columns = [
+        "experiment_name",
+        "peft_type",
+        "total_time",
+        "train_time",
+        "test_accuracy",
+        "test_loss",
+        "cuda_memory_max",
+        "cuda_memory_reserved_99th",
+        "cuda_memory_reserved_avg",
+        "file_size",
+        "created_at",
+        "task_name",
+    ]
+    other_columns = [col for col in df if col not in important_columns]
+    df = df[important_columns + other_columns]
+
 
     size_before_drop_dups = len(df)
     columns = ["experiment_name", "model_id", "peft_type", "created_at"]

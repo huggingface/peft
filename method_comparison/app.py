@@ -93,6 +93,7 @@ def generate_pareto_plot(df, metric_x, metric_y):
         y=metric_y,
         hover_data={"experiment_name": True, "peft_type": True, metric_x: True, metric_y: True},
         title=f"Pareto Frontier for {metric_x} vs {metric_y}",
+        template="seaborn",
     )
     fig.update_traces(marker={"size": 12})
     return fig
@@ -126,7 +127,7 @@ def export_csv(df):
 
 
 def build_app(df):
-    with gr.Blocks() as demo:
+    with gr.Blocks(theme=gr.themes.Soft()) as demo:
         gr.Markdown("# PEFT method comparison")
 
         gr.Markdown("## Choose the task and base model")
@@ -140,7 +141,7 @@ def build_app(df):
                 label="Select Model ID", choices=get_model_ids(sorted(df["task_name"].unique())[0], df)
             )
 
-        data_table = gr.DataFrame(label="Filtered Data", value=df, interactive=False)
+        data_table = gr.DataFrame(label="Results", value=df, interactive=False)
 
         gr.Markdown("## Pareto plot")
         gr.Markdown(
