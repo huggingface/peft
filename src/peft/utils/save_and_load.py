@@ -339,7 +339,7 @@ def set_peft_model_state_dict(
     # them and translating saved state dict key (which does not include the adapter name) to loaded state dict key
     # (which includes the adapter name).
     for name, module in model.named_modules():
-        if isinstance(module, AuxiliaryTrainingWrapper):
+        if isinstance(module, AuxiliaryTrainingWrapper) and adapter_name in module.modules_to_save.keys():
             # Not every module has a 1:1 mapping. ModulesToSaveWrapper, for example, removes the
             # `modules_to_save.{adapter_name}.` prefix. This prefix must be restored when loading the model from the
             # saved state dict which is why we fetch a load key map from the wrapper.
