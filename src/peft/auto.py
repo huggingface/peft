@@ -130,11 +130,14 @@ class _BaseAutoPeftModel:
                 token=token,
             )
 
-        if tokenizer_exists:
+        if tokenizer_exists and hasattr(base_model, "get_input_embeddings"):
             tokenizer = AutoTokenizer.from_pretrained(
                 pretrained_model_name_or_path, trust_remote_code=kwargs.get("trust_remote_code", False)
             )
-            base_model.resize_token_embeddings(len(tokenizer))
+            embedding_size = base_model.get_input_embeddings().weight.shape[0]
+            if len(tokenizer) > embedding_size:
+                # only resize if the tokenizer has a larger vocab size than there are embeddings
+                base_model.resize_token_embeddings(len(tokenizer))
 
         return cls._target_peft_class.from_pretrained(
             base_model,
