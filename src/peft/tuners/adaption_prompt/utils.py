@@ -141,11 +141,12 @@ def gpt2_compute_query_states(
                     "If class is used as cross attention, the weights `q_attn` have to be defined. "
                     "Please make sure to instantiate class with `GPT2Attention(..., is_cross_attention=True)`."
                 )
-        query = model.q_attn(hidden_states)
+        query_states = model.q_attn(hidden_states)
     else:
-        query, _, _ = model.c_attn(hidden_states).split(model.split_size, dim=2)
+        query_states, _, _ = model.c_attn(hidden_states).split(model.split_size, dim=2)
     
-    query_states = model._split_heads(query, model.num_heads, model.head_dim)
+    shape_q = (*query_states.shape[:-1], -1, model.head_dim)
+    query_states = query_states.view(shape_q).transpose(1, 2)
         
     return query_states
 

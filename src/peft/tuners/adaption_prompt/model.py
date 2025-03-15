@@ -66,7 +66,7 @@ class AdaptionPromptModel(nn.Module):
 
         parents = []
         for name, _ in self.model.named_modules():
-            if name.endswith(config.target_modules) and not name.endswith(f"_{config.target_modules}"):
+            if name.endswith(config.target_modules) and not name.endswith(f"_{config.target_modules}"): #accounts for attn vs c_attn
                 par, _, _ = _get_submodules(self.model, name)
                 parents.append(par)
         if len(parents) < config.adapter_layers:
