@@ -19,7 +19,7 @@ import os
 import re
 import warnings
 from contextlib import nullcontext
-from typing import Any, Optional, Union
+from typing import Any, Optional, Sequence, Union
 
 import accelerate
 import torch
@@ -1089,6 +1089,12 @@ def check_file_exists_on_hf_hub(repo_id: str, filename: str, **kwargs) -> Option
     return exists
 
 
-def get_pattern_key(pattern_keys, key_to_match):
+def get_pattern_key(pattern_keys: Sequence[str], key_to_match: str) -> str:
     """Match a substring of key_to_match in pattern keys"""
-    return next(filter(lambda key: re.match(rf".*\.{key}$", key_to_match), pattern_keys), key_to_match)
+    for key in pattern_keys:
+        match = re.match(rf"(.*\.)?({key})$", key_to_match)
+        if not match:
+            continue
+        return key
+
+    return key_to_match
