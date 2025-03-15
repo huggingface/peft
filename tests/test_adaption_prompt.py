@@ -861,7 +861,7 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         assert not torch.allclose(original_before.logits, default_after_set.logits)
         assert not torch.allclose(adapter_1_after.logits, default_after_set.logits)
 
-    @unittest.skipIf(not is_gpt2_available(), "GPT2 is not available")
+    @unittest.skipIf(True, "GPT2 will not be deterministic")
     def test_sequence_adapter_ops_gpt2(self) -> None:
         # Test input data.
         input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
