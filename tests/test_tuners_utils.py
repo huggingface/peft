@@ -37,6 +37,7 @@ from peft import (
     IA3Config,
     LoHaConfig,
     LoraConfig,
+    PeftModel,
     PromptTuningConfig,
     VeraConfig,
     get_layer_status,
@@ -1501,6 +1502,36 @@ class TestFindMinimalTargetModules:
 
         # target modules should *not* be simplified to "query" as that would match "single_transformers_blocks" too
         assert model.peft_config["default"].target_modules != {"query"}
+
+    def test_find_minimal_target_modules_does_not_error_with_ia3(self, tmp_path):
+        # See #2429
+        # There is an issue with the compression of the target_modules attribute when using IA³. There, we additionally
+        # have the feedforward_modules attribute, which must be subset of target_modules. When target_modules is shrunk,
+        # the subset check will fail. This test ensures that this doesn't happen.
+        n_layers = MIN_TARGET_MODULES_FOR_OPTIMIZATION + 1
+
+        class InnerModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.query = nn.Linear(10, 10)
+
+        class OuterModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.blocks = nn.ModuleList([InnerModule() for _ in range(n_layers)])
+
+        target_modules = [f"blocks.{i}.query" for i in range(n_layers)]
+        feedforward_modules = [f"blocks.{i}.query" for i in range(n_layers)]
+        # the subset check happens here
+        config = IA3Config(target_modules=target_modules, feedforward_modules=feedforward_modules)
+        # the optimization step happens here, after the subset check, so at first we're fine, but we will run into an
+        # issue after a save/load roundtrip
+        model = get_peft_model(OuterModule(), config)
+        model.save_pretrained(tmp_path)
+        del model
+
+        # does not raise
+        PeftModel.from_pretrained(OuterModule(), tmp_path)
 
 
 class TestRankAndAlphaPattern:

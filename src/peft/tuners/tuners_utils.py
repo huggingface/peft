@@ -452,9 +452,13 @@ class BaseTuner(nn.Module, ABC):
         # quite a lot. See: https://github.com/huggingface/diffusers/issues/9297
         # As there is a small chance for undiscovered bugs, we apply this optimization only if the list of
         # target_modules is sufficiently big.
+        # We also exclude IA³ from this optimization. This is because IA³ has both target_modules and
+        # feedforward_modules, which are coupled (the latter must be a subset). It would be possible to change the logic
+        # to keep both in sync, but it's not quite trivial and probably not worth the effort. See #2429.
         if (
             isinstance(peft_config.target_modules, (list, set))
-            and len(peft_config.target_modules) >= MIN_TARGET_MODULES_FOR_OPTIMIZATION
+            and (len(peft_config.target_modules) >= MIN_TARGET_MODULES_FOR_OPTIMIZATION)
+            and (peft_config.peft_type != PeftType.IA3)
         ):
             names_no_target = [
                 name
