@@ -26,9 +26,12 @@ from dataclasses import asdict, dataclass
 from decimal import Decimal, DivisionByZero, InvalidOperation
 from typing import Any, Callable, Literal, Optional
 
+import bitsandbytes
+import datasets
 import huggingface_hub
 import numpy as np
 import torch
+import transformers
 from torch import nn
 from transformers import (
     AutoModelForCausalLM,
@@ -431,13 +434,6 @@ def get_git_hash(module) -> Optional[str]:
 
 def get_package_info() -> dict[str, Optional[str]]:
     """Get the package versions and commit hashes of transformers, peft, datasets, bnb, and torch"""
-    import bitsandbytes
-    import datasets
-    import torch
-    import transformers
-
-    import peft
-
     package_info = {
         "transformers-version": transformers.__version__,
         "transformers-commit-hash": get_git_hash(transformers),
