@@ -110,7 +110,7 @@ def test_get_peft_model_revision_warning(tmp_path):
 
 def test_load_multiple_adapters_different_modules_to_save(tmp_path):
     # This tests the error described in #2422 where loading multiple adapters with different modules_to_save
-    # attributes fails (due to a regression from #2376.
+    # attributes fails (due to a regression from #2376).
 
     model = AutoModelForCausalLM.from_pretrained("trl-internal-testing/tiny-random-LlamaForCausalLM")
 
