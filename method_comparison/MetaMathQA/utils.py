@@ -21,7 +21,6 @@ import json
 import os
 import platform
 import subprocess
-import tempfile
 import warnings
 from dataclasses import asdict, dataclass
 from decimal import Decimal, DivisionByZero, InvalidOperation
@@ -39,7 +38,7 @@ from transformers import (
 
 import peft
 from peft import PeftConfig, get_peft_model, prepare_model_for_kbit_training
-from peft.utils import CONFIG_NAME, SAFETENSORS_WEIGHTS_NAME
+from peft.utils import CONFIG_NAME
 
 
 if not torch.cuda.is_available():
@@ -537,7 +536,7 @@ def log_results(
     train_result: TrainResult,
     cuda_memory_init: int,
     time_total: float,
-    model: nn.Module,
+    file_size: int,
     model_info: Optional[huggingface_hub.ModelInfo],
     datasets_info: dict[str, Optional[huggingface_hub.DatasetInfo]],
     start_date: str,
@@ -549,12 +548,6 @@ def log_results(
     cuda_memory_final = torch.cuda.max_memory_reserved()
     cuda_memory_avg = int(sum(train_result.cuda_memory_reserved_log) / len(train_result.cuda_memory_reserved_log))
     cuda_memory_reserved_99th = int(np.percentile(train_result.cuda_memory_reserved_log, 99))
-
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        model.save_pretrained(tmp_dir)
-        stat = os.stat(os.path.join(tmp_dir, SAFETENSORS_WEIGHTS_NAME))
-        file_size = stat.st_size
-        print_fn(f"Saved PEFT checkpoint to {tmp_dir}")
 
     meta_info = get_meta_info()
     if model_info is not None:

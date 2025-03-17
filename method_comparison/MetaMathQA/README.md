@@ -66,6 +66,8 @@ Once everything is set up properly, start a run by using the `run.py` script. Pa
 python run.py -v experiments/lora/llama-3.2-3B-rank32/
 ```
 
+By default, the adapter will be saved in a temporary file for further inspection if needed. The prevent this, add the `--clean` flag to the call.
+
 ### Run status
 
 The run can be categorized 3 different states:
@@ -196,7 +198,7 @@ Apart from the normal PEFT dependencies, ensure that the packages in the `requir
 python -m pip install -r requirements.txt
 ```
 
-Python 3.11+ is recommended
+Python 3.12+ is required.
 
 ## Open tasks
 

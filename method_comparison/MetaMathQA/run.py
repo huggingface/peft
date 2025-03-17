@@ -23,6 +23,7 @@ import json
 import os
 import random
 import sys
+import tempfile
 import textwrap
 import time
 from contextlib import nullcontext
@@ -53,6 +54,7 @@ from data import (
     get_train_valid_test_datasets,
 )
 from peft import AdaLoraConfig, PeftConfig
+from peft.utils import SAFETENSORS_WEIGHTS_NAME
 
 
 # # suppress all warnings
@@ -342,7 +344,7 @@ def train(
     return train_result
 
 
-def main(*, path_experiment: str, experiment_name: str) -> None:
+def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
     tic_total = time.perf_counter()
     start_date = dt.datetime.now(tz=dt.timezone.utc).replace(microsecond=0).isoformat()
 
@@ -399,15 +401,22 @@ def main(*, path_experiment: str, experiment_name: str) -> None:
         print_verbose("Training failed, not logging results")
         sys.exit(1)
 
-    time_total = time.perf_counter() - tic_total
+    # save the model in temp dir, get file size, clean it up afterwards if clean is passed
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True, delete=clean) as tmp_dir:
+        model.save_pretrained(tmp_dir)
+        stat = os.stat(os.path.join(tmp_dir, SAFETENSORS_WEIGHTS_NAME))
+        file_size = stat.st_size
+        if not clean:
+            print_verbose(f"Saved PEFT checkpoint to {tmp_dir}")
 
+    time_total = time.perf_counter() - tic_total
     # log results: print and save to file
     log_results(
         experiment_name=experiment_name,
         train_result=train_result,
         cuda_memory_init=cuda_memory_init,
         time_total=time_total,
-        model=model,
+        file_size=file_size,
         model_info=model_info,
         datasets_info={"metamath": metamath_info, "gsm8k": gsm8k_info},
         start_date=start_date,
@@ -421,6 +430,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
     parser.add_argument("path_experiment", type=str, help="Path to the experiment directory")
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Delete training artifacts after run finishes (logs are still saved)",
+    )
     args = parser.parse_args()
 
     experiment_name = validate_experiment_path(args.path_experiment)
@@ -438,4 +452,5 @@ if __name__ == "__main__":
     main(
         path_experiment=args.path_experiment,
         experiment_name=experiment_name,
+        clean=args.clean,
     )
