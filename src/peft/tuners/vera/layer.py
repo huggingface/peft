@@ -250,8 +250,8 @@ class Linear(nn.Linear, VeraLayer):
 
             # cast back the weights
             # TODO: why?
-            self.vera_lambda_d[adapter].data = lambda_d.to(dtype)
-            self.vera_lambda_b[adapter].data = lambda_b.to(dtype)
+            self.vera_lambda_d[adapter].data = lambda_d.squeeze(-1).to(dtype)
+            self.vera_lambda_b[adapter].data = lambda_b.squeeze(-1).to(dtype)
 
         return output_tensor
 
