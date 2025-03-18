@@ -1501,7 +1501,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
                     # TODO: work with separate weights
                     # merging in_proj (nn.Parameter)
                     orig_weights_in = base_layer.in_proj_weight.data.detach().clone()
-                    orig_weights_in += self.get_delta_weight(active_adapter).to(base_layer.in_proj_weight.dtype)
+                    orig_weights_in += self.get_delta_weight(active_adapter).to(orig_dtype)
                     if not torch.isfinite(orig_weights_in).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
@@ -1526,7 +1526,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
                 else:
                     # merging in_proj (nn.Parameter)
                     # TODO: work with separate weights
-                    delta_weight = self.get_delta_weight(active_adapter).to(base_layer.in_proj_weight.dtype)
+                    delta_weight = self.get_delta_weight(active_adapter).to(orig_dtype)
                     weight_merged = base_layer.in_proj_weight.data.detach() + delta_weight
 
                     # unregister parameter implicitly and overwrite using merged weights; gradients are computed after
@@ -1560,7 +1560,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
                 # requires_grad was False when the optimizer was initialized, but still let's try to be correct here.
 
                 # in_proj
-                delta_weight = self.get_delta_weight(active_adapter).to(base_layer.in_proj_weight.dtype)
+                delta_weight = self.get_delta_weight(active_adapter).to(orig_dtype)
                 old_weight = base_layer.in_proj_weight.data - delta_weight
                 del base_layer.in_proj_weight
                 base_layer.register_parameter("in_proj_weight", nn.Parameter(old_weight, requires_grad=False))

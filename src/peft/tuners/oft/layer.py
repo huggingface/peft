@@ -431,8 +431,8 @@ class Linear(nn.Module, OFTLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            oft_rotation = torch.eye(self.in_features, device=x.device, dtype=previous_dtype)
-            oft_scale = torch.ones((int(self.out_features), 1), device=x.device, dtype=previous_dtype)
+            oft_rotation = torch.eye(self.in_features, device=x.device)
+            oft_scale = torch.ones((int(self.out_features), 1), device=x.device)
 
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.oft_r.keys():
@@ -451,7 +451,7 @@ class Linear(nn.Module, OFTLayer):
 
                 orth_rotate = self._cayley_batch(oft_r)
                 orth_rotate = dropout(orth_rotate)
-                oft_mat = self._block_diagonal(orth_rotate, rank).to(previous_dtype)
+                oft_mat = self._block_diagonal(orth_rotate, rank)
 
                 oft_rotation = oft_mat @ oft_rotation
                 oft_scale = oft_s * oft_scale
@@ -460,7 +460,7 @@ class Linear(nn.Module, OFTLayer):
 
             orig_weight = self.get_base_layer().weight.data
             orig_weight = torch.transpose(orig_weight, 0, 1)
-            rotated_weight = torch.mm(oft_rotation, orig_weight)
+            rotated_weight = torch.mm(oft_rotation, orig_weight.to(oft_rotation.dtype))
             rotated_weight = torch.transpose(rotated_weight, 0, 1)
             scaled_rotated_weight = rotated_weight * oft_scale
 
@@ -692,7 +692,7 @@ class Conv2d(nn.Module, OFTLayer):
                 self.in_features * self.get_base_layer().kernel_size[0] * self.get_base_layer().kernel_size[0],
                 device=x.device,
             )
-            oft_scale = torch.ones((int(self.out_features), 1), device=x.device, dtype=previous_dtype)
+            oft_scale = torch.ones((int(self.out_features), 1), device=x.device)
 
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.oft_r.keys():
@@ -713,7 +713,7 @@ class Conv2d(nn.Module, OFTLayer):
                 orth_rotate = dropout(orth_rotate)
                 oft_mat = self._block_diagonal(orth_rotate, rank)
 
-                oft_rotation = oft_mat @ oft_rotation.to(oft_mat.dtype)
+                oft_rotation = oft_mat @ oft_rotation
                 oft_scale = oft_s * oft_scale
 
             orig_weights = self.base_layer.weight.data
