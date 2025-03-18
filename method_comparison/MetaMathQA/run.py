@@ -27,11 +27,12 @@ import tempfile
 import textwrap
 import time
 from contextlib import nullcontext
-from typing import Any, Literal, Optional
+from functools import partial
+from typing import Any, Callable, ContextManager, Literal, Optional
 
 import torch
 from torch import nn
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import GradScaler, autocast
 from tqdm import tqdm
 from transformers import GenerationConfig, get_cosine_schedule_with_warmup, set_seed
 from utils import (
@@ -150,8 +151,8 @@ def train(
     total_samples = 0  # total number of samples over all epochs
     total_tokens = []  # total number of tokens over all epochs
     if use_amp:
-        grad_scaler: GradScaler | DummyGradScaler = GradScaler()
-        autocast_ctx: type[autocast] | type[nullcontext[None]] = autocast
+        grad_scaler: GradScaler | DummyGradScaler = GradScaler(device="cuda")
+        autocast_ctx: Callable[[], ContextManager[Any]] = partial(autocast, device_type="cuda")
     else:
         grad_scaler = DummyGradScaler()
         autocast_ctx = nullcontext
