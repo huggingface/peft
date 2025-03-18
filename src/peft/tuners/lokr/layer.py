@@ -303,6 +303,7 @@ class Linear(LoKrLayer):
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
         delta_weight = self.get_delta_weight(adapter_name)
+        input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
         return F.linear(input, delta_weight)
 
@@ -340,6 +341,7 @@ class Conv2d(LoKrLayer):
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
         delta_weight = self.get_delta_weight(adapter_name)
+        input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
         base_layer = self.get_base_layer()
         return F.conv2d(
