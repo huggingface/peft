@@ -16,6 +16,7 @@
 # limitations under the License.
 import copy
 import os
+import platform
 import re
 import shutil
 import tempfile
@@ -1158,6 +1159,10 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             # skip this test if float16 is not supported on this machine
             self.skipTest(reason="Test requires float16 support")
 
+        # skip on MacOS
+        if platform.system() == "Darwin":
+            self.skipTest(reason="MacOS does not support multiple ops in float16")
+
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16).to(self.torch_device)
         model.dtype = torch.float16
@@ -1187,6 +1192,10 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             # skip this test if float16 is not supported on this machine
             self.skipTest(reason="Test requires bfloat16 support")
 
+        # skip on MacOS
+        if platform.system() == "Darwin":
+            self.skipTest(reason="MacOS does not support multiple ops in bfloat16")
+
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16).to(self.torch_device)
         model.dtype = torch.bfloat16
@@ -1215,6 +1224,10 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             # skip this test if float16 is not supported on this machine
             self.skipTest(reason="Test requires float16 support")
 
+        # skip on MacOS
+        if platform.system() == "Darwin":
+            self.skipTest(reason="MacOS does not support multiple ops in float16")
+
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16).to(self.torch_device)
         model.dtype = torch.float16
@@ -1242,6 +1255,10 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         except Exception:
             # skip this test if float16 is not supported on this machine
             self.skipTest(reason="Test requires bfloat16 support")
+
+        # skip on MacOS
+        if platform.system() == "Darwin":
+            self.skipTest(reason="MacOS does not support multiple ops in bfloat16")
 
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16).to(self.torch_device)
