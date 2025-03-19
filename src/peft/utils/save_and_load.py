@@ -468,15 +468,13 @@ def set_peft_model_state_dict(
     return load_result
 
 
+# TODO: remove this function, use vanilla torch.load as soon as torch < 2.6.0 is no longer supported
 def torch_load(*args, weights_only=True, **kwargs):
     """Call torch.load and handle weights_only.
 
     Defaults to weights_only=True to anticipate upcoming switch on the PyTorch side.
 
     """
-    # TODO: weights_only was added in 1.13, remove if 1.12 no longer needs to be supported
-    if version.parse(torch.__version__) < version.parse("1.13"):
-        return torch.load(*args, **kwargs)
     return torch.load(*args, weights_only=weights_only, **kwargs)
 
 
