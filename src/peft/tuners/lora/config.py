@@ -262,10 +262,10 @@ class LoraConfig(PeftConfig):
             `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
         rank_pattern (`dict`):
             The mapping from layer names or regexp expression to ranks which are different from the default rank
-            specified by `r`.
+            specified by `r`. For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`.
         alpha_pattern (`dict`):
             The mapping from layer names or regexp expression to alphas which are different from the default alpha
-            specified by `lora_alpha`.
+            specified by `lora_alpha`. For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`.
         megatron_config (`Optional[dict]`):
             The TransformerConfig arguments for Megatron. It is used to create LoRA's parallel linear layer. You can
             get it like this, `core_transformer_config_from_args(get_args())`, these two functions being from Megatron.
@@ -273,6 +273,13 @@ class LoraConfig(PeftConfig):
             parameter when you want to apply LoRA to the ColumnParallelLinear and RowParallelLinear layers of megatron.
         megatron_core (`Optional[str]`):
             The core module from Megatron to use, defaults to `"megatron.core"`.
+        trainable_token_indices (`Optional[Union[List[int], dict[str, List[int]]]]`)
+            Lets you specify which token indices to selectively fine-tune without requiring to re-train the whole
+            embedding matrix using the `peft.TrainableTokensModel` method. You can specify token indices in two ways.
+            Either you specify a list of indices which will then target the model's input embedding layer (or, if not
+            found, `embed_tokens`). Alternatively, you can specify a dictionary where the key is the name of the
+            embedding module and the values are the list of token indices, e.g. `{'embed_tokens': [0, 1, ...]}`. Note
+            that training with FSDP/DeepSpeed might not yet be fully supported with this option enabled.
         loftq_config (`Optional[LoftQConfig]`):
             The configuration of LoftQ. If this is not None, then LoftQ will be used to quantize the backbone weights
             and initialize Lora layers. Also pass `init_lora_weights='loftq'`. Note that you should not pass a
@@ -392,7 +399,7 @@ class LoraConfig(PeftConfig):
         metadata={
             "help": (
                 "The mapping from layer names or regexp expression to ranks which are different from the default rank specified by `r`. "
-                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 8`}"
+                "For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`."
             )
         },
     )
@@ -401,7 +408,7 @@ class LoraConfig(PeftConfig):
         metadata={
             "help": (
                 "The mapping from layer names or regexp expression to alphas which are different from the default alpha specified by `lora_alpha`. "
-                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 32`}"
+                "For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`."
             )
         },
     )
@@ -428,6 +435,21 @@ class LoraConfig(PeftConfig):
                 "The core module from Megatron, it is used to create LoRA's parallel linear layer. "
                 "It only needs to be passed in when you need to use your own modified megatron core module. "
                 "Otherwise, it will use the default value `megatron.core`. "
+            )
+        },
+    )
+    trainable_token_indices: Optional[Union[list[int], dict[str, list[int]]]] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Lets you specify which token indices to selectively fine-tune without requiring to re-train the "
+                "whole embedding matrix using the `peft.TrainableTokensModel` method. You can specify token indices "
+                "in two ways. Either you specify a list of indices which will then target the model's input embedding "
+                "layer (or, if not found, `embed_tokens`). Alternatively, you can specify a dictionary where the key "
+                "is the name of the embedding module and the values are the list of token indices, e.g. "
+                "`{'embed_tokens': [0, 1, ...]}`. "
+                "Note that training with FSDP/DeepSpeed might not yet be fully supported with this option enabled. "
+                "Also note that models using weight-tying are currently not supported."
             )
         },
     )

@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import tempfile
-import unittest
 
 import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import (
     AutoPeftModel,
@@ -24,6 +24,7 @@ from peft import (
     AutoPeftModelForSeq2SeqLM,
     AutoPeftModelForSequenceClassification,
     AutoPeftModelForTokenClassification,
+    LoraConfig,
     PeftModel,
     PeftModelForCausalLM,
     PeftModelForFeatureExtraction,
@@ -31,11 +32,12 @@ from peft import (
     PeftModelForSeq2SeqLM,
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
+    get_peft_model,
 )
 from peft.utils import infer_device
 
 
-class PeftAutoModelTester(unittest.TestCase):
+class TestPeftAutoModel:
     dtype = torch.float16 if infer_device() == "mps" else torch.bfloat16
 
     def test_peft_causal_lm(self):
@@ -207,3 +209,23 @@ class PeftAutoModelTester(unittest.TestCase):
         is_trainable = False
         # This should work
         _ = AutoPeftModel.from_pretrained(model_id, adapter_name, is_trainable, torch_dtype=self.dtype)
+
+    def test_embedding_size_not_reduced_if_greater_vocab_size(self, tmp_path):
+        # See 2415
+        # There was a bug in AutoPeftModels where the embedding was always resized to the vocab size of the tokenizer
+        # when the tokenizer was found. This makes sense if the vocabulary was extended, but some models like Qwen
+        # already start out with "spare" embeddings, i.e. the embedding size is larger than the vocab size. This could
+        # result in the embedding being shrunk, which in turn resulted in an error when loading the weights.
+
+        # first create a checkpoint; it is important that the tokenizer is also saved in the same location
+        model_id = "Qwen/Qwen2-0.5B"
+        model = AutoModelForCausalLM.from_pretrained(model_id)
+        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        model = get_peft_model(model, LoraConfig(modules_to_save=["lm_head", "embed_token"]))
+        model.save_pretrained(tmp_path)
+        tokenizer.save_pretrained(tmp_path)
+
+        # does not raise; without the fix, it raises:
+        # > size mismatch for base_model.model.lm_head.modules_to_save.default.weight: copying a param with shape
+        # torch.Size([151936, 896]) from checkpoint, the shape in current model is torch.Size([151646, 896]).
+        AutoPeftModelForCausalLM.from_pretrained(tmp_path)

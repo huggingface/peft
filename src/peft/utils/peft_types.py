@@ -63,6 +63,7 @@ class PeftType(str, enum.Enum):
     VBLORA = "VBLORA"
     CPT = "CPT"
     BONE = "BONE"
+    TRAINABLE_TOKENS = "TRAINABLE_TOKENS"
 
 
 class TaskType(str, enum.Enum):

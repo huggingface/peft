@@ -291,7 +291,7 @@ class TestLoraInitialization:
         assert model.conv2d.scaling["default"] == expected_scaling
 
     # testcase for bugfix for issue 2194
-    def test_pattern_override(self):
+    def test_rank_alpha_pattern_override(self):
         torch.manual_seed(0)
 
         layer = self.get_model()
