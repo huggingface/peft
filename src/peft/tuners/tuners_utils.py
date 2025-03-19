@@ -452,9 +452,13 @@ class BaseTuner(nn.Module, ABC):
         # quite a lot. See: https://github.com/huggingface/diffusers/issues/9297
         # As there is a small chance for undiscovered bugs, we apply this optimization only if the list of
         # target_modules is sufficiently big.
+        # We also exclude IA³ from this optimization. This is because IA³ has both target_modules and
+        # feedforward_modules, which are coupled (the latter must be a subset). It would be possible to change the logic
+        # to keep both in sync, but it's not quite trivial and probably not worth the effort. See #2429.
         if (
             isinstance(peft_config.target_modules, (list, set))
-            and len(peft_config.target_modules) >= MIN_TARGET_MODULES_FOR_OPTIMIZATION
+            and (len(peft_config.target_modules) >= MIN_TARGET_MODULES_FOR_OPTIMIZATION)
+            and (peft_config.peft_type != PeftType.IA3)
         ):
             names_no_target = [
                 name
@@ -469,6 +473,13 @@ class BaseTuner(nn.Module, ABC):
             if not key:
                 continue
             # Check for modules_to_save in case
+            #
+            # Note that this is redundant with PeftModel.set_additional_trainable_models but might be necessary
+            # when calling inject_adapter without a PEFT model. This is outdated as it only focuses on
+            # ModulesToSaveWrapper and ignores other potentially configured AuxiliaryTrainingWrapper instances.
+            #
+            # TODO: determine if there's a good reason for this and refactor to support AuxiliaryTrainingWrapper,
+            # or remove if superfluous.
             if _check_for_modules_to_save and any(
                 key.endswith(module_to_save) for module_to_save in peft_config.modules_to_save
             ):
