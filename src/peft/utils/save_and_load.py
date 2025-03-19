@@ -21,7 +21,6 @@ import huggingface_hub
 import torch
 from huggingface_hub import file_exists, hf_hub_download
 from huggingface_hub.errors import EntryNotFoundError, LocalEntryNotFoundError
-from packaging import version
 from safetensors.torch import load_file as safe_load_file
 
 from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
