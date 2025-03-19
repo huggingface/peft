@@ -15,7 +15,7 @@
 from setuptools import find_packages, setup
 
 
-VERSION = "0.15.0"
+VERSION = "0.15.1.dev0"
 
 extras = {}
 extras["quality"] = [
@@ -90,7 +90,7 @@ setup(
 # 1. Change the version in __init__.py and setup.py to the release version, e.g. from "0.6.1.dev0" to "0.7.0"
 # 2. Check if there are any deprecations that need to be addressed for this release by searching for "# TODO" in the code
 # 3. Commit these changes with the message: "Release: VERSION", create a PR and merge it.
-# 4. Add a tag in git to mark the release: "git tag -a VERSION -m 'Adds tag VERSION for pypi' "
+# 4. Add a tag in git to mark the release: "git tag -a v<VERSION> -m 'Adds tag <VERSION> for pypi' "
 #    Push the tag to git:
 #      git push --tags origin main
 #    It is necessary to work on the original repository, not on a fork.
