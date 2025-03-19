@@ -270,11 +270,12 @@ class BucketIterator:
         tokens_per_sample_bucket = torch.tensor([len(i) for i in bucket["input_ids"]])
         # sort long to short instead to encounter possible OOM errors as early as possible
         sorted = torch.argsort(tokens_per_sample_bucket, descending=True)
+        cls = type(bucket)  # conserve the type returned by the ds
         bucket = {k: [v[i] for i in sorted] for k, v in bucket.items() if k not in self.delete_cols}
         num_samples = len(bucket["input_ids"])
         for j in range(0, num_samples, self.batch_size):
             batch = {k: v[j : j + self.batch_size] for k, v in bucket.items()}
-            yield type(bucket)(batch)
+            yield cls(batch)
 
     def __iter__(self):
         bucket_size = self.batch_size * self.bucket_factor
