@@ -37,6 +37,130 @@ from .config import LoraConfig
 from .dora import DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer, _DoraConvNdLayer
 
 
+class LoraVariant:
+    @staticmethod
+    def init(module: nn.Module, adapter_name: str):
+        pass
+
+    @staticmethod
+    def merge_safe(module: nn.Module, active_adapter: str):
+        pass
+
+    @staticmethod
+    def merge_unsafe(module: nn.Module, active_adapter: str):
+        pass
+
+    @staticmethod
+    def unmerge(module: nn.Module, active_adapter: str):
+        pass
+
+
+    @staticmethod
+    def forward(module: nn.Module, active_adapter: str, x: torch.Tensor, result: torch.Tensor):
+        pass
+
+
+class DoraVariant(LoraVariant):
+    @staticmethod
+    def init(module: nn.Module, adapter_name: str) -> None:
+        if not module.lora_magnitude_vector:
+            # first dora layer being added, add lora_magnitude_vector to the list of learnable parameters
+            module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_magnitude_vector",)
+
+        dora_layer = DoraLinearLayer(fan_in_fan_out=getattr(module, "fan_in_fan_out", False))
+        lora_A = module.lora_A[adapter_name].weight
+        lora_B = module.lora_B[adapter_name].weight
+        place_on_cpu = module.ephemeral_gpu_offload and (lora_A.device.type == "cpu" or lora_B.device.type == "cpu")
+        if module.ephemeral_gpu_offload:
+            if lora_A.device.type in ["cuda", "xpu"]:
+                lora_B = lora_B.to(lora_A.device)
+            else:
+                if lora_B.device.type not in ["cuda", "xpu"]:
+                    if is_xpu_available():
+                        lora_B = lora_B.to("xpu")
+                    else:
+                        lora_B = lora_B.to("cuda")
+                lora_A = lora_A.to(lora_B.device)
+        scaling = module.scaling[adapter_name]
+        dora_layer.update_layer(
+            base_layer=module.get_base_layer(), lora_A=lora_A, lora_B=lora_B, scaling=scaling, place_on_cpu=place_on_cpu
+        )
+        module.lora_magnitude_vector[adapter_name] = dora_layer
+
+    @staticmethod
+    def merge_safe(module: nn.Module, active_adapter: str) -> torch.Tensor:
+        orig_weights = module.get_base_layer().weight.data.clone()
+        delta_weight = module.get_delta_weight(active_adapter)
+
+        # handle dora
+        # since delta_weight already includes scaling, set it to 1 here
+        weight_norm = (
+            module.lora_magnitude_vector[active_adapter]
+            .get_weight_norm(orig_weights, transpose(delta_weight, module.fan_in_fan_out), scaling=1)
+            .detach()
+        )
+        # We need to cache weight_norm because it has to be based on the original weights. We
+        # cannot calculate it on the fly based on the merged weights when unmerging because its a
+        # different value
+        module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+        dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
+        dora_factor = transpose(dora_factor.view(-1, 1), module.fan_in_fan_out)
+        orig_weights = dora_factor * (orig_weights + delta_weight)
+        return orig_weights
+
+    @staticmethod
+    def merge_unsafe(module: nn.Module, active_adapter: str) -> None:
+        base_layer = module.get_base_layer()
+        delta_weight = module.get_delta_weight(active_adapter)
+        weight_norm = (
+            module.lora_magnitude_vector[active_adapter]
+            .get_weight_norm(
+                base_layer.weight, transpose(delta_weight, module.fan_in_fan_out), scaling=1
+            )
+            .detach()
+        )
+        # We need to cache weight_norm because it has to be based on the original weights. We
+        # cannot calculate it on the fly based on the merged weights when unmerging because its a
+        # different value
+        module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+        dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
+        dora_factor = transpose(dora_factor.view(-1, 1), module.fan_in_fan_out)
+        new_weight = dora_factor * (base_layer.weight.data + delta_weight)
+        base_layer.weight.data = new_weight
+
+    @staticmethod
+    def unmerge(module: nn.Module, active_adapter: str) -> None:
+        weight = module.get_base_layer().weight
+        delta_weight = module.get_delta_weight(active_adapter)
+        weight_norm = module._cache_pop(f"{active_adapter}-weight_norm")
+        dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
+        weight_orig = weight.data / dora_factor.view(-1, 1) - delta_weight
+        weight.data = weight_orig
+
+    @staticmethod
+    def forward(module: nn.Module, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        dropout = module.lora_dropout[active_adapter]
+        scaling = module.scaling[active_adapter]
+
+        if isinstance(dropout, nn.Identity) or not module.training:
+            base_result = result
+        else:
+            x = dropout(x)
+            base_result = None
+
+        result = result + module.lora_magnitude_vector[active_adapter](
+            x,
+            lora_A=lora_A,
+            lora_B=lora_B,
+            scaling=scaling,
+            base_layer=module.get_base_layer(),
+            base_result=base_result,
+        )
+        return result
+
+
 class LoraLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names = ("lora_A", "lora_B", "lora_embedding_A", "lora_embedding_B")
@@ -64,6 +188,7 @@ class LoraLayer(BaseTunerLayer):
         self.ephemeral_gpu_offload: bool = ephemeral_gpu_offload
         # flag to enable/disable casting of input to weight dtype during forward call
         self.cast_input_dtype_enabled: bool = True
+        self.lora_variant: dict[str, LoraVariant] = {}
         self.kwargs = kwargs
 
         base_layer = self.get_base_layer()
@@ -131,6 +256,9 @@ class LoraLayer(BaseTunerLayer):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
+        if use_dora:
+            self.lora_variant[adapter_name] = DoraVariant()
+
         self.r[adapter_name] = r
         self.lora_alpha[adapter_name] = lora_alpha
         if lora_dropout > 0.0:
@@ -170,7 +298,7 @@ class LoraLayer(BaseTunerLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
         if use_dora:
-            self.dora_init(adapter_name)
+            self.lora_variant[adapter_name].init(self, adapter_name=adapter_name)
             self.use_dora[adapter_name] = True
         else:
             self.use_dora[adapter_name] = False
@@ -377,31 +505,6 @@ class LoraLayer(BaseTunerLayer):
             self.lora_embedding_B[adapter_name].weight.data = lora_B
         self.get_base_layer().weight.data = qweight
 
-    def dora_init(self, adapter_name: str) -> None:
-        if not self.lora_magnitude_vector:
-            # first dora layer being added, add lora_magnitude_vector to the list of learnable parameters
-            self.adapter_layer_names = self.adapter_layer_names[:] + ("lora_magnitude_vector",)
-
-        dora_layer = DoraLinearLayer(fan_in_fan_out=getattr(self, "fan_in_fan_out", False))
-        lora_A = self.lora_A[adapter_name].weight
-        lora_B = self.lora_B[adapter_name].weight
-        place_on_cpu = self.ephemeral_gpu_offload and (lora_A.device.type == "cpu" or lora_B.device.type == "cpu")
-        if self.ephemeral_gpu_offload:
-            if lora_A.device.type in ["cuda", "xpu"]:
-                lora_B = lora_B.to(lora_A.device)
-            else:
-                if lora_B.device.type not in ["cuda", "xpu"]:
-                    if is_xpu_available():
-                        lora_B = lora_B.to("xpu")
-                    else:
-                        lora_B = lora_B.to("cuda")
-                lora_A = lora_A.to(lora_B.device)
-        scaling = self.scaling[adapter_name]
-        dora_layer.update_layer(
-            base_layer=self.get_base_layer(), lora_A=lora_A, lora_B=lora_B, scaling=scaling, place_on_cpu=place_on_cpu
-        )
-        self.lora_magnitude_vector[adapter_name] = dora_layer
-
     def _cache_store(self, key: str, value: Any) -> None:
         self._caches[key] = value
 
@@ -576,25 +679,12 @@ class Linear(nn.Module, LoraLayer):
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
-                    orig_weights = base_layer.weight.data.clone()
-                    delta_weight = self.get_delta_weight(active_adapter)
-                    if not self.use_dora[active_adapter]:
+                    if active_adapter not in self.lora_variant:
+                        orig_weights = base_layer.weight.data.clone()
+                        delta_weight = self.get_delta_weight(active_adapter)
                         orig_weights += delta_weight
                     else:
-                        # handle dora
-                        # since delta_weight already includes scaling, set it to 1 here
-                        weight_norm = (
-                            self.lora_magnitude_vector[active_adapter]
-                            .get_weight_norm(orig_weights, transpose(delta_weight, self.fan_in_fan_out), scaling=1)
-                            .detach()
-                        )
-                        # We need to cache weight_norm because it has to be based on the original weights. We
-                        # cannot calculate it on the fly based on the merged weights when unmerging because its a
-                        # different value
-                        self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
-                        dora_factor = self.lora_magnitude_vector[active_adapter].weight / weight_norm
-                        dora_factor = transpose(dora_factor.view(-1, 1), self.fan_in_fan_out)
-                        orig_weights = dora_factor * (orig_weights + delta_weight)
+                        orig_weights = self.lora_variant[active_adapter].merge_safe(self, active_adapter)
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
@@ -612,27 +702,11 @@ class Linear(nn.Module, LoraLayer):
                         base_layer.bias.data = new_bias
 
                 else:
-                    delta_weight = self.get_delta_weight(active_adapter)
-                    if not self.use_dora[active_adapter]:
+                    if active_adapter not in self.lora_variant:
+                        delta_weight = self.get_delta_weight(active_adapter)
                         base_layer.weight.data += delta_weight
                     else:
-                        # handle dora
-                        # since delta_weight already includes scaling, set it to 1 here
-                        weight_norm = (
-                            self.lora_magnitude_vector[active_adapter]
-                            .get_weight_norm(
-                                base_layer.weight, transpose(delta_weight, self.fan_in_fan_out), scaling=1
-                            )
-                            .detach()
-                        )
-                        # We need to cache weight_norm because it has to be based on the original weights. We
-                        # cannot calculate it on the fly based on the merged weights when unmerging because its a
-                        # different value
-                        self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
-                        dora_factor = self.lora_magnitude_vector[active_adapter].weight / weight_norm
-                        dora_factor = transpose(dora_factor.view(-1, 1), self.fan_in_fan_out)
-                        new_weight = dora_factor * (base_layer.weight.data + delta_weight)
-                        base_layer.weight.data = new_weight
+                        self.lora_variant[active_adapter].merge_unsafe(self, active_adapter)
 
                     if self.lora_bias[active_adapter]:
                         base_layer.bias.data += self.lora_B[active_adapter].bias
@@ -649,15 +723,12 @@ class Linear(nn.Module, LoraLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.lora_A.keys():
-                weight = self.get_base_layer().weight
-                delta_weight = self.get_delta_weight(active_adapter)
-                if not self.use_dora[active_adapter]:
+                if active_adapter not in self.lora_variant:
+                    weight = self.get_base_layer().weight
+                    delta_weight = self.get_delta_weight(active_adapter)
                     weight.data -= delta_weight
                 else:
-                    weight_norm = self._cache_pop(f"{active_adapter}-weight_norm")
-                    dora_factor = self.lora_magnitude_vector[active_adapter].weight / weight_norm
-                    weight_orig = weight.data / dora_factor.view(-1, 1) - delta_weight
-                    weight.data = weight_orig
+                    self.lora_variant[active_adapter].unmerge(self, active_adapter)
 
                 if self.lora_bias[active_adapter]:
                     self.get_base_layer().bias.data -= self.lora_B[active_adapter].bias
@@ -722,23 +793,14 @@ class Linear(nn.Module, LoraLayer):
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
                 x = self._cast_input_dtype(x, lora_A.weight.dtype)
-
-                if not self.use_dora[active_adapter]:
+                if active_adapter not in self.lora_variant:
                     result = result + lora_B(lora_A(dropout(x))) * scaling
                 else:
-                    if isinstance(dropout, nn.Identity) or not self.training:
-                        base_result = result
-                    else:
-                        x = dropout(x)
-                        base_result = None
-
-                    result = result + self.lora_magnitude_vector[active_adapter](
-                        x,
-                        lora_A=lora_A,
-                        lora_B=lora_B,
-                        scaling=scaling,
-                        base_layer=self.get_base_layer(),
-                        base_result=base_result,
+                    result = self.lora_variant[active_adapter].forward(
+                        self,
+                        active_adapter,
+                        x=x,
+                        result=result,
                     )
 
             result = result.to(torch_result_dtype)
