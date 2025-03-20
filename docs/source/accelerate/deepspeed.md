@@ -195,7 +195,7 @@ tpu_use_sudo: false
 use_cpu: false
 ```
 
-Launch command is given below which is available at [run_peft_qlora_deepspeed_stage3.sh](https://github.com/huggingface/peft/blob/main/examples/sft/run_peft_deepspeed.sh):
+Launch command is given below which is available at [run_peft_qlora_deepspeed_stage3.sh](https://github.com/huggingface/peft/blob/main/examples/sft/run_peft_qlora_deepspeed_stage3.sh):
 ```
 accelerate launch --config_file "configs/deepspeed_config_z3_qlora.yaml"  train.py \
 --seed 100 \
