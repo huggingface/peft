@@ -1,0 +1,17 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "encoder_dropout": 0.0,
+  "encoder_hidden_size": 3072,
+  "encoder_num_layers": 2,
+  "encoder_reparameterization_type": "MLP",
+  "inference_mode": false,
+  "num_attention_heads": 24,
+  "num_layers": 28,
+  "num_transformer_submodules": 1,
+  "num_virtual_tokens": 20,
+  "peft_type": "P_TUNING",
+  "revision": null,
+  "task_type": "CAUSAL_LM",
+  "token_dim": 3072
+}
