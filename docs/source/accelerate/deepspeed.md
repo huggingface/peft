@@ -441,12 +441,14 @@ dataset['train'][label_column][:10]=['no complaint', 'no complaint', 'complaint'
 
 <Tip>
 
-💡 When you have code that requires merging (and unmerging) of weights, try to manually collect the parameters with DeepSpeed beforehand:
+💡 When you have code that requires merging (and unmerging) of weights, try to manually collect the parameters with DeepSpeed Zero-3 beforehand:
 
 ```python
 import deepspeed
 
-with deepspeed.zero.GatheredParameters(list(model.parameters())):
+is_ds_zero_3 = ... # check if Zero-3
+
+with deepspeed.zero.GatheredParameters(list(model.parameters()), enabled= is_ds_zero_3):
     model.merge_adapter()
     # do whatever is needed, then unmerge in the same context if unmerging is required
     ...
