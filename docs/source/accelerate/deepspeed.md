@@ -438,3 +438,21 @@ dataset['train'][label_column][:10]=['no complaint', 'no complaint', 'complaint'
 1. Merging when using PEFT and DeepSpeed is currently unsupported and will raise error.
 2. When using CPU offloading, the major gains from using PEFT to shrink the optimizer states and gradients to that of the adapter weights would be realized on CPU RAM and there won't be savings with respect to GPU memory.
 3. DeepSpeed Stage 3 and qlora when used with CPU offloading leads to more GPU memory usage when compared to disabling CPU offloading. 
+
+<Tip>
+
+💡 When you have code that requires merging (and unmerging) of weights, try to manually collect the parameters with DeepSpeed Zero-3 beforehand:
+
+```python
+import deepspeed
+
+is_ds_zero_3 = ... # check if Zero-3
+
+with deepspeed.zero.GatheredParameters(list(model.parameters()), enabled= is_ds_zero_3):
+    model.merge_adapter()
+    # do whatever is needed, then unmerge in the same context if unmerging is required
+    ...
+    model.unmerge_adapter()
+```
+
+</Tip>
