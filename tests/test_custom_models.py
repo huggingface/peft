@@ -1379,6 +1379,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         outputs_base = model(**X)
         if issubclass(config_cls, (FourierFTConfig, TrainableTokensConfig)):
             config_kwargs = config_kwargs.copy()
+            # override the default value and make PEFT operation a no-op
             config_kwargs["init_weights"] = True
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -1398,9 +1399,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model.train()
         # EmbConv1D is slow to learn for some reason
         lr = 0.01 if model_id != "EmbConv1D" else 1.0
-        if isinstance(config_cls, LNTuningConfig):
-            # LayerNorm tuning is slow to learn
-            lr = 1.0
+        if isinstance(config, TrainableTokensConfig):
+            # TrainableTokens is only changing a small subset, so we need a higher lr to see the difference
+            lr = 2.0
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
