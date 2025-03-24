@@ -923,9 +923,11 @@ class ModelConv2DGroups(nn.Module):
         self.flat = nn.Flatten()
         self.lin0 = nn.Linear(5, 2)
         self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
 
     def forward(self, X):
-        X = X.float().reshape(-1, 5, 3, 3)
+        X = X.to(self.dtype)
+        X = X.reshape(-1, 5, 3, 3)
         X = self.conv2d(X)
         X = self.relu(X)
         X = self.flat(X)
@@ -1223,6 +1225,11 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         # check that none of this raises an error
         model(**X)
+
+        if model_id in ["Conv2dGroups"]:
+            # this model does not support merging
+            return
+
         model.merge_adapter()
         model(**X)
         model.unmerge_adapter()
@@ -1256,6 +1263,11 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         # check that none of this raises an error
         model(**X)
+
+        if model_id in ["Conv2dGroups"]:
+            # this model does not support merging
+            return
+
         model.merge_adapter()
         model(**X)
         model.unmerge_adapter()
@@ -1288,6 +1300,11 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         # check that none of this raises an error
         model(**X)
+
+        if model_id in ["Conv2dGroups"]:
+            # this model does not support merging
+            return
+
         model.merge_adapter()
         model(**X)
         model.unmerge_adapter()
@@ -1320,6 +1337,11 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         # check that none of this raises an error
         model(**X)
+
+        if model_id in ["Conv2dGroups"]:
+            # this model does not support merging
+            return
+
         model.merge_adapter()
         model(**X)
         model.unmerge_adapter()
