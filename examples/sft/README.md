@@ -23,11 +23,11 @@ Note:
 1. At present, `use_reentrant` needs to be `False` when using gradient checkpointing with Multi-GPU QLoRA else it will lead to errors. However, this leads to huge GPU memory consumption. 
 
 ## Multi-GPU SFT with LoRA and DeepSpeed
-When you have access to multiple GPUs, it would be better to use normal LoRA with DeepSpeed/FSDP. To use LoRA with DeepSpeed, refer the docs at [PEFT with DeepSpeed](https://huggingface.co/docs/peft/accelerate/deepspeed).
+When you have access to multiple GPUs, it would be better to use normal LoRA with DeepSpeed/FSDP. To use LoRA with DeepSpeed, refer to the docs at [PEFT with DeepSpeed](https://huggingface.co/docs/peft/accelerate/deepspeed).
 
 
 ## Multi-GPU SFT with LoRA and FSDP
-When you have access to multiple GPUs, it would be better to use normal LoRA with DeepSpeed/FSDP. To use LoRA with DeepSpeed, refer the docs at [PEFT with FSDP](https://huggingface.co/docs/peft/accelerate/fsdp).
+When you have access to multiple GPUs, it would be better to use normal LoRA with DeepSpeed/FSDP. To use LoRA with DeepSpeed, refer to the docs at [PEFT with FSDP](https://huggingface.co/docs/peft/accelerate/fsdp).
 
 ## Tip
 
