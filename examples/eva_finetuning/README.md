@@ -109,7 +109,7 @@ EVA initialization can be parallelized across multiple GPUs. In this case inputs
 
 ## Customizing EVA
 
-By default, EVA is designed to work with standard transformer language models. However we integrated three different paramters which can be used to customize EVA for other types of models.
+By default, EVA is designed to work with standard transformer language models. However we integrated three different parameters which can be used to customize EVA for other types of models.
 1. `forward_fn`: Defines how the forward pass during EVA initialization should be computed.
 2. `prepare_model_inputs_fn`: Can be used if it is necessary to use information contained in the original model_input to prepare the input for SVD in individual layers.
 3. `prepare_layer_inputs_fn`: Defines how layer inputs should be prepared for SVD.

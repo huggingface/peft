@@ -1379,7 +1379,7 @@ class TestFindMinimalTargetModules:
             find_minimal_target_modules(target_modules, other_module_names)
 
     def test_get_peft_model_applies_find_target_modules(self):
-        # Check that when calling get_peft_model, the target_module optimization is indeed applied if the lenght of
+        # Check that when calling get_peft_model, the target_module optimization is indeed applied if the length of
         # target_modules is big enough. The resulting model itself should be unaffected.
         torch.manual_seed(0)
         model_id = "facebook/opt-125m"  # must be big enough for optimization to trigger

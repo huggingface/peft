@@ -109,7 +109,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
 
         indices = set()
 
-        # we take already merged adapters into account as well since they can be overriden by new adapters as well.
+        # we take already merged adapters into account as well since they can be overridden by new adapters as well.
         for adapter_name in set(adapter_names + self.merged_adapters):
             index_set = set(self.token_indices[adapter_name])
             if len(indices.intersection(index_set)):
