@@ -187,7 +187,7 @@ def test_load_multiple_adapters_different_modules_to_save(tmp_path):
 
 
 class TestModulesToSaveAttributeAccess:
-    """Test attribute accces on the ModulesToSaveWrapper class.
+    """Test attribute access on the ModulesToSaveWrapper class.
 
     When we have modules_to_save, the original module is wrapped. As long as only forward was called on this wrapped
     module, we were good. However, if, for instance, model parameters were directly accessed by another module, this
