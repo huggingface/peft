@@ -328,7 +328,7 @@ class BoneLinear(nn.Module, BoneLayer):
                     orig_weight = orig_weight + delta_weight
 
                 x = self._cast_input_dtype(x, orig_weight.dtype)
-                bias = self.base_layer.bias.to(orig_weight.dtype)
+                bias = self._cast_input_dtype(self.base_layer.bias, orig_weight.dtype)
                 result = F.linear(input=x, weight=orig_weight, bias=bias)
             else:
                 result = self.base_layer(x, *args, **kwargs)
