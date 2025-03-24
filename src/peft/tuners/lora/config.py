@@ -241,7 +241,7 @@ class LoraConfig(PeftConfig):
             this setting is intended for debugging purposes. Passing 'gaussian' results in Gaussian initialization
             scaled by the LoRA rank for linear and layers. Pass `'loftq'` to use LoftQ initialization. Passing `'eva'`
             results in a data-driven initialization of <ahref='https://arxiv.org/abs/2410.07170' >Explained Variance
-            Adaptation</a>. EVA initalizes LoRA based on the SVD of layer input activations and achieves SOTA
+            Adaptation</a>. EVA initializes LoRA based on the SVD of layer input activations and achieves SOTA
             performance due to its ability to adapt to the finetuning data. Pass `'olora'` to use OLoRA initialization.
             Passing `'pissa'` results in the initialization of <ahref='https://arxiv.org/abs/2404.02948' >Principal
             Singular values and Singular vectors Adaptation (PiSSA)</a>, which converges more rapidly than LoRA and
