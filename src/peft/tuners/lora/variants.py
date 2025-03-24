@@ -55,14 +55,13 @@ class DoraLinearVariant(LoraVariant):
         module.lora_magnitude_vector[adapter_name] = dora_layer
 
     @staticmethod
-    def merge_safe(module: Linear, active_adapter: str) -> torch.Tensor:
-        orig_weights = module.get_base_layer().weight.data.clone()
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
         delta_weight = module.get_delta_weight(active_adapter)
 
         # since delta_weight already includes scaling, set it to 1 here
         weight_norm = (
             module.lora_magnitude_vector[active_adapter]
-            .get_weight_norm(orig_weights, transpose(delta_weight, module.fan_in_fan_out), scaling=1)
+            .get_weight_norm(orig_weight, transpose(delta_weight, module.fan_in_fan_out), scaling=1)
             .detach()
         )
         # We need to cache weight_norm because it has to be based on the original weights. We
@@ -71,16 +70,15 @@ class DoraLinearVariant(LoraVariant):
         module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
         dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
         dora_factor = transpose(dora_factor.view(-1, 1), module.fan_in_fan_out)
-        orig_weights = dora_factor * (orig_weights + delta_weight)
-        return orig_weights
+        orig_weight = dora_factor * (orig_weight + delta_weight)
+        return orig_weight
 
     @staticmethod
-    def merge_unsafe(module: Linear, active_adapter: str) -> None:
-        base_layer = module.get_base_layer()
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
         delta_weight = module.get_delta_weight(active_adapter)
         weight_norm = (
             module.lora_magnitude_vector[active_adapter]
-            .get_weight_norm(base_layer.weight, transpose(delta_weight, module.fan_in_fan_out), scaling=1)
+            .get_weight_norm(orig_weight, transpose(delta_weight, module.fan_in_fan_out), scaling=1)
             .detach()
         )
         # We need to cache weight_norm because it has to be based on the original weights. We
@@ -89,17 +87,15 @@ class DoraLinearVariant(LoraVariant):
         module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
         dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
         dora_factor = transpose(dora_factor.view(-1, 1), module.fan_in_fan_out)
-        new_weight = dora_factor * (base_layer.weight.data + delta_weight)
-        base_layer.weight.data = new_weight
+        new_weight = dora_factor * (orig_weight.data + delta_weight)
+        orig_weight.data = new_weight
 
     @staticmethod
-    def unmerge(module: Linear, active_adapter: str) -> None:
-        weight = module.get_base_layer().weight
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
         delta_weight = module.get_delta_weight(active_adapter)
         weight_norm = module._cache_pop(f"{active_adapter}-weight_norm")
         dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
-        weight_orig = weight.data / dora_factor.view(-1, 1) - delta_weight
-        weight.data = weight_orig
+        return orig_weight.data / dora_factor.view(-1, 1) - delta_weight
 
     @staticmethod
     def forward(module: Linear, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
@@ -142,14 +138,13 @@ class DoraEmbeddingVariant(DoraLinearVariant):
         module.lora_magnitude_vector[adapter_name] = dora_layer
 
     @staticmethod
-    def merge_safe(module: Embedding, active_adapter: str) -> torch.Tensor:
-        orig_weights = module.get_base_layer().weight.data.clone()
+    def merge_safe(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
         delta_weight = module.get_delta_weight(active_adapter)
 
         # since delta_weight already includes scaling, set it to 1 here
         weight_norm = (
             module.lora_magnitude_vector[active_adapter]
-            .get_weight_norm(orig_weights, delta_weight.T, scaling=1)
+            .get_weight_norm(orig_weight, delta_weight.T, scaling=1)
             .detach()
         )
         # We need to cache weight_norm because it has to be based on the original weights. We
@@ -158,16 +153,15 @@ class DoraEmbeddingVariant(DoraLinearVariant):
         module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
         dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
         dora_factor = dora_factor.view(1, -1)
-        orig_weights = dora_factor * (orig_weights + delta_weight)
-        return orig_weights
+        orig_weight = dora_factor * (orig_weight + delta_weight)
+        return orig_weight
 
     @staticmethod
-    def merge_unsafe(module: Embedding, active_adapter: str) -> None:
-        base_layer = module.get_base_layer()
+    def merge_unsafe(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> None:
         delta_weight = module.get_delta_weight(active_adapter)
         weight_norm = (
             module.lora_magnitude_vector[active_adapter]
-            .get_weight_norm(base_layer.weight, delta_weight.T, scaling=1)
+            .get_weight_norm(orig_weight, delta_weight.T, scaling=1)
             .detach()
         )
         # We need to cache weight_norm because it has to be based on the original weights. We
@@ -176,17 +170,15 @@ class DoraEmbeddingVariant(DoraLinearVariant):
         module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
         dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
         dora_factor = dora_factor.view(1, -1)
-        new_weight = dora_factor * (base_layer.weight.data + delta_weight)
-        base_layer.weight.data = new_weight
+        new_weight = dora_factor * (orig_weight.data + delta_weight)
+        orig_weight.data = new_weight
 
     @staticmethod
-    def unmerge(module: Embedding, active_adapter: str) -> None:
-        weight = module.get_base_layer().weight
+    def unmerge(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
         delta_weight = module.get_delta_weight(active_adapter)
         weight_norm = module._cache_pop(f"{active_adapter}-weight_norm")
         dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
-        weight_orig = weight.data / dora_factor.view(1, -1) - delta_weight
-        weight.data = weight_orig
+        return orig_weight.data / dora_factor.view(1, -1) - delta_weight
 
     @staticmethod
     def forward(module: Embedding, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
@@ -208,51 +200,42 @@ class DoraEmbeddingVariant(DoraLinearVariant):
 
 class _DoraConvNdVariant(LoraVariant):
     @staticmethod
-    def merge_safe(module: _ConvNd, active_adapter: str) -> torch.Tensor:
-        base_layer = module.get_base_layer()
-        orig_weights = base_layer.weight.data.clone()
+    def merge_safe(module: _ConvNd, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
         delta_weight = module.get_delta_weight(active_adapter)
 
         # since delta_weight already includes scaling, set it to 1 here
         weight_norm = (
-            module.lora_magnitude_vector[active_adapter]
-            .get_weight_norm(orig_weights, delta_weight, scaling=1)
-            .detach()
+            module.lora_magnitude_vector[active_adapter].get_weight_norm(orig_weight, delta_weight, scaling=1).detach()
         )
         # We need to cache weight_norm because it has to be based on the original weights. We
         # cannot calculate it on the fly based on the merged weights when unmerging because its a
         # different value
         module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
         dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
-        orig_weights = dora_factor.view(*module._get_dora_factor_view()) * (orig_weights + delta_weight)
-        return orig_weights
+        orig_weight = dora_factor.view(*module._get_dora_factor_view()) * (orig_weight + delta_weight)
+        return orig_weight
 
     @staticmethod
-    def merge_unsafe(module: _ConvNd, active_adapter: str) -> None:
-        base_layer = module.get_base_layer()
+    def merge_unsafe(module: _ConvNd, active_adapter: str, orig_weight: torch.Tensor) -> None:
         delta_weight = module.get_delta_weight(active_adapter)
         # since delta_weight already includes scaling, set it to 1 here
         weight_norm = (
-            module.lora_magnitude_vector[active_adapter]
-            .get_weight_norm(base_layer.weight, delta_weight, scaling=1)
-            .detach()
+            module.lora_magnitude_vector[active_adapter].get_weight_norm(orig_weight, delta_weight, scaling=1).detach()
         )
         # We need to cache weight_norm because it has to be based on the original weights. We
         # cannot calculate it on the fly based on the merged weights when unmerging because its a
         # different value
         module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
         dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
-        new_weight = dora_factor.view(*module._get_dora_factor_view()) * (base_layer.weight.data + delta_weight)
-        base_layer.weight.data = new_weight
+        new_weight = dora_factor.view(*module._get_dora_factor_view()) * (orig_weight.data + delta_weight)
+        orig_weight.data = new_weight
 
     @staticmethod
-    def unmerge(module: _ConvNd, active_adapter: str) -> None:
-        weight = module.get_base_layer().weight
+    def unmerge(module: _ConvNd, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
         delta_weight = module.get_delta_weight(active_adapter)
         weight_norm = module._cache_pop(f"{active_adapter}-weight_norm")
         dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
-        weight_orig = weight.data / dora_factor.view(*module._get_dora_factor_view()) - delta_weight
-        weight.data = weight_orig
+        return orig_weight.data / dora_factor.view(*module._get_dora_factor_view()) - delta_weight
 
     @staticmethod
     def forward(module: _ConvNd, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:

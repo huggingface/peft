@@ -23,6 +23,7 @@ import torch.nn.functional as F
 from torch import svd_lowrank
 from transformers.pytorch_utils import Conv1D
 
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_hqq_available
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.integrations import (
     dequantize_module_weight,
@@ -49,17 +50,17 @@ class LoraVariant:
         raise NotImplementedError
 
     @staticmethod
-    def merge_safe(module: LoraLayer, active_adapter: str) -> torch.Tensor:
+    def merge_safe(module: LoraLayer, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
         """Safe merging of the weights from `merge(..., safe_merge=True)`, should return a new tensor"""
         raise NotImplementedError
 
     @staticmethod
-    def merge_unsafe(module: LoraLayer, active_adapter: str) -> None:
+    def merge_unsafe(module: LoraLayer, active_adapter: str, orig_weight: torch.Tensor) -> None:
         """Unsafe merging of the weights from `merge(..., safe_merge=False)`, should modify the weight in-place"""
 
     @staticmethod
-    def unmerge(module: LoraLayer, active_adapter: str) -> None:
-        """Unmerge any merged weights, should be in-place"""
+    def unmerge(module: LoraLayer, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        """Remove the adapter weights from the original weights, then return them"""
 
     @staticmethod
     def forward(module: LoraLayer, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
@@ -78,10 +79,27 @@ class LoraVariant:
 def dispatch_lora_variant(module: LoraLayer, *, use_dora=True) -> Optional[LoraVariant]:
     from .variants import DoraConv2dVariant, DoraConv3dVariant, DoraEmbeddingVariant, DoraLinearVariant
 
+    if is_bnb_available():
+        from .bnb import Linear8bitLt
+    else:
+        Linear8bitLt = type(None)
+
+    if is_bnb_4bit_available():
+        from .bnb import Linear4bit
+    else:
+        Linear4bit = type(None)
+
+    if is_hqq_available():
+        from .hqq import HQQLinear
+    else:
+        HQQLinear = type(None)
+
     variant: Optional[LoraVariant] = None
 
     if use_dora:
-        if isinstance(module, (Linear, nn.Linear, Conv1D)):
+        if isinstance(module, (Linear4bit, Linear8bitLt, HQQLinear)):
+            variant = DoraLinearVariant()
+        elif isinstance(module, (Linear, nn.Linear, Conv1D)):
             variant = DoraLinearVariant()
         elif isinstance(module, (Embedding, nn.Embedding)):
             variant = DoraEmbeddingVariant()
@@ -115,7 +133,7 @@ class LoraLayer(BaseTunerLayer):
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
-        self.use_dora: dict[str, bool] = {}
+        self.use_dora: dict[str, bool] = {}  # not actively used anymore after #2443, keep it for BC
         self.lora_bias: dict[str, bool] = {}
         self.lora_magnitude_vector = torch.nn.ModuleDict()  # for DoRA
         self._caches: dict[str, Any] = {}
@@ -613,19 +631,19 @@ class Linear(nn.Module, LoraLayer):
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
+                    orig_weight = base_layer.weight.data.clone()
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
-                        orig_weights = base_layer.weight.data.clone()
                         delta_weight = self.get_delta_weight(active_adapter)
-                        orig_weights += delta_weight
+                        orig_weight += delta_weight
                     else:
-                        orig_weights = self.lora_variant[active_adapter].merge_safe(self, active_adapter)
+                        orig_weight = self.lora_variant[active_adapter].merge_safe(self, active_adapter, orig_weight)
 
-                    if not torch.isfinite(orig_weights).all():
+                    if not torch.isfinite(orig_weight).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weights
+                    base_layer.weight.data = orig_weight
 
                     if self.lora_bias[active_adapter]:
                         new_bias = base_layer.bias + self.lora_B[active_adapter].bias
@@ -640,7 +658,7 @@ class Linear(nn.Module, LoraLayer):
                         delta_weight = self.get_delta_weight(active_adapter)
                         base_layer.weight.data += delta_weight
                     else:
-                        self.lora_variant[active_adapter].merge_unsafe(self, active_adapter)
+                        self.lora_variant[active_adapter].merge_unsafe(self, active_adapter, base_layer.weight)
 
                     if self.lora_bias[active_adapter]:
                         base_layer.bias.data += self.lora_B[active_adapter].bias
@@ -657,12 +675,13 @@ class Linear(nn.Module, LoraLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.lora_A.keys():
+                weight = self.get_base_layer().weight
                 if active_adapter not in self.lora_variant:  # vanilla LoRA
-                    weight = self.get_base_layer().weight
                     delta_weight = self.get_delta_weight(active_adapter)
                     weight.data -= delta_weight
                 else:
-                    self.lora_variant[active_adapter].unmerge(self, active_adapter)
+                    unmerged = self.lora_variant[active_adapter].unmerge(self, active_adapter, weight)
+                    weight.data = unmerged
 
                 if self.lora_bias[active_adapter]:
                     self.get_base_layer().bias.data -= self.lora_B[active_adapter].bias
@@ -851,23 +870,23 @@ class Embedding(nn.Module, LoraLayer):
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
+                    orig_weight = base_layer.weight.data.clone()
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
-                        orig_weights = base_layer.weight.data.clone()
-                        orig_weights += self.get_delta_weight(active_adapter)
+                        orig_weight += self.get_delta_weight(active_adapter)
                     else:
-                        orig_weights = self.lora_variant[active_adapter].merge_safe(self, active_adapter)
+                        orig_weight = self.lora_variant[active_adapter].merge_safe(self, active_adapter, orig_weight)
 
-                    if not torch.isfinite(orig_weights).all():
+                    if not torch.isfinite(orig_weight).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weights
+                    base_layer.weight.data = orig_weight
                 else:
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
                         base_layer.weight.data += self.get_delta_weight(active_adapter)
                     else:
-                        self.lora_variant[active_adapter].merge_unsafe(self, active_adapter)
+                        self.lora_variant[active_adapter].merge_unsafe(self, active_adapter, base_layer.weight)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -880,10 +899,12 @@ class Embedding(nn.Module, LoraLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.lora_embedding_A.keys():
+                weight = self.get_base_layer().weight
                 if active_adapter not in self.lora_variant:  # vanilla LoRA
-                    self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
+                    weight.data -= self.get_delta_weight(active_adapter)
                 else:
-                    self.lora_variant[active_adapter].unmerge(self, active_adapter)
+                    unmerged = self.lora_variant[active_adapter].unmerge(self, active_adapter, weight)
+                    weight.data = unmerged
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -1111,18 +1132,18 @@ class _ConvNd(nn.Module, LoraLayer):
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
+                    orig_weight = base_layer.weight.data.clone()
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
-                        orig_weights = base_layer.weight.data.clone()
                         delta_weight = self.get_delta_weight(active_adapter)
-                        orig_weights += delta_weight
+                        orig_weight += delta_weight
                     else:
-                        orig_weights = self.lora_variant[active_adapter].merge_safe(self, active_adapter)
+                        orig_weight = self.lora_variant[active_adapter].merge_safe(self, active_adapter, orig_weight)
 
-                    if not torch.isfinite(orig_weights).all():
+                    if not torch.isfinite(orig_weight).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
-                    base_layer.weight.data = orig_weights
+                    base_layer.weight.data = orig_weight
 
                     if self.lora_bias[active_adapter]:
                         new_bias = base_layer.bias + self.lora_B[active_adapter].bias
@@ -1137,7 +1158,7 @@ class _ConvNd(nn.Module, LoraLayer):
                         delta_weight = self.get_delta_weight(active_adapter)
                         base_layer.weight.data += delta_weight
                     else:
-                        self.lora_variant[active_adapter].merge_unsafe(self, active_adapter)
+                        self.lora_variant[active_adapter].merge_unsafe(self, active_adapter, base_layer.weight)
 
                     if self.lora_bias[active_adapter]:
                         base_layer.bias.data += self.lora_B[active_adapter].bias
@@ -1154,12 +1175,13 @@ class _ConvNd(nn.Module, LoraLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.lora_A.keys():
+                weight = self.get_base_layer().weight
                 if active_adapter not in self.lora_variant:  # vanilla LoRA
-                    weight = self.get_base_layer().weight
                     delta_weight = self.get_delta_weight(active_adapter)
                     weight.data -= delta_weight
                 else:
-                    self.lora_variant[active_adapter].unmerge(self, active_adapter)
+                    unmerged = self.lora_variant[active_adapter].unmerge(self, active_adapter, weight)
+                    weight.data = unmerged
 
                 if self.lora_bias[active_adapter]:
                     self.get_base_layer().bias.data -= self.lora_B[active_adapter].bias
@@ -1435,17 +1457,17 @@ class MultiheadAttention(nn.Module, LoraLayer):
                 if safe_merge:
                     # TODO: work with separate weights
                     # merging in_proj (nn.Parameter)
-                    orig_weights_in = base_layer.in_proj_weight.data.detach().clone()
-                    orig_weights_in += self.get_delta_weight(active_adapter)
-                    if not torch.isfinite(orig_weights_in).all():
+                    orig_weight_in = base_layer.in_proj_weight.data.detach().clone()
+                    orig_weight_in += self.get_delta_weight(active_adapter)
+                    if not torch.isfinite(orig_weight_in).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
                     # merging out_proj (subclass of nn.Linear)
-                    orig_weights_out = base_layer.out_proj.weight.data.detach().clone()
-                    orig_weights_out += base_layer.out_proj.get_delta_weight(active_adapter)
-                    if not torch.isfinite(orig_weights_out).all():
+                    orig_weight_out = base_layer.out_proj.weight.data.detach().clone()
+                    orig_weight_out += base_layer.out_proj.get_delta_weight(active_adapter)
+                    if not torch.isfinite(orig_weight_out).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
@@ -1453,10 +1475,10 @@ class MultiheadAttention(nn.Module, LoraLayer):
                     # unregister parameter implicitly and overwrite using merged weights; gradients are computed after
                     # forward and, thus, after unmerging (see forward()), therefore this is safe to do.
                     del base_layer.in_proj_weight
-                    base_layer.in_proj_weight = orig_weights_in
+                    base_layer.in_proj_weight = orig_weight_in
 
                     del base_layer.out_proj.get_base_layer().weight
-                    base_layer.out_proj.get_base_layer().weight = orig_weights_out
+                    base_layer.out_proj.get_base_layer().weight = orig_weight_out
                     base_layer.out_proj.merge(adapter_names=[active_adapter])
                 else:
                     # merging in_proj (nn.Parameter)
