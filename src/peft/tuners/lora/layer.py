@@ -23,7 +23,6 @@ import torch.nn.functional as F
 from torch import svd_lowrank
 from transformers.pytorch_utils import Conv1D
 
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_hqq_available
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.integrations import (
     dequantize_module_weight,
@@ -74,43 +73,6 @@ class LoraVariant:
             result (torch.Tensor): The result from the base model
         """
         raise NotImplementedError
-
-
-def dispatch_lora_variant(module: LoraLayer, *, use_dora=True) -> Optional[LoraVariant]:
-    from .variants import DoraConv2dVariant, DoraConv3dVariant, DoraEmbeddingVariant, DoraLinearVariant
-
-    if is_bnb_available():
-        from .bnb import Linear8bitLt
-    else:
-        Linear8bitLt = type(None)
-
-    if is_bnb_4bit_available():
-        from .bnb import Linear4bit
-    else:
-        Linear4bit = type(None)
-
-    if is_hqq_available():
-        from .hqq import HQQLinear
-    else:
-        HQQLinear = type(None)
-
-    variant: Optional[LoraVariant] = None
-
-    if use_dora:
-        if isinstance(module, (Linear4bit, Linear8bitLt, HQQLinear)):
-            variant = DoraLinearVariant()
-        elif isinstance(module, (Linear, nn.Linear, Conv1D)):
-            variant = DoraLinearVariant()
-        elif isinstance(module, (Embedding, nn.Embedding)):
-            variant = DoraEmbeddingVariant()
-        elif isinstance(module, (Conv2d, nn.Conv2d)):
-            variant = DoraConv2dVariant()
-        elif isinstance(module, (Conv3d, nn.Conv3d)):
-            variant = DoraConv3dVariant()
-        elif isinstance(module, (Conv1d, nn.Conv1d)):
-            raise NotImplementedError("DoRA is not implemented for Conv1d yet.")
-
-    return variant
 
 
 class LoraLayer(BaseTunerLayer):
@@ -193,6 +155,21 @@ class LoraLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
+    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+        """
+        Return any possible LoRA variant for this layer type.
+
+        Given the init arguments of this layer, return the correct LoRA variant, if any. E.g., if `use_dora=True`, this
+        method should return the DoRA variant for the given layer.
+
+        If there is no fitting variant, return None.
+
+        Note: If this layer type does not support the LoRA variant at all, please raise an error during __init__ and
+        not here.
+
+        """
+        return None
+
     def update_layer(
         self,
         adapter_name,
@@ -208,7 +185,7 @@ class LoraLayer(BaseTunerLayer):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
-        lora_variant = dispatch_lora_variant(self, use_dora=use_dora)
+        lora_variant = self.resolve_lora_variant(use_dora=use_dora)
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 
@@ -607,6 +584,14 @@ class Linear(nn.Module, LoraLayer):
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
+    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+        if not use_dora:
+            return None
+
+        from .variants import DoraLinearVariant
+
+        return DoraLinearVariant()
+
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
@@ -801,13 +786,21 @@ class Embedding(nn.Module, LoraLayer):
             lora_bias=lora_bias,
         )
 
+    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+        if not use_dora:
+            return None
+
+        from .variants import DoraEmbeddingVariant
+
+        return DoraEmbeddingVariant()
+
     def update_layer(
         self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora, lora_bias
     ):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
-        lora_variant = dispatch_lora_variant(self, use_dora=use_dora)
+        lora_variant = self.resolve_lora_variant(use_dora=use_dora)
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 
@@ -1062,7 +1055,7 @@ class _ConvNd(nn.Module, LoraLayer):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
-        lora_variant = dispatch_lora_variant(self, use_dora=use_dora)
+        lora_variant = self.resolve_lora_variant(use_dora=use_dora)
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 
@@ -1285,6 +1278,14 @@ class Conv2d(_ConvNd):
             raise ValueError(f"Conv2d layer kernel must have 4 dimensions, not {self._kernel_dim}")
         self.conv_fn = F.conv2d
 
+    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+        if not use_dora:
+            return None
+
+        from .variants import DoraConv2dVariant
+
+        return DoraConv2dVariant()
+
 
 class Conv1d(_ConvNd):
     # Lora implemented in a conv1d layer
@@ -1294,6 +1295,14 @@ class Conv1d(_ConvNd):
             raise ValueError(f"Conv1d layer kernel must have 3 dimensions, not {self._kernel_dim}")
         self.conv_fn = F.conv1d
 
+    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+        if not use_dora:
+            return None
+
+        from .variants import DoraConv1dVariant
+
+        return DoraConv1dVariant()
+
 
 class Conv3d(_ConvNd):
     # Lora implemented in a conv3d layer
@@ -1302,6 +1311,14 @@ class Conv3d(_ConvNd):
         if not self._kernel_dim == 5:
             raise ValueError(f"Conv3d layer kernel must have 5 dimensions, not {self._kernel_dim}")
         self.conv_fn = F.conv3d
+
+    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+        if not use_dora:
+            return None
+
+        from .variants import DoraConv3dVariant
+
+        return DoraConv3dVariant()
 
 
 class MultiheadAttention(nn.Module, LoraLayer):

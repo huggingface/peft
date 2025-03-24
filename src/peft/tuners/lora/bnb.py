@@ -24,7 +24,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.integrations import dequantize_bnb_weight
 from peft.utils.other import transpose
 
-from .layer import LoraLayer
+from .layer import LoraLayer, LoraVariant
 
 
 if is_bnb_available():
@@ -59,6 +59,14 @@ if is_bnb_available():
                 use_dora=use_dora,
                 lora_bias=lora_bias,
             )
+
+        def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+            if not use_dora:
+                return None
+
+            from .variants import DoraLinearVariant
+
+            return DoraLinearVariant()
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
             """
@@ -306,6 +314,14 @@ if is_bnb_4bit_available():
                 use_dora=use_dora,
                 lora_bias=lora_bias,
             )
+
+        def resolve_lora_variant(self, *, use_dora: bool) -> Optional[LoraVariant]:
+            if not use_dora:
+                return None
+
+            from .variants import DoraLinearVariant
+
+            return DoraLinearVariant()
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
             """
