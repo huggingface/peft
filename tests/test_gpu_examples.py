@@ -79,6 +79,7 @@ from peft.utils.loftq_utils import NFQuantizer
 from peft.utils.other import fsdp_auto_wrap_policy
 
 from .testing_utils import (
+    device_count,
     require_aqlm,
     require_auto_awq,
     require_auto_gptq,
@@ -302,7 +303,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             )
 
-            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+            assert set(model.hf_device_map.values()) == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -424,7 +425,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.single_gpu_tests
-    @require_torch_gpu
+    @require_non_cpu
     def test_8bit_adalora_causalLM(self):
         r"""
         Tests the 8bit training with adalora
@@ -497,7 +498,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
-    @require_torch_multi_gpu
+    @require_multi_accelerator
     def test_causal_lm_training_multi_gpu(self):
         r"""
         Test the CausalLM training on a multi-GPU device. This test is a converted version of
@@ -511,8 +512,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 quantization_config=BitsAndBytesConfig(load_in_8bit=True),
                 device_map="auto",
             )
-
-            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+            print(f"device map: {model.hf_device_map}")
+            assert set(model.hf_device_map.values()) == set(range(device_count))
 
             tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
             model = prepare_model_for_kbit_training(model)
@@ -621,7 +622,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
-    @require_torch_multi_gpu
+    @require_multi_accelerator
     def test_seq2seq_lm_training_multi_gpu(self):
         r"""
         Test the Seq2SeqLM training on a multi-GPU device. This test is a converted version of
@@ -636,7 +637,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 device_map="balanced",
             )
 
-            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+            assert set(model.hf_device_map.values()) == set(range(device_count))
 
             tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
             model = prepare_model_for_kbit_training(model)
@@ -920,7 +921,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             )
 
-            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+            assert set(model.hf_device_map.values()) == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1037,7 +1038,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             )
 
-            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+            assert set(model.hf_device_map.values()) == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1284,7 +1285,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             )
 
-            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+            assert set(model.hf_device_map.values()) == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1343,7 +1344,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             )
 
-            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+            assert set(model.hf_device_map.values()) == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1656,7 +1657,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
                 quantization_config=self.quantization_config,
             )
 
-            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+            assert set(model.hf_device_map.values()) == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -2552,7 +2553,7 @@ class TestLoftQ:
 
 
 @require_bitsandbytes
-@require_torch_gpu
+@require_non_cpu
 class MultiprocessTester(unittest.TestCase):
     def test_notebook_launcher(self):
         script_path = os.path.join("scripts", "launch_notebook_mp.py")
@@ -3187,7 +3188,7 @@ class PeftAwqGPUTests(unittest.TestCase):
                 device_map="auto",
             )
 
-            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+            assert set(model.hf_device_map.values()) == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -3335,7 +3336,7 @@ class PeftEetqGPUTests(unittest.TestCase):
                 quantization_config=quantization_config,
             )
 
-            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+            assert set(model.hf_device_map.values()) == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -3586,7 +3587,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
                 torch_dtype=torch.bfloat16,
             )
 
-            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+            assert set(model.hf_device_map.values()) == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
             model.model_parallel = True
@@ -3646,7 +3647,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             torch_dtype=torch.bfloat16,
         )
 
-        assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+        assert set(model.hf_device_map.values()) == set(range(device_count))
 
         model = prepare_model_for_kbit_training(model)
         model.model_parallel = True
