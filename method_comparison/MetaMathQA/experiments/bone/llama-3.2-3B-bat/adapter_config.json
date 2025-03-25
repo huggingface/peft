@@ -1,0 +1,19 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "bias": "none",
+  "exclude_modules": null,
+  "inference_mode": false,
+  "init_weights": "bat",
+  "layers_pattern": null,
+  "layers_to_transform": null,
+  "modules_to_save": null,
+  "peft_type": "BONE",
+  "r": 64,
+  "revision": null,
+  "target_modules": [
+    "v_proj",
+    "q_proj"
+  ],
+  "task_type": null
+}
