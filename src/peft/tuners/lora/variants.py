@@ -200,6 +200,18 @@ class DoraEmbeddingVariant(DoraLinearVariant):
 
 class _DoraConvNdVariant(LoraVariant):
     @staticmethod
+    def init_convd_variant(module: _ConvNd, adapter_name: str, dora_layer: nn.Module) -> None:
+        if module.lora_magnitude_vector is None:
+            # first dora layer being added, add lora_magnitude_vector to the list of learnable parameters
+            module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_magnitude_vector",)
+
+        lora_A = module.lora_A[adapter_name].weight
+        lora_B = module.lora_B[adapter_name].weight
+        scaling = module.scaling[adapter_name]
+        dora_layer.update_layer(base_layer=module.get_base_layer(), lora_A=lora_A, lora_B=lora_B, scaling=scaling)
+        module.lora_magnitude_vector[adapter_name] = dora_layer
+
+    @staticmethod
     def merge_safe(module: _ConvNd, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
         delta_weight = module.get_delta_weight(active_adapter)
 
@@ -264,28 +276,12 @@ class _DoraConvNdVariant(LoraVariant):
 class DoraConv2dVariant(_DoraConvNdVariant):
     @staticmethod
     def init(module: Conv2d, adapter_name: str) -> None:
-        if module.lora_magnitude_vector is None:
-            # first dora layer being added, add lora_magnitude_vector to the list of learnable parameters
-            module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_magnitude_vector",)
-
         dora_layer = DoraConv2dLayer(fan_in_fan_out=False)
-        lora_A = module.lora_A[adapter_name].weight
-        lora_B = module.lora_B[adapter_name].weight
-        scaling = module.scaling[adapter_name]
-        dora_layer.update_layer(base_layer=module.get_base_layer(), lora_A=lora_A, lora_B=lora_B, scaling=scaling)
-        module.lora_magnitude_vector[adapter_name] = dora_layer
+        _DoraConvNdVariant.init_convd_variant(module, adapter_name, dora_layer=dora_layer)
 
 
 class DoraConv3dVariant(_DoraConvNdVariant):
     @staticmethod
     def init(module: Conv3d, adapter_name: str) -> None:
-        if module.lora_magnitude_vector is None:
-            # first dora layer being added, add lora_magnitude_vector to the list of learnable parameters
-            module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_magnitude_vector",)
-
         dora_layer = DoraConv3dLayer(fan_in_fan_out=False)
-        lora_A = module.lora_A[adapter_name].weight
-        lora_B = module.lora_B[adapter_name].weight
-        scaling = module.scaling[adapter_name]
-        dora_layer.update_layer(base_layer=module.get_base_layer(), lora_A=lora_A, lora_B=lora_B, scaling=scaling)
-        module.lora_magnitude_vector[adapter_name] = dora_layer
+        _DoraConvNdVariant.init_convd_variant(module, adapter_name, dora_layer=dora_layer)
