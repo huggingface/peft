@@ -24,6 +24,7 @@ from accelerate import notebook_launcher
 import peft
 from peft.utils import infer_device
 
+
 def init():
     class MyModule(torch.nn.Module):
         def __init__(self):
@@ -32,6 +33,7 @@ def init():
 
         def forward(self, x):
             return self.linear(x)
+
     device = infer_device()
     model = MyModule().to(device)
     peft.get_peft_model(model, peft.LoraConfig(target_modules=["linear"]))

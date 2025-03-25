@@ -62,7 +62,6 @@ from .testing_utils import (
     require_bitsandbytes,
     require_multi_accelerator,
     require_non_cpu,
-    require_torch_gpu,
 )
 
 
