@@ -156,16 +156,15 @@ class LoraLayer(BaseTunerLayer):
         self.out_features = out_features
 
     def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
-        """
-        Return any possible LoRA variant for this layer type.
+        """Return a matching LoRA variant for this layer type.
 
         Given the init arguments of this layer, return the correct LoRA variant, if any. E.g., if `use_dora=True`, this
         method should return the DoRA variant for the given layer.
 
         If there is no fitting variant, return None.
 
-        Note: If this layer type does not support the LoRA variant at all, please raise an error during __init__ and
-        not here.
+        Note: If this layer type does not support the LoRA variant at all, please raise an error during __init__ as is
+        convention, and not here.
 
         """
         return None
