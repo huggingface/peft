@@ -368,6 +368,7 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         compile=train_config.compile,
         attn_implementation=train_config.attn_implementation,
         peft_config=peft_config,
+        autocast_adapter_dtype=train_config.autocast_adapter_dtype,
     )
     print_verbose(model)
     num_trainable_params, num_params = model.get_nb_trainable_parameters()

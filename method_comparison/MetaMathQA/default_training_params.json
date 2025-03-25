@@ -15,6 +15,7 @@
   },
   "lr_scheduler": "cosine",
   "use_amp": false,
+  "autocast_adapter_dtype": true,
   "attn_implementation": null,
   "generation_kwargs": {
     "max_length": 800,
