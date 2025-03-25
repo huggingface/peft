@@ -39,7 +39,9 @@ Installing PEFT from source is useful for keeping up with the latest development
 python -m pip install git+https://github.com/huggingface/peft
 ```
 
-## ValueError: Attempting to unscale FP16 gradients
+## Dtype-related issues
+
+### ValueError: Attempting to unscale FP16 gradients
 
 This error probably occurred because the model was loaded with `torch_dtype=torch.float16` and then used in an automatic mixed precision (AMP) context, e.g. by setting `fp16=True` in the [`~transformers.Trainer`] class from 🤗 Transformers. The reason is that when using AMP, trainable weights should never use fp16. To make this work without loading the whole model in fp32, add the following to your code:
 
@@ -74,6 +76,23 @@ trainer.train()
 Starting from PEFT verion v0.12.0, PEFT automatically promotes the dtype of adapter weights from `torch.float16` and `torch.bfloat16` to `torch.float32` where appropriate. To _prevent_ this behavior, you can pass `autocast_adapter_dtype=False` to [`~get_peft_model`], to [`~PeftModel.from_pretrained`], and to [`~PeftModel.load_adapter`].
 
 </Tip>
+
+### Selecting the dtype of the adapter
+
+Most PEFT methods, like LoRA, work by adding trainable adapter weights. By default, those weights are stored in float32 dtype (fp32), i.e. at a relatively high precision. Therefore, even if the base model is loaded in float16 (fp16) or bfloat16 (bf16), the adapter weights are float32. When the adapter results are calculated during the forward pass, the input will typically be in the dtype of the base model, thus it will be upcast to float32 if necessary, then cast back to the original dtype.
+
+If you prefer to have the adapter weights in the lower precision of the base model, i.e. in float16 or bfloat16, you can pass `autocast_adapter_dtype=False` when creating the model ([`~get_peft_model`]) or loading the model ([`~PeftModel.from_pretrained`]). There are some advantages and disadvantages to this:
+
+Advantages of half precision adapter:
+- computation slightly faster
+- slightly less memory
+- smaller file size of checkpoint (half the size)
+
+Disadvantages of half precision adapter:
+- slightly worse loss
+- higher risk of overflow or underflow
+
+Note that for most use cases, overall runtime and memory cost will be determined by the size of the base model and by the dataset, while the dtype of the PEFT adapter will only have a small impact.
 
 ## Bad results from a loaded PEFT model
 
