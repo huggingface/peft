@@ -19,6 +19,7 @@ import tempfile
 
 import gradio as gr
 import plotly.express as px
+import plotly.graph_objects as go
 from processing import load_df
 
 
@@ -86,15 +87,69 @@ def compute_pareto_frontier(df, metric_x, metric_y):
 def generate_pareto_plot(df, metric_x, metric_y):
     if df.empty:
         return {}
-    fig = px.scatter(
-        df,
-        x=metric_x,
-        y=metric_y,
-        hover_data={"experiment_name": True, "peft_type": True, metric_x: True, metric_y: True},
+
+    # Compute Pareto frontier and non-frontier points.
+    pareto_df = compute_pareto_frontier(df, metric_x, metric_y)
+    non_pareto_df = df.drop(pareto_df.index)
+
+    # Create an empty figure.
+    fig = go.Figure()
+
+    # Draw the line connecting Pareto frontier points.
+    if not pareto_df.empty:
+        # Sort the Pareto frontier points by metric_x for a meaningful connection.
+        pareto_sorted = pareto_df.sort_values(by=metric_x)
+        line_trace = go.Scatter(
+            x=pareto_sorted[metric_x],
+            y=pareto_sorted[metric_y],
+            mode="lines",
+            line={"color": "rgba(0,0,255,0.3)", "width": 4},
+            name="Pareto Frontier",
+        )
+        fig.add_trace(line_trace)
+
+    # Add non-frontier points in gray with semi-transparency.
+    if not non_pareto_df.empty:
+        non_frontier_trace = go.Scatter(
+            x=non_pareto_df[metric_x],
+            y=non_pareto_df[metric_y],
+            mode="markers",
+            marker={"color": "rgba(128,128,128,0.5)", "size": 12},
+            hoverinfo="text",
+            text=non_pareto_df.apply(
+                lambda row: f"experiment_name: {row['experiment_name']}<br>"
+                f"peft_type: {row['peft_type']}<br>"
+                f"{metric_x}: {row[metric_x]}<br>"
+                f"{metric_y}: {row[metric_y]}",
+                axis=1,
+            ),
+            showlegend=False,
+        )
+        fig.add_trace(non_frontier_trace)
+
+    # Add Pareto frontier points with legend
+    if not pareto_df.empty:
+        pareto_scatter = px.scatter(
+            pareto_df,
+            x=metric_x,
+            y=metric_y,
+            color="experiment_name",
+            hover_data={"experiment_name": True, "peft_type": True, metric_x: True, metric_y: True},
+        )
+        for trace in pareto_scatter.data:
+            trace.marker = {"size": 12}
+            fig.add_trace(trace)
+
+    # Update layout with axes labels.
+    fig.update_layout(
         title=f"Pareto Frontier for {metric_x} vs {metric_y}",
         template="seaborn",
+        height=700,
+        width=900,
+        xaxis_title=metric_x,
+        yaxis_title=metric_y,
     )
-    fig.update_traces(marker={"size": 12})
+
     return fig
 
 
@@ -160,7 +215,8 @@ def build_app(df):
         gr.Markdown("## Pareto plot")
         gr.Markdown(
             "Select 2 criteria to plot the Pareto frontier. This will show the best PEFT methods along this axis and "
-            "the trade-offs with the other axis."
+            "the trade-offs with the other axis. The PEFT methods that Pareto-dominate are shown in colors. All other "
+            "methods are inferior with regard to these two metrics. Hover over a point to show details."
         )
 
         with gr.Row():
@@ -222,8 +278,9 @@ def build_app(df):
                     filtered = filtered.query(current_filter)
                 except Exception as e:
                     return generate_pareto_plot(filtered, metric_x, metric_y), f"Filter error: {e}"
+
             pareto_df = compute_pareto_frontier(filtered, metric_x, metric_y)
-            fig = generate_pareto_plot(pareto_df, metric_x, metric_y)
+            fig = generate_pareto_plot(filtered, metric_x, metric_y)
             summary = compute_pareto_summary(filtered, pareto_df, metric_x, metric_y)
             return fig, summary
 
@@ -247,8 +304,9 @@ def build_app(df):
                         generate_pareto_plot(filtered, metric_x, metric_y),
                         f"Filter error: {e}",
                     )
+
             pareto_df = compute_pareto_frontier(filtered, metric_x, metric_y)
-            fig = generate_pareto_plot(pareto_df, metric_x, metric_y)
+            fig = generate_pareto_plot(filtered, metric_x, metric_y)
             summary = compute_pareto_summary(filtered, pareto_df, metric_x, metric_y)
             return filter_query, filtered, fig, summary
 
@@ -261,7 +319,7 @@ def build_app(df):
         def reset_filter(task_name, model_id, metric_x, metric_y):
             filtered = filter_data(task_name, model_id, df)
             pareto_df = compute_pareto_frontier(filtered, metric_x, metric_y)
-            fig = generate_pareto_plot(pareto_df, metric_x, metric_y)
+            fig = generate_pareto_plot(filtered, metric_x, metric_y)
             summary = compute_pareto_summary(filtered, pareto_df, metric_x, metric_y)
             # Return empty strings to clear the filter state and textbox.
             return "", "", filtered, fig, summary
