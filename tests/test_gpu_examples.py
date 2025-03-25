@@ -2553,7 +2553,7 @@ class TestLoftQ:
 
 
 @require_bitsandbytes
-@require_torch_gpu
+@require_non_cpu
 class MultiprocessTester(unittest.TestCase):
     def test_notebook_launcher(self):
         script_path = os.path.join("scripts", "launch_notebook_mp.py")

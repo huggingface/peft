@@ -1252,7 +1252,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert torch.allclose(out_dora, out_unmerged, atol=atol, rtol=rtol)
         assert torch.allclose(out_dora, out_unloaded, atol=atol, rtol=rtol)
 
-    @require_torch_gpu
+    @require_non_cpu
     @pytest.mark.single_gpu_tests
     @require_bitsandbytes
     def test_8bit_dora_merging(self):
