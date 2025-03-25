@@ -1377,12 +1377,13 @@ class PeftGPUCommonTests(unittest.TestCase):
         lora_A, lora_B = layer.lora_A, layer.lora_B
 
         possible_combinations = ["cpu", self.device, f"{self.device}:0", f"{self.device}:1"]
+        adapter_name = layer.active_adapter[0]
         for device_A in possible_combinations:
             la = lora_A.to(device_A)
             for device_B in possible_combinations:
                 lb = lora_B.to(device_B)
                 layer.lora_A, layer.lora_B = la, lb
-                layer.dora_init(layer.active_adapter[0])  # should not raise an error
+                layer.lora_variant[adapter_name].init(layer, adapter_name)  # should not raise an error
 
     def test_apply_GS_hra_inference(self):
         # check for different result with and without apply_GS
