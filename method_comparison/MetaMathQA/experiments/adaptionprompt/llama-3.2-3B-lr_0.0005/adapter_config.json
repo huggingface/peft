@@ -1,0 +1,11 @@
+{
+  "adapter_layers": 28,
+  "adapter_len": 100,
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "inference_mode": false,
+  "peft_type": "ADAPTION_PROMPT",
+  "revision": null,
+  "target_modules": null,
+  "task_type": "CAUSAL_LM"
+}

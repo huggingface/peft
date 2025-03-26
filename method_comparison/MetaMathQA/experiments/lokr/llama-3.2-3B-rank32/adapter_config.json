@@ -1,0 +1,27 @@
+{
+  "alpha": 64,
+  "alpha_pattern": {},
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "decompose_both": false,
+  "decompose_factor": -1,
+  "exclude_modules": null,
+  "inference_mode": false,
+  "init_weights": true,
+  "layers_pattern": null,
+  "layers_to_transform": null,
+  "module_dropout": 0.0,
+  "modules_to_save": null,
+  "peft_type": "LOKR",
+  "r": 32,
+  "rank_dropout": 0.0,
+  "rank_dropout_scale": false,
+  "rank_pattern": {},
+  "revision": null,
+  "target_modules": [
+    "q_proj",
+    "v_proj"
+  ],
+  "task_type": null,
+  "use_effective_conv2d": false
+}
