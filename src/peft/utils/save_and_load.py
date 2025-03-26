@@ -197,7 +197,9 @@ def get_peft_model_state_dict(
     # ADDITIONAL TRAINING MODULES / MODULES_TO_SAVE
     for name, module in model.named_modules():
         if isinstance(module, AuxiliaryTrainingWrapper):
-            to_return.update({f"{name}.{k}": v for k, v in module.adapter_state_dict(adapter_name).items()})
+            to_return.update(
+                {f"{name}.{k}": v for k, v in module.adapter_state_dict(adapter_name, state_dict).items()}
+            )
 
     # DEAL WITH EMBEDDINGS
     # check the common embedding layers in `target_modules` to reset `save_embedding_layers` if necessary

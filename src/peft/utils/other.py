@@ -426,7 +426,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
 
                 self._active_adapter.append(adapter_name)
 
-    def adapter_state_dict(self, adapter_name):
+    def adapter_state_dict(self, adapter_name: str, state_dict: Optional[dict[str, torch.Tensor]] = None):
         """Return the state dict of this module for a given adapter."""
         raise NotImplementedError
 
@@ -553,12 +553,23 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         # The state dict returned by ModulesToSaveWrapper
         return {k: f"modules_to_save.{adapter_name}.{k}" for k in self.adapter_state_dict(adapter_name)}
 
-    def adapter_state_dict(self, adapter_name):
+    def adapter_state_dict(self, adapter_name: str, state_dict: Optional[dict[str, torch.Tensor]] = None):
         if adapter_name not in self._adapters:
-            # In caes of multiple adapters, each bringing their own modules to save, each
+            # In case of multiple adapters, each bringing their own modules to save, each
             # ModulesToSaveWrapper will be queried but not every wrapper is obliged to serve the same adapters.
             return {}
-        return self.modules_to_save[adapter_name].state_dict()
+        if state_dict is None:
+            return self.modules_to_save[adapter_name].state_dict()
+
+        # fetch the items from the state_dict directly -- using self.modules_to_save[adapter_name].state_dict() can
+        # return empty tensors in a distributed setting
+        remapped_state_dict = {}
+        infix = f"modules_to_save.{adapter_name}."
+        for k, v in state_dict.items():
+            idx = k.rfind(infix)
+            if idx > -1:
+                remapped_state_dict[k[idx + len(infix) :]] = v
+        return remapped_state_dict
 
     def unload_and_optionally_merge_module(
         self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]
@@ -651,18 +662,32 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
 
         super().update(active_adapter)
 
-    def adapter_state_dict(self, adapter_name):
+    def adapter_state_dict(self, adapter_name: str, state_dict: Optional[dict[str, torch.Tensor]] = None):
         if self.token_adapter.tied_adapter:
             # storing of weight-tied layers is not up to us and will be handled by
             # transformers. we're just here to keep those layers in sync during training.
             # therefore we return an empty state dict.
             return {}
 
-        return {
-            f"token_adapter.{k}": v
-            for k, v in self.token_adapter.state_dict().items()
-            if k.startswith("trainable_tokens_") and k.endswith(f".{adapter_name}")
-        }
+        # note: trainable_tokens_original is not part of the state_dict, as it's from the BufferDict
+        infix = "trainable_tokens_delta"
+        if state_dict is None:
+            return {
+                f"token_adapter.{k}": v
+                for k, v in self.token_adapter.state_dict().items()
+                if k.startswith(infix) and k.endswith(f".{adapter_name}")
+            }
+
+        # fetch the items from the state_dict directly -- using self.modules_to_save[adapter_name].state_dict() can
+        # return empty tensors in a distributed setting
+        remapped_state_dict = {}
+        for k, v in state_dict.items():
+            if not k.endswith(f".{adapter_name}"):
+                continue
+            idx = k.rfind(infix)
+            if idx > -1:
+                remapped_state_dict[f"token_adapter.{k[idx:]}"] = v
+        return remapped_state_dict
 
     def enable_adapters(self, enabled: bool):
         """Enables/disables the underlying `TrainableTokens` adapter.
