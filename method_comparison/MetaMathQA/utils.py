@@ -79,6 +79,7 @@ class TrainConfig:
         optimizer_kwargs: The optimizer keyword arguments (lr etc.)
         lr_scheduler: The learning rate scheduler (currently only None or 'cosine' are supported)
         use_amp: Whether to use automatic mixed precision
+        autocast_adapter_dtype: Whether to cast adapter dtype to float32, same argument as in PEFT
         generation_kwargs: Arguments passed to transformers GenerationConfig (used in evaluation)
         attn_implementation: The attention implementation to use (if any), see transformers docs
     """
@@ -97,6 +98,7 @@ class TrainConfig:
     optimizer_kwargs: dict[str, Any]
     lr_scheduler: Optional[Literal["cosine"]]
     use_amp: bool
+    autocast_adapter_dtype: bool
     generation_kwargs: dict[str, Any]
     attn_implementation: Optional[str]
 
@@ -235,11 +237,12 @@ def get_model(
     compile: bool,
     attn_implementation: Optional[str],
     peft_config: PeftConfig,
+    autocast_adapter_dtype: bool,
 ) -> nn.Module:
     base_model = get_base_model(
         model_id=model_id, dtype=dtype, compile=compile, attn_implementation=attn_implementation
     )
-    model = get_peft_model(base_model, peft_config)
+    model = get_peft_model(base_model, peft_config, autocast_adapter_dtype=autocast_adapter_dtype)
     return model
 
 
