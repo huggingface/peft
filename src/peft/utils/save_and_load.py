@@ -197,7 +197,16 @@ def get_peft_model_state_dict(
     # ADDITIONAL TRAINING MODULES / MODULES_TO_SAVE
     for name, module in model.named_modules():
         if isinstance(module, AuxiliaryTrainingWrapper):
-            to_return.update({f"{name}.{k}": v for k, v in module.adapter_state_dict(adapter_name).items()})
+            # Compute the module-relative state dict to make it easier for the adapter to fetch the appropriate
+            # keys that the module thinks need to be saved. We cannot rely on `.state_dict()` internally of the
+            # module since accelerators like DeepSpeed require special handling which is done for the model
+            # state dict from above but most likely not in the module itself. See #2450.
+            module_state_dict = {
+                k.removeprefix(f"{name}."): v for k, v in state_dict.items() if k.startswith(f"{name}.")
+            }
+            to_return.update(
+                {f"{name}.{k}": v for k, v in module.adapter_state_dict(adapter_name, module_state_dict).items()}
+            )
 
     # DEAL WITH EMBEDDINGS
     # check the common embedding layers in `target_modules` to reset `save_embedding_layers` if necessary
@@ -343,14 +352,9 @@ def set_peft_model_state_dict(
             # `modules_to_save.{adapter_name}.` prefix. This prefix must be restored when loading the model from the
             # saved state dict which is why we fetch a load key map from the wrapper.
             key_map = module.adapter_state_dict_load_map(adapter_name)
-
-            for k in module.adapter_state_dict(adapter_name):
-                # each saved state dict is adapter specific, i.e. does not contain the adapter name
-                # but the loaded state dict does include adapter names since we can have multiple.
-                k_no_adapter = k.replace(f".{adapter_name}", "")
-
-                store_key = f"{name}.{key_map.get(k, k)}"
-                lookup_key = f"{name}.{k_no_adapter}"
+            for k in key_map:
+                lookup_key = f"{name}.{k}"
+                store_key = f"{name}.{key_map[k]}"
 
                 state_dict[store_key] = peft_model_state_dict[lookup_key]
 
