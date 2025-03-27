@@ -434,9 +434,10 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         """Return a mapping from the key present in disk-loaded state dict
         and how it should be represented in the loaded model's state dict.
 
-        If a key is not present here, it is assumed to be mapped 1:1.
+        The default should be a 1:1 mapping but it is important to define a mapping as it also serves as the
+        ground-truth for which keys are supposed to be loaded from a saved state dict.
         """
-        return {}
+        raise NotImplementedError
 
     def unload_and_optionally_merge_module(
         self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]
@@ -550,15 +551,24 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         self._active_adapter = adapter_name
 
     def adapter_state_dict_load_map(self, adapter_name):
-        # The state dict returned by ModulesToSaveWrapper
-        return {k: f"modules_to_save.{adapter_name}.{k}" for k in self.adapter_state_dict(adapter_name)}
-
-    def adapter_state_dict(self, adapter_name):
+        # Maps the module keys as they are in the saved state dict to the in-memory state dict.
+        # Must contain all keys that are supposed to be loaded.
         if adapter_name not in self._adapters:
             # In caes of multiple adapters, each bringing their own modules to save, each
             # ModulesToSaveWrapper will be queried but not every wrapper is obliged to serve the same adapters.
             return {}
-        return self.modules_to_save[adapter_name].state_dict()
+        return {k: f"modules_to_save.{adapter_name}.{k}" for k in self.modules_to_save[adapter_name].state_dict()}
+
+    def adapter_state_dict(self, adapter_name, state_dict):
+        if adapter_name not in self._adapters:
+            # In caes of multiple adapters, each bringing their own modules to save, each
+            # ModulesToSaveWrapper will be queried but not every wrapper is obliged to serve the same adapters.
+            return {}
+
+        return {
+            k: state_dict[f"modules_to_save.{adapter_name}.{k}"]
+            for k in self.modules_to_save[adapter_name].state_dict()
+        }
 
     def unload_and_optionally_merge_module(
         self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]
@@ -651,7 +661,12 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
 
         super().update(active_adapter)
 
-    def adapter_state_dict(self, adapter_name):
+    def adapter_state_dict_load_map(self, adapter_name):
+        if self.token_adapter.tied_adapter:
+            return {}
+        return {"token_adapter.trainable_tokens_delta": f"token_adapter.trainable_tokens_delta.{adapter_name}"}
+
+    def adapter_state_dict(self, adapter_name, state_dict):
         if self.token_adapter.tied_adapter:
             # storing of weight-tied layers is not up to us and will be handled by
             # transformers. we're just here to keep those layers in sync during training.
@@ -659,9 +674,7 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
             return {}
 
         return {
-            f"token_adapter.{k}": v
-            for k, v in self.token_adapter.state_dict().items()
-            if k.startswith("trainable_tokens_") and k.endswith(f".{adapter_name}")
+            f"token_adapter.{k}": state_dict[f"token_adapter.{k}.{adapter_name}"] for k in ["trainable_tokens_delta"]
         }
 
     def enable_adapters(self, enabled: bool):
