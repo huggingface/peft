@@ -13,6 +13,8 @@
 # limitations under the License.
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 from accelerate.utils.imports import is_xpu_available
 from torch import nn
@@ -25,7 +27,7 @@ from .layer import Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd
 
 class DoraLinearVariant(LoraVariant):
     @staticmethod
-    def init(module: Linear, adapter_name: str) -> None:
+    def init(module: Linear, adapter_name: str, **kwargs: Any) -> None:
         if not module.lora_magnitude_vector:
             # first dora layer being added, add lora_magnitude_vector to the list of learnable parameters
             module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_magnitude_vector",)
@@ -123,7 +125,7 @@ class DoraLinearVariant(LoraVariant):
 
 class DoraEmbeddingVariant(DoraLinearVariant):
     @staticmethod
-    def init(module: Embedding, adapter_name: str) -> None:
+    def init(module: Embedding, adapter_name: str, **kwargs: Any) -> None:
         if module.lora_magnitude_vector is None:
             # first dora layer being added, add lora_magnitude_vector to the list of learnable parameters
             module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_magnitude_vector",)
@@ -275,13 +277,13 @@ class _DoraConvNdVariant(LoraVariant):
 
 class DoraConv2dVariant(_DoraConvNdVariant):
     @staticmethod
-    def init(module: Conv2d, adapter_name: str) -> None:
+    def init(module: Conv2d, adapter_name: str, **kwargs: Any) -> None:
         dora_layer = DoraConv2dLayer(fan_in_fan_out=False)
         _DoraConvNdVariant.init_convd_variant(module, adapter_name, dora_layer=dora_layer)
 
 
 class DoraConv3dVariant(_DoraConvNdVariant):
     @staticmethod
-    def init(module: Conv3d, adapter_name: str) -> None:
+    def init(module: Conv3d, adapter_name: str, **kwargs: Any) -> None:
         dora_layer = DoraConv3dLayer(fan_in_fan_out=False)
         _DoraConvNdVariant.init_convd_variant(module, adapter_name, dora_layer=dora_layer)
