@@ -47,7 +47,6 @@ from .testing_common import PeftTestConfigManagerForDecoderModels as PeftTestCon
 
 PEFT_DECODER_MODELS_TO_TEST = [
     "hf-internal-testing/tiny-random-OPTForCausalLM",
-    "hf-internal-testing/tiny-random-GPTNeoXForCausalLM",
     "hf-internal-testing/tiny-random-GPT2LMHeadModel",
     "hf-internal-testing/tiny-random-BloomForCausalLM",
     "hf-internal-testing/tiny-random-gpt_neo",
@@ -55,6 +54,7 @@ PEFT_DECODER_MODELS_TO_TEST = [
     "hf-internal-testing/tiny-random-GPTBigCodeForCausalLM",
     "trl-internal-testing/tiny-random-LlamaForCausalLM",
     "peft-internal-testing/tiny-dummy-qwen2",
+    "hf-internal-testing/tiny-random-Gemma2ForCausalLM",
 ]
 
 FULL_GRID = {
@@ -69,6 +69,7 @@ SMALL_GRID = {
         "hf-internal-testing/tiny-random-MistralForCausalLM",
         "peft-internal-testing/tiny-dummy-qwen2",
         "trl-internal-testing/tiny-random-LlamaForCausalLM",
+        "hf-internal-testing/tiny-random-Gemma2ForCausalLM",
     ],
     "task_type": "CAUSAL_LM",
 }
