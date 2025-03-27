@@ -785,13 +785,15 @@ class Embedding(nn.Module, LoraLayer):
             lora_bias=lora_bias,
         )
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
-        if not use_dora:
+    def resolve_lora_variant(self, *, use_dora: bool, use_sine_lora:bool,**kwargs) -> Optional[LoraVariant]:
+        if use_dora:
+            from .variants import DoraEmbeddingVariant
+            return DoraEmbeddingVariant()
+        elif use_sine_lora:
+            from .variants import SineLoraLinearVariant
+            return SineLoraLinearVariant()
+        else:
             return None
-
-        from .variants import DoraEmbeddingVariant
-
-        return DoraEmbeddingVariant()
 
     def update_layer(
         self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora, lora_bias
