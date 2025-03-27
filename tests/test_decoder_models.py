@@ -54,7 +54,7 @@ PEFT_DECODER_MODELS_TO_TEST = [
     "hf-internal-testing/tiny-random-GPTBigCodeForCausalLM",
     "trl-internal-testing/tiny-random-LlamaForCausalLM",
     "peft-internal-testing/tiny-dummy-qwen2",
-    "hf-internal-testing/tiny-random-Gemma2ForCausalLM",
+    "hf-internal-testing/tiny-random-Gemma3ForCausalLM",
 ]
 
 FULL_GRID = {
@@ -69,7 +69,7 @@ SMALL_GRID = {
         "hf-internal-testing/tiny-random-MistralForCausalLM",
         "peft-internal-testing/tiny-dummy-qwen2",
         "trl-internal-testing/tiny-random-LlamaForCausalLM",
-        "hf-internal-testing/tiny-random-Gemma2ForCausalLM",
+        "hf-internal-testing/tiny-random-Gemma3ForCausalLM",
     ],
     "task_type": "CAUSAL_LM",
 }
@@ -87,6 +87,8 @@ def skip_oft_or_hra_and_gpt2(test_list):
             ("GPT2LMHeadModel" in test[1])
             and ((test[2] == BOFTConfig) or (test[2] == HRAConfig) or (test[2] == OFTConfig))
             or (test[2] == BoneConfig)
+            # prefix tuning fails with gemma, possibly because of 4d attention mask
+            or (("gemma" in test[1].lower()) and (test[2] == PrefixTuningConfig))
         )
     ]
 
@@ -335,6 +337,9 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
 
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_generate_half_prec(self, test_name, model_id, config_cls, config_kwargs):
+        if ("gemma" in model_id.lower()) and (config_cls == PrefixTuningConfig):
+            # gemma with prefix tuning fails
+            self.skipTest("Passing inputs_embeds fails with gemma")
         self._test_generate_half_prec(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
@@ -462,6 +467,9 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_oft_or_hra_and_gpt2)
     )
     def test_passing_input_embeds_works(self, test_name, model_id, config_cls, config_kwargs):
+        if "gemma" in model_id.lower():
+            # it appears that gemma requires input_ids
+            self.skipTest("Passing inputs_embeds fails with gemma")
         self._test_passing_input_embeds_works(test_name, model_id, config_cls, config_kwargs)
 
     def test_lora_layer_replication(self):
