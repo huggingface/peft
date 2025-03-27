@@ -201,7 +201,9 @@ def get_peft_model_state_dict(
             # keys that the module thinks need to be saved. We cannot rely on `.state_dict()` internally of the
             # module since accelerators like DeepSpeed require special handling which is done for the model
             # state dict from above but most likely not in the module itself. See #2450.
-            module_state_dict = {k[len(f"{name}.") :]: v for k, v in state_dict.items() if k.startswith(f"{name}.")}
+            module_state_dict = {
+                k.removeprefix(f"{name}."): v for k, v in state_dict.items() if k.startswith(f"{name}.")
+            }
             to_return.update(
                 {f"{name}.{k}": v for k, v in module.adapter_state_dict(adapter_name, module_state_dict).items()}
             )
