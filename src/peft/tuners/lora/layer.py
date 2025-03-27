@@ -41,6 +41,9 @@ class LoraVariant:
 
     This class should be subclassed and the methods below should be implemented accordingly. The methods should be
     implemented as static methods, this makes it easier to combine variants.
+
+    Note for developers: These methods are prone to change and should thus considered to be "private". Use at your own
+    discretion.
     """
 
     @staticmethod
@@ -180,6 +183,10 @@ class LoraLayer(BaseTunerLayer):
         use_dora: bool = False,
         lora_bias: bool = False,
     ):
+        # collect the kwargs
+        kwargs = locals().copy()
+        del kwargs["self"]
+
         # This code works for linear layers, override for other layer types
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -229,7 +236,7 @@ class LoraLayer(BaseTunerLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
         if adapter_name in self.lora_variant:
-            self.lora_variant[adapter_name].init(self, adapter_name=adapter_name)
+            self.lora_variant[adapter_name].init(self, **kwargs)
 
         self.set_adapter(self.active_adapters)
 
@@ -796,6 +803,10 @@ class Embedding(nn.Module, LoraLayer):
     def update_layer(
         self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora, lora_bias
     ):
+        # collect the kwargs
+        kwargs = locals().copy()
+        del kwargs["self"]
+
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
@@ -834,7 +845,7 @@ class Embedding(nn.Module, LoraLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
         if adapter_name in self.lora_variant:
-            self.lora_variant[adapter_name].init(self, adapter_name=adapter_name)
+            self.lora_variant[adapter_name].init(self, **kwargs)
 
         self.set_adapter(self.active_adapters)
 
@@ -1054,6 +1065,10 @@ class _ConvNd(nn.Module, LoraLayer):
     def update_layer(
         self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora, lora_bias
     ):
+        # collect the kwargs
+        kwargs = locals().copy()
+        del kwargs["self"]
+
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
@@ -1098,7 +1113,7 @@ class _ConvNd(nn.Module, LoraLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
         if adapter_name in self.lora_variant:
-            self.lora_variant[adapter_name].init(self, adapter_name=adapter_name)
+            self.lora_variant[adapter_name].init(self, **kwargs)
 
         self.set_adapter(self.active_adapters)
 
