@@ -426,6 +426,10 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
 
                 self._active_adapter.append(adapter_name)
 
+    def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
+        """Delete an adapter from the layer, set a new active adapter if necessary """
+        raise NotImplementedError
+
     def adapter_state_dict(self, adapter_name):
         """Return the state dict of this module for a given adapter."""
         raise NotImplementedError
@@ -462,6 +466,8 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         return "modules_to_save"
 
     def _forward_wrapped(self, x, *args, **kwargs):
+        if not self.active_adapters:
+            return self.original_module(x, *args, **kwargs)
         return self.modules_to_save[self.active_adapters[0]](x, *args, **kwargs)
 
     def _forward_wrapped_mixed_batch(self, x, active_adapter, *args, **kwargs):
@@ -549,6 +555,31 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         self.modules_to_save[self.active_adapters[0]].requires_grad_(False)
         self.modules_to_save[adapter_name].requires_grad_(True)
         self._active_adapter = adapter_name
+
+    def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
+        """
+        Delete the adapter if present.
+
+        This method will also set a new active adapter if the deleted adapter was the active adapter. It is important
+        that the new adapter is chosen in a deterministic way, so that the same adapter is chosen on all layers.
+        """
+        if adapter_name not in self.modules_to_save:
+            return
+
+        # set new active adapter, if necessary
+        # note: there can only ever be one active adapter, unlike for LoRA etc.
+        if len(new_active_adapters) > 1:
+            raise ValueError("TODO")
+
+        if not new_active_adapters:
+            del self.modules_to_save[adapter_name]
+            self._active_adapter = []
+            return
+
+        new_active_adapter = new_active_adapters[0]
+        if (new_active_adapter in self.modules_to_save) and (new_active_adapter != self.active_adapters[0]):
+            self.set_adapter(new_active_adapter)
+        del self.modules_to_save[adapter_name]
 
     def adapter_state_dict_load_map(self, adapter_name):
         # Maps the module keys as they are in the saved state dict to the in-memory state dict.
@@ -643,6 +674,8 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         )
 
     def _forward_wrapped(self, x, *args, **kwargs):
+        if not self.active_adapters:
+            return self.original_module(x, *args, **kwargs)
         return self.token_adapter(x)
 
     def _forward_wrapped_mixed_batch(self, x, active_adapter, *args, **kwargs):
@@ -688,6 +721,27 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
     def set_adapter(self, adapter_names: Union[str, list[str]]):
         super().set_adapter(adapter_names)
         self.token_adapter.set_adapter(adapter_names)
+
+    def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
+        """
+        Delete the adapter if present.
+
+        This method will also set a new active adapter if the deleted adapter was the active adapter. It is important
+        that the new adapter is chosen in a deterministic way, so that the same adapter is chosen on all layers.
+        """
+        self.token_adapter.delete_adapter(adapter_name)
+
+        # set new active adapter, if necessary
+        # note: there can only ever be one active adapter, unlike for LoRA etc.
+        if len(new_active_adapters) > 1:
+            raise ValueError("TODO")
+
+        if not new_active_adapters:
+            self._active_adapter = []
+            return
+
+        new_active_adapter = new_active_adapters[0]
+        self.token_adapter.set_adapter(new_active_adapter)
 
     def unload_and_optionally_merge_module(
         self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]

@@ -58,7 +58,7 @@ from peft import (
 from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import _get_submodules, infer_device
-from peft.utils.other import TrainableTokensWrapper
+from peft.utils.other import AuxiliaryTrainingWrapper, TrainableTokensWrapper
 
 from .testing_utils import get_state_dict
 
@@ -1397,9 +1397,6 @@ class PeftCommonTester:
         if config.peft_type not in supported_peft_types:
             return pytest.skip(f"Test not applicable for {config.peft_type}")
 
-        if hasattr(config, "trainable_token_indices"):
-            return pytest.skip("This is currently not supported. See https://github.com/huggingface/peft/issues/2381")
-
         model = self.transformers_class.from_pretrained(model_id)
         adapter_to_delete = "delete_me"
         model = get_peft_model(model, config)
@@ -1417,10 +1414,23 @@ class PeftCommonTester:
             for attr in attributes_to_check:
                 assert adapter_to_delete not in getattr(target, attr)
 
+        has_auxiliary = bool(getattr(config, "modules_to_save", False))
+        if has_auxiliary:
+            for module in model.modules():
+                if isinstance(module, AuxiliaryTrainingWrapper):
+                    assert adapter_to_delete not in module.modules_to_save
+                    assert module.active_adapters == ["default"]
+
         # check that we can also delete the last remaining adapter
         model.delete_adapter("default")
         assert "default" not in model.peft_config
         assert model.active_adapters == []
+
+        if has_auxiliary:
+            for module in model.modules():
+                if isinstance(module, AuxiliaryTrainingWrapper):
+                    assert "default" not in module.modules_to_save
+                    assert module.active_adapters == []
 
         input = self.prepare_inputs_for_testing()
         # note: we cannot call model(**input) because PeftModel always expects there to be at least one adapter
@@ -1449,9 +1459,6 @@ class PeftCommonTester:
         if config.peft_type not in supported_peft_types:
             return pytest.skip(f"Test not applicable for {config.peft_type}")
 
-        if hasattr(config, "trainable_token_indices"):
-            return pytest.skip("This is currently not supported. See https://github.com/huggingface/peft/issues/2381")
-
         model = self.transformers_class.from_pretrained(model_id)
         adapter_to_delete = "delete_me"
         model = get_peft_model(model, config)
@@ -1469,10 +1476,23 @@ class PeftCommonTester:
             for attr in attributes_to_check:
                 assert adapter_to_delete not in getattr(target, attr)
 
+        has_auxiliary = bool(getattr(config, "modules_to_save", False))
+        if has_auxiliary:
+            for module in model.modules():
+                if isinstance(module, AuxiliaryTrainingWrapper):
+                    assert adapter_to_delete not in module.modules_to_save
+                    assert module.active_adapters == ["default"]
+
         # check that we can also delete the last remaining adapter
         model.delete_adapter("default")
         assert "default" not in model.peft_config
         assert model.active_adapters == []
+
+        if has_auxiliary:
+            for module in model.modules():
+                if isinstance(module, AuxiliaryTrainingWrapper):
+                    assert "default" not in module.modules_to_save
+                    assert module.active_adapters == []
 
         input = self.prepare_inputs_for_testing()
         # note: we cannot call model(**input) because PeftModel always expects there to be at least one adapter
