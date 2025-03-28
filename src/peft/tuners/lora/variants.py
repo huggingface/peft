@@ -292,7 +292,6 @@ class DoraConv3dVariant(_DoraConvNdVariant):
 class SineLoraLinearVariant(LoraVariant):
     @staticmethod
     def init(module: Linear, adapter_name:str) -> None:
-        module.freq = 
         
         if module.sine_scaling is None:
             import math

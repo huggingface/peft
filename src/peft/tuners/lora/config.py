@@ -297,6 +297,10 @@ class LoraConfig(PeftConfig):
             ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger overhead than pure
             LoRA, so it is recommended to merge weights for inference. For more information, see
             https://arxiv.org/abs/2402.09353.
+        use_sine_lora (`bool`):
+            Enable 'Sine Activated Low-Rank Adaptation' (Sine-LoRA). This technique introduce to apply sine activation 
+            on the low-rank adaptor. This can be beneficial for rank boosting for low-rank matrices and enhancing its 
+            capacity. For more information, see https://arxiv.org/pdf/2403.19243.
         layer_replication (`List[Tuple[int, int]]`):
             Build a new stack of layers by stacking the original model layers according to the ranges specified. This
             allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
@@ -493,6 +497,31 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    use_sinelora: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Enable <a href='https://arxiv.org/pdf/2403.19243'> This technique introduce to apply sine activation on the low-rank adaptor."
+                "This can be beneficial for rank boosting for low-rank matrices and enhancing its capacity, especially at low ranks."
+            )
+        },
+    )
+    sinelora_frequency: float = field(
+        default=200.0,
+        metadata={
+            "help": (
+                "The frequency factor for the sine activation. If not specified, it will be set to the default value of 200."
+            )
+        },
+    )
+    sinelora_scaling: float = field(
+        default=None,
+        metadata={
+            "help": (
+                "The scaling factor for the sine activation. If not specified, it will be set to the default value of sqrt(in_features)."
+            )
+        },
+    )
     # Enables replicating layers in a model to expand it to a larger model.
     layer_replication: Optional[list[tuple[int, int]]] = field(
         default=None,
@@ -597,6 +626,7 @@ class LoraConfig(PeftConfig):
                 )
             if self.use_dora:
                 raise ValueError("The argument lora_bias=True is not supported for DoRA, please pass use_dora=False")
+            
 
         # Using post training conversion of modified base weights to restore their initial values PiSSA/CorDA/OLoRA cannot
         # be correctly done when using rslora + rank_pattern/alpha_pattern. We can't really know if the user intends

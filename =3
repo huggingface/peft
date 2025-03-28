@@ -1,0 +1,5 @@
+Collecting oauthlib
+  Using cached oauthlib-3.2.2-py3-none-any.whl.metadata (7.5 kB)
+Using cached oauthlib-3.2.2-py3-none-any.whl (151 kB)
+Installing collected packages: oauthlib
+Successfully installed oauthlib-3.2.2
