@@ -95,6 +95,8 @@ from .tuners import (
     VeraModel,
     XLoraConfig,
     XLoraModel,
+    RandLoraConfig,
+    RandLoraModel,
     get_eva_state_dict,
     initialize_lora_eva_weights,
 )
