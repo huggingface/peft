@@ -1382,7 +1382,7 @@ class PeftGPUCommonTests(unittest.TestCase):
             for device_B in possible_combinations:
                 lb = lora_B.to(device_B)
                 layer.lora_A, layer.lora_B = la, lb
-                layer.lora_variant[adapter_name].init(layer, adapter_name)  # should not raise an error
+                layer.lora_variant[adapter_name].init(layer, adapter_name=adapter_name)  # should not raise an error
 
     def test_apply_GS_hra_inference(self):
         # check for different result with and without apply_GS
