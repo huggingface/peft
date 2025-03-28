@@ -11,6 +11,7 @@ on:
 
 env:
   HF_HOME: .cache/huggingface
+  TRANSFORMERS_IS_CI: 1
 
 permissions: {}
 
