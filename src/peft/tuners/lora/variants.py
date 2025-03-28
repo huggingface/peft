@@ -293,9 +293,9 @@ class SineLoraLinearVariant(LoraVariant):
     @staticmethod
     def init(module: Linear, adapter_name:str) -> None:
         
-        if module.sine_scaling is None:
+        if module.sinelora_scaling is None:
             import math
-            module.sine_scaling = math.sqrt(module.in_features)
+            module.sinelora_scaling = math.sqrt(module.in_features)
         
     @staticmethod
     def forward(module: Linear, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
@@ -303,5 +303,5 @@ class SineLoraLinearVariant(LoraVariant):
         lora_A = module.lora_A[active_adapter]
         lora_B = module.lora_B[active_adapter]
         lora_scaling = module.scaling[active_adapter]
-        sine_output = x @ torch.sin(module.freq * lora_B.weight.T @ lora_A.weight) / module.sine_scaling * lora_scaling
+        sine_output = x @ torch.sin(module.sinelora_frequency * lora_B.weight.T @ lora_A.weight) / module.sinelora_scaling * lora_scaling
         result = result + sine_output
