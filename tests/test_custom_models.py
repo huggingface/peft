@@ -499,6 +499,10 @@ TEST_CASES = [
         TrainableTokensConfig,
         {"target_modules": ["emb"], "token_indices": [0, 1, 3], "init_weights": False},
     ),
+    ###################
+    # LoRA + SineLoRA #
+    ###################
+    ("Vanilla MLP LoRA + SineLoRA", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"],"use_sinelora": True}),
 ]
 
 # For this test matrix, each tuple consists of:
