@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 from typing import Any
-
+import math
 import torch
 from accelerate.utils.imports import is_xpu_available
 from torch import nn
@@ -292,9 +292,7 @@ class DoraConv3dVariant(_DoraConvNdVariant):
 class SineLoraLinearVariant(LoraVariant):
     @staticmethod
     def init(module: Linear, adapter_name:str) -> None:
-        
         if module.sinelora_scaling is None:
-            import math
             module.sinelora_scaling = math.sqrt(module.in_features)
         
     @staticmethod
@@ -305,3 +303,18 @@ class SineLoraLinearVariant(LoraVariant):
         lora_scaling = module.scaling[active_adapter]
         sine_output = x @ torch.sin(module.sinelora_frequency * lora_B.weight.T @ lora_A.weight) / module.sinelora_scaling * lora_scaling
         result = result + sine_output
+
+class SineLoraEmbeddingVariant(SineLoraLinearVariant):
+    @staticmethod
+    def init(module: Linear, adapter_name:str) -> None:
+        if module.sinelora_scaling is None:
+            module.sinelora_scaling = math.sqrt(module.in_features)
+
+    @staticmethod        
+    def forward(module: Embedding, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
+        lora_embedding_A = module.lora_embedding_A[active_adapter]
+        lora_embedding_B = module.lora_embedding_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        sine_output = module._embed(x) @ torch.sin(module.sinelora_frequency * lora_embedding_B.weight.T @ lora_embedding_A.weight) / module.sinelora_scaling * lora_scaling
+        result = result + sine_output
+        return result
