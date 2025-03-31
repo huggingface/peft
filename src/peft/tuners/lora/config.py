@@ -298,8 +298,8 @@ class LoraConfig(PeftConfig):
             LoRA, so it is recommended to merge weights for inference. For more information, see
             https://arxiv.org/abs/2402.09353.
         use_sinelora (`bool`):
-            Enable 'Sine Activated Low-Rank Adaptation' (Sine-LoRA). This technique introduce to apply sine activation 
-            on the low-rank adaptor. This can be beneficial for rank boosting for low-rank matrices and enhancing its 
+            Enable 'Sine Activated Low-Rank Adaptation' (Sine-LoRA). This technique introduce to apply sine activation
+            on the low-rank adaptor. This can be beneficial for rank boosting for low-rank matrices and enhancing its
             capacity. For more information, see https://arxiv.org/pdf/2403.19243.
         sinelora_frequency (`float`):
             The frequency factor for the sine activation. If not specified, it will be set to the default value of 200.
@@ -519,7 +519,7 @@ class LoraConfig(PeftConfig):
             )
         },
     )
-    sinelora_scaling: float = field(
+    sinelora_scaling: Optional[float] = field(
         default=None,
         metadata={
             "help": (
@@ -631,7 +631,6 @@ class LoraConfig(PeftConfig):
                 )
             if self.use_dora:
                 raise ValueError("The argument lora_bias=True is not supported for DoRA, please pass use_dora=False")
-            
 
         # Using post training conversion of modified base weights to restore their initial values PiSSA/CorDA/OLoRA cannot
         # be correctly done when using rslora + rank_pattern/alpha_pattern. We can't really know if the user intends

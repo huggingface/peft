@@ -502,7 +502,7 @@ TEST_CASES = [
     ###################
     # LoRA + SineLoRA #
     ###################
-    ("Vanilla MLP LoRA + SineLoRA", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"],"use_sinelora": True}),
+    ("Vanilla MLP LoRA + SineLoRA", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"], "use_sinelora": True}),
 ]
 
 # For this test matrix, each tuple consists of:

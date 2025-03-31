@@ -41,7 +41,7 @@ free_in_GB = int(torch.cuda.mem_get_info()[0] / 1024**3)
 max_memory = f"{free_in_GB - 2}GB"
 
 n_gpus = torch.cuda.device_count()
-max_memory = {i: max_memory for i in range(n_gpus)}
+max_memory = dict.fromkeys(range(n_gpus), max_memory)
 
 model = AutoModelForCausalLM.from_pretrained(
     "facebook/opt-350m",

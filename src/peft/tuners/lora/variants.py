@@ -13,8 +13,9 @@
 # limitations under the License.
 from __future__ import annotations
 
-from typing import Any
 import math
+from typing import Any
+
 import torch
 from accelerate.utils.imports import is_xpu_available
 from torch import nn
@@ -291,30 +292,46 @@ class DoraConv3dVariant(_DoraConvNdVariant):
 
 class SineLoraLinearVariant(LoraVariant):
     @staticmethod
-    def init(module: Linear, adapter_name:str) -> None:
-        if module.sinelora_scaling is None:
-            module.sinelora_scaling = math.sqrt(module.in_features)
-        
+    def init(module: Linear, adapter_name: str, **kwargs) -> None:
+        module.sinelora_frequency = kwargs['sinelora_frequency']
+
+        sinelora_scaling = kwargs.get('sinelora_scaling')
+        if sinelora_scaling is not None:
+            module.sinelora_scaling = sinelora_scaling
+
     @staticmethod
     def forward(module: Linear, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
 
         lora_A = module.lora_A[active_adapter]
         lora_B = module.lora_B[active_adapter]
         lora_scaling = module.scaling[active_adapter]
-        sine_output = x @ torch.sin(module.sinelora_frequency * lora_B.weight.T @ lora_A.weight) / module.sinelora_scaling * lora_scaling
+        sine_output = (
+            x
+            @ torch.sin(module.sinelora_frequency * lora_B.weight.T @ lora_A.weight)
+            / module.sinelora_scaling
+            * lora_scaling
+        )
         result = result + sine_output
+
 
 class SineLoraEmbeddingVariant(SineLoraLinearVariant):
     @staticmethod
-    def init(module: Linear, adapter_name:str) -> None:
-        if module.sinelora_scaling is None:
-            module.sinelora_scaling = math.sqrt(module.in_features)
+    def init(module: Embedding, adapter_name: str, **kwargs) -> None:
+        module.sinelora_frequency = kwargs['sinelora_frequency']
 
-    @staticmethod        
+        sinelora_scaling = kwargs.get('sinelora_scaling')
+        if sinelora_scaling is not None:
+            module.sinelora_scaling = sinelora_scaling
+    @staticmethod
     def forward(module: Embedding, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
         lora_embedding_A = module.lora_embedding_A[active_adapter]
         lora_embedding_B = module.lora_embedding_B[active_adapter]
         lora_scaling = module.scaling[active_adapter]
-        sine_output = module._embed(x) @ torch.sin(module.sinelora_frequency * lora_embedding_B.weight.T @ lora_embedding_A.weight) / module.sinelora_scaling * lora_scaling
+        sine_output = (
+            module._embed(x)
+            @ torch.sin(module.sinelora_frequency * lora_embedding_B.weight.T @ lora_embedding_A.weight)
+            / module.sinelora_scaling
+            * lora_scaling
+        )
         result = result + sine_output
         return result
