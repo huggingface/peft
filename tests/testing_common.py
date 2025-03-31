@@ -1498,6 +1498,17 @@ class PeftCommonTester:
         # note: we cannot call model(**input) because PeftModel always expects there to be at least one adapter
         model.base_model(**input)  # should not raise an error
 
+    def _test_delete_unknown_adapter_raises(self, model_id, config_cls, config_kwargs):
+        # Check that we get a nice error message when trying to delete an adapter that does not exist.
+        config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+        model = self.transformers_class.from_pretrained(model_id)
+        adapter_to_delete = "delete_me"
+        model = get_peft_model(model, config)
+
+        msg = "Adapter unknown-adapter does not exist"
+        with pytest.raises(ValueError, match=msg):
+            model.delete_adapter("unknown-adapter")
+
     def _test_unload_adapter(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
         num_params_base = len(model.state_dict())

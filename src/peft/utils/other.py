@@ -427,7 +427,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
                 self._active_adapter.append(adapter_name)
 
     def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
-        """Delete an adapter from the layer, set a new active adapter if necessary """
+        """Delete an adapter from the layer, set a new active adapter if necessary"""
         raise NotImplementedError
 
     def adapter_state_dict(self, adapter_name):
@@ -568,8 +568,11 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 
         # set new active adapter, if necessary
         # note: there can only ever be one active adapter, unlike for LoRA etc.
-        if len(new_active_adapters) > 1:
-            raise ValueError("TODO")
+        if isinstance(new_active_adapters, (list, tuple)) and len(new_active_adapters) > 1:
+            name = self.__class__.__name__
+            raise ValueError(
+                f"Attempted to set multiple ({new_active_adapters}) adapters at once for {name}, which is not allowed."
+            )
 
         if not new_active_adapters:
             del self.modules_to_save[adapter_name]
@@ -577,7 +580,12 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
             return
 
         new_active_adapter = new_active_adapters[0]
-        if (new_active_adapter in self.modules_to_save) and (new_active_adapter != self.active_adapters[0]):
+        if new_active_adapter not in self.modules_to_save:
+            # a new active adapter was chosen but it seems like it has no modules_to_save
+            self._active_adapter = []
+            return
+
+        if new_active_adapter != self.active_adapters[0]:
             self.set_adapter(new_active_adapter)
         del self.modules_to_save[adapter_name]
 
@@ -733,11 +741,19 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
 
         # set new active adapter, if necessary
         # note: there can only ever be one active adapter, unlike for LoRA etc.
-        if len(new_active_adapters) > 1:
-            raise ValueError("TODO")
+        if isinstance(new_active_adapters, (list, tuple)) and len(new_active_adapters) > 1:
+            name = self.__class__.__name__
+            raise ValueError(
+                f"Attempted to set multiple ({new_active_adapters}) adapters at once for {name}, which is not allowed."
+            )
 
         if not new_active_adapters:
             self._active_adapter = []
+            return
+
+        if new_active_adapters[0] not in self.active_adapters:
+            # a new active adapter was chosen but it seems like it has no trainable_tokens
+            self._active_adapters = []
             return
 
         new_active_adapter = new_active_adapters[0]

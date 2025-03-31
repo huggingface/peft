@@ -946,6 +946,25 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         self.set_additional_trainable_modules(peft_config, adapter_name)
 
+    def delete_adapter(self, adapter_name: str) -> None:
+        """
+        Deletes an existing adapter.
+
+        Args:
+            adapter_name (str): Name of the adapter to be deleted.
+        """
+        if adapter_name not in self.peft_config:
+            raise ValueError(f"Adapter {adapter_name} does not exist")
+
+        self.base_model.delete_adapter(adapter_name=adapter_name)
+        new_active_adapters = self.active_adapters
+        num_adapters = len(new_active_adapters)
+        # Note: PeftModel assumes that there is exactly one active adapter, so we should theoretically raise if
+        # num_adapters != 1. However, we have allowed this in the past (maybe inadvertently), so we let it slip and
+        # don't introduce a backwards incompatibility by raising an error.
+        if num_adapters == 1:
+            self.active_adapter = new_active_adapters[0]
+
     def set_additional_trainable_modules(self, peft_config, adapter_name):
         if getattr(peft_config, "modules_to_save", None) is not None:
             if self.modules_to_save is None:
