@@ -571,7 +571,7 @@ class BaseTuner(nn.Module, ABC):
             else:
                 model.modules_to_save.update(set(peft_config.modules_to_save))
 
-    def merge_adapter(self, adapter_names: Optional[list[str]] = None) -> None:
+    def merge_adapter(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         This method merges the adapter layers into the base model.
 
@@ -592,7 +592,7 @@ class BaseTuner(nn.Module, ABC):
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
                 with onload_layer(module):
-                    module.merge(adapter_names=adapter_names)
+                    module.merge(adapter_names=adapter_names, safe_merge=safe_merge)
 
     def unmerge_adapter(self):
         """

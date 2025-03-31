@@ -177,7 +177,7 @@ class HRALinear(nn.Module, HRALayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weight
+                    base_layer.weight.data = orig_weight.to(orig_dtype)
                 else:
                     delta_weight = self.get_delta_weight(active_adapter)
                     new_weight = torch.mm(base_layer.weight.data.to(delta_weight.dtype), delta_weight)

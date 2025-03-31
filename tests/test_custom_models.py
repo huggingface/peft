@@ -1230,7 +1230,11 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             # this model does not support merging
             return
 
-        model.merge_adapter()
+        model.merge_adapter(safe_merge=False)
+        model(**X)
+        model.unmerge_adapter()
+        model(**X)
+        model.merge_adapter(safe_merge=True)
         model(**X)
         model.unmerge_adapter()
         model(**X)
@@ -1268,7 +1272,11 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             # this model does not support merging
             return
 
-        model.merge_adapter()
+        model.merge_adapter(safe_merge=False)
+        model(**X)
+        model.unmerge_adapter()
+        model(**X)
+        model.merge_adapter(safe_merge=True)
         model(**X)
         model.unmerge_adapter()
         model(**X)
@@ -1305,7 +1313,11 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             # this model does not support merging
             return
 
-        model.merge_adapter()
+        model.merge_adapter(safe_merge=False)
+        model(**X)
+        model.unmerge_adapter()
+        model(**X)
+        model.merge_adapter(safe_merge=True)
         model(**X)
         model.unmerge_adapter()
         model(**X)
@@ -1342,7 +1354,11 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             # this model does not support merging
             return
 
-        model.merge_adapter()
+        model.merge_adapter(safe_merge=False)
+        model(**X)
+        model.unmerge_adapter()
+        model(**X)
+        model.merge_adapter(safe_merge=True)
         model(**X)
         model.unmerge_adapter()
         model(**X)
