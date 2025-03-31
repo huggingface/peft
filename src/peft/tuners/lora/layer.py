@@ -610,8 +610,8 @@ class Linear(nn.Module, LoraLayer):
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
                     orig_weight = base_layer.weight.data.clone()
+                    orig_dtype = orig_weight.dtype
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
-                        orig_dtype = orig_weight.dtype
                         delta_weight = self.get_delta_weight(active_adapter)
                         orig_weight += delta_weight.to(orig_dtype)
                     else:
@@ -622,13 +622,15 @@ class Linear(nn.Module, LoraLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
+                    base_layer.weight.data = orig_weight
+
                     if self.lora_bias[active_adapter]:
                         new_bias = base_layer.bias + self.lora_B[active_adapter].bias
                         if not torch.isfinite(new_bias).all():
                             raise ValueError(
                                 f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                             )
-                        base_layer.bias.data = new_bias
+                        base_layer.bias.data = new_bias.to(orig_dtype)
 
                 else:
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
@@ -1150,6 +1152,7 @@ class _ConvNd(nn.Module, LoraLayer):
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
+
                     base_layer.weight.data = orig_weight
 
                     if self.lora_bias[active_adapter]:
@@ -1158,7 +1161,7 @@ class _ConvNd(nn.Module, LoraLayer):
                             raise ValueError(
                                 f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                             )
-                        base_layer.bias.data = new_bias
+                        base_layer.bias.data = new_bias.to(orig_dtype)
 
                 else:
                     if active_adapter not in self.lora_variant:  # vanilla LoRA

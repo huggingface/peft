@@ -74,7 +74,7 @@ class DoraLinearVariant(LoraVariant):
         dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
         dora_factor = transpose(dora_factor.view(-1, 1), module.fan_in_fan_out)
         new_weight = dora_factor * (orig_weight + delta_weight)
-        new_weight = orig_weight.to(orig_dtype)
+        new_weight = new_weight.to(orig_dtype)
         return new_weight
 
     @staticmethod
