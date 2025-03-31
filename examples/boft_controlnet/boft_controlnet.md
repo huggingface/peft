@@ -19,7 +19,7 @@ rendered properly in your Markdown viewer.
 
 This guide demonstrates how to use BOFT, an orthogonal fine-tuning method, to fine-tune Stable Diffusion with either `stabilityai/stable-diffusion-2-1` or `runwayml/stable-diffusion-v1-5` model for controllable generation.
 
-By using BOFT from 🤗 PEFT, we can significantly reduce the number of trainable parameters while still achieving impressive results in various fine-tuning tasks across different foundation models. BOFT enhances model efficiency by integrating full-rank orthogonal matrices with a butterfly structure into specific model blocks, such as attention blocks, mirroring the approach used in LoRA. During fine-tuning, only these inserted matrices are trained, leaving the original model parameters untouched. During inference, the trainable BOFT paramteres can be merged into the original model, eliminating any additional computational costs.
+By using BOFT from 🤗 PEFT, we can significantly reduce the number of trainable parameters while still achieving impressive results in various fine-tuning tasks across different foundation models. BOFT enhances model efficiency by integrating full-rank orthogonal matrices with a butterfly structure into specific model blocks, such as attention blocks, mirroring the approach used in LoRA. During fine-tuning, only these inserted matrices are trained, leaving the original model parameters untouched. During inference, the trainable BOFT parameters can be merged into the original model, eliminating any additional computational costs.
 
 As a member of the **orthogonal finetuning** class, BOFT presents a systematic and principled method for fine-tuning. It possesses several unique properties and has demonstrated superior performance compared to LoRA in a variety of scenarios. For further details on BOFT, please consult the [PEFT's GitHub repo's concept guide OFT](https://https://huggingface.co/docs/peft/index), the [original BOFT paper](https://arxiv.org/abs/2311.06243) and the [original OFT paper](https://arxiv.org/abs/2306.07280).
 
@@ -58,7 +58,7 @@ export DATASET_NAME="oftverse/control-celeba-hq"
 
 ## Train controllable generation (ControlNet) with BOFT
 
-Start with setting some hyperparamters for BOFT:
+Start with setting some hyperparameters for BOFT:
 ```bash
 PEFT_TYPE="boft"
 BLOCK_NUM=8
