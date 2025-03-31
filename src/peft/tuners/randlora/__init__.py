@@ -20,11 +20,10 @@ from .layer import Linear, RandLoraLayer
 from .model import RandLoraModel
 
 
-__all__ = ["RandLoraConfig", "RandLoraLayer", "Linear", "RandLoraModel"]
+__all__ = ["Linear", "RandLoraConfig", "RandLoraLayer", "RandLoraModel"]
 
-register_peft_method(
-    name="randlora", config_cls=RandLoraConfig, model_cls=RandLoraModel, prefix="randlora_"
-)
+register_peft_method(name="randlora", config_cls=RandLoraConfig, model_cls=RandLoraModel, prefix="randlora_")
+
 
 def __getattr__(name):
     if (name == "Linear8bitLt") and is_bnb_available():
