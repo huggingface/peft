@@ -295,9 +295,9 @@ class SineLoraLinearVariant(LoraVariant):
     def init(module: Linear, adapter_name: str, **kwargs) -> None:
         module.sinelora_frequency = kwargs['sinelora_frequency']
 
-        sinelora_scaling = kwargs.get('sinelora_scaling')
-        if sinelora_scaling is not None:
-            module.sinelora_scaling = sinelora_scaling
+        module.sinelora_scaling = kwargs['sinelora_scaling']
+        if module.sinelora_scaling is None:
+            module.sinelora_scaling = math.sqrt(module.in_features)
 
     @staticmethod
     def forward(module: Linear, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
@@ -307,7 +307,7 @@ class SineLoraLinearVariant(LoraVariant):
         lora_scaling = module.scaling[active_adapter]
         sine_output = (
             x
-            @ torch.sin(module.sinelora_frequency * lora_B.weight.T @ lora_A.weight)
+            @ torch.sin(module.sinelora_frequency * lora_A.weight.T @ lora_B.weight.T)
             / module.sinelora_scaling
             * lora_scaling
         )
@@ -319,9 +319,10 @@ class SineLoraEmbeddingVariant(SineLoraLinearVariant):
     def init(module: Embedding, adapter_name: str, **kwargs) -> None:
         module.sinelora_frequency = kwargs['sinelora_frequency']
 
-        sinelora_scaling = kwargs.get('sinelora_scaling')
-        if sinelora_scaling is not None:
-            module.sinelora_scaling = sinelora_scaling
+        sinelora_scaling = kwargs['sinelora_scaling']
+        if sinelora_scaling is None:
+            module.sinelora_scaling = math.sqrt(module.in_features)
+
     @staticmethod
     def forward(module: Embedding, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
         lora_embedding_A = module.lora_embedding_A[active_adapter]
@@ -329,7 +330,7 @@ class SineLoraEmbeddingVariant(SineLoraLinearVariant):
         lora_scaling = module.scaling[active_adapter]
         sine_output = (
             module._embed(x)
-            @ torch.sin(module.sinelora_frequency * lora_embedding_B.weight.T @ lora_embedding_A.weight)
+            @ torch.sin(module.sinelora_frequency * lora_embedding_A.weight.T @ lora_embedding_B.weight.T)
             / module.sinelora_scaling
             * lora_scaling
         )

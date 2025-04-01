@@ -183,11 +183,17 @@ class LoraLayer(BaseTunerLayer):
         use_rslora,
         use_dora: bool = False,
         use_sinelora: bool = False,
+        sinelora_frequency: float = 200.0,
+        sinelora_scaling: Optional[float] = None,
         lora_bias: bool = False,
     ):
         # collect the kwargs
         kwargs = locals().copy()
         del kwargs["self"]
+
+        if use_sinelora:
+            self.sinelora_frequency = sinelora_frequency
+            self.sinelora_scaling = sinelora_scaling
 
         # This code works for linear layers, override for other layer types
         if r <= 0:
@@ -572,6 +578,8 @@ class Linear(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        sinelora_frequency: float = 200.0,
+        sinelora_scaling: Optional[float] = None,
         lora_bias: bool = False,
         use_sinelora: bool = False,
         **kwargs,
@@ -591,6 +599,8 @@ class Linear(nn.Module, LoraLayer):
             use_dora=use_dora,
             lora_bias=lora_bias,
             use_sinelora=use_sinelora,
+            sinelora_frequency=sinelora_frequency,
+            sinelora_scaling=sinelora_scaling,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
@@ -780,6 +790,8 @@ class Embedding(nn.Module, LoraLayer):
         use_dora: bool = False,
         lora_bias: bool = False,
         use_sinelora: bool = False,
+        sinelora_frequency=200.0,
+        sinelora_scaling: Optional[float] = None,
         **kwargs,
     ) -> None:
         if lora_bias:
@@ -801,6 +813,8 @@ class Embedding(nn.Module, LoraLayer):
             use_dora=use_dora,
             use_sinelora=use_sinelora,
             lora_bias=lora_bias,
+            sinelora_frequency=sinelora_frequency,
+            sinelora_scaling=sinelora_scaling,
         )
 
     def resolve_lora_variant(self, *, use_dora: bool, use_sinelora: bool, **kwargs) -> Optional[LoraVariant]:
@@ -826,11 +840,17 @@ class Embedding(nn.Module, LoraLayer):
         use_dora,
         use_sinelora,
         lora_bias,
+        sinelora_frequency,
+        sinelora_scaling,
     ):
         # collect the kwargs
         kwargs = locals().copy()
         del kwargs["self"]
 
+        if use_sinelora:
+            self.sinelora_frequency = sinelora_frequency
+            self.sinelora_scaling = sinelora_scaling
+            
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
