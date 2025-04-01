@@ -29,6 +29,7 @@ from peft import (
     AdaLoraConfig,
     BOFTConfig,
     BoneConfig,
+    CPTConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -39,6 +40,7 @@ from peft import (
     PromptLearningConfig,
     PromptTuningConfig,
     PromptTuningInit,
+    VBLoRAConfig,
     VeraConfig,
     get_peft_model,
 )
@@ -67,32 +69,14 @@ SMALL_GRID_MODELS = [
 ]
 
 
+# Note: Missing from this list are LoKr, LoHa, LN Tuning
 ALL_CONFIGS = [
-    (
-        LoraConfig,
-        {
-            "task_type": "CAUSAL_LM",
-            "r": 8,
-            "lora_alpha": 32,
-            "target_modules": None,
-            "lora_dropout": 0.05,
-            "bias": "none",
-        },
-    ),
     (
         AdaLoraConfig,
         {
             "task_type": "CAUSAL_LM",
             "target_modules": None,
             "total_step": 1,
-        },
-    ),
-    (
-        IA3Config,
-        {
-            "task_type": "CAUSAL_LM",
-            "target_modules": None,
-            "feedforward_modules": None,
         },
     ),
     (
@@ -111,23 +95,11 @@ ALL_CONFIGS = [
         },
     ),
     (
-        OFTConfig,
+        CPTConfig,
         {
-            "task_type": "CAUSAL_LM",
-            "target_modules": None,
-        },
-    ),
-    (
-        VeraConfig,
-        {
-            "task_type": "CAUSAL_LM",
-            "r": 8,
-            "target_modules": None,
-            "vera_dropout": 0.05,
-            "projection_prng_key": 0xFF,
-            "d_initial": 0.1,
-            "save_projection": True,
-            "bias": "none",
+            "cpt_token_ids": [0, 1, 2, 3, 4, 5, 6, 7],  # Example token IDs for testing
+            "cpt_mask": [1, 1, 1, 1, 1, 1, 1, 1],
+            "cpt_tokens_type_mask": [1, 2, 2, 2, 3, 3, 4, 4],
         },
     ),
     (
@@ -146,14 +118,46 @@ ALL_CONFIGS = [
         },
     ),
     (
-        PrefixTuningConfig,
+        IA3Config,
         {
             "task_type": "CAUSAL_LM",
-            "num_virtual_tokens": 10,
+            "target_modules": None,
+            "feedforward_modules": None,
         },
     ),
     (
-        PromptTuningConfig,
+        LoraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "r": 8,
+            "lora_alpha": 32,
+            "target_modules": None,
+            "lora_dropout": 0.05,
+            "bias": "none",
+        },
+    ),
+    # LoRA + trainable tokens
+    (
+        LoraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "r": 8,
+            "lora_alpha": 32,
+            "target_modules": None,
+            "lora_dropout": 0.05,
+            "bias": "none",
+            "trainable_token_indices": [0, 1, 3],
+        },
+    ),
+    (
+        OFTConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+        },
+    ),
+    (
+        PrefixTuningConfig,
         {
             "task_type": "CAUSAL_LM",
             "num_virtual_tokens": 10,
@@ -167,11 +171,39 @@ ALL_CONFIGS = [
             "encoder_hidden_size": 32,
         },
     ),
+    (
+        PromptTuningConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "num_virtual_tokens": 10,
+        },
+    ),
+    (
+        VBLoRAConfig,
+        {
+            "target_modules": None,
+            "vblora_dropout": 0.05,
+            "vector_length": 1,
+            "num_vectors": 2,
+        },
+    ),
+    (
+        VeraConfig,
+        {
+            "r": 8,
+            "target_modules": None,
+            "vera_dropout": 0.05,
+            "projection_prng_key": 0xFF,
+            "d_initial": 0.1,
+            "save_projection": True,
+            "bias": "none",
+        },
+    ),
 ]
 
 
-def _skip_oft_hra_bone_for_gpt2(model_id, config_cls):
-    if "GPT2LMHeadModel" in model_id and config_cls in [BOFTConfig, HRAConfig, OFTConfig, BoneConfig]:
+def _skip_if_not_conv1d_supported(model_id, config_cls):
+    if "GPT2LMHeadModel" in model_id and config_cls in [BOFTConfig, BoneConfig, HRAConfig, OFTConfig]:
         pytest.skip("Skipping BOFT/HRA/OFT/Bone for GPT2LMHeadModel")
 
 
@@ -188,7 +220,10 @@ def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
 
 def set_init_weights_false(config_cls, kwargs):
     kwargs = kwargs.copy()
+
     if issubclass(config_cls, PromptLearningConfig):
+        return kwargs
+    if config_cls == VBLoRAConfig:
         return kwargs
 
     if (config_cls == LoraConfig) or (config_cls == AdaLoraConfig):
@@ -222,19 +257,19 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_attributes_parametrized(self, model_id, config_cls, config_kwargs):
-        _skip_oft_hra_bone_for_gpt2(model_id, config_cls)
+        _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_model_attr(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_adapter_name(self, model_id, config_cls, config_kwargs):
-        _skip_oft_hra_bone_for_gpt2(model_id, config_cls)
+        _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_adapter_name(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_prepare_for_training_parametrized(self, model_id, config_cls, config_kwargs):
-        _skip_oft_hra_bone_for_gpt2(model_id, config_cls)
+        _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_prepare_for_training(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
@@ -292,25 +327,25 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained(self, model_id, config_cls, config_kwargs):
-        _skip_oft_hra_bone_for_gpt2(model_id, config_cls)
+        _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_save_pretrained(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_pickle(self, model_id, config_cls, config_kwargs):
-        _skip_oft_hra_bone_for_gpt2(model_id, config_cls)
+        _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_save_pretrained(model_id, config_cls, config_kwargs.copy(), safe_serialization=False)
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs):
-        _skip_oft_hra_bone_for_gpt2(model_id, config_cls)
+        _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_selected_adapters_pickle(self, model_id, config_cls, config_kwargs):
-        _skip_oft_hra_bone_for_gpt2(model_id, config_cls)
+        _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_save_pretrained_selected_adapters(
             model_id, config_cls, config_kwargs.copy(), safe_serialization=False
         )
@@ -318,7 +353,7 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_from_pretrained_config_construction(self, model_id, config_cls, config_kwargs):
-        _skip_oft_hra_bone_for_gpt2(model_id, config_cls)
+        _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
@@ -330,7 +365,7 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_merge_layers_multi(self, model_id, config_cls, config_kwargs):
-        _skip_oft_hra_bone_for_gpt2(model_id, config_cls)
+        _skip_if_not_conv1d_supported(model_id, config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers_multi(model_id, config_cls, config_kwargs.copy())
 
@@ -359,13 +394,13 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_generate(self, model_id, config_cls, config_kwargs):
-        _skip_oft_hra_bone_for_gpt2(model_id, config_cls)
+        _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_generate(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_generate_pos_args(self, model_id, config_cls, config_kwargs):
-        _skip_oft_hra_bone_for_gpt2(model_id, config_cls)
+        _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_generate_pos_args(model_id, config_cls, config_kwargs.copy(), raises_err=False)
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
@@ -386,7 +421,7 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_training_decoders(self, model_id, config_cls, config_kwargs):
-        _skip_oft_hra_bone_for_gpt2(model_id, config_cls)
+        _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_training(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
@@ -397,13 +432,13 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_training_decoders_gradient_checkpointing(self, model_id, config_cls, config_kwargs):
-        _skip_oft_hra_bone_for_gpt2(model_id, config_cls)
+        _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_inference_safetensors(self, model_id, config_cls, config_kwargs):
-        _skip_oft_hra_bone_for_gpt2(model_id, config_cls)
+        _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_inference_safetensors(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
@@ -414,19 +449,19 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_delete_adapter(self, model_id, config_cls, config_kwargs):
-        _skip_oft_hra_bone_for_gpt2(model_id, config_cls)
+        _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_delete_adapter(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_delete_inactive_adapter(self, model_id, config_cls, config_kwargs):
-        _skip_oft_hra_bone_for_gpt2(model_id, config_cls)
+        _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_delete_inactive_adapter(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_adding_multiple_adapters_with_bias_raises(self, model_id, config_cls, config_kwargs):
-        _skip_oft_hra_bone_for_gpt2(model_id, config_cls)
+        _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
@@ -450,7 +485,7 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_disable_adapter(self, model_id, config_cls, config_kwargs):
-        _skip_oft_hra_bone_for_gpt2(model_id, config_cls)
+        _skip_if_not_conv1d_supported(model_id, config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_disable_adapter(model_id, config_cls, config_kwargs.copy())
 
@@ -468,7 +503,7 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_passing_input_embeds_works(self, model_id, config_cls, config_kwargs):
-        _skip_oft_hra_bone_for_gpt2(model_id, config_cls)
+        _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_passing_input_embeds_works("", model_id, config_cls, config_kwargs.copy())
 
     def test_lora_layer_replication(self):
@@ -570,6 +605,14 @@ class TestDecoderModels(PeftCommonTester):
                     "num_virtual_tokens": 10,
                     "encoder_hidden_size": 32,
                     "task_type": "CAUSAL_LM",
+                },
+            ),
+            (
+                CPTConfig,
+                {
+                    "cpt_token_ids": [0, 1, 2, 3, 4, 5, 6, 7],  # Example token IDs for testing
+                    "cpt_mask": [1, 1, 1, 1, 1, 1, 1, 1],
+                    "cpt_tokens_type_mask": [1, 2, 2, 2, 3, 3, 4, 4],
                 },
             ),
         ],
