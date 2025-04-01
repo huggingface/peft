@@ -13,10 +13,11 @@
 # limitations under the License.
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_eetq_available
+from peft.utils import register_peft_method
 
 from .config import EvaConfig, LoftQConfig, LoraConfig, LoraRuntimeConfig
 from .eva import get_eva_state_dict, initialize_lora_eva_weights
-from .gptq import QuantLinear
+from .gptq import GPTQLoraLinear
 from .layer import Conv2d, Conv3d, Embedding, Linear, LoraLayer
 from .model import LoraModel
 
@@ -26,16 +27,18 @@ __all__ = [
     "Conv3d",
     "Embedding",
     "EvaConfig",
+    "GPTQLoraLinear",
     "Linear",
     "LoftQConfig",
     "LoraConfig",
     "LoraLayer",
     "LoraModel",
     "LoraRuntimeConfig",
-    "QuantLinear",
     "get_eva_state_dict",
     "initialize_lora_eva_weights",
 ]
+
+register_peft_method(name="lora", config_cls=LoraConfig, model_cls=LoraModel, is_mixed_compatible=True)
 
 
 def __getattr__(name):

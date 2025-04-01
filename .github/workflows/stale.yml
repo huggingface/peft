@@ -4,6 +4,8 @@ on:
   schedule:
     - cron: "0 15 * * *"
 
+permissions: {}
+
 jobs:
   close_stale_issues:
     name: Close Stale Issues
@@ -16,6 +18,8 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
     - uses: actions/checkout@v3
+      with:
+        persist-credentials: false
 
     - name: Setup Python
       uses: actions/setup-python@v4

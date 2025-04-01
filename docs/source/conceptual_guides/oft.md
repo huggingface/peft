@@ -58,13 +58,13 @@ As with other methods supported by PEFT, to fine-tune a model using OFT or BOFT,
 4. Train the `PeftModel` as you normally would train the base model.
 
 
-### BOFT-specific paramters
+### BOFT-specific parameters
 
 `BOFTConfig` allows you to control how OFT/BOFT is applied to the base model through the following parameters:
 
-- `boft_block_size`: the BOFT matrix block size across different layers, expressed in `int`. Smaller block size results in sparser update matrices with fewer trainable paramters. **Note**, please choose `boft_block_size` to be divisible by most layer's input dimension (`in_features`), e.g., 4, 8, 16. Also, please only 
+- `boft_block_size`: the BOFT matrix block size across different layers, expressed in `int`. Smaller block size results in sparser update matrices with fewer trainable parameters. **Note**, please choose `boft_block_size` to be divisible by most layer's input dimension (`in_features`), e.g., 4, 8, 16. Also, please only 
 specify either `boft_block_size` or `boft_block_num`, but not both simultaneously or leaving both to 0, because `boft_block_size` x `boft_block_num` must equal the layer's input dimension.
-- `boft_block_num`: the number of BOFT matrix blocks across different layers, expressed in `int`. Fewer blocks result in sparser update matrices with fewer trainable paramters. **Note**, please choose `boft_block_num` to be divisible by most layer's input dimension (`in_features`), e.g., 4, 8, 16. Also, please only 
+- `boft_block_num`: the number of BOFT matrix blocks across different layers, expressed in `int`. Fewer blocks result in sparser update matrices with fewer trainable parameters. **Note**, please choose `boft_block_num` to be divisible by most layer's input dimension (`in_features`), e.g., 4, 8, 16. Also, please only 
 specify either `boft_block_size` or `boft_block_num`, but not both simultaneously or leaving both to 0, because `boft_block_size` x `boft_block_num` must equal the layer's input dimension.
 - `boft_n_butterfly_factor`: the number of butterfly factors. **Note**, for `boft_n_butterfly_factor=1`, BOFT is the same as vanilla OFT, for `boft_n_butterfly_factor=2`, the effective block size of OFT becomes twice as big and the number of blocks become half.
 - `bias`: specify if the `bias` parameters should be trained. Can be `"none"`, `"all"` or `"boft_only"`.
@@ -79,8 +79,8 @@ specify either `boft_block_size` or `boft_block_num`, but not both simultaneousl
 For an example of the BOFT method application to various downstream tasks, please refer to the following guides:
 
 Take a look at the following step-by-step guides on how to finetune a model with BOFT:
-- [Dreambooth finetuning with BOFT](../task_guides/boft_dreambooth) 
-- [Controllable generation finetuning with BOFT (ControlNet)](../task_guides/boft_controlnet) 
+- [Dreambooth finetuning with BOFT](https://github.com/huggingface/peft/blob/main/examples/boft_dreambooth/boft_dreambooth.md)
+- [Controllable generation finetuning with BOFT (ControlNet)](https://github.com/huggingface/peft/blob/main/examples/boft_controlnet/boft_controlnet.md)
 
 For the task of image classification, one can initialize the BOFT config for a DinoV2 model as follows:
 

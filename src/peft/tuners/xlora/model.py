@@ -314,6 +314,7 @@ class XLoraModel(BaseTuner):
                     param.requires_grad = False
 
     def generate(self, *args, **kwargs):
+        kwargs["use_cache"] = False
         res = self.lora_model.generate(*args, **kwargs)  # type: ignore
         #  This is necessary because we use PeftModel.disable_adapter() which reenables the adapters
         self._maybe_freeze_all_adapters()

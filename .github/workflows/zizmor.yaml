@@ -1,0 +1,28 @@
+name: CI security linting
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["*"]
+    paths:
+      - '.github/**'
+
+permissions: {}
+
+jobs:
+  zizmor:
+    name: zizmor latest via Cargo
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install zizmor
+        run: cargo install --locked zizmor
+      - name: Run zizmor
+        run: zizmor .github/workflows

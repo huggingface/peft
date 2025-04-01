@@ -14,12 +14,16 @@
 
 from __future__ import annotations
 
+import functools
 from contextlib import contextmanager
 from typing import Literal
 
 import packaging.version
 import torch
 import transformers
+from torch import nn
+
+from peft.import_utils import is_xpu_available
 
 
 @contextmanager
@@ -89,7 +93,10 @@ def dequantize_bnb_weight(weight: torch.nn.Parameter, state=None):
     device = weight.device
     is_cpu = device.type == torch.device("cpu").type
     if is_cpu:
-        weight = weight.to(torch.device("cuda"))
+        if torch.cuda.is_available():
+            weight = weight.to(torch.device("cuda"))
+        elif is_xpu_available():
+            weight = weight.to(torch.device("xpu"))
 
     cls_name = weight.__class__.__name__
     if cls_name == "Params4bit":
@@ -170,3 +177,109 @@ def map_cache_to_layer_device_map(model, cache) -> None:
         layer_device = layer_device_map[idx]
         cache.key_cache[idx] = cache.key_cache[idx].to(layer_device)
         cache.value_cache[idx] = cache.value_cache[idx].to(layer_device)
+
+
+##################################
+# START: ADAPTED FROM ACCELERATE #
+##################################
+#
+# Modified to support explicitly skipping layer initialization for faster switching between layer states
+# (necessary for supporting `nn.MultiHeadAttention` adapters)
+
+
+@contextmanager
+def init_empty_weights(include_buffers: bool = None):
+    # adapted from accelerate.big_modeling.py
+    with _init_on_device(torch.device("meta"), include_buffers=include_buffers) as f:
+        yield f
+
+
+@contextmanager
+def _init_on_device(device: torch.device, include_buffers: bool = None):
+    # adapted from accelerate.big_modeling.py
+    old_register_parameter = nn.Module.register_parameter
+    if include_buffers:
+        old_register_buffer = nn.Module.register_buffer
+
+    def register_empty_parameter(module, name, param):
+        # This works because torch first initializes the parameters with torch.empty, thus not assigning any new memory.
+        # Then the parameter is moved to meta device before reset_parameters() is called, which then operates on the
+        # meta device, making any subsequent calls to initialization methods no-ops.
+        old_register_parameter(module, name, param)
+        if (param is not None) and (getattr(_init_on_device, "_skip", False) is not True):
+            param_cls = type(module._parameters[name])
+            kwargs = module._parameters[name].__dict__
+            kwargs["requires_grad"] = param.requires_grad
+            module._parameters[name] = param_cls(module._parameters[name].to(device), **kwargs)
+
+    def register_empty_buffer(module, name, buffer, persistent=True):
+        old_register_buffer(module, name, buffer, persistent=persistent)
+        if buffer is not None:
+            module._buffers[name] = module._buffers[name].to(device)
+
+    # Patch tensor creation
+    if include_buffers:
+        tensor_constructors_to_patch = {
+            torch_function_name: getattr(torch, torch_function_name)
+            for torch_function_name in ["empty", "zeros", "ones", "full"]
+        }
+    else:
+        tensor_constructors_to_patch = {}
+
+    def patch_tensor_constructor(fn):
+        def wrapper(*args, **kwargs):
+            kwargs["device"] = device
+            return fn(*args, **kwargs)
+
+        return wrapper
+
+    try:
+        nn.Module.register_parameter = register_empty_parameter
+        if include_buffers:
+            nn.Module.register_buffer = register_empty_buffer
+        for torch_function_name in tensor_constructors_to_patch.keys():
+            setattr(torch, torch_function_name, patch_tensor_constructor(getattr(torch, torch_function_name)))
+        yield
+    finally:
+        nn.Module.register_parameter = old_register_parameter
+        if include_buffers:
+            nn.Module.register_buffer = old_register_buffer
+        for torch_function_name, old_torch_function in tensor_constructors_to_patch.items():
+            setattr(torch, torch_function_name, old_torch_function)
+
+
+@contextmanager
+def _skip_init_on_device():
+    # context manager to skip the _init_on_device context manager
+    old_val = getattr(_init_on_device, "_skip", False)
+    try:
+        _init_on_device._skip = True
+        yield
+    finally:
+        _init_on_device._skip = old_val
+
+
+def skip_init_on_device(func):
+    """
+    Ignore the init_on_device context manager when calling the decorated function.
+
+    This is a narrow use decorator that allows us to avoid initializing on meta device even when we're inside the
+    init_empty_weights context.
+
+    """
+
+    # The need for this functionality arose when working on MultiheadAttention, where we have to call _restore_weights
+    # repeatedly as parametes are overwritten and need to be re-registered. When using low_cpu_mem_usage=True, as
+    # register_parameter is patched inside of the init_empty_weights context, this would result in those parameters
+    # suddenly being moved to meta device. Using this decorator allows us to avoid this.
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        with _skip_init_on_device():
+            return func(*args, **kwargs)
+
+    return wrapper
+
+
+#######
+# END #
+#######

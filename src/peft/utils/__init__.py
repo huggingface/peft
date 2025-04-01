@@ -28,9 +28,11 @@ from .other import (
     TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
     WEIGHTS_NAME,
+    AuxiliaryTrainingWrapper,
     ModulesToSaveWrapper,
     _freeze_adapter,
     _get_batch_size,
+    _get_input_embeddings_name,
     _get_submodules,
     _is_valid_match,
     _prepare_prompt_learning_config,
@@ -39,6 +41,7 @@ from .other import (
     bloom_model_postprocess_past_key_value,
     cast_mixed_precision_params,
     get_auto_gptq_quant_linear,
+    get_gptqmodel_quant_linear,
     get_quantization_config,
     id_tensor_storage,
     infer_device,
@@ -46,7 +49,7 @@ from .other import (
     shift_tokens_right,
     transpose,
 )
-from .peft_types import PeftType, TaskType
+from .peft_types import PeftType, TaskType, register_peft_method
 from .save_and_load import get_peft_model_state_dict, load_peft_weights, set_peft_model_state_dict
 
 
@@ -64,11 +67,13 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING",
     "WEIGHTS_NAME",
+    "AuxiliaryTrainingWrapper",
     "ModulesToSaveWrapper",
     "PeftType",
     "TaskType",
     "_freeze_adapter",
     "_get_batch_size",
+    "_get_input_embeddings_name",
     "_get_submodules",
     "_is_valid_match",
     "_prepare_prompt_learning_config",
@@ -77,6 +82,7 @@ __all__ = [
     "bloom_model_postprocess_past_key_value",
     "cast_mixed_precision_params",
     "get_auto_gptq_quant_linear",
+    "get_gptqmodel_quant_linear",
     "get_peft_model_state_dict",
     "get_quantization_config",
     "id_tensor_storage",
@@ -84,6 +90,7 @@ __all__ = [
     "load_peft_weights",
     "map_cache_to_layer_device_map",
     "prepare_model_for_kbit_training",
+    "register_peft_method",
     "replace_lora_weights_loftq",
     "set_peft_model_state_dict",
     "shift_tokens_right",

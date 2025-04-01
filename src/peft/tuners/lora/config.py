@@ -145,6 +145,8 @@ class CordaConfig:
         use_float16_for_covariance (`bool`):
             If true, uses float16 for the covariance matrix. This can reduce the memory usage of the covariance matrix
             by half, but may lead to numerical instability. Defaults to `False`.
+        prune_temporary_fields (`bool`):
+            If true, temporary fields generated in CorDA preprocessing will be pruned. Defaults to `True`.
     """
 
     cache_file: Optional[str] = field(
@@ -189,6 +191,9 @@ class CordaConfig:
             )
         },
     )
+    prune_temporary_fields: bool = field(
+        default=True, metadata={"help": "If true, temporary fields generated in CorDA preprocessing will be pruned."}
+    )
 
 
 @dataclass
@@ -230,11 +235,13 @@ class LoraConfig(PeftConfig):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
         init_lora_weights (`bool` | `Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "corda", "loftq"]`):
             How to initialize the weights of the adapter layers. Passing True (default) results in the default
-            initialization from the reference implementation from Microsoft. Passing 'gaussian' results in Gaussian
-            initialization scaled by the LoRA rank for linear and layers. Setting the initialization to False leads to
-            completely random initialization and is discouraged. Pass `'loftq'` to use LoftQ initialization. Passing
-            `'eva'` results in a data-driven initialization of <ahref='https://arxiv.org/abs/2410.07170' >Explained
-            Variance Adaptation</a>. EVA initalizes LoRA based on the SVD of layer input activations and achieves SOTA
+            initialization from the reference implementation from Microsoft, with the LoRA B weight being set to 0.
+            This means that without further training, the LoRA adapter will be a no-op. Setting the initialization to
+            False leads to random initialization of LoRA A and B, meaning that LoRA is not a no-op before training;
+            this setting is intended for debugging purposes. Passing 'gaussian' results in Gaussian initialization
+            scaled by the LoRA rank for linear and layers. Pass `'loftq'` to use LoftQ initialization. Passing `'eva'`
+            results in a data-driven initialization of <ahref='https://arxiv.org/abs/2410.07170' >Explained Variance
+            Adaptation</a>. EVA initializes LoRA based on the SVD of layer input activations and achieves SOTA
             performance due to its ability to adapt to the finetuning data. Pass `'olora'` to use OLoRA initialization.
             Passing `'pissa'` results in the initialization of <ahref='https://arxiv.org/abs/2404.02948' >Principal
             Singular values and Singular vectors Adaptation (PiSSA)</a>, which converges more rapidly than LoRA and
@@ -255,10 +262,10 @@ class LoraConfig(PeftConfig):
             `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
         rank_pattern (`dict`):
             The mapping from layer names or regexp expression to ranks which are different from the default rank
-            specified by `r`.
+            specified by `r`. For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`.
         alpha_pattern (`dict`):
             The mapping from layer names or regexp expression to alphas which are different from the default alpha
-            specified by `lora_alpha`.
+            specified by `lora_alpha`. For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`.
         megatron_config (`Optional[dict]`):
             The TransformerConfig arguments for Megatron. It is used to create LoRA's parallel linear layer. You can
             get it like this, `core_transformer_config_from_args(get_args())`, these two functions being from Megatron.
@@ -266,6 +273,13 @@ class LoraConfig(PeftConfig):
             parameter when you want to apply LoRA to the ColumnParallelLinear and RowParallelLinear layers of megatron.
         megatron_core (`Optional[str]`):
             The core module from Megatron to use, defaults to `"megatron.core"`.
+        trainable_token_indices (`Optional[Union[List[int], dict[str, List[int]]]]`)
+            Lets you specify which token indices to selectively fine-tune without requiring to re-train the whole
+            embedding matrix using the `peft.TrainableTokensModel` method. You can specify token indices in two ways.
+            Either you specify a list of indices which will then target the model's input embedding layer (or, if not
+            found, `embed_tokens`). Alternatively, you can specify a dictionary where the key is the name of the
+            embedding module and the values are the list of token indices, e.g. `{'embed_tokens': [0, 1, ...]}`. Note
+            that training with FSDP/DeepSpeed might not yet be fully supported with this option enabled.
         loftq_config (`Optional[LoftQConfig]`):
             The configuration of LoftQ. If this is not None, then LoftQ will be used to quantize the backbone weights
             and initialize Lora layers. Also pass `init_lora_weights='loftq'`. Note that you should not pass a
@@ -347,17 +361,21 @@ class LoraConfig(PeftConfig):
         default=True,
         metadata={
             "help": (
-                "How to initialize the weights of the LoRA layers. Passing `'True'` (default) results in the default "
-                "initialization from the reference implementation from Microsoft. Passing `'gaussian'` results "
-                "in Gaussian initialization scaled by the LoRA rank for linear and layers. Setting the initialization "
-                "to `'False'` leads to completely random initialization and *is discouraged.*"
-                "Pass `'eva'` results in a data-driven initialization of Explained Variance Adaptation."
-                "Passing `'olora'` results in OLoRA initialization."
-                "Passing `'pissa'` results in PiSSA initialization."
-                "Passing `'pissa_niter_[number of iters]'` initiates Fast-SVD-based PiSSA initialization, "
-                "where [number of iters] indicates the number of subspace iterations to perform fsvd, and must be a nonnegative integer."
-                "Passing `'corda'` results in CorDA initialization."
-                "Pass `'loftq'` to use LoftQ initialization"
+                "How to initialize the weights of the LoRA layers. "
+                "Passing True (default) results in the default initialization from the reference implementation from "
+                "Microsoft, with the LoRA B weight being set to 0. This means that without further training, the LoRA "
+                "adapter will be a no-op. "
+                "Setting the initialization to False leads to random initialization of LoRA A and B, meaning that LoRA "
+                "is not a no-op before training; this setting is intended for debugging purposes. "
+                "Passing `'gaussian'` results in Gaussian initialization scaled by the LoRA rank for linear and layers. "
+                "Passing `'eva'` results in a data-driven initialization of Explained Variance Adaptation. "
+                "Passing `'olora'` results in OLoRA initialization. "
+                "Passing `'pissa'` results in PiSSA initialization. "
+                "Passing `'pissa_niter_[number of iters]'` initiates Fast-SVD-based PiSSA initialization, where "
+                "[number of iters] indicates the number of subspace iterations to perform fsvd, and must be a "
+                "nonnegative integer. "
+                "Passing `'corda'` results in CorDA initialization. "
+                "Pass `'loftq'` to use LoftQ initialization."
             ),
         },
     )
@@ -381,7 +399,7 @@ class LoraConfig(PeftConfig):
         metadata={
             "help": (
                 "The mapping from layer names or regexp expression to ranks which are different from the default rank specified by `r`. "
-                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 8`}"
+                "For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`."
             )
         },
     )
@@ -390,7 +408,7 @@ class LoraConfig(PeftConfig):
         metadata={
             "help": (
                 "The mapping from layer names or regexp expression to alphas which are different from the default alpha specified by `lora_alpha`. "
-                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 32`}"
+                "For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`."
             )
         },
     )
@@ -417,6 +435,21 @@ class LoraConfig(PeftConfig):
                 "The core module from Megatron, it is used to create LoRA's parallel linear layer. "
                 "It only needs to be passed in when you need to use your own modified megatron core module. "
                 "Otherwise, it will use the default value `megatron.core`. "
+            )
+        },
+    )
+    trainable_token_indices: Optional[Union[list[int], dict[str, list[int]]]] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Lets you specify which token indices to selectively fine-tune without requiring to re-train the "
+                "whole embedding matrix using the `peft.TrainableTokensModel` method. You can specify token indices "
+                "in two ways. Either you specify a list of indices which will then target the model's input embedding "
+                "layer (or, if not found, `embed_tokens`). Alternatively, you can specify a dictionary where the key "
+                "is the name of the embedding module and the values are the list of token indices, e.g. "
+                "`{'embed_tokens': [0, 1, ...]}`. "
+                "Note that training with FSDP/DeepSpeed might not yet be fully supported with this option enabled. "
+                "Also note that models using weight-tying are currently not supported."
             )
         },
     )

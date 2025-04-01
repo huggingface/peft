@@ -10,8 +10,9 @@ env:
   IS_GITHUB_CI: "1"
   # To be able to run tests on CUDA 12.2
   NVIDIA_DISABLE_REQUIRE: "1"
-  SLACK_API_TOKEN: ${{ secrets.SLACK_API_TOKEN }}
+  SLACK_API_TOKEN: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
 
+permissions: {}
 
 jobs:
   run_all_tests_single_gpu:
@@ -30,6 +31,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v3
+        with:
+          persist-credentials: false
       - name: Pip install
         run: |
           source activate peft
@@ -78,6 +81,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v3
+        with:
+          persist-credentials: false
       - name: Pip install
         run: |
           source activate peft

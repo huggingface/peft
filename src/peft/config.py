@@ -155,12 +155,15 @@ class PeftConfigMixin(PushToHubMixin):
             if "got an unexpected keyword argument" not in str(exc):
                 raise exc
 
-            filtered_kwargs, unexpected_kwargs = _check_and_remove_unused_kwargs(cls, kwargs)
+            filtered_kwargs, unexpected_kwargs = _check_and_remove_unused_kwargs(config_cls, kwargs)
             if not MIN_EXPECTED_CONFIG_KEYS.issubset(set(filtered_kwargs.keys())):
-                raise TypeError(f"The config that is trying to be loaded is not a valid {cls.__name__} config.")
+                raise TypeError(
+                    f"The {cls.__name__} config that is trying to be loaded is missing required keys: "
+                    f"{MIN_EXPECTED_CONFIG_KEYS}."
+                )
 
             warnings.warn(
-                f"Unexpected keyword arguments {sorted(unexpected_kwargs)} for class {cls.__name__}, these are "
+                f"Unexpected keyword arguments {sorted(unexpected_kwargs)} for class {config_cls.__name__}, these are "
                 "ignored. This probably means that you're loading a configuration file that was saved using a "
                 "higher version of the library and additional parameters have been introduced since. It is "
                 "highly recommended to upgrade the PEFT version before continuing (e.g. by running `pip install "

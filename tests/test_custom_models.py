@@ -46,12 +46,13 @@ from peft import (
     OFTConfig,
     PeftModel,
     TaskType,
+    TrainableTokensConfig,
     VBLoRAConfig,
     VeraConfig,
     get_peft_model,
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
-from peft.utils import infer_device
+from peft.utils import AuxiliaryTrainingWrapper, infer_device
 
 from .testing_common import PeftCommonTester
 from .testing_utils import get_state_dict, require_non_cpu
@@ -103,10 +104,19 @@ TEST_CASES = [
         LoraConfig,
         {"target_modules": ["emb", "conv1d"], "use_dora": True},
     ),
+    (
+        "Embedding + transformers Conv1D 1 LoRA trainable_tokens",
+        "EmbConv1D",
+        LoraConfig,
+        {"target_modules": ["conv1d"], "trainable_token_indices": {"emb": [0, 10]}},
+    ),
+    ("Conv1d LoRA", "Conv1d", LoraConfig, {"target_modules": ["conv1d"]}),
     ("Conv2d 1 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
     ("Conv2d 1 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"], "use_dora": True}),
     ("Conv2d 2 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"], "use_dora": True}),
+    ("Conv2d Groups LoRA", "Conv2dGroups", LoraConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d Groups LoRA with DoRA", "Conv2dGroups", LoraConfig, {"target_modules": ["conv2d"], "use_dora": True}),
     ("Conv3d 1 LoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d"]}),
     ("Conv3d 2 LoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d", "lin0"]}),
     ("Conv3d 1 LoRA with DoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d"], "use_dora": True}),
@@ -120,6 +130,8 @@ TEST_CASES = [
     ),
     ("Conv2d 1 LoRA with lora_b bias", "Conv2d", LoraConfig, {"target_modules": ["conv2d"], "lora_bias": True}),
     ("Conv3d 1 LoRA with lora_b bias", "Conv3d", LoraConfig, {"target_modules": ["conv3d"], "lora_bias": True}),
+    ("MHA 1 LoRA", "MHA", LoraConfig, {"target_modules": ["mha"]}),
+    ("MHA 2 LoRA", "MHA", LoraConfig, {"target_modules": ["mha", "lin0"]}),
     #######
     # IA³ #
     #######
@@ -163,7 +175,7 @@ TEST_CASES = [
         "transformers Conv1D 1 IA3",
         "EmbConv1D",
         IA3Config,
-        {"target_modules": ["conv1d"], "feedforward_modules": ["conv1d"], "modules_to_save": ["lin1"]},
+        {"target_modules": ["conv1d"], "feedforward_modules": ["conv1d"], "modules_to_save": ["lin0"]},
     ),
     ("Conv2d 1 IA3", "Conv2d", IA3Config, {"target_modules": ["conv2d"], "feedforward_modules": []}),
     ("Conv2d 2 IA3", "Conv2d", IA3Config, {"target_modules": ["conv2d"], "feedforward_modules": ["conv2d"]}),
@@ -478,6 +490,15 @@ TEST_CASES = [
         VBLoRAConfig,
         {"target_modules": ["conv1d"], "vector_length": 1, "num_vectors": 2},
     ),
+    ###################
+    # TrainableTokens #
+    ###################
+    (
+        "Embedding + transformers Conv1D 1 trainable_tokens",
+        "EmbConv1D",
+        TrainableTokensConfig,
+        {"target_modules": ["emb"], "token_indices": [0, 1, 3], "init_weights": False},
+    ),
 ]
 
 # For this test matrix, each tuple consists of:
@@ -501,6 +522,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         LoraConfig,
         {"target_modules": ["lin0"], "init_lora_weights": False},
         {"target_modules": ["lin1"], "init_lora_weights": False},
+    ),
+    (
+        "LoRA + trainable tokens Same",
+        "lora+trainable_tokens",
+        LoraConfig,
+        {"target_modules": ["lin0"], "init_lora_weights": False, "trainable_token_indices": {"emb": [0, 1, 2]}},
+        {"target_modules": ["lin0"], "init_lora_weights": False, "trainable_token_indices": {"emb": [3, 4, 5, 6]}},
+    ),
+    (
+        "LoRA + trainable tokens Different",
+        "lora+trainable_tokens",
+        LoraConfig,
+        {"target_modules": ["lin0"], "init_lora_weights": False, "trainable_token_indices": {"emb": [0, 1, 2]}},
+        {"target_modules": ["lin1"], "init_lora_weights": False, "trainable_token_indices": {"emb": [3, 4, 5, 6]}},
     ),
     (
         "IA3 Same",
@@ -536,15 +571,15 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         "AdaLora Same",
         "adalora",
         AdaLoraConfig,
-        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True},
-        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True},
+        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True, "total_step": 1},
+        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True, "total_step": 1},
     ),
     (
         "AdaLora Different",
         "adalora",
         AdaLoraConfig,
-        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True},
-        {"target_modules": ["lin1"], "init_lora_weights": False, "inference_mode": True},
+        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True, "total_step": 1},
+        {"target_modules": ["lin1"], "init_lora_weights": False, "inference_mode": True, "total_step": 1},
     ),
     (
         "FourierFT Same",
@@ -641,6 +676,7 @@ PREFIXES = {
     HRAConfig: "hra_",
     VBLoRAConfig: "vblora_",
     BoneConfig: "bone_",
+    TrainableTokensConfig: "trainable_tokens_",
 }
 
 
@@ -808,6 +844,25 @@ class ModelEmbWithEmbeddingUtils(nn.Module):
         return None
 
 
+class ModelConv1D(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1d = nn.Conv1d(1, 1, 2)
+        self.relu = nn.ReLU()
+        self.flat = nn.Flatten()
+        self.lin0 = nn.Linear(9, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        X = X.float().reshape(-1, 1, 10)
+        X = self.conv1d(X)
+        X = self.relu(X)
+        X = self.flat(X)
+        X = self.lin0(X)
+        X = self.sm(X)
+        return X
+
+
 class ModelConv2D(nn.Module):
     def __init__(self):
         super().__init__()
@@ -850,6 +905,25 @@ class ModelConv2D2(nn.Module):
         return X
 
 
+class ModelConv2DGroups(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv2d = nn.Conv2d(5, 5, 3, groups=5)
+        self.relu = nn.ReLU()
+        self.flat = nn.Flatten()
+        self.lin0 = nn.Linear(5, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        X = X.float().reshape(-1, 5, 3, 3)
+        X = self.conv2d(X)
+        X = self.relu(X)
+        X = self.flat(X)
+        X = self.lin0(X)
+        X = self.sm(X)
+        return X
+
+
 class ModelConv3D(nn.Module):
     def __init__(self):
         super().__init__()
@@ -867,6 +941,21 @@ class ModelConv3D(nn.Module):
         X = self.conv3d(X)
         X = self.relu(X)
         X = self.flat(X)
+        X = self.lin0(X)
+        X = self.sm(X)
+        return X
+
+
+class ModelMha(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mha = nn.MultiheadAttention(10, 2)
+        self.lin0 = nn.Linear(10, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        X = X.float()
+        X, _ = self.mha(X, X, X)
         X = self.lin0(X)
         X = self.sm(X)
         return X
@@ -893,8 +982,14 @@ class MockTransformerWrapper:
         if model_id == "EmbConv1D":
             return ModelEmbConv1D().to(torch_dtype)
 
+        if model_id == "Conv1d":
+            return ModelConv1D().to(torch_dtype)
+
         if model_id == "Conv2d":
             return ModelConv2D().to(torch_dtype)
+
+        if model_id == "Conv2dGroups":
+            return ModelConv2DGroups().to(torch_dtype)
 
         if model_id == "Conv3d":
             return ModelConv3D().to(torch_dtype)
@@ -907,6 +1002,9 @@ class MockTransformerWrapper:
 
         if model_id == "Conv2d2":
             return ModelConv2D2().to(torch_dtype)
+
+        if model_id == "MHA":
+            return ModelMha().to(torch_dtype)
 
         raise ValueError(f"model_id {model_id} not implemented")
 
@@ -964,6 +1062,12 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
     @parameterized.expand(TEST_CASES)
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
+        # https://github.com/huggingface/peft/pull/2403
+        if model_id in ["Conv2dGroups"]:
+            pytest.skip(
+                f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
+            )
+
         config_kwargs = config_kwargs.copy()
         if issubclass(config_cls, LoraConfig):
             config_kwargs["init_lora_weights"] = False
@@ -973,12 +1077,20 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             pass
         elif issubclass(config_cls, VBLoRAConfig):
             pass
+        elif issubclass(config_cls, TrainableTokensConfig):
+            pass
         else:
             config_kwargs["init_weights"] = False
         self._test_merge_layers(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(TEST_CASES)
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
+        # https://github.com/huggingface/peft/pull/2403
+        if model_id in ["Conv2dGroups"]:
+            pytest.skip(
+                f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
+            )
+
         config_kwargs = config_kwargs.copy()
         if issubclass(config_cls, LoraConfig):
             config_kwargs["init_lora_weights"] = False
@@ -988,6 +1100,12 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
     @parameterized.expand(TEST_CASES)
     def test_merge_layers_is_idempotent(self, test_name, model_id, config_cls, config_kwargs):
+        # https://github.com/huggingface/peft/pull/2403
+        if model_id in ["Conv2dGroups"]:
+            pytest.skip(
+                f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
+            )
+
         # calling merge twice with the same arguments should not change the output
         config_kwargs = config_kwargs.copy()
         if issubclass(config_cls, LoraConfig):
@@ -998,6 +1116,12 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
     @parameterized.expand(TEST_CASES)
     def test_safe_merge(self, test_name, model_id, config_cls, config_kwargs):
+        # https://github.com/huggingface/peft/pull/2403
+        if model_id in ["Conv2dGroups"]:
+            pytest.skip(
+                f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
+            )
+
         # calling merge twice with the same arguments should not change the output
         config_kwargs = config_kwargs.copy()
         if issubclass(config_cls, LoraConfig):
@@ -1074,12 +1198,13 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model_before = copy.deepcopy(model)
 
         model.train()
-        # this high learning rate was found through testing to be necessary to avoid flakiness
-        lr = (
-            100.0
-            if (config_kwargs.get("use_dora") and model_id == "EmbConv1D") or issubclass(config_cls, VBLoRAConfig)
-            else 0.5
-        )
+        lr = 0.5
+        if (config_kwargs.get("use_dora") and model_id == "EmbConv1D") or issubclass(config_cls, VBLoRAConfig):
+            # this high learning rate was found through testing to be necessary to avoid flakiness
+            lr = 100
+        elif "mha" in model_id.lower():
+            # we get exploding gradients with MHA when learning rate is too high
+            lr = 1e-3
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
@@ -1099,8 +1224,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         prefix = PREFIXES[config_cls]
         for name, param_before in params_before.items():
             param_after = params_after[name]
-            if (prefix in name) or ("modules_to_save" in name):
-                # target_modules and modules_to_save _are_ updated
+            if (prefix in name) or ("modules_to_save" in name) or ("token_adapter.trainable_tokens" in name):
+                # target_modules, modules_to_save and modules of `NewTokensWrapper` _are_ updated
                 assert not torch.allclose(param_before, param_after, atol=tol, rtol=tol)
             else:
                 assert torch.allclose(param_before, param_after, atol=tol, rtol=tol)
@@ -1117,8 +1242,13 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         )
         model = get_peft_model(model, config)
         model.train()
-        lr = 0.5 if not config_kwargs.get("use_dora") else 0.1  # otherwise we get nan
-        if issubclass(config_cls, VBLoRAConfig):
+
+        lr = 0.5
+        if config_kwargs.get("use_dora"):
+            lr = 0.1  # otherwise we get nan
+        elif "mha" in model_id.lower():
+            lr = 1e-3  # we get exploding gradients with MHA when learning rate is too high
+        elif issubclass(config_cls, VBLoRAConfig):
             lr = 0.01  # otherwise we get nan
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
@@ -1152,8 +1282,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device).eval()
         outputs_base = model(**X)
-        if issubclass(config_cls, FourierFTConfig):
+        if issubclass(config_cls, (FourierFTConfig, TrainableTokensConfig)):
             config_kwargs = config_kwargs.copy()
+            # override the default value and make PEFT operation a no-op
             config_kwargs["init_weights"] = True
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -1173,9 +1304,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model.train()
         # EmbConv1D is slow to learn for some reason
         lr = 0.01 if model_id != "EmbConv1D" else 1.0
-        if isinstance(config_cls, LNTuningConfig):
-            # LayerNorm tuning is slow to learn
-            lr = 1.0
+        if isinstance(config, TrainableTokensConfig):
+            # TrainableTokens is only changing a small subset, so we need a higher lr to see the difference
+            lr = 2.0
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
@@ -1208,6 +1339,12 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
     @parameterized.expand(TEST_CASES)
     def test_disable_adapters_with_merging(self, test_name, model_id, config_cls, config_kwargs):
+        # https://github.com/huggingface/peft/pull/2403
+        if model_id in ["Conv2dGroups"]:
+            pytest.skip(
+                f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
+            )
+
         # same as test_disable_adapters, but with merging
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
@@ -1582,6 +1719,26 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         with pytest.raises(ValueError, match=msg):
             model.add_weighted_adapter(["default", "other"], weights=[1.0, 1.0], adapter_name="merged")
 
+    def test_multiple_adapters_no_needless_copy_modules_to_save(self):
+        # See 2206
+        # The problem was that we keep a "global" modules_to_save on the model which contains all possible
+        # modules_to_save for each adapter. When the first adapter targets embed_tokens with modules_to_save and the
+        # second adapter targets lm_head, then embed_tokens will create a copy of the original module for the second
+        # adapter, even though it's not needed. The copy still acts as expected but uses unnecessary memory.
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
+        config0 = LoraConfig(modules_to_save=["embed_tokens"])
+        config1 = LoraConfig(modules_to_save=["lm_head"])
+        model = get_peft_model(model, config0)
+        model.add_adapter("other", config1)
+
+        lm_head_keys = list(model.base_model.model.lm_head.modules_to_save.keys())
+        assert lm_head_keys == ["other"]
+
+        embed_token_keys = list(model.base_model.model.model.decoder.embed_tokens.modules_to_save.keys())
+        # before the fix, this would be: ['default', 'other']
+        assert embed_token_keys == ["default"]
+
     def test_existing_model_card(self):
         # ensure that if there is already a model card, it is not overwritten
         model = MLP()
@@ -1699,7 +1856,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             LoraConfig(target_modules=["lin0"], init_lora_weights=False),
             LoKrConfig(target_modules=["lin0"], init_weights=False),
             LoHaConfig(target_modules=["lin0"], init_weights=False),
-            AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
+            AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False, total_step=1),
             IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
             OFTConfig(target_modules=["lin0"], init_weights=False, r=2),
             BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
@@ -1775,6 +1932,14 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # should not raise an error
         model.merge_and_unload(safe_merge=True)
 
+    def test_unload_adapter_multihead_attention(self):
+        # MultiheadAttention has special logic for unloading, that logic is covered by this test
+        self._test_unload_adapter(
+            model_id="MHA",
+            config_cls=LoraConfig,
+            config_kwargs={"target_modules": ["mha"], "init_lora_weights": False},
+        )
+
     def test_dora_save_and_load_remapping(self):
         # Here we test the refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a ModuleDict
         # with a DoraLayer instance. The old parameter is now the "weight" attribute of that layer. Since we want the
@@ -1809,6 +1974,37 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert state_dict.keys() == state_dict_loaded.keys()
         for k in state_dict:
             assert torch.allclose(state_dict[k], state_dict_loaded[k])
+
+    @parameterized.expand([False, True])
+    def test_mha_gradients_set_correctly(self, with_forward_call):
+        # check for this bug: https://github.com/huggingface/peft/issues/761#issuecomment-1893804738
+        base_model = ModelMha()
+        config = LoraConfig(target_modules=["mha"])
+        model = get_peft_model(base_model, config)
+        model = model.to(self.torch_device)
+
+        if with_forward_call:
+            # after the merge-unmerge roundtrip happening in forward of lora MHA, the base weights should be set to
+            # requires_grad=False
+            inputs = self.prepare_inputs_for_testing()
+            model(**inputs)
+
+        assert model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad is False
+        assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is False
+
+        # _restore_weights used to ignore the gradient, this checks that it is indeed considered
+        model.base_model.model.mha._restore_weights()
+        assert model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad is False
+        assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is False
+
+        model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad = True
+        model.base_model.model.mha.base_layer.in_proj_weight.requires_grad = True
+        assert model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad is True
+        assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is True
+
+        model.base_model.model.mha._restore_weights()
+        assert model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad is True
+        assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is True
 
 
 class TestMultiRankAdapter(unittest.TestCase):
@@ -1874,9 +2070,9 @@ class TestMultiRankAdapter(unittest.TestCase):
                 if isinstance(module, BaseTunerLayer):
                     rank_expected = rank_pattern.get(key, r)
                     rank_current = module.lora_A[adapter].weight.shape[0]
-                    assert (
-                        rank_current == rank_expected
-                    ), f"Rank {rank_current} is not equal to expected {rank_expected}"
+                    assert rank_current == rank_expected, (
+                        f"Rank {rank_current} is not equal to expected {rank_expected}"
+                    )
 
 
 class TestRepr(unittest.TestCase):
@@ -1943,15 +2139,26 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
 
     def set_multiple_active_adapters(self, model, adapter_names):
         for module in model.modules():
-            if isinstance(module, BaseTunerLayer):
+            if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
                 module.set_adapter(adapter_names)
+
+    def resolve_model_cls(self, tuner_method):
+        if tuner_method == "lora+trainable_tokens":
+            # for this method we need an Embedding layer to target
+            return ModelEmbConv1D()
+        if tuner_method == "ia3":
+            return MLP(bias=False)
+        return MLP(bias=True)
 
     @parameterized.expand(MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES)
     def test_multiple_active_adapters_forward(
         self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
     ):
         torch.manual_seed(0)
-        model = MLP(bias=tuner_method != "ia3").to(self.torch_device).eval()
+
+        model = self.resolve_model_cls(tuner_method)
+        model = model.to(self.torch_device).eval()
+
         X = self.prepare_inputs_for_testing()
 
         config_1 = config_cls(**config_kwargs_1)
@@ -1959,6 +2166,19 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
 
         peft_model = get_peft_model(model, config_1, adapter_name="adapter_1")
         peft_model.add_adapter("adapter_2", config_2)
+
+        # the assumption that the output of the combined output of two adapters is != to the output of one
+        # adapter is not true for unmodified trainable tokens as they just mimic the existing embedding matrix.
+        # therefore, we modify the weights so that the adapter weights differs from the embedding weights.
+        #
+        # We do it this way because we have no way to pass something like `init_weights=False` to the token adapter.
+        if "trainable_tokens" in tuner_method:
+            peft_model.emb.token_adapter.trainable_tokens_delta["adapter_1"].data = torch.rand_like(
+                peft_model.emb.token_adapter.trainable_tokens_delta["adapter_1"].data
+            )
+            peft_model.emb.token_adapter.trainable_tokens_delta["adapter_2"].data = torch.rand_like(
+                peft_model.emb.token_adapter.trainable_tokens_delta["adapter_2"].data
+            )
 
         # set adapter_1
         peft_model.set_adapter("adapter_1")
@@ -1991,7 +2211,10 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
         self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
     ):
         torch.manual_seed(0)
-        model = MLP(bias=tuner_method != "ia3").to(self.torch_device).eval()
+
+        model = self.resolve_model_cls(tuner_method)
+        model = model.to(self.torch_device).eval()
+
         X = self.prepare_inputs_for_testing()
         base_output = model(**X)
 
@@ -2019,12 +2242,25 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
     @parameterized.expand(MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES)
     def test_merge_layers_multi(self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2):
         torch.manual_seed(0)
-        model = MLP(bias=tuner_method != "ia3").to(self.torch_device).eval()
+
+        model = self.resolve_model_cls(tuner_method)
+        model = model.to(self.torch_device).eval()
 
         config_1 = config_cls(**config_kwargs_1)
         config_2 = config_cls(**config_kwargs_2)
 
         model = get_peft_model(model, config_1)
+
+        # the assumption that the output of the combined output of two adapters is != to the output of one
+        # adapter is not true for unmodified trainable tokens as they just mimic the existing embedding matrix.
+        # therefore, we modify the weights so that the adapter weights differs from the embedding weights. in this
+        # case we even use 20*rand to be very distinct to adapter 2 since we're comparing outputs and not embeddings
+        # with rather high tolerance values. this is also the reason why `init_weights` is not sufficient here and
+        # when using `<peft method>.trainable_token_indices` we do not have the utility of `init_weights` anyway.
+        if "trainable_tokens" in tuner_method:
+            model.emb.token_adapter.trainable_tokens_delta["default"].data = 20 * torch.rand_like(
+                model.emb.token_adapter.trainable_tokens_delta["default"].data
+            )
 
         dummy_input = self.prepare_inputs_for_testing()
         model.eval()
@@ -2034,6 +2270,13 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
 
         model.add_adapter("adapter-2", config_2)
         model.set_adapter("adapter-2")
+
+        # same as above but for adapter 2
+        if "trainable_tokens" in tuner_method:
+            model.emb.token_adapter.trainable_tokens_delta["adapter-2"].data = 2 * torch.rand_like(
+                model.emb.token_adapter.trainable_tokens_delta["adapter-2"].data
+            )
+
         model.eval()
 
         with torch.inference_mode():
@@ -2340,10 +2583,10 @@ class RequiresGradTester(unittest.TestCase):
 
     def test_requires_grad_adalora_different_targets(self):
         # test two different AdaLora adapters that target different modules
-        config0 = AdaLoraConfig(target_modules=["lin0"])
+        config0 = AdaLoraConfig(target_modules=["lin0"], total_step=1)
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = AdaLoraConfig(target_modules=["lin1"], inference_mode=True)
+        config1 = AdaLoraConfig(target_modules=["lin1"], total_step=1, inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -2386,10 +2629,10 @@ class RequiresGradTester(unittest.TestCase):
 
     def test_requires_grad_adalora_same_targets(self):
         # same as previous test, except that AdaLora adapters target the same layer
-        config0 = AdaLoraConfig(target_modules=["lin0"])
+        config0 = AdaLoraConfig(target_modules=["lin0"], total_step=1)
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = AdaLoraConfig(target_modules=["lin0"], inference_mode=True)
+        config1 = AdaLoraConfig(target_modules=["lin0"], total_step=1, inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -3630,6 +3873,18 @@ class TestMixedAdapterBatches:
         inputs = {"X": torch.arange(270).view(6, 5, 3, 3).to(self.torch_device)}
         self.run_checks(peft_model, inputs)
 
+    def test_mixed_adapter_batches_mha_raises(self):
+        base_model = ModelMha().to(self.torch_device).eval()
+        config0 = LoraConfig(target_modules=["mha"], init_lora_weights=False)
+        config1 = LoraConfig(target_modules=["mha"], r=16, init_lora_weights=False)
+        peft_model = get_peft_model(base_model, config0, "adapter0").eval()
+        peft_model.add_adapter("adapter1", config1)
+
+        inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
+        msg = "lora.MultiheadAttention does not support mixed adapter batches"
+        with pytest.raises(TypeError, match=msg):
+            self.run_checks(peft_model, inputs)
+
     def test_mixed_adapter_batches_lora_length_mismatch_raises(self, mlp_lora):
         inputs = {
             "X": torch.arange(90).view(-1, 10).to(self.torch_device),
@@ -3879,9 +4134,9 @@ class TestDynamicDispatch:
         config._register_custom_module({custom_module_cls: custom_lora_cls})
 
         peft_model = get_peft_model(model, config)
-        sd_before = peft_model.state_dict()
+        sd_before = copy.deepcopy(peft_model.state_dict())
         inputs = torch.randn(16, 10)
-        optimizer = torch.optim.SGD(peft_model.parameters(), lr=1e-1)
+        optimizer = torch.optim.SGD(peft_model.parameters(), lr=1e-4)
 
         for _ in range(5):
             optimizer.zero_grad()
@@ -3891,6 +4146,13 @@ class TestDynamicDispatch:
             optimizer.step()
 
         sd_after = peft_model.state_dict()
+
+        # sanity check that for finite results, since nan != nan, which would make the test pass trivially
+        for val in sd_before.values():
+            assert torch.isfinite(val).all()
+        for val in sd_after.values():
+            assert torch.isfinite(val).all()
+
         assert not torch.allclose(
             sd_before["base_model.model.my_module.lora_A.default.weight"],
             sd_after["base_model.model.my_module.lora_A.default.weight"],

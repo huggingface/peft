@@ -22,13 +22,14 @@ import os
 from typing import Callable, Optional, Union
 
 import torch
+from accelerate.utils.memory import clear_device_cache
 from huggingface_hub import snapshot_download
 from huggingface_hub.errors import HFValidationError, LocalEntryNotFoundError
 from safetensors import SafetensorError, safe_open
 from transformers.utils import cached_file
 from transformers.utils.hub import get_checkpoint_shard_files
 
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_xpu_available
 
 
 class NFQuantizer:
@@ -201,21 +202,19 @@ def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, r
     out_feature, in_feature = weight.size()
     device = weight.device
     dtype = weight.dtype
-
     logging.info(
-        f"Weight: ({out_feature}, {in_feature}) | Rank: {reduced_rank} "
-        f"| Num Iter: {num_iter} | Num Bits: {num_bits}"
+        f"Weight: ({out_feature}, {in_feature}) | Rank: {reduced_rank} | Num Iter: {num_iter} | Num Bits: {num_bits}"
     )
     if not is_bnb_4bit_available() or num_bits in [2, 8]:
         quantizer = NFQuantizer(num_bits=num_bits, device=device, method="normal", block_size=64)
         compute_device = device
     else:
-        compute_device = "cuda"
+        compute_device = "xpu" if is_xpu_available() else "cuda"
 
     weight = weight.to(device=compute_device, dtype=torch.float32)
     res = weight.clone()
     for i in range(num_iter):
-        torch.cuda.empty_cache()
+        clear_device_cache()
         # Quantization
         if num_bits == 4 and is_bnb_4bit_available():
             qweight = bnb.nn.Params4bit(
@@ -247,12 +246,12 @@ def _loftq_init_new(qweight, weight, num_bits: int, reduced_rank: int):
     if not is_bnb_4bit_available():
         raise ValueError("bitsandbytes 4bit quantization is not available.")
 
-    compute_device = "cuda"
+    compute_device = "xpu" if is_xpu_available() else "cuda"
     dequantized_weight = bnb.functional.dequantize_4bit(qweight.data, qweight.quant_state)
 
     weight = weight.to(device=compute_device, dtype=torch.float32)
     residual = weight - dequantized_weight
-    torch.cuda.empty_cache()
+    clear_device_cache()
     # Decompose the residualidual by SVD
     output = _low_rank_decomposition(residual, reduced_rank=reduced_rank)
     L, R, reduced_rank = output["L"], output["R"], output["reduced_rank"]

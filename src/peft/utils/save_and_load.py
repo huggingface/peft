@@ -21,14 +21,15 @@ import huggingface_hub
 import torch
 from huggingface_hub import file_exists, hf_hub_download
 from huggingface_hub.errors import EntryNotFoundError, LocalEntryNotFoundError
-from packaging import version
 from safetensors.torch import load_file as safe_load_file
 
-from .constants import PEFT_TYPE_TO_PREFIX_MAPPING
+from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
+
 from .other import (
     EMBEDDING_LAYER_NAMES,
     SAFETENSORS_WEIGHTS_NAME,
     WEIGHTS_NAME,
+    AuxiliaryTrainingWrapper,
     check_file_exists_on_hf_hub,
     infer_device,
 )
@@ -133,12 +134,6 @@ def get_peft_model_state_dict(
         else:
             raise NotImplementedError
 
-    elif config.peft_type == PeftType.LOHA:
-        to_return = {k: state_dict[k] for k in state_dict if "hada_" in k}
-
-    elif config.peft_type == PeftType.LOKR:
-        to_return = {k: state_dict[k] for k in state_dict if "lokr_" in k}
-
     elif config.peft_type == PeftType.ADAPTION_PROMPT:
         to_return = {k: state_dict[k] for k in state_dict if k.split(".")[-1].startswith("adaption_")}
 
@@ -155,20 +150,9 @@ def get_peft_model_state_dict(
                 prompt_embeddings = model.get_prompt_embedding_to_save(adapter_name)
         to_return["prompt_embeddings"] = prompt_embeddings
 
-    elif config.peft_type == PeftType.IA3:
-        to_return = {k: state_dict[k] for k in state_dict if "ia3_" in k}
-
-    elif config.peft_type == PeftType.OFT:
-        to_return = {k: state_dict[k] for k in state_dict if "oft_" in k}
-
-    elif config.peft_type == PeftType.POLY:
-        to_return = {k: state_dict[k] for k in state_dict if "poly_" in k}
-
-    elif config.peft_type == PeftType.LN_TUNING:
-        to_return = {k: state_dict[k] for k in state_dict if "ln_tuning_" in k}
-
     elif config.peft_type == PeftType.VERA:
-        to_return = {k: state_dict[k] for k in state_dict if "vera_lambda_" in k}
+        vera_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
+        to_return = {k: state_dict[k] for k in state_dict if vera_prefix in k}
         if config.save_projection:
             # TODO: adding vera_A and vera_B to `self.get_base_layer` would
             # make name to match here difficult to predict.
@@ -179,12 +163,8 @@ def get_peft_model_state_dict(
                 )
             to_return["base_model.vera_A." + adapter_name] = state_dict["base_model.vera_A." + adapter_name]
             to_return["base_model.vera_B." + adapter_name] = state_dict["base_model.vera_B." + adapter_name]
-    elif config.peft_type == PeftType.FOURIERFT:
-        to_return = {k: state_dict[k] for k in state_dict if "fourierft_" in k}
     elif config.peft_type == PeftType.XLORA:
         to_return = {k: state_dict[k] for k in state_dict if "internal_xlora_classifier" in k}
-    elif config.peft_type == PeftType.HRA:
-        to_return = {k: state_dict[k] for k in state_dict if "hra_" in k}
     elif config.peft_type == PeftType.VBLORA:
         to_return = {}
         # choose the most efficient dtype for indices
@@ -208,16 +188,25 @@ def get_peft_model_state_dict(
         to_return["base_model.vblora_vector_bank." + adapter_name] = state_dict[
             "base_model.vblora_vector_bank." + adapter_name
         ]
-    elif config.peft_type == PeftType.BONE:
-        to_return = {k: state_dict[k] for k in state_dict if "bone_" in k}
+    elif config.peft_type in list(PeftType):
+        prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
+        to_return = {k: state_dict[k] for k in state_dict if prefix in k}
     else:
         raise ValueError(f"Unknown PEFT type passed: {config.peft_type}")
 
-    # MODULES TO SAVE
-    if getattr(model, "modules_to_save", None) is not None:
-        for key, value in state_dict.items():
-            if any(f"{module_name}.modules_to_save.{adapter_name}" in key for module_name in model.modules_to_save):
-                to_return[key.replace("modules_to_save.", "")] = value
+    # ADDITIONAL TRAINING MODULES / MODULES_TO_SAVE
+    for name, module in model.named_modules():
+        if isinstance(module, AuxiliaryTrainingWrapper):
+            # Compute the module-relative state dict to make it easier for the adapter to fetch the appropriate
+            # keys that the module thinks need to be saved. We cannot rely on `.state_dict()` internally of the
+            # module since accelerators like DeepSpeed require special handling which is done for the model
+            # state dict from above but most likely not in the module itself. See #2450.
+            module_state_dict = {
+                k.removeprefix(f"{name}."): v for k, v in state_dict.items() if k.startswith(f"{name}.")
+            }
+            to_return.update(
+                {f"{name}.{k}": v for k, v in module.adapter_state_dict(adapter_name, module_state_dict).items()}
+            )
 
     # DEAL WITH EMBEDDINGS
     # check the common embedding layers in `target_modules` to reset `save_embedding_layers` if necessary
@@ -226,6 +215,7 @@ def get_peft_model_state_dict(
         save_embedding_layers == "auto"
         and hasattr(config, "target_modules")
         and any(k in config.target_modules for k in EMBEDDING_LAYER_NAMES)
+        and config.peft_type != PeftType.TRAINABLE_TOKENS
     ):
         warnings.warn("Setting `save_embedding_layers` to `True` as embedding layers found in `target_modules`.")
         save_embedding_layers = is_embedding_in_target_modules = True
@@ -294,7 +284,7 @@ def _find_mismatched_keys(
         # see https://github.com/huggingface/transformers/blob/09f9f566de83eef1f13ee83b5a1bbeebde5c80c1/src/transformers/modeling_utils.py#L3858-L3864
         if (state_dict[key].shape[-1] == 1) and (state_dict[key].numel() * 2 == tensor.numel()):
             # This skips size mismatches for 4-bit weights. Two 4-bit values share an 8-bit container, causing size
-            # differences. Without matching with module type or paramter type it seems like a practical way to detect
+            # differences. Without matching with module type or parameter type it seems like a practical way to detect
             # valid 4bit weights.
             continue
 
@@ -351,19 +341,31 @@ def set_peft_model_state_dict(
 
     """
     config = model.peft_config[adapter_name]
-    state_dict = {}
-    if getattr(model, "modules_to_save", None) is not None:
-        for key, value in peft_model_state_dict.items():
-            if any(module_name in key for module_name in model.modules_to_save):
-                for module_name in model.modules_to_save:
-                    if module_name in key:
-                        key = key.replace(module_name, f"{module_name}.modules_to_save.{adapter_name}")
-                        break
-            state_dict[key] = value
-    else:
-        state_dict = peft_model_state_dict
+    state_dict = peft_model_state_dict
 
-    if config.peft_type in PEFT_TYPE_TO_PREFIX_MAPPING:
+    # handle auxiliary training wrappers such as ModulesToSaveWrapper and TrainableTokensWrapper by getting each of
+    # them and translating saved state dict key (which does not include the adapter name) to loaded state dict key
+    # (which includes the adapter name).
+    for name, module in model.named_modules():
+        if isinstance(module, AuxiliaryTrainingWrapper):
+            # Not every module has a 1:1 mapping. ModulesToSaveWrapper, for example, removes the
+            # `modules_to_save.{adapter_name}.` prefix. This prefix must be restored when loading the model from the
+            # saved state dict which is why we fetch a load key map from the wrapper.
+            key_map = module.adapter_state_dict_load_map(adapter_name)
+            for k in key_map:
+                lookup_key = f"{name}.{k}"
+                store_key = f"{name}.{key_map[k]}"
+
+                state_dict[store_key] = peft_model_state_dict[lookup_key]
+
+                # delete the old key from the previous `state_dict = peft_model_state_dict` statement.
+                del state_dict[lookup_key]
+
+    if config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT:
+        peft_model_state_dict = state_dict
+    elif config.peft_type == PeftType.XLORA:
+        peft_model_state_dict = state_dict
+    elif config.peft_type in PEFT_TYPE_TO_PREFIX_MAPPING:
         peft_model_state_dict = {}
         parameter_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
         if config.peft_type == PeftType.VBLORA and config.save_only_topk_weights:
@@ -430,11 +432,6 @@ def set_peft_model_state_dict(
                 return k
 
             peft_model_state_dict = {renamed_dora_weights(k): v for k, v in peft_model_state_dict.items()}
-
-    elif config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT:
-        peft_model_state_dict = state_dict
-    elif config.peft_type == PeftType.XLORA:
-        peft_model_state_dict = state_dict
     else:
         raise NotImplementedError
 
@@ -474,15 +471,13 @@ def set_peft_model_state_dict(
     return load_result
 
 
+# TODO: remove this function, use vanilla torch.load as soon as torch < 2.6.0 is no longer supported
 def torch_load(*args, weights_only=True, **kwargs):
     """Call torch.load and handle weights_only.
 
     Defaults to weights_only=True to anticipate upcoming switch on the PyTorch side.
 
     """
-    # TODO: weights_only was added in 1.13, remove if 1.12 no longer needs to be supported
-    if version.parse(torch.__version__) < version.parse("1.13"):
-        return torch.load(*args, **kwargs)
     return torch.load(*args, weights_only=weights_only, **kwargs)
 
 
@@ -524,14 +519,15 @@ def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_down
     elif huggingface_hub.constants.HF_HUB_OFFLINE:
         # if in offline mode, check if we can find the adapter file locally
         hub_filename = get_hub_filename(use_safetensors=True)
+        hf_hub_download_kwargs.pop("local_files_only", None)
         try:
-            filename = hf_hub_download(model_id, hub_filename, local_files_only=True)
+            filename = hf_hub_download(model_id, hub_filename, local_files_only=True, **hf_hub_download_kwargs)
             use_safetensors = True
         except LocalEntryNotFoundError:
             # Could not find safetensors, try pickle. If this also fails, it's fine to let the error be raised here, as
             # it means that the user tried to load a non-cached model in offline mode.
             hub_filename = get_hub_filename(use_safetensors=False)
-            filename = hf_hub_download(model_id, hub_filename, local_files_only=True)
+            filename = hf_hub_download(model_id, hub_filename, local_files_only=True, **hf_hub_download_kwargs)
             use_safetensors = False
     else:
         token = hf_hub_download_kwargs.get("token", None)

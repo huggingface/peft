@@ -24,6 +24,7 @@ from unittest.mock import patch
 import pytest
 import torch
 from datasets import Dataset, load_dataset
+from huggingface_hub import snapshot_download
 from huggingface_hub.utils import reset_sessions
 from safetensors.torch import load_file
 from scipy import stats
@@ -55,12 +56,12 @@ from peft import (
     inject_adapter_in_model,
     set_peft_model_state_dict,
 )
+from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.tuners.lora.config import CordaConfig
 from peft.tuners.lora.corda import preprocess_corda
 from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
-from peft.utils.constants import PEFT_TYPE_TO_PREFIX_MAPPING
-from peft.utils.hotswap import hotswap_adapter
+from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
 
 
 class TestLoraInitialization:
@@ -134,10 +135,6 @@ class TestLoraInitialization:
         # use statistical test to check if weight A is from a normal distribution
         normal = self.get_normal(0.0, 1 / config.r)
         _, p_value = stats.kstest(weight_A.detach().flatten().cpu().numpy(), normal.flatten().cpu().numpy())
-
-        # import matplotlib.pyplot as plt
-        # x = weight_A.detach().flatten().cpu().numpy()
-        # breakpoint()
 
         assert p_value > 0.5
 
@@ -294,7 +291,7 @@ class TestLoraInitialization:
         assert model.conv2d.scaling["default"] == expected_scaling
 
     # testcase for bugfix for issue 2194
-    def test_pattern_override(self):
+    def test_rank_alpha_pattern_override(self):
         torch.manual_seed(0)
 
         layer = self.get_model()
@@ -1092,6 +1089,124 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match="DoRA does not support megatron_core"):
             LoraConfig(target_modules=["linear"], use_dora=True, megatron_config=megatron_config)
 
+    @pytest.fixture
+    def mha_cls(self):
+        class ModelMha(nn.Module):
+            def __init__(self, kdim=None, vdim=None):
+                super().__init__()
+                self.mha = nn.MultiheadAttention(10, 2, kdim=kdim, vdim=vdim)
+                self.lin0 = nn.Linear(10, 2)
+                self.sm = nn.LogSoftmax(dim=-1)
+
+            def forward(self, X):
+                X = X.float()
+                X, _ = self.mha(X, X, X)
+                X = self.lin0(X)
+                X = self.sm(X)
+                return X
+
+        return ModelMha
+
+    def test_mha_load_init_model_first(self, mha_cls):
+        # This test used to fail and require a workaround, for more context, see:
+        # https://github.com/huggingface/peft/pull/1324#issuecomment-2252473980
+        # The workaround was that _restore_weights had to be called manually on lora.MHA layers in order to make loading
+        # the state dict work. With recent changes, this workaround is no longer required, so that test has been
+        # deleted.
+        inputs = torch.rand(10, 10, 10)
+        model = mha_cls()
+        config = LoraConfig(target_modules=["mha"], init_lora_weights=False)
+        model = get_peft_model(model, config).eval()
+        restore_state_dict = {k: v.detach().cpu() for k, v in model.state_dict().items()}
+
+        del model
+
+        model = mha_cls()
+        model = get_peft_model(model, config)
+        # the workaround used to be:
+        # for module in model.modules():
+        #     if isinstance(module, peft.tuners.lora.layer.MultiheadAttention):
+        #         module._restore_weights()
+        model(inputs)
+        model.load_state_dict(restore_state_dict)
+
+    def test_mha_with_separate_qkv_embed_raises(self, mha_cls):
+        # passing different kdim and vdim results in separate parameters for q, k, v, which is not supported (yet)
+        model = mha_cls(kdim=20, vdim=30)
+        config = LoraConfig(target_modules=["mha"])
+        msg = "Only same embed for query/key/value is supported as of now for MultiheadAttention"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+    def test_mha_with_dora_raises(self, mha_cls):
+        model = mha_cls()
+        config = LoraConfig(target_modules=["mha"], use_dora=True)
+        msg = re.escape("MultiheadAttention does not support DoRA (yet), please set use_dora to False")
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+    def test_mha_exposes_attributes(self, mha_cls):
+        # MHA requires a bunch of attributes to be exposed, try to check them exhaustively here
+        model = mha_cls()
+        embed_dim = model.mha.embed_dim
+        kdim = model.mha.kdim
+        vdim = model.mha.vdim
+        qkv_same_embed_dim = model.mha._qkv_same_embed_dim
+        num_heads = model.mha.num_heads
+        dropout = model.mha.dropout
+        batch_first = model.mha.batch_first
+        head_dim = model.mha.head_dim
+        in_proj_weight = model.mha.in_proj_weight
+        in_proj_bias = model.mha.in_proj_bias
+        out_proj = model.mha.out_proj
+        bias_k = model.mha.bias_k
+        bias_v = model.mha.bias_v
+        add_zero_attn = model.mha.add_zero_attn
+
+        config = LoraConfig(target_modules=["mha"])
+        peft_model = get_peft_model(model, config)
+        assert peft_model.base_model.mha.embed_dim == embed_dim
+        assert peft_model.base_model.mha.kdim == kdim
+        assert peft_model.base_model.mha.vdim == vdim
+        assert peft_model.base_model.mha._qkv_same_embed_dim == qkv_same_embed_dim
+        assert peft_model.base_model.mha.num_heads == num_heads
+        assert peft_model.base_model.mha.dropout == dropout
+        assert peft_model.base_model.mha.batch_first == batch_first
+        assert peft_model.base_model.mha.head_dim == head_dim
+        if in_proj_weight is not None:
+            assert torch.allclose(peft_model.base_model.mha.in_proj_weight, in_proj_weight)
+        else:
+            assert peft_model.base_model.mha.in_proj_weight is None
+        if in_proj_bias is not None:
+            assert torch.allclose(peft_model.base_model.mha.in_proj_bias, in_proj_bias)
+        else:
+            assert peft_model.base_model.mha.in_proj_bias is None
+        assert peft_model.base_model.mha.out_proj is out_proj
+        if bias_k is not None:
+            assert torch.allclose(peft_model.base_model.mha.bias_k, bias_k)
+        else:
+            assert peft_model.base_model.mha.bias_k is None
+        if bias_v is not None:
+            assert torch.allclose(peft_model.base_model.mha.bias_v, bias_v)
+        else:
+            assert peft_model.base_model.mha.bias_v is None
+        assert peft_model.base_model.mha.add_zero_attn == add_zero_attn
+
+    def test_mha_merge_masks_method(self, mha_cls):
+        # MHA requires a merge_masks method to be exposed, check that it works
+        model = mha_cls()
+        config = LoraConfig(target_modules=["mha"])
+        peft_model = get_peft_model(model, config)
+
+        attn_mask = torch.randint(0, 2, (10, 10))
+        key_padding_mask = torch.randint(0, 2, (10, 10))
+        query = torch.rand(10, 10, 10)
+        merged_mask0, mask_type0 = model.mha.merge_masks(attn_mask, key_padding_mask, query)
+        merged_mask1, mask_type1 = peft_model.base_model.mha.merge_masks(attn_mask, key_padding_mask, query)
+
+        assert torch.allclose(merged_mask0, merged_mask1)
+        assert mask_type0 == mask_type1
+
     def test_lora_with_bias_extra_params(self):
         # lora with lora_bias=True
         model = self.get_model()
@@ -1238,16 +1353,16 @@ class TestAdaLoraInitialization:
     torch_device = infer_device()
 
     def test_adalora_target_modules_set(self):
-        config = AdaLoraConfig(target_modules=["linear", "embed", "conv2d"])
+        config = AdaLoraConfig(target_modules=["linear", "embed", "conv2d"], total_step=1)
         assert config.target_modules == {"linear", "embed", "conv2d"}
 
     def test_adalora_use_dora_raises(self):
         with pytest.raises(ValueError, match="ADALORA does not support DoRA"):
-            AdaLoraConfig(use_dora=True)
+            AdaLoraConfig(use_dora=True, total_step=1)
 
     def test_adalora_loftq_config_raises(self):
         with pytest.raises(ValueError, match="ADALORA does not support LOFTQ"):
-            AdaLoraConfig(init_lora_weights="loftq", loftq_config={"loftq": "config"})
+            AdaLoraConfig(init_lora_weights="loftq", loftq_config={"loftq": "config"}, total_step=1)
 
     def get_model(self):
         class MyModule(nn.Module):
@@ -1271,7 +1386,7 @@ class TestAdaLoraInitialization:
 
         model = self.get_model()
         output_before = model(data)
-        config = AdaLoraConfig(target_modules=["linear"])
+        config = AdaLoraConfig(target_modules=["linear"], total_step=1)
         model = get_peft_model(model, config)
         output_after = model(data)
         assert torch.allclose(output_before, output_after)
@@ -1449,8 +1564,10 @@ class TestNoInfiniteRecursionDeepspeed:
 
 
 class TestLoadAdapterOfflineMode:
-    # make sure that PEFT honors offline mode
+    base_model = "hf-internal-testing/tiny-random-OPTForCausalLM"
+    peft_model_id = "peft-internal-testing/tiny-OPTForCausalLM-lora"
 
+    # make sure that PEFT honors offline mode
     @contextmanager
     def hub_offline_ctx(self):
         # this is required to simulate offline mode, setting the env var dynamically inside the test does not work
@@ -1462,18 +1579,36 @@ class TestLoadAdapterOfflineMode:
 
     def test_load_from_hub_then_offline_model(self):
         # this uses LoRA but it's the same mechanism for other methods
-        peft_model_id = "peft-internal-testing/gpt2-lora-random"
-        base_model = AutoModelForCausalLM.from_pretrained("gpt2")
+        base_model = AutoModelForCausalLM.from_pretrained(self.base_model)
 
         # first ensure that the adapter model has been downloaded
-        PeftModel.from_pretrained(base_model, peft_model_id)
+        PeftModel.from_pretrained(base_model, self.peft_model_id)
 
         del base_model
 
-        base_model = AutoModelForCausalLM.from_pretrained("gpt2")
+        base_model = AutoModelForCausalLM.from_pretrained(self.base_model)
         with self.hub_offline_ctx():
             # does not raise
-            PeftModel.from_pretrained(base_model, peft_model_id)
+            PeftModel.from_pretrained(base_model, self.peft_model_id)
+
+    @pytest.fixture
+    def changed_default_cache_dir(self, tmp_path, monkeypatch):
+        # ensure that this test does not interact with other tests that may use the HF cache
+        monkeypatch.setattr("huggingface_hub.constants.HF_HOME", tmp_path)
+        monkeypatch.setattr("huggingface_hub.constants.HF_HUB_CACHE", tmp_path / "hub")
+        monkeypatch.setattr("huggingface_hub.constants.HF_TOKEN_PATH", tmp_path / "token")
+
+    def load_checkpoints(self, cache_dir):
+        # download model and lora checkpoint to a specific cache dir
+        snapshot_download(self.base_model, cache_dir=cache_dir)
+        snapshot_download(self.peft_model_id, cache_dir=cache_dir)
+
+    def test_load_checkpoint_offline_non_default_cache_dir(self, changed_default_cache_dir, tmp_path):
+        # See #2373 for context
+        self.load_checkpoints(tmp_path)
+        with self.hub_offline_ctx():
+            base_model = AutoModelForCausalLM.from_pretrained(self.base_model, cache_dir=tmp_path)
+            PeftModel.from_pretrained(base_model, self.peft_model_id, cache_dir=tmp_path)
 
 
 class TestCustomModelConfigWarning:
@@ -1843,12 +1978,45 @@ class TestCordaInitialization:
         return torch.rand(1000, 1000).to(self.torch_device)
 
     @pytest.mark.parametrize("corda_method", ("ipm", "kpm"))
+    def test_lora_corda_no_redundant_fields(self, data, corda_method):
+        original_model = self.get_model()
+        model = deepcopy(original_model)
+
+        corda_config = CordaConfig(
+            corda_method=corda_method,
+        )
+        config = LoraConfig(
+            init_lora_weights="corda",
+            target_modules=["linear"],
+            corda_config=corda_config,
+        )
+        preprocess_corda(
+            model,
+            config,
+            run_model=lambda: model(data),
+            hooked_model=model,
+        )
+        peft_model = get_peft_model(model, config)
+
+        # check if the redundant fields are removed
+        assert not hasattr(peft_model.base_model.linear, "sample_count")
+        assert not hasattr(peft_model.base_model.linear, "covariance_matrix")
+        assert not hasattr(peft_model.base_model.linear, "corda_method")
+        assert not hasattr(peft_model.base_model.linear, "rank")
+        assert not hasattr(peft_model.base_model.linear, "eigens")
+
+        # legacy debug fields
+        assert not hasattr(peft_model.base_model.linear, "mean")
+        assert not hasattr(peft_model.base_model.linear, "std")
+
+    @pytest.mark.parametrize("corda_method", ("ipm", "kpm"))
     def test_lora_corda_sample_count(self, data, corda_method):
         original_model = self.get_model()
         model = deepcopy(original_model)
 
         corda_config = CordaConfig(
             corda_method=corda_method,
+            prune_temporary_fields=False,
         )
         config = LoraConfig(
             init_lora_weights="corda",
@@ -1886,6 +2054,7 @@ class TestCordaInitialization:
 
         corda_config = CordaConfig(
             corda_method=corda_method,
+            prune_temporary_fields=False,
         )
         config = LoraConfig(
             init_lora_weights="corda",
@@ -2694,6 +2863,18 @@ class TestHotSwapping:
         torch.manual_seed(0)
         return MLP().to(self.torch_device)
 
+    def get_model_conv2d(self):
+        class ConvModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(3, 10, kernel_size=3)
+
+            def forward(self, X):
+                return self.conv(X)
+
+        torch.manual_seed(0)
+        return ConvModel().to(self.torch_device)
+
     # this works with all adapters except prompt learning, but we don't test all
     # as it is unnecessary and would be slow
     @pytest.mark.parametrize(
@@ -2763,29 +2944,6 @@ class TestHotSwapping:
         # real check: model now behaves again like adapter 0
         assert torch.allclose(output0, output_loaded_back0, atol=atol, rtol=rtol)
 
-    def test_hotswap_incompatible_config_params_raises(self, tmp_path):
-        # When the configs of the two adapters are incompatible, an error is raised
-        config0 = LoraConfig(target_modules=["lin0"], lora_alpha=1.0)
-        config1 = LoraConfig(target_modules=["lin0"], lora_alpha=2.0)
-
-        model = self.get_model()
-        model = get_peft_model(model, config0)
-        model.save_pretrained(tmp_path / "adapter0")
-        del model
-
-        model = self.get_model()
-        model = get_peft_model(model, config1)
-        model.save_pretrained(tmp_path / "adapter1")
-        del model
-
-        # load adapter 0
-        model = self.get_model()
-        model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
-
-        msg = r"Configs are incompatible: for lora_alpha, 1.0 != 2.0"
-        with pytest.raises(ValueError, match=msg):
-            hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
-
     def test_hotswap_different_peft_types_raises(self, tmp_path):
         # When the configs of the two adapters are different PEFT methods, raise
         config0 = LoraConfig(target_modules=["lin0"])
@@ -2832,8 +2990,8 @@ class TestHotSwapping:
         with pytest.raises(ValueError, match=msg):
             hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
 
-    def test_hotswap_missing_key_raises(self, tmp_path):
-        # When a key is missing, raise
+    def test_hotswap_missing_key_works(self, tmp_path):
+        # When a key is missing, it is fine, the extra weight is zeroed out
         config = LoraConfig(target_modules=["lin0", "lin1"])
 
         model = self.get_model()
@@ -2856,9 +3014,11 @@ class TestHotSwapping:
         model = self.get_model()
         model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
 
-        msg = f"Hot swapping the adapter did not succeed. Missing keys: {key}"
-        with pytest.raises(RuntimeError, match=msg):
-            hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+        # sanity check: the missing weight is not already all zeros
+        assert not (model.base_model.model.lin1.lora_A["default"].weight == 0).all()
+        hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+        # after hotswapping, it is zeroed out
+        assert (model.base_model.model.lin1.lora_A["default"].weight == 0).all()
 
     def test_hotswap_extra_key_raises(self, tmp_path):
         # When there is an extra key, raise
@@ -2884,6 +3044,440 @@ class TestHotSwapping:
         model = self.get_model()
         model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
 
-        msg = f"Hot swapping the adapter did not succeed. Unexpected keys: {new_key}"
+        msg = f"Hot swapping the adapter did not succeed, unexpected keys found: {new_key}"
         with pytest.raises(RuntimeError, match=msg):
             hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+
+    @pytest.mark.parametrize("ranks", [(7, 13), (13, 7)])
+    def test_hotswap_works_different_ranks_alphas(self, ranks, tmp_path):
+        # same as test_hotswap_works but different rank and alpha
+        # Load 2 different adapters and check that we can hotswap between them, with the model optionally being
+        # compiled.
+        atol, rtol = 1e-4, 1e-4
+        inputs = torch.rand(3, 10).to(self.torch_device)
+
+        # create adapter 0
+        config0 = LoraConfig(target_modules=["lin0", "lin1"], r=ranks[0], lora_alpha=ranks[0], init_lora_weights=False)
+        model = self.get_model()
+        torch.manual_seed(0)
+        model = get_peft_model(model, config0)
+        model.eval()
+        with torch.inference_mode():
+            output0 = model(inputs)
+        model.save_pretrained(tmp_path / "adapter0")
+
+        del model
+
+        # create adapter 1
+        config1 = LoraConfig(target_modules=["lin0"], r=ranks[1], lora_alpha=ranks[1], init_lora_weights=False)
+        model = self.get_model()
+        torch.manual_seed(1)
+        model = get_peft_model(model, config1)
+        model.eval()
+        with torch.inference_mode():
+            output1 = model(inputs)
+        model.save_pretrained(tmp_path / "adapter1")
+
+        # sanity check: they're not the same
+        assert not torch.allclose(output0, output1, atol=atol, rtol=rtol)
+
+        del model
+
+        # load adapter 0
+        model = self.get_model()
+        model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
+        with torch.inference_mode():
+            output_loaded0 = model(inputs)
+
+        # sanity check: same output after loading for adapter 0
+        assert torch.allclose(output0, output_loaded0, atol=atol, rtol=rtol)
+
+        # hotswap with adapter 1
+        hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+        with torch.inference_mode():
+            output_loaded1 = model(inputs)
+
+        # real check: model now behaves like adapter 1
+        assert torch.allclose(output1, output_loaded1, atol=atol, rtol=rtol)
+
+        # hotswap back to adapter 0
+        hotswap_adapter(model, tmp_path / "adapter0", adapter_name="default")
+        with torch.inference_mode():
+            output_loaded_back0 = model(inputs)
+
+        # real check: model now behaves again like adapter 0
+        assert torch.allclose(output0, output_loaded_back0, atol=atol, rtol=rtol)
+
+    @pytest.mark.parametrize("ranks", [(7, 13), (13, 7)])
+    def test_hotswap_works_different_ranks_alphas_conv2d(self, ranks, tmp_path):
+        # same as previous test, but for a Conv2d model
+        atol, rtol = 1e-4, 1e-4
+        inputs = torch.rand(3, 3, 10, 10).to(self.torch_device)
+
+        # create adapter 0
+        config0 = LoraConfig(target_modules=["conv"], r=ranks[0], init_lora_weights=False)
+        model = self.get_model_conv2d()
+        torch.manual_seed(0)
+        model = get_peft_model(model, config0)
+        model.eval()
+        with torch.inference_mode():
+            output0 = model(inputs)
+        model.save_pretrained(tmp_path / "adapter0")
+
+        del model
+
+        # create adapter 1
+        config1 = LoraConfig(target_modules=["conv"], r=ranks[1], init_lora_weights=False)
+        model = self.get_model_conv2d()
+        torch.manual_seed(1)
+        model = get_peft_model(model, config1)
+        model.eval()
+        with torch.inference_mode():
+            output1 = model(inputs)
+        model.save_pretrained(tmp_path / "adapter1")
+
+        # sanity check: they're not the same
+        assert not torch.allclose(output0, output1, atol=atol, rtol=rtol)
+
+        del model
+
+        # load adapter 0
+        model = self.get_model_conv2d()
+        model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
+        with torch.inference_mode():
+            output_loaded0 = model(inputs)
+
+        # sanity check: same output after loading for adapter 0
+        assert torch.allclose(output0, output_loaded0, atol=atol, rtol=rtol)
+
+        # hotswap with adapter 1
+        hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+        with torch.inference_mode():
+            output_loaded1 = model(inputs)
+
+        # real check: model now behaves like adapter 1
+        assert torch.allclose(output1, output_loaded1, atol=atol, rtol=rtol)
+
+        # hotswap back to adapter 0
+        hotswap_adapter(model, tmp_path / "adapter0", adapter_name="default")
+        with torch.inference_mode():
+            output_loaded_back0 = model(inputs)
+
+        # real check: model now behaves again like adapter 0
+        assert torch.allclose(output0, output_loaded_back0, atol=atol, rtol=rtol)
+
+    def test_prepare_model_for_compiled_hotswap_scalings_are_tensors(self):
+        config = LoraConfig(target_modules=["lin0", "lin1"])
+        model = self.get_model()
+        model = get_peft_model(model, config)
+
+        # sanity check: all scalings are floats
+        scalings_before = {}
+        for name, module in model.named_modules():
+            if hasattr(module, "scaling"):
+                for key, val in module.scaling.items():
+                    assert isinstance(val, float)
+                    scalings_before[f"{name}.{key}"] = val
+
+        prepare_model_for_compiled_hotswap(model)
+
+        scalings_after = {}
+        for name, module in model.named_modules():
+            if hasattr(module, "scaling"):
+                for key, val in module.scaling.items():
+                    assert isinstance(val, torch.Tensor)
+                    scalings_after[f"{name}.{key}"] = val.item()
+
+        assert scalings_before == scalings_after
+
+    def test_prepare_model_for_compiled_hotswap_rank_padding_works(self):
+        old_rank = 8
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=old_rank)
+        model = self.get_model()
+        model = get_peft_model(model, config)
+
+        # sanity check
+        for name, param in model.named_parameters():
+            if "lora_A" in name:
+                assert param.shape[0] == old_rank
+            elif "lora_B" in name:
+                assert param.shape[1] == old_rank
+
+        new_rank = 13
+        prepare_model_for_compiled_hotswap(model, target_rank=new_rank)
+
+        for name, param in model.named_parameters():
+            if "lora_A" in name:
+                assert param.shape[0] == new_rank
+            elif "lora_B" in name:
+                assert param.shape[1] == new_rank
+
+    def test_prepare_model_for_compiled_hotswap_same_rank_padding_works(self):
+        # same as previous test, but ensure there is no error if the rank to pad to is the same
+        old_rank = 8
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=old_rank)
+        model = self.get_model()
+        model = get_peft_model(model, config)
+        prepare_model_for_compiled_hotswap(model, target_rank=old_rank)
+
+        for name, param in model.named_parameters():
+            if "lora_A" in name:
+                assert param.shape[0] == old_rank
+            elif "lora_B" in name:
+                assert param.shape[1] == old_rank
+
+    def test_prepare_model_for_compiled_hotswap_conv2d_rank_padding_works(self):
+        # same as previous test, but for a Conv2d model
+        old_rank = 8
+        config = LoraConfig(target_modules=["conv"], r=old_rank)
+        model = self.get_model_conv2d()
+        model = get_peft_model(model, config)
+
+        # sanity check
+        for name, param in model.named_parameters():
+            if "lora_A" in name:
+                assert param.shape[0] == old_rank
+            elif "lora_B" in name:
+                assert param.shape[1] == old_rank
+
+        new_rank = 13
+        prepare_model_for_compiled_hotswap(model, target_rank=new_rank)
+
+        for name, param in model.named_parameters():
+            if "lora_A" in name:
+                assert param.shape[0] == new_rank
+            elif "lora_B" in name:
+                assert param.shape[1] == new_rank
+
+    def test_prepare_model_for_compiled_hotswap_lower_rank_padding_raises(self):
+        # when trying to pad to a lower rank, raise an error
+        old_rank0 = 8
+        old_rank1 = 10
+        new_rank = 9
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=old_rank0, rank_pattern={"lin1": old_rank1})
+        model = self.get_model()
+        model = get_peft_model(model, config)
+
+        msg = re.escape("Trying to pad the adapter to the target rank 9, but the original rank is larger (10)")
+        with pytest.raises(ValueError, match=msg):
+            prepare_model_for_compiled_hotswap(model, target_rank=new_rank)
+
+    def test_prepare_model_for_compiled_hotswap_with_rank_pattern(self):
+        old_rank0 = 8
+        old_rank1 = 9
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=old_rank0, rank_pattern={"lin1": old_rank1})
+        model = self.get_model()
+        model = get_peft_model(model, config)
+
+        # sanity check
+        for name, param in model.named_parameters():
+            if "lora_A" in name:
+                if "lin0" in name:
+                    assert param.shape[0] == old_rank0
+                else:
+                    assert param.shape[0] == old_rank1
+            elif "lora_B" in name:
+                if "lin0" in name:
+                    assert param.shape[1] == old_rank0
+                else:
+                    assert param.shape[1] == old_rank1
+
+        new_rank = 13
+        prepare_model_for_compiled_hotswap(model, target_rank=new_rank)
+
+        for name, param in model.named_parameters():
+            if "lora_A" in name:
+                assert param.shape[0] == new_rank
+            elif "lora_B" in name:
+                assert param.shape[1] == new_rank
+
+    def test_prepare_model_for_compiled_hotswap_model_already_compiled_raises(self):
+        config = LoraConfig(target_modules=["lin0"])
+        model = self.get_model()
+        model = get_peft_model(model, config)
+        model = torch.compile(model, mode="reduce-overhead")
+
+        msg = re.escape("Call prepare_model_for_compiled_hotswap *before* compiling the model")
+        with pytest.raises(ValueError, match=msg):
+            prepare_model_for_compiled_hotswap(model)
+
+    def test_prepare_model_for_compiled_hotswap_model_already_compiled_warns(self, recwarn):
+        config = LoraConfig(target_modules=["lin0"])
+        model = self.get_model()
+        model = get_peft_model(model, config)
+        model = torch.compile(model, mode="reduce-overhead")
+
+        msg = "prepare_model_for_compiled_hotswap was called with a model that is already compiled"
+        prepare_model_for_compiled_hotswap(model, check_compiled="warn")
+        assert any(msg in str(w.message) for w in recwarn)
+
+    def test_prepare_model_for_compiled_hotswap_model_already_compiled_ignore(self, recwarn):
+        config = LoraConfig(target_modules=["lin0"])
+        model = self.get_model()
+        model = get_peft_model(model, config)
+        model = torch.compile(model, mode="reduce-overhead")
+
+        msg = "prepare_model_for_compiled_hotswap was called with a model that is already compiled"
+        prepare_model_for_compiled_hotswap(model, check_compiled="ignore")
+        # no error, no warning
+        assert not any(msg in str(w.message) for w in recwarn)
+
+    def test_prepare_model_for_compiled_hotswap_model_already_compiled_wrong_argument(self, recwarn):
+        config = LoraConfig(target_modules=["lin0"])
+        model = self.get_model()
+        model = get_peft_model(model, config)
+        model = torch.compile(model, mode="reduce-overhead")
+
+        msg = re.escape("check_compiles should be one of 'error', 'warn', or 'ignore', got 'wrong-option' instead.")
+        with pytest.raises(ValueError, match=msg):
+            prepare_model_for_compiled_hotswap(model, check_compiled="wrong-option")
+
+    def test_prepare_model_for_compiled_hotswap_model_no_adapter_raises(self):
+        model = self.get_model()
+        msg = re.escape("No adapter layers found on the model")
+        with pytest.raises(ValueError, match=msg):
+            prepare_model_for_compiled_hotswap(model)
+
+    def test_prepare_model_for_compiled_hotswap_does_not_change_output(self):
+        # preparing the model for hotswapping should not change the model output
+        inputs = torch.rand(3, 10).to(self.torch_device)
+        model = self.get_model().eval()
+        with torch.inference_mode():
+            output_base = model(inputs)
+
+        old_rank = 8
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=old_rank, init_lora_weights=False)
+        model = get_peft_model(model, config).eval()
+        with torch.inference_mode():
+            output_before = model(inputs)
+
+        # sanity check: LoRA changed output
+        assert not torch.allclose(output_base, output_before)
+
+        new_rank = 13
+        prepare_model_for_compiled_hotswap(model, target_rank=new_rank)
+        with torch.inference_mode():
+            output_after = model(inputs)
+
+        assert torch.allclose(output_before, output_after)
+
+    def test_prepare_model_for_compiled_hotswap_does_not_change_output_conv2d(self):
+        # preparing the model for hotswapping should not change the model output
+        inputs = torch.rand(3, 3, 10, 10).to(self.torch_device)
+        model = self.get_model_conv2d().eval()
+        with torch.inference_mode():
+            output_base = model(inputs)
+
+        old_rank = 8
+        config = LoraConfig(target_modules=["conv"], r=old_rank, init_lora_weights=False)
+        model = get_peft_model(model, config).eval()
+        with torch.inference_mode():
+            output_before = model(inputs)
+
+        # sanity check: LoRA changed output
+        assert not torch.allclose(output_base, output_before)
+
+        new_rank = 13
+        prepare_model_for_compiled_hotswap(model, target_rank=new_rank)
+        with torch.inference_mode():
+            output_after = model(inputs)
+
+        assert torch.allclose(output_before, output_after)
+
+    def test_prepare_model_for_compiled_hotswap_scalings_update_config(self):
+        old_rank0 = 11
+        old_rank1 = 13
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=old_rank0, rank_pattern={"lin1": old_rank1})
+        model = self.get_model()
+        model = get_peft_model(model, config)
+
+        new_rank = 15
+        prepare_model_for_compiled_hotswap(model, target_rank=new_rank, config=model.peft_config)
+
+        assert model.peft_config["default"].r == new_rank
+        assert model.peft_config["default"].rank_pattern == {"lin1": new_rank}
+
+    def test_prepare_model_for_compiled_hotswap_lora_bias(self):
+        # When setting lora_bias=True in the LoraConfig, the LoRA B parameter will have a bias term. Check that padding
+        # still works correctly. Note that the LoRA A parameter still won't have a bias term.
+        old_rank = 8
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=old_rank, lora_bias=True)
+        model = self.get_model()
+        model = get_peft_model(model, config)
+
+        # sanity check
+        for name, param in model.named_parameters():
+            if "lora_A" in name and name.endswith(".weight"):
+                assert param.shape[0] == old_rank
+            elif "lora_B" in name and name.endswith(".weight"):
+                assert param.shape[1] == old_rank
+            elif "lora_A" in name and name.endswith(".bias"):
+                assert False, "LoRA A should not have a bias term"
+            elif "lora_B" in name and name.endswith(".bias"):
+                assert param.shape[0] in (5, 20)  # output shapes of the 2 layers
+
+        new_rank = 13
+        prepare_model_for_compiled_hotswap(model, target_rank=new_rank)
+
+        for name, param in model.named_parameters():
+            if "lora_A" in name and name.endswith(".weight"):
+                assert param.shape[0] == new_rank
+            elif "lora_B" in name and name.endswith(".weight"):
+                assert param.shape[1] == new_rank
+            elif "lora_A" in name and name.endswith(".bias"):
+                assert False, "LoRA A should not have a bias term"
+            elif "lora_B" in name and name.endswith(".bias"):
+                assert param.shape[0] in (5, 20)  # output shapes of the 2 layers
+
+    def test_prepare_model_for_compiled_hotswap_conv2d_lora_bias(self):
+        # same as previous test, but for a Conv2d model
+        old_rank = 8
+        config = LoraConfig(target_modules=["conv"], r=old_rank, lora_bias=True)
+        model = self.get_model_conv2d()
+        model = get_peft_model(model, config)
+
+        # sanity check
+        for name, param in model.named_parameters():
+            if "lora_A" in name and name.endswith(".weight"):
+                assert param.shape[0] == old_rank
+            elif "lora_B" in name and name.endswith(".weight"):
+                assert param.shape[1] == old_rank
+            elif "lora_A" in name and name.endswith(".bias"):
+                assert False, "LoRA A should not have a bias term"
+            elif "lora_B" in name and name.endswith(".bias"):
+                assert param.shape[0] == 10  # output shape of conv layer
+
+        new_rank = 13
+        prepare_model_for_compiled_hotswap(model, target_rank=new_rank)
+
+        for name, param in model.named_parameters():
+            if "lora_A" in name and name.endswith(".weight"):
+                assert param.shape[0] == new_rank
+            elif "lora_B" in name and name.endswith(".weight"):
+                assert param.shape[1] == new_rank
+            elif "lora_A" in name and name.endswith(".bias"):
+                assert False, "LoRA A should not have a bias term"
+            elif "lora_B" in name and name.endswith(".bias"):
+                assert param.shape[0] == 10  # output shape of conv layer
+
+
+def test_import_peft_type_to_model_mapping_deprecation_warning(recwarn):
+    # This is for backwards compatibility: In #2282, PEFT_TYPE_TO_MODEL_MAPPING was removed as it was redundant with
+    # PEFT_TYPE_TO_TUNER_MAPPING. However, third party code could still use this mapping, e.g.:
+    # https://github.com/AutoGPTQ/AutoGPTQ/blob/6689349625de973b9ee3016c28c11f32acf7f02c/auto_gptq/utils/peft_utils.py#L8
+    # TODO: Remove after 2026-01
+
+    # first check that there is no warning under normal circumstances
+    from peft.peft_model import PeftModel  # noqa
+
+    expected = (
+        "PEFT_TYPE_TO_MODEL_MAPPING is deprecated, please use `from peft import PEFT_TYPE_TO_TUNER_MAPPING` instead"
+    )
+    warnings = (w.message.args[0] for w in recwarn.list)
+    assert not any(w.startswith(expected) for w in warnings)
+
+    from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING  # noqa
+
+    # check that there is a warning with this message after importing the variable
+    warnings = (w.message.args[0] for w in recwarn.list)
+    assert any(w.startswith(expected) for w in warnings)
