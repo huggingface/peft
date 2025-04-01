@@ -19,7 +19,6 @@ import gc
 import numpy as np
 import pytest
 import torch
-from datasets import load_dataset
 from safetensors.torch import load_file
 from transformers import (
     AutoImageProcessor,
@@ -38,6 +37,8 @@ from peft import (
     PrefixTuningConfig,
     get_peft_model,
 )
+
+from .testing_utils import load_cat_image
 
 
 CONFIGS = {
@@ -77,6 +78,7 @@ class TestPastKV:
 
 class TestResnet:
     model_id = "hf-internal-testing/tiny-random-ResNetForImageClassification"
+    cat_image = load_cat_image()  # for caching
 
     @pytest.fixture(autouse=True)
     def teardown(self):
@@ -96,9 +98,7 @@ class TestResnet:
 
     @pytest.fixture(scope="class")
     def data(self, image_processor):
-        dataset = load_dataset("huggingface/cats-image", trust_remote_code=True)
-        image = dataset["test"]["image"][0]
-        return image_processor(image, return_tensors="pt")
+        return image_processor(self.cat_image, return_tensors="pt")
 
     @pytest.mark.parametrize("config", CONFIGS.values(), ids=CONFIGS.keys())
     def test_model_with_batchnorm_reproducibility(self, config, tmp_path, data):

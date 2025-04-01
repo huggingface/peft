@@ -2569,6 +2569,8 @@ class TestEvaInitialization:
     LORA_DIM = 8
     LORA_ALPHA = 1
     DEVICE = infer_device()
+    # for caching purposes:
+    _dataset = load_dataset_english_quotes()["train"]
 
     @pytest.fixture
     def tokenizer(self):
@@ -2578,11 +2580,10 @@ class TestEvaInitialization:
 
     @pytest.fixture
     def dataset(self, tokenizer):
-        dataset = load_dataset_english_quotes()["train"]
         # concatenate examples
         examples = []
         example = ""
-        for data in dataset:
+        for data in self._dataset:
             if len(example) >= self.MAX_LENGTH:
                 examples.append(example)
                 example = ""

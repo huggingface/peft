@@ -189,3 +189,10 @@ def get_state_dict(model, unwrap_compiled=True):
 def load_dataset_english_quotes():
     data = load_dataset("ybelkada/english_quotes_copy")
     return data
+
+
+@lru_cache
+def load_cat_image():
+    dataset = load_dataset("huggingface/cats-image", trust_remote_code=True)
+    image = dataset["test"]["image"][0]
+    return image
