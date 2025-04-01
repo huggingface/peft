@@ -204,6 +204,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model = get_peft_model(model, config)
 
             data = load_dataset_english_quotes()
+            data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
                 model=model,
