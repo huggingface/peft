@@ -1139,7 +1139,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         )
 
         torch.manual_seed(0)
-        config_lora = LoraConfig(r=8, init_lora_weights=False, use_dora=False)
+        config_lora = LoraConfig(r=8, init_lora_weights="eva", use_dora=False)
         model = get_peft_model(model, config_lora).eval()
 
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
@@ -1151,7 +1151,7 @@ class PeftGPUCommonTests(unittest.TestCase):
             torch_dtype=torch.float32,
         )
         torch.manual_seed(0)
-        config_dora = LoraConfig(r=8, init_lora_weights=False, use_dora=True)
+        config_dora = LoraConfig(r=8, init_lora_weights="eva", use_dora=True)
         model = get_peft_model(model, config_dora).eval()
 
         logits_dora = model(random_input).logits
