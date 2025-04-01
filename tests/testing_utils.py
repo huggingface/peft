@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import os
 import unittest
 from contextlib import contextmanager
 
@@ -18,6 +19,7 @@ import numpy as np
 import pytest
 import torch
 from accelerate.test_utils.testing import get_backend
+from datasets import load_from_disk
 
 from peft.import_utils import (
     is_aqlm_available,
@@ -181,3 +183,8 @@ def get_state_dict(model, unwrap_compiled=True):
     if unwrap_compiled:
         model = getattr(model, "_orig_mod", model)
     return model.state_dict()
+
+
+def load_dataset_english_quotes():
+    data = load_from_disk(os.path.join("tests", "data", "english_quotes"))
+    return data

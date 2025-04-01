@@ -23,7 +23,7 @@ from unittest.mock import patch
 
 import pytest
 import torch
-from datasets import Dataset, load_dataset
+from datasets import Dataset
 from huggingface_hub import snapshot_download
 from huggingface_hub.utils import reset_sessions
 from safetensors.torch import load_file
@@ -62,6 +62,8 @@ from peft.tuners.lora.corda import preprocess_corda
 from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
+
+from .testing_utils import load_dataset_english_quotes
 
 
 class TestLoraInitialization:
@@ -2576,7 +2578,7 @@ class TestEvaInitialization:
 
     @pytest.fixture
     def dataset(self, tokenizer):
-        dataset = load_dataset("ybelkada/english_quotes_copy", split="train")
+        dataset = load_dataset_english_quotes()["train"]
         # concatenate examples
         examples = []
         example = ""
