@@ -16,7 +16,6 @@ from unittest.mock import Mock, call, patch
 
 import pytest
 import torch
-from datasets import load_dataset
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -46,6 +45,7 @@ from peft import (
 )
 
 from .testing_common import PeftCommonTester
+from .testing_utils import load_dataset_english_quotes
 
 
 PEFT_DECODER_MODELS_TO_TEST = [
@@ -567,9 +567,12 @@ class TestDecoderModels(PeftCommonTester):
         tokenizer.pad_token = tokenizer.eos_token
 
         def process(samples):
-            return tokenizer(samples["quote"], truncation=True, max_length=128)
+            tokenized = tokenizer(samples["quote"], truncation=True, max_length=128)
+            return tokenized
 
-        data = load_dataset("ybelkada/english_quotes_copy").map(process, batched=True)
+        data = load_dataset_english_quotes()
+        data = data.map(process, batched=True)
+
         with tempfile.TemporaryDirectory() as tmp_dirname:
             trainer = Trainer(
                 model=model,
@@ -646,9 +649,12 @@ class TestDecoderModels(PeftCommonTester):
         tokenizer.pad_token = tokenizer.eos_token
 
         def process(samples):
-            return tokenizer(samples["quote"], truncation=True, max_length=128)
+            tokenized = tokenizer(samples["quote"], truncation=True, max_length=128)
+            return tokenized
 
-        data = load_dataset("ybelkada/english_quotes_copy").map(process, batched=True)
+        data = load_dataset_english_quotes()
+        data = data.map(process, batched=True)
+
         with tempfile.TemporaryDirectory() as tmp_dirname:
             trainer = Trainer(
                 model=model,
