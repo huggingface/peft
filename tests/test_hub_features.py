@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import copy
-import unittest
 
+import pytest
 import torch
 from transformers import AutoModelForCausalLM
 
@@ -23,7 +23,9 @@ from peft import AutoPeftModelForCausalLM, LoraConfig, PeftConfig, PeftModel, ge
 PEFT_MODELS_TO_TEST = [("peft-internal-testing/test-lora-subfolder", "test")]
 
 
-class PeftHubFeaturesTester(unittest.TestCase):
+class PeftHubFeaturesTester:
+    # TODO remove when/if Hub is more stable
+    @pytest.mark.xfail(reason="Test is flaky on CI", raises=ValueError)
     def test_subfolder(self):
         r"""
         Test if subfolder argument works as expected
@@ -95,6 +97,8 @@ class TestBaseModelRevision:
         output_revision_loaded = peft_model_revision_loaded(test_inputs).logits
         assert torch.allclose(output_revision, output_revision_loaded)
 
+    # TODO remove when/if Hub is more stable
+    @pytest.mark.xfail(reason="Test is flaky on CI", raises=ValueError)
     def test_load_different_peft_and_base_model_revision(self, tmp_path):
         r"""
         Test loading an AutoPeftModel from the hub where the base model revision and peft revision differ
