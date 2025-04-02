@@ -13,11 +13,13 @@
 # limitations under the License.
 import unittest
 from contextlib import contextmanager
+from functools import lru_cache
 
 import numpy as np
 import pytest
 import torch
 from accelerate.test_utils.testing import get_backend
+from datasets import load_dataset
 
 from peft.import_utils import (
     is_aqlm_available,
@@ -181,3 +183,18 @@ def get_state_dict(model, unwrap_compiled=True):
     if unwrap_compiled:
         model = getattr(model, "_orig_mod", model)
     return model.state_dict()
+
+
+@lru_cache
+def load_dataset_english_quotes():
+    # can't use pytest fixtures for now because of unittest style tests
+    data = load_dataset("ybelkada/english_quotes_copy")
+    return data
+
+
+@lru_cache
+def load_cat_image():
+    # can't use pytest fixtures for now because of unittest style tests
+    dataset = load_dataset("huggingface/cats-image", trust_remote_code=True)
+    image = dataset["test"]["image"][0]
+    return image

@@ -18,7 +18,6 @@ import unittest
 import pytest
 import torch
 import torch.nn.functional as F
-from datasets import load_dataset
 from parameterized import parameterized
 from torch import nn
 from transformers import (
@@ -59,6 +58,7 @@ from peft.utils import infer_device
 
 from .testing_utils import (
     device_count,
+    load_cat_image,
     require_bitsandbytes,
     require_multi_accelerator,
     require_non_cpu,
@@ -1416,8 +1416,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         # check for different result with and without apply_GS
         model_id = "microsoft/resnet-18"
         image_processor = AutoImageProcessor.from_pretrained(model_id)
-        dataset = load_dataset("huggingface/cats-image", trust_remote_code=True)
-        image = dataset["test"]["image"][0]
+        image = load_cat_image()
         data = image_processor(image, return_tensors="pt")
 
         model = AutoModelForImageClassification.from_pretrained(model_id).eval()
