@@ -187,12 +187,14 @@ def get_state_dict(model, unwrap_compiled=True):
 
 @lru_cache
 def load_dataset_english_quotes():
+    # can't use pytest fixtures for now because of unittest style tests
     data = load_dataset("ybelkada/english_quotes_copy")
     return data
 
 
 @lru_cache
 def load_cat_image():
+    # can't use pytest fixtures for now because of unittest style tests
     dataset = load_dataset("huggingface/cats-image", trust_remote_code=True)
     image = dataset["test"]["image"][0]
     return image
