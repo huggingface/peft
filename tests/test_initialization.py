@@ -25,6 +25,7 @@ import pytest
 import torch
 from datasets import Dataset
 from huggingface_hub import snapshot_download
+from huggingface_hub.errors import HfHubHTTPError, LocalEntryNotFoundError
 from huggingface_hub.utils import reset_sessions
 from safetensors.torch import load_file
 from scipy import stats
@@ -1579,6 +1580,8 @@ class TestLoadAdapterOfflineMode:
             yield
         reset_sessions()
 
+    # TODO remove when/if Hub is more stable
+    @pytest.mark.xfail(reason="Test is flaky on CI", raises=HfHubHTTPError)
     def test_load_from_hub_then_offline_model(self):
         # this uses LoRA but it's the same mechanism for other methods
         base_model = AutoModelForCausalLM.from_pretrained(self.base_model)
@@ -1605,6 +1608,8 @@ class TestLoadAdapterOfflineMode:
         snapshot_download(self.base_model, cache_dir=cache_dir)
         snapshot_download(self.peft_model_id, cache_dir=cache_dir)
 
+    # TODO remove when/if Hub is more stable
+    @pytest.mark.xfail(reason="Test is flaky on CI", raises=LocalEntryNotFoundError)
     def test_load_checkpoint_offline_non_default_cache_dir(self, changed_default_cache_dir, tmp_path):
         # See #2373 for context
         self.load_checkpoints(tmp_path)
