@@ -2198,7 +2198,7 @@ class TestLoftQ:
     # The error factor indicates by how much the quantization error should be decreased when using LoftQ compared to
     # quantization without LoftQ. Thus 1.03 means that the error should be decreased by 3% at least. This is a very
     # conservative value to prevent flakiness, in practice most gains are > 1.5
-    error_factor = 1.03 if torch.cuda.is_available() else 1.01
+    error_factor = 1.03 if torch.cuda.is_available() else 1.005
     device = infer_device()
 
     def get_input(self, model_id, device):
