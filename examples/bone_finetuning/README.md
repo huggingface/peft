@@ -1,6 +1,7 @@
-# BONE: BLOCK AFFINE TRANSFORMATION AS PARAMETER EFFICIENT FINE-TUNING METHODS FOR LARGE LANGUAGE MODELS
-## Introduction ([Paper](https://arxiv.org/pdf/2409.15371), [code](https://github.com/JL-er/Bone))
-Low-Rank Adaptation (LoRA) has achieved remarkable training results by freezing the original weights and training only low-rank matrices, establishing itself as the predominant fine-tuning method for LLMs. In pursuit of performance closer to full-parameter training, a series of LoRA variants have emerged, such as LoRA+, PISSA, Olora, and LoRA-GA. This paper introduces a novel PEFT technique distinct from LoRA, called Block-Affine Adaptation (Bone). By dividing the original weights into multiple subspaces that share a single matrix for weight updates, Bone simplifies the process by requiring the trainable matrix to be initialized to zero, eliminating the need for complex initialization as in some LoRA variants. Compared to LoRA, Bone significantly reduces memory usage and achieves faster computation. Evaluation of both NLU and NLG tasks demonstrates that Bone substantially outperforms LoRA and its variants. Inspired by Pissa, we further proposed the 'Weight Guide' theory to better utilize the information from the original weights. By integrating 'Weight Guide' with Bone, we developed a new structure called Block-Affine Transformation (Bat), and ablation experiments confirmed the effectiveness of 'Weight Guide'.
+# DiSHA: Dimension-Sharding Adaptation with Fast Convergence and Fast Computation
+## Introduction ([Paper](https://arxiv.org/pdf/2409.15371), [code](https://github.com/JL-er/DiSHA))
+Low-Rank Adaptation (LoRA) leverages the low intrinsic rank of weight updates in Large Language Models (LLMs), establishing a Parameter-Efficient Fine-Tuning (PEFT) paradigm. However, LoRA suffers from slow convergence. We introduce Dimension-Sharding Adaptation (DiSHA), which expands the PEFT design space to unlock lower intrinsic ranks and faster convergence by default. Within DiSHA's design space, we propose Block Affine Adaptation (Bone), a computationally efficient structure that delivers both high performance and efficiency. While certain DiSHA configurations may result in colinear updates to weight shards, we address this with Block Affine Transformation Adaptation (BAT), a nonlinear variant of DiSHA. BAT introduces nonlinearity by combining trainable matrices with original weight shards in a nonlinear manner, inducing nonlinearity in matrix updates without introducing additional parameters. Empirical results show that Bone, under the DiSHA framework, consistently outperforms LoRA variants in both NLG and NLU tasks, with significantly improved computational efficiency. Further analysis demonstrates that BAT enhances model capabilities by leveraging its nonlinear design.
+
 
 ## Quick Start
 ```python
@@ -84,10 +85,10 @@ python bone_finetuning.py \
 
 # Citation
 ```bib
-@misc{kang2024boneblockaffineadaptationlarge,
-      title={Bone: Block-Affine Adaptation of Large Language Models}, 
+@misc{kang2025dishadimensionshardingadaptationlarge,
+      title={DiSHA: Dimension-Sharding Adaptation of Large Language Models with Fast Convergence and Fast Computation}, 
       author={Jiale Kang},
-      year={2024},
+      year={2025},
       eprint={2409.15371},
       archivePrefix={arXiv},
       primaryClass={cs.CL},
