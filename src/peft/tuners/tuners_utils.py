@@ -571,7 +571,7 @@ class BaseTuner(nn.Module, ABC):
             else:
                 model.modules_to_save.update(set(peft_config.modules_to_save))
 
-    def merge_adapter(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+    def merge_adapter(self, adapter_names: Optional[list[str]] = None, safe_merge: bool = False) -> None:
         """
         This method merges the adapter layers into the base model.
 
@@ -580,14 +580,20 @@ class BaseTuner(nn.Module, ABC):
         in memory, please call `merge_and_unload`.
 
         Args:
+            adapter_names (`list[str]`, *optional*):
+                The list of adapter names that should be merged. If `None`, all active adapters will be merged.
+                Defaults to `None`.
             safe_merge (`bool`, *optional*):
                 If `True`, the merge operation will be performed in a copy of the original weights and check for NaNs
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
-            adapter_names (`list[str]`, *optional*):
-                The list of adapter names that should be merged. If `None`, all active adapters will be merged.
-                Defaults to `None`.
         """
+        # Note: The order of arguments here is:
+        #   adapter_names, safe_merge
+        # For layer.merge, the order is:
+        #   safe_merge, adapter_names
+        # This is not so nice but this method here started with only adapter_names, thus putting safe_merge first would
+        # be a backwards incompatible change.
         self._check_merge_allowed()
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
