@@ -23,8 +23,9 @@ from unittest.mock import patch
 
 import pytest
 import torch
-from datasets import Dataset, load_dataset
+from datasets import Dataset
 from huggingface_hub import snapshot_download
+from huggingface_hub.errors import HfHubHTTPError, LocalEntryNotFoundError
 from huggingface_hub.utils import reset_sessions
 from safetensors.torch import load_file
 from scipy import stats
@@ -62,6 +63,8 @@ from peft.tuners.lora.corda import preprocess_corda
 from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
+
+from .testing_utils import load_dataset_english_quotes
 
 
 class TestLoraInitialization:
@@ -1577,6 +1580,8 @@ class TestLoadAdapterOfflineMode:
             yield
         reset_sessions()
 
+    # TODO remove when/if Hub is more stable
+    @pytest.mark.xfail(reason="Test is flaky on CI", raises=HfHubHTTPError)
     def test_load_from_hub_then_offline_model(self):
         # this uses LoRA but it's the same mechanism for other methods
         base_model = AutoModelForCausalLM.from_pretrained(self.base_model)
@@ -1603,6 +1608,8 @@ class TestLoadAdapterOfflineMode:
         snapshot_download(self.base_model, cache_dir=cache_dir)
         snapshot_download(self.peft_model_id, cache_dir=cache_dir)
 
+    # TODO remove when/if Hub is more stable
+    @pytest.mark.xfail(reason="Test is flaky on CI", raises=LocalEntryNotFoundError)
     def test_load_checkpoint_offline_non_default_cache_dir(self, changed_default_cache_dir, tmp_path):
         # See #2373 for context
         self.load_checkpoints(tmp_path)
@@ -2567,6 +2574,8 @@ class TestEvaInitialization:
     LORA_DIM = 8
     LORA_ALPHA = 1
     DEVICE = infer_device()
+    # for caching purposes:
+    _dataset = load_dataset_english_quotes()["train"]
 
     @pytest.fixture
     def tokenizer(self):
@@ -2576,11 +2585,10 @@ class TestEvaInitialization:
 
     @pytest.fixture
     def dataset(self, tokenizer):
-        dataset = load_dataset("ybelkada/english_quotes_copy", split="train")
         # concatenate examples
         examples = []
         example = ""
-        for data in dataset:
+        for data in self._dataset:
             if len(example) >= self.MAX_LENGTH:
                 examples.append(example)
                 example = ""
