@@ -1125,6 +1125,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     @require_non_cpu
     @pytest.mark.single_gpu_tests
     @require_bitsandbytes
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="XPU have numerial errors")
     def test_4bit_dora_inference(self):
         # check for same result with and without DoRA when initializing with init_lora_weights=False
         bnb_config = BitsAndBytesConfig(
@@ -1164,6 +1165,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     @require_non_cpu
     @pytest.mark.single_gpu_tests
     @require_bitsandbytes
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="XPU have numerial errors")
     def test_8bit_dora_inference(self):
         # check for same result with and without DoRA when initializing with init_lora_weights=False
         model = AutoModelForCausalLM.from_pretrained(
