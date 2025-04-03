@@ -169,14 +169,14 @@ class BoneLinear(nn.Module, BoneLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    self.base_layer.weight.data = orig_weight.to(orig_dtype)
+                    base_layer.weight.data = orig_weight.to(orig_dtype)
                 else:
                     if self.bone_fn == "bat":
                         delta_weight = self.get_delta_weight(active_adapter, self.base_layer.weight.data)
-                        self.base_layer.weight.data += delta_weight.to(orig_dtype)
+                        base_layer.weight.data += delta_weight.to(orig_dtype)
                     else:
                         delta_weight = self.get_delta_weight_bone(active_adapter, self.base_layer.weight.data)
-                        self.base_layer.weight.data = delta_weight.to(orig_dtype)
+                        base_layer.weight.data = delta_weight.to(orig_dtype)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:

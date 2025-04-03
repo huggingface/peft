@@ -878,7 +878,7 @@ class Conv2d(nn.Module, BOFTLayer):
                     base_layer.kernel_size[0],
                 )
 
-                self.get_base_layer().weight.data = orig_weight.to(orig_dtype)
+                base_layer.weight.data = orig_weight.to(orig_dtype)
 
     def get_delta_weight(self, adapter) -> tuple[torch.Tensor, torch.Tensor]:
         """
