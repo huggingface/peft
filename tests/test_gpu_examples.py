@@ -80,6 +80,7 @@ from peft.utils.other import fsdp_auto_wrap_policy
 
 from .testing_utils import (
     device_count,
+    load_dataset_english_quotes,
     require_aqlm,
     require_auto_awq,
     require_auto_gptq,
@@ -202,7 +203,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -260,7 +261,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -321,7 +322,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("Abirate/english_quotes")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -385,7 +386,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
         model = get_peft_model(model, peft_config)
 
-        data = load_dataset("ybelkada/english_quotes_copy")
+        data = load_dataset_english_quotes()
         data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
         batch = tokenizer(data["train"][:3]["quote"], return_tensors="pt", padding=True)
         self._check_inference_finite(model, batch)
@@ -458,7 +459,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
         model = get_peft_model(model, peft_config)
 
-        data = load_dataset("ybelkada/english_quotes_copy")
+        data = load_dataset_english_quotes()
         data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
         batch = tokenizer(data["train"][:3]["quote"], return_tensors="pt", padding=True)
         self._check_inference_finite(model, batch)
@@ -532,7 +533,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("Abirate/english_quotes")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -592,7 +593,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -653,7 +654,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -879,7 +880,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -940,7 +941,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("Abirate/english_quotes")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -996,7 +997,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -1057,7 +1058,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("Abirate/english_quotes")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -1108,7 +1109,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -1189,7 +1190,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -1243,7 +1244,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -1302,7 +1303,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("Abirate/english_quotes")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -1361,7 +1362,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("Abirate/english_quotes")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -1432,7 +1433,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
 
             def tokenize(samples):
                 # add new tokens to samples
@@ -1539,7 +1540,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
             )
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -1602,7 +1603,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
 
         model = get_peft_model(model, peft_config)
 
-        data = load_dataset("ybelkada/english_quotes_copy")
+        data = load_dataset_english_quotes()
         data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
         batch = tokenizer(data["train"][:3]["quote"], return_tensors="pt", padding=True)
         self._check_inference_finite(model, batch)
@@ -1675,7 +1676,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("Abirate/english_quotes")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -2573,7 +2574,7 @@ class MixedPrecisionTests(unittest.TestCase):
             task_type="CAUSAL_LM",
         )
 
-        data = load_dataset("ybelkada/english_quotes_copy")
+        data = load_dataset_english_quotes()
         self.data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
     def tearDown(self):
@@ -2883,7 +2884,7 @@ class PeftAqlmGPUTests(unittest.TestCase):
             )
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -2972,7 +2973,7 @@ class PeftHqqGPUTests(unittest.TestCase):
             )
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -3142,7 +3143,7 @@ class PeftAwqGPUTests(unittest.TestCase):
             )
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             # TODO: deal correctly with this case in transformers
@@ -3206,7 +3207,7 @@ class PeftAwqGPUTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("Abirate/english_quotes")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -3290,7 +3291,7 @@ class PeftEetqGPUTests(unittest.TestCase):
             )
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -3354,7 +3355,7 @@ class PeftEetqGPUTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("Abirate/english_quotes")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -3440,7 +3441,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             )
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -3492,7 +3493,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             )
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -3603,7 +3604,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             )
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -4074,7 +4075,7 @@ class TestEvaInitializationGPU:
 
     @pytest.fixture
     def dataset(self, tokenizer):
-        dataset = load_dataset("ybelkada/english_quotes_copy", split="train")
+        dataset = load_dataset_english_quotes()["train"]
         # concatenate examples
         examples = []
         example = ""
