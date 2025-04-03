@@ -18,19 +18,18 @@ This module contains the implementation of the LoRA-FA optimizer.
 
 from __future__ import annotations
 
-from typing import Tuple, Callable, Iterable
-
 import math
+from typing import Callable, Iterable
 
 import torch
 import torch.nn as nn
-from torch.optim import Optimizer
 from torch.cuda.amp import autocast
+from torch.optim import Optimizer
 
 from ..peft_model import PeftModel
 
 
-class lorafa(Optimizer):
+class LoraFAOptimizer(Optimizer):
     """
     Implements the LoRA-FA optimizer designed specifically for training Low-Rank Adaptation (LoRA) parameters efficiently.
 
@@ -50,7 +49,7 @@ class lorafa(Optimizer):
         self,
         params: Iterable[nn.parameter.Parameter],
         lr: float = 1e-3,
-        betas: Tuple[float, float] = (0.9, 0.999),
+        betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-6,
         weight_decay: float = 0.0,
         correct_bias: bool = True,
@@ -110,8 +109,8 @@ class lorafa(Optimizer):
                         continue
                 else:
                     name = n
-
-                # param_list -> [A,B]
+                # param_list contains a pair of A and B adapters
+                # i.e., param_list -> [A,B]
 
                 state = self.state[name]
                 # State initialization
@@ -129,6 +128,12 @@ class lorafa(Optimizer):
                         # Exponential moving average of squared gradient values
                         state["exp_avg_sq"] = torch.zeros_like(p)
 
+                # Below is the LoRA-FA part
+                # 1. In this part, we optimize the gradient of B as:
+                #    g^B = \left(\frac{r}{\alpha}\right)^2 (A^\top A)^{-1} g_{\text{LoRA-FA}}^B
+                #    to min the func as described below:
+                #    \min_{g^B} \|\hat{g}_\text{LoRA-FA} - g\|_F^2
+                # 2. After the gradient of B is ready, update the optimizer state
                 if len(param_list) == 2:
                     A = param_list[0]
                     B = param_list[1]
@@ -167,6 +172,8 @@ class lorafa(Optimizer):
                         B.add_(B, alpha=(-group["lr"] * group["weight_decay"]))
                     param_list = []
                     name_list = []
+
+                # Below is the original AdamW
                 else:
                     exp_avg, exp_avg_sq = state["exp_avg"], state["exp_avg_sq"]
                     beta1, beta2 = group["betas"]
@@ -204,7 +211,7 @@ class lorafa(Optimizer):
 
 
 def create_lorafa_optimizer(
-    model: PeftModel, r: int, lora_alpha: int, learning_rate: float, **kwargs
+    model: PeftModel, r: int, lora_alpha: int, learning_rate: float, weight_decay: float = 0.0, use_rslora: bool = False
 ) -> Optimizer:
     """
     Helper function to instantiate a lorafa optimizer specifically configured for a given model using the LoRA method.
@@ -219,7 +226,8 @@ def create_lorafa_optimizer(
         r (int): Rank of the LoRA decomposition.
         lora_alpha (int): Scaling factor for LoRA parameterization.
         learning_rate (float): Learning rate for optimizer updates.
-        **kwargs: Additional optimizer configuration parameters (e.g., weight_decay).
+        weight_decay (float): Weight decay for AdamW.
+        use_rslora (bool): whether to use rslora. In rslora, the lora scaling factor becomes to lora_alpha / math.sqrt(r) instead of lora_alpha / r.
 
     Returns:
         Optimizer: Configured lorafa optimizer instance ready for training.
@@ -227,8 +235,7 @@ def create_lorafa_optimizer(
     for name, param in model.named_parameters():
         if "lora_A" in name:
             param.requires_grad_(False)
-    lora_scaling = lora_alpha / r
-    weight_decay = kwargs.pop("weight_decay", 0.0)
+    lora_scaling = lora_alpha / math.sqrt(r) if use_rslora else lora_alpha / r
     param_groups = [
         {
             "params": model.parameters(),
@@ -239,4 +246,4 @@ def create_lorafa_optimizer(
             "weight_decay": weight_decay,
         }
     ]
-    return lorafa(param_groups)
+    return LoraFAOptimizer(param_groups)
