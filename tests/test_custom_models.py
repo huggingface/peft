@@ -1607,27 +1607,42 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
     def test_delete_adapter_multiple_adapters_with_modules_to_save(self):
         # There are 3 adapters. Adapter 0 has modules_to_save. Delete it, we should switch to adapter 1, which does not
-        # have modules_to_save. Then, we delete it too, switching to adapter 2, which has modules_to_save.
+        # have modules_to_save. Then, we delete it too, switching to adapter 2, which has modules_to_save. Finally, we
+        # delete the last adapter (state is updated but forward is no longer possible).
+        model = MLP()
+        inputs = self.prepare_inputs_for_testing()
+
         config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
         config1 = LoraConfig(target_modules=["lin0"])
         config2 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
-        model = get_peft_model(MLP(), config0, adapter_name="adapter0").to(self.torch_device)
+        model = get_peft_model(model, config0, adapter_name="adapter0").to(self.torch_device)
         model.add_adapter("adapter1", config1)
         model.add_adapter("adapter2", config2)
 
-        inputs = self.prepare_inputs_for_testing()
         assert model.active_adapters == ["adapter0"]
+        assert model.modules_to_save == {"lin1"}
+        assert set(model.base_model.model.lin1.modules_to_save) == {"adapter0", "adapter2"}
         model(**inputs)  # does not raise
 
         # delete active adapter, should switch to the next adapter (which does not have modules_to_save)
         model.delete_adapter("adapter0")
         assert model.active_adapters == ["adapter1"]
+        assert model.modules_to_save == {"lin1"}
+        assert set(model.base_model.model.lin1.modules_to_save) == {"adapter2"}
         model(**inputs)  # does not raise
 
         # delete active adapter, should switch to the next adapter (which *does* have modules_to_save)
         model.delete_adapter("adapter1")
         assert model.active_adapters == ["adapter2"]
+        assert model.modules_to_save == {"lin1"}
+        assert set(model.base_model.model.lin1.modules_to_save) == {"adapter2"}
         model(**inputs)  # does not raise
+
+        # delete last adapter
+        model.delete_adapter("adapter2")
+        assert model.active_adapters == []
+        assert model.modules_to_save is None
+        assert set(model.base_model.model.lin1.modules_to_save) == set()
 
     def test_delete_adapter_multiple_adapters_with_trainable_token_indices(self):
         # Same as the previous test, just using trainable_token_indices instead of modules_to_save
@@ -1642,18 +1657,41 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model.add_adapter("adapter1", config1)
         model.add_adapter("adapter2", config2)
 
+        embed_tokens = model.base_model.model.model.decoder.embed_tokens
+        lm_head = model.base_model.model.lm_head
+
         assert model.active_adapters == ["adapter0"]
+        assert set(embed_tokens.token_adapter.trainable_tokens_delta) == {"adapter0", "adapter2"}
+        assert set(embed_tokens.token_adapter.trainable_tokens_original) == {"adapter0", "adapter2"}
+        assert set(lm_head.token_adapter.trainable_tokens_delta) == {"adapter0", "adapter2"}
+        assert set(lm_head.token_adapter.trainable_tokens_original) == {"adapter0", "adapter2"}
         model(**inputs)  # does not raise
 
         # delete active adapter, should switch to the next adapter (which does not have modules_to_save)
         model.delete_adapter("adapter0")
         assert model.active_adapters == ["adapter1"]
+        assert set(embed_tokens.token_adapter.trainable_tokens_delta) == {"adapter2"}
+        assert set(embed_tokens.token_adapter.trainable_tokens_original) == {"adapter2"}
+        assert set(lm_head.token_adapter.trainable_tokens_delta) == {"adapter2"}
+        assert set(lm_head.token_adapter.trainable_tokens_original) == {"adapter2"}
         model(**inputs)  # does not raise
 
         # delete active adapter, should switch to the next adapter (which *does* have modules_to_save)
         model.delete_adapter("adapter1")
         assert model.active_adapters == ["adapter2"]
+        assert set(embed_tokens.token_adapter.trainable_tokens_delta) == {"adapter2"}
+        assert set(embed_tokens.token_adapter.trainable_tokens_original) == {"adapter2"}
+        assert set(lm_head.token_adapter.trainable_tokens_delta) == {"adapter2"}
+        assert set(lm_head.token_adapter.trainable_tokens_original) == {"adapter2"}
         model(**inputs)  # does not raise
+
+        # delete last adapter
+        model.delete_adapter("adapter2")
+        assert model.active_adapters == []
+        assert set(embed_tokens.token_adapter.trainable_tokens_delta) == set()
+        assert set(embed_tokens.token_adapter.trainable_tokens_original) == set()
+        assert set(lm_head.token_adapter.trainable_tokens_delta) == set()
+        assert set(lm_head.token_adapter.trainable_tokens_original) == set()
 
     @parameterized.expand(TEST_CASES)
     def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):

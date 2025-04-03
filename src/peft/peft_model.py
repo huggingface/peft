@@ -112,7 +112,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         low_cpu_mem_usage: bool = False,
     ) -> None:
         super().__init__()
-        self.modules_to_save = None
         self.active_adapter = adapter_name
         self.peft_type = peft_config.peft_type
         # These args are special PEFT arguments that users can pass. They need to be removed before passing them to
@@ -965,12 +964,21 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if num_adapters == 1:
             self.active_adapter = new_active_adapters[0]
 
+    @property
+    def modules_to_save(self) -> Optional[set[str]]:
+        modules: set[str] = set()
+        for config in self.peft_config.values():
+            if config.modules_to_save:
+                # modules_to_save can only be a sequence of str, not a str
+                modules.update(config.modules_to_save)
+
+        if not modules:
+            # for backwards compatibility, as modules_to_save was initialized as None
+            return None
+        return modules
+
     def set_additional_trainable_modules(self, peft_config, adapter_name):
         if getattr(peft_config, "modules_to_save", None) is not None:
-            if self.modules_to_save is None:
-                self.modules_to_save = set(peft_config.modules_to_save)
-            else:
-                self.modules_to_save.update(peft_config.modules_to_save)
             # this may add a new ModulesToSaveWrapper
             _set_trainable(self, adapter_name, module_names=peft_config.modules_to_save)
 
@@ -1505,11 +1513,6 @@ class PeftModelForSequenceClassification(PeftModel):
         super().__init__(model, peft_config, adapter_name, **kwargs)
 
         classifier_module_names = ["classifier", "score"]
-        if self.modules_to_save is None:
-            self.modules_to_save = set(classifier_module_names)
-        else:
-            self.modules_to_save.update(classifier_module_names)
-
         if hasattr(peft_config, "modules_to_save"):
             if peft_config.modules_to_save is None:
                 peft_config.modules_to_save = classifier_module_names[:]
@@ -2296,11 +2299,6 @@ class PeftModelForTokenClassification(PeftModel):
         super().__init__(model, peft_config, adapter_name, **kwargs)
 
         classifier_module_names = ["classifier", "score"]
-        if self.modules_to_save is None:
-            self.modules_to_save = set(classifier_module_names)
-        else:
-            self.modules_to_save.update(classifier_module_names)
-
         if hasattr(peft_config, "modules_to_save"):
             if peft_config.modules_to_save is None:
                 peft_config.modules_to_save = classifier_module_names[:]
@@ -2517,11 +2515,6 @@ class PeftModelForQuestionAnswering(PeftModel):
         super().__init__(model, peft_config, adapter_name, **kwargs)
 
         qa_module_names = ["qa_outputs"]
-        if self.modules_to_save is None:
-            self.modules_to_save = set(qa_module_names)
-        else:
-            self.modules_to_save.update(qa_module_names)
-
         if hasattr(peft_config, "modules_to_save"):
             if peft_config.modules_to_save is None:
                 peft_config.modules_to_save = qa_module_names[:]

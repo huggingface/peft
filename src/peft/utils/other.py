@@ -575,6 +575,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
             )
 
         if not new_active_adapters:
+            # no active adapter now
             del self.modules_to_save[adapter_name]
             self._active_adapter = []
             return
@@ -582,6 +583,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         new_active_adapter = new_active_adapters[0]
         if new_active_adapter not in self.modules_to_save:
             # a new active adapter was chosen but it seems like it has no modules_to_save
+            del self.modules_to_save[adapter_name]
             self._active_adapter = []
             return
 
