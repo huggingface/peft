@@ -20,7 +20,6 @@ import unittest
 
 import pytest
 import torch
-from datasets import load_dataset
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -40,6 +39,7 @@ from peft.tuners.lora import GPTQLoraLinear
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
 
 from .testing_utils import (
+    load_dataset_english_quotes,
     require_gptqmodel,
     require_optimum,
     require_torch_multi_gpu,
@@ -158,7 +158,7 @@ class PeftGPTQModelTests(unittest.TestCase):
             )
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -221,7 +221,7 @@ class PeftGPTQModelTests(unittest.TestCase):
 
         model = get_peft_model(model, peft_config)
 
-        data = load_dataset("ybelkada/english_quotes_copy")
+        data = load_dataset_english_quotes()
         data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
         batch = tokenizer(data["train"][:3]["quote"], return_tensors="pt", padding=True)
         self._check_inference_finite(model, batch)
@@ -287,7 +287,7 @@ class PeftGPTQModelTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("Abirate/english_quotes")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(

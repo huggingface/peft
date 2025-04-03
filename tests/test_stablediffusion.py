@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
 from dataclasses import asdict, replace
 from unittest import TestCase
 
@@ -127,10 +128,15 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
     """
 
     transformers_class = StableDiffusionPipeline
+    sd_model = StableDiffusionPipeline.from_pretrained("hf-internal-testing/tiny-sd-pipe")
 
     def instantiate_sd_peft(self, model_id, config_cls, config_kwargs):
         # Instantiate StableDiffusionPipeline
-        model = self.transformers_class.from_pretrained(model_id)
+        if model_id == "hf-internal-testing/tiny-sd-pipe":
+            # in CI, this model often times out on the hub, let's cache it
+            model = copy.deepcopy(self.sd_model)
+        else:
+            model = self.transformers_class.from_pretrained(model_id)
 
         config_kwargs = config_kwargs.copy()
         text_encoder_kwargs = config_kwargs.pop("text_encoder")
