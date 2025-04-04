@@ -220,6 +220,8 @@ class BOFTLayer(BaseTunerLayer):
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
+        # flag to enable/disable casting of input to weight dtype during forward call
+        self.cast_input_dtype_enabled = True
         self.kwargs = kwargs
 
         base_layer = self.get_base_layer()
@@ -503,13 +505,14 @@ class Linear(nn.Module, BOFTLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.boft_R.keys():
                 base_layer = self.get_base_layer()
+                orig_dtype = base_layer.weight.dtype
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
                     orig_weight = base_layer.weight.data.clone()
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
                     orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
+                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight.to(butterfly_oft_mat.dtype))
                     orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = orig_weight * boft_s
 
@@ -518,16 +521,16 @@ class Linear(nn.Module, BOFTLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    self.base_layer.weight.data = orig_weight.contiguous()
+                    self.base_layer.weight.data = orig_weight.contiguous().to(orig_dtype)
                 else:
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
                     orig_weight = base_layer.weight.data.clone()
                     orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
+                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight.to(butterfly_oft_mat.dtype))
                     orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = orig_weight * boft_s
 
-                    self.base_layer.weight.data = orig_weight.contiguous()
+                    self.base_layer.weight.data = orig_weight.contiguous().to(orig_dtype)
 
                 self.merged_adapters.append(active_adapter)
 
@@ -538,17 +541,20 @@ class Linear(nn.Module, BOFTLayer):
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
+
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
+            base_layer = self.get_base_layer()
+            orig_dtype = base_layer.weight.dtype
             if active_adapter in self.boft_R.keys():
                 butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
 
-                orig_weight = self.get_base_layer().weight.data.clone()
+                orig_weight = base_layer.weight.data.clone()
                 orig_weight = torch.transpose(orig_weight, 0, 1)
-                orig_weight = torch.mm(butterfly_oft_mat.t(), orig_weight)
+                orig_weight = torch.mm(butterfly_oft_mat.t(), orig_weight.to(butterfly_oft_mat.dtype))
                 orig_weight = torch.transpose(orig_weight, 0, 1)
 
-                self.get_base_layer().weight.data = orig_weight * (1 / boft_s)
+                base_layer.weight.data = (orig_weight * (1 / boft_s)).to(orig_dtype)
 
     def get_delta_weight(self, adapter) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -804,6 +810,7 @@ class Conv2d(nn.Module, BOFTLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.boft_R.keys():
                 base_layer = self.get_base_layer()
+                orig_dtype = base_layer.weight.dtype
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
@@ -814,14 +821,14 @@ class Conv2d(nn.Module, BOFTLayer):
                         self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
                     )
                     orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
+                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight.to(butterfly_oft_mat.dtype))
                     orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = orig_weight * boft_s
                     orig_weight = orig_weight.view(
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
                     )
 
-                    self.base_layer.weight.data = orig_weight.contiguous()
+                    self.base_layer.weight.data = orig_weight.contiguous().to(orig_dtype)
                 else:
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
 
@@ -830,14 +837,14 @@ class Conv2d(nn.Module, BOFTLayer):
                         self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
                     )
                     orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
+                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight.to(butterfly_oft_mat.dtype))
                     orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = orig_weight * boft_s
                     orig_weight = orig_weight.view(
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
                     )
 
-                    self.base_layer.weight.data = orig_weight.contiguous()
+                    self.base_layer.weight.data = orig_weight.contiguous().to(orig_dtype)
 
                 self.merged_adapters.append(active_adapter)
 
@@ -850,26 +857,28 @@ class Conv2d(nn.Module, BOFTLayer):
             return
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
+            base_layer = self.get_base_layer()
+            orig_dtype = base_layer.weight.dtype
             if active_adapter in self.boft_R.keys():
                 butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
 
-                orig_weight = self.get_base_layer().weight.data.clone()
+                orig_weight = base_layer.weight.data.clone()
                 orig_weight = orig_weight.view(
                     self.out_features,
-                    self.in_features * self.get_base_layer().kernel_size[0] * self.get_base_layer().kernel_size[0],
+                    self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0],
                 )
                 orig_weight = torch.transpose(orig_weight, 0, 1)
-                orig_weight = torch.mm(butterfly_oft_mat.t(), orig_weight)
+                orig_weight = torch.mm(butterfly_oft_mat.t(), orig_weight.to(butterfly_oft_mat.dtype))
                 orig_weight = torch.transpose(orig_weight, 0, 1)
                 orig_weight = orig_weight * (1 / boft_s)
                 orig_weight = orig_weight.view(
                     self.out_features,
                     self.in_features,
-                    self.get_base_layer().kernel_size[0],
-                    self.get_base_layer().kernel_size[0],
+                    base_layer.kernel_size[0],
+                    base_layer.kernel_size[0],
                 )
 
-                self.get_base_layer().weight.data = orig_weight
+                base_layer.weight.data = orig_weight.to(orig_dtype)
 
     def get_delta_weight(self, adapter) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -968,10 +977,12 @@ class Conv2d(nn.Module, BOFTLayer):
             scaled_rotated_weight = scaled_rotated_weight.view(
                 self.out_features, self.in_features, self.base_layer.kernel_size[0], self.base_layer.kernel_size[0]
             )
+            x = self._cast_input_dtype(x, scaled_rotated_weight.dtype)
+            bias = self._cast_input_dtype(self.base_layer.bias, scaled_rotated_weight.dtype)
             result = F.conv2d(
                 input=x,
                 weight=scaled_rotated_weight,
-                bias=self.base_layer.bias,
+                bias=bias,
                 padding=self.base_layer.padding[0],
                 stride=self.base_layer.stride[0],
             )
