@@ -561,7 +561,8 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         Delete the adapter if present.
 
         This method will also set a new active adapter if the deleted adapter was the active adapter. It is important
-        that the new adapter is chosen in a deterministic way, so that the same adapter is chosen on all layers.
+        that the new adapter is chosen by the caller in a deterministic way, so that the same adapter is chosen on all
+        layers.
         """
         if adapter_name not in self.modules_to_save:
             return
@@ -573,6 +574,9 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
             raise ValueError(
                 f"Attempted to set multiple ({new_active_adapters}) adapters at once for {name}, which is not allowed."
             )
+
+        if adapter_name in self._adapters:
+            self._adapters.remove(adapter_name)
 
         if not new_active_adapters:
             # no active adapter now
@@ -737,7 +741,8 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         Delete the adapter if present.
 
         This method will also set a new active adapter if the deleted adapter was the active adapter. It is important
-        that the new adapter is chosen in a deterministic way, so that the same adapter is chosen on all layers.
+        that the new adapter is chosen by the caller in a deterministic way, so that the same adapter is chosen on all
+        layers.
         """
         self.token_adapter.delete_adapter(adapter_name)
 
@@ -749,16 +754,20 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
                 f"Attempted to set multiple ({new_active_adapters}) adapters at once for {name}, which is not allowed."
             )
 
+        if adapter_name in self._adapters:
+            self._adapters.remove(adapter_name)
+
         if not new_active_adapters:
             self._active_adapter = []
             return
 
-        if new_active_adapters[0] not in self.active_adapters:
+        if new_active_adapters[0] not in self.token_adapter.trainable_tokens_delta:
             # a new active adapter was chosen but it seems like it has no trainable_tokens
-            self._active_adapters = []
+            self._active_adapter = []
             return
 
         new_active_adapter = new_active_adapters[0]
+        self.set_adapter(new_active_adapter)
         self.token_adapter.set_adapter(new_active_adapter)
 
     def unload_and_optionally_merge_module(

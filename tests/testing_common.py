@@ -58,7 +58,7 @@ from peft import (
 from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import _get_submodules, infer_device
-from peft.utils.other import AuxiliaryTrainingWrapper, TrainableTokensWrapper
+from peft.utils.other import AuxiliaryTrainingWrapper, ModulesToSaveWrapper, TrainableTokensWrapper
 
 from .testing_utils import get_state_dict
 
@@ -1414,23 +1414,31 @@ class PeftCommonTester:
             for attr in attributes_to_check:
                 assert adapter_to_delete not in getattr(target, attr)
 
-        has_auxiliary = bool(getattr(config, "modules_to_save", False))
-        if has_auxiliary:
-            for module in model.modules():
-                if isinstance(module, AuxiliaryTrainingWrapper):
-                    assert adapter_to_delete not in module.modules_to_save
-                    assert module.active_adapters == ["default"]
+        # check auxiliary modules
+        for module in model.modules():
+            if isinstance(module, AuxiliaryTrainingWrapper):
+                assert adapter_to_delete not in module._adapters
+                assert module.active_adapters == ["default"]
+            if isinstance(module, ModulesToSaveWrapper):
+                assert adapter_to_delete not in module.modules_to_save
+            elif isinstance(module, TrainableTokensWrapper):
+                assert adapter_to_delete not in module.token_adapter.trainable_tokens_delta
+                assert adapter_to_delete not in module.token_adapter.trainable_tokens_original
 
         # check that we can also delete the last remaining adapter
         model.delete_adapter("default")
         assert "default" not in model.peft_config
         assert model.active_adapters == []
 
-        if has_auxiliary:
-            for module in model.modules():
-                if isinstance(module, AuxiliaryTrainingWrapper):
-                    assert "default" not in module.modules_to_save
-                    assert module.active_adapters == []
+        for module in model.modules():
+            if isinstance(module, AuxiliaryTrainingWrapper):
+                assert "default" not in module._adapters
+                assert module.active_adapters == []
+            if isinstance(module, ModulesToSaveWrapper):
+                assert "default" not in module.modules_to_save
+            elif isinstance(module, TrainableTokensWrapper):
+                assert "default" not in module.token_adapter.trainable_tokens_delta
+                assert "default" not in module.token_adapter.trainable_tokens_original
 
         input = self.prepare_inputs_for_testing()
         # note: we cannot call model(**input) because PeftModel always expects there to be at least one adapter
@@ -1476,23 +1484,31 @@ class PeftCommonTester:
             for attr in attributes_to_check:
                 assert adapter_to_delete not in getattr(target, attr)
 
-        has_auxiliary = bool(getattr(config, "modules_to_save", False))
-        if has_auxiliary:
-            for module in model.modules():
-                if isinstance(module, AuxiliaryTrainingWrapper):
-                    assert adapter_to_delete not in module.modules_to_save
-                    assert module.active_adapters == ["default"]
+        # check auxiliary modules
+        for module in model.modules():
+            if isinstance(module, AuxiliaryTrainingWrapper):
+                assert adapter_to_delete not in module._adapters
+                assert module.active_adapters == ["default"]
+            if isinstance(module, ModulesToSaveWrapper):
+                assert adapter_to_delete not in module.modules_to_save
+            elif isinstance(module, TrainableTokensWrapper):
+                assert adapter_to_delete not in module.token_adapter.trainable_tokens_delta
+                assert adapter_to_delete not in module.token_adapter.trainable_tokens_original
 
         # check that we can also delete the last remaining adapter
         model.delete_adapter("default")
         assert "default" not in model.peft_config
         assert model.active_adapters == []
 
-        if has_auxiliary:
-            for module in model.modules():
-                if isinstance(module, AuxiliaryTrainingWrapper):
-                    assert "default" not in module.modules_to_save
-                    assert module.active_adapters == []
+        for module in model.modules():
+            if isinstance(module, AuxiliaryTrainingWrapper):
+                assert "default" not in module._adapters
+                assert module.active_adapters == []
+            if isinstance(module, ModulesToSaveWrapper):
+                assert "default" not in module.modules_to_save
+            elif isinstance(module, TrainableTokensWrapper):
+                assert "default" not in module.token_adapter.trainable_tokens_delta
+                assert "default" not in module.token_adapter.trainable_tokens_original
 
         input = self.prepare_inputs_for_testing()
         # note: we cannot call model(**input) because PeftModel always expects there to be at least one adapter
