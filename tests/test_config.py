@@ -46,7 +46,7 @@ from peft import (
 )
 
 
-PEFT_MODELS_TO_TEST = [("lewtun/tiny-random-OPTForCausalLM-delta", "v1")]
+PEFT_MODELS_TO_TEST = [("peft-internal-testing/tiny-opt-lora-revision", "test")]
 
 # Config classes and their mandatory parameters
 ALL_CONFIG_CLASSES = (

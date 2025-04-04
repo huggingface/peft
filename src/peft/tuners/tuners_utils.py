@@ -20,7 +20,7 @@ import textwrap
 import warnings
 from abc import ABC, abstractmethod
 from contextlib import contextmanager, nullcontext
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, overload
 
 import torch
 from accelerate.hooks import AlignDevicesHook
@@ -571,7 +571,7 @@ class BaseTuner(nn.Module, ABC):
             else:
                 model.modules_to_save.update(set(peft_config.modules_to_save))
 
-    def merge_adapter(self, adapter_names: Optional[list[str]] = None) -> None:
+    def merge_adapter(self, adapter_names: Optional[list[str]] = None, safe_merge: bool = False) -> None:
         """
         This method merges the adapter layers into the base model.
 
@@ -580,19 +580,25 @@ class BaseTuner(nn.Module, ABC):
         in memory, please call `merge_and_unload`.
 
         Args:
+            adapter_names (`list[str]`, *optional*):
+                The list of adapter names that should be merged. If `None`, all active adapters will be merged.
+                Defaults to `None`.
             safe_merge (`bool`, *optional*):
                 If `True`, the merge operation will be performed in a copy of the original weights and check for NaNs
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
-            adapter_names (`list[str]`, *optional*):
-                The list of adapter names that should be merged. If `None`, all active adapters will be merged.
-                Defaults to `None`.
         """
+        # Note: The order of arguments here is:
+        #   adapter_names, safe_merge
+        # For layer.merge, the order is:
+        #   safe_merge, adapter_names
+        # This is not so nice but this method here started with only adapter_names, thus putting safe_merge first would
+        # be a backwards incompatible change.
         self._check_merge_allowed()
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
                 with onload_layer(module):
-                    module.merge(adapter_names=adapter_names)
+                    module.merge(adapter_names=adapter_names, safe_merge=safe_merge)
 
     def unmerge_adapter(self):
         """
@@ -870,6 +876,29 @@ class BaseTunerLayer(ABC):
                 adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device, dtype=dtype)
             else:
                 adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device)
+
+    @overload
+    def _cast_input_dtype(self, x: None, dtype: torch.dtype) -> None: ...
+
+    @overload
+    def _cast_input_dtype(self, x: torch.Tensor, dtype: torch.dtype) -> torch.Tensor: ...
+
+    def _cast_input_dtype(self, x, dtype: torch.dtype):
+        """
+        Whether to cast the dtype of the input of the forward method.
+
+        Usually, we want to enable this to align the input dtype with the dtype of the weight, but by setting
+        layer.cast_input_dtype=False, this can be disabled if necessary.
+
+        Enabling or disabling can be managed via the peft.helpers.disable_lora_input_dtype_casting context manager.
+        """
+        if x is None:  # useful e.g. if x is the bias, which can be None
+            return None
+
+        cast_input_dtype_enabled = getattr(self, "cast_input_dtype_enabled", True)
+        if (not cast_input_dtype_enabled) or (x.dtype == dtype):
+            return x
+        return x.to(dtype=dtype)
 
 
 def _find_minimal_target_modules(

@@ -84,12 +84,13 @@ class FourierFTLayer(BaseTunerLayer):
             nn.init.zeros_(self.fourierft_spectrum[adapter_name])
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
+        # careful: ifft2 does not work with float16 or bfloat16
         spectrum = self.fourierft_spectrum[adapter]
         indices = self.indices[adapter].to(spectrum.device)
-        dense_spectrum = torch.zeros(self.out_features, self.in_features, device=spectrum.device, dtype=spectrum.dtype)
-        dense_spectrum[indices[0, :], indices[1, :]] = spectrum
+        dense_spectrum = torch.zeros(self.out_features, self.in_features, device=spectrum.device)
+        dense_spectrum[indices[0, :], indices[1, :]] = spectrum.float()
         delta_weight = torch.fft.ifft2(dense_spectrum).real * self.fourierft_scaling[adapter]
-        return delta_weight
+        return delta_weight.to(spectrum.dtype)
 
 
 class FourierFTLinear(nn.Module, FourierFTLayer):

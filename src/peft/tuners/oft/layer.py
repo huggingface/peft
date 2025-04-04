@@ -101,6 +101,8 @@ class OFTLayer(BaseTunerLayer):
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
+        # flag to enable/disable casting of input to weight dtype during forward call
+        self.cast_input_dtype_enabled = True
         self.kwargs = kwargs
 
         base_layer = self.get_base_layer()
@@ -344,13 +346,14 @@ class Linear(nn.Module, OFTLayer):
         for active_adapter in adapter_names:
             if active_adapter in self._available_adapters:
                 base_layer = self.get_base_layer()
+                orig_dtype = base_layer.weight.dtype
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
                     orig_weights = base_layer.weight.data
                     oft_mat, oft_s = self.get_delta_weight(active_adapter)
                     orig_weights = torch.transpose(orig_weights, 0, 1)
-                    orig_weights = torch.mm(oft_mat, orig_weights)
+                    orig_weights = torch.mm(oft_mat, orig_weights.to(oft_mat.dtype))
                     orig_weights = torch.transpose(orig_weights, 0, 1)
                     orig_weights = orig_weights * oft_s
 
@@ -359,16 +362,16 @@ class Linear(nn.Module, OFTLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weights.contiguous()
+                    base_layer.weight.data = orig_weights.contiguous().to(orig_dtype)
                 else:
                     oft_mat, oft_s = self.get_delta_weight(active_adapter)
                     orig_weights = base_layer.weight.data
                     orig_weights = torch.transpose(orig_weights, 0, 1)
-                    orig_weights = torch.mm(oft_mat, orig_weights)
+                    orig_weights = torch.mm(oft_mat, orig_weights.to(oft_mat.dtype))
                     orig_weights = torch.transpose(orig_weights, 0, 1)
                     orig_weights = orig_weights * oft_s
 
-                    base_layer.weight.data = orig_weights.contiguous()
+                    base_layer.weight.data = orig_weights.contiguous().to(orig_dtype)
 
                 self.merged_adapters.append(active_adapter)
 
@@ -379,6 +382,9 @@ class Linear(nn.Module, OFTLayer):
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
+
+        base_layer = self.get_base_layer()
+        orig_dtype = base_layer.weight.dtype
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.oft_r.keys():
@@ -386,10 +392,10 @@ class Linear(nn.Module, OFTLayer):
 
                 orig_weights = self.get_base_layer().weight.data
                 orig_weights = torch.transpose(orig_weights, 0, 1)
-                orig_weights = torch.mm(oft_mat.t(), orig_weights)
+                orig_weights = torch.mm(oft_mat.t(), orig_weights.to(oft_mat.dtype))
                 orig_weights = torch.transpose(orig_weights, 0, 1)
 
-                self.get_base_layer().weight.data = orig_weights * (1 / oft_s)
+                base_layer.weight.data = (orig_weights * (1 / oft_s)).to(orig_dtype)
 
     def get_delta_weight(self, adapter_name) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -425,8 +431,8 @@ class Linear(nn.Module, OFTLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            oft_rotation = torch.eye(self.in_features, device=x.device, dtype=previous_dtype)
-            oft_scale = torch.ones((int(self.out_features), 1), device=x.device, dtype=previous_dtype)
+            oft_rotation = torch.eye(self.in_features, device=x.device)
+            oft_scale = torch.ones((int(self.out_features), 1), device=x.device)
 
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.oft_r.keys():
@@ -454,15 +460,12 @@ class Linear(nn.Module, OFTLayer):
 
             orig_weight = self.get_base_layer().weight.data
             orig_weight = torch.transpose(orig_weight, 0, 1)
-            oft_rotation = oft_rotation.to(previous_dtype)
-            orig_weight = orig_weight.to(previous_dtype)
-            rotated_weight = torch.mm(oft_rotation, orig_weight)
+            rotated_weight = torch.mm(oft_rotation, orig_weight.to(oft_rotation.dtype))
             rotated_weight = torch.transpose(rotated_weight, 0, 1)
-
             scaled_rotated_weight = rotated_weight * oft_scale
 
-            scaled_rotated_weight = scaled_rotated_weight.to(previous_dtype)
-            bias = self.get_base_layer().bias.to(previous_dtype) if self.get_base_layer().bias is not None else None
+            x = self._cast_input_dtype(x, scaled_rotated_weight.dtype)
+            bias = self._cast_input_dtype(self.get_base_layer().bias, scaled_rotated_weight.dtype)
             result = F.linear(input=x, weight=scaled_rotated_weight, bias=bias)
 
         result = result.to(previous_dtype)
@@ -580,6 +583,7 @@ class Conv2d(nn.Module, OFTLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.oft_r.keys():
                 base_layer = self.get_base_layer()
+                orig_dtype = base_layer.weight.dtype
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
@@ -590,14 +594,14 @@ class Conv2d(nn.Module, OFTLayer):
                         self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
                     )
                     orig_weights = torch.transpose(orig_weights, 0, 1)
-                    orig_weights = torch.mm(oft_mat, orig_weights)
+                    orig_weights = torch.mm(oft_mat, orig_weights.to(oft_mat.dtype))
                     orig_weights = torch.transpose(orig_weights, 0, 1)
                     orig_weights = orig_weights * oft_s
                     orig_weights = orig_weights.view(
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
                     )
 
-                    base_layer.weight.data = orig_weights.contiguous()
+                    base_layer.weight.data = orig_weights.contiguous().to(orig_dtype)
                 else:
                     oft_mat, oft_s = self.get_delta_weight(active_adapter)
 
@@ -606,14 +610,14 @@ class Conv2d(nn.Module, OFTLayer):
                         self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
                     )
                     orig_weights = torch.transpose(orig_weights, 0, 1)
-                    orig_weights = torch.mm(oft_mat, orig_weights)
+                    orig_weights = torch.mm(oft_mat, orig_weights.to(oft_mat.dtype))
                     orig_weights = torch.transpose(orig_weights, 0, 1)
                     orig_weights = orig_weights * oft_s
                     orig_weights = orig_weights.view(
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
                     )
 
-                    base_layer.weight.data = orig_weights.contiguous()
+                    base_layer.weight.data = orig_weights.contiguous().to(orig_dtype)
 
                 self.merged_adapters.append(active_adapter)
 
@@ -624,6 +628,9 @@ class Conv2d(nn.Module, OFTLayer):
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
+
+        base_layer = self.get_base_layer()
+        orig_dtype = base_layer.weight.dtype
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.oft_r.keys():
@@ -635,7 +642,7 @@ class Conv2d(nn.Module, OFTLayer):
                     self.in_features * self.get_base_layer().kernel_size[0] * self.get_base_layer().kernel_size[0],
                 )
                 orig_weights = torch.transpose(orig_weights, 0, 1)
-                orig_weights = torch.mm(oft_mat.t(), orig_weights)
+                orig_weights = torch.mm(oft_mat.t(), orig_weights.to(oft_mat.dtype))
                 orig_weights = torch.transpose(orig_weights, 0, 1)
                 orig_weights = orig_weights * (1 / oft_s)
                 orig_weights = orig_weights.view(
@@ -645,7 +652,7 @@ class Conv2d(nn.Module, OFTLayer):
                     self.get_base_layer().kernel_size[0],
                 )
 
-                self.get_base_layer().weight.data = orig_weights
+                base_layer.weight.data = orig_weights.to(orig_dtype)
 
     def get_delta_weight(self, adapter_name) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -684,9 +691,8 @@ class Conv2d(nn.Module, OFTLayer):
             oft_rotation = torch.eye(
                 self.in_features * self.get_base_layer().kernel_size[0] * self.get_base_layer().kernel_size[0],
                 device=x.device,
-                dtype=previous_dtype,
             )
-            oft_scale = torch.ones((int(self.out_features), 1), device=x.device, dtype=previous_dtype)
+            oft_scale = torch.ones((int(self.out_features), 1), device=x.device)
 
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.oft_r.keys():
@@ -710,8 +716,6 @@ class Conv2d(nn.Module, OFTLayer):
                 oft_rotation = oft_mat @ oft_rotation
                 oft_scale = oft_s * oft_scale
 
-            x = x.to(self.get_base_layer().weight.data.dtype)
-
             orig_weights = self.base_layer.weight.data
             orig_weights = orig_weights.view(
                 self.out_features,
@@ -731,10 +735,12 @@ class Conv2d(nn.Module, OFTLayer):
                 self.get_base_layer().kernel_size[0],
                 self.get_base_layer().kernel_size[0],
             )
+            x = self._cast_input_dtype(x, scaled_rotated_weight.dtype)
+            bias = self._cast_input_dtype(self.get_base_layer().bias, scaled_rotated_weight.dtype)
             result = F.conv2d(
                 input=x,
                 weight=scaled_rotated_weight,
-                bias=self.get_base_layer().bias,
+                bias=bias,
                 padding=self.get_base_layer().padding[0],
                 stride=self.get_base_layer().stride[0],
             )

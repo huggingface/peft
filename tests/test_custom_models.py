@@ -16,6 +16,7 @@
 # limitations under the License.
 import copy
 import os
+import platform
 import re
 import shutil
 import tempfile
@@ -688,9 +689,10 @@ class MLP(nn.Module):
         self.drop = nn.Dropout(0.5)
         self.lin1 = nn.Linear(20, 2, bias=bias)
         self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
 
     def forward(self, X):
-        X = X.float()
+        X = X.to(self.dtype)
         X = self.lin0(X)
         X = self.relu(X)
         X = self.drop(X)
@@ -708,9 +710,10 @@ class MLPWithGRU(nn.Module):
         self.gru = nn.GRU(input_size=20, hidden_size=20, num_layers=1, batch_first=True, bias=bias)
         self.fc = nn.Linear(20, 2, bias=bias)
         self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
 
     def forward(self, X):
-        X = X.float()
+        X = X.to(self.dtype)
         X = self.lin0(X)
         X = self.relu(X)
         X = self.drop(X)
@@ -732,9 +735,10 @@ class MLP_LayerNorm(nn.Module):
         self.layernorm1 = nn.LayerNorm(20, 20)
         self.lin1 = nn.Linear(20, 2, bias=bias)
         self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
 
     def forward(self, X):
-        X = X.float()
+        X = X.to(self.dtype)
         X = self.layernorm0(X)
         X = self.lin0(X)
         X = self.relu(X)
@@ -753,9 +757,10 @@ class MLP2(nn.Module):
         self.drop = nn.Dropout(0.5)
         self.lin1 = nn.Linear(32, 2, bias=bias)
         self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
 
     def forward(self, X):
-        X = X.float()
+        X = X.to(self.dtype)
         X = self.lin0(X)
         X = self.relu(X)
         X = self.drop(X)
@@ -852,9 +857,11 @@ class ModelConv1D(nn.Module):
         self.flat = nn.Flatten()
         self.lin0 = nn.Linear(9, 2)
         self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
 
     def forward(self, X):
-        X = X.float().reshape(-1, 1, 10)
+        X = X.to(self.dtype)
+        X = X.reshape(-1, 1, 10)
         X = self.conv1d(X)
         X = self.relu(X)
         X = self.flat(X)
@@ -871,9 +878,11 @@ class ModelConv2D(nn.Module):
         self.flat = nn.Flatten()
         self.lin0 = nn.Linear(10, 2)
         self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
 
     def forward(self, X):
-        X = X.float().reshape(-1, 5, 3, 3)
+        X = X.to(self.dtype)
+        X = X.reshape(-1, 5, 3, 3)
         X = self.conv2d(X)
         X = self.relu(X)
         X = self.flat(X)
@@ -891,9 +900,10 @@ class ModelConv2D2(nn.Module):
         self.flat = nn.Flatten()
         self.lin1 = nn.Linear(32, 2)
         self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
 
     def forward(self, X):
-        X = X.float()
+        X = X.to(self.dtype)
         X = self.lin0(X)
         X = self.relu(X)
         X = X.reshape(-1, 8, 3, 3)
@@ -913,9 +923,11 @@ class ModelConv2DGroups(nn.Module):
         self.flat = nn.Flatten()
         self.lin0 = nn.Linear(5, 2)
         self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
 
     def forward(self, X):
-        X = X.float().reshape(-1, 5, 3, 3)
+        X = X.to(self.dtype)
+        X = X.reshape(-1, 5, 3, 3)
         X = self.conv2d(X)
         X = self.relu(X)
         X = self.flat(X)
@@ -932,12 +944,14 @@ class ModelConv3D(nn.Module):
         self.flat = nn.Flatten()
         self.lin0 = nn.Linear(10, 2)
         self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
 
     def forward(self, X):
+        X = X.to(self.dtype)
         # If necessary, convert from 2D image to 3D volume
         if X.dim() == 2:
             X = torch.stack([X] * 3, dim=-1)
-        X = X.float().reshape(-1, 5, 3, 3, 3)
+        X = X.reshape(-1, 5, 3, 3, 3)
         X = self.conv3d(X)
         X = self.relu(X)
         X = self.flat(X)
@@ -952,9 +966,10 @@ class ModelMha(nn.Module):
         self.mha = nn.MultiheadAttention(10, 2)
         self.lin0 = nn.Linear(10, 2)
         self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
 
     def forward(self, X):
-        X = X.float()
+        X = X.to(self.dtype)
         X, _ = self.mha(X, X, X)
         X = self.lin0(X)
         X = self.sm(X)
@@ -1183,6 +1198,172 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         with torch.no_grad():
             output = model(**X)
         assert torch.isfinite(output).all()
+
+    @parameterized.expand(TEST_CASES)
+    def test_forward_float16(self, test_name, model_id, config_cls, config_kwargs):
+        # The user manually sets the dtype of the base model to fp16 precision. This should not cause an error for the
+        # different PEFT methods.
+        try:
+            torch.zeros(1, dtype=torch.float16)
+        except Exception:
+            # skip this test if float16 is not supported on this machine
+            self.skipTest(reason="Test requires float16 support")
+
+        # skip on MacOS
+        if platform.system() == "Darwin":
+            self.skipTest(reason="MacOS does not support multiple ops in float16")
+
+        X = self.prepare_inputs_for_testing()
+        model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16).to(self.torch_device)
+        model.dtype = torch.float16
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model.eval()
+
+        # check that none of this raises an error
+        model(**X)
+
+        if model_id in ["Conv2dGroups"]:
+            # this model does not support merging
+            return
+
+        model.merge_adapter(safe_merge=False)
+        model(**X)
+        model.unmerge_adapter()
+        model(**X)
+        model.merge_adapter(safe_merge=True)
+        model(**X)
+        model.unmerge_adapter()
+        model(**X)
+        model = model.merge_and_unload()
+        model(**X)
+
+    @parameterized.expand(TEST_CASES)
+    def test_forward_bfloat16(self, test_name, model_id, config_cls, config_kwargs):
+        # The user manually sets the dtype of the base model to bf16 precision. This should not cause an error for the
+        # different PEFT methods.
+        try:
+            torch.zeros(1, dtype=torch.bfloat16)
+        except Exception:
+            # skip this test if float16 is not supported on this machine
+            self.skipTest(reason="Test requires bfloat16 support")
+
+        # skip on MacOS
+        if platform.system() == "Darwin":
+            self.skipTest(reason="MacOS does not support multiple ops in bfloat16")
+
+        X = self.prepare_inputs_for_testing()
+        model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16).to(self.torch_device)
+        model.dtype = torch.bfloat16
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model.eval()
+
+        # check that none of this raises an error
+        model(**X)
+
+        if model_id in ["Conv2dGroups"]:
+            # this model does not support merging
+            return
+
+        model.merge_adapter(safe_merge=False)
+        model(**X)
+        model.unmerge_adapter()
+        model(**X)
+        model.merge_adapter(safe_merge=True)
+        model(**X)
+        model.unmerge_adapter()
+        model(**X)
+        model = model.merge_and_unload()
+        model(**X)
+
+    @parameterized.expand(TEST_CASES)
+    def test_forward_float16_no_autocast(self, test_name, model_id, config_cls, config_kwargs):
+        # Same as above but don't autocast adapter weights to float32 automatically
+        try:
+            torch.zeros(1, dtype=torch.float16)
+        except Exception:
+            # skip this test if float16 is not supported on this machine
+            self.skipTest(reason="Test requires float16 support")
+
+        # skip on MacOS
+        if platform.system() == "Darwin":
+            self.skipTest(reason="MacOS does not support multiple ops in float16")
+
+        X = self.prepare_inputs_for_testing()
+        model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16).to(self.torch_device)
+        model.dtype = torch.float16
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config, autocast_adapter_dtype=False)
+        model.eval()
+
+        # check that none of this raises an error
+        model(**X)
+
+        if model_id in ["Conv2dGroups"]:
+            # this model does not support merging
+            return
+
+        model.merge_adapter(safe_merge=False)
+        model(**X)
+        model.unmerge_adapter()
+        model(**X)
+        model.merge_adapter(safe_merge=True)
+        model(**X)
+        model.unmerge_adapter()
+        model(**X)
+        model = model.merge_and_unload()
+        model(**X)
+
+    @parameterized.expand(TEST_CASES)
+    def test_forward_bfloat16_no_autocast(self, test_name, model_id, config_cls, config_kwargs):
+        # Same as above but don't autocast adapter weights to float32 automatically
+        try:
+            torch.zeros(1, dtype=torch.bfloat16)
+        except Exception:
+            # skip this test if float16 is not supported on this machine
+            self.skipTest(reason="Test requires bfloat16 support")
+
+        # skip on MacOS
+        if platform.system() == "Darwin":
+            self.skipTest(reason="MacOS does not support multiple ops in bfloat16")
+
+        X = self.prepare_inputs_for_testing()
+        model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16).to(self.torch_device)
+        model.dtype = torch.bfloat16
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config, autocast_adapter_dtype=False)
+        model.eval()
+
+        # check that none of this raises an error
+        model(**X)
+
+        if model_id in ["Conv2dGroups"]:
+            # this model does not support merging
+            return
+
+        model.merge_adapter(safe_merge=False)
+        model(**X)
+        model.unmerge_adapter()
+        model(**X)
+        model.merge_adapter(safe_merge=True)
+        model(**X)
+        model.unmerge_adapter()
+        model(**X)
+        model = model.merge_and_unload()
+        model(**X)
 
     @parameterized.expand(TEST_CASES)
     def test_only_params_are_updated(self, test_name, model_id, config_cls, config_kwargs):
