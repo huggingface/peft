@@ -356,7 +356,7 @@ class LoraConfig(PeftConfig):
         },
     )
     init_lora_weights: (
-        bool | Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "corda", "loftq"]
+        bool | Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "corda", "loftq", "orthogonal"]
     ) = field(
         default=True,
         metadata={
@@ -376,6 +376,7 @@ class LoraConfig(PeftConfig):
                 "nonnegative integer. "
                 "Passing `'corda'` results in CorDA initialization. "
                 "Pass `'loftq'` to use LoftQ initialization."
+                "Pass `'orthogonal'` to use orthogonal initialization."
             ),
         },
     )
