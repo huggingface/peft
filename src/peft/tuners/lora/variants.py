@@ -13,6 +13,7 @@
 # limitations under the License.
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import torch
@@ -308,3 +309,51 @@ class DoraConv3dVariant(_DoraConvNdVariant):
     def init(module: Conv3d, adapter_name: str, **kwargs: Any) -> None:
         dora_layer = DoraConv3dLayer(fan_in_fan_out=False)
         _DoraConvNdVariant.init_convd_variant(module, adapter_name, dora_layer=dora_layer)
+
+
+class SineLoraLinearVariant(LoraVariant):
+    @staticmethod
+    def init(module: Linear, adapter_name: str, **kwargs) -> None:
+        module.sinelora_frequency = kwargs['sinelora_frequency']
+
+        module.sinelora_scaling = kwargs['sinelora_scaling']
+        if module.sinelora_scaling is None:
+            module.sinelora_scaling = math.sqrt(module.in_features)
+
+    @staticmethod
+    def forward(module: Linear, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
+
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        sine_output = (
+            x
+            @ torch.sin(module.sinelora_frequency * lora_A.weight.T @ lora_B.weight.T)
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+        result = result + sine_output
+
+
+class SineLoraEmbeddingVariant(SineLoraLinearVariant):
+    @staticmethod
+    def init(module: Embedding, adapter_name: str, **kwargs) -> None:
+        module.sinelora_frequency = kwargs['sinelora_frequency']
+
+        sinelora_scaling = kwargs['sinelora_scaling']
+        if sinelora_scaling is None:
+            module.sinelora_scaling = math.sqrt(module.in_features)
+
+    @staticmethod
+    def forward(module: Embedding, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
+        lora_embedding_A = module.lora_embedding_A[active_adapter]
+        lora_embedding_B = module.lora_embedding_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        sine_output = (
+            module._embed(x)
+            @ torch.sin(module.sinelora_frequency * lora_embedding_A.weight.T @ lora_embedding_B.weight.T)
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+        result = result + sine_output
+        return result
