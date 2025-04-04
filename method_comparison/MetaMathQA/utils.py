@@ -37,10 +37,12 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
+    get_cosine_schedule_with_warmup,
 )
 
 import peft
 from peft import PeftConfig, get_peft_model, prepare_model_for_kbit_training
+from peft.optimizers import create_lorafa_optimizer, create_loraplus_optimizer
 from peft.utils import CONFIG_NAME
 
 
@@ -58,6 +60,7 @@ RESULT_PATH_TEST = os.path.join(os.path.dirname(__file__), "temporary_results")
 # cancelled results
 RESULT_PATH_CANCELLED = os.path.join(os.path.dirname(__file__), "cancelled_results")
 hf_api = huggingface_hub.HfApi()
+WARMUP_STEP_RATIO = 0.1
 
 
 @dataclass
@@ -76,6 +79,7 @@ class TrainConfig:
         query_template: The template for the query
         seed: The random seed
         grad_norm_clip: The gradient norm clipping value (set to 0 to skip)
+        optimizer_type: The name of a torch optimizer (e.g. AdamW) or a PEFT method ("lora+", "lora-fa")
         optimizer_kwargs: The optimizer keyword arguments (lr etc.)
         lr_scheduler: The learning rate scheduler (currently only None or 'cosine' are supported)
         use_amp: Whether to use automatic mixed precision
@@ -95,6 +99,7 @@ class TrainConfig:
     query_template: str
     seed: int
     grad_norm_clip: float  # set to 0 to skip
+    optimizer_type: str
     optimizer_kwargs: dict[str, Any]
     lr_scheduler: Optional[Literal["cosine"]]
     use_amp: bool
@@ -121,6 +126,8 @@ class TrainConfig:
             raise ValueError(f"Invalid eval_steps: {self.eval_steps} > max_steps: {self.max_steps}")
         if self.grad_norm_clip < 0:
             raise ValueError(f"Invalid grad_norm_clip: {self.grad_norm_clip}")
+        if self.optimizer_type not in ["lora+", "lora-fa"] and not hasattr(torch.optim, self.optimizer_type):
+            raise ValueError(f"Invalid optimizer_type: {self.optimizer_type}")
         if self.lr_scheduler not in [None, "cosine"]:
             raise ValueError(f"Invalid lr_scheduler: {self.lr_scheduler}, must be None or 'cosine'")
         if "{query}" not in self.query_template:
@@ -244,6 +251,42 @@ def get_model(
     )
     model = get_peft_model(base_model, peft_config, autocast_adapter_dtype=autocast_adapter_dtype)
     return model
+
+
+class DummyScheduler:
+    # if no lr scheduler is being used
+    def __init__(self, lr):
+        self.lr = lr
+
+    def get_last_lr(self):
+        return [self.lr]
+
+    def step(self):
+        pass
+
+
+def get_optimizer_and_scheduler(
+    model, *, optimizer_type: str, max_steps: int, lr_scheduler_arg: Optional[Literal["cosine"]], **optimizer_kwargs
+) -> tuple[torch.optim.Optimizer, Any]:
+    if optimizer_type == "lora+":
+        optimizer = create_loraplus_optimizer(model, optimizer_cls=torch.optim.AdamW, **optimizer_kwargs)
+    elif optimizer_type == "lora-fa":
+        optimizer = create_lorafa_optimizer(model, **optimizer_kwargs)
+    else:
+        cls = getattr(torch.optim, optimizer_type)
+        optimizer = cls(model.parameters(), **optimizer_kwargs)
+
+    if lr_scheduler_arg == "cosine":
+        warmup_steps = int(WARMUP_STEP_RATIO * max_steps)
+        lr_scheduler = get_cosine_schedule_with_warmup(
+            optimizer, num_warmup_steps=warmup_steps, num_training_steps=max_steps
+        )
+    elif lr_scheduler_arg is None:
+        lr_scheduler = DummyScheduler(optimizer_kwargs["lr"])
+    else:
+        raise ValueError(f"Invalid lr_scheduler argument: {lr_scheduler_arg}")
+
+    return optimizer, lr_scheduler
 
 
 class BucketIterator:
