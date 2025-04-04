@@ -1914,12 +1914,20 @@ class PeftModelForCausalLM(PeftModel):
                 if seq_len >= model_kwargs["input_ids"].shape[1]:
                     model_kwargs["input_ids"] = model_kwargs["input_ids"][:, -1:]
 
-            if model_kwargs.get("attention_mask", None) is not None:
+            if (attention_mask := model_kwargs.get("attention_mask", None)) is not None:
                 size = model_kwargs["input_ids"].shape[0], peft_config.num_virtual_tokens
                 prefix_attention_mask = torch.ones(size).to(model_kwargs["input_ids"].device)
-                model_kwargs["attention_mask"] = torch.cat(
-                    (prefix_attention_mask, model_kwargs["attention_mask"]), dim=1
-                )
+                if attention_mask.dim() == 4:
+                    # Transform the 4d attention mask to 2d, leave it up to the model to deal with it instead of trying
+                    # to create a 4d attention mask here.
+                    # from [batch_size, heads, input_ids_length, total_sequence_length]
+                    # to   [batch_size, total_sequence_length]
+                    bs = attention_mask.shape[0]
+                    total_seq_len = prefix_attention_mask.shape[1] + attention_mask.shape[2]
+                    model_kwargs["attention_mask"] = torch.ones((bs, total_seq_len), dtype=attention_mask.dtype)
+                else:
+                    # 2d attention mask
+                    model_kwargs["attention_mask"] = torch.cat((prefix_attention_mask, attention_mask), dim=1)
 
             if model_kwargs.get("position_ids", None) is not None:
                 warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")
