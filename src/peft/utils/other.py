@@ -694,7 +694,9 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         return self.token_adapter.forward_adapters(x, [active_adapter])
 
     def _forward_wrapped_passthrough(self, x, *args, **kwargs):
-        return self.original_module(x, *args, **kwargs)
+        # the token adapter knows how to deal with disabled adapter / no active adapter, don't call original_module
+        # directly
+        return self.token_adapter(x, *args, **kwargs)
 
     def update(self, active_adapter, **kwargs):
         # TODO this does not support deepspeed/fsdp since it is missing a context manager
