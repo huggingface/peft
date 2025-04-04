@@ -348,10 +348,8 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
     ) -> torch.Tensor:
         raise NotImplementedError
 
-    def _forward_disabled(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
-        """The forward call when all 'adapters' are disabled. For example this could entail
-        restoring (unmerging) a base model and returning its forward return values.
-        """
+    def _forward_wrapped_passthrough(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        """The forward call when no adapter is involved in the forward computation, only the base model"""
         raise NotImplementedError
 
     def _mixed_batch_forward(
@@ -393,7 +391,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         adapter_names = kwargs.pop("adapter_names", None)
 
         if self.disable_adapters or any(adapter not in self._adapters for adapter in self.active_adapters):
-            return self._forward_wrapped_disabled(x, *args, **kwargs)
+            return self._forward_wrapped_passthrough(x, *args, **kwargs)
 
         if adapter_names is None:
             return self._forward_wrapped(x, *args, **kwargs)
@@ -467,13 +465,13 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 
     def _forward_wrapped(self, x, *args, **kwargs):
         if not self.active_adapters:
-            return self.original_module(x, *args, **kwargs)
+            return self._forward_wrapped_passthrough(x, *args, **kwargs)
         return self.modules_to_save[self.active_adapters[0]](x, *args, **kwargs)
 
     def _forward_wrapped_mixed_batch(self, x, active_adapter, *args, **kwargs):
         return self.modules_to_save[active_adapter](x, *args, **kwargs)
 
-    def _forward_wrapped_disabled(self, x, *args, **kwargs):
+    def _forward_wrapped_passthrough(self, x, *args, **kwargs):
         return self.original_module(x, *args, **kwargs)
 
     def _hasattr_wrapped(self, name, modules):
@@ -689,16 +687,14 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
 
     def _forward_wrapped(self, x, *args, **kwargs):
         if not self.active_adapters:
-            return self.original_module(x, *args, **kwargs)
+            return self._forward_wrapped_passthrough(x, *args, **kwargs)
         return self.token_adapter(x)
 
     def _forward_wrapped_mixed_batch(self, x, active_adapter, *args, **kwargs):
         return self.token_adapter.forward_adapters(x, [active_adapter])
 
-    def _forward_wrapped_disabled(self, x, *args, **kwargs):
-        # we already disabled the adapter so we can safely forward call to the adapter
-        # since it will know best what to do when being disabled.
-        return self.token_adapter(x, *args, **kwargs)
+    def _forward_wrapped_passthrough(self, x, *args, **kwargs):
+        return self.original_module(x, *args, **kwargs)
 
     def update(self, active_adapter, **kwargs):
         # TODO this does not support deepspeed/fsdp since it is missing a context manager
@@ -768,7 +764,6 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
 
         new_active_adapter = new_active_adapters[0]
         self.set_adapter(new_active_adapter)
-        self.token_adapter.set_adapter(new_active_adapter)
 
     def unload_and_optionally_merge_module(
         self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]
