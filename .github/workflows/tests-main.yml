@@ -6,6 +6,9 @@ on:
     paths-ignore:
         - 'docs/**'
 
+env:
+  TRANSFORMERS_IS_CI: 1
+
 permissions: {}
 
 jobs:

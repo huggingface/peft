@@ -21,6 +21,13 @@ import torch
 from accelerate.test_utils.testing import get_backend
 from datasets import load_dataset
 
+from peft import (
+    AdaLoraConfig,
+    IA3Config,
+    LoraConfig,
+    PromptLearningConfig,
+    VBLoRAConfig,
+)
 from peft.import_utils import (
     is_aqlm_available,
     is_auto_awq_available,
@@ -198,3 +205,20 @@ def load_cat_image():
     dataset = load_dataset("huggingface/cats-image", trust_remote_code=True)
     image = dataset["test"]["image"][0]
     return image
+
+
+def set_init_weights_false(config_cls, kwargs):
+    kwargs = kwargs.copy()
+
+    if issubclass(config_cls, PromptLearningConfig):
+        return kwargs
+    if config_cls == VBLoRAConfig:
+        return kwargs
+
+    if (config_cls == LoraConfig) or (config_cls == AdaLoraConfig):
+        kwargs["init_lora_weights"] = False
+    elif config_cls == IA3Config:
+        kwargs["init_ia3_weights"] = False
+    else:
+        kwargs["init_weights"] = False
+    return kwargs
