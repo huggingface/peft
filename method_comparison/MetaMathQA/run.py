@@ -34,7 +34,7 @@ import torch
 from torch import nn
 from torch.amp import GradScaler, autocast
 from tqdm import tqdm
-from transformers import GenerationConfig, get_cosine_schedule_with_warmup, set_seed
+from transformers import GenerationConfig, set_seed
 from utils import (
     FILE_NAME_TRAIN_PARAMS,
     BucketIterator,
@@ -44,6 +44,7 @@ from utils import (
     get_base_model_info,
     get_dataset_info,
     get_model,
+    get_optimizer_and_scheduler,
     get_tokenizer,
     get_train_config,
     init_cuda,
@@ -63,7 +64,6 @@ from peft.utils import SAFETENSORS_WEIGHTS_NAME
 
 dtype_to_bytes_linear = {"float32": 4, "float16": 2, "bfloat16": 2, "int8": 1, "int4": 0.5}
 # if lr scheduler with warmup is used, the ratio of warmup steps to total steps
-WARMUP_STEP_RATIO = 0.1
 BUCKET_FACTOR = 20  # number of batches per bucket, increasing this further has diminishing returns
 
 
@@ -98,18 +98,6 @@ def evaluate(model, tokenizer, ds, batch_size, generate_kwargs, use_tqdm: bool =
     return predictions, responses
 
 
-class DummyScheduler:
-    # if no lr scheduler is being used
-    def __init__(self, lr):
-        self.lr = lr
-
-    def get_last_lr(self):
-        return [self.lr]
-
-    def step(self):
-        pass
-
-
 class DummyGradScaler:
     # if no mixed precision is being used
     def scale(self, loss):
@@ -136,6 +124,7 @@ def train(
     eval_steps: int,
     generation_kwargs: dict[str, Any],
     grad_norm_clip: float,
+    optimizer_type: str,
     optimizer_kwargs: dict[str, Any],
     query_template: str,
     lr_scheduler_arg: Optional[Literal["cosine"]],
@@ -156,16 +145,20 @@ def train(
     else:
         grad_scaler = DummyGradScaler()
         autocast_ctx = nullcontext
-    optimizer = torch.optim.AdamW(model.parameters(), **optimizer_kwargs)
-    if lr_scheduler_arg == "cosine":
-        warmup_steps = int(WARMUP_STEP_RATIO * max_steps)
-        lr_scheduler = get_cosine_schedule_with_warmup(
-            optimizer, num_warmup_steps=warmup_steps, num_training_steps=max_steps
-        )
-    elif lr_scheduler_arg is None:
-        lr_scheduler = DummyScheduler(optimizer_kwargs["lr"])
-    else:
-        raise ValueError(f"Invalid lr_scheduler argument: {lr_scheduler_arg}")
+
+    optimizer, lr_scheduler = get_optimizer_and_scheduler(
+        model,
+        optimizer_type=optimizer_type,
+        max_steps=max_steps,
+        lr_scheduler_arg=lr_scheduler_arg,
+        **optimizer_kwargs,
+    )
+    # print this after getting the optimizer, in case it modifies requires_gard
+    num_trainable_params, num_params = model.get_nb_trainable_parameters()
+    print_verbose(
+        f"trainable params: {num_trainable_params:,d} || all params: {num_params:,d} || "
+        f"trainable: {100 * num_trainable_params / num_params:.4f}%"
+    )
 
     status = TrainStatus.FAILED
     tic_train = time.perf_counter()
@@ -371,11 +364,6 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         autocast_adapter_dtype=train_config.autocast_adapter_dtype,
     )
     print_verbose(model)
-    num_trainable_params, num_params = model.get_nb_trainable_parameters()
-    print_verbose(
-        f"trainable params: {num_trainable_params:,d} || all params: {num_params:,d} || "
-        f"trainable: {100 * num_trainable_params / num_params:.4f}%"
-    )
 
     # train model
     try:
@@ -389,6 +377,7 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
             eval_steps=train_config.eval_steps,
             generation_kwargs=train_config.generation_kwargs,
             grad_norm_clip=train_config.grad_norm_clip,
+            optimizer_type=train_config.optimizer_type,
             optimizer_kwargs=train_config.optimizer_kwargs,
             query_template=train_config.query_template,
             lr_scheduler_arg=train_config.lr_scheduler,
