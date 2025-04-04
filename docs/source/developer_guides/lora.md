@@ -271,7 +271,40 @@ The same logic applies to `alpha_pattern`. If you're in doubt, don't try to get 
 
 ## Optimizers
 
-LoRA training can optionally include special purpose optimizers. Currently the only such optimizer is LoRA+.
+LoRA training can optionally include special purpose optimizers. Currently PEFT supports LoRA-FA and LoRA+.
+
+### LoRA-FA Optimizer
+
+LoRA training can be more effective and efficient using LoRA-FA, as described in [LoRA-FA](https://arxiv.org/abs/2308.03303). LoRA-FA reduces activation memory consumption by fixing the matrix A and only tuning the matrix B. During training, the gradient of B is optimized to approximate the full parameter fine-tuning gradient.
+
+```py
+from peft import LoraConfig, get_peft_model
+from peft.optimizers import create_lorafa_optimizer
+from transformers import Trainer, get_cosine_schedule_with_warmup
+
+base_model = AutoModelForCausalLM.from_pretrained("meta-llama/Meta-Llama-3-8B-Instruct")
+
+config = LoraConfig(...)
+model = get_peft_model(base_model, config)
+
+optimizer = create_lorafa_optimizer(
+    model=model,
+    r=16,
+    lora_alpha=32,
+    learning_rate=7e-5,
+)
+
+scheduler = get_cosine_schedule_with_warmup(
+    optimizer,
+    num_warmup_steps=100,
+    num_training_steps=1000,
+)
+
+trainer = Trainer(
+    ...,
+    optimizers=(optimizer, scheduler),
+)
+```
 
 ### LoRA+ optimized LoRA
 
