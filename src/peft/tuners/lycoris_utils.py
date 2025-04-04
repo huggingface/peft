@@ -436,3 +436,4 @@ class LycorisTuner(BaseTuner):
                     new_adapter = target.active_adapters[:]
 
         self.active_adapter = new_adapter or []
+        self._delete_auxiliary_adapter(adapter_name, new_active_adapters=new_adapter)
