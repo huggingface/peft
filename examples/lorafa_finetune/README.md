@@ -50,7 +50,7 @@ peft_model.save_pretrained("lorafa-llama-3-8b-inst")
 
 The only change in your code is to pass the LoRA-FA optimizer to the trainer (if training with trainer). Do not forget `from peft.optimizers import create_lorafa_optimizer`!
 
-In this dir, we also provide you a very toy example for fine-tuning with LoRA-FA optimizer. Run the finetuning script simply by running:
+In this dir, we also provide you a simple example for fine-tuning with LoRA-FA optimizer. Run the finetuning script simply by running:
 
 ```bash
 accelerate launch examples/lorafa_finetuning/lorafa_finetuning.py --base_model_name_or_path meta-llama/Meta-Llama-3-8B --dataset_name_or_path meta-math/MetaMathQA-40K --lorafa
