@@ -2,7 +2,7 @@
 
 ## Introduction
 
-[LoRA-FA](https://arxiv.org/abs/2308.03303) is a noval Parameter-efficient Fine-tuning method, which freeze the projection down layer (matrix A) during LoRA training process and thus lead to less GPU memory consumption by eliminating the needing for storage the activations of input tensors (X). Futhermore, LoRA-FA Narrows the gap between the update amount of pre-trained weights when using the low-rank fine-tuning method and the full fine-tuning method. In conclusion, LoRA-FA reduce the memory consumption and lead to suprior performance compared with vanilla LoRA.
+[LoRA-FA](https://arxiv.org/abs/2308.03303) is a noval Parameter-efficient Fine-tuning method, which freezes the projection down layer (matrix A) during LoRA training process and thus lead to less GPU memory consumption by eliminating the need for storing the activations of input tensors (X). Furthermore, LoRA-FA narrows the gap between the update amount of pre-trained weights when using the low-rank fine-tuning method and the full fine-tuning method. In conclusion, LoRA-FA reduces the memory consumption and leads to superior performance compared to vanilla LoRA.
 
 ## Quick start
 
