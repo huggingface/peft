@@ -31,7 +31,7 @@ from ..peft_model import PeftModel
 
 class LoraFAOptimizer(Optimizer):
     """
-    Implements the LoRA-FA optimizer designed specifically for training Low-Rank Adaptation (LoRA) parameters efficiently.
+    Implements the LoRA-FA optimizer designed specifically for training Low-Rank Adaptation (LoRA) parameters efficiently. Note that LoraFAOptimizer is based on adamw-hf in transformers, with only LoRA part modified. Without LoRA it will fall back to adamw-hf.
 
     Args:
         params (Iterable[nn.parameter.Parameter]): Parameters to optimize.
