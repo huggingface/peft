@@ -65,9 +65,9 @@ from transformers import AutoModel
 model = AutoModel.from_pretrained("meta-llama/Llama-2-7b-chat-hf")
 ```
 
-### Best practice in fine-tuning Llama on Metamath using LoRA-FA
+### Best practice in fine-tuning Llama on Metamath using LoRA-FA: the hyper-params
 
-In LoRA-FA's fine-tuning, we recommend to use a larger lora rank such as 64 or 128 (max). LoRA-FA can achieve 57.3% on GSM8K, just by fine-tuning Llama-2-7b-chat-hf on meta-math/MetaMathQA-40K for 3 epochs! For the best practices you can just check [LoRA-FA examples](https://github.com/AaronZLT/lorafa).
+Sometimes, achieving optimal LoRA fine-tuning can be challenging due to the larger number of hyperparameters to consider compared to full fine-tuning. For instance, not only do we need to adjust the commonly used learning rate, but the ideal LoRA rank may also vary depending on the specific model and task. Additionally, there are other factors to consider, such as LoRA alpha and sequence length. To assist with this, we have created a repository of reproducible best practices in the [LoRA-FA examples](https://github.com/AaronZLT/lorafa) for reference. This resource showcases the optimal LoRA-FA fine-tuning hyperparameters for different models across various datasets. By doing so, we significantly reduce the time and effort spent on hyperparameter tuning, and it may also provide insights for tuning other training hyperparameters. We encourage you to experiment and fine-tune on your own downstream tasks as well.
 
 ## LoRA-FA vs. LoRA
 
