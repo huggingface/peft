@@ -41,6 +41,9 @@ class LoraFAOptimizer(Optimizer):
         weight_decay (float, optional): Weight decay (L2 penalty) (default: 0.0).
         correct_bias (bool, optional): Whether to apply bias correction as in original Adam (default: True).
 
+    Args in sub-function step:
+        closure (Callable, optional): A closure that reevaluates the model and returns the loss.
+
     Reference:
         - LoRA-FA: https://arxiv.org/abs/2308.03303
     """
@@ -74,9 +77,6 @@ class LoraFAOptimizer(Optimizer):
             "correct_bias": correct_bias,
         }
         super().__init__(params, defaults)
-
-    def is_same(self, name_list):
-        return name_list[0].split(".")[:-3] == name_list[1].split(".")[:-3]
 
     @torch.no_grad()
     def step(self, closure: Callable = None):
@@ -220,6 +220,8 @@ def create_lorafa_optimizer(
     - Disable gradient updates for the "lora_A" parameters (these are typically frozen during LoRA training).
     - Compute the scaling factor based on provided `lora_alpha` and rank `r` for proper gradient projection.
     - Create and configure parameter groups for the optimizer including specified learning rate, weight decay, and additional optimizer options.
+
+    For hyper-params, LoRA-FA uses the same hyper-params as AdamW, except for the LoRA hyper-params (r, lora_alpha, use_rslora). One can always use the same hyper-params such as lr and weight_decay, as AdamW in LoRA tuning.
 
     Args:
         model (PeftModel): The model containing LoRA-adapted parameters.
