@@ -58,12 +58,6 @@ accelerate launch examples/lorafa_finetuning/lorafa_finetuning.py --base_model_n
 
 This 👆🏻 by default will load the model in peft set up with LoRA config, and train the model with LoRA-FA optimizer. The `accelerate launch` will automatically configure single-GPU or multi-GPU for you. 
 
-LoRA-FA also supports quantization. To use bitsandbytes NF4 4-bit quantization try:
-
-```bash
-accelerate launch examples/lorafa_finetuning/lorafa_finetuning.py --base_model_name_or_path meta-llama/Meta-Llama-3-8B --dataset_name_or_path meta-math/MetaMathQA-40K --lorafa --quantize
-```
-
 ## Use the model from 🤗
 You can load and use the model as any other 🤗 models.
 ```python
