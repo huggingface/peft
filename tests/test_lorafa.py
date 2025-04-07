@@ -46,7 +46,7 @@ def test_lorafa_init_default():
     """
     lora_rank = 16
     lora_alpha = 32
-    learning_rate = 7e-5
+    lr = 7e-5
 
     model = SimpleNet()
     config = LoraConfig(
@@ -56,7 +56,7 @@ def test_lorafa_init_default():
         bias="none",
     )
     model = get_peft_model(model, config)
-    optimizer = create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, learning_rate=learning_rate)
+    optimizer = create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr)
 
     assert math.isclose(optimizer.param_groups[0]["scaling_factor"], lora_alpha / lora_rank, rel_tol=1e-9, abs_tol=0.0)
 
@@ -80,7 +80,7 @@ def test_lorafa_init_rslora():
     """
     lora_rank = 16
     lora_alpha = 32
-    learning_rate = 7e-5
+    lr = 7e-5
 
     model = SimpleNet()
     config = LoraConfig(
@@ -91,7 +91,7 @@ def test_lorafa_init_rslora():
     )
     model = get_peft_model(model, config)
     optimizer = create_lorafa_optimizer(
-        model=model, r=lora_rank, lora_alpha=lora_alpha, learning_rate=learning_rate, use_rslora=True
+        model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr, use_rslora=True
     )
     assert math.isclose(
         optimizer.param_groups[0]["scaling_factor"], lora_alpha / math.sqrt(lora_rank), rel_tol=1e-9, abs_tol=0.0
@@ -104,7 +104,7 @@ def test_LoraFAOptimizer_step():
     """
     lora_rank = 16
     lora_alpha = 32
-    learning_rate = 7e-5
+    lr = 7e-5
 
     model = SimpleNet()
     config = LoraConfig(
@@ -114,7 +114,7 @@ def test_LoraFAOptimizer_step():
         bias="none",
     )
     model = get_peft_model(model, config).to(torch_device)
-    optimizer = create_lorafa_optimizer(model=model, r=16, lora_alpha=32, learning_rate=7e-5)
+    optimizer = create_lorafa_optimizer(model=model, r=16, lora_alpha=32, lr=7e-5)
     loss = torch.nn.CrossEntropyLoss()
     x = torch.randint(100, (2, 4, 10)).to(torch_device)
     output = model(x).permute(0, 3, 1, 2)

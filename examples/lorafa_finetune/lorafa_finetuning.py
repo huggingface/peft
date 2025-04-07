@@ -21,7 +21,7 @@ def train_model(
     output_dir: str,
     batch_size: int,
     num_epochs: int,
-    learning_rate: float,
+    lr: float,
     cutoff_len: int,
     quantize: bool,
     eval_step: int,
@@ -107,7 +107,7 @@ def train_model(
         save_total_limit=2,
         gradient_accumulation_steps=1,
         fp16=True,
-        learning_rate=learning_rate,
+        lr=lr,
     )
 
     # Clear CUDA cache to free memory
@@ -117,7 +117,7 @@ def train_model(
     # After this, all adapter A will be fixed, only adapter B will be trainable
     if lorafa:
         optimizer = create_lorafa_optimizer(
-            model=model, r=lora_rank, lora_alpha=lora_alpha, learning_rate=learning_rate
+            model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr
         )
         trainer = Trainer(
             model=model,
@@ -162,7 +162,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size")
     parser.add_argument("--num_epochs", type=int, default=1, help="Number of training epochs")
-    parser.add_argument("--learning_rate", type=float, default=2e-4, help="Learning rate")
+    parser.add_argument("--lr", type=float, default=2e-4, help="Learning rate")
     parser.add_argument("--cutoff_len", type=int, default=512, help="Cutoff length for tokenization")
     parser.add_argument("--quantize", action="store_true", help="Use quantization")
     parser.add_argument("--eval_step", type=int, default=10, help="Evaluation step interval")
@@ -182,7 +182,7 @@ if __name__ == "__main__":
         output_dir=args.output_dir,
         batch_size=args.batch_size,
         num_epochs=args.num_epochs,
-        learning_rate=args.learning_rate,
+        lr=args.lr,
         cutoff_len=args.cutoff_len,
         quantize=args.quantize,
         eval_step=args.eval_step,

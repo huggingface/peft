@@ -211,7 +211,7 @@ class LoraFAOptimizer(Optimizer):
 
 
 def create_lorafa_optimizer(
-    model: PeftModel, r: int, lora_alpha: int, learning_rate: float, weight_decay: float = 0.0, use_rslora: bool = False
+    model: PeftModel, r: int, lora_alpha: int, lr: float, weight_decay: float = 0.0, use_rslora: bool = False
 ) -> Optimizer:
     """
     Helper function to instantiate a lorafa optimizer specifically configured for a given model using the LoRA method.
@@ -225,7 +225,7 @@ def create_lorafa_optimizer(
         model (PeftModel): The model containing LoRA-adapted parameters.
         r (int): Rank of the LoRA decomposition.
         lora_alpha (int): Scaling factor for LoRA parameterization.
-        learning_rate (float): Learning rate for optimizer updates.
+        lr (float): Learning rate for optimizer updates.
         weight_decay (float): Weight decay for AdamW.
         use_rslora (bool): whether to use rslora. In rslora, the lora scaling factor becomes to lora_alpha / math.sqrt(r) instead of lora_alpha / r.
 
@@ -239,7 +239,7 @@ def create_lorafa_optimizer(
     param_groups = [
         {
             "params": model.parameters(),
-            "lr": learning_rate,
+            "lr": lr,
             "names": [name for name, _ in model.named_parameters()],
             "scaling_factor": lora_scaling,
             "betas": (0.9, 0.999),

@@ -30,7 +30,7 @@ optimizer = create_lorafa_optimizer(
     model=peft_model,
     r=lora_rank,
     lora_alpha=lora_alpha,
-    learning_rate=7e-5,
+    lr=7e-5,
 )
 # you can also use scheduler, we recommend get_cosine_schedule_with_warmup from transformers
 # for better model performance

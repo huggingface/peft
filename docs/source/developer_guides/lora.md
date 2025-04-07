@@ -291,7 +291,7 @@ optimizer = create_lorafa_optimizer(
     model=model,
     r=16,
     lora_alpha=32,
-    learning_rate=7e-5,
+    lr=7e-5,
 )
 
 scheduler = get_cosine_schedule_with_warmup(
