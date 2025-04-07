@@ -69,9 +69,9 @@ model = AutoModel.from_pretrained("meta-llama/Llama-2-7b-chat-hf")
 
 Sometimes, achieving optimal LoRA fine-tuning can be challenging due to the larger number of hyperparameters to consider compared to full fine-tuning. For instance, not only do we need to adjust the commonly used learning rate, but the ideal LoRA rank may also vary depending on the specific model and task. Additionally, there are other factors to consider, such as LoRA alpha and sequence length. To assist with this, we have created a repository of reproducible best practices in the [LoRA-FA examples](https://github.com/AaronZLT/lorafa) for reference. This resource showcases the optimal LoRA-FA fine-tuning hyperparameters for different models across various datasets. By doing so, we significantly reduce the time and effort spent on hyperparameter tuning, and it may also provide insights for tuning other training hyperparameters. We encourage you to experiment and fine-tune on your own downstream tasks as well.
 
-## LoRA-FA vs. LoRA
+## Limitations
 
-Despite its advantages, LoRA-FA remains inherently constrained by its low-rank approximation nature and potential catastrophic forgetting. Besides, since LoRA-FA has less trainable parameter than LoRA, LoRA-FA may converge slower than LoRA and requires larger lora rank and fine-grained hyper-parameter (mainly learning rate) search. Addressing these limitations, particularly approximation accuracy and forgetting phenomena, represents a promising direction for future work.
+Despite its advantages, LoRA-FA remains inherently constrained by its low-rank approximation nature and potential catastrophic forgetting. Addressing these limitations, particularly approximation accuracy and forgetting phenomena, represents a promising direction for future work.
 
 ## Citation
 ```
