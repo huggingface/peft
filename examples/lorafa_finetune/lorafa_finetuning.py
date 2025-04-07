@@ -48,38 +48,43 @@ def train_model(
 ):
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-    print("In this example we only spport GPU training.")
+    compute_dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
+    device_map = "cuda" if torch.cuda.is_available() else None
 
     # load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(base_model_name_or_path)
 
-    # QLoRA-FA (quantized LoRA-FA): IF YOU WANNA QUANTIZE THE MODEL
+    # load model
     if quantize:
         model = AutoModelForCausalLM.from_pretrained(
             base_model_name_or_path,
             quantization_config=BitsAndBytesConfig(
                 load_in_4bit=True,
-                bnb_4bit_compute_dtype=(
-                    torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
-                ),
+                bnb_4bit_compute_dtype=compute_dtype,
                 bnb_4bit_use_double_quant=False,
                 bnb_4bit_quant_type="nf4",
             ),
-            torch_dtype=torch.bfloat16,
+            torch_dtype=compute_dtype,
+            device_map=device_map,
         )
         # setup for quantized training
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
     else:
-        model = AutoModelForCausalLM.from_pretrained(base_model_name_or_path, torch_dtype=torch.bfloat16)
+        model = AutoModelForCausalLM.from_pretrained(base_model_name_or_path, torch_dtype=compute_dtype, device_map=device_map)
+
     # LoRA config for the PEFT model
+    if lora_target_modules is not None:
+        if lora_target_modules == "all-linear":
+            target_modules = "all-linear"
+        else:
+            target_modules = lora_target_modules.split(",")
+    else:
+        target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+
     lora_config = LoraConfig(
         r=lora_rank,
         lora_alpha=lora_alpha,
-        target_modules=(
-            lora_target_modules.split(",")
-            if lora_target_modules
-            else ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
-        ),
+        target_modules=target_modules,
         lora_dropout=lora_dropout,
         bias="none",
     )
@@ -120,12 +125,10 @@ def train_model(
         save_steps=save_step,
         save_total_limit=2,
         gradient_accumulation_steps=1,
-        fp16=True,
-        lr=lr,
+        bf16 = True if compute_dtype == torch.bfloat16 else False,
+        fp16=True if compute_dtype == torch.float16 else False,
+        learning_rate=lr,
     )
-
-    # Clear CUDA cache to free memory
-    torch.cuda.empty_cache()
 
     # Here we initialize the LoRA-FA Optimizer
     # After this, all adapter A will be fixed, only adapter B will be trainable
@@ -175,9 +178,9 @@ if __name__ == "__main__":
         "--output_dir", type=str, default="path/to/output", help="Output directory for the fine-tuned model"
     )
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size")
-    parser.add_argument("--num_epochs", type=int, default=1, help="Number of training epochs")
-    parser.add_argument("--lr", type=float, default=2e-4, help="Learning rate")
-    parser.add_argument("--cutoff_len", type=int, default=512, help="Cutoff length for tokenization")
+    parser.add_argument("--num_epochs", type=int, default=3, help="Number of training epochs")
+    parser.add_argument("--lr", type=float, default=7e-5, help="Learning rate")
+    parser.add_argument("--cutoff_len", type=int, default=1024, help="Cutoff length for tokenization")
     parser.add_argument("--quantize", action="store_true", help="Use quantization")
     parser.add_argument("--eval_step", type=int, default=10, help="Evaluation step interval")
     parser.add_argument("--save_step", type=int, default=100, help="Save step interval")
@@ -188,6 +191,7 @@ if __name__ == "__main__":
         "--lora_target_modules", type=str, default=None, help="Comma-separated list of target modules for LoRA"
     )
     parser.add_argument("--lorafa", action="store_true", help="Use LoRA-FA Optimizer")
+
     args = parser.parse_args()
 
     train_model(

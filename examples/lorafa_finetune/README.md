@@ -50,22 +50,48 @@ peft_model.save_pretrained("lorafa-llama-3-8b-inst")
 
 The only change in your code is to pass the LoRA-FA optimizer to the trainer (if training with trainer). Do not forget `from peft.optimizers import create_lorafa_optimizer`!
 
-In this dir, we also provide you a simple example for fine-tuning with LoRA-FA optimizer. Run the finetuning script simply by running:
+## Example
+
+In this dir, we also provide you a simple example for fine-tuning with LoRA-FA optimizer.
+
+### Run on CPU, single-GPU or multi-GPU
+
+This 👇 by default will load the model in peft set up with LoRA config, and train the model with LoRA-FA optimizer.
+
+0. CPU
+
+You can simply run LoRA-FA as below:
 
 ```bash
-accelerate launch examples/lorafa_finetuning/lorafa_finetuning.py --base_model_name_or_path meta-llama/Meta-Llama-3-8B --dataset_name_or_path meta-math/MetaMathQA-40K --lorafa
+python lorafa_finetuning.py --base_model_name_or_path meta-llama/Meta-Llama-3-8B --dataset_name_or_path meta-math/MetaMathQA-40K --lorafa
 ```
 
-This 👆🏻 by default will load the model in peft set up with LoRA config, and train the model with LoRA-FA optimizer. The `accelerate launch` will automatically configure single-GPU or multi-GPU for you. 
+1. Single-GPU
 
-## Use the model from 🤗
+Run the finetuning script on 1 GPU:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python lorafa_finetuning.py --base_model_name_or_path meta-llama/Meta-Llama-3-8B --dataset_name_or_path meta-math/MetaMathQA-40K --lorafa
+```
+
+2. Multi-GPU
+
+LoRA-FA can also be run on multi-GPU, with 🤗 Accelerate:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3 accelerate launch lorafa_finetuning.py --base_model_name_or_path meta-llama/Meta-Llama-3-8B --dataset_name_or_path meta-math/MetaMathQA-40K --lorafa
+```
+
+The `accelerate launch` will automatically configure multi-GPU for you. You can also utilize `accelerate launch` in single-GPU scenario.
+
+### Use the model from 🤗
 You can load and use the model as any other 🤗 models.
 ```python
 from transformers import AutoModel
 model = AutoModel.from_pretrained("meta-llama/Llama-2-7b-chat-hf")
 ```
 
-### Best practice in fine-tuning Llama on Metamath using LoRA-FA: the hyper-params
+## Best practice in fine-tuning Llama using LoRA-FA: the hyper-params
 
 Sometimes, achieving optimal LoRA fine-tuning can be challenging due to the larger number of hyperparameters to consider compared to full fine-tuning. For instance, not only do we need to adjust the commonly used learning rate, but the ideal LoRA rank may also vary depending on the specific model and task. Additionally, there are other factors to consider, such as LoRA alpha and sequence length. To assist with this, we have created a repository of reproducible best practices in the [LoRA-FA examples](https://github.com/AaronZLT/lorafa) for reference. This resource showcases the optimal LoRA-FA fine-tuning hyperparameters for different models across various datasets. By doing so, we significantly reduce the time and effort spent on hyperparameter tuning, and it may also provide insights for tuning other training hyperparameters. We encourage you to experiment and fine-tune on your own downstream tasks as well.
 
