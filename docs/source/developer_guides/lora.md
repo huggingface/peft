@@ -275,7 +275,7 @@ LoRA training can optionally include special purpose optimizers. Currently PEFT 
 
 ### LoRA-FA Optimizer
 
-LoRA training can be more effective and efficient using LoRA-FA, as described in [LoRA-FA](https://arxiv.org/abs/2308.03303). LoRA-FA reduces activation memory consumption by fixing the matrix A and only tuning the matrix B. During training, the gradient of B is optimized to approximate the full parameter fine-tuning gradient.
+LoRA training can be more effective and efficient using LoRA-FA, as described in [LoRA-FA](https://arxiv.org/abs/2308.03303). LoRA-FA reduces activation memory consumption by fixing the matrix A and only tuning the matrix B. During training, the gradient of B is optimized to approximate the full parameter fine-tuning gradient. Moreover, the memory consumption of LoRA-FA is not sensitive to the rank (since it erases the activation of $A$), therefore it can improve performance by enlarging lora rank without increasing memory consumption.
 
 ```py
 from peft import LoraConfig, get_peft_model
@@ -289,7 +289,7 @@ model = get_peft_model(base_model, config)
 
 optimizer = create_lorafa_optimizer(
     model=model,
-    r=16,
+    r=128,
     lora_alpha=32,
     lr=7e-5,
 )

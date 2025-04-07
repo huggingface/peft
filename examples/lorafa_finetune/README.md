@@ -95,9 +95,11 @@ model = AutoModel.from_pretrained("meta-llama/Llama-2-7b-chat-hf")
 
 Sometimes, achieving optimal LoRA fine-tuning can be challenging due to the larger number of hyperparameters to consider compared to full fine-tuning. For instance, not only do we need to adjust the commonly used learning rate, but the ideal LoRA rank may also vary depending on the specific model and task. Additionally, there are other factors to consider, such as LoRA alpha and sequence length. To assist with this, we have created a repository of reproducible best practices in the [LoRA-FA examples](https://github.com/AaronZLT/lorafa) for reference. This resource showcases the optimal LoRA-FA fine-tuning hyperparameters for different models across various datasets. By doing so, we significantly reduce the time and effort spent on hyperparameter tuning, and it may also provide insights for tuning other training hyperparameters. We encourage you to experiment and fine-tune on your own downstream tasks as well.
 
-## Limitations
+## LoRA-FA's advantages and limitations
 
-Despite its advantages, LoRA-FA remains inherently constrained by its low-rank approximation nature and potential catastrophic forgetting. Addressing these limitations, particularly approximation accuracy and forgetting phenomena, represents a promising direction for future work.
+By eliminating the activation of adapter A, LoRA-FA uses less memory for fine-tuning compared to LoRA. For instance, when fine-tuning Llama-2-7b-chat-hf with a batch size of 8 and a sequence length of 1024, LoRA-FA requires 36GB of memory to store activations. This allows it to run successfully on an 80GB GPU. In contrast, LoRA requires at least 60GB of memory for activations, leading to an Out of Memory (OOM) error. Additionally, the memory consumption of LoRA-FA is not sensitive to the rank, allowing for performance improvements by increasing the LoRA rank without additional memory usage. LoRA-FA further narrows the performance gap with Full-FT by minimizing the discrepancy between the low-rank gradient and the full gradient, enabling it to achieve performance that is on par with or even superior to vanilla LoRA.
+
+Despite its advantages, LoRA-FA is inherently limited by its low-rank approximation nature and potential issues with catastrophic forgetting. The gradient approximation can impact training throughput. Addressing these limitations, especially in terms of approximation accuracy and forgetting phenomena, presents a promising direction for future research.
 
 ## Citation
 ```
