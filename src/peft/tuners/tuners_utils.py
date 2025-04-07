@@ -38,6 +38,7 @@ from peft.utils.constants import (
     SEQ_CLS_HEAD_NAMES,
 )
 from peft.utils.integrations import init_empty_weights
+from peft.utils.other import get_modules_to_save_from_config
 from peft.utils.peft_types import PeftType, TaskType
 
 from ..config import PeftConfig
@@ -1010,6 +1011,14 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
         elif key in config.exclude_modules:
             return _ExcludedModule()
         elif any(key.endswith(f".{exclude_key}") for exclude_key in config.exclude_modules):
+            return _ExcludedModule()
+
+    # Adapters should never match on modules to save modules as it is a guarantee for conflicts of behavior
+    # between `ModulesToSaveWrapper` internals and the potential adapter.
+    # TODO extend this to AuxiliaryTrainingWrapper in this PR if possible
+    modules_to_save = get_modules_to_save_from_config(config)
+    if modules_to_save:
+        if any(re.match(rf"(^|.*\.){m}($|\..*)", key) for m in modules_to_save):
             return _ExcludedModule()
 
     if isinstance(config.target_modules, str):

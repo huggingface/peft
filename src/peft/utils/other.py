@@ -749,6 +749,11 @@ def _set_trainable(
     if wrapper_cls is None:
         wrapper_cls = ModulesToSaveWrapper
 
+    if not module_names:
+        # This is useful for the case that the PEFT config does not have `modules_to_save`, e.g.
+        # in the case of prompt tuning and friends as returned by `get_modules_to_save_from_config`.
+        return
+
     trainable_modules = []
     found_modules = set()
     # disable removal of duplicates to support targeting tied weights
@@ -1121,3 +1126,12 @@ def get_pattern_key(pattern_keys: Sequence[str], key_to_match: str) -> str:
         return key
 
     return key_to_match
+
+
+def get_modules_to_save_from_config(peft_config) -> Optional[list[str]]:
+    """Utility for retrieving `modules_to_save` from a PEFT config.
+    This is useful for exceptional tuners like `PromptTuning` which do not have this attribute.
+    """
+    if hasattr(peft_config, "modules_to_save"):
+        return peft_config.modules_to_save
+    return None
