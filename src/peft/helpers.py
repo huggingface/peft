@@ -22,6 +22,7 @@ from torch import nn
 
 from .peft_model import PeftConfig, PeftModel
 from .tuners.lora import LoraLayer
+from .tuners.tuners_utils import BaseTunerLayer
 
 
 def update_forward_signature(model: PeftModel) -> None:
@@ -218,8 +219,6 @@ def disable_input_dtype_casting(model: nn.Module, active: bool = True):
     """
     Context manager disables input dtype casting to the dtype of the weight.
 
-    Currently specifically works for LoRA.
-
     Parameters:
         model (nn.Module):
             The model containing PEFT modules whose input dtype casting is to be adjusted.
@@ -237,7 +236,7 @@ def disable_input_dtype_casting(model: nn.Module, active: bool = True):
 
     original_values = {}
     for name, module in model.named_modules():
-        if not isinstance(module, LoraLayer):
+        if not isinstance(module, BaseTunerLayer):
             continue
         original_values[name] = module.cast_input_dtype_enabled
         module.cast_input_dtype_enabled = False
@@ -246,7 +245,7 @@ def disable_input_dtype_casting(model: nn.Module, active: bool = True):
         yield
     finally:
         for name, module in model.named_modules():
-            if not isinstance(module, LoraLayer):
+            if not isinstance(module, BaseTunerLayer):
                 continue
             if name in original_values:
                 module.cast_input_dtype_enabled = original_values[name]

@@ -35,6 +35,8 @@ class BoneLayer(BaseTunerLayer):
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
+        # flag to enable/disable casting of input to weight dtype during forward call
+        self.cast_input_dtype_enabled = True
         self.kwargs = kwargs
 
         base_layer = self.get_base_layer()
@@ -150,6 +152,7 @@ class BoneLinear(nn.Module, BoneLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.bone_block.keys():
                 base_layer = self.get_base_layer()
+                orig_dtype = base_layer.weight.dtype
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
@@ -166,14 +169,14 @@ class BoneLinear(nn.Module, BoneLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    self.base_layer.weight.data = orig_weight
+                    base_layer.weight.data = orig_weight.to(orig_dtype)
                 else:
                     if self.bone_fn == "bat":
                         delta_weight = self.get_delta_weight(active_adapter, self.base_layer.weight.data)
-                        self.base_layer.weight.data += delta_weight
+                        base_layer.weight.data += delta_weight.to(orig_dtype)
                     else:
                         delta_weight = self.get_delta_weight_bone(active_adapter, self.base_layer.weight.data)
-                        self.base_layer.weight.data = delta_weight
+                        base_layer.weight.data = delta_weight.to(orig_dtype)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -183,8 +186,11 @@ class BoneLinear(nn.Module, BoneLayer):
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
+
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
+            base_layer = self.get_base_layer()
+            orig_dtype = base_layer.weight.dtype
             if active_adapter in self.bone_block.keys():
                 orig_weight = self.get_base_layer().weight.data.clone()
                 if self.bone_fn == "bat":
@@ -192,7 +198,7 @@ class BoneLinear(nn.Module, BoneLayer):
                 else:
                     delta_weight = self.get_delta_weight_bone(active_adapter, orig_weight, re=True)
 
-                self.get_base_layer().weight.data = delta_weight
+                base_layer.weight.data = delta_weight.to(orig_dtype)
 
     def get_delta_weight(self, adapter, orig_weight, re: bool = False) -> torch.Tensor:
         """
@@ -213,12 +219,15 @@ class BoneLinear(nn.Module, BoneLayer):
 
         if cast_to_fp32:
             weight_bone = weight_bone.float()
+        orig_weight = orig_weight.to(weight_bone.dtype)
 
         r = weight_bone.size(-1)
         if re:
             o = orig_weight.reshape(orig_weight.size(0) // r, r, orig_weight.size(1) // r, r).permute(2, 0, 1, 3)
             one = torch.eye(weight_bone.size(-1)).to(weight_bone.device)
+            # inverse must be in float32, after that the dtype can be adjusted if needed
             inv_I_plus_b = torch.inverse(one + weight_bone)
+            inv_I_plus_b = inv_I_plus_b.to(weight_bone.dtype)
             w = (o - weight_bone) @ inv_I_plus_b
             output_tensor = w.permute(1, 2, 0, 3).reshape(*orig_weight.shape)
         else:
@@ -318,7 +327,9 @@ class BoneLinear(nn.Module, BoneLayer):
                     delta_weight = self.get_delta_weight(active_adapter, orig_weight)
                     orig_weight = orig_weight + delta_weight
 
-                result = F.linear(input=x, weight=orig_weight, bias=self.base_layer.bias)
+                x = self._cast_input_dtype(x, orig_weight.dtype)
+                bias = self._cast_input_dtype(self.base_layer.bias, orig_weight.dtype)
+                result = F.linear(input=x, weight=orig_weight, bias=bias)
             else:
                 result = self.base_layer(x, *args, **kwargs)
                 for active_adapter in self.active_adapters:
@@ -329,6 +340,7 @@ class BoneLinear(nn.Module, BoneLayer):
                     if x.size(-1) % r != 0:
                         padding_size = (r - x.size(-1) % r) % r
                         x = F.pad(x, (0, padding_size))
+                    x = self._cast_input_dtype(x, bone.dtype)
                     result = result + torch.sum(x.reshape(*x.shape[:-1], x.size(-1) // r, r), dim=-2) @ bone
 
         result = result.to(previous_dtype)

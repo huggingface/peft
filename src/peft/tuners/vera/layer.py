@@ -248,11 +248,6 @@ class Linear(nn.Linear, VeraLayer):
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
 
-            # cast back the weights
-            # TODO: why?
-            self.vera_lambda_d[adapter].data = lambda_d.to(dtype)
-            self.vera_lambda_b[adapter].data = lambda_b.to(dtype)
-
         return output_tensor
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:

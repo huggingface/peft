@@ -532,19 +532,6 @@ class LoraLayer(BaseTunerLayer):
 
         return result
 
-    def _cast_input_dtype(self, x: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
-        """
-        Whether to cast the dtype of the input to the forward method.
-
-        Usually, we want to enable this to align the input dtype with the dtype of the weight, but by setting
-        layer.cast_input_dtype=False, this can be disabled if necessary.
-
-        Enabling or disabling can be managed via the peft.helpers.disable_lora_input_dtype_casting context manager.
-        """
-        if (not self.cast_input_dtype_enabled) or (x.dtype == dtype):
-            return x
-        return x.to(dtype=dtype)
-
 
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
 # and modified to work with PyTorch FSDP
@@ -623,9 +610,10 @@ class Linear(nn.Module, LoraLayer):
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
                     orig_weight = base_layer.weight.data.clone()
+                    orig_dtype = orig_weight.dtype
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
                         delta_weight = self.get_delta_weight(active_adapter)
-                        orig_weight += delta_weight
+                        orig_weight += delta_weight.to(orig_dtype)
                     else:
                         orig_weight = self.lora_variant[active_adapter].merge_safe(self, active_adapter, orig_weight)
 
@@ -642,7 +630,7 @@ class Linear(nn.Module, LoraLayer):
                             raise ValueError(
                                 f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                             )
-                        base_layer.bias.data = new_bias
+                        base_layer.bias.data = new_bias.to(orig_dtype)
 
                 else:
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
@@ -668,8 +656,9 @@ class Linear(nn.Module, LoraLayer):
             if active_adapter in self.lora_A.keys():
                 weight = self.get_base_layer().weight
                 if active_adapter not in self.lora_variant:  # vanilla LoRA
+                    orig_dtype = weight.dtype
                     delta_weight = self.get_delta_weight(active_adapter)
-                    weight.data -= delta_weight
+                    weight.data -= delta_weight.to(orig_dtype)
                 else:
                     unmerged = self.lora_variant[active_adapter].unmerge(self, active_adapter, weight)
                     weight.data = unmerged
@@ -870,12 +859,13 @@ class Embedding(nn.Module, LoraLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.lora_embedding_A.keys():
                 base_layer = self.get_base_layer()
+                orig_dtype = base_layer.weight.dtype
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
                     orig_weight = base_layer.weight.data.clone()
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
-                        orig_weight += self.get_delta_weight(active_adapter)
+                        orig_weight += self.get_delta_weight(active_adapter).to(orig_dtype)
                     else:
                         orig_weight = self.lora_variant[active_adapter].merge_safe(self, active_adapter, orig_weight)
 
@@ -887,7 +877,7 @@ class Embedding(nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weight
                 else:
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
-                        base_layer.weight.data += self.get_delta_weight(active_adapter)
+                        base_layer.weight.data += self.get_delta_weight(active_adapter).to(orig_dtype)
                     else:
                         self.lora_variant[active_adapter].merge_unsafe(self, active_adapter, base_layer.weight)
                 self.merged_adapters.append(active_adapter)
@@ -901,10 +891,11 @@ class Embedding(nn.Module, LoraLayer):
             return
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
+            orig_dtype = self.get_base_layer().weight.dtype
             if active_adapter in self.lora_embedding_A.keys():
                 weight = self.get_base_layer().weight
                 if active_adapter not in self.lora_variant:  # vanilla LoRA
-                    weight.data -= self.get_delta_weight(active_adapter)
+                    weight.data -= self.get_delta_weight(active_adapter).to(orig_dtype)
                 else:
                     unmerged = self.lora_variant[active_adapter].unmerge(self, active_adapter, weight)
                     weight.data = unmerged
@@ -1141,6 +1132,7 @@ class _ConvNd(nn.Module, LoraLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.lora_A.keys():
                 base_layer = self.get_base_layer()
+                orig_dtype = base_layer.weight.dtype
 
                 if base_layer.groups > 1:
                     # https://github.com/huggingface/peft/pull/2403
@@ -1152,7 +1144,7 @@ class _ConvNd(nn.Module, LoraLayer):
                     orig_weight = base_layer.weight.data.clone()
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
                         delta_weight = self.get_delta_weight(active_adapter)
-                        orig_weight += delta_weight
+                        orig_weight += delta_weight.to(orig_dtype)
                     else:
                         orig_weight = self.lora_variant[active_adapter].merge_safe(self, active_adapter, orig_weight)
 
@@ -1160,6 +1152,7 @@ class _ConvNd(nn.Module, LoraLayer):
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
+
                     base_layer.weight.data = orig_weight
 
                     if self.lora_bias[active_adapter]:
@@ -1168,12 +1161,12 @@ class _ConvNd(nn.Module, LoraLayer):
                             raise ValueError(
                                 f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                             )
-                        base_layer.bias.data = new_bias
+                        base_layer.bias.data = new_bias.to(orig_dtype)
 
                 else:
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
                         delta_weight = self.get_delta_weight(active_adapter)
-                        base_layer.weight.data += delta_weight
+                        base_layer.weight.data += delta_weight.to(orig_dtype)
                     else:
                         self.lora_variant[active_adapter].merge_unsafe(self, active_adapter, base_layer.weight)
 
@@ -1194,8 +1187,9 @@ class _ConvNd(nn.Module, LoraLayer):
             if active_adapter in self.lora_A.keys():
                 weight = self.get_base_layer().weight
                 if active_adapter not in self.lora_variant:  # vanilla LoRA
+                    orig_dtype = weight.dtype
                     delta_weight = self.get_delta_weight(active_adapter)
-                    weight.data -= delta_weight
+                    weight.data -= delta_weight.to(orig_dtype)
                 else:
                     unmerged = self.lora_variant[active_adapter].unmerge(self, active_adapter, weight)
                     weight.data = unmerged
@@ -1494,11 +1488,12 @@ class MultiheadAttention(nn.Module, LoraLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.lora_A.keys():
                 base_layer = self.get_base_layer()
+                orig_dtype = base_layer.out_proj.weight.dtype
                 if safe_merge:
                     # TODO: work with separate weights
                     # merging in_proj (nn.Parameter)
                     orig_weight_in = base_layer.in_proj_weight.data.detach().clone()
-                    orig_weight_in += self.get_delta_weight(active_adapter)
+                    orig_weight_in += self.get_delta_weight(active_adapter).to(orig_dtype)
                     if not torch.isfinite(orig_weight_in).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
@@ -1506,7 +1501,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
 
                     # merging out_proj (subclass of nn.Linear)
                     orig_weight_out = base_layer.out_proj.weight.data.detach().clone()
-                    orig_weight_out += base_layer.out_proj.get_delta_weight(active_adapter)
+                    orig_weight_out += base_layer.out_proj.get_delta_weight(active_adapter).to(orig_dtype)
                     if not torch.isfinite(orig_weight_out).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
@@ -1523,7 +1518,8 @@ class MultiheadAttention(nn.Module, LoraLayer):
                 else:
                     # merging in_proj (nn.Parameter)
                     # TODO: work with separate weights
-                    weight_merged = base_layer.in_proj_weight.data.detach() + self.get_delta_weight(active_adapter)
+                    delta_weight = self.get_delta_weight(active_adapter).to(orig_dtype)
+                    weight_merged = base_layer.in_proj_weight.data.detach() + delta_weight
 
                     # unregister parameter implicitly and overwrite using merged weights; gradients are computed after
                     # forward and, thus, after unmerging (see forward()), therefore this is safe to do.
@@ -1531,9 +1527,8 @@ class MultiheadAttention(nn.Module, LoraLayer):
                     base_layer.in_proj_weight = weight_merged
 
                     # merging out_proj (subclass of nn.Linear)
-                    weight_merged = base_layer.out_proj.weight.data.detach() + base_layer.out_proj.get_delta_weight(
-                        active_adapter
-                    )
+                    delta_weight = base_layer.out_proj.get_delta_weight(active_adapter).to(orig_dtype)
+                    weight_merged = base_layer.out_proj.weight.data.detach() + delta_weight
                     del base_layer.out_proj.get_base_layer().weight
                     base_layer.out_proj.get_base_layer().weight = weight_merged
                     base_layer.out_proj.merge(adapter_names=[active_adapter])
@@ -1549,6 +1544,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
 
         # TODO work with separate weights
         base_layer = self.get_base_layer()
+        orig_dtype = base_layer.out_proj.base_layer.weight.dtype
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.lora_A.keys():
@@ -1556,14 +1552,14 @@ class MultiheadAttention(nn.Module, LoraLayer):
                 # requires_grad was False when the optimizer was initialized, but still let's try to be correct here.
 
                 # in_proj
-                old_weight = base_layer.in_proj_weight.data - self.get_delta_weight(active_adapter)
+                delta_weight = self.get_delta_weight(active_adapter).to(orig_dtype)
+                old_weight = base_layer.in_proj_weight.data - delta_weight
                 del base_layer.in_proj_weight
                 base_layer.register_parameter("in_proj_weight", nn.Parameter(old_weight, requires_grad=False))
 
                 # out_proj
-                old_weight = base_layer.out_proj.base_layer.weight.data - base_layer.out_proj.get_delta_weight(
-                    active_adapter
-                )
+                delta_weight = base_layer.out_proj.get_delta_weight(active_adapter).to(orig_dtype)
+                old_weight = base_layer.out_proj.base_layer.weight.data - delta_weight
                 del base_layer.out_proj.base_layer.weight
                 base_layer.out_proj.base_layer.register_parameter(
                     "weight", nn.Parameter(old_weight, requires_grad=False)
