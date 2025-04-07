@@ -13,9 +13,7 @@
 
 import pytest
 import torch
-from transformers import (
-    AutoModelForSequenceClassification,
-)
+from transformers import AutoModelForSequenceClassification
 
 from peft import (
     AdaLoraConfig,
@@ -181,10 +179,8 @@ ALL_CONFIGS = [
 
 class TestSequenceClassificationModels(PeftCommonTester):
     r"""
-    Test if the PeftModel behaves as expected. This includes:
-    - test if the model has the expected methods
-
-    We use pytest for debugging purposes to test each model individually.
+    Tests for basic coverage of AutoModelForSequenceClassification and classification-specific cases.
+    Most of the functionality is probably already covered by other tests.
     """
 
     transformers_class = AutoModelForSequenceClassification
