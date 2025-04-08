@@ -28,9 +28,9 @@ class RandLoraConfig(PeftConfig):
     Paper: https://arxiv.org/pdf/2502.00987.
 
     Args:
-        r (`int`, *optional*, defaults to `32`):
-            RandLora's random basis rank dimension. This parameter is inversely proportional to the amount of trainable
-            parameters.
+        r (`int`, *optional*, defaults to `10`):
+            RandLora's random basis rank dimension. Contrary to Lora, this parameter is inversely proportional to the amount of trainable
+            parameters as reducing it increases trainable parameters.
         target_modules (`Union[List[str], str]`):
             The names of the modules to apply RandLora to. Only linear layers are supported.
         projection_prng_key (`int`):
@@ -41,11 +41,14 @@ class RandLoraConfig(PeftConfig):
             gamma diagonal matrices. This will increase the size of the checkpoint, but guarantee that we can
             reload the checkpoint on all system configurations. Defaults to `True`.
         sparse (`bool`):
-            Whether to use sparse random bases as described in the RandLora paper. The current implementation is a
-            proof of concept where the sparseness is not used to improve speed or memory usage. Defaults to `False`.
+            Whether to use sparse random bases as described in the RandLora paper. The bases are ternary sparse bases (only containing -1, 0 and 1) where the attribution probability is 1/6 for -1 and 1 and 2/3 for 0.
+            These sparse matrices aim to be used for matmul free computation in the future, see https://arxiv.org/pdf/2406.02528v1
+            The current implementation is a proof of concept however where the sparseness is not used to improve speed or memory usage. Using sparse matrices typically does not reduce performance and can even help reduce overfitting.
+            Defaults to `False`.
         very_sparse (`bool`):
-            Whether to use very sparse random bases. The current implementation is a proof of concept where the
-            sparseness is not used to improve speed or memory usage. Defaults to `False`.
+            Whether to use highly sparse random bases as described in the RandLora paper. The very sparse bases are ternary sparse bases (only containing -1, 0 and 1) given a matrix with smallest dimension d, the attribution probability is 1/√D for -1 and 1 and 1- 2/√D for 0.
+            Using these sparse matrices can further reduce overfitting over the `sparse` alternatives but will most likely decrease performance as a results. Use carefully.
+            Defaults to `False`.
         randlora_dropout (`float`):
             The dropout probability for RandLora layers.
         randlora_alpha (`float`):
@@ -72,7 +75,7 @@ class RandLoraConfig(PeftConfig):
             pattern is not in the common layers pattern.
     """
 
-    r: int = field(default=32, metadata={"help": "RandLora random basis rank"})
+    r: int = field(default=10, metadata={"help": "RandLora random basis rank"})
 
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,
@@ -129,7 +132,7 @@ class RandLoraConfig(PeftConfig):
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
     )
     randlora_alpha: int = field(
-        default=64,
+        default=20,
         metadata={
             "help": "Scaling coefficient in the adapter layers, typically 2 times the rank of the random bases."
         },

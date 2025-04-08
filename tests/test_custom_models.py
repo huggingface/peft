@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # coding=utf-8
-# Copyright 2025-present the HuggingFace Inc. team.
+# Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ import os
 import platform
 import re
 import shutil
-import sys
 import tempfile
 import time
 import unittest
@@ -34,8 +33,6 @@ from torch import nn
 from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
 from transformers.pytorch_utils import Conv1D
 
-
-sys.path.append(os.path.join(os.getcwd(), "src"))
 from peft import (
     AdaLoraConfig,
     BOFTConfig,

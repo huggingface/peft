@@ -151,6 +151,7 @@ class RandLoraModel(BaseTuner):
 
         # deterministic init of randlora_A and randlora_B if we know the key
         generator = torch.Generator(device="cpu").manual_seed(config.projection_prng_key)
+
         # The gamma matrix is applied on A meaning it can be unique (shared) accross the n scaling matrices.
         # We also set randlora_A as the smallest matrix to reduce trainable parameters.
         randlora_A = torch.rand((config.r, 1, min_dim), generator=generator)
@@ -369,7 +370,6 @@ class RandLoraModel(BaseTuner):
             eightbit_kwargs.update(
                 {
                     "has_fp16_weights": target_base_layer.state.has_fp16_weights,
-                    "memory_efficient_backward": target_base_layer.state.memory_efficient_backward,
                     "threshold": target_base_layer.state.threshold,
                     "index": target_base_layer.index,
                 }
