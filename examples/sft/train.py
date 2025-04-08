@@ -91,10 +91,6 @@ class DataTrainingArguments:
         default="train,test",
         metadata={"help": "Comma separate list of the splits to use from the dataset."},
     )
-    max_seq_len: Optional[int] = field(
-        default=512,
-        metadata={"help": "The maximum total input sequence length after tokenization."},
-    )
 
 
 def main(model_args, data_args, training_args):
