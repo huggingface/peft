@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import numpy as np
 import PIL.Image
@@ -42,8 +42,8 @@ class LightControlNetPipelineOutput(BaseOutput):
             (nsfw) content, or `None` if safety checking could not be performed.
     """
 
-    images: Union[List[PIL.Image.Image], np.ndarray]
-    nsfw_content_detected: Optional[List[bool]]
+    images: Union[list[PIL.Image.Image], np.ndarray]
+    nsfw_content_detected: Optional[list[bool]]
 
 
 class LightControlNetPipeline(StableDiffusionControlNetPipeline):
@@ -164,23 +164,23 @@ class LightControlNetPipeline(StableDiffusionControlNetPipeline):
     @torch.no_grad()
     def __call__(
         self,
-        prompt: Union[str, List[str]] = None,
+        prompt: Union[str, list[str]] = None,
         image: Union[
             torch.FloatTensor,
             PIL.Image.Image,
             np.ndarray,
-            List[torch.FloatTensor],
-            List[PIL.Image.Image],
-            List[np.ndarray],
+            list[torch.FloatTensor],
+            list[PIL.Image.Image],
+            list[np.ndarray],
         ] = None,
         height: Optional[int] = None,
         width: Optional[int] = None,
         num_inference_steps: int = 50,
         guidance_scale: float = 7.5,
-        negative_prompt: Optional[Union[str, List[str]]] = None,
+        negative_prompt: Optional[Union[str, list[str]]] = None,
         num_images_per_prompt: Optional[int] = 1,
         eta: float = 0.0,
-        generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
+        generator: Optional[Union[torch.Generator, list[torch.Generator]]] = None,
         latents: Optional[torch.FloatTensor] = None,
         prompt_embeds: Optional[torch.FloatTensor] = None,
         negative_prompt_embeds: Optional[torch.FloatTensor] = None,
@@ -188,8 +188,8 @@ class LightControlNetPipeline(StableDiffusionControlNetPipeline):
         return_dict: bool = True,
         callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
         callback_steps: int = 1,
-        cross_attention_kwargs: Optional[Dict[str, Any]] = None,
-        controlnet_conditioning_scale: Union[float, List[float]] = 1.0,
+        cross_attention_kwargs: Optional[dict[str, Any]] = None,
+        controlnet_conditioning_scale: Union[float, list[float]] = 1.0,
         guess_mode: bool = False,
     ):
         r"""
