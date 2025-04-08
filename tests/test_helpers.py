@@ -210,8 +210,9 @@ class TestScalingAdapters:
         text_scales_before_scaling = self.get_scale_from_modules(pipeline.text_encoder)
         unet_scales_before_scaling = self.get_scale_from_modules(pipeline.unet)
 
-        with rescale_adapter_scale(model=pipeline.text_encoder, multiplier=0.5), rescale_adapter_scale(
-            model=pipeline.unet, multiplier=0.5
+        with (
+            rescale_adapter_scale(model=pipeline.text_encoder, multiplier=0.5),
+            rescale_adapter_scale(model=pipeline.unet, multiplier=0.5),
         ):
             text_scales_during_scaling = self.get_scale_from_modules(pipeline.text_encoder)
             unet_scales_during_scaling = self.get_scale_from_modules(pipeline.unet)
