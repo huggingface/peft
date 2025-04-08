@@ -39,6 +39,7 @@ from .testing_common import PeftCommonTester
 PEFT_SEQ_CLS_MODELS_TO_TEST = [
     "hf-internal-testing/tiny-random-BertForSequenceClassification",
     "hf-internal-testing/tiny-random-RobertaForSequenceClassification",
+    "trl-internal-testing/tiny-random-LlamaForCausalLM",
 ]
 
 
@@ -179,8 +180,8 @@ ALL_CONFIGS = [
 
 class TestSequenceClassificationModels(PeftCommonTester):
     r"""
-    Tests for basic coverage of AutoModelForSequenceClassification and classification-specific cases.
-    Most of the functionality is probably already covered by other tests.
+    Tests for basic coverage of AutoModelForSequenceClassification and classification-specific cases. Most of the
+    functionality is probably already covered by other tests.
     """
 
     transformers_class = AutoModelForSequenceClassification

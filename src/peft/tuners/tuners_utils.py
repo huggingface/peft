@@ -41,7 +41,7 @@ from peft.utils.integrations import init_empty_weights
 from peft.utils.peft_types import PeftType, TaskType
 
 from ..config import PeftConfig
-from ..utils import ModulesToSaveWrapper, _get_submodules
+from ..utils import _get_submodules
 from ._buffer_dict import BufferDict
 
 
@@ -507,7 +507,8 @@ class BaseTuner(nn.Module, ABC):
                 error_msg = (
                     "No modules were targeted for adaptation. "
                     "This might be caused by a combination of mismatched target modules and excluded modules. "
-                    "Please check your `target_modules` and `exclude_modules` configuration."
+                    "Please check your `target_modules` and `exclude_modules` configuration. You may also have "
+                    "only targeted modules that are marked to be saved (`modules_to_save`)."
                 )
                 if getattr(peft_config, "layers_to_transform", None) is not None:
                     error_msg += f" Note: You specified 'layers_to_transform': {peft_config.layers_to_transform}."
