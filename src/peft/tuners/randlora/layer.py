@@ -169,7 +169,7 @@ class RandLoraLayer(BaseTunerLayer):
         if adapter_name in self.randlora_lambda.keys():
             with torch.no_grad():
                 nn.init.zeros_(self.randlora_lambda[adapter_name])
-                nn.init.ones_(self.randlora_gamma[adapter_name]).fill_(
+                nn.init.zeros_(self.randlora_gamma[adapter_name]).fill_(
                     1 / max(self.randlora_gamma[adapter_name].shape)
                 )
 
@@ -330,6 +330,7 @@ class Linear(nn.Linear, RandLoraLayer):
                 x = x.to(update_A.dtype)
                 scaling = self.scaling[active_adapter]
                 result = result + F.linear(F.linear(dropout(x), update_B), update_A) * scaling
+
         result = result.to(previous_dtype)
         return result
 
