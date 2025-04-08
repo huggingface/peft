@@ -58,7 +58,7 @@ from peft import (
 from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import _get_submodules, infer_device
-from peft.utils.other import TrainableTokensWrapper
+from peft.utils.other import AuxiliaryTrainingWrapper, ModulesToSaveWrapper, TrainableTokensWrapper
 
 from .testing_utils import get_state_dict
 
@@ -1397,9 +1397,6 @@ class PeftCommonTester:
         if config.peft_type not in supported_peft_types:
             return pytest.skip(f"Test not applicable for {config.peft_type}")
 
-        if hasattr(config, "trainable_token_indices"):
-            return pytest.skip("This is currently not supported. See https://github.com/huggingface/peft/issues/2381")
-
         model = self.transformers_class.from_pretrained(model_id)
         adapter_to_delete = "delete_me"
         model = get_peft_model(model, config)
@@ -1417,10 +1414,31 @@ class PeftCommonTester:
             for attr in attributes_to_check:
                 assert adapter_to_delete not in getattr(target, attr)
 
+        # check auxiliary modules
+        for module in model.modules():
+            if isinstance(module, AuxiliaryTrainingWrapper):
+                assert adapter_to_delete not in module._adapters
+                assert module.active_adapters == ["default"]
+            if isinstance(module, ModulesToSaveWrapper):
+                assert adapter_to_delete not in module.modules_to_save
+            elif isinstance(module, TrainableTokensWrapper):
+                assert adapter_to_delete not in module.token_adapter.trainable_tokens_delta
+                assert adapter_to_delete not in module.token_adapter.trainable_tokens_original
+
         # check that we can also delete the last remaining adapter
         model.delete_adapter("default")
         assert "default" not in model.peft_config
         assert model.active_adapters == []
+
+        for module in model.modules():
+            if isinstance(module, AuxiliaryTrainingWrapper):
+                assert "default" not in module._adapters
+                assert module.active_adapters == []
+            if isinstance(module, ModulesToSaveWrapper):
+                assert "default" not in module.modules_to_save
+            elif isinstance(module, TrainableTokensWrapper):
+                assert "default" not in module.token_adapter.trainable_tokens_delta
+                assert "default" not in module.token_adapter.trainable_tokens_original
 
         input = self.prepare_inputs_for_testing()
         # note: we cannot call model(**input) because PeftModel always expects there to be at least one adapter
@@ -1449,9 +1467,6 @@ class PeftCommonTester:
         if config.peft_type not in supported_peft_types:
             return pytest.skip(f"Test not applicable for {config.peft_type}")
 
-        if hasattr(config, "trainable_token_indices"):
-            return pytest.skip("This is currently not supported. See https://github.com/huggingface/peft/issues/2381")
-
         model = self.transformers_class.from_pretrained(model_id)
         adapter_to_delete = "delete_me"
         model = get_peft_model(model, config)
@@ -1469,14 +1484,46 @@ class PeftCommonTester:
             for attr in attributes_to_check:
                 assert adapter_to_delete not in getattr(target, attr)
 
+        # check auxiliary modules
+        for module in model.modules():
+            if isinstance(module, AuxiliaryTrainingWrapper):
+                assert adapter_to_delete not in module._adapters
+                assert module.active_adapters == ["default"]
+            if isinstance(module, ModulesToSaveWrapper):
+                assert adapter_to_delete not in module.modules_to_save
+            elif isinstance(module, TrainableTokensWrapper):
+                assert adapter_to_delete not in module.token_adapter.trainable_tokens_delta
+                assert adapter_to_delete not in module.token_adapter.trainable_tokens_original
+
         # check that we can also delete the last remaining adapter
         model.delete_adapter("default")
         assert "default" not in model.peft_config
         assert model.active_adapters == []
 
+        for module in model.modules():
+            if isinstance(module, AuxiliaryTrainingWrapper):
+                assert "default" not in module._adapters
+                assert module.active_adapters == []
+            if isinstance(module, ModulesToSaveWrapper):
+                assert "default" not in module.modules_to_save
+            elif isinstance(module, TrainableTokensWrapper):
+                assert "default" not in module.token_adapter.trainable_tokens_delta
+                assert "default" not in module.token_adapter.trainable_tokens_original
+
         input = self.prepare_inputs_for_testing()
         # note: we cannot call model(**input) because PeftModel always expects there to be at least one adapter
         model.base_model(**input)  # should not raise an error
+
+    def _test_delete_unknown_adapter_raises(self, model_id, config_cls, config_kwargs):
+        # Check that we get a nice error message when trying to delete an adapter that does not exist.
+        config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+        model = self.transformers_class.from_pretrained(model_id)
+        adapter_to_delete = "delete_me"
+        model = get_peft_model(model, config)
+
+        msg = "Adapter unknown-adapter does not exist"
+        with pytest.raises(ValueError, match=msg):
+            model.delete_adapter("unknown-adapter")
 
     def _test_unload_adapter(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
