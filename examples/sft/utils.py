@@ -122,7 +122,7 @@ def create_and_prepare_model(args, data_args, training_args):
         # Load model
         model, _ = FastLanguageModel.from_pretrained(
             model_name=args.model_name_or_path,
-            max_seq_length=data_args.max_seq_len,
+            max_seq_length=training_args.max_seq_length,
             dtype=None,
             load_in_4bit=args.use_4bit_quantization,
         )
