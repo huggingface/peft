@@ -198,7 +198,7 @@ def create_and_prepare_model(args, data_args, training_args):
             else args.lora_target_modules,
             use_gradient_checkpointing=training_args.gradient_checkpointing,
             random_state=training_args.seed,
-            max_seq_length=data_args.max_seq_len,
+            max_seq_length=training_args.max_seq_length,
         )
 
     return model, peft_config, tokenizer
