@@ -13,7 +13,7 @@
 # limitations under the License.
 import math
 import warnings
-from typing import Any, List, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -131,7 +131,7 @@ class BoneLinear(nn.Module, BoneLayer):
         self.update_layer(adapter_name, r, init_weights, **kwargs)
         self.bone_fn = init_weights
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 

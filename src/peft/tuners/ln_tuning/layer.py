@@ -14,7 +14,7 @@
 
 import warnings
 from copy import deepcopy
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -60,7 +60,7 @@ class LNTuningLayer(nn.Module, BaseTunerLayer):
                 layer.requires_grad_(False)
             self._disable_adapters = True
 
-    def merge(self, adapter_names: Optional[List[str]] = None, safe_merge: bool = False):
+    def merge(self, adapter_names: Optional[list[str]] = None, safe_merge: bool = False):
         # note that there is no actual merging, so whether safe_merge is True or False is irrelevant
         adapter_names = check_adapters_to_merge(self, adapter_names)
         if not adapter_names:

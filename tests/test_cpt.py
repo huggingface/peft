@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, Dict, List, Union
+from typing import Any, Union
 
 import pytest
 import torch
@@ -98,7 +98,7 @@ def collator(global_tokenizer):
             self.training = training
             self.tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # mk check why needed
 
-        def torch_call(self, examples: List[Union[List[int], Any, Dict[str, Any]]]) -> Dict[str, Any]:
+        def torch_call(self, examples: list[Union[list[int], Any, dict[str, Any]]]) -> dict[str, Any]:
             # Handle dict or lists with proper padding and conversion to tensor.
             list_sample_mask = []
             for i in range(len(examples)):

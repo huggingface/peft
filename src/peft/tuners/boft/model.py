@@ -18,7 +18,7 @@
 import warnings
 from dataclasses import asdict
 from enum import Enum
-from typing import List, Optional
+from typing import Optional
 
 import torch
 from torch import nn
@@ -272,7 +272,7 @@ class BOFTModel(BaseTuner):
         merge=True,
         progressbar: bool = False,
         safe_merge: bool = False,
-        adapter_names: Optional[List[str]] = None,
+        adapter_names: Optional[list[str]] = None,
     ):
         if merge:
             self._check_merge_allowed()
@@ -324,7 +324,7 @@ class BOFTModel(BaseTuner):
         self.active_adapter = new_adapter or []
 
     def merge_and_unload(
-        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None
+        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ) -> torch.nn.Module:
         r"""
         This method merges the BOFT layers into the base model. This is needed if someone wants to use the base model

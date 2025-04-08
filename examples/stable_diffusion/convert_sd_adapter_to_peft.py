@@ -5,7 +5,7 @@ import os
 from collections import Counter
 from dataclasses import dataclass
 from operator import attrgetter
-from typing import Dict, List, Optional, Union
+from typing import Optional, Union
 
 import safetensors
 import torch
@@ -35,7 +35,7 @@ class LoRAInfo:
     lora_A: Optional[torch.Tensor] = None
     lora_B: Optional[torch.Tensor] = None
 
-    def peft_state_dict(self) -> Dict[str, torch.Tensor]:
+    def peft_state_dict(self) -> dict[str, torch.Tensor]:
         if self.lora_A is None or self.lora_B is None:
             raise ValueError("At least one of lora_A or lora_B is None, they must both be provided")
         return {
@@ -57,7 +57,7 @@ class LoHaInfo:
     hada_t1: Optional[torch.Tensor] = None
     hada_t2: Optional[torch.Tensor] = None
 
-    def peft_state_dict(self) -> Dict[str, torch.Tensor]:
+    def peft_state_dict(self) -> dict[str, torch.Tensor]:
         if self.hada_w1_a is None or self.hada_w1_b is None or self.hada_w2_a is None or self.hada_w2_b is None:
             raise ValueError(
                 "At least one of hada_w1_a, hada_w1_b, hada_w2_a, hada_w2_b is missing, they all must be provided"
@@ -92,7 +92,7 @@ class LoKrInfo:
     lokr_w2_b: Optional[torch.Tensor] = None
     lokr_t2: Optional[torch.Tensor] = None
 
-    def peft_state_dict(self) -> Dict[str, torch.Tensor]:
+    def peft_state_dict(self) -> dict[str, torch.Tensor]:
         if (self.lokr_w1 is None) and ((self.lokr_w1_a is None) or (self.lokr_w1_b is None)):
             raise ValueError("Either lokr_w1 or both lokr_w1_a and lokr_w1_b should be provided")
 
@@ -119,7 +119,7 @@ class LoKrInfo:
         return state_dict
 
 
-def construct_peft_loraconfig(info: Dict[str, LoRAInfo], **kwargs) -> LoraConfig:
+def construct_peft_loraconfig(info: dict[str, LoRAInfo], **kwargs) -> LoraConfig:
     """Constructs LoraConfig from data extracted from adapter checkpoint
 
     Args:
@@ -158,7 +158,7 @@ def construct_peft_loraconfig(info: Dict[str, LoRAInfo], **kwargs) -> LoraConfig
     return config
 
 
-def construct_peft_lohaconfig(info: Dict[str, LoHaInfo], **kwargs) -> LoHaConfig:
+def construct_peft_lohaconfig(info: dict[str, LoHaInfo], **kwargs) -> LoHaConfig:
     """Constructs LoHaConfig from data extracted from adapter checkpoint
 
     Args:
@@ -201,7 +201,7 @@ def construct_peft_lohaconfig(info: Dict[str, LoHaInfo], **kwargs) -> LoHaConfig
     return config
 
 
-def construct_peft_lokrconfig(info: Dict[str, LoKrInfo], decompose_factor: int = -1, **kwargs) -> LoKrConfig:
+def construct_peft_lokrconfig(info: dict[str, LoKrInfo], decompose_factor: int = -1, **kwargs) -> LoKrConfig:
     """Constructs LoKrConfig from data extracted from adapter checkpoint
 
     Args:
@@ -272,14 +272,14 @@ def construct_peft_lokrconfig(info: Dict[str, LoKrInfo], decompose_factor: int =
     return config
 
 
-def combine_peft_state_dict(info: Dict[str, Union[LoRAInfo, LoHaInfo]]) -> Dict[str, torch.Tensor]:
+def combine_peft_state_dict(info: dict[str, Union[LoRAInfo, LoHaInfo]]) -> dict[str, torch.Tensor]:
     result = {}
     for key_info in info.values():
         result.update(key_info.peft_state_dict())
     return result
 
 
-def detect_adapter_type(keys: List[str]) -> PeftType:
+def detect_adapter_type(keys: list[str]) -> PeftType:
     # Detect type of adapter by keys
     # Inspired by this:
     # https://github.com/bmaltais/kohya_ss/blob/ed4e3b0239a40506de9a17e550e6cf2d0b867a4f/tools/lycoris_utils.py#L312
@@ -348,7 +348,7 @@ if __name__ == "__main__":
         )
 
     # Store conversion info (model_type -> peft_key -> LoRAInfo | LoHaInfo | LoKrInfo)
-    adapter_info: Dict[str, Dict[str, Union[LoRAInfo, LoHaInfo, LoKrInfo]]] = {
+    adapter_info: dict[str, dict[str, Union[LoRAInfo, LoHaInfo, LoKrInfo]]] = {
         "text_encoder": {},
         "unet": {},
     }

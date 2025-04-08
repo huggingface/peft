@@ -18,8 +18,9 @@ import inspect
 import os
 import re
 import warnings
+from collections.abc import Sequence
 from contextlib import nullcontext
-from typing import Any, Optional, Sequence, Union
+from typing import Any, Optional, Union
 
 import accelerate
 import torch
