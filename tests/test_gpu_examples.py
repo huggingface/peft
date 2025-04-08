@@ -1649,16 +1649,31 @@ class PeftGPTQGPUTests(unittest.TestCase):
         Test the CausalLM training on a multi-GPU device. The test would simply fail if the adapters are not set
         correctly.
         """
+        device_map = {
+            "": 0,
+            "model.decoder.layers.11": 1,
+            "model.decoder.layers.11.activation_fn": 1,
+            "model.decoder.layers.11.fc1": 1,
+            "model.decoder.layers.11.fc2": 1,
+            "model.decoder.layers.11.final_layer_norm": 1,
+            "model.decoder.layers.11.self_attn": 1,
+            "model.decoder.layers.11.self_attn.k_proj": 1,
+            "model.decoder.layers.11.self_attn.out_proj": 1,
+            "model.decoder.layers.11.self_attn.q_proj": 1,
+            "model.decoder.layers.11.self_attn.v_proj": 1,
+            "model.decoder.layers.11.self_attn_layer_norm": 1,
+        }
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
                 torch_dtype=torch.float16,
-                device_map="auto",
+                device_map=device_map,
                 quantization_config=self.quantization_config,
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -3182,14 +3197,29 @@ class PeftAwqGPUTests(unittest.TestCase):
         Test the CausalLM training on a multi-GPU device. The test would simply fail if the adapters are not set
         correctly.
         """
+        device_map = {
+            "": 0,
+            "model.decoder.layers.11": 1,
+            "model.decoder.layers.11.activation_fn": 1,
+            "model.decoder.layers.11.fc1": 1,
+            "model.decoder.layers.11.fc2": 1,
+            "model.decoder.layers.11.final_layer_norm": 1,
+            "model.decoder.layers.11.self_attn": 1,
+            "model.decoder.layers.11.self_attn.k_proj": 1,
+            "model.decoder.layers.11.self_attn.out_proj": 1,
+            "model.decoder.layers.11.self_attn.q_proj": 1,
+            "model.decoder.layers.11.self_attn.v_proj": 1,
+            "model.decoder.layers.11.self_attn_layer_norm": 1,
+        }
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                device_map="auto",
+                device_map=device_map,
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -3579,16 +3609,32 @@ class PeftTorchaoGPUTests(unittest.TestCase):
     def test_causal_lm_training_multi_gpu_torchao(self, quant_type):
         from transformers import TorchAoConfig
 
+        device_map = {
+            "": 0,
+            "model.decoder.layers.11": 1,
+            "model.decoder.layers.11.activation_fn": 1,
+            "model.decoder.layers.11.fc1": 1,
+            "model.decoder.layers.11.fc2": 1,
+            "model.decoder.layers.11.final_layer_norm": 1,
+            "model.decoder.layers.11.self_attn": 1,
+            "model.decoder.layers.11.self_attn.k_proj": 1,
+            "model.decoder.layers.11.self_attn.out_proj": 1,
+            "model.decoder.layers.11.self_attn.q_proj": 1,
+            "model.decoder.layers.11.self_attn.v_proj": 1,
+            "model.decoder.layers.11.self_attn_layer_norm": 1,
+        }
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             quantization_config = TorchAoConfig(quant_type=quant_type)
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                device_map="auto",
+                device_map=device_map,
                 quantization_config=quantization_config,
                 torch_dtype=torch.bfloat16,
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
             model.model_parallel = True
@@ -3640,15 +3686,30 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         # TODO: Once proper torchao support for int4 is added, remove this test and add int4 to supported_quant_types
         from transformers import TorchAoConfig
 
+        device_map = {
+            "": 0,
+            "model.decoder.layers.11": 1,
+            "model.decoder.layers.11.activation_fn": 1,
+            "model.decoder.layers.11.fc1": 1,
+            "model.decoder.layers.11.fc2": 1,
+            "model.decoder.layers.11.final_layer_norm": 1,
+            "model.decoder.layers.11.self_attn": 1,
+            "model.decoder.layers.11.self_attn.k_proj": 1,
+            "model.decoder.layers.11.self_attn.out_proj": 1,
+            "model.decoder.layers.11.self_attn.q_proj": 1,
+            "model.decoder.layers.11.self_attn.v_proj": 1,
+            "model.decoder.layers.11.self_attn_layer_norm": 1,
+        }
         quantization_config = TorchAoConfig(quant_type="int4_weight_only")
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
-            device_map="auto",
+            device_map=device_map,
             quantization_config=quantization_config,
             torch_dtype=torch.bfloat16,
         )
 
         assert set(model.hf_device_map.values()) == set(range(device_count))
+        assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
         model = prepare_model_for_kbit_training(model)
         model.model_parallel = True
