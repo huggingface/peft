@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 202-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -899,7 +899,6 @@ class PeftCommonTester:
             **config_kwargs,
         )
         model = model.to(self.torch_device).eval()
-
         inputs = self.prepare_inputs_for_testing()
         logits_base = model(**inputs)[0]
 
