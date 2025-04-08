@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2025-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ from typing import Optional, Union
 
 import torch
 import torch.nn as nn
-from torch.nn.init import _calculate_correct_fan
 from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
 
@@ -64,7 +63,6 @@ def _kaiming_init(
     with torch.no_grad():
         basis = torch.nn.init.kaiming_uniform_(tensor, a=math.sqrt(5), generator=generator)
         return basis
-    
 
 
 class RandLoraModel(BaseTuner):
@@ -145,6 +143,7 @@ class RandLoraModel(BaseTuner):
         """
 
         linear_out_dim, linear_in_dim = self._find_dim(config)
+        max_dim, min_dim = max(linear_out_dim, linear_in_dim), min(linear_out_dim, linear_in_dim)
 
         # use of persistent to exclude randlora_A and randlora_B from the state dict if we choose not to save them.
         self.randlora_A = BufferDict({}, persistent=config.save_projection)
@@ -152,58 +151,68 @@ class RandLoraModel(BaseTuner):
 
         # deterministic init of randlora_A and randlora_B if we know the key
         generator = torch.Generator(device="cpu").manual_seed(config.projection_prng_key)
-        randlora_A = torch.rand((config.r, 1, linear_out_dim), generator=generator) #The gamma matrix is applied on A meaning it can be unique (shared) accross the n scaling matrices
-        
-        #Ensure full rank
-        n = min(linear_out_dim, linear_in_dim) / config.r
-        n = int(n) if n.is_integer() else int(n) + 1 #Ensure full rank
-        randlora_B = torch.rand((linear_in_dim, n, config.r), generator=generator)
+        # The gamma matrix is applied on A meaning it can be unique (shared) accross the n scaling matrices.
+        # We also set randlora_A as the smallest matrix to reduce trainable parameters.
+        randlora_A = torch.rand((config.r, 1, min_dim), generator=generator)
 
-        #The current implementation is a proof of concept and does take into consideration
-        #the sparsity to reduce memory usage or speed up compute
+        # Ensure full rank
+        n = min_dim / config.r
+        n = int(n) if n.is_integer() else int(n) + 1  # Ensure full rank
+        randlora_B = torch.rand((max_dim, n, config.r), generator=generator)
+
+        # The current implementation is a proof of concept and does take into consideration
+        # the sparsity to reduce memory usage or speed up compute
         randlora_B_sparse = torch.zeros(randlora_B.shape)
         randlora_A_sparse = torch.zeros(randlora_A.shape)
-        randlora_B_sparse[randlora_B<1/(2*s)] = -1
-        randlora_B_sparse[randlora_B>1-1/(2*s)] = 1        
-        randlora_A_sparse[randlora_A<1/(2*s)] = -1
-        randlora_A_sparse[randlora_A>1-1/(2*s)] = 1
-        
-        #Std normalization is empirically found to be the best
-        randlora_A, randlora_B = randlora_A_sparse / randlora_A_sparse.std(), randlora_B_sparse / randlora_B_sparse.std()
+        randlora_B_sparse[randlora_B < 1 / (2 * s)] = -1
+        randlora_B_sparse[randlora_B > 1 - 1 / (2 * s)] = 1
+        randlora_A_sparse[randlora_A < 1 / (2 * s)] = -1
+        randlora_A_sparse[randlora_A > 1 - 1 / (2 * s)] = 1
+
+        # Std normalization is empirically found to be the best
+        randlora_A, randlora_B = (
+            randlora_A_sparse / randlora_A_sparse.std(),
+            randlora_B_sparse / randlora_B_sparse.std(),
+        )
         self.randlora_A[adapter_name] = randlora_A
         self.randlora_B[adapter_name] = randlora_B
-        
+
     def _init_randlora_A_randlora_B(self, config: RandLoraConfig, adapter_name: str) -> None:
         linear_out_dim, linear_in_dim = self._find_dim(config)
+        max_dim, min_dim = max(linear_out_dim, linear_in_dim), min(linear_out_dim, linear_in_dim)
+
         # use of persistent to exclude randlora_A and randlora_B from the state dict if we choose not to save them.
         self.randlora_A = BufferDict({}, persistent=config.save_projection)
         self.randlora_B = BufferDict({}, persistent=config.save_projection)
 
         # deterministic init of randlora_A and randlora_B if we know the key
         generator = torch.Generator(device="cpu").manual_seed(config.projection_prng_key)
-        #The gamma matrix is applied on A meaning it can be unique (shared) accross the n scaling matrices
-        randlora_A = _kaiming_init((config.r, 1, linear_out_dim), generator=generator)
-        
-        #Ensure full rank
+        # The gamma matrix is applied on A meaning it can be unique (shared) accross the n scaling matrices.
+        # We also set randlora_A as the smallest matrix to reduce trainable parameters.
+        randlora_A = _kaiming_init((config.r, 1, min_dim), generator=generator)
+
+        # Ensure full rank
         n = min(linear_out_dim, linear_in_dim) / config.r
         n = int(n) if n.is_integer() else int(n) + 1
-        randlora_B = torch.cat([_kaiming_init((linear_in_dim, 1, config.r), generator=generator) for _ in range(n)], dim=1)
-        
-        #Std normalization is empirically found to be the best
+        randlora_B = torch.cat([_kaiming_init((max_dim, 1, config.r), generator=generator) for _ in range(n)], dim=1)
+
+        # Std normalization is empirically found to be the best
         randlora_A, randlora_B = randlora_A / randlora_A.std(), randlora_B / randlora_B.std()
         self.randlora_A[adapter_name] = randlora_A
         self.randlora_B[adapter_name] = randlora_B
 
-    def _pre_injection_hook(self, model: nn.Module, config: RandLoraxConfig, adapter_name: str) -> None:
+    def _pre_injection_hook(self, model: nn.Module, config: RandLoraConfig, adapter_name: str) -> None:
         if config.very_sparse:
             linear_out_dim, linear_in_dim = self._find_dim(config)
-            self._init_randlora_A_randlora_B_sparse(config, adapter_name, s=math.sqrt(min(linear_out_dim, linear_in_dim)))
+            self._init_randlora_A_randlora_B_sparse(
+                config, adapter_name, s=math.sqrt(min(linear_out_dim, linear_in_dim))
+            )
         elif config.sparse:
             self._init_randlora_A_randlora_B_sparse(config, adapter_name, s=3)
         else:
             self._init_randlora_A_randlora_B(config, adapter_name)
 
-    def _check_new_adapter_config(self, config: RandLora) -> None:
+    def _check_new_adapter_config(self, config: RandLoraConfig) -> None:
         """
         A helper method to check the config when a new adapter is being added.
 
@@ -277,7 +286,9 @@ class RandLoraModel(BaseTuner):
                 randlora_config.init_weights,
             )
         else:
-            new_module = self._create_new_module(randlora_config, self.randlora_A, self.randlora_B, adapter_name, target, **kwargs)
+            new_module = self._create_new_module(
+                randlora_config, self.randlora_A, self.randlora_B, adapter_name, target, **kwargs
+            )
             if adapter_name not in self.active_adapter:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
@@ -385,8 +396,7 @@ class RandLoraModel(BaseTuner):
             kwargs["is_target_conv_1d_layer"] = True
             if not kwargs["fan_in_fan_out"]:
                 warnings.warn(
-                    "fan_in_fan_out is set to False but the target module is `Conv1D`. "
-                    "Setting fan_in_fan_out to True."
+                    "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
                 )
                 kwargs["fan_in_fan_out"] = randlora_config.fan_in_fan_out = True
         else:
@@ -515,8 +525,8 @@ class RandLoraModel(BaseTuner):
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ):
         r"""
-        This method merges the RandLora layers into the base model. This is needed if someone wants to use the base model
-        as a standalone model.
+        This method merges the RandLora layers into the base model. This is needed if someone wants to use the base
+        model as a standalone model.
 
         Args:
             progressbar (`bool`):
@@ -546,7 +556,7 @@ class RandLoraModel(BaseTuner):
 
     def unload(self):
         """
-        Gets back the base model by removing all the RandLora modules without merging. This gives back the original base
-        model.
+        Gets back the base model by removing all the RandLora modules without merging. This gives back the original
+        base model.
         """
         return self._unload_and_optionally_merge(merge=False)

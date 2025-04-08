@@ -39,11 +39,12 @@ from .p_tuning import PromptEncoder, PromptEncoderConfig, PromptEncoderReparamet
 from .poly import PolyConfig, PolyModel
 from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
 from .prompt_tuning import PromptEmbedding, PromptTuningConfig, PromptTuningInit
+from .randlora import RandLoraConfig, RandLoraModel
 from .trainable_tokens import TrainableTokensConfig, TrainableTokensModel
 from .vblora import VBLoRAConfig, VBLoRAModel
 from .vera import VeraConfig, VeraModel
 from .xlora import XLoraConfig, XLoraModel
-from .randlora import RandLoraConfig, RandLoraModel
+
 
 __all__ = [
     "AdaLoraConfig",
@@ -89,6 +90,8 @@ __all__ = [
     "PromptEncoderReparameterizationType",
     "PromptTuningConfig",
     "PromptTuningInit",
+    "RandLoraConfig",
+    "RandLoraModel",
     "TrainableTokensConfig",
     "TrainableTokensModel",
     "VBLoRAConfig",
@@ -97,8 +100,6 @@ __all__ = [
     "VeraModel",
     "XLoraConfig",
     "XLoraModel",
-    "RandLoraConfig",
-    "RandLoraModel",
     "get_eva_state_dict",
     "initialize_lora_eva_weights",
 ]

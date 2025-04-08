@@ -1,4 +1,4 @@
-# Copyright 2024-present the HuggingFace Inc. team.
+# Copyright 2025-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -124,10 +124,11 @@ if is_bnb_available():
                 ).to(weight.device)
                 state.reset_grads()
 
-        def get_scaled_bases(self, adapter) -> List[torch.Tensor, torch.Tensor, torch.dtype]:
+        def get_scaled_bases(self, adapter) -> list[torch.Tensor, torch.Tensor, torch.dtype]:
             """
-            Performs scaling on the smallest random base (randlora_A) and returns randlora_A and randlora_B in the correct order
-            to fit the target layers' dimensions
+            Performs scaling on the smallest random base (randlora_A) and returns randlora_A and randlora_B in the
+            correct order to fit the target layers' dimensions
+
             Args:
                 adapter (str):
                     The name of the adapter for which the delta weight should be computed.
@@ -153,15 +154,15 @@ if is_bnb_available():
                 randlora_lambda = randlora_lambda.float()
                 randlora_gamma = randlora_gamma.float()
 
-            #The trainable paramters are always applied to randlora_A, the smallest basis.
+            # The trainable paramters are always applied to randlora_A, the smallest basis.
             min_dim, max_dim = min(self.out_features, self.in_features), max(self.out_features, self.in_features)
 
             # As adapted layers may have different shapes and RandLora contains a single shared pair of A and B matrices,
             # we initialize these matrices with the largest required size for each dimension.
             # During the forward pass, required submatrices are sliced out from the shared randlora_A and randlora_B.
-            sliced_A = randlora_A[:, : self.n, : min_dim]
-            sliced_B = randlora_B[: max_dim, : self.n, :]
-            #Flattening the matrices over the rank and number of bases dimensions is more memory efficient
+            sliced_A = randlora_A[:, : self.n, :min_dim]
+            sliced_B = randlora_B[:max_dim, : self.n, :]
+            # Flattening the matrices over the rank and number of bases dimensions is more memory efficient
             update_B = sliced_B.flatten(start_dim=1)
             update_A = UniqueBaseGrad.apply(sliced_A, randlora_lambda, randlora_gamma).flatten(end_dim=1)
             if min_dim == self.in_features:
@@ -188,11 +189,11 @@ if is_bnb_available():
 
                 # cast back the weights
                 # TODO: why?, taken from the VeRA implementation
-                self.randlora_lambda[adapter].data = randlora_lambda.to(dtype)
-                self.randlora_gamma[adapter].data = randlora_gamma.to(dtype)
+                self.randlora_lambda[adapter].data = self.randlora_lambda[adapter].data.to(dtype)
+                self.randlora_gamma[adapter].data = self.randlora_gamma[adapter].data.to(dtype)
 
             scaling = self.scaling[adapter]
-            
+
             return output_tensor * scaling
 
         def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
@@ -206,9 +207,9 @@ if is_bnb_available():
                 torch.Tensor: Output tensor after applying the RandLora adaptation.
 
             Note:
-                This method implements the RandLora-specific forward pass. It applies the shared projections (randlora_A and
-                randlora_B) along with the per-layer trainable parameters (lambda and gamma) to compute the adapter
-                output.
+                This method implements the RandLora-specific forward pass. It applies the shared projections
+                (randlora_A and randlora_B) along with the per-layer trainable parameters (lambda and gamma) to compute
+                the adapter output.
             """
             if self.disable_adapters:
                 if self.merged:
@@ -221,7 +222,7 @@ if is_bnb_available():
                 for active_adapter in self.active_adapters:
                     if active_adapter not in self.randlora_lambda.keys():
                         continue
-                    
+
                     update_B, update_A, dtype = self.get_scaled_bases(active_adapter)
                     requires_conversion = not torch.is_autocast_enabled()
                     if requires_conversion:
@@ -232,14 +233,12 @@ if is_bnb_available():
 
                     dropout = self.randlora_dropout[active_adapter]
                     x_temp = dropout(x.to(update_A.dtype))
-                    
-                    adapter_output = torch.nn.functional.linear(
-                        torch.nn.functional.linear(x_temp, update_B), update_A
-                    )
+
+                    adapter_output = torch.nn.functional.linear(torch.nn.functional.linear(x_temp, update_B), update_A)
 
                     if requires_conversion:
                         adapter_output = adapter_output.to(expected_dtype)
-                        
+
                     scaling = self.scaling[active_adapter]
                     result = result + adapter_output * scaling
 
@@ -337,10 +336,11 @@ if is_bnb_4bit_available():
                     weight.device
                 )
 
-        def get_scaled_bases(self, adapter) -> List[torch.Tensor, torch.Tensor, torch.dtype]:
+        def get_scaled_bases(self, adapter) -> list[torch.Tensor, torch.Tensor, torch.dtype]:
             """
-            Performs scaling on the smallest random base (randlora_A) and returns randlora_A and randlora_B in the correct order
-            to fit the target layers' dimensions
+            Performs scaling on the smallest random base (randlora_A) and returns randlora_A and randlora_B in the
+            correct order to fit the target layers' dimensions
+
             Args:
                 adapter (str):
                     The name of the adapter for which the delta weight should be computed.
@@ -366,15 +366,15 @@ if is_bnb_4bit_available():
                 randlora_lambda = randlora_lambda.float()
                 randlora_gamma = randlora_gamma.float()
 
-            #The trainable paramters are always applied to randlora_A, the smallest basis.
+            # The trainable paramters are always applied to randlora_A, the smallest basis.
             min_dim, max_dim = min(self.out_features, self.in_features), max(self.out_features, self.in_features)
 
             # As adapted layers may have different shapes and RandLora contains a single shared pair of A and B matrices,
             # we initialize these matrices with the largest required size for each dimension.
-            # During the forward pass, required submatrices are sliced out from the shared randlora_A and randlora_B.        
-            sliced_A = randlora_A[:, : self.n, : min_dim]
-            sliced_B = randlora_B[: max_dim, : self.n, :]
-            #Flattening the matrices over the rank and number of bases dimensions is more memory efficient
+            # During the forward pass, required submatrices are sliced out from the shared randlora_A and randlora_B.
+            sliced_A = randlora_A[:, : self.n, :min_dim]
+            sliced_B = randlora_B[:max_dim, : self.n, :]
+            # Flattening the matrices over the rank and number of bases dimensions is more memory efficient
             update_B = sliced_B.flatten(start_dim=1)
             update_A = UniqueBaseGrad.apply(sliced_A, randlora_lambda, randlora_gamma).flatten(end_dim=1)
             if min_dim == self.in_features:
@@ -385,6 +385,7 @@ if is_bnb_4bit_available():
         def get_delta_weight(self, adapter) -> torch.Tensor:
             """
             Compute the delta weight for the given adapter.
+
             Args:
                 adapter (str):
                     The name of the adapter for which the delta weight should be computed.
@@ -400,13 +401,13 @@ if is_bnb_4bit_available():
 
                 # cast back the weights
                 # TODO: why?, taken from the VeRA implementation
-                self.randlora_lambda[adapter].data = randlora_lambda.to(dtype)
-                self.randlora_gamma[adapter].data = randlora_gamma.to(dtype)
+                self.randlora_lambda[adapter].data = self.randlora_lambda[adapter].to(dtype)
+                self.randlora_gamma[adapter].data = self.randlora_gamma[adapter].to(dtype)
 
             scaling = self.scaling[adapter]
-            
+
             return output_tensor * scaling
-    
+
         def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
             if self.disable_adapters:
                 if self.merged:
@@ -419,7 +420,7 @@ if is_bnb_4bit_available():
                 result = result.clone()
                 for active_adapter in self.active_adapters:
                     if active_adapter not in self.randlora_lambda.keys():
-                        continue                    
+                        continue
                     update_B, update_A, dtype = self.get_scaled_bases(active_adapter)
                     requires_conversion = not torch.is_autocast_enabled()
                     if requires_conversion:
@@ -431,16 +432,14 @@ if is_bnb_4bit_available():
                     dropout = self.randlora_dropout[active_adapter]
                     x_temp = dropout(x.to(update_A.dtype))
 
-                    adapter_output = torch.nn.functional.linear(
-                        torch.nn.functional.linear(x_temp, update_B), update_A
-                    )
+                    adapter_output = torch.nn.functional.linear(torch.nn.functional.linear(x_temp, update_B), update_A)
 
                     if requires_conversion:
                         adapter_output = adapter_output.to(expected_dtype)
 
                     scaling = self.scaling[active_adapter]
                     result = result + adapter_output * scaling
-                    
+
             # Ensure the output tensor has the same dtype as the input tensor
             return result.to(x.dtype)
 

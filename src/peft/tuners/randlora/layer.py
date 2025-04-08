@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2025-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,13 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import math
 import warnings
 from typing import List, Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
@@ -26,21 +26,27 @@ from peft.utils.other import transpose
 
 from .._buffer_dict import BufferDict
 
+
 class UniqueBaseGrad(torch.autograd.Function):
-    #Memory efficent for a unique base 
-    @staticmethod    
+    # Memory efficent for a unique base
+    @staticmethod
     def forward(ctx, randlora_A, randlora_lambda, randlora_gamma):
-        Out = randlora_lambda[:, :, None] * randlora_A * randlora_gamma[None, ]
+        Out = randlora_lambda[:, :, None] * randlora_A * randlora_gamma[None,]
         ctx.save_for_backward(randlora_A, randlora_lambda, randlora_gamma)
-        return Out 
-    
+        return Out
+
     @staticmethod
     def backward(ctx, grad_output):
         randlora_A, randlora_lambda, randlora_gamma = ctx.saved_tensors
-        randlora_A, randlora_lambda, randlora_gamma = randlora_A.to(grad_output.dtype), randlora_lambda.to(grad_output.dtype), randlora_gamma.to(grad_output.dtype)
-        grad_randlora_lambda = torch.einsum('kbj,kvj,bj->kb', grad_output, randlora_A, randlora_gamma)
-        grad_randlora_gamma = torch.einsum('kbj,kvj,kb->bj', grad_output, randlora_A, randlora_lambda)
+        randlora_A, randlora_lambda, randlora_gamma = (
+            randlora_A.to(grad_output.dtype),
+            randlora_lambda.to(grad_output.dtype),
+            randlora_gamma.to(grad_output.dtype),
+        )
+        grad_randlora_lambda = torch.einsum("kbj,kvj,bj->kb", grad_output, randlora_A, randlora_gamma)
+        grad_randlora_gamma = torch.einsum("kbj,kvj,kb->bj", grad_output, randlora_A, randlora_lambda)
         return None, grad_randlora_lambda, grad_randlora_gamma
+
 
 class RandLoraLayer(BaseTunerLayer):
     # List all names of layers that may contain adapter weights
@@ -56,8 +62,6 @@ class RandLoraLayer(BaseTunerLayer):
         # For storing vector scale
         self.randlora_lambda = nn.ParameterDict({})
         self.randlora_gamma = nn.ParameterDict({})
-        self.randlora_m = nn.ParameterDict({})
-        self.randlora_cache_norm_dora = nn.ParameterDict({})
 
         # Stores a reference to the randlora_A/B BufferDict.
         # Set to `None` otherwise to avoid computation with random weights
@@ -105,12 +109,16 @@ class RandLoraLayer(BaseTunerLayer):
         self.randlora_dropout.update(nn.ModuleDict({adapter_name: randlora_dropout_layer}))
 
         # Actual trainable parameters
-        n = min(self.in_features, self.out_features) / r
-        self.n = int(n) if n.is_integer() else int(n) + 1 #Full rank
-        self.randlora_lambda[adapter_name] = nn.Parameter(torch.zeros(r, self.n), requires_grad=True)
-        self.randlora_gamma[adapter_name] = nn.Parameter(torch.ones(self.n, min(self.out_features, self.in_features))/max(self.out_features, self.in_features), requires_grad=True)
+        num_bases = min(self.in_features, self.out_features) / r
+        self.num_bases = int(num_bases) if num_bases.is_integer() else int(num_bases) + 1  # Full rank
+        self.randlora_lambda[adapter_name] = nn.Parameter(torch.randn(r, self.num_bases), requires_grad=True)
+        self.randlora_gamma[adapter_name] = nn.Parameter(
+            torch.ones(self.num_bases, min(self.out_features, self.in_features))
+            / max(self.out_features, self.in_features),
+            requires_grad=True,
+        )
 
-        self.scaling[adapter_name] = randlora_alpha / r / math.sqrt(self.n)#* 10#/ math.sqrt(self.n)
+        self.scaling[adapter_name] = randlora_alpha / r / math.sqrt(self.num_bases)
 
         # non trainable references to randlora_A/B buffers
         self.randlora_A = randlora_A
@@ -129,12 +137,14 @@ class RandLoraLayer(BaseTunerLayer):
                 "{} has a size of {} but {} or greater is required; this probably happened because an additional RandLora "
                 "adapter was added after the first one with incompatible shapes."
             )
+            max_dim, min_dim = max(self.in_features, self.out_features), min(self.in_features, self.out_features)
             # check input size
-            if randlora_A_param.shape[-1] < self.in_features:
-                raise ValueError(error_tmpl.format("randlora_A", randlora_A_param.shape[1], self.in_features))
+            if randlora_B_param.shape[0] < max_dim:
+                raise ValueError(error_tmpl.format("randlora_B", randlora_B_param.shape[0], max_dim))
             # check output size
-            if randlora_B_param.shape[0] < self.out_features:
-                raise ValueError(error_tmpl.format("randlora_B", randlora_B_param.shape[0], self.out_features))
+            if randlora_A_param.shape[-1] < min_dim:
+                raise ValueError(error_tmpl.format("randlora_A", randlora_A_param.shape[1], min_dim))
+
             # check r
             error_tmpl = (
                 "{} has a size of {} but {} or greater is required; this probably happened because an additional RandLora "
@@ -143,8 +153,8 @@ class RandLoraLayer(BaseTunerLayer):
             )
             if randlora_A_param.shape[0] < self.r[adapter_name]:
                 raise ValueError(error_tmpl.format("randlora_A", randlora_A_param.shape[0], self.r[adapter_name]))
-            if randlora_B_param.shape[1] < self.r[adapter_name]:
-                raise ValueError(error_tmpl.format("randlora_B", randlora_B_param.shape[1], self.r[adapter_name]))
+            if randlora_B_param.shape[-1] < self.r[adapter_name]:
+                raise ValueError(error_tmpl.format("randlora_B", randlora_B_param.shape[-1], self.r[adapter_name]))
 
             self.randlora_A[adapter_name] = randlora_A_param
             self.randlora_B[adapter_name] = randlora_B_param
@@ -159,7 +169,9 @@ class RandLoraLayer(BaseTunerLayer):
         if adapter_name in self.randlora_lambda.keys():
             with torch.no_grad():
                 nn.init.zeros_(self.randlora_lambda[adapter_name])
-                nn.init.zeros_(self.randlora_gamma[adapter_name]).fill_(1/max(self.randlora_gamma[adapter_name].shape))
+                nn.init.ones_(self.randlora_gamma[adapter_name]).fill_(
+                    1 / max(self.randlora_gamma[adapter_name].shape)
+                )
 
 
 class Linear(nn.Linear, RandLoraLayer):
@@ -211,10 +223,8 @@ class Linear(nn.Linear, RandLoraLayer):
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
                     orig_weights = base_layer.weight.data.clone()
-                    if active_adapter in self.randlora_m.keys():
-                        norm = torch.linalg.norm(orig_weight, dim=1, keepdim=True)
-                        self.randlora_cache_norm_dora[active_adapter] = norm
-                        orig_weight *= (self.randlora_m[active_adapter] / norm).view(1, -1)
+
+                    orig_weights += self.get_delta_weight(active_adapter)
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
@@ -234,28 +244,18 @@ class Linear(nn.Linear, RandLoraLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.randlora_lambda.keys():
-                if active_adapter in self.randlora_m.keys():
-                    ori_weight = self.get_base_layer().weight.data
-                    delta = self.get_delta_weight(active_adapter)
-                    if active_adapter in self.randlora_m.keys():
-                        norm = self.randlora_cache_norm_dora[active_adapter]
-                    else:
-                        norm = self.randlora_m[active_adapter].data
-                        
-                    self.get_base_layer().weight.data = \
-                        ori_weight * (norm / self.randlora_m[active_adapter]).view(1, -1) - delta
-                else:
-                    self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
+                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
 
     def get_scaled_bases(self, adapter) -> tuple[torch.Tensor, torch.Tensor, torch.dtype]:
         """
-        Performs scaling on the smallest random base (randlora_A) and returns randlora_A and randlora_B in the correct order
-        to fit the target layers' dimensions
+        Performs scaling on the smallest random base (randlora_A) and returns randlora_A and randlora_B in the correct
+        order to fit the target layers' dimensions
+
         Args:
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
-        
+
         randlora_A = self.randlora_A[adapter]
         randlora_B = self.randlora_B[adapter]
 
@@ -276,22 +276,24 @@ class Linear(nn.Linear, RandLoraLayer):
             randlora_lambda = randlora_lambda.float()
             randlora_gamma = randlora_gamma.float()
 
-        #The trainable paramters are always applied to randlora_A, the smallest basis.
+        # The trainable paramters are always applied to randlora_A, the smallest basis.
         min_dim, max_dim = min(self.out_features, self.in_features), max(self.out_features, self.in_features)
-        
+
         # As adapted layers may have different shapes and RandLora contains a single shared pair of A and B matrices,
         # we initialize these matrices with the largest required size for each dimension.
-        # During the forward pass, required submatrices are sliced out from the shared randlora_A and randlora_B.        
-        sliced_A = randlora_A[:, : self.n, : min_dim]
-        sliced_B = randlora_B[: max_dim, : self.n, :]
-        
-        #Flattening the matrices over the rank and number of bases dimensions is more memory efficient
+        # During the forward pass, required submatrices are sliced out from the shared randlora_A and randlora_B.
+        sliced_A = randlora_A[:, : self.num_bases, :min_dim]
+        sliced_B = randlora_B[:max_dim, : self.num_bases, :]
+
+        # Flattening the matrices over the rank and number of bases dimensions is more memory efficient
         update_B = sliced_B.flatten(start_dim=1)
         update_A = UniqueBaseGrad.apply(sliced_A, randlora_lambda, randlora_gamma).flatten(end_dim=1)
+
+        # Since update_A is applied on the smallest dimension, test whether update_A or update_B should applied first. This is done to reduce trainable parameters.
         if min_dim == self.in_features:
-            return update_A, update_B, dtype            
+            return update_A, update_B, dtype
         return update_B.T, update_A.T, dtype
-        
+
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
         Compute the delta weight for the given adapter.
@@ -302,17 +304,9 @@ class Linear(nn.Linear, RandLoraLayer):
         """
 
         update_B, update_A, dtype = self.get_scaled_bases(adapter)
-        
+
         update = (update_B.T @ update_A.T).T
         output_tensor = transpose(update, self.fan_in_fan_out)
-
-        if dtype != self.randlora_B[adapter].dtype:
-            output_tensor = output_tensor.to(dtype=dtype)
-
-            # cast back the weights
-            # TODO: why?, taken from the VeRA implementation
-            self.randlora_lambda[adapter].data = randlora_lambda.to(dtype)
-            self.randlora_gamma[adapter].data = randlora_gamma.to(dtype)
 
         scaling = self.scaling[adapter]
         return output_tensor * scaling
@@ -330,19 +324,12 @@ class Linear(nn.Linear, RandLoraLayer):
             result = self.base_layer(x, *args, **kwargs)
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.randlora_lambda.keys():
-                    continue                
+                    continue
                 dropout = self.randlora_dropout[active_adapter]
                 update_B, update_A, _ = self.get_scaled_bases(active_adapter)
                 x = x.to(update_A.dtype)
                 scaling = self.scaling[active_adapter]
-                if active_adapter in self.randlora_m.keys():
-                    update = update_A @ update_B * scaling
-                    weight_update_norm = torch.linalg.norm(update + self.weight, dim=1, keepdim=True).detach()
-                    lora_result = F.linear(F.linear(dropout(x), update_B), update_A) * scaling 
-                    result = (result + lora_result) * (self.randlora_m[active_adapter] / weight_update_norm).view(1, -1)
-                else:
-                    result = result + F.linear(F.linear(dropout(x), update_B), update_A) * scaling
-
+                result = result + F.linear(F.linear(dropout(x), update_B), update_A) * scaling
         result = result.to(previous_dtype)
         return result
 
