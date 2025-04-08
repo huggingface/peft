@@ -1650,18 +1650,24 @@ class PeftGPTQGPUTests(unittest.TestCase):
         correctly.
         """
         device_map = {
-            "": 0,
+            "model.decoder.embed_tokens": 0,
+            "lm_head": 0,
+            "model.decoder.embed_positions": 0,
+            "model.decoder.project_out": 0,
+            "model.decoder.project_in": 0,
+            "model.decoder.layers.0": 0,
+            "model.decoder.layers.1": 0,
+            "model.decoder.layers.2": 0,
+            "model.decoder.layers.3": 0,
+            "model.decoder.layers.4": 0,
+            "model.decoder.layers.5": 0,
+            "model.decoder.layers.6": 1,
+            "model.decoder.layers.7": 1,
+            "model.decoder.layers.8": 1,
+            "model.decoder.layers.9": 1,
+            "model.decoder.layers.10": 1,
             "model.decoder.layers.11": 1,
-            "model.decoder.layers.11.activation_fn": 1,
-            "model.decoder.layers.11.fc1": 1,
-            "model.decoder.layers.11.fc2": 1,
-            "model.decoder.layers.11.final_layer_norm": 1,
-            "model.decoder.layers.11.self_attn": 1,
-            "model.decoder.layers.11.self_attn.k_proj": 1,
-            "model.decoder.layers.11.self_attn.out_proj": 1,
-            "model.decoder.layers.11.self_attn.q_proj": 1,
-            "model.decoder.layers.11.self_attn.v_proj": 1,
-            "model.decoder.layers.11.self_attn_layer_norm": 1,
+            "model.decoder.final_layer_norm": 1,
         }
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -3198,18 +3204,24 @@ class PeftAwqGPUTests(unittest.TestCase):
         correctly.
         """
         device_map = {
-            "": 0,
+            "model.decoder.embed_tokens": 0,
+            "lm_head": 0,
+            "model.decoder.embed_positions": 0,
+            "model.decoder.project_out": 0,
+            "model.decoder.project_in": 0,
+            "model.decoder.layers.0": 0,
+            "model.decoder.layers.1": 0,
+            "model.decoder.layers.2": 0,
+            "model.decoder.layers.3": 0,
+            "model.decoder.layers.4": 0,
+            "model.decoder.layers.5": 0,
+            "model.decoder.layers.6": 1,
+            "model.decoder.layers.7": 1,
+            "model.decoder.layers.8": 1,
+            "model.decoder.layers.9": 1,
+            "model.decoder.layers.10": 1,
             "model.decoder.layers.11": 1,
-            "model.decoder.layers.11.activation_fn": 1,
-            "model.decoder.layers.11.fc1": 1,
-            "model.decoder.layers.11.fc2": 1,
-            "model.decoder.layers.11.final_layer_norm": 1,
-            "model.decoder.layers.11.self_attn": 1,
-            "model.decoder.layers.11.self_attn.k_proj": 1,
-            "model.decoder.layers.11.self_attn.out_proj": 1,
-            "model.decoder.layers.11.self_attn.q_proj": 1,
-            "model.decoder.layers.11.self_attn.v_proj": 1,
-            "model.decoder.layers.11.self_attn_layer_norm": 1,
+            "model.decoder.final_layer_norm": 1,
         }
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -3610,18 +3622,24 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         from transformers import TorchAoConfig
 
         device_map = {
-            "": 0,
+            "model.decoder.embed_tokens": 0,
+            "lm_head": 0,
+            "model.decoder.embed_positions": 0,
+            "model.decoder.project_out": 0,
+            "model.decoder.project_in": 0,
+            "model.decoder.layers.0": 0,
+            "model.decoder.layers.1": 0,
+            "model.decoder.layers.2": 0,
+            "model.decoder.layers.3": 0,
+            "model.decoder.layers.4": 0,
+            "model.decoder.layers.5": 0,
+            "model.decoder.layers.6": 1,
+            "model.decoder.layers.7": 1,
+            "model.decoder.layers.8": 1,
+            "model.decoder.layers.9": 1,
+            "model.decoder.layers.10": 1,
             "model.decoder.layers.11": 1,
-            "model.decoder.layers.11.activation_fn": 1,
-            "model.decoder.layers.11.fc1": 1,
-            "model.decoder.layers.11.fc2": 1,
-            "model.decoder.layers.11.final_layer_norm": 1,
-            "model.decoder.layers.11.self_attn": 1,
-            "model.decoder.layers.11.self_attn.k_proj": 1,
-            "model.decoder.layers.11.self_attn.out_proj": 1,
-            "model.decoder.layers.11.self_attn.q_proj": 1,
-            "model.decoder.layers.11.self_attn.v_proj": 1,
-            "model.decoder.layers.11.self_attn_layer_norm": 1,
+            "model.decoder.final_layer_norm": 1,
         }
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -3687,18 +3705,24 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         from transformers import TorchAoConfig
 
         device_map = {
-            "": 0,
+            "model.decoder.embed_tokens": 0,
+            "lm_head": 0,
+            "model.decoder.embed_positions": 0,
+            "model.decoder.project_out": 0,
+            "model.decoder.project_in": 0,
+            "model.decoder.layers.0": 0,
+            "model.decoder.layers.1": 0,
+            "model.decoder.layers.2": 0,
+            "model.decoder.layers.3": 0,
+            "model.decoder.layers.4": 0,
+            "model.decoder.layers.5": 0,
+            "model.decoder.layers.6": 1,
+            "model.decoder.layers.7": 1,
+            "model.decoder.layers.8": 1,
+            "model.decoder.layers.9": 1,
+            "model.decoder.layers.10": 1,
             "model.decoder.layers.11": 1,
-            "model.decoder.layers.11.activation_fn": 1,
-            "model.decoder.layers.11.fc1": 1,
-            "model.decoder.layers.11.fc2": 1,
-            "model.decoder.layers.11.final_layer_norm": 1,
-            "model.decoder.layers.11.self_attn": 1,
-            "model.decoder.layers.11.self_attn.k_proj": 1,
-            "model.decoder.layers.11.self_attn.out_proj": 1,
-            "model.decoder.layers.11.self_attn.q_proj": 1,
-            "model.decoder.layers.11.self_attn.v_proj": 1,
-            "model.decoder.layers.11.self_attn_layer_norm": 1,
+            "model.decoder.final_layer_norm": 1,
         }
         quantization_config = TorchAoConfig(quant_type="int4_weight_only")
         model = AutoModelForCausalLM.from_pretrained(
