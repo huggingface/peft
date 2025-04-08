@@ -426,7 +426,6 @@ class BaseTuner(nn.Module, ABC):
         self._check_new_adapter_config(peft_config)
 
         _check_for_modules_to_save = getattr(peft_config, "modules_to_save", None) is not None
-        _has_modules_to_save = False
 
         model_config = self.get_model_config(model)
 
@@ -471,28 +470,6 @@ class BaseTuner(nn.Module, ABC):
 
         for key in key_list:
             if not key:
-                continue
-            # Check for modules_to_save in case
-            #
-            # Note that this is redundant with PeftModel.set_additional_trainable_models but might be necessary
-            # when calling inject_adapter without a PEFT model. This is outdated as it only focuses on
-            # ModulesToSaveWrapper and ignores other potentially configured AuxiliaryTrainingWrapper instances.
-            #
-            # TODO: determine if there's a good reason for this and refactor to support AuxiliaryTrainingWrapper,
-            # or remove if superfluous.
-            if _check_for_modules_to_save and any(
-                key.endswith(module_to_save) for module_to_save in peft_config.modules_to_save
-            ):
-                # Optionally set the modules to save
-                parent, target, target_name = _get_submodules(model, key)
-
-                if not isinstance(target, ModulesToSaveWrapper):
-                    new_module = ModulesToSaveWrapper(target, adapter_name)
-                    setattr(parent, target_name, new_module)
-                else:
-                    target.update(adapter_name)
-
-                _has_modules_to_save = True
                 continue
 
             result = self._check_target_module_exists(peft_config, key)
@@ -564,12 +541,6 @@ class BaseTuner(nn.Module, ABC):
             for n, p in model.named_parameters():
                 if adapter_name in n:
                     p.requires_grad = False
-
-        if _has_modules_to_save:
-            if not hasattr(model, "modules_to_save"):
-                model.modules_to_save = set(peft_config.modules_to_save)
-            else:
-                model.modules_to_save.update(set(peft_config.modules_to_save))
 
     def merge_adapter(self, adapter_names: Optional[list[str]] = None, safe_merge: bool = False) -> None:
         """
