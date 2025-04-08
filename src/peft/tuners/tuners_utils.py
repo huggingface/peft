@@ -38,6 +38,7 @@ from peft.utils.constants import (
     SEQ_CLS_HEAD_NAMES,
 )
 from peft.utils.integrations import init_empty_weights
+from peft.utils.other import AuxiliaryTrainingWrapper
 from peft.utils.peft_types import PeftType, TaskType
 
 from ..config import PeftConfig
@@ -608,6 +609,11 @@ class BaseTuner(nn.Module, ABC):
             if isinstance(module, BaseTunerLayer):
                 with onload_layer(module):
                     module.unmerge()
+
+    def _delete_auxiliary_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
+        for module in self.modules():
+            if isinstance(module, AuxiliaryTrainingWrapper):
+                module.delete_adapter(adapter_name, new_active_adapters=new_active_adapters)
 
     def _unloading_checks(self, adapter_names: Optional[list[str]]):
         adapters_to_consider = adapter_names or self.active_adapters
