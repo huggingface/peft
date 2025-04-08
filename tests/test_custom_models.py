@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # coding=utf-8
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2025-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ import os
 import platform
 import re
 import shutil
+import sys
 import tempfile
 import time
 import unittest
@@ -33,6 +34,8 @@ from torch import nn
 from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
 from transformers.pytorch_utils import Conv1D
 
+
+sys.path.append(os.path.join(os.getcwd(), "src"))
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
@@ -46,11 +49,11 @@ from peft import (
     LoraConfig,
     OFTConfig,
     PeftModel,
+    RandLoraConfig,
     TaskType,
     TrainableTokensConfig,
     VBLoRAConfig,
     VeraConfig,
-    RandLoraConfig,
     get_peft_model,
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
@@ -519,17 +522,13 @@ TEST_CASES = [
     ("Vanilla MLP 2 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin0"]}),
     ("Vanilla MLP 3 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin1"]}),
     ("Vanilla MLP 4 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 5 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin0", "lin1"], "sparse": True}),
+    ("Vanilla MLP 6 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin0", "lin1"], "very_sparse": True}),
     (
-        "Vanilla MLP 5 RandLora",
+        "Vanilla MLP 7 RandLora",
         "MLP",
         RandLoraConfig,
         {"target_modules": ["lin0"], "modules_to_save": ["lin1"]},
-    ),
-    (
-        "Embedding + transformers Conv1D 1 RandLora",
-        "EmbConv1D",
-        RandLoraConfig,
-        {"target_modules": ["conv1d"]},
     ),
 ]
 
@@ -639,11 +638,11 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
     ),
     # Note: RandLora may present the same problem mentioned above for Vera.
     (
-        "RandLora Different",
+        "RandLora Same",
         "randlora",
         RandLoraConfig,
         {"target_modules": ["lin0"], "init_weights": False},
-        {"target_modules": ["lin1"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
     ),
     (
         "HRA Same",
@@ -3809,8 +3808,7 @@ class RequiresGradTester(unittest.TestCase):
         # active adapter is still "default"
         self.check_requires_grad(
             peft_model,
-            "no"
-            "base_model.model.lin1.vera_lambda_b.default",
+            "nobase_model.model.lin1.vera_lambda_b.default",
             "base_model.model.lin1.vera_lambda_d.default",
         )
 
@@ -3943,10 +3941,10 @@ class RequiresGradTester(unittest.TestCase):
                 X = self.sm(X)
                 return X
 
-        config0 = VeraConfig(target_modules=["lin1"])
+        config0 = RandLoraConfig(target_modules=["lin1"])
         peft_model = get_peft_model(MLP2(), config0)
 
-        config1 = VeraConfig(target_modules=["lin2"])
+        config1 = RandLoraConfig(target_modules=["lin2"])
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"

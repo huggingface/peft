@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2025-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,11 +20,10 @@ from .layer import Linear, RandLoraLayer
 from .model import RandLoraModel
 
 
-__all__ = ["RandLoraConfig", "RandLoraLayer", "Linear", "RandLoraModel"]
+__all__ = ["Linear", "RandLoraConfig", "RandLoraLayer", "RandLoraModel"]
 
-register_peft_method(
-    name="randlora", config_cls=RandLoraConfig, model_cls=RandLoraModel, prefix="randlora_"
-)
+register_peft_method(name="randlora", config_cls=RandLoraConfig, model_cls=RandLoraModel, prefix="randlora_")
+
 
 def __getattr__(name):
     if (name == "Linear8bitLt") and is_bnb_available():

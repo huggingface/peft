@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2025-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,40 +13,44 @@
 # limitations under the License.
 
 import warnings
-import math
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
 
+
 @dataclass
 class RandLoraConfig(PeftConfig):
     """
     This is the configuration class to store the configuration of a [`RandLoraModel`].
 
-    Paper: {}.
+    Paper: https://arxiv.org/pdf/2502.00987.
 
     Args:
         r (`int`, *optional*, defaults to `32`):
-            RandLora's random basis rank dimension. This parameter is inversely proportional to the amount of trainable parameters.
+            RandLora's random basis rank dimension. This parameter is inversely proportional to the amount of trainable
+            parameters.
         target_modules (`Union[List[str], str]`):
             The names of the modules to apply RandLora to. Only linear layers are supported.
         projection_prng_key (`int`):
-            RandLora PRNG init key. Used for initialising basis_A and basis_B for new models or when loading a checkpoint
-            that did not include these projections. Defaults to `int(math.exp(1)*3.1415*1000)`.
+            RandLora PRNG init key. Used for initialising basis_A and basis_B for new models or when loading a
+            checkpoint that did not include these projections. Defaults to `0`.
         save_projection (`bool`):
-            Whether to save the global basis_A / basis_B random basis in the state dict alongside per layer lambda / gamma diagonal matrices.
-            weights. This will increase the size of the checkpoint, but guarantee that we can reload the checkpoint on
-            all system configurations. Defaults to `True`.
+            Whether to save the global basis_A / basis_B random basis in the state dict alongside per layer lambda /
+            gamma diagonal matrices. This will increase the size of the checkpoint, but guarantee that we can
+            reload the checkpoint on all system configurations. Defaults to `True`.
         sparse (`bool`):
-            Whether to use sparse random bases as described in the RandLora paper. The current implementation is a proof of concept where the sparseness is not used to improve speed or memory usage. Defaults to `False`.
+            Whether to use sparse random bases as described in the RandLora paper. The current implementation is a
+            proof of concept where the sparseness is not used to improve speed or memory usage. Defaults to `False`.
         very_sparse (`bool`):
-            Whether to use very sparse random bases. The current implementation is a proof of concept where the sparseness is not used to improve speed or memory usage. Defaults to `False`.
+            Whether to use very sparse random bases. The current implementation is a proof of concept where the
+            sparseness is not used to improve speed or memory usage. Defaults to `False`.
         randlora_dropout (`float`):
             The dropout probability for RandLora layers.
         randlora_alpha (`float`):
-            The scaling coefficient for RandLora layers, this would be typically be the same as LoRA, e.g. 2 times the rank.
+            The scaling coefficient for RandLora layers, this would be typically be the same as LoRA, e.g. 2 times the
+            rank.
         fan_in_fan_out (`bool`):
             Set this to True if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 uses
             `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
@@ -57,12 +61,12 @@ class RandLoraConfig(PeftConfig):
         modules_to_save (`List[str]`):
             List of modules apart from RandLora layers to be set as trainable and saved in the final checkpoint.
         init_weights (`bool`):
-            Whether to initialize the weights of the RandLora layers with their default initialization. Don't change this
-            setting, except if you know exactly what you're doing.
+            Whether to initialize the weights of the RandLora layers with their default initialization. Don't change
+            this setting, except if you know exactly what you're doing.
         layers_to_transform (`Union[List[int],int]`):
-            The layer indexes to transform, if this argument is specified, it will apply the RandLora transformations on
-            the layer indexes that are specified in this list. If a single integer is passed, it will apply the RandLora
-            transformations on the layer at this index.
+            The layer indexes to transform, if this argument is specified, it will apply the RandLora transformations
+            on the layer indexes that are specified in this list. If a single integer is passed, it will apply the
+            RandLora transformations on the layer at this index.
         layers_pattern (`str`):
             The layer pattern name, used only if `layers_to_transform` is different from `None` and if the layer
             pattern is not in the common layers pattern.
@@ -81,7 +85,7 @@ class RandLoraConfig(PeftConfig):
         },
     )
     projection_prng_key: int = field(
-        default=int(math.exp(1)*3.1415*1000),
+        default=0,
         metadata={
             "help": (
                 "RandLora PRNG init key. Used for initialising basis_A and basis_B for new models or when loading a "
@@ -124,8 +128,15 @@ class RandLoraConfig(PeftConfig):
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
     )
-    randlora_alpha: int = field(default=64, metadata={"help": "Scaling coefficient in the adapter layers, typically 2 times the rank of the random bases."})
-    bias: str = field(default="none", metadata={"help": "Bias type for RandLora. Can be 'none', 'all' or 'randlora_only'"})
+    randlora_alpha: int = field(
+        default=64,
+        metadata={
+            "help": "Scaling coefficient in the adapter layers, typically 2 times the rank of the random bases."
+        },
+    )
+    bias: str = field(
+        default="none", metadata={"help": "Bias type for RandLora. Can be 'none', 'all' or 'randlora_only'"}
+    )
     modules_to_save: Optional[List[str]] = field(
         default=None,
         metadata={
