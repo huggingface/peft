@@ -19,7 +19,8 @@ This module contains the implementation of the LoRA-FA optimizer.
 from __future__ import annotations
 
 import math
-from typing import Callable, Iterable
+from collections.abc import Iterable
+from typing import Callable
 
 import torch
 import torch.nn as nn
@@ -31,12 +32,15 @@ from ..peft_model import PeftModel
 
 class LoraFAOptimizer(Optimizer):
     """
-    Implements the LoRA-FA optimizer designed specifically for training Low-Rank Adaptation (LoRA) parameters efficiently. Note that LoraFAOptimizer is based on adamw-hf in transformers, with only LoRA part modified. Without LoRA it will fall back to adamw-hf.
+    Implements the LoRA-FA optimizer designed specifically for training Low-Rank Adaptation (LoRA) parameters
+    efficiently. Note that LoraFAOptimizer is based on adamw-hf in transformers, with only LoRA part modified. Without
+    LoRA it will fall back to adamw-hf.
 
     Args:
         params (Iterable[nn.parameter.Parameter]): Parameters to optimize.
         lr (float, optional): Learning rate (default: 1e-3).
-        betas (Tuple[float, float], optional): Coefficients for computing running averages of gradient and squared gradient (default: (0.9, 0.999)).
+        betas (Tuple[float, float], optional):
+            Coefficients for computing running averages of gradient and squared gradient (default: (0.9, 0.999)).
         eps (float, optional): Term added to denominator to improve numerical stability (default: 1e-6).
         weight_decay (float, optional): Weight decay (L2 penalty) (default: 0.0).
         correct_bias (bool, optional): Whether to apply bias correction as in original Adam (default: True).
@@ -213,9 +217,11 @@ def create_lorafa_optimizer(
     This function will:
     - Disable gradient updates for the "lora_A" parameters (these are typically frozen during LoRA training).
     - Compute the scaling factor based on provided `lora_alpha` and rank `r` for proper gradient projection.
-    - Create and configure parameter groups for the optimizer including specified learning rate, weight decay, and additional optimizer options.
+    - Create and configure parameter groups for the optimizer including specified learning rate, weight decay, and
+      additional optimizer options.
 
-    For hyper-params, LoRA-FA uses the same hyper-params as AdamW, except for the LoRA hyper-params (r, lora_alpha, use_rslora). One can always use the same hyper-params such as lr and weight_decay, as AdamW in LoRA tuning.
+    For hyper-params, LoRA-FA uses the same hyper-params as AdamW, except for the LoRA hyper-params (r, lora_alpha,
+    use_rslora). One can always use the same hyper-params such as lr and weight_decay, as AdamW in LoRA tuning.
 
     Args:
         model (PeftModel): The model containing LoRA-adapted parameters.
@@ -223,7 +229,9 @@ def create_lorafa_optimizer(
         lora_alpha (int): Scaling factor for LoRA parameterization.
         lr (float): Learning rate for optimizer updates.
         weight_decay (float): Weight decay for AdamW.
-        use_rslora (bool): whether to use rslora. In rslora, the lora scaling factor becomes to lora_alpha / math.sqrt(r) instead of lora_alpha / r.
+        use_rslora (bool):
+            whether to use rslora. In rslora, the lora scaling factor becomes to lora_alpha / math.sqrt(r) instead of
+            lora_alpha / r.
 
     Returns:
         Optimizer: Configured lorafa optimizer instance ready for training.

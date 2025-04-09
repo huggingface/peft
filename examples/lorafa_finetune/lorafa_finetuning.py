@@ -136,7 +136,9 @@ def train_model(
     # Here we initialize the LoRA-FA Optimizer
     # After this, all adapter A will be fixed, only adapter B will be trainable
     if lorafa:
-        optimizer = create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr, weight_decay = training_args.weight_decay)
+        optimizer = create_lorafa_optimizer(
+            model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr, weight_decay=training_args.weight_decay
+        )
         trainer = Trainer(
             model=model,
             args=training_args,
@@ -175,9 +177,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset_name_or_path", type=str, default="meta-math/MetaMathQA-40K", help="Dataset name or path"
     )
-    parser.add_argument(
-        "--output_dir", type=str, help="Output directory for the fine-tuned model"
-    )
+    parser.add_argument("--output_dir", type=str, help="Output directory for the fine-tuned model")
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size")
     parser.add_argument("--num_epochs", type=int, default=3, help="Number of training epochs")
     parser.add_argument("--lr", type=float, default=7e-5, help="Learning rate")

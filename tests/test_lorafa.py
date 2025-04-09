@@ -99,8 +99,8 @@ def test_lorafa_init_rslora():
 
 def test_LoraFAOptimizer_step():
     """
-    Test if the optimizer's step function runs without any exception
-    and checks specific conditions on lora_A and lora_B weights.
+    Test if the optimizer's step function runs without any exception and checks specific conditions on lora_A and
+    lora_B weights.
     """
     lora_rank = 16
     lora_alpha = 32
