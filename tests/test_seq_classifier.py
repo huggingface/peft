@@ -39,7 +39,7 @@ from .testing_common import PeftCommonTester
 PEFT_SEQ_CLS_MODELS_TO_TEST = [
     "hf-internal-testing/tiny-random-BertForSequenceClassification",
     "hf-internal-testing/tiny-random-RobertaForSequenceClassification",
-    "trl-internal-testing/tiny-random-LlamaForCausalLM",
+    "trl-internal-testing/tiny-LlamaForSequenceClassification-3.2"
 ]
 
 
