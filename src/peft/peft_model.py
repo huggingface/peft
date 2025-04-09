@@ -968,7 +968,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     def modules_to_save(self) -> Optional[set[str]]:
         modules: set[str] = set()
         for config in self.peft_config.values():
-            if config.modules_to_save:
+            if hasattr(config, "modules_to_save"):
                 # modules_to_save can only be a sequence of str, not a str
                 modules.update(config.modules_to_save)
 
@@ -1523,10 +1523,11 @@ class PeftModelForSequenceClassification(PeftModel):
         # config is relevant for this, the `modules_to_save` attribute can follow later.
         super().__init__(model, peft_config, adapter_name, **kwargs)
 
-        for name, _ in self.base_model.named_children():
-            if any(module_name in name for module_name in self.modules_to_save):
-                self.cls_layer_name = name
-                break
+        if hasattr(peft_config, "modules_to_save"):
+            for name, _ in self.base_model.named_children():
+                if any(module_name in name for module_name in self.modules_to_save):
+                    self.cls_layer_name = name
+                    break
 
         # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
         _set_trainable(self, adapter_name, module_names=getattr(peft_config, "modules_to_save", None))

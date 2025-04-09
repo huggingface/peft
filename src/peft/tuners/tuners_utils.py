@@ -992,7 +992,6 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
 
     # Adapters should never match on modules to save modules as it is a guarantee for conflicts of behavior
     # between `ModulesToSaveWrapper` internals and the potential adapter.
-    # TODO extend this to AuxiliaryTrainingWrapper in this PR if possible
     modules_to_save = getattr(config, "modules_to_save", None)
     if modules_to_save:
         if any(re.match(rf"(^|.*\.){m}($|\..*)", key) for m in modules_to_save):
