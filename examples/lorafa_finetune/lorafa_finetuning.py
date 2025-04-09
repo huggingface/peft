@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import os
+from typing import Optional
 
 import torch
 from datasets import load_dataset
@@ -43,7 +44,7 @@ def train_model(
     lora_rank: int,
     lora_alpha: int,
     lora_dropout: float,
-    lora_target_modules: str,
+    lora_target_modules: Optional[str],
     lorafa: bool,
 ):
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -135,7 +136,7 @@ def train_model(
     # Here we initialize the LoRA-FA Optimizer
     # After this, all adapter A will be fixed, only adapter B will be trainable
     if lorafa:
-        optimizer = create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr)
+        optimizer = create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr, weight_decay = training_args.weight_decay)
         trainer = Trainer(
             model=model,
             args=training_args,
@@ -175,7 +176,7 @@ if __name__ == "__main__":
         "--dataset_name_or_path", type=str, default="meta-math/MetaMathQA-40K", help="Dataset name or path"
     )
     parser.add_argument(
-        "--output_dir", type=str, default="path/to/output", help="Output directory for the fine-tuned model"
+        "--output_dir", type=str, help="Output directory for the fine-tuned model"
     )
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size")
     parser.add_argument("--num_epochs", type=int, default=3, help="Number of training epochs")

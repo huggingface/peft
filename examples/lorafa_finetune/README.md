@@ -63,7 +63,7 @@ This 👇 by default will load the model in peft set up with LoRA config, and tr
 You can simply run LoRA-FA as below:
 
 ```bash
-python lorafa_finetuning.py --base_model_name_or_path meta-llama/Meta-Llama-3-8B --dataset_name_or_path meta-math/MetaMathQA-40K --lorafa
+python lorafa_finetuning.py --base_model_name_or_path meta-llama/Meta-Llama-3-8B --dataset_name_or_path meta-math/MetaMathQA-40K --output_dir path/to/output --lorafa
 ```
 
 1. Single-GPU
@@ -71,7 +71,7 @@ python lorafa_finetuning.py --base_model_name_or_path meta-llama/Meta-Llama-3-8B
 Run the finetuning script on 1 GPU:
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 python lorafa_finetuning.py --base_model_name_or_path meta-llama/Meta-Llama-3-8B --dataset_name_or_path meta-math/MetaMathQA-40K --lorafa
+CUDA_VISIBLE_DEVICES=0 python lorafa_finetuning.py --base_model_name_or_path meta-llama/Meta-Llama-3-8B --dataset_name_or_path meta-math/MetaMathQA-40K --output_dir path/to/output --lorafa
 ```
 
 2. Multi-GPU
@@ -79,7 +79,7 @@ CUDA_VISIBLE_DEVICES=0 python lorafa_finetuning.py --base_model_name_or_path met
 LoRA-FA can also be run on multi-GPU, with 🤗 Accelerate:
 
 ```bash
-CUDA_VISIBLE_DEVICES=0,1,2,3 accelerate launch lorafa_finetuning.py --base_model_name_or_path meta-llama/Meta-Llama-3-8B --dataset_name_or_path meta-math/MetaMathQA-40K --lorafa
+CUDA_VISIBLE_DEVICES=0,1,2,3 accelerate launch lorafa_finetuning.py --base_model_name_or_path meta-llama/Meta-Llama-3-8B --dataset_name_or_path meta-math/MetaMathQA-40K --output_dir path/to/output --lorafa
 ```
 
 The `accelerate launch` will automatically configure multi-GPU for you. You can also utilize `accelerate launch` in single-GPU scenario.
