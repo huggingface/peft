@@ -3,7 +3,7 @@
   "optimizer_kwargs": {
     "r": 32,
     "lora_alpha": 64,
-    "learning_rate": 1e-4,
+    "lr": 1e-4,
     "weight_decay": 0.1
   }
 }
