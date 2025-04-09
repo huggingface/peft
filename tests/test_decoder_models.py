@@ -68,7 +68,7 @@ SMALL_GRID_MODELS = [
 ]
 
 
-# Note: Missing from this list are LoKr, LoHa, LN Tuning
+# TODO Missing from this list are LoKr, LoHa, LN Tuning, add them
 ALL_CONFIGS = [
     (
         AdaLoraConfig,

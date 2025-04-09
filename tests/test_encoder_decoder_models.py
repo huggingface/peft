@@ -44,7 +44,7 @@ PEFT_ENCODER_DECODER_MODELS_TO_TEST = [
     "hf-internal-testing/tiny-random-BartForConditionalGeneration",
 ]
 
-# Note: Missing from this list are LoKr, LoHa, LN Tuning
+# TODO Missing from this list are LoKr, LoHa, LN Tuning, add them
 ALL_CONFIGS = [
     (
         AdaLoraConfig,
