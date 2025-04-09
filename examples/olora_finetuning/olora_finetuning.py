@@ -14,7 +14,7 @@
 
 
 import os
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import transformers
@@ -43,7 +43,7 @@ def train(
     lora_r: int = 32,
     lora_alpha: int = 16,
     lora_dropout: float = 0.05,
-    lora_target_modules: List[str] = None,
+    lora_target_modules: list[str] = None,
     torch_dtype: str = "float16",
     init_lora_weights="olora",
     seed: Optional[int] = None,

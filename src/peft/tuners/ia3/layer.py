@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import warnings
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -89,7 +89,7 @@ class Linear(nn.Module, IA3Layer):
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, init_ia3_weights)
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -213,7 +213,7 @@ class _ConvNd(nn.Module, IA3Layer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 

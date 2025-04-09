@@ -16,7 +16,7 @@ import json
 import os
 import warnings
 from dataclasses import asdict, dataclass, field
-from typing import Dict, Optional, Union
+from typing import Optional, Union
 
 from huggingface_hub import hf_hub_download
 from transformers.utils import PushToHubMixin
@@ -68,7 +68,7 @@ class PeftConfigMixin(PushToHubMixin):
                 f"Invalid task type: '{self.task_type}'. Must be one of the following task types: {', '.join(TaskType)}."
             )
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         r"""
         Returns the configuration for your adapter model as a dictionary.
         """

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import warnings
-from typing import List, Optional, Tuple
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -133,7 +133,7 @@ class Linear(nn.Linear, VBLoRALayer):
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -183,7 +183,7 @@ class Linear(nn.Linear, VBLoRALayer):
         topk_weights = F.softmax(top_k_logits, dim=-1)
         return (topk_weights.unsqueeze(-1) * vblora_vector_bank[indices]).sum(-2)
 
-    def _get_lora_matrices(self, adapter, cast_to_fp32=False) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _get_lora_matrices(self, adapter, cast_to_fp32=False) -> tuple[torch.Tensor, torch.Tensor]:
         vblora_logits_A = self.vblora_logits_A[adapter]
         vblora_logits_B = self.vblora_logits_B[adapter]
 
