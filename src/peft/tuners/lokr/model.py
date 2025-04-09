@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Dict, Type, Union
+from typing import Union
 
 import torch
 from torch import nn
@@ -83,7 +83,7 @@ class LoKrModel(LycorisTuner):
     """
 
     prefix: str = "lokr_"
-    layers_mapping: Dict[Type[torch.nn.Module], Type[LoKrLayer]] = {
+    layers_mapping: dict[type[torch.nn.Module], type[LoKrLayer]] = {
         torch.nn.Conv2d: Conv2d,
         torch.nn.Linear: Linear,
     }
