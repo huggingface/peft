@@ -142,8 +142,12 @@ class LoraFAOptimizer(Optimizer):
                     AA_T = A @ A.T
                     AA_T_inv = torch.linalg.pinv(AA_T + delta * torch.eye(A.shape[0]).to(A.device))
 
-                    with autocast(dtype=torch.bfloat16):
+                    if torch.cuda.is_bf16_supported():
+                        with autocast(dtype=torch.bfloat16):
+                            grad_B = (1 / scaling_factor**2) * (grad_B_orin @ AA_T_inv)
+                    else:
                         grad_B = (1 / scaling_factor**2) * (grad_B_orin @ AA_T_inv)
+
                     if grad_B.dtype != B.grad.dtype:
                         grad_B = grad_B.to(B.grad.dtype)
 
