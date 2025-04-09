@@ -70,7 +70,9 @@ def train_model(
         # setup for quantized training
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
     else:
-        model = AutoModelForCausalLM.from_pretrained(base_model_name_or_path, torch_dtype=compute_dtype, device_map=device_map)
+        model = AutoModelForCausalLM.from_pretrained(
+            base_model_name_or_path, torch_dtype=compute_dtype, device_map=device_map
+        )
 
     # LoRA config for the PEFT model
     if lora_target_modules is not None:
@@ -125,7 +127,7 @@ def train_model(
         save_steps=save_step,
         save_total_limit=2,
         gradient_accumulation_steps=1,
-        bf16 = True if compute_dtype == torch.bfloat16 else False,
+        bf16=True if compute_dtype == torch.bfloat16 else False,
         fp16=True if compute_dtype == torch.float16 else False,
         learning_rate=lr,
     )
@@ -133,9 +135,7 @@ def train_model(
     # Here we initialize the LoRA-FA Optimizer
     # After this, all adapter A will be fixed, only adapter B will be trainable
     if lorafa:
-        optimizer = create_lorafa_optimizer(
-            model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr
-        )
+        optimizer = create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr)
         trainer = Trainer(
             model=model,
             args=training_args,

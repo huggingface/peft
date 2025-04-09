@@ -60,13 +60,9 @@ class LoraFAOptimizer(Optimizer):
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr} - should be >= 0.0")
         if not 0.0 <= betas[0] < 1.0:
-            raise ValueError(
-                f"Invalid beta parameter: {betas[0]} - should be in [0.0, 1.0)"
-            )
+            raise ValueError(f"Invalid beta parameter: {betas[0]} - should be in [0.0, 1.0)")
         if not 0.0 <= betas[1] < 1.0:
-            raise ValueError(
-                f"Invalid beta parameter: {betas[1]} - should be in [0.0, 1.0)"
-            )
+            raise ValueError(f"Invalid beta parameter: {betas[1]} - should be in [0.0, 1.0)")
         if not 0.0 <= eps:
             raise ValueError(f"Invalid epsilon value: {eps} - should be >= 0.0")
         defaults = {
@@ -144,9 +140,7 @@ class LoraFAOptimizer(Optimizer):
 
                     # computing the inverse matrix
                     AA_T = A @ A.T
-                    AA_T_inv = torch.linalg.pinv(
-                        AA_T + delta * torch.eye(A.shape[0]).to(A.device)
-                    )
+                    AA_T_inv = torch.linalg.pinv(AA_T + delta * torch.eye(A.shape[0]).to(A.device))
 
                     with autocast(dtype=torch.bfloat16):
                         grad_B = (1 / scaling_factor**2) * (grad_B_orin @ AA_T_inv)
@@ -164,9 +158,7 @@ class LoraFAOptimizer(Optimizer):
                     if group["correct_bias"]:  # No bias correction for Bert
                         bias_correction1 = 1.0 - beta1 ** state["step"]
                         bias_correction2 = 1.0 - beta2 ** state["step"]
-                        step_size = (
-                            step_size * math.sqrt(bias_correction2) / bias_correction1
-                        )
+                        step_size = step_size * math.sqrt(bias_correction2) / bias_correction1
                     B.addcdiv_(exp_avg_B, denom_B, value=-step_size)
                     if group["weight_decay"] > 0.0:
                         B.add_(B, alpha=(-group["lr"] * group["weight_decay"]))
@@ -190,9 +182,7 @@ class LoraFAOptimizer(Optimizer):
                     if group["correct_bias"]:  # No bias correction for Bert
                         bias_correction1 = 1.0 - beta1 ** state["step"]
                         bias_correction2 = 1.0 - beta2 ** state["step"]
-                        step_size = (
-                            step_size * math.sqrt(bias_correction2) / bias_correction1
-                        )
+                        step_size = step_size * math.sqrt(bias_correction2) / bias_correction1
 
                     p.addcdiv_(exp_avg, denom, value=-step_size)
 

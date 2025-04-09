@@ -91,9 +91,7 @@ def test_lorafa_init_rslora():
         bias="none",
     )
     model = get_peft_model(model, config)
-    optimizer = create_lorafa_optimizer(
-        model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr, use_rslora=True
-    )
+    optimizer = create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr, use_rslora=True)
     assert math.isclose(
         optimizer.param_groups[0]["scaling_factor"], lora_alpha / math.sqrt(lora_rank), rel_tol=1e-9, abs_tol=0.0
     )
