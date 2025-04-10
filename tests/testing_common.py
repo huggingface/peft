@@ -20,7 +20,9 @@ import shutil
 import tempfile
 import warnings
 from collections import OrderedDict
+from contextlib import contextmanager
 from dataclasses import replace
+from unittest import mock
 
 import pytest
 import torch
@@ -62,6 +64,8 @@ from peft.utils.other import AuxiliaryTrainingWrapper, ModulesToSaveWrapper, Tra
 
 from .testing_utils import get_state_dict
 
+
+HUB_MODEL_ACCESSES = {}
 
 CONFIG_TESTING_KWARGS = (
     # IA³
@@ -228,6 +232,45 @@ class ClassInstantier(OrderedDict):
         return generated_tests
 
 
+@contextmanager
+def model_cache_context(kind, model_ids):
+    global HUB_MODEL_ACCESSES
+    override = {}
+
+    if isinstance(model_ids, str):
+        model_ids = [model_ids]
+    try:
+        if all((kind, m) in HUB_MODEL_ACCESSES for m in model_ids):
+            override = {"HF_HUB_OFFLINE": "1"}
+            for m in model_ids:
+                HUB_MODEL_ACCESSES[(kind, m)] += 1
+        else:
+            for m in model_ids:
+                if (kind, m) not in HUB_MODEL_ACCESSES:
+                    HUB_MODEL_ACCESSES[(kind, m)] = 0
+        with (
+            mock.patch.dict(os.environ, override),
+            mock.patch("huggingface_hub.constants.HF_HUB_OFFLINE", override.get("HF_HUB_OFFLINE", False) == "1"),
+            mock.patch("transformers.utils.hub._is_offline_mode", override.get("HF_HUB_OFFLINE", False) == "1"),
+        ):
+            yield
+    except Exception:
+        # in case of an error we have to assume that we didn't access the model properly from the hub
+        # for the first time, so the next call cannot be cached.
+        for m in model_ids:
+            if HUB_MODEL_ACCESSES.get((kind, m)) == 0:
+                del HUB_MODEL_ACCESSES[(kind, m)]
+        raise
+    finally:
+        pass
+
+
+@contextmanager
+def transformers_cache(model_ids):
+    with model_cache_context("transformers", model_ids):
+        yield
+
+
 PeftTestConfigManager = ClassInstantier(CLASSES_MAPPING)
 PeftTestConfigManagerForDecoderModels = ClassInstantier({**CLASSES_MAPPING, **DECODER_MODELS_EXTRA})
 
@@ -301,7 +344,8 @@ class PeftCommonTester:
         )
 
     def _test_model_attr(self, model_id, config_cls, config_kwargs):
-        model = self.transformers_class.from_pretrained(model_id)
+        with model_cache_context("transformers", model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -313,7 +357,8 @@ class PeftCommonTester:
         assert hasattr(model, "push_to_hub")
 
     def _test_adapter_name(self, model_id, config_cls, config_kwargs):
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -332,7 +377,8 @@ class PeftCommonTester:
             # incompatible because trainable tokens is marking embeddings as trainable
             self.skipTest("Trainable tokens is incompatible with this test.")
 
-        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -345,7 +391,8 @@ class PeftCommonTester:
         assert not dummy_output.requires_grad
 
         # load with `prepare_model_for_kbit_training`
-        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         model = prepare_model_for_kbit_training(model)
 
         for param in model.parameters():
@@ -375,7 +422,8 @@ class PeftCommonTester:
     def _test_load_model_low_cpu_mem_usage(self, model_id, config_cls, config_kwargs):
         # Ensure that low_cpu_mem_usage=True works for from_pretrained and load_adapter and that the resulting model's
         # parameters are on the correct device.
-        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -387,7 +435,8 @@ class PeftCommonTester:
         try:
             model.save_pretrained(tmp_dirname)
 
-            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            with transformers_cache(model_id):
+                model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
             model = PeftModel.from_pretrained(
                 model, tmp_dirname, torch_device=self.torch_device, low_cpu_mem_usage=True
             )
@@ -404,7 +453,8 @@ class PeftCommonTester:
 
         # also test injecting directly
         del model
-        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         inject_adapter_in_model(config, model, low_cpu_mem_usage=True)  # check that there is no error
 
         if not isinstance(config, LNTuningConfig):
@@ -424,7 +474,8 @@ class PeftCommonTester:
             config_kwargs = config_kwargs.copy()
             config_kwargs["init_weights"] = False
 
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -438,7 +489,8 @@ class PeftCommonTester:
             else:
                 model.save_pretrained(tmp_dirname, safe_serialization=False)
 
-            model_from_pretrained = self.transformers_class.from_pretrained(model_id)
+            with transformers_cache(model_id):
+                model_from_pretrained = self.transformers_class.from_pretrained(model_id)
             with warnings.catch_warnings(record=True) as recs:
                 model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
                 # ensure that there is no warning
@@ -493,7 +545,8 @@ class PeftCommonTester:
         elif hasattr(config_cls, "init_weights"):
             config_kwargs["init_weights"] = False
 
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -514,7 +567,8 @@ class PeftCommonTester:
             else:
                 model.save_pretrained(tmp_dirname, safe_serialization=False)
 
-            model_from_pretrained = self.transformers_class.from_pretrained(model_id)
+            with transformers_cache(model_id):
+                model_from_pretrained = self.transformers_class.from_pretrained(model_id)
             model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
 
             new_adapter_dir = os.path.join(tmp_dirname, "new_adapter")
@@ -564,14 +618,16 @@ class PeftCommonTester:
         with tempfile.TemporaryDirectory() as tmp_dirname:
             model.save_pretrained(tmp_dirname, selected_adapters=["default"])
 
-            model_from_pretrained = self.transformers_class.from_pretrained(model_id)
+            with transformers_cache(model_id):
+                model_from_pretrained = self.transformers_class.from_pretrained(model_id)
             model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
 
             assert "default" in model_from_pretrained.peft_config.keys()
             assert "new_adapter" not in model_from_pretrained.peft_config.keys()
 
     def _test_from_pretrained_config_construction(self, model_id, config_cls, config_kwargs):
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
@@ -579,7 +635,8 @@ class PeftCommonTester:
         with tempfile.TemporaryDirectory() as tmp_dirname:
             model.save_pretrained(tmp_dirname)
 
-            model_from_pretrained = self.transformers_class.from_pretrained(model_id)
+            with transformers_cache(model_id):
+                model_from_pretrained = self.transformers_class.from_pretrained(model_id)
             model_from_pretrained = PeftModel.from_pretrained(
                 model_from_pretrained, tmp_dirname, is_trainable=False, config=config
             )
@@ -589,7 +646,8 @@ class PeftCommonTester:
 
     def _test_load_multiple_adapters(self, model_id, config_cls, config_kwargs):
         # just ensure that this works and raises no error
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -600,7 +658,8 @@ class PeftCommonTester:
             model.save_pretrained(tmp_dirname)
             del model
 
-            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            with transformers_cache(model_id):
+                model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
             model = PeftModel.from_pretrained(model, tmp_dirname, torch_device=self.torch_device)
             load_result1 = model.load_adapter(tmp_dirname, adapter_name="other")
             load_result2 = model.load_adapter(tmp_dirname, adapter_name="yet-another")
@@ -623,7 +682,8 @@ class PeftCommonTester:
         if (self.torch_device in ["cpu"]) and (version.parse(torch.__version__) <= version.parse("2.1")):
             self.skipTest("PyTorch 2.1 not supported for Half of addmm_impl_cpu_ ")
 
-        model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -651,7 +711,8 @@ class PeftCommonTester:
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
 
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -674,7 +735,8 @@ class PeftCommonTester:
 
         assert torch.allclose(logits_unmerged, logits_merged, atol=1e-3, rtol=1e-3)
 
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -724,7 +786,8 @@ class PeftCommonTester:
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
 
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -766,7 +829,8 @@ class PeftCommonTester:
 
         # For this test to work, weights should not be initialized to identity transform (e.g.
         # init_lora_weights should be False).
-        transformers_model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        with transformers_cache(model_id):
+            transformers_model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         logits_transformers = transformers_model(**dummy_input)[0]
         assert not torch.allclose(logits_merged, logits_transformers, atol=1e-10, rtol=1e-10)
 
@@ -777,7 +841,8 @@ class PeftCommonTester:
             # note: not using the context manager here because it fails on Windows CI for some reason
             try:
                 model.save_pretrained(tmp_dirname)
-                model_from_pretrained = self.transformers_class.from_pretrained(tmp_dirname).to(self.torch_device)
+                with transformers_cache(model_id):
+                    model_from_pretrained = self.transformers_class.from_pretrained(tmp_dirname).to(self.torch_device)
             finally:
                 try:
                     shutil.rmtree(tmp_dirname)
@@ -820,7 +885,8 @@ class PeftCommonTester:
         if config.peft_type not in supported_peft_types:
             return
 
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
@@ -871,7 +937,8 @@ class PeftCommonTester:
         assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3)
 
     def _test_merge_layers_is_idempotent(self, model_id, config_cls, config_kwargs):
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -893,7 +960,8 @@ class PeftCommonTester:
 
     def _test_safe_merge(self, model_id, config_cls, config_kwargs):
         torch.manual_seed(0)
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -944,7 +1012,8 @@ class PeftCommonTester:
         )
 
         torch.manual_seed(0)
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         model = get_peft_model(model, config, adapter_name="adapter0").eval()
         model.add_adapter("adapter1", config)
         model = model.to(self.torch_device).eval()
@@ -1014,7 +1083,8 @@ class PeftCommonTester:
         )
 
         torch.manual_seed(0)
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         model = get_peft_model(model, config, adapter_name="adapter0").eval()
         model.add_adapter("adapter1", config)
 
@@ -1084,7 +1154,8 @@ class PeftCommonTester:
         assert gens_are_same(gen_adapter1[2::3], gen_mixed[2::3])
 
     def _test_generate(self, model_id, config_cls, config_kwargs):
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -1098,7 +1169,8 @@ class PeftCommonTester:
         _ = model.generate(**inputs)
 
     def _test_generate_pos_args(self, model_id, config_cls, config_kwargs, raises_err: bool):
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -1122,7 +1194,8 @@ class PeftCommonTester:
         if self.torch_device == "mps":  # BFloat16 is not supported on MPS
             return pytest.skip("BFloat16 is not supported on MPS")
 
-        model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -1145,7 +1218,8 @@ class PeftCommonTester:
             **config_kwargs,
         )
 
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         model = get_peft_model(model, config)
         model = model.half()
 
@@ -1158,7 +1232,8 @@ class PeftCommonTester:
             # TODO: no gradients on the "dense" layer, other layers work, not sure why
             self.skipTest("AdaLora with RoBERTa does not work correctly")
 
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -1189,7 +1264,8 @@ class PeftCommonTester:
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
@@ -1211,7 +1287,8 @@ class PeftCommonTester:
             assert "adapter_model.safetensors" in os.listdir(tmp_dirname)
             assert "adapter_model.bin" not in os.listdir(tmp_dirname)
 
-            model_from_pretrained = self.transformers_class.from_pretrained(model_id)
+            with transformers_cache(model_id):
+                model_from_pretrained = self.transformers_class.from_pretrained(model_id)
             model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname).to(self.torch_device)
 
             logits_from_pretrained = model_from_pretrained(**inputs)[0][0]
@@ -1226,7 +1303,8 @@ class PeftCommonTester:
             layers_to_transform=[0],
             **config_kwargs,
         )
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
@@ -1252,13 +1330,15 @@ class PeftCommonTester:
         with tempfile.TemporaryDirectory() as tmp_dirname:
             model.save_pretrained(tmp_dirname)
 
-            model_from_pretrained = self.transformers_class.from_pretrained(model_id)
+            with transformers_cache(model_id):
+                model_from_pretrained = self.transformers_class.from_pretrained(model_id)
             model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname).to(self.torch_device)
 
             logits_from_pretrained = model_from_pretrained(**inputs)[0][0]
             assert torch.allclose(logits, logits_from_pretrained, atol=1e-4, rtol=1e-4)
 
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -1284,7 +1364,8 @@ class PeftCommonTester:
             # TODO: no gradients on the "dense" layer, other layers work, not sure why
             self.skipTest("OFT with Deberta does not work correctly")
 
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
 
         if not getattr(model, "supports_gradient_checkpointing", False):
             return pytest.skip(f"Model {model_id} does not support gradient checkpointing")
@@ -1330,7 +1411,8 @@ class PeftCommonTester:
             **config_kwargs,
         )
 
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
 
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
@@ -1338,7 +1420,8 @@ class PeftCommonTester:
         with tempfile.TemporaryDirectory() as tmp_dirname:
             model.save_pretrained(tmp_dirname)
 
-            model_from_pretrained = self.transformers_class.from_pretrained(model_id)
+            with transformers_cache(model_id):
+                model_from_pretrained = self.transformers_class.from_pretrained(model_id)
             _ = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname, device_map={"": "cpu"}).to(
                 self.torch_device
             )
@@ -1347,7 +1430,8 @@ class PeftCommonTester:
         if not issubclass(config_cls, PromptLearningConfig):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -1397,7 +1481,8 @@ class PeftCommonTester:
         if config.peft_type not in supported_peft_types:
             return pytest.skip(f"Test not applicable for {config.peft_type}")
 
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         adapter_to_delete = "delete_me"
         model = get_peft_model(model, config)
         model.add_adapter(adapter_to_delete, config)
@@ -1467,7 +1552,8 @@ class PeftCommonTester:
         if config.peft_type not in supported_peft_types:
             return pytest.skip(f"Test not applicable for {config.peft_type}")
 
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         adapter_to_delete = "delete_me"
         model = get_peft_model(model, config)
         model.add_adapter(adapter_to_delete, config)
@@ -1517,7 +1603,8 @@ class PeftCommonTester:
     def _test_delete_unknown_adapter_raises(self, model_id, config_cls, config_kwargs):
         # Check that we get a nice error message when trying to delete an adapter that does not exist.
         config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         adapter_to_delete = "delete_me"
         model = get_peft_model(model, config)
 
@@ -1526,7 +1613,8 @@ class PeftCommonTester:
             model.delete_adapter("unknown-adapter")
 
     def _test_unload_adapter(self, model_id, config_cls, config_kwargs):
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         num_params_base = len(model.state_dict())
 
         config = config_cls(
@@ -1556,7 +1644,8 @@ class PeftCommonTester:
             dummy_input = self.prepare_inputs_for_testing()
             logits_with_adapter = model(**dummy_input)[0]
 
-            transformers_model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            with transformers_cache(model_id):
+                transformers_model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
             logits_transformers = transformers_model(**dummy_input)[0]
 
             model.eval()
@@ -1801,7 +1890,8 @@ class PeftCommonTester:
             # This test is only applicable for Lora and IA3 configs
             return pytest.skip(f"Test not applicable for {config}")
 
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         model = get_peft_model(model, config, adapter_list[0])
 
         if isinstance(config, LoraConfig):
@@ -1837,7 +1927,8 @@ class PeftCommonTester:
             return output
 
         # initialize model
-        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
 
         # output from BASE MODEL
         input = self.prepare_inputs_for_testing()
@@ -1899,7 +1990,8 @@ class PeftCommonTester:
             **config_kwargs,
         )
 
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         model = get_peft_model(model, config, "adapter0")
 
         if config_cls == LoraConfig or config_cls == AdaLoraConfig:
@@ -1916,7 +2008,8 @@ class PeftCommonTester:
 
     def _test_passing_input_embeds_works(self, test_name, model_id, config_cls, config_kwargs):
         # https://github.com/huggingface/peft/issues/727
-        model = self.transformers_class.from_pretrained(model_id)
+        with transformers_cache(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
