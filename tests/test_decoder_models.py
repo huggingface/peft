@@ -36,7 +36,6 @@ from peft import (
     OFTConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
-    PromptLearningConfig,
     PromptTuningConfig,
     PromptTuningInit,
     VBLoRAConfig,
@@ -45,7 +44,7 @@ from peft import (
 )
 
 from .testing_common import PeftCommonTester
-from .testing_utils import load_dataset_english_quotes
+from .testing_utils import load_dataset_english_quotes, set_init_weights_false
 
 
 PEFT_DECODER_MODELS_TO_TEST = [
@@ -69,7 +68,7 @@ SMALL_GRID_MODELS = [
 ]
 
 
-# Note: Missing from this list are LoKr, LoHa, LN Tuning
+# TODO Missing from this list are LoKr, LoHa, LN Tuning, add them
 ALL_CONFIGS = [
     (
         AdaLoraConfig,
@@ -221,31 +220,7 @@ def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
         pytest.skip("Skipping AdaLora/BOFT/HRA/OFT/Bone for GPT2LMHeadModel")
 
 
-def set_init_weights_false(config_cls, kwargs):
-    kwargs = kwargs.copy()
-
-    if issubclass(config_cls, PromptLearningConfig):
-        return kwargs
-    if config_cls == VBLoRAConfig:
-        return kwargs
-
-    if (config_cls == LoraConfig) or (config_cls == AdaLoraConfig):
-        kwargs["init_lora_weights"] = False
-    elif config_cls == IA3Config:
-        kwargs["init_ia3_weights"] = False
-    else:
-        kwargs["init_weights"] = False
-    return kwargs
-
-
 class TestDecoderModels(PeftCommonTester):
-    r"""
-    Test if the PeftModel behaves as expected. This includes:
-    - test if the model has the expected methods
-
-    We use pytest for debugging purposes to test each model individually.
-    """
-
     transformers_class = AutoModelForCausalLM
 
     def skipTest(self, reason=""):
