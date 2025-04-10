@@ -127,10 +127,20 @@ TEST_CASES = [
         "Vanilla MLP 1 LoRA with lora_b bias",
         "MLP",
         LoraConfig,
-        {"target_modules": ["lin0", "lin1"], "lora_bias": True},
+        {"target_modules": ["lin0", "lin1"], "lora_bias": True, "lora_alpha": 32},
     ),
-    ("Conv2d 1 LoRA with lora_b bias", "Conv2d", LoraConfig, {"target_modules": ["conv2d"], "lora_bias": True}),
-    ("Conv3d 1 LoRA with lora_b bias", "Conv3d", LoraConfig, {"target_modules": ["conv3d"], "lora_bias": True}),
+    (
+        "Conv2d 1 LoRA with lora_b bias",
+        "Conv2d",
+        LoraConfig,
+        {"target_modules": ["conv2d"], "lora_bias": True, "lora_alpha": 32},
+    ),
+    (
+        "Conv3d 1 LoRA with lora_b bias",
+        "Conv3d",
+        LoraConfig,
+        {"target_modules": ["conv3d"], "lora_bias": True, "lora_alpha": 32},
+    ),
     ("MHA 1 LoRA", "MHA", LoraConfig, {"target_modules": ["mha"]}),
     ("MHA 2 LoRA", "MHA", LoraConfig, {"target_modules": ["mha", "lin0"]}),
     #######
