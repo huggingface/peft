@@ -1,4 +1,4 @@
-# Copyright 2024-present the HuggingFace Inc. team.
+# Copyright 2025-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from .lorafa import create_lorafa_optimizer
 from .loraplus import create_loraplus_optimizer
 
 
-__all__ = ["create_loraplus_optimizer"]
+__all__ = ["create_lorafa_optimizer", "create_loraplus_optimizer"]
