@@ -124,7 +124,7 @@ if is_bnb_available():
                 ).to(weight.device)
                 state.reset_grads()
 
-        def get_scaled_bases(self, adapter) -> list[torch.Tensor, torch.Tensor, torch.dtype]:
+        def get_scaled_bases(self, adapter) -> list[torch.Tensor, torch.Tensor]:
             """
             Performs scaling on the smallest random base (randlora_A) and returns randlora_A and randlora_B in the
             correct order to fit the target layers' dimensions
@@ -160,15 +160,15 @@ if is_bnb_available():
             # As adapted layers may have different shapes and RandLora contains a single shared pair of A and B matrices,
             # we initialize these matrices with the largest required size for each dimension.
             # During the forward pass, required submatrices are sliced out from the shared randlora_A and randlora_B.
-            sliced_A = randlora_A[:, : self.n, :min_dim]
-            sliced_B = randlora_B[:max_dim, : self.n, :]
+            sliced_A = randlora_A[:, : self.num_bases, :min_dim]
+            sliced_B = randlora_B[:max_dim, : self.num_bases, :]
             # Flattening the matrices over the rank and number of bases dimensions is more memory efficient
             update_B = sliced_B.flatten(start_dim=1)
             update_A = UniqueBaseGrad.apply(sliced_A, randlora_lambda, randlora_gamma).flatten(end_dim=1)
             if min_dim == self.in_features:
-                return update_A, update_B, dtype
+                return update_A, update_B
 
-            return update_B.T, update_A.T, dtype
+            return update_B.T, update_A.T
 
         def get_delta_weight(self, adapter) -> torch.Tensor:
             """
@@ -179,18 +179,10 @@ if is_bnb_available():
                     The name of the adapter for which the delta weight should be computed.
             """
 
-            update_B, update_A, dtype = self.get_scaled_bases(adapter)
+            update_B, update_A = self.get_scaled_bases(adapter)
 
             update = update_B @ update_A
             output_tensor = transpose(update, self.fan_in_fan_out)
-
-            if dtype != self.randlora_B[adapter].dtype:
-                output_tensor = output_tensor.to(dtype=dtype)
-
-                # cast back the weights
-                # TODO: why?, taken from the VeRA implementation
-                self.randlora_lambda[adapter].data = self.randlora_lambda[adapter].data.to(dtype)
-                self.randlora_gamma[adapter].data = self.randlora_gamma[adapter].data.to(dtype)
 
             scaling = self.scaling[adapter]
 
@@ -223,7 +215,7 @@ if is_bnb_available():
                     if active_adapter not in self.randlora_lambda.keys():
                         continue
 
-                    update_B, update_A, dtype = self.get_scaled_bases(active_adapter)
+                    update_B, update_A = self.get_scaled_bases(active_adapter)
                     requires_conversion = not torch.is_autocast_enabled()
                     if requires_conversion:
                         expected_dtype = result.dtype
@@ -336,7 +328,7 @@ if is_bnb_4bit_available():
                     weight.device
                 )
 
-        def get_scaled_bases(self, adapter) -> list[torch.Tensor, torch.Tensor, torch.dtype]:
+        def get_scaled_bases(self, adapter) -> list[torch.Tensor, torch.Tensor]:
             """
             Performs scaling on the smallest random base (randlora_A) and returns randlora_A and randlora_B in the
             correct order to fit the target layers' dimensions
@@ -372,15 +364,15 @@ if is_bnb_4bit_available():
             # As adapted layers may have different shapes and RandLora contains a single shared pair of A and B matrices,
             # we initialize these matrices with the largest required size for each dimension.
             # During the forward pass, required submatrices are sliced out from the shared randlora_A and randlora_B.
-            sliced_A = randlora_A[:, : self.n, :min_dim]
-            sliced_B = randlora_B[:max_dim, : self.n, :]
+            sliced_A = randlora_A[:, : self.num_bases, :min_dim]
+            sliced_B = randlora_B[:max_dim, : self.num_bases, :]
             # Flattening the matrices over the rank and number of bases dimensions is more memory efficient
             update_B = sliced_B.flatten(start_dim=1)
             update_A = UniqueBaseGrad.apply(sliced_A, randlora_lambda, randlora_gamma).flatten(end_dim=1)
             if min_dim == self.in_features:
-                return update_A, update_B, dtype
+                return update_A, update_B
 
-            return update_B.T, update_A.T, dtype
+            return update_B.T, update_A.T
 
         def get_delta_weight(self, adapter) -> torch.Tensor:
             """
@@ -391,18 +383,10 @@ if is_bnb_4bit_available():
                     The name of the adapter for which the delta weight should be computed.
             """
 
-            update_B, update_A, dtype = self.get_scaled_bases(adapter)
+            update_B, update_A = self.get_scaled_bases(adapter)
 
             update = update_B @ update_A
             output_tensor = transpose(update, self.fan_in_fan_out)
-
-            if dtype != self.randlora_B[adapter].dtype:
-                output_tensor = output_tensor.to(dtype=dtype)
-
-                # cast back the weights
-                # TODO: why?, taken from the VeRA implementation
-                self.randlora_lambda[adapter].data = self.randlora_lambda[adapter].to(dtype)
-                self.randlora_gamma[adapter].data = self.randlora_gamma[adapter].to(dtype)
 
             scaling = self.scaling[adapter]
 
@@ -421,7 +405,7 @@ if is_bnb_4bit_available():
                 for active_adapter in self.active_adapters:
                     if active_adapter not in self.randlora_lambda.keys():
                         continue
-                    update_B, update_A, dtype = self.get_scaled_bases(active_adapter)
+                    update_B, update_A = self.get_scaled_bases(active_adapter)
                     requires_conversion = not torch.is_autocast_enabled()
                     if requires_conversion:
                         expected_dtype = result.dtype

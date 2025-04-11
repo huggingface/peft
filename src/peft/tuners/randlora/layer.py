@@ -169,9 +169,7 @@ class RandLoraLayer(BaseTunerLayer):
         if adapter_name in self.randlora_lambda.keys():
             with torch.no_grad():
                 nn.init.zeros_(self.randlora_lambda[adapter_name])
-                nn.init.zeros_(self.randlora_gamma[adapter_name]).fill_(
-                    1 / max(self.randlora_gamma[adapter_name].shape)
-                )
+                nn.init.constant_(self.randlora_gamma[adapter_name], 1 / max(self.randlora_gamma[adapter_name].shape))
 
 
 class Linear(nn.Linear, RandLoraLayer):
@@ -246,7 +244,7 @@ class Linear(nn.Linear, RandLoraLayer):
             if active_adapter in self.randlora_lambda.keys():
                 self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
 
-    def get_scaled_bases(self, adapter) -> tuple[torch.Tensor, torch.Tensor, torch.dtype]:
+    def get_scaled_bases(self, adapter) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Performs scaling on the smallest random base (randlora_A) and returns randlora_A and randlora_B in the correct
         order to fit the target layers' dimensions
@@ -291,8 +289,8 @@ class Linear(nn.Linear, RandLoraLayer):
 
         # Since update_A is applied on the smallest dimension, test whether update_A or update_B should applied first. This is done to reduce trainable parameters.
         if min_dim == self.in_features:
-            return update_A, update_B, dtype
-        return update_B.T, update_A.T, dtype
+            return update_A, update_B
+        return update_B.T, update_A.T
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -303,7 +301,7 @@ class Linear(nn.Linear, RandLoraLayer):
                 The name of the adapter for which the delta weight should be computed.
         """
 
-        update_B, update_A, dtype = self.get_scaled_bases(adapter)
+        update_B, update_A = self.get_scaled_bases(adapter)
 
         update = (update_B.T @ update_A.T).T
         output_tensor = transpose(update, self.fan_in_fan_out)
@@ -326,11 +324,10 @@ class Linear(nn.Linear, RandLoraLayer):
                 if active_adapter not in self.randlora_lambda.keys():
                     continue
                 dropout = self.randlora_dropout[active_adapter]
-                update_B, update_A, _ = self.get_scaled_bases(active_adapter)
+                update_B, update_A = self.get_scaled_bases(active_adapter)
                 x = x.to(update_A.dtype)
                 scaling = self.scaling[active_adapter]
                 result = result + F.linear(F.linear(dropout(x), update_B), update_A) * scaling
-
         result = result.to(previous_dtype)
         return result
 
