@@ -291,6 +291,10 @@ TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING = {
     "qwen2": ["q_proj", "v_proj"],
 }
 
+TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING = (
+    TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING  # Leaving this for now but RandLoRA is flexible
+)
+
 WEIGHTS_NAME = "adapter_model.bin"
 SAFETENSORS_WEIGHTS_NAME = "adapter_model.safetensors"
 CONFIG_NAME = "adapter_config.json"

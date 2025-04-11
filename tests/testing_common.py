@@ -899,7 +899,6 @@ class PeftCommonTester:
             **config_kwargs,
         )
         model = model.to(self.torch_device).eval()
-
         inputs = self.prepare_inputs_for_testing()
         logits_base = model(**inputs)[0]
 
