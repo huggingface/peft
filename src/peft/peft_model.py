@@ -34,7 +34,7 @@ from huggingface_hub import HfFileSystem, ModelCard, ModelCardData, hf_hub_downl
 from safetensors import safe_open
 from safetensors.torch import save_file as safe_save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
-from transformers import Cache, DynamicCache, EncoderDecoderCache, PreTrainedModel
+from transformers import Cache, DynamicCache, EncoderDecoderCache, HybridCache, PreTrainedModel
 from transformers.modeling_outputs import QuestionAnsweringModelOutput, SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
 
@@ -676,7 +676,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         return prompt_embeddings[0].detach().cpu()
 
-    def get_prompt(self, batch_size: int, task_ids: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def get_prompt(
+        self, batch_size: int, task_ids: Optional[torch.Tensor] = None, max_cache_len: Optional[int] = None
+    ) -> torch.Tensor:
         """
         Returns the virtual prompts to use for Peft. Only applicable when using a prompt learning method.
         """
@@ -705,12 +707,39 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             )
             if peft_config.num_transformer_submodules == 2:
                 past_key_values = torch.cat([past_key_values, past_key_values], dim=2)
+
+            # Transpose: 2 x [num_layers, batch_size, num_heads, num_virtual_tokens, head_dim]
             past_key_values = past_key_values.permute([2, 0, 3, 1, 4]).split(
                 peft_config.num_transformer_submodules * 2
             )
+
+            base_model = self.get_base_model()
+            model_config = getattr(base_model, "config", None)
+            model_type = getattr(model_config, "model_type", "")
             if TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING.get(self.config.model_type, None) is not None:
                 post_process_fn = TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING[self.config.model_type]
                 past_key_values = post_process_fn(past_key_values)
+            elif ("gemma" in model_type) or ("gemma3_text" in model_type):
+                # Gemma2 and Gemma3 only support HybridCache (which does not have the from_legacy_cache method)
+                if max_cache_len is None:
+                    raise ValueError(
+                        "max_cache_len is None but it should have been passed. Something went wrong, please open an "
+                        "issue on GitHub with a reproducer: https://github.com/huggingface/peft/issues"
+                    )
+                new_cache = HybridCache(
+                    base_model.config,
+                    max_batch_size=batch_size,
+                    max_cache_len=max_cache_len,
+                    dtype=past_key_values[0].dtype,
+                    device=past_key_values[0].device,
+                )
+                cache_position = torch.arange(peft_config.num_virtual_tokens)
+                for layer_idx in range(peft_config.num_layers):
+                    key_states, value_states = past_key_values[0][layer_idx], past_key_values[1][layer_idx]
+                    new_cache.update(
+                        key_states, value_states, layer_idx, cache_kwargs={"cache_position": cache_position}
+                    )
+                past_key_values = new_cache
             elif peft_config.num_transformer_submodules == 1:
                 # Dont' apply this to encoder-decoder models and not to models requiring special processing.
                 # local import in case users use a very old transformers version
@@ -1810,7 +1839,12 @@ class PeftModelForCausalLM(PeftModel):
 
         if peft_config.peft_type == PeftType.PREFIX_TUNING:
             # overwrite past_kv in kwargs
-            kwargs["past_key_values"] = self.get_prompt(batch_size)
+            # some archs require max_cache_len to re-initialize the cache
+            if input_ids is not None:
+                max_cache_len = input_ids.shape[1] + peft_config.num_virtual_tokens
+            else:
+                max_cache_len = inputs_embeds.shape[1] + peft_config.num_virtual_tokens
+            kwargs["past_key_values"] = self.get_prompt(batch_size, max_cache_len=max_cache_len)
             return self.base_model(input_ids=input_ids, inputs_embeds=inputs_embeds, **kwargs)
         elif peft_config.peft_type == PeftType.CPT:
             return self._cpt_forward(input_ids, inputs_embeds, peft_config, task_ids, batch_size, **kwargs)
@@ -1968,7 +2002,12 @@ class PeftModelForCausalLM(PeftModel):
             )
 
             if requires_prompt_injection and peft_config.peft_type == PeftType.PREFIX_TUNING:
-                new_past_key_values = self.get_prompt(batch_size=model_kwargs["input_ids"].shape[0])
+                # some archs require max_cache_len to re-initialize the cache
+                max_cache_len = model_kwargs["past_key_values"].max_cache_len
+                new_past_key_values = self.get_prompt(
+                    batch_size=model_kwargs["input_ids"].shape[0],
+                    max_cache_len=max_cache_len,
+                )
                 model_kwargs["past_key_values"] = new_past_key_values
             elif requires_prompt_injection:
                 inputs_embeds = self.word_embeddings(model_kwargs["input_ids"])
