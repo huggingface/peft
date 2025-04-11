@@ -968,7 +968,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     def modules_to_save(self) -> Optional[set[str]]:
         modules: set[str] = set()
         for config in self.peft_config.values():
-            if config.modules_to_save:
+            if getattr(config, "modules_to_save", None) is not None:
                 # modules_to_save can only be a sequence of str, not a str
                 modules.update(config.modules_to_save)
 
@@ -980,7 +980,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     def set_additional_trainable_modules(self, peft_config, adapter_name):
         if getattr(peft_config, "modules_to_save", None) is not None:
             # this may add a new ModulesToSaveWrapper
-            _set_trainable(self, adapter_name, module_names=peft_config.modules_to_save)
+            _set_trainable(self, adapter_name, module_names=getattr(peft_config, "modules_to_save", None))
 
         if getattr(peft_config, "trainable_token_indices", None) is not None:
             if isinstance(peft_config.trainable_token_indices, dict):
@@ -1510,22 +1510,27 @@ class PeftModelForSequenceClassification(PeftModel):
     def __init__(
         self, model: torch.nn.Module, peft_config: PeftConfig, adapter_name: str = "default", **kwargs
     ) -> None:
-        super().__init__(model, peft_config, adapter_name, **kwargs)
-
         classifier_module_names = ["classifier", "score"]
+
         if hasattr(peft_config, "modules_to_save"):
             if peft_config.modules_to_save is None:
                 peft_config.modules_to_save = classifier_module_names[:]
             else:
                 peft_config.modules_to_save.extend(classifier_module_names)
 
-        for name, _ in self.base_model.named_children():
-            if any(module_name in name for module_name in self.modules_to_save):
-                self.cls_layer_name = name
-                break
+        # The modification of peft_config must happen before the init call as the `modules_to_save` information
+        # will be used to guard the target layer matching against matching `modules_to_save` layers. Only the
+        # config is relevant for this, the `modules_to_save` attribute can follow later.
+        super().__init__(model, peft_config, adapter_name, **kwargs)
+
+        if hasattr(peft_config, "modules_to_save"):
+            for name, _ in self.base_model.named_children():
+                if any(module_name in name for module_name in self.modules_to_save):
+                    self.cls_layer_name = name
+                    break
 
         # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
-        _set_trainable(self, adapter_name, module_names=peft_config.modules_to_save)
+        _set_trainable(self, adapter_name, module_names=getattr(peft_config, "modules_to_save", None))
 
     def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """
@@ -2311,7 +2316,7 @@ class PeftModelForTokenClassification(PeftModel):
                 break
 
         # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
-        _set_trainable(self, adapter_name, module_names=peft_config.modules_to_save)
+        _set_trainable(self, adapter_name, module_names=getattr(peft_config, "modules_to_save", None))
 
     def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """
@@ -2527,7 +2532,7 @@ class PeftModelForQuestionAnswering(PeftModel):
                 break
 
         # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
-        _set_trainable(self, adapter_name, module_names=peft_config.modules_to_save)
+        _set_trainable(self, adapter_name, module_names=getattr(peft_config, "modules_to_save", None))
 
     def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """

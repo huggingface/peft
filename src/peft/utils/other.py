@@ -828,6 +828,11 @@ def _set_trainable(
     if wrapper_cls is None:
         wrapper_cls = ModulesToSaveWrapper
 
+    if not module_names:
+        # This is useful for the case that the PEFT config does not have `modules_to_save`, e.g.
+        # in the case of prompt tuning and friends.
+        return
+
     trainable_modules = []
     found_modules = set()
     # disable removal of duplicates to support targeting tied weights
