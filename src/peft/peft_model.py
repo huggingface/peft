@@ -968,7 +968,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     def modules_to_save(self) -> Optional[set[str]]:
         modules: set[str] = set()
         for config in self.peft_config.values():
-            if hasattr(config, "modules_to_save"):
+            if getattr(config, "modules_to_save", None) is not None:
                 # modules_to_save can only be a sequence of str, not a str
                 modules.update(config.modules_to_save)
 
