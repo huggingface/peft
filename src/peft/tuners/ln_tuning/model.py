@@ -203,3 +203,9 @@ class LNTuningModel(BaseTuner):
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ) -> nn.Module:
         return self._unload_and_optionally_merge(merge=True)
+
+    def _cast_adapter_dtype(self, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
+        # Note: LN Tuning does not add adapter layers, instead it creates copies of the original layer. For this reason,
+        # we need to skip adapter autocasting, otherwise we would change the dtype of copies of the original layer,
+        # resulting in dtype errors down the line.
+        pass

@@ -13,6 +13,8 @@
 # limitations under the License.
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 from accelerate.utils.imports import is_xpu_available
 from torch import nn
@@ -25,7 +27,7 @@ from .layer import Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd
 
 class DoraLinearVariant(LoraVariant):
     @staticmethod
-    def init(module: Linear, adapter_name: str) -> None:
+    def init(module: Linear, adapter_name: str, **kwargs: Any) -> None:
         if not module.lora_magnitude_vector:
             # first dora layer being added, add lora_magnitude_vector to the list of learnable parameters
             module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_magnitude_vector",)
@@ -56,6 +58,7 @@ class DoraLinearVariant(LoraVariant):
 
     @staticmethod
     def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
         delta_weight = module.get_delta_weight(active_adapter)
 
         # since delta_weight already includes scaling, set it to 1 here
@@ -70,11 +73,13 @@ class DoraLinearVariant(LoraVariant):
         module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
         dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
         dora_factor = transpose(dora_factor.view(-1, 1), module.fan_in_fan_out)
-        orig_weight = dora_factor * (orig_weight + delta_weight)
-        return orig_weight
+        new_weight = dora_factor * (orig_weight + delta_weight)
+        new_weight = new_weight.to(orig_dtype)
+        return new_weight
 
     @staticmethod
     def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        orig_dtype = orig_weight.dtype
         delta_weight = module.get_delta_weight(active_adapter)
         weight_norm = (
             module.lora_magnitude_vector[active_adapter]
@@ -88,14 +93,18 @@ class DoraLinearVariant(LoraVariant):
         dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
         dora_factor = transpose(dora_factor.view(-1, 1), module.fan_in_fan_out)
         new_weight = dora_factor * (orig_weight.data + delta_weight)
+        new_weight = new_weight.to(orig_dtype)
         orig_weight.data = new_weight
 
     @staticmethod
     def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
         delta_weight = module.get_delta_weight(active_adapter)
         weight_norm = module._cache_pop(f"{active_adapter}-weight_norm")
         dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
-        return orig_weight.data / dora_factor.view(-1, 1) - delta_weight
+        new_weight = orig_weight.data / dora_factor.view(-1, 1) - delta_weight
+        new_weight = new_weight.to(orig_dtype)
+        return new_weight
 
     @staticmethod
     def forward(module: Linear, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
@@ -123,7 +132,7 @@ class DoraLinearVariant(LoraVariant):
 
 class DoraEmbeddingVariant(DoraLinearVariant):
     @staticmethod
-    def init(module: Embedding, adapter_name: str) -> None:
+    def init(module: Embedding, adapter_name: str, **kwargs: Any) -> None:
         if module.lora_magnitude_vector is None:
             # first dora layer being added, add lora_magnitude_vector to the list of learnable parameters
             module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_magnitude_vector",)
@@ -139,6 +148,7 @@ class DoraEmbeddingVariant(DoraLinearVariant):
 
     @staticmethod
     def merge_safe(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
         delta_weight = module.get_delta_weight(active_adapter)
 
         # since delta_weight already includes scaling, set it to 1 here
@@ -153,11 +163,13 @@ class DoraEmbeddingVariant(DoraLinearVariant):
         module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
         dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
         dora_factor = dora_factor.view(1, -1)
-        orig_weight = dora_factor * (orig_weight + delta_weight)
-        return orig_weight
+        new_weight = dora_factor * (orig_weight + delta_weight)
+        new_weight = new_weight.to(orig_dtype)
+        return new_weight
 
     @staticmethod
     def merge_unsafe(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        orig_dtype = orig_weight.dtype
         delta_weight = module.get_delta_weight(active_adapter)
         weight_norm = (
             module.lora_magnitude_vector[active_adapter]
@@ -171,14 +183,18 @@ class DoraEmbeddingVariant(DoraLinearVariant):
         dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
         dora_factor = dora_factor.view(1, -1)
         new_weight = dora_factor * (orig_weight.data + delta_weight)
+        new_weight = new_weight.to(orig_dtype)
         orig_weight.data = new_weight
 
     @staticmethod
     def unmerge(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
         delta_weight = module.get_delta_weight(active_adapter)
         weight_norm = module._cache_pop(f"{active_adapter}-weight_norm")
         dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
-        return orig_weight.data / dora_factor.view(1, -1) - delta_weight
+        new_weight = orig_weight.data / dora_factor.view(1, -1) - delta_weight
+        new_weight = new_weight.to(orig_dtype)
+        return new_weight
 
     @staticmethod
     def forward(module: Embedding, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
@@ -213,6 +229,7 @@ class _DoraConvNdVariant(LoraVariant):
 
     @staticmethod
     def merge_safe(module: _ConvNd, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
         delta_weight = module.get_delta_weight(active_adapter)
 
         # since delta_weight already includes scaling, set it to 1 here
@@ -224,11 +241,13 @@ class _DoraConvNdVariant(LoraVariant):
         # different value
         module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
         dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
-        orig_weight = dora_factor.view(*module._get_dora_factor_view()) * (orig_weight + delta_weight)
-        return orig_weight
+        new_weight = dora_factor.view(*module._get_dora_factor_view()) * (orig_weight + delta_weight)
+        new_weight = new_weight.to(orig_dtype)
+        return new_weight
 
     @staticmethod
     def merge_unsafe(module: _ConvNd, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        orig_dtype = orig_weight.dtype
         delta_weight = module.get_delta_weight(active_adapter)
         # since delta_weight already includes scaling, set it to 1 here
         weight_norm = (
@@ -240,14 +259,18 @@ class _DoraConvNdVariant(LoraVariant):
         module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
         dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
         new_weight = dora_factor.view(*module._get_dora_factor_view()) * (orig_weight.data + delta_weight)
+        new_weight = new_weight.to(orig_dtype)
         orig_weight.data = new_weight
 
     @staticmethod
     def unmerge(module: _ConvNd, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
         delta_weight = module.get_delta_weight(active_adapter)
         weight_norm = module._cache_pop(f"{active_adapter}-weight_norm")
         dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
-        return orig_weight.data / dora_factor.view(*module._get_dora_factor_view()) - delta_weight
+        new_weight = orig_weight.data / dora_factor.view(*module._get_dora_factor_view()) - delta_weight
+        new_weight = new_weight.to(orig_dtype)
+        return new_weight
 
     @staticmethod
     def forward(module: _ConvNd, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
@@ -275,13 +298,13 @@ class _DoraConvNdVariant(LoraVariant):
 
 class DoraConv2dVariant(_DoraConvNdVariant):
     @staticmethod
-    def init(module: Conv2d, adapter_name: str) -> None:
+    def init(module: Conv2d, adapter_name: str, **kwargs: Any) -> None:
         dora_layer = DoraConv2dLayer(fan_in_fan_out=False)
         _DoraConvNdVariant.init_convd_variant(module, adapter_name, dora_layer=dora_layer)
 
 
 class DoraConv3dVariant(_DoraConvNdVariant):
     @staticmethod
-    def init(module: Conv3d, adapter_name: str) -> None:
+    def init(module: Conv3d, adapter_name: str, **kwargs: Any) -> None:
         dora_layer = DoraConv3dLayer(fan_in_fan_out=False)
         _DoraConvNdVariant.init_convd_variant(module, adapter_name, dora_layer=dora_layer)

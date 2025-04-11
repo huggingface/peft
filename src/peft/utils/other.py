@@ -18,8 +18,9 @@ import inspect
 import os
 import re
 import warnings
+from collections.abc import Sequence
 from contextlib import nullcontext
-from typing import Any, Optional, Sequence, Union
+from typing import Any, Optional, Union
 
 import accelerate
 import torch
@@ -348,10 +349,8 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
     ) -> torch.Tensor:
         raise NotImplementedError
 
-    def _forward_disabled(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
-        """The forward call when all 'adapters' are disabled. For example this could entail
-        restoring (unmerging) a base model and returning its forward return values.
-        """
+    def _forward_wrapped_passthrough(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        """The forward call when no adapter is involved in the forward computation, only the base model"""
         raise NotImplementedError
 
     def _mixed_batch_forward(
@@ -393,7 +392,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         adapter_names = kwargs.pop("adapter_names", None)
 
         if self.disable_adapters or any(adapter not in self._adapters for adapter in self.active_adapters):
-            return self._forward_wrapped_disabled(x, *args, **kwargs)
+            return self._forward_wrapped_passthrough(x, *args, **kwargs)
 
         if adapter_names is None:
             return self._forward_wrapped(x, *args, **kwargs)
@@ -426,6 +425,10 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
 
                 self._active_adapter.append(adapter_name)
 
+    def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
+        """Delete an adapter from the layer, set a new active adapter if necessary"""
+        raise NotImplementedError
+
     def adapter_state_dict(self, adapter_name):
         """Return the state dict of this module for a given adapter."""
         raise NotImplementedError
@@ -434,9 +437,10 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         """Return a mapping from the key present in disk-loaded state dict
         and how it should be represented in the loaded model's state dict.
 
-        If a key is not present here, it is assumed to be mapped 1:1.
+        The default should be a 1:1 mapping but it is important to define a mapping as it also serves as the
+        ground-truth for which keys are supposed to be loaded from a saved state dict.
         """
-        return {}
+        raise NotImplementedError
 
     def unload_and_optionally_merge_module(
         self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]
@@ -461,12 +465,14 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         return "modules_to_save"
 
     def _forward_wrapped(self, x, *args, **kwargs):
+        if not self.active_adapters:
+            return self._forward_wrapped_passthrough(x, *args, **kwargs)
         return self.modules_to_save[self.active_adapters[0]](x, *args, **kwargs)
 
     def _forward_wrapped_mixed_batch(self, x, active_adapter, *args, **kwargs):
         return self.modules_to_save[active_adapter](x, *args, **kwargs)
 
-    def _forward_wrapped_disabled(self, x, *args, **kwargs):
+    def _forward_wrapped_passthrough(self, x, *args, **kwargs):
         return self.original_module(x, *args, **kwargs)
 
     def _hasattr_wrapped(self, name, modules):
@@ -549,16 +555,64 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         self.modules_to_save[adapter_name].requires_grad_(True)
         self._active_adapter = adapter_name
 
-    def adapter_state_dict_load_map(self, adapter_name):
-        # The state dict returned by ModulesToSaveWrapper
-        return {k: f"modules_to_save.{adapter_name}.{k}" for k in self.adapter_state_dict(adapter_name)}
+    def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
+        """
+        Delete the adapter if present.
 
-    def adapter_state_dict(self, adapter_name):
+        This method will also set a new active adapter if the deleted adapter was the active adapter. It is important
+        that the new adapter is chosen by the caller in a deterministic way, so that the same adapter is chosen on all
+        layers.
+        """
+        if adapter_name not in self.modules_to_save:
+            return
+
+        # set new active adapter, if necessary
+        # note: there can only ever be one active adapter, unlike for LoRA etc.
+        if isinstance(new_active_adapters, (list, tuple)) and len(new_active_adapters) > 1:
+            name = self.__class__.__name__
+            raise ValueError(
+                f"Attempted to set multiple ({new_active_adapters}) adapters at once for {name}, which is not allowed."
+            )
+
+        if adapter_name in self._adapters:
+            self._adapters.remove(adapter_name)
+
+        if not new_active_adapters:
+            # no active adapter now
+            del self.modules_to_save[adapter_name]
+            self._active_adapter = []
+            return
+
+        new_active_adapter = new_active_adapters[0]
+        if new_active_adapter not in self.modules_to_save:
+            # a new active adapter was chosen but it seems like it has no modules_to_save
+            del self.modules_to_save[adapter_name]
+            self._active_adapter = []
+            return
+
+        if new_active_adapter != self.active_adapters[0]:
+            self.set_adapter(new_active_adapter)
+        del self.modules_to_save[adapter_name]
+
+    def adapter_state_dict_load_map(self, adapter_name):
+        # Maps the module keys as they are in the saved state dict to the in-memory state dict.
+        # Must contain all keys that are supposed to be loaded.
         if adapter_name not in self._adapters:
             # In caes of multiple adapters, each bringing their own modules to save, each
             # ModulesToSaveWrapper will be queried but not every wrapper is obliged to serve the same adapters.
             return {}
-        return self.modules_to_save[adapter_name].state_dict()
+        return {k: f"modules_to_save.{adapter_name}.{k}" for k in self.modules_to_save[adapter_name].state_dict()}
+
+    def adapter_state_dict(self, adapter_name, state_dict):
+        if adapter_name not in self._adapters:
+            # In caes of multiple adapters, each bringing their own modules to save, each
+            # ModulesToSaveWrapper will be queried but not every wrapper is obliged to serve the same adapters.
+            return {}
+
+        return {
+            k: state_dict[f"modules_to_save.{adapter_name}.{k}"]
+            for k in self.modules_to_save[adapter_name].state_dict()
+        }
 
     def unload_and_optionally_merge_module(
         self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]
@@ -633,14 +687,16 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         )
 
     def _forward_wrapped(self, x, *args, **kwargs):
+        if not self.active_adapters:
+            return self._forward_wrapped_passthrough(x, *args, **kwargs)
         return self.token_adapter(x)
 
     def _forward_wrapped_mixed_batch(self, x, active_adapter, *args, **kwargs):
         return self.token_adapter.forward_adapters(x, [active_adapter])
 
-    def _forward_wrapped_disabled(self, x, *args, **kwargs):
-        # we already disabled the adapter so we can safely forward call to the adapter
-        # since it will know best what to do when being disabled.
+    def _forward_wrapped_passthrough(self, x, *args, **kwargs):
+        # the token adapter knows how to deal with disabled adapter / no active adapter, don't call original_module
+        # directly
         return self.token_adapter(x, *args, **kwargs)
 
     def update(self, active_adapter, **kwargs):
@@ -651,7 +707,12 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
 
         super().update(active_adapter)
 
-    def adapter_state_dict(self, adapter_name):
+    def adapter_state_dict_load_map(self, adapter_name):
+        if self.token_adapter.tied_adapter:
+            return {}
+        return {"token_adapter.trainable_tokens_delta": f"token_adapter.trainable_tokens_delta.{adapter_name}"}
+
+    def adapter_state_dict(self, adapter_name, state_dict):
         if self.token_adapter.tied_adapter:
             # storing of weight-tied layers is not up to us and will be handled by
             # transformers. we're just here to keep those layers in sync during training.
@@ -659,9 +720,7 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
             return {}
 
         return {
-            f"token_adapter.{k}": v
-            for k, v in self.token_adapter.state_dict().items()
-            if k.startswith("trainable_tokens_") and k.endswith(f".{adapter_name}")
+            f"token_adapter.{k}": state_dict[f"token_adapter.{k}.{adapter_name}"] for k in ["trainable_tokens_delta"]
         }
 
     def enable_adapters(self, enabled: bool):
@@ -675,6 +734,39 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
     def set_adapter(self, adapter_names: Union[str, list[str]]):
         super().set_adapter(adapter_names)
         self.token_adapter.set_adapter(adapter_names)
+
+    def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
+        """
+        Delete the adapter if present.
+
+        This method will also set a new active adapter if the deleted adapter was the active adapter. It is important
+        that the new adapter is chosen by the caller in a deterministic way, so that the same adapter is chosen on all
+        layers.
+        """
+        self.token_adapter.delete_adapter(adapter_name)
+
+        # set new active adapter, if necessary
+        # note: there can only ever be one active adapter, unlike for LoRA etc.
+        if isinstance(new_active_adapters, (list, tuple)) and len(new_active_adapters) > 1:
+            name = self.__class__.__name__
+            raise ValueError(
+                f"Attempted to set multiple ({new_active_adapters}) adapters at once for {name}, which is not allowed."
+            )
+
+        if adapter_name in self._adapters:
+            self._adapters.remove(adapter_name)
+
+        if not new_active_adapters:
+            self._active_adapter = []
+            return
+
+        if new_active_adapters[0] not in self.token_adapter.trainable_tokens_delta:
+            # a new active adapter was chosen but it seems like it has no trainable_tokens
+            self._active_adapter = []
+            return
+
+        new_active_adapter = new_active_adapters[0]
+        self.set_adapter(new_active_adapter)
 
     def unload_and_optionally_merge_module(
         self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]

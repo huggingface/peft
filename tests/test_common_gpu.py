@@ -18,7 +18,6 @@ import unittest
 import pytest
 import torch
 import torch.nn.functional as F
-from datasets import load_dataset
 from parameterized import parameterized
 from torch import nn
 from transformers import (
@@ -59,6 +58,7 @@ from peft.utils import infer_device
 
 from .testing_utils import (
     device_count,
+    load_cat_image,
     require_bitsandbytes,
     require_multi_accelerator,
     require_non_cpu,
@@ -1125,6 +1125,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     @require_non_cpu
     @pytest.mark.single_gpu_tests
     @require_bitsandbytes
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="XPU have numerial errors")
     def test_4bit_dora_inference(self):
         # check for same result with and without DoRA when initializing with init_lora_weights=False
         bnb_config = BitsAndBytesConfig(
@@ -1164,6 +1165,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     @require_non_cpu
     @pytest.mark.single_gpu_tests
     @require_bitsandbytes
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="XPU have numerial errors")
     def test_8bit_dora_inference(self):
         # check for same result with and without DoRA when initializing with init_lora_weights=False
         model = AutoModelForCausalLM.from_pretrained(
@@ -1382,7 +1384,7 @@ class PeftGPUCommonTests(unittest.TestCase):
             for device_B in possible_combinations:
                 lb = lora_B.to(device_B)
                 layer.lora_A, layer.lora_B = la, lb
-                layer.lora_variant[adapter_name].init(layer, adapter_name)  # should not raise an error
+                layer.lora_variant[adapter_name].init(layer, adapter_name=adapter_name)  # should not raise an error
 
     def test_apply_GS_hra_inference(self):
         # check for different result with and without apply_GS
@@ -1416,8 +1418,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         # check for different result with and without apply_GS
         model_id = "microsoft/resnet-18"
         image_processor = AutoImageProcessor.from_pretrained(model_id)
-        dataset = load_dataset("huggingface/cats-image", trust_remote_code=True)
-        image = dataset["test"]["image"][0]
+        image = load_cat_image()
         data = image_processor(image, return_tensors="pt")
 
         model = AutoModelForImageClassification.from_pretrained(model_id).eval()

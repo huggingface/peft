@@ -112,6 +112,10 @@ class LoraParallelLinear(nn.Module, LoraLayer):
         gather_output=False,
         **parallel_linear_kwargs,
     ):
+        # collect the kwargs
+        kwargs = locals().copy()
+        del kwargs["self"]
+
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         self.r[adapter_name] = r
@@ -176,7 +180,7 @@ class LoraParallelLinear(nn.Module, LoraLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
         if adapter_name in self.lora_variant:
-            self.lora_variant[adapter_name].init(self, adapter_name=adapter_name)
+            self.lora_variant[adapter_name].init(self, **kwargs)
 
         self.set_adapter(self.active_adapters)
 

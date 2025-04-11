@@ -14,8 +14,9 @@
 
 import copy
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence
+from typing import Optional
 
 import torch
 import transformers
@@ -65,7 +66,7 @@ class TrainingArguments(transformers.TrainingArguments):
     model_name_or_path: Optional[str] = field(default="facebook/opt-125m")
     data_path: str = field(default=None, metadata={"help": "Path to the training data."})
     dataset_split: str = field(default="train[:100000]", metadata={"help": "(`['train', 'test', 'eval']`):"})
-    dataset_field: List[str] = field(default=None, metadata={"help": "Fields of dataset input and output."})
+    dataset_field: list[str] = field(default=None, metadata={"help": "Fields of dataset input and output."})
     dataloader_num_proc: int = field(default=16, metadata={"help": "Number of processes to load dataset"})
     dataloader_batch_size: int = field(
         default=3000,
@@ -95,7 +96,7 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
 
 
 def smart_tokenizer_and_embedding_resize(
-    special_tokens_dict: Dict,
+    special_tokens_dict: dict,
     tokenizer: transformers.PreTrainedTokenizer,
     model: transformers.PreTrainedModel,
 ):
@@ -117,7 +118,7 @@ def smart_tokenizer_and_embedding_resize(
         output_embeddings[-num_new_tokens:] = output_embeddings_avg
 
 
-def _tokenize_fn(strings: Sequence[str], tokenizer: transformers.PreTrainedTokenizer) -> Dict:
+def _tokenize_fn(strings: Sequence[str], tokenizer: transformers.PreTrainedTokenizer) -> dict:
     """Tokenize a list of strings."""
     tokenized_list = [
         tokenizer(
@@ -145,7 +146,7 @@ def preprocess(
     sources: Sequence[str],
     targets: Sequence[str],
     tokenizer: transformers.PreTrainedTokenizer,
-) -> Dict:
+) -> dict:
     """Preprocess the data by tokenizing."""
     examples = [s + t for s, t in zip(sources, targets)]
     examples_tokenized, sources_tokenized = (_tokenize_fn(strings, tokenizer) for strings in (examples, sources))
@@ -165,7 +166,7 @@ class DataCollatorForSupervisedDataset:
 
     tokenizer: transformers.PreTrainedTokenizer
 
-    def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
+    def __call__(self, instances: Sequence[dict]) -> dict[str, torch.Tensor]:
         input_ids, labels = tuple([instance[key] for instance in instances] for key in ("input_ids", "labels"))
         input_ids = [torch.tensor(x) for x in input_ids]
         input_ids = torch.nn.utils.rnn.pad_sequence(
