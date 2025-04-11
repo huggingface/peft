@@ -13,7 +13,7 @@
 # limitations under the License.
 import unittest
 from contextlib import contextmanager
-from functools import lru_cache
+from functools import wraps, lru_cache
 
 import numpy as np
 import pytest
@@ -158,6 +158,16 @@ def require_torchao(test_case):
     """
     return unittest.skipUnless(is_torchao_available(), "test requires torchao")(test_case)
 
+def require_deterministic(test_case):
+    @wraps(test_case)
+    def wrapper(*args, **kwargs):
+        original_state = torch.are_deterministic_algorithms_enabled()
+        try:
+            torch.use_deterministic_algorithms(True)
+            return test_case(*args, **kwargs)
+        finally:
+            torch.use_deterministic_algorithms(original_state)
+    return wrapper
 
 @contextmanager
 def temp_seed(seed: int):
