@@ -50,6 +50,7 @@ from .constants import (
     bloom_model_postprocess_past_key_value,
     starcoder_model_postprocess_past_key_value,
 )
+from .peft_types import PeftType
 
 
 mlu_available = False
@@ -896,7 +897,7 @@ def _prepare_prompt_learning_config(peft_config, model_config):
         peft_config.num_layers = num_layers
 
     if peft_config.token_dim is None:
-        if model_config.get("head_dim", None) is not None:
+        if (peft_config.peft_type == PeftType.PREFIX_TUNING) and (model_config.get("head_dim", None) is not None):
             token_dim = model_config["head_dim"]
         elif "hidden_size" in model_config:
             token_dim = model_config["hidden_size"]
@@ -924,7 +925,7 @@ def _prepare_prompt_learning_config(peft_config, model_config):
     # For grouped-query attention, see #1901.
     if peft_config.peft_type == "PREFIX_TUNING" and "num_key_value_heads" in model_config:
         num_key_value_heads = model_config["num_key_value_heads"]
-        if model_config.get("head_dim", None) is None:
+        if (peft_config.peft_type == PeftType.PREFIX_TUNING) and (model_config.get("head_dim", None) is None):
             # don't change if head_dim is given
             peft_config.token_dim = peft_config.token_dim // peft_config.num_attention_heads * num_key_value_heads
         peft_config.num_attention_heads = num_key_value_heads
