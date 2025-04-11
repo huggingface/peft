@@ -158,6 +158,7 @@ def require_torchao(test_case):
     """
     return unittest.skipUnless(is_torchao_available(), "test requires torchao")(test_case)
 
+
 def require_deterministic(test_case):
     @wraps(test_case)
     def wrapper(*args, **kwargs):
@@ -167,7 +168,9 @@ def require_deterministic(test_case):
             return test_case(*args, **kwargs)
         finally:
             torch.use_deterministic_algorithms(original_state)
+
     return wrapper
+
 
 @contextmanager
 def temp_seed(seed: int):

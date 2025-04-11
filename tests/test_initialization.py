@@ -66,6 +66,7 @@ from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotsw
 
 from .testing_utils import load_dataset_english_quotes, require_deterministic
 
+
 class TestLoraInitialization:
     """Test class to check the initialization of LoRA adapters."""
 
