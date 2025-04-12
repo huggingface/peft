@@ -201,7 +201,7 @@ class PeftConfigMixin(PushToHubMixin):
                     pretrained_model_name_or_path, CONFIG_NAME, subfolder=subfolder, **hf_hub_download_kwargs
                 )
             except Exception as exc:
-                raise ValueError(f"Can't find '{CONFIG_NAME}' at '{pretrained_model_name_or_path}'") from exc
+                raise ValueError(f"Can't find '{CONFIG_NAME}' at '{pretrained_model_name_or_path}' ({exc.args[0]})") from exc
 
         loaded_attributes = cls.from_json_file(config_file)
         kwargs = {**class_kwargs, **loaded_attributes}
@@ -264,8 +264,8 @@ class PeftConfigMixin(PushToHubMixin):
                     CONFIG_NAME,
                     **hf_hub_download_kwargs,
                 )
-            except Exception:
-                raise ValueError(f"Can't find '{CONFIG_NAME}' at '{model_id}'")
+            except Exception as exc:
+                raise ValueError(f"Can't find '{CONFIG_NAME}' at '{model_id}' ({exc.args[0]})") from exc
 
         loaded_attributes = cls.from_json_file(config_file)
         return loaded_attributes["peft_type"]
