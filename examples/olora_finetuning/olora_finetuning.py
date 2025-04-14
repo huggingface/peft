@@ -125,7 +125,7 @@ def train(
             learning_rate=learning_rate,
             logging_steps=100,
             optim="adamw_torch",
-            evaluation_strategy="steps",
+            eval_strategy="steps",
             save_strategy="steps",
             eval_steps=eval_step,
             save_steps=save_step,
