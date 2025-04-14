@@ -2006,7 +2006,7 @@ class PeftModelForCausalLM(PeftModel):
 
             if requires_prompt_injection and peft_config.peft_type == PeftType.PREFIX_TUNING:
                 # some archs require max_cache_len to re-initialize the cache
-                max_cache_len = getattr(model_kwargs["past_key_values"], "max_cache_len", None)
+                max_cache_len = getattr(model_kwargs.get("past_key_values", None), "max_cache_len", None)
                 new_past_key_values = self.get_prompt(
                     batch_size=model_kwargs["input_ids"].shape[0],
                     max_cache_len=max_cache_len,
