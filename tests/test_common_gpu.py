@@ -60,7 +60,7 @@ from .testing_utils import (
     device_count,
     load_cat_image,
     require_bitsandbytes,
-    require_deterministic,
+    require_deterministic_for_xpu,
     require_multi_accelerator,
     require_non_cpu,
 )
@@ -1125,7 +1125,7 @@ class PeftGPUCommonTests(unittest.TestCase):
 
     @require_non_cpu
     @pytest.mark.single_gpu_tests
-    @require_deterministic
+    @require_deterministic_for_xpu
     @require_bitsandbytes
     def test_4bit_dora_inference(self):
         # check for same result with and without DoRA when initializing with init_lora_weights=False
@@ -1165,7 +1165,7 @@ class PeftGPUCommonTests(unittest.TestCase):
 
     @require_non_cpu
     @pytest.mark.single_gpu_tests
-    @require_deterministic
+    @require_deterministic_for_xpu
     @require_bitsandbytes
     def test_8bit_dora_inference(self):
         # check for same result with and without DoRA when initializing with init_lora_weights=False

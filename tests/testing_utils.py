@@ -159,15 +159,18 @@ def require_torchao(test_case):
     return unittest.skipUnless(is_torchao_available(), "test requires torchao")(test_case)
 
 
-def require_deterministic(test_case):
+def require_deterministic_for_xpu(test_case):
     @wraps(test_case)
     def wrapper(*args, **kwargs):
-        original_state = torch.are_deterministic_algorithms_enabled()
-        try:
-            torch.use_deterministic_algorithms(True)
+        if torch_device is "xpu":
+            original_state = torch.are_deterministic_algorithms_enabled()
+            try:
+                torch.use_deterministic_algorithms(True)
+                return test_case(*args, **kwargs)
+            finally:
+                torch.use_deterministic_algorithms(original_state)
+        else:
             return test_case(*args, **kwargs)
-        finally:
-            torch.use_deterministic_algorithms(original_state)
 
     return wrapper
 
