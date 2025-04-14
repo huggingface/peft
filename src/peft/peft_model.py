@@ -953,7 +953,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             else:
                 self.modules_to_save.update(peft_config.modules_to_save)
             # this may add a new ModulesToSaveWrapper
-            _set_trainable(self, adapter_name, module_names=peft_config.modules_to_save)
+            _set_trainable(self, adapter_name, module_names=getattr(peft_config, "modules_to_save", None))
 
         if getattr(peft_config, "trainable_token_indices", None) is not None:
             if isinstance(peft_config.trainable_token_indices, dict):
@@ -1497,13 +1497,14 @@ class PeftModelForSequenceClassification(PeftModel):
             else:
                 peft_config.modules_to_save.extend(classifier_module_names)
 
-        for name, _ in self.base_model.named_children():
-            if any(module_name in name for module_name in self.modules_to_save):
-                self.cls_layer_name = name
-                break
+        if self.modules_to_save:
+            for name, _ in self.base_model.named_children():
+                if any(module_name in name for module_name in self.modules_to_save):
+                    self.cls_layer_name = name
+                    break
 
         # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
-        _set_trainable(self, adapter_name, module_names=peft_config.modules_to_save)
+        _set_trainable(self, adapter_name, module_names=getattr(peft_config, "modules_to_save", None))
 
     def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """
@@ -2288,13 +2289,14 @@ class PeftModelForTokenClassification(PeftModel):
             else:
                 peft_config.modules_to_save.extend(classifier_module_names)
 
-        for name, _ in self.base_model.named_children():
-            if any(module_name in name for module_name in self.modules_to_save):
-                self.cls_layer_name = name
-                break
+        if self.modules_to_save is not None:
+            for name, _ in self.base_model.named_children():
+                if any(module_name in name for module_name in self.modules_to_save):
+                    self.cls_layer_name = name
+                    break
 
         # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
-        _set_trainable(self, adapter_name, module_names=peft_config.modules_to_save)
+        _set_trainable(self, adapter_name, module_names=getattr(peft_config, "modules_to_save", None))
 
     def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """
@@ -2515,7 +2517,7 @@ class PeftModelForQuestionAnswering(PeftModel):
                 break
 
         # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
-        _set_trainable(self, adapter_name, module_names=peft_config.modules_to_save)
+        _set_trainable(self, adapter_name, module_names=getattr(peft_config, "modules_to_save", None))
 
     def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """
