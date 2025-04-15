@@ -749,6 +749,9 @@ def _set_trainable(
     if wrapper_cls is None:
         wrapper_cls = ModulesToSaveWrapper
 
+    if module_names is None:
+        return
+
     trainable_modules = []
     found_modules = set()
     # disable removal of duplicates to support targeting tied weights
