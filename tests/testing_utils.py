@@ -13,7 +13,7 @@
 # limitations under the License.
 import unittest
 from contextlib import contextmanager
-from functools import wraps, lru_cache
+from functools import lru_cache, wraps
 
 import numpy as np
 import pytest
