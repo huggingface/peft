@@ -20,7 +20,7 @@ import unittest
 from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Dict, List, Union
+from typing import Any, Union
 
 import pytest
 import torch
@@ -80,6 +80,7 @@ from peft.utils.other import fsdp_auto_wrap_policy
 
 from .testing_utils import (
     device_count,
+    load_dataset_english_quotes,
     require_aqlm,
     require_auto_awq,
     require_auto_gptq,
@@ -110,7 +111,7 @@ class DataCollatorSpeechSeq2SeqWithPadding:
 
     processor: Any
 
-    def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
+    def __call__(self, features: list[dict[str, Union[list[int], torch.Tensor]]]) -> dict[str, torch.Tensor]:
         # split inputs and labels since they have to be of different lengths and need different padding methods
         # first treat the audio inputs by simply returning torch tensors
         input_features = [{"input_features": feature["input_features"]} for feature in features]
@@ -202,7 +203,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -260,7 +261,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -321,7 +322,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("Abirate/english_quotes")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -385,7 +386,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
         model = get_peft_model(model, peft_config)
 
-        data = load_dataset("ybelkada/english_quotes_copy")
+        data = load_dataset_english_quotes()
         data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
         batch = tokenizer(data["train"][:3]["quote"], return_tensors="pt", padding=True)
         self._check_inference_finite(model, batch)
@@ -458,7 +459,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
         model = get_peft_model(model, peft_config)
 
-        data = load_dataset("ybelkada/english_quotes_copy")
+        data = load_dataset_english_quotes()
         data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
         batch = tokenizer(data["train"][:3]["quote"], return_tensors="pt", padding=True)
         self._check_inference_finite(model, batch)
@@ -532,7 +533,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("Abirate/english_quotes")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -592,7 +593,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -653,7 +654,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -879,7 +880,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -940,7 +941,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("Abirate/english_quotes")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -996,7 +997,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -1057,7 +1058,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("Abirate/english_quotes")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -1108,7 +1109,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -1189,7 +1190,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -1243,7 +1244,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -1302,7 +1303,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("Abirate/english_quotes")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -1361,7 +1362,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("Abirate/english_quotes")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -1432,7 +1433,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
 
             def tokenize(samples):
                 # add new tokens to samples
@@ -1539,7 +1540,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
             )
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -1602,7 +1603,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
 
         model = get_peft_model(model, peft_config)
 
-        data = load_dataset("ybelkada/english_quotes_copy")
+        data = load_dataset_english_quotes()
         data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
         batch = tokenizer(data["train"][:3]["quote"], return_tensors="pt", padding=True)
         self._check_inference_finite(model, batch)
@@ -1648,16 +1649,37 @@ class PeftGPTQGPUTests(unittest.TestCase):
         Test the CausalLM training on a multi-GPU device. The test would simply fail if the adapters are not set
         correctly.
         """
+        device_map = {
+            "model.decoder.embed_tokens": 0,
+            "lm_head": 0,
+            "model.decoder.embed_positions": 0,
+            "model.decoder.project_out": 0,
+            "model.decoder.project_in": 0,
+            "model.decoder.layers.0": 0,
+            "model.decoder.layers.1": 0,
+            "model.decoder.layers.2": 0,
+            "model.decoder.layers.3": 0,
+            "model.decoder.layers.4": 0,
+            "model.decoder.layers.5": 0,
+            "model.decoder.layers.6": 1,
+            "model.decoder.layers.7": 1,
+            "model.decoder.layers.8": 1,
+            "model.decoder.layers.9": 1,
+            "model.decoder.layers.10": 1,
+            "model.decoder.layers.11": 1,
+            "model.decoder.final_layer_norm": 1,
+        }
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
                 torch_dtype=torch.float16,
-                device_map="auto",
+                device_map=device_map,
                 quantization_config=self.quantization_config,
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1675,7 +1697,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("Abirate/english_quotes")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -2198,8 +2220,8 @@ class TestLoftQ:
     # The error factor indicates by how much the quantization error should be decreased when using LoftQ compared to
     # quantization without LoftQ. Thus 1.03 means that the error should be decreased by 3% at least. This is a very
     # conservative value to prevent flakiness, in practice most gains are > 1.5
-    error_factor = 1.03
     device = infer_device()
+    error_factor = 1.005 if device in ("xpu", "cpu") else 1.03
 
     def get_input(self, model_id, device):
         tokenizer = AutoTokenizer.from_pretrained(model_id)
@@ -2573,7 +2595,7 @@ class MixedPrecisionTests(unittest.TestCase):
             task_type="CAUSAL_LM",
         )
 
-        data = load_dataset("ybelkada/english_quotes_copy")
+        data = load_dataset_english_quotes()
         self.data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
     def tearDown(self):
@@ -2883,7 +2905,7 @@ class PeftAqlmGPUTests(unittest.TestCase):
             )
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -2972,7 +2994,7 @@ class PeftHqqGPUTests(unittest.TestCase):
             )
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -3142,7 +3164,7 @@ class PeftAwqGPUTests(unittest.TestCase):
             )
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             # TODO: deal correctly with this case in transformers
@@ -3181,14 +3203,35 @@ class PeftAwqGPUTests(unittest.TestCase):
         Test the CausalLM training on a multi-GPU device. The test would simply fail if the adapters are not set
         correctly.
         """
+        device_map = {
+            "model.decoder.embed_tokens": 0,
+            "lm_head": 0,
+            "model.decoder.embed_positions": 0,
+            "model.decoder.project_out": 0,
+            "model.decoder.project_in": 0,
+            "model.decoder.layers.0": 0,
+            "model.decoder.layers.1": 0,
+            "model.decoder.layers.2": 0,
+            "model.decoder.layers.3": 0,
+            "model.decoder.layers.4": 0,
+            "model.decoder.layers.5": 0,
+            "model.decoder.layers.6": 1,
+            "model.decoder.layers.7": 1,
+            "model.decoder.layers.8": 1,
+            "model.decoder.layers.9": 1,
+            "model.decoder.layers.10": 1,
+            "model.decoder.layers.11": 1,
+            "model.decoder.final_layer_norm": 1,
+        }
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                device_map="auto",
+                device_map=device_map,
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -3206,7 +3249,7 @@ class PeftAwqGPUTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("Abirate/english_quotes")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -3290,7 +3333,7 @@ class PeftEetqGPUTests(unittest.TestCase):
             )
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -3354,7 +3397,7 @@ class PeftEetqGPUTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("Abirate/english_quotes")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -3440,7 +3483,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             )
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -3492,7 +3535,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             )
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -3578,16 +3621,38 @@ class PeftTorchaoGPUTests(unittest.TestCase):
     def test_causal_lm_training_multi_gpu_torchao(self, quant_type):
         from transformers import TorchAoConfig
 
+        device_map = {
+            "model.decoder.embed_tokens": 0,
+            "lm_head": 0,
+            "model.decoder.embed_positions": 0,
+            "model.decoder.project_out": 0,
+            "model.decoder.project_in": 0,
+            "model.decoder.layers.0": 0,
+            "model.decoder.layers.1": 0,
+            "model.decoder.layers.2": 0,
+            "model.decoder.layers.3": 0,
+            "model.decoder.layers.4": 0,
+            "model.decoder.layers.5": 0,
+            "model.decoder.layers.6": 1,
+            "model.decoder.layers.7": 1,
+            "model.decoder.layers.8": 1,
+            "model.decoder.layers.9": 1,
+            "model.decoder.layers.10": 1,
+            "model.decoder.layers.11": 1,
+            "model.decoder.final_layer_norm": 1,
+        }
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             quantization_config = TorchAoConfig(quant_type=quant_type)
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                device_map="auto",
+                device_map=device_map,
                 quantization_config=quantization_config,
                 torch_dtype=torch.bfloat16,
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
             model.model_parallel = True
@@ -3603,7 +3668,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             )
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -3639,15 +3704,36 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         # TODO: Once proper torchao support for int4 is added, remove this test and add int4 to supported_quant_types
         from transformers import TorchAoConfig
 
+        device_map = {
+            "model.decoder.embed_tokens": 0,
+            "lm_head": 0,
+            "model.decoder.embed_positions": 0,
+            "model.decoder.project_out": 0,
+            "model.decoder.project_in": 0,
+            "model.decoder.layers.0": 0,
+            "model.decoder.layers.1": 0,
+            "model.decoder.layers.2": 0,
+            "model.decoder.layers.3": 0,
+            "model.decoder.layers.4": 0,
+            "model.decoder.layers.5": 0,
+            "model.decoder.layers.6": 1,
+            "model.decoder.layers.7": 1,
+            "model.decoder.layers.8": 1,
+            "model.decoder.layers.9": 1,
+            "model.decoder.layers.10": 1,
+            "model.decoder.layers.11": 1,
+            "model.decoder.final_layer_norm": 1,
+        }
         quantization_config = TorchAoConfig(quant_type="int4_weight_only")
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
-            device_map="auto",
+            device_map=device_map,
             quantization_config=quantization_config,
             torch_dtype=torch.bfloat16,
         )
 
         assert set(model.hf_device_map.values()) == set(range(device_count))
+        assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
         model = prepare_model_for_kbit_training(model)
         model.model_parallel = True
@@ -4074,7 +4160,7 @@ class TestEvaInitializationGPU:
 
     @pytest.fixture
     def dataset(self, tokenizer):
-        dataset = load_dataset("ybelkada/english_quotes_copy", split="train")
+        dataset = load_dataset_english_quotes()["train"]
         # concatenate examples
         examples = []
         example = ""
