@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import torch
 
@@ -85,7 +85,7 @@ if is_eetq_available():
                 result = result + output
             return result
 
-        def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+        def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
             raise AttributeError("Merging LoRA layers is not supported for Eetq layers.")
 
         def unmerge(self) -> None:

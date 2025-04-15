@@ -14,7 +14,7 @@
 
 import math
 import warnings
-from typing import Any, List, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -143,7 +143,7 @@ class HRALinear(nn.Module, HRALayer):
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, apply_GS, init_weights, **kwargs)
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -286,7 +286,7 @@ class HRAConv2d(nn.Module, HRALayer):
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, apply_GS, init_weights, **kwargs)
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 

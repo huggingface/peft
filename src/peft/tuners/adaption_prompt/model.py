@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Dict, List
 
 import torch.nn as nn
 
@@ -40,16 +39,16 @@ class AdaptionPromptModel(nn.Module):
     - Disabling the adapter would also result in the modules being removed from the model.
     """
 
-    def __init__(self, model, configs: Dict, adapter_name: str):
+    def __init__(self, model, configs: dict, adapter_name: str):
         super().__init__()
         self.model = model
         # Store adapter configs by name.
-        self.peft_config: Dict[str, AdaptionPromptConfig] = {}
+        self.peft_config: dict[str, AdaptionPromptConfig] = {}
         # Store lists of the parents of the affected attention modules by adapter name.
         # We keep references to the parents so we can swap the adapters in-and-out of the model.
-        self._parents: Dict[str, List[nn.Module]] = {}
+        self._parents: dict[str, list[nn.Module]] = {}
         # Store lists of cached AdaptedAttention modules by name.
-        self._cached_adapters: Dict[str, List] = {}
+        self._cached_adapters: dict[str, list] = {}
         # The name of the currently active adapter.
         self._active_adapter = None
         # Whether the adapter is enabled.
@@ -116,7 +115,7 @@ class AdaptionPromptModel(nn.Module):
         self._enabled = False
         self._remove_adapted_attentions(self._active_adapter)
 
-    def _create_adapted_attentions(self, config: AdaptionPromptConfig, parents: List[nn.Module]) -> None:
+    def _create_adapted_attentions(self, config: AdaptionPromptConfig, parents: list[nn.Module]) -> None:
         """Wrap LlamaAttention modules with newly created AdaptedAttention modules."""
         for par in parents:
             attn = AdaptedAttention(
