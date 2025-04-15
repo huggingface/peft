@@ -123,14 +123,25 @@ TEST_CASES = [
     ("Conv3d 1 LoRA with DoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d"], "use_dora": True}),
     ("Conv3d 2 LoRA with DoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d", "lin0"], "use_dora": True}),
     # LoRA with lora_B bias enabled (note: embedding is not supported)
+    # It's important to set lora_alpha != r to ensure that scaling is taken into account correctly
     (
         "Vanilla MLP 1 LoRA with lora_b bias",
         "MLP",
         LoraConfig,
-        {"target_modules": ["lin0", "lin1"], "lora_bias": True},
+        {"target_modules": ["lin0", "lin1"], "lora_bias": True, "lora_alpha": 32},
     ),
-    ("Conv2d 1 LoRA with lora_b bias", "Conv2d", LoraConfig, {"target_modules": ["conv2d"], "lora_bias": True}),
-    ("Conv3d 1 LoRA with lora_b bias", "Conv3d", LoraConfig, {"target_modules": ["conv3d"], "lora_bias": True}),
+    (
+        "Conv2d 1 LoRA with lora_b bias",
+        "Conv2d",
+        LoraConfig,
+        {"target_modules": ["conv2d"], "lora_bias": True, "lora_alpha": 32},
+    ),
+    (
+        "Conv3d 1 LoRA with lora_b bias",
+        "Conv3d",
+        LoraConfig,
+        {"target_modules": ["conv3d"], "lora_bias": True, "lora_alpha": 32},
+    ),
     ("MHA 1 LoRA", "MHA", LoraConfig, {"target_modules": ["mha"]}),
     ("MHA 2 LoRA", "MHA", LoraConfig, {"target_modules": ["mha", "lin0"]}),
     #######

@@ -19,7 +19,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Optional, Union
 
 from huggingface_hub import hf_hub_download
-from transformers.utils import PushToHubMixin
+from transformers.utils import PushToHubMixin, http_user_agent
 
 from .utils import CONFIG_NAME, PeftType, TaskType
 
@@ -190,6 +190,8 @@ class PeftConfigMixin(PushToHubMixin):
         )
 
         hf_hub_download_kwargs, class_kwargs, _ = cls._split_kwargs(kwargs)
+        if "user_agent" not in hf_hub_download_kwargs:
+            hf_hub_download_kwargs["user_agent"] = http_user_agent()
 
         if os.path.isfile(os.path.join(path, CONFIG_NAME)):
             config_file = os.path.join(path, CONFIG_NAME)

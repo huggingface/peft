@@ -62,9 +62,18 @@ class TestXlora:
     @pytest.fixture(scope="class")
     def saved_lora_adapters(self, lora_dir):
         file_names = []
-        for i in range(1, self.num_loras + 1):
+
+        lora_configs = [
+            LoraConfig(task_type="CAUSAL_LM", target_modules=["q_proj", "v_proj"], init_lora_weights=False)
+            for _ in range(self.num_loras)
+        ]
+        # have 1 LoRA with different target modules
+        lora_configs[-1] = LoraConfig(
+            task_type="CAUSAL_LM", target_modules=["k_proj", "q_proj", "v_proj"], init_lora_weights=False
+        )
+
+        for i, lora_config in enumerate(lora_configs, start=1):
             torch.manual_seed(i)
-            lora_config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False)
             model = AutoModelForCausalLM.from_pretrained(self.model_id)
             peft_model = get_peft_model(model, lora_config)
             file_name = os.path.join(lora_dir, f"checkpoint-{i}")
@@ -289,7 +298,7 @@ class TestXlora:
         assert model.internal_xlora_classifier.override_scaling_pass_value == 2
         assert model.internal_xlora_classifier.config.scaling_pass_value == 2
 
-        # Set it to 2 and make sure it is 1/a
+        # Set it to None and make sure it is 1/n
         model.set_scaling_pass_value(None)
         assert model.internal_xlora_classifier.override_scaling_pass_value == 1 / self.num_loras
         assert model.internal_xlora_classifier.config.scaling_pass_value == 1 / self.num_loras
