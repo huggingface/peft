@@ -107,11 +107,11 @@ class XLoraLinearLayer(XLoraLayer):
         # Ignore if disabled. We want to make sure this is always run.
         if not self.target.merged:
             for adapter_n, active_adapter in enumerate(self.target.active_adapters):
+                if active_adapter not in self.target.lora_A.keys():
+                    continue
                 # TODO: implement X-LoRA with Lora+Dora layers
                 if self.target.use_dora[active_adapter]:
                     raise ValueError("X-LoRA currently does not support LoRA layers with DoRA")
-                if active_adapter not in self.target.lora_A.keys():
-                    continue
                 lora_A = self.target.lora_A[active_adapter]
                 lora_B = self.target.lora_B[active_adapter]
                 dropout = self.target.lora_dropout[active_adapter]
@@ -154,11 +154,11 @@ class XLoraEmbeddingLayer(XLoraLayer):
         # Ignore if disabled. We want to make sure this is always run.
         if not self.target.merged:
             for adapter_n, active_adapter in enumerate(self.target.active_adapters):
+                if active_adapter not in self.target.lora_embedding_A:
+                    continue
                 # TODO: implement X-LoRA with Lora+Dora layers
                 if self.target.use_dora.get(active_adapter, False):
                     raise ValueError("X-LoRA currently does not support LoRA layers with DoRA")
-                if active_adapter not in self.target.lora_embedding_A:
-                    continue
                 embedding_A = self.target.lora_embedding_A[active_adapter].T
                 embedding_B = self.target.lora_embedding_B[active_adapter].T
                 scaling = self.target.scaling[active_adapter]
@@ -201,11 +201,11 @@ class XLoraConv2dLayer(XLoraLayer):
         # Ignore if disabled. We want to make sure this is always run.
         if not self.target.merged:
             for adapter_n, active_adapter in enumerate(self.target.active_adapters):
+                if active_adapter not in self.target.lora_A.keys():
+                    continue
                 # TODO: implement X-LoRA with Lora+Dora layers
                 if self.target.use_dora[active_adapter]:
                     raise ValueError("X-LoRA currently does not support LoRA layers with DoRA")
-                if active_adapter not in self.target.lora_A.keys():
-                    continue
                 lora_A = self.target.lora_A[active_adapter]
                 lora_B = self.target.lora_B[active_adapter]
                 dropout = self.target.lora_dropout[active_adapter]
