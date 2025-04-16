@@ -1370,7 +1370,7 @@ class PeftCommonTester:
                 assert nb_trainable == nb_trainable_all
             else:
                 # more than 1 layer, i.e. setting layers_to_transform=[0] should target fewer layers
-                assert nb_trainable <= nb_trainable_all
+                assert nb_trainable < nb_trainable_all
 
     def _test_training_gradient_checkpointing(self, model_id, config_cls, config_kwargs):
         if config_cls == PrefixTuningConfig:
