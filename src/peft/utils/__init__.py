@@ -46,6 +46,7 @@ from .other import (
     id_tensor_storage,
     infer_device,
     prepare_model_for_kbit_training,
+    set_additional_trainable_modules,
     shift_tokens_right,
     transpose,
 )
@@ -92,6 +93,7 @@ __all__ = [
     "prepare_model_for_kbit_training",
     "register_peft_method",
     "replace_lora_weights_loftq",
+    "set_additional_trainable_modules",
     "set_peft_model_state_dict",
     "shift_tokens_right",
     "transpose",
