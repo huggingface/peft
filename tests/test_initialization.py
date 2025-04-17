@@ -64,7 +64,7 @@ from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
 
-from .testing_utils import load_dataset_english_quotes
+from .testing_utils import load_dataset_english_quotes, require_deterministic_for_xpu
 
 
 class TestLoraInitialization:
@@ -1053,6 +1053,7 @@ class TestLoraInitialization:
         assert model.embed.scaling["default"] == expected_scaling["embed"]
         assert model.conv2d.scaling["default"] == expected_scaling["conv2d"]
 
+    @require_deterministic_for_xpu
     def test_lora_use_dora_linear(self, data):
         # check that dora is a no-op when initialized
         torch.manual_seed(0)

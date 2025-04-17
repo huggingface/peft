@@ -13,7 +13,7 @@
 # limitations under the License.
 import unittest
 from contextlib import contextmanager
-from functools import lru_cache
+from functools import lru_cache, wraps
 
 import numpy as np
 import pytest
@@ -157,6 +157,22 @@ def require_torchao(test_case):
     Decorator marking a test that requires torchao. These tests are skipped when torchao isn't installed.
     """
     return unittest.skipUnless(is_torchao_available(), "test requires torchao")(test_case)
+
+
+def require_deterministic_for_xpu(test_case):
+    @wraps(test_case)
+    def wrapper(*args, **kwargs):
+        if torch_device == "xpu":
+            original_state = torch.are_deterministic_algorithms_enabled()
+            try:
+                torch.use_deterministic_algorithms(True)
+                return test_case(*args, **kwargs)
+            finally:
+                torch.use_deterministic_algorithms(original_state)
+        else:
+            return test_case(*args, **kwargs)
+
+    return wrapper
 
 
 @contextmanager
