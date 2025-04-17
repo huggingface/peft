@@ -515,17 +515,28 @@ TEST_CASES = [
     ########
     # RandLora #
     ########
-    ("Vanilla MLP 1 RandLora", "MLP", RandLoraConfig, {"target_modules": "lin0"}),
-    ("Vanilla MLP 2 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin0"]}),
-    ("Vanilla MLP 3 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin1"]}),
-    ("Vanilla MLP 4 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin0", "lin1"]}),
-    ("Vanilla MLP 5 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin0", "lin1"], "sparse": True}),
-    ("Vanilla MLP 6 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin0", "lin1"], "very_sparse": True}),
+    # We have to reduce the default scaling parameter to avoid nans when using large learning rates
+    ("Vanilla MLP 1 RandLora", "MLP", RandLoraConfig, {"target_modules": "lin0", "randlora_alpha": 64}),
+    ("Vanilla MLP 2 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin0"], "randlora_alpha": 64}),
+    ("Vanilla MLP 3 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin1"], "randlora_alpha": 64}),
+    ("Vanilla MLP 4 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin0", "lin1"], "randlora_alpha": 64}),
+    (
+        "Vanilla MLP 5 RandLora",
+        "MLP",
+        RandLoraConfig,
+        {"target_modules": ["lin0", "lin1"], "sparse": True, "randlora_alpha": 64},
+    ),
+    (
+        "Vanilla MLP 6 RandLora",
+        "MLP",
+        RandLoraConfig,
+        {"target_modules": ["lin0", "lin1"], "very_sparse": True, "randlora_alpha": 64},
+    ),
     (
         "Vanilla MLP 7 RandLora",
         "MLP",
         RandLoraConfig,
-        {"target_modules": ["lin0"], "modules_to_save": ["lin1"]},
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "randlora_alpha": 64},
     ),
 ]
 
@@ -1465,7 +1476,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             lr = 0.1  # otherwise we get nan
         elif "mha" in model_id.lower():
             lr = 1e-3  # we get exploding gradients with MHA when learning rate is too high
-        elif issubclass(config_cls, VBLoRAConfig):
+        elif issubclass(config_cls, VBLoRAConfig) or issubclass(config_cls, RandLoraConfig):
             lr = 0.01  # otherwise we get nan
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 

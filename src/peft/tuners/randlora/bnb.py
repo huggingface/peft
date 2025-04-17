@@ -162,6 +162,7 @@ if is_bnb_available():
             # During the forward pass, required submatrices are sliced out from the shared randlora_A and randlora_B.
             sliced_A = randlora_A[:, : self.num_bases, :min_dim]
             sliced_B = randlora_B[:max_dim, : self.num_bases, :]
+
             # Flattening the matrices over the rank and number of bases dimensions is more memory efficient
             update_B = sliced_B.flatten(start_dim=1)
             update_A = UniqueBaseGrad.apply(sliced_A, randlora_lambda, randlora_gamma).flatten(end_dim=1)
@@ -216,6 +217,7 @@ if is_bnb_available():
                         continue
 
                     update_B, update_A = self.get_scaled_bases(active_adapter)
+
                     requires_conversion = not torch.is_autocast_enabled()
                     if requires_conversion:
                         expected_dtype = result.dtype
@@ -382,7 +384,6 @@ if is_bnb_4bit_available():
                 adapter (str):
                     The name of the adapter for which the delta weight should be computed.
             """
-
             update_B, update_A = self.get_scaled_bases(adapter)
 
             update = update_B @ update_A
@@ -405,7 +406,9 @@ if is_bnb_4bit_available():
                 for active_adapter in self.active_adapters:
                     if active_adapter not in self.randlora_lambda.keys():
                         continue
+
                     update_B, update_A = self.get_scaled_bases(active_adapter)
+
                     requires_conversion = not torch.is_autocast_enabled()
                     if requires_conversion:
                         expected_dtype = result.dtype

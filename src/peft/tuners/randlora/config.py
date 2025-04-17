@@ -14,7 +14,7 @@
 
 import warnings
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from typing import Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
@@ -28,10 +28,10 @@ class RandLoraConfig(PeftConfig):
     Paper: https://arxiv.org/pdf/2502.00987.
 
     Args:
-        r (`int`, *optional*, defaults to `10`):
+        r (`int`, *optional*, defaults to `32`):
             RandLora's random basis rank dimension. Contrary to Lora, this parameter is inversely proportional to the amount of trainable
             parameters as reducing it increases trainable parameters.
-        target_modules (`Union[List[str], str]`):
+        target_modules (`Union[list[str], str]`):
             The names of the modules to apply RandLora to. Only linear layers are supported.
         projection_prng_key (`int`):
             RandLora PRNG init key. Used for initialising basis_A and basis_B for new models or when loading a
@@ -52,8 +52,7 @@ class RandLoraConfig(PeftConfig):
         randlora_dropout (`float`):
             The dropout probability for RandLora layers.
         randlora_alpha (`float`):
-            The scaling coefficient for RandLora layers, this would be typically be the same as LoRA, e.g. 2 times the
-            rank.
+            The scaling coefficient for RandLora layers, this would typically be 20 times the rank.
         fan_in_fan_out (`bool`):
             Set this to True if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 uses
             `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
@@ -61,12 +60,12 @@ class RandLoraConfig(PeftConfig):
             Bias type. Can be 'none', 'all' or 'randlora_only'. If 'all' or 'randlora_only', the corresponding biases
             will be updated during training. Be aware that this means that, even when disabling the adapters, the model
             will not produce the same output as the base model would have without adaptation.
-        modules_to_save (`List[str]`):
-            List of modules apart from RandLora layers to be set as trainable and saved in the final checkpoint.
+        modules_to_save (`list[str]`):
+            list of modules apart from RandLora layers to be set as trainable and saved in the final checkpoint.
         init_weights (`bool`):
             Whether to initialize the weights of the RandLora layers with their default initialization. Don't change
             this setting, except if you know exactly what you're doing.
-        layers_to_transform (`Union[List[int],int]`):
+        layers_to_transform (`Union[list[int],int]`):
             The layer indexes to transform, if this argument is specified, it will apply the RandLora transformations
             on the layer indexes that are specified in this list. If a single integer is passed, it will apply the
             RandLora transformations on the layer at this index.
@@ -75,13 +74,13 @@ class RandLoraConfig(PeftConfig):
             pattern is not in the common layers pattern.
     """
 
-    r: int = field(default=10, metadata={"help": "RandLora random basis rank"})
+    r: int = field(default=32, metadata={"help": "RandLora random basis rank"})
 
-    target_modules: Optional[Union[List[str], str]] = field(
+    target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
             "help": (
-                "List of module names or regex expression of the module names to replace with RandLora."
+                "list of module names or regex expression of the module names to replace with RandLora."
                 "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. "
                 "Only linear layers are supported."
             )
@@ -132,19 +131,19 @@ class RandLoraConfig(PeftConfig):
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
     )
     randlora_alpha: int = field(
-        default=20,
+        default=640,
         metadata={
-            "help": "Scaling coefficient in the adapter layers, typically 2 times the rank of the random bases."
+            "help": "Scaling coefficient in the adapter layers, typically 20 times the rank of the random bases."
         },
     )
     bias: str = field(
         default="none", metadata={"help": "Bias type for RandLora. Can be 'none', 'all' or 'randlora_only'"}
     )
-    modules_to_save: Optional[List[str]] = field(
+    modules_to_save: Optional[list[str]] = field(
         default=None,
         metadata={
             "help": (
-                "List of modules apart from RandLora layers to be set as trainable and saved in the final checkpoint. For"
+                "list of modules apart from RandLora layers to be set as trainable and saved in the final checkpoint. For"
                 " example, in Sequence Classification or Token Classification tasks, the final layer"
                 " `classifier/score` are randomly initialized and as such need to be trainable and saved."
             )
@@ -159,7 +158,7 @@ class RandLoraConfig(PeftConfig):
             ),
         },
     )
-    layers_to_transform: Optional[Union[List[int], int]] = field(
+    layers_to_transform: Optional[Union[list[int], int]] = field(
         default=None,
         metadata={
             "help": (

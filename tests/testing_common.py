@@ -145,8 +145,8 @@ CONFIG_TESTING_KWARGS = (
     },
     # RandLoRA
     {
-        "r": 10,
-        "randlora_alpha": 20,
+        "r": 32,
+        "randlora_alpha": 64,
         "target_modules": None,
         "randlora_dropout": 0.05,
         "projection_prng_key": 0xFF,

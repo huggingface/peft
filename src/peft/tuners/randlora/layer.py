@@ -12,9 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import math
 import warnings
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -72,6 +71,9 @@ class RandLoraLayer(BaseTunerLayer):
         self._disable_adapters = False
         self.merged_adapters = []
 
+        # flag to enable/disable casting of input to weight dtype during forward call
+        self.cast_input_dtype_enabled = True
+
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
             in_features, out_features = base_layer.in_features, base_layer.out_features
@@ -118,7 +120,7 @@ class RandLoraLayer(BaseTunerLayer):
             requires_grad=True,
         )
 
-        self.scaling[adapter_name] = randlora_alpha / r / math.sqrt(self.num_bases)
+        self.scaling[adapter_name] = randlora_alpha / r
 
         # non trainable references to randlora_A/B buffers
         self.randlora_A = randlora_A
@@ -153,6 +155,7 @@ class RandLoraLayer(BaseTunerLayer):
             )
             if randlora_A_param.shape[0] < self.r[adapter_name]:
                 raise ValueError(error_tmpl.format("randlora_A", randlora_A_param.shape[0], self.r[adapter_name]))
+
             if randlora_B_param.shape[-1] < self.r[adapter_name]:
                 raise ValueError(error_tmpl.format("randlora_B", randlora_B_param.shape[-1], self.r[adapter_name]))
 
@@ -169,9 +172,7 @@ class RandLoraLayer(BaseTunerLayer):
         if adapter_name in self.randlora_lambda.keys():
             with torch.no_grad():
                 nn.init.zeros_(self.randlora_lambda[adapter_name])
-                nn.init.ones_(self.randlora_gamma[adapter_name]).fill_(
-                    1 / max(self.randlora_gamma[adapter_name].shape)
-                )
+                nn.init.constant_(self.randlora_gamma[adapter_name], 1 / max(self.randlora_gamma[adapter_name].shape))
 
 
 class Linear(nn.Linear, RandLoraLayer):
@@ -198,7 +199,7 @@ class Linear(nn.Linear, RandLoraLayer):
         self.update_layer(adapter_name, randlora_A, randlora_B, r, randlora_alpha, randlora_dropout, init_weights)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -207,7 +208,7 @@ class Linear(nn.Linear, RandLoraLayer):
                 If True, the merge operation will be performed in a copy of the original weights and check for NaNs
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
-            adapter_names (`List[str]`, *optional*):
+            adapter_names (`list[str]`, *optional*):
                 The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
                 to `None`.
         """
@@ -219,6 +220,8 @@ class Linear(nn.Linear, RandLoraLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.randlora_lambda.keys():
                 base_layer = self.get_base_layer()
+                orig_dtype = base_layer.weight.dtype
+
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
@@ -231,9 +234,11 @@ class Linear(nn.Linear, RandLoraLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weights
+                    base_layer.weight.data = orig_weights.to(orig_dtype)
                 else:
-                    base_layer.weight.data += self.get_delta_weight(active_adapter)
+                    delta_weight = self.get_delta_weight(active_adapter)
+                    base_layer.weight.data += delta_weight.to(orig_dtype)
+
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -242,9 +247,12 @@ class Linear(nn.Linear, RandLoraLayer):
             return
 
         while len(self.merged_adapters) > 0:
+            base_layer = self.get_base_layer()
+            orig_dtype = base_layer.weight.dtype
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.randlora_lambda.keys():
-                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
+                delta_weight = self.get_delta_weight(active_adapter)
+                base_layer.weight.data -= delta_weight.to(orig_dtype)
 
     def get_scaled_bases(self, adapter) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -289,7 +297,7 @@ class Linear(nn.Linear, RandLoraLayer):
         update_B = sliced_B.flatten(start_dim=1)
         update_A = UniqueBaseGrad.apply(sliced_A, randlora_lambda, randlora_gamma).flatten(end_dim=1)
 
-        # Since update_A is applied on the smallest dimension, test whether update_A or update_B should applied first. This is done to reduce trainable parameters.
+        # Since update_A is applied on the smallest dimension, test whether update_A or update_B should be applied first. This is done to reduce trainable parameters.
         if min_dim == self.in_features:
             return update_A, update_B
         return update_B.T, update_A.T
