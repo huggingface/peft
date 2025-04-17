@@ -46,6 +46,7 @@ from peft import (
     LoraConfig,
     OFTConfig,
     PeftModel,
+    RandLoraConfig,
     TaskType,
     VBLoRAConfig,
     VeraConfig,
@@ -71,11 +72,13 @@ if is_bnb_available():
 
     from peft.tuners.ia3 import Linear8bitLt as IA3Linear8bitLt
     from peft.tuners.lora import Linear8bitLt as LoraLinear8bitLt
+    from peft.tuners.randlora import Linear8bitLt as RandLoraLinear8bitLt
     from peft.tuners.vera import Linear8bitLt as VeraLinear8bitLt
 
     if is_bnb_4bit_available():
         from peft.tuners.ia3 import Linear4bit as IA3Linear4bit
         from peft.tuners.lora import Linear4bit as LoraLinear4bit
+        from peft.tuners.randlora import Linear4bit as RandLoraLinear4bit
         from peft.tuners.vera import Linear4bit as VeraLinear4bit
 
 
@@ -199,6 +202,54 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         whisper_8bit = get_peft_model(whisper_8bit, config)
         assert isinstance(whisper_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, VeraLinear8bitLt)
+
+    @require_bitsandbytes
+    @pytest.mark.multi_gpu_tests
+    @pytest.mark.single_gpu_tests
+    def test_randlora_bnb_8bit_quantization(self):
+        r"""
+        Test that tests if the 8bit quantization using RandLora works as expected
+        """
+        whisper_8bit = WhisperForConditionalGeneration.from_pretrained(
+            self.audio_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+        )
+
+        opt_8bit = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+        )
+
+        flan_8bit = AutoModelForSeq2SeqLM.from_pretrained(
+            self.seq2seq_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+        )
+
+        flan_randlora_config = RandLoraConfig(
+            r=16, target_modules=["q", "v"], randlora_dropout=0.05, bias="none", task_type="SEQ_2_SEQ_LM"
+        )
+
+        opt_randlora_config = RandLoraConfig(
+            r=10,
+            target_modules=["q_proj", "v_proj"],
+            randlora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+
+        config = RandLoraConfig(r=5, target_modules=["q_proj", "v_proj"], randlora_dropout=0.05, bias="none")
+
+        flan_8bit = get_peft_model(flan_8bit, flan_randlora_config)
+        assert isinstance(flan_8bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, RandLoraLinear8bitLt)
+
+        opt_8bit = get_peft_model(opt_8bit, opt_randlora_config)
+        assert isinstance(opt_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, RandLoraLinear8bitLt)
+
+        whisper_8bit = get_peft_model(whisper_8bit, config)
+        assert isinstance(whisper_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, RandLoraLinear8bitLt)
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
@@ -347,6 +398,43 @@ class PeftGPUCommonTests(unittest.TestCase):
             # check that both adapters are in the same layer
             assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.vera_A
             assert "adapter2" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.vera_A
+
+    @require_bitsandbytes
+    @pytest.mark.multi_gpu_tests
+    @pytest.mark.single_gpu_tests
+    @parameterized.expand(["4bit", "8bit"])
+    def test_randlora_bnb_quantization_from_pretrained_safetensors(self, quantization):
+        r"""
+        Tests that the bnb quantization using RandLora works as expected with safetensors weights.
+        """
+        model_id = "facebook/opt-350m"
+        kwargs = {"device_map": "auto"}
+        if quantization == "4bit":
+            kwargs["quantization_config"] = BitsAndBytesConfig(load_in_4bit=True)
+        else:
+            kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+
+        model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
+        config = RandLoraConfig(task_type=TaskType.CAUSAL_LM)
+        peft_model = get_peft_model(model, config)
+        peft_model = prepare_model_for_kbit_training(peft_model)
+        peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            peft_model.save_pretrained(tmp_dir)
+            model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
+            model = PeftModel.from_pretrained(model, tmp_dir)
+            model = prepare_model_for_kbit_training(model)
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+            # loading a 2nd adapter works, #1239
+            model.load_adapter(tmp_dir, "adapter2")
+            model.set_adapter("adapter2")
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+            # check that both adapters are in the same layer
+            assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.randlora_A
+            assert "adapter2" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.randlora_A
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
@@ -519,6 +607,54 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         whisper_4bit = get_peft_model(whisper_4bit, config)
         assert isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, VeraLinear4bit)
+
+    @require_bitsandbytes
+    @pytest.mark.multi_gpu_tests
+    @pytest.mark.single_gpu_tests
+    def test_randlora_bnb_4bit_quantization(self):
+        r"""
+        Test that tests if the 4bit quantization using RandLoRA works as expected
+        """
+        whisper_4bit = WhisperForConditionalGeneration.from_pretrained(
+            self.audio_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+        )
+
+        opt_4bit = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+        )
+
+        flan_4bit = AutoModelForSeq2SeqLM.from_pretrained(
+            self.seq2seq_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+        )
+
+        flan_randlora_config = RandLoraConfig(
+            r=16, target_modules=["q", "v"], randlora_dropout=0.05, bias="none", task_type="SEQ_2_SEQ_LM"
+        )
+
+        opt_randlora_config = RandLoraConfig(
+            r=16,
+            target_modules=["q_proj", "v_proj"],
+            randlora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+
+        config = RandLoraConfig(r=32, target_modules=["q_proj", "v_proj"], randlora_dropout=0.05, bias="none")
+
+        flan_4bit = get_peft_model(flan_4bit, flan_randlora_config)
+        assert isinstance(flan_4bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, RandLoraLinear4bit)
+
+        opt_4bit = get_peft_model(opt_4bit, opt_randlora_config)
+        assert isinstance(opt_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, RandLoraLinear4bit)
+
+        whisper_4bit = get_peft_model(whisper_4bit, config)
+        assert isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, RandLoraLinear4bit)
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
@@ -1787,6 +1923,28 @@ class TestSameAdapterDifferentDevices:
         assert model.lin0.base_layer.weight.device.type == self.device
         assert model.lin0.vera_A.other.device.type == self.device
         assert model.lin0.vera_lambda_d.other.device.type == self.device
+
+    def test_randlora_add_new_adapter_does_not_change_device(self, mlp):
+        # same as first test, but using RandLora
+        config = RandLoraConfig(target_modules=["lin0"])
+        model = get_peft_model(mlp, config)
+        model = model.to(self.device)
+        model.lin0.randlora_A.cpu()
+        model.lin0.randlora_lambda.cpu()
+
+        # check that the adapter is indeed on CPU and the base model on GPU
+        assert model.lin0.randlora_A.default.device.type == "cpu"
+        assert model.lin0.randlora_lambda.default.device.type == "cpu"
+        assert model.lin0.base_layer.weight.device.type == self.device
+
+        model.add_adapter("other", config)
+        # check that after adding a new adapter, the old adapter is still on CPU
+        assert model.lin0.randlora_A.default.device.type == "cpu"
+        assert model.lin0.randlora_lambda.default.device.type == "cpu"
+        # the rest should be on GPU
+        assert model.lin0.base_layer.weight.device.type == self.device
+        assert model.lin0.randlora_A.other.device.type == self.device
+        assert model.lin0.randlora_lambda.other.device.type == self.device
 
     def test_vblora_add_new_adapter_does_not_change_device(self, mlp):
         # same as first test, but using VBLoRA

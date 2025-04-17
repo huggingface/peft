@@ -50,6 +50,7 @@ from peft import (
     PromptEncoderConfig,
     PromptLearningConfig,
     PromptTuningConfig,
+    RandLoraConfig,
     VBLoRAConfig,
     VeraConfig,
     get_peft_model,
@@ -142,6 +143,16 @@ CONFIG_TESTING_KWARGS = (
         "bias": "none",
         "trainable_token_indices": [0, 1, 3],
     },
+    # RandLoRA
+    {
+        "r": 32,
+        "randlora_alpha": 64,
+        "target_modules": None,
+        "randlora_dropout": 0.05,
+        "projection_prng_key": 0xFF,
+        "save_projection": True,
+        "bias": "none",
+    },
     # CPT tuninig
     {
         "cpt_token_ids": [0, 1, 2, 3, 4, 5, 6, 7],  # Example token IDs for testing
@@ -165,9 +176,10 @@ CLASSES_MAPPING = {
     "oft": (OFTConfig, CONFIG_TESTING_KWARGS[11]),
     "bone": (BoneConfig, CONFIG_TESTING_KWARGS[12]),
     "lora+trainable_tokens": (LoraConfig, CONFIG_TESTING_KWARGS[13]),
+    "randlora": (RandLoraConfig, CONFIG_TESTING_KWARGS[14]),
 }
 
-DECODER_MODELS_EXTRA = {"cpt": (CPTConfig, CONFIG_TESTING_KWARGS[14])}
+DECODER_MODELS_EXTRA = {"cpt": (CPTConfig, CONFIG_TESTING_KWARGS[15])}
 
 
 # Adapted from https://github.com/huggingface/transformers/blob/48327c57182fdade7f7797d1eaad2d166de5c55b/src/transformers/activations.py#LL166C7-L166C22
@@ -482,7 +494,7 @@ class PeftCommonTester:
         if issubclass(config_cls, IA3Config):
             config_kwargs = config_kwargs.copy()
             config_kwargs["init_ia3_weights"] = False
-        if issubclass(config_cls, VeraConfig):
+        if hasattr(config_cls, "init_weights"):
             config_kwargs = config_kwargs.copy()
             config_kwargs["init_weights"] = False
 
@@ -1642,6 +1654,7 @@ class PeftCommonTester:
             "FOURIERFT",
             "HRA",
             "VBLORA",
+            "RANDLORA",
             "BONE",
         ):
             with pytest.raises(AttributeError):
