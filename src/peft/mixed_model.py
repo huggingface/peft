@@ -251,7 +251,7 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
             self.modules_to_save = set(modules_to_save)
         else:
             self.modules_to_save.update(modules_to_save)
-        _set_trainable(self, adapter_name, module_names=peft_config.modules_to_save)
+        _set_trainable(self, adapter_name, module_names=getattr(peft_config, "modules_to_save", None))
 
     def set_adapter(self, adapter_name: Union[str, list[str]]) -> None:
         """

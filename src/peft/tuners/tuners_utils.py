@@ -38,11 +38,11 @@ from peft.utils.constants import (
     SEQ_CLS_HEAD_NAMES,
 )
 from peft.utils.integrations import init_empty_weights
-from peft.utils.other import AuxiliaryTrainingWrapper
+from peft.utils.other import AuxiliaryTrainingWrapper, set_additional_trainable_modules
 from peft.utils.peft_types import PeftType, TaskType
 
 from ..config import PeftConfig
-from ..utils import ModulesToSaveWrapper, _get_submodules
+from ..utils import _get_submodules
 from ._buffer_dict import BufferDict
 
 
@@ -427,7 +427,6 @@ class BaseTuner(nn.Module, ABC):
         self._check_new_adapter_config(peft_config)
 
         _check_for_modules_to_save = getattr(peft_config, "modules_to_save", None) is not None
-        _has_modules_to_save = False
 
         model_config = self.get_model_config(model)
 
@@ -473,28 +472,6 @@ class BaseTuner(nn.Module, ABC):
         for key in key_list:
             if not key:
                 continue
-            # Check for modules_to_save in case
-            #
-            # Note that this is redundant with PeftModel.set_additional_trainable_models but might be necessary
-            # when calling inject_adapter without a PEFT model. This is outdated as it only focuses on
-            # ModulesToSaveWrapper and ignores other potentially configured AuxiliaryTrainingWrapper instances.
-            #
-            # TODO: determine if there's a good reason for this and refactor to support AuxiliaryTrainingWrapper,
-            # or remove if superfluous.
-            if _check_for_modules_to_save and any(
-                key.endswith(module_to_save) for module_to_save in peft_config.modules_to_save
-            ):
-                # Optionally set the modules to save
-                parent, target, target_name = _get_submodules(model, key)
-
-                if not isinstance(target, ModulesToSaveWrapper):
-                    new_module = ModulesToSaveWrapper(target, adapter_name)
-                    setattr(parent, target_name, new_module)
-                else:
-                    target.update(adapter_name)
-
-                _has_modules_to_save = True
-                continue
 
             result = self._check_target_module_exists(peft_config, key)
             if isinstance(result, _ExcludedModule):
@@ -513,7 +490,7 @@ class BaseTuner(nn.Module, ABC):
                 # All targeted modules were excluded
                 raise ValueError(
                     "All modules were excluded. This is likely unintended. "
-                    "Check your `target_modules` and `exclude_modules` configuration."
+                    "Check your `target_modules`, `exclude_modules` and `modules_to_save` configuration."
                 )
             elif not excluded_modules and unmatched_modules:
                 # None of the targeted modules matched
@@ -531,7 +508,8 @@ class BaseTuner(nn.Module, ABC):
                 error_msg = (
                     "No modules were targeted for adaptation. "
                     "This might be caused by a combination of mismatched target modules and excluded modules. "
-                    "Please check your `target_modules` and `exclude_modules` configuration."
+                    "Please check your `target_modules` and `exclude_modules` configuration. You may also have "
+                    "only targeted modules that are marked to be saved (`modules_to_save`)."
                 )
                 if getattr(peft_config, "layers_to_transform", None) is not None:
                     error_msg += f" Note: You specified 'layers_to_transform': {peft_config.layers_to_transform}."
@@ -566,11 +544,12 @@ class BaseTuner(nn.Module, ABC):
                 if adapter_name in n:
                     p.requires_grad = False
 
-        if _has_modules_to_save:
-            if not hasattr(model, "modules_to_save"):
-                model.modules_to_save = set(peft_config.modules_to_save)
-            else:
-                model.modules_to_save.update(set(peft_config.modules_to_save))
+        set_additional_trainable_modules(
+            model=model,
+            peft_config=peft_config,
+            model_config=BaseTuner.get_model_config(self),
+            adapter_name=adapter_name,
+        )
 
     def merge_adapter(self, adapter_names: Optional[list[str]] = None, safe_merge: bool = False) -> None:
         """
@@ -1016,6 +995,13 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
         elif key in config.exclude_modules:
             return _ExcludedModule()
         elif any(key.endswith(f".{exclude_key}") for exclude_key in config.exclude_modules):
+            return _ExcludedModule()
+
+    # Adapters should never match on modules to save modules as it is a guarantee for conflicts of behavior
+    # between `ModulesToSaveWrapper` internals and the potential adapter.
+    modules_to_save = getattr(config, "modules_to_save", None)
+    if modules_to_save:
+        if any(re.match(rf"(^|.*\.){m}($|\..*)", key) for m in modules_to_save):
             return _ExcludedModule()
 
     if isinstance(config.target_modules, str):
