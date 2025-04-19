@@ -117,6 +117,9 @@ def is_eetq_available():
 def is_hqq_available():
     return importlib.util.find_spec("hqq") is not None
 
+@lru_cache
+def is_inc_available():
+    return importlib.util.find_spec("neural_compressor") is not None
 
 @lru_cache
 def is_torchao_available():
