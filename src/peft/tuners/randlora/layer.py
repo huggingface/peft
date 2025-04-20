@@ -30,9 +30,9 @@ class UniqueBaseGrad(torch.autograd.Function):
     # Memory efficent for a unique base
     @staticmethod
     def forward(ctx, randlora_A, randlora_lambda, randlora_gamma):
-        Out = randlora_lambda[:, :, None] * randlora_A * randlora_gamma[None,]
+        out = randlora_lambda[:, :, None] * randlora_A * randlora_gamma[None,]
         ctx.save_for_backward(randlora_A, randlora_lambda, randlora_gamma)
-        return Out
+        return out
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -242,6 +242,9 @@ class Linear(nn.Linear, RandLoraLayer):
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
+        """
+        This method unmerges all merged adapter layers from the base weights.
+        """
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
@@ -254,7 +257,7 @@ class Linear(nn.Linear, RandLoraLayer):
                 delta_weight = self.get_delta_weight(active_adapter)
                 base_layer.weight.data -= delta_weight.to(orig_dtype)
 
-    def get_scaled_bases(self, adapter) -> tuple[torch.Tensor, torch.Tensor]:
+    def get_scaled_bases(self, adapter, device=None) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Performs scaling on the smallest random base (randlora_A) and returns randlora_A and randlora_B in the correct
         order to fit the target layers' dimensions
@@ -266,8 +269,8 @@ class Linear(nn.Linear, RandLoraLayer):
 
         randlora_A = self.randlora_A[adapter]
         randlora_B = self.randlora_B[adapter]
-
-        device = randlora_B.device
+        if device is None:
+            device = randlora_B.device
         dtype = randlora_B.dtype
 
         # In case users wants to merge the adapter weights that are in
@@ -275,8 +278,8 @@ class Linear(nn.Linear, RandLoraLayer):
         # (b)float16 because some CPUs have slow bf16/fp16 matmuls.
         cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
 
-        randlora_lambda = self.randlora_lambda[adapter]
-        randlora_gamma = self.randlora_gamma[adapter]
+        randlora_lambda = self.randlora_lambda[adapter].to(device)
+        randlora_gamma = self.randlora_gamma[adapter].to(device)
 
         if cast_to_fp32:
             randlora_A = randlora_A.float()
@@ -290,8 +293,8 @@ class Linear(nn.Linear, RandLoraLayer):
         # As adapted layers may have different shapes and RandLora contains a single shared pair of A and B matrices,
         # we initialize these matrices with the largest required size for each dimension.
         # During the forward pass, required submatrices are sliced out from the shared randlora_A and randlora_B.
-        sliced_A = randlora_A[:, : self.num_bases, :min_dim]
-        sliced_B = randlora_B[:max_dim, : self.num_bases, :]
+        sliced_A = randlora_A[:, : self.num_bases, :min_dim].to(device)
+        sliced_B = randlora_B[:max_dim, : self.num_bases, :].to(device)
 
         # Flattening the matrices over the rank and number of bases dimensions is more memory efficient
         update_B = sliced_B.flatten(start_dim=1)
@@ -334,7 +337,7 @@ class Linear(nn.Linear, RandLoraLayer):
                 if active_adapter not in self.randlora_lambda.keys():
                     continue
                 dropout = self.randlora_dropout[active_adapter]
-                update_B, update_A = self.get_scaled_bases(active_adapter)
+                update_B, update_A = self.get_scaled_bases(active_adapter, device=x.device)
                 x = x.to(update_A.dtype)
                 scaling = self.scaling[active_adapter]
                 result = result + F.linear(F.linear(dropout(x), update_B), update_A) * scaling

@@ -137,7 +137,7 @@ class RandLoraModel(BaseTuner):
 
         return largest_shape
 
-    def _init_randlora_A_randlora_B_sparse(self, config: RandLoraConfig, adapter_name: str, s: int = 3) -> None:
+    def _init_randlora_A_randlora_B_sparse(self, config: RandLoraConfig, adapter_name: str, sparsity: int = 3) -> None:
         """
         Sparse random projections as described in https://cs-people.bu.edu/evimaria/cs565/kdd-rp.pdf
         """
@@ -156,19 +156,19 @@ class RandLoraModel(BaseTuner):
         # We also set randlora_A as the smallest matrix to reduce trainable parameters.
         randlora_A = torch.rand((config.r, 1, min_dim), generator=generator)
 
-        # Ensure full rank
-        n = min_dim / config.r
-        n = int(n) if n.is_integer() else int(n) + 1  # Ensure full rank
-        randlora_B = torch.rand((max_dim, n, config.r), generator=generator)
+        # Number of bases to ensure full rank
+        num_bases = min_dim / config.r
+        num_bases = int(n_bases) if num_bases.is_integer() else int(num_bases) + 1  # Ensure full rank
+        randlora_B = torch.rand((max_dim, num_bases, config.r), generator=generator)
 
         # The current implementation is a proof of concept and does take into consideration
         # the sparsity to reduce memory usage or speed up compute
         randlora_B_sparse = torch.zeros(randlora_B.shape)
         randlora_A_sparse = torch.zeros(randlora_A.shape)
-        randlora_B_sparse[randlora_B < 1 / (2 * s)] = -1
-        randlora_B_sparse[randlora_B > 1 - 1 / (2 * s)] = 1
-        randlora_A_sparse[randlora_A < 1 / (2 * s)] = -1
-        randlora_A_sparse[randlora_A > 1 - 1 / (2 * s)] = 1
+        randlora_B_sparse[randlora_B < 1 / (2 * sparsity)] = -1
+        randlora_B_sparse[randlora_B > 1 - 1 / (2 * sparsity)] = 1
+        randlora_A_sparse[randlora_A < 1 / (2 * sparsity)] = -1
+        randlora_A_sparse[randlora_A > 1 - 1 / (2 * sparsity)] = 1
 
         # Std normalization is empirically found to be the best
         randlora_A, randlora_B = (
@@ -194,9 +194,9 @@ class RandLoraModel(BaseTuner):
         randlora_A = _kaiming_init((config.r, 1, min_dim), generator=generator)
 
         # Ensure full rank
-        n = min(linear_out_dim, linear_in_dim) / config.r
-        n = int(n) if n.is_integer() else int(n) + 1
-        randlora_B = torch.cat([_kaiming_init((max_dim, 1, config.r), generator=generator) for _ in range(n)], dim=1)
+        num_bases = min(linear_out_dim, linear_in_dim) / config.r
+        num_bases = int(num_bases) if num_bases.is_integer() else int(num_bases) + 1
+        randlora_B = torch.cat([_kaiming_init((max_dim, 1, config.r), generator=generator) for _ in range(num_bases)], dim=1)
 
         # Std normalization is empirically found to be the best
         randlora_A, randlora_B = randlora_A / randlora_A.std(), randlora_B / randlora_B.std()
@@ -207,10 +207,10 @@ class RandLoraModel(BaseTuner):
         if config.very_sparse:
             linear_out_dim, linear_in_dim = self._find_dim(config)
             self._init_randlora_A_randlora_B_sparse(
-                config, adapter_name, s=math.sqrt(min(linear_out_dim, linear_in_dim))
+                config, adapter_name, sparsity=math.sqrt(min(linear_out_dim, linear_in_dim))
             )
         elif config.sparse:
-            self._init_randlora_A_randlora_B_sparse(config, adapter_name, s=3)
+            self._init_randlora_A_randlora_B_sparse(config, adapter_name, sparsity=3)
         else:
             self._init_randlora_A_randlora_B(config, adapter_name)
 
@@ -521,6 +521,7 @@ class RandLoraModel(BaseTuner):
                     new_adapter = target.active_adapter[:]
 
         self.active_adapter = new_adapter or []
+        self._delete_auxiliary_adapter(adapter_name, new_active_adapters=new_adapter)
 
     def merge_and_unload(
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None

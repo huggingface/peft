@@ -29,8 +29,8 @@ class RandLoraConfig(PeftConfig):
 
     Args:
         r (`int`, *optional*, defaults to `32`):
-            RandLora's random basis rank dimension. Contrary to Lora, this parameter is inversely proportional to the amount of trainable
-            parameters as reducing it increases trainable parameters.
+            RandLora's random basis rank dimension. Contrary to Lora, this parameter is inversely proportional to the
+            amount of trainable parameters as reducing it increases trainable parameters.
         target_modules (`Union[list[str], str]`):
             The names of the modules to apply RandLora to. Only linear layers are supported.
         projection_prng_key (`int`):
@@ -38,17 +38,21 @@ class RandLoraConfig(PeftConfig):
             checkpoint that did not include these projections. Defaults to `0`.
         save_projection (`bool`):
             Whether to save the global basis_A / basis_B random basis in the state dict alongside per layer lambda /
-            gamma diagonal matrices. This will increase the size of the checkpoint, but guarantee that we can
-            reload the checkpoint on all system configurations. Defaults to `True`.
+            gamma diagonal matrices. This will increase the size of the checkpoint, but guarantee that we can reload
+            the checkpoint on all system configurations. Defaults to `True`.
         sparse (`bool`):
-            Whether to use sparse random bases as described in the RandLora paper. The bases are ternary sparse bases (only containing -1, 0 and 1) where the attribution probability is 1/6 for -1 and 1 and 2/3 for 0.
-            These sparse matrices aim to be used for matmul free computation in the future, see https://arxiv.org/pdf/2406.02528v1
-            The current implementation is a proof of concept however where the sparseness is not used to improve speed or memory usage. Using sparse matrices typically does not reduce performance and can even help reduce overfitting.
-            Defaults to `False`.
+            Whether to use sparse random bases as described in the RandLora paper. The bases are ternary sparse bases
+            (only containing -1, 0 and 1) where the attribution probability is 1/6 for -1 and 1 and 2/3 for 0. These
+            sparse matrices aim to be used for matmul free computation in the future, see
+            https://arxiv.org/pdf/2406.02528v1 The current implementation is a proof of concept however where the
+            sparseness is not used to improve speed or memory usage. Using sparse matrices typically does not reduce
+            performance and can even help reduce overfitting. Defaults to `False`.
         very_sparse (`bool`):
-            Whether to use highly sparse random bases as described in the RandLora paper. The very sparse bases are ternary sparse bases (only containing -1, 0 and 1) given a matrix with smallest dimension d, the attribution probability is 1/√D for -1 and 1 and 1- 2/√D for 0.
-            Using these sparse matrices can further reduce overfitting over the `sparse` alternatives but will most likely decrease performance as a results. Use carefully.
-            Defaults to `False`.
+            Whether to use highly sparse random bases as described in the RandLora paper. The very sparse bases are
+            ternary sparse bases (only containing -1, 0 and 1) given a matrix with smallest dimension d, the
+            attribution probability is 1/√D for -1 and 1 and 1- 2/√D for 0. Using these sparse matrices can further
+            reduce overfitting over the `sparse` alternatives but will most likely decrease performance as a results.
+            Use carefully. Defaults to `False`.
         randlora_dropout (`float`):
             The dropout probability for RandLora layers.
         randlora_alpha (`float`):

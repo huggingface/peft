@@ -59,11 +59,18 @@ if is_bnb_available():
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
-            if self.merged:
-                warnings.warn(
-                    f"Already following adapters were merged {','.join(self.merged_adapters)}. "
-                    f"You are now additionally merging {','.join(self.active_adapters)}."
-                )
+            """
+            Merge the active adapter weights into the base weights
+
+            Args:
+                safe_merge (`bool`, *optional*):
+                    If True, the merge operation will be performed in a copy of the original weights and check for NaNs
+                    before merging the weights. This is useful if you want to check if the merge operation will produce
+                    NaNs. Defaults to `False`.
+                adapter_names (`list[str]`, *optional*):
+                    The list of adapter names that should be merged. If None, all active adapters will be merged.
+                    Defaults to `None`.
+            """
 
             adapter_names = check_adapters_to_merge(self, adapter_names)
             if not adapter_names:
@@ -98,6 +105,9 @@ if is_bnb_available():
                 self.merged_adapters.append(active_adapter)
 
         def unmerge(self) -> None:
+            """
+            This method unmerges all merged adapter layers from the base weights.
+            """
             if not self.merged:
                 warnings.warn("Already unmerged. Nothing to do")
                 return
@@ -124,7 +134,7 @@ if is_bnb_available():
                 ).to(weight.device)
                 state.reset_grads()
 
-        def get_scaled_bases(self, adapter) -> list[torch.Tensor, torch.Tensor]:
+        def get_scaled_bases(self, adapter, device=None) -> list[torch.Tensor, torch.Tensor]:
             """
             Performs scaling on the smallest random base (randlora_A) and returns randlora_A and randlora_B in the
             correct order to fit the target layers' dimensions
@@ -137,7 +147,8 @@ if is_bnb_available():
             randlora_A = self.randlora_A[adapter]
             randlora_B = self.randlora_B[adapter]
 
-            device = randlora_B.device
+            if device is None:
+                device = randlora_B.device
             dtype = randlora_B.dtype
 
             # In case users wants to merge the adapter weights that are in
@@ -145,8 +156,8 @@ if is_bnb_available():
             # (b)float16 because some CPUs have slow bf16/fp16 matmuls.
             cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
 
-            randlora_lambda = self.randlora_lambda[adapter]
-            randlora_gamma = self.randlora_gamma[adapter]
+            randlora_lambda = self.randlora_lambda[adapter].to(device)
+            randlora_gamma = self.randlora_gamma[adapter].to(device)
 
             if cast_to_fp32:
                 randlora_A = randlora_A.float()
@@ -160,8 +171,8 @@ if is_bnb_available():
             # As adapted layers may have different shapes and RandLora contains a single shared pair of A and B matrices,
             # we initialize these matrices with the largest required size for each dimension.
             # During the forward pass, required submatrices are sliced out from the shared randlora_A and randlora_B.
-            sliced_A = randlora_A[:, : self.num_bases, :min_dim]
-            sliced_B = randlora_B[:max_dim, : self.num_bases, :]
+            sliced_A = randlora_A[:, : self.num_bases, :min_dim].to(device)
+            sliced_B = randlora_B[:max_dim, : self.num_bases, :].to(device)
 
             # Flattening the matrices over the rank and number of bases dimensions is more memory efficient
             update_B = sliced_B.flatten(start_dim=1)
@@ -216,7 +227,7 @@ if is_bnb_available():
                     if active_adapter not in self.randlora_lambda.keys():
                         continue
 
-                    update_B, update_A = self.get_scaled_bases(active_adapter)
+                    update_B, update_A = self.get_scaled_bases(active_adapter, device=x.device)
 
                     requires_conversion = not torch.is_autocast_enabled()
                     if requires_conversion:
@@ -275,11 +286,18 @@ if is_bnb_4bit_available():
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
-            if self.merged:
-                warnings.warn(
-                    f"Already following adapters were merged {','.join(self.merged_adapters)}. "
-                    f"You are now additionally merging {','.join(self.active_adapters)}."
-                )
+            """
+            Merge the active adapter weights into the base weights
+
+            Args:
+                safe_merge (`bool`, *optional*):
+                    If True, the merge operation will be performed in a copy of the original weights and check for NaNs
+                    before merging the weights. This is useful if you want to check if the merge operation will produce
+                    NaNs. Defaults to `False`.
+                adapter_names (`list[str]`, *optional*):
+                    The list of adapter names that should be merged. If None, all active adapters will be merged.
+                    Defaults to `None`.
+            """
 
             adapter_names = check_adapters_to_merge(self, adapter_names)
             if not adapter_names:
@@ -309,6 +327,9 @@ if is_bnb_4bit_available():
                 self.merged_adapters.append(active_adapter)
 
         def unmerge(self) -> None:
+            """
+            This method unmerges all merged adapter layers from the base weights.
+            """
             if not self.merged:
                 warnings.warn("Already unmerged. Nothing to do")
                 return
@@ -330,7 +351,7 @@ if is_bnb_4bit_available():
                     weight.device
                 )
 
-        def get_scaled_bases(self, adapter) -> list[torch.Tensor, torch.Tensor]:
+        def get_scaled_bases(self, adapter, device=None) -> list[torch.Tensor, torch.Tensor]:
             """
             Performs scaling on the smallest random base (randlora_A) and returns randlora_A and randlora_B in the
             correct order to fit the target layers' dimensions
@@ -342,8 +363,8 @@ if is_bnb_4bit_available():
 
             randlora_A = self.randlora_A[adapter]
             randlora_B = self.randlora_B[adapter]
-
-            device = randlora_B.device
+            if device is None:
+                device = randlora_B.device
             dtype = randlora_B.dtype
 
             # In case users wants to merge the adapter weights that are in
@@ -351,8 +372,8 @@ if is_bnb_4bit_available():
             # (b)float16 because some CPUs have slow bf16/fp16 matmuls.
             cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
 
-            randlora_lambda = self.randlora_lambda[adapter]
-            randlora_gamma = self.randlora_gamma[adapter]
+            randlora_lambda = self.randlora_lambda[adapter].to(device)
+            randlora_gamma = self.randlora_gamma[adapter].to(device)
 
             if cast_to_fp32:
                 randlora_A = randlora_A.float()
@@ -366,8 +387,8 @@ if is_bnb_4bit_available():
             # As adapted layers may have different shapes and RandLora contains a single shared pair of A and B matrices,
             # we initialize these matrices with the largest required size for each dimension.
             # During the forward pass, required submatrices are sliced out from the shared randlora_A and randlora_B.
-            sliced_A = randlora_A[:, : self.num_bases, :min_dim]
-            sliced_B = randlora_B[:max_dim, : self.num_bases, :]
+            sliced_A = randlora_A[:, : self.num_bases, :min_dim].to(device)
+            sliced_B = randlora_B[:max_dim, : self.num_bases, :].to(device)
             # Flattening the matrices over the rank and number of bases dimensions is more memory efficient
             update_B = sliced_B.flatten(start_dim=1)
             update_A = UniqueBaseGrad.apply(sliced_A, randlora_lambda, randlora_gamma).flatten(end_dim=1)
@@ -407,7 +428,7 @@ if is_bnb_4bit_available():
                     if active_adapter not in self.randlora_lambda.keys():
                         continue
 
-                    update_B, update_A = self.get_scaled_bases(active_adapter)
+                    update_B, update_A = self.get_scaled_bases(active_adapter, device=x.device)
 
                     requires_conversion = not torch.is_autocast_enabled()
                     if requires_conversion:

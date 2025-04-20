@@ -44,8 +44,8 @@ def skip_non_prompt_tuning(test_list):
 
 def skip_deberta_lora_tests(test_list):
     r"""
-    Skip tests that are checkpointing with lora/ia3/boft/vera/randlora/fourierft for Deberta models (couldn't find much info on
-    the error)
+    Skip tests that are checkpointing with lora/ia3/boft/vera/randlora/fourierft for Deberta models (couldn't find much
+    info on the error)
     """
     to_skip = ["lora", "ia3", "boft", "vera", "fourierft", "hra", "bone", "randlora"]
     return [test for test in test_list if not (any(k in test[0] for k in to_skip) and "Deberta" in test[0])]

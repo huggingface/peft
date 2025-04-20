@@ -1393,7 +1393,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.single_gpu_tests
-    def test_causal_lm_training_randlora(self):
+    def test_causal_lm_training_8bit_randlora(self):
         r"""
         Same as test_causal_lm_training but with RandLora
         """
@@ -1501,7 +1501,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
-    def test_causal_lm_training_multi_gpu_RandLora(self):
+    def test_causal_lm_training_multi_gpu_8bit_randlora(self):
         r"""
         Same as test_causal_lm_training_multi_gpu but with RandLoRA
         """

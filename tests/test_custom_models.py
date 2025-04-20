@@ -3816,7 +3816,7 @@ class RequiresGradTester(unittest.TestCase):
         # active adapter is still "default"
         self.check_requires_grad(
             peft_model,
-            "nobase_model.model.lin1.vera_lambda_b.default",
+            "base_model.model.lin1.vera_lambda_b.default",
             "base_model.model.lin1.vera_lambda_d.default",
         )
 
