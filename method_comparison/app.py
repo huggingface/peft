@@ -18,6 +18,7 @@ import os
 import tempfile
 
 import gradio as gr
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from processing import load_df
@@ -345,11 +346,193 @@ def build_app(df):
             outputs=[pareto_plot, summary_box],
         )
 
+        gr.Markdown("## Method Comparison Dashboard")
+
+        with gr.Row():
+            with gr.Column():
+                gr.Markdown("### Method Selection")
+                method_checkbox_group = gr.CheckboxGroup(
+                    label="Select Methods to Compare",
+                    choices=sorted(df["peft_type"].unique()),
+                    value=sorted(df["peft_type"].unique())[:2],
+                )
+
+                metric_selector = gr.Dropdown(
+                    label="Select Metric",
+                    choices=list(metric_preferences.keys()),
+                    value="test_accuracy",
+                )
+
+                comparison_type = gr.Radio(
+                    label="Comparison Type",
+                    choices=["Bar Chart", "Line Chart", "Scatter Plot"],
+                    value="Bar Chart",
+                )
+
+            with gr.Column():
+                comparison_plot = gr.Plot(label="Method Comparison")
+
+        gr.Markdown("## Performance Metrics")
+        with gr.Row():
+            with gr.Column():
+                memory_plot = gr.Plot(label="Memory Usage Comparison")
+            with gr.Column():
+                time_plot = gr.Plot(label="Training Time Comparison")
+
+        gr.Markdown("## Method Details")
+        method_details = gr.DataFrame(label="Selected Method Details", interactive=False)
+
+        def update_comparison_plot(methods, metric, plot_type):
+            if not methods:
+                return {}
+
+            filtered = df[df["peft_type"].isin(methods)]
+            if filtered.empty:
+                return {}
+
+            if plot_type == "Bar Chart":
+                fig = px.bar(
+                    filtered,
+                    x="peft_type",
+                    y=metric,
+                    color="peft_type",
+                    title=f"{metric} Comparison",
+                    template="seaborn",
+                )
+            elif plot_type == "Line Chart":
+                fig = px.line(
+                    filtered,
+                    x="peft_type",
+                    y=metric,
+                    color="peft_type",
+                    title=f"{metric} Comparison",
+                    template="seaborn",
+                )
+            else:  # Scatter Plot
+                fig = px.scatter(
+                    filtered,
+                    x="peft_type",
+                    y=metric,
+                    color="peft_type",
+                    title=f"{metric} Comparison",
+                    template="seaborn",
+                )
+
+            fig.update_layout(height=400, width=600)
+            return fig
+
+        def update_memory_plot(methods):
+            if not methods:
+                return {}
+
+            filtered = df[df["peft_type"].isin(methods)]
+            if filtered.empty:
+                return {}
+
+            fig = px.box(
+                filtered,
+                x="peft_type",
+                y="cuda_memory_max",
+                color="peft_type",
+                title="Memory Usage Distribution",
+                template="seaborn",
+            )
+            fig.update_layout(height=400, width=500)
+            return fig
+
+        def update_time_plot(methods):
+            if not methods:
+                return {}
+
+            filtered = df[df["peft_type"].isin(methods)]
+            if filtered.empty:
+                return {}
+
+            fig = px.box(
+                filtered,
+                x="peft_type",
+                y="total_time",
+                color="peft_type",
+                title="Training Time Distribution",
+                template="seaborn",
+            )
+            fig.update_layout(height=400, width=500)
+            return fig
+
+        def update_method_details(methods):
+            if not methods:
+                return pd.DataFrame()
+
+            filtered = df[df["peft_type"].isin(methods)]
+            if filtered.empty:
+                return pd.DataFrame()
+
+            # Aggregate statistics for each method
+            details = (
+                filtered.groupby("peft_type")
+                .agg(
+                    {
+                        "test_accuracy": ["mean", "std"],
+                        "cuda_memory_max": ["mean", "std"],
+                        "total_time": ["mean", "std"],
+                    }
+                )
+                .round(3)
+            )
+
+            return details
+
+        # Add event handlers
+        method_checkbox_group.change(
+            fn=update_comparison_plot,
+            inputs=[method_checkbox_group, metric_selector, comparison_type],
+            outputs=comparison_plot,
+        )
+
+        metric_selector.change(
+            fn=update_comparison_plot,
+            inputs=[method_checkbox_group, metric_selector, comparison_type],
+            outputs=comparison_plot,
+        )
+
+        comparison_type.change(
+            fn=update_comparison_plot,
+            inputs=[method_checkbox_group, metric_selector, comparison_type],
+            outputs=comparison_plot,
+        )
+
+        method_checkbox_group.change(
+            fn=update_memory_plot,
+            inputs=[method_checkbox_group],
+            outputs=memory_plot,
+        )
+
+        method_checkbox_group.change(
+            fn=update_time_plot,
+            inputs=[method_checkbox_group],
+            outputs=time_plot,
+        )
+
+        method_checkbox_group.change(
+            fn=update_method_details,
+            inputs=[method_checkbox_group],
+            outputs=method_details,
+        )
+
     return demo
 
 
-# TODO only 1 task, using temporary results for now
-path = os.path.join(os.path.dirname(__file__), "MetaMathQA", "temporary_results")
-df = load_df(path, task_name="MetaMathQA")
-demo = build_app(df)
-demo.launch()
+def main():
+    path = os.path.join(os.path.dirname(__file__), "MetaMathQA", "temporary_results")
+    df = load_df(path, task_name="MetaMathQA")
+
+    if df.empty:
+        print("No data available. Please ensure there are JSON files in the temporary_results directory.")
+        return
+
+    demo = build_app(df)
+    demo.launch(share=True)
+
+
+if __name__ == "__main__":
+    main()

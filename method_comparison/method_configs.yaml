@@ -1,0 +1,13 @@
+LoRA:
+  best_use_cases:
+  - Fine-tuning large language models
+  hardware_requirements:
+    GPU: A100
+  limitations:
+  - Requires careful rank selection
+  memory_requirements:
+    GPU: 8.0
+  parameters:
+    alpha: 16
+    rank: 8
+  training_time: 2.5
