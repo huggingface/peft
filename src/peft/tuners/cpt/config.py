@@ -82,7 +82,8 @@ class CPTConfig(PromptLearningConfig):
         self.peft_type = PeftType.CPT  # Specifies that the PEFT type is CPT.
         if self.task_type != TaskType.CAUSAL_LM:
             warnings.warn(
-                f"{self.__class__.__name__} only supports task_type = {TaskType.CAUSAL_LM}, setting it automatically."
+                f"{self.__class__.__name__} only supports task_type = {TaskType.CAUSAL_LM.value}, "
+                "setting it automatically."
             )
             self.task_type = "CAUSAL_LM"  # Ensures task type is causal language modeling.
 
