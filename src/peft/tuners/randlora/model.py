@@ -158,7 +158,7 @@ class RandLoraModel(BaseTuner):
 
         # Number of bases to ensure full rank
         num_bases = min_dim / config.r
-        num_bases = int(n_bases) if num_bases.is_integer() else int(num_bases) + 1  # Ensure full rank
+        num_bases = int(num_bases) if num_bases.is_integer() else int(num_bases) + 1  # Ensure full rank
         randlora_B = torch.rand((max_dim, num_bases, config.r), generator=generator)
 
         # The current implementation is a proof of concept and does take into consideration
