@@ -47,7 +47,8 @@ class MLP(nn.Module):
         X = self.sm(X)
         return X
 
-
+# Tests copied from the TestVera class in test_vera.py. 
+# Changes to the code file should be reflected here.
 class TestRandLora:
     @pytest.fixture
     def mlp(self):
