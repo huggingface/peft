@@ -196,7 +196,9 @@ class RandLoraModel(BaseTuner):
         # Ensure full rank
         num_bases = min(linear_out_dim, linear_in_dim) / config.r
         num_bases = int(num_bases) if num_bases.is_integer() else int(num_bases) + 1
-        randlora_B = torch.cat([_kaiming_init((max_dim, 1, config.r), generator=generator) for _ in range(num_bases)], dim=1)
+        randlora_B = torch.cat(
+            [_kaiming_init((max_dim, 1, config.r), generator=generator) for _ in range(num_bases)], dim=1
+        )
 
         # Std normalization is empirically found to be the best
         randlora_A, randlora_B = randlora_A / randlora_A.std(), randlora_B / randlora_B.std()
