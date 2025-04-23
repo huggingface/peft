@@ -85,7 +85,7 @@ class CPTConfig(PromptLearningConfig):
                 f"{self.__class__.__name__} only supports task_type = {TaskType.CAUSAL_LM.value}, "
                 "setting it automatically."
             )
-            self.task_type = "CAUSAL_LM"  # Ensures task type is causal language modeling.
+            self.task_type = TaskType.CAUSAL_LM  # Ensures task type is causal language modeling.
 
         if self.cpt_token_ids is None:
             self.cpt_token_ids = [0]
