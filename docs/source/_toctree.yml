@@ -45,6 +45,8 @@
     title: Troubleshooting
   - local: developer_guides/checkpoint
     title: PEFT checkpoint format
+  - local: developer_guides/method_comparison
+    title: Method Comparison
 
 - title: 🤗 Accelerate integrations
   sections:
