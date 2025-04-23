@@ -228,8 +228,9 @@ def test_model_initialization_random(global_tokenizer, config_random):
 
 
 def test_model_initialization_wrong_task_type_warns():
+    # TODO: adjust this test to check for an error with PEFT v0.18.0
     msg = "CPTConfig only supports task_type = CAUSAL_LM, setting it automatically"
-    with pytest.warns(UserWarning, match=msg):
+    with pytest.warns(FutureWarning, match=msg):
         config = CPTConfig(task_type=TaskType.SEQ_CLS)
     assert config.task_type == TaskType.CAUSAL_LM
 
