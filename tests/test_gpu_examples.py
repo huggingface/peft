@@ -85,6 +85,7 @@ from .testing_utils import (
     require_auto_awq,
     require_auto_gptq,
     require_bitsandbytes,
+    require_deterministic_for_xpu,
     require_eetq,
     require_hqq,
     require_multi_accelerator,
@@ -4025,6 +4026,7 @@ class TestPTuningReproducibility:
     device = infer_device()
 
     @require_non_cpu
+    @require_deterministic_for_xpu
     def test_p_tuning_exactly_reproducible_after_loading(self, tmp_path):
         # See: https://github.com/huggingface/peft/issues/2043#issuecomment-2321522577
         # Ensure that after loading a p-tuning checkpoint, results are exactly reproducible (before the patch, they were

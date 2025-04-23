@@ -1286,6 +1286,7 @@ class TestLokrInitialization:
     def data(self):
         return torch.rand(10, 1000).to(self.torch_device)
 
+    @require_deterministic_for_xpu
     def test_lokr_linear_init_default(self, data):
         torch.manual_seed(0)
 
@@ -1384,6 +1385,7 @@ class TestAdaLoraInitialization:
     def data(self):
         return torch.rand(10, 1000).to(self.torch_device)
 
+    @require_deterministic_for_xpu
     def test_adalora_default_init_identity(self, data):
         # default is True
         torch.manual_seed(0)
