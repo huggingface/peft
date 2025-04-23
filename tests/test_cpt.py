@@ -27,7 +27,7 @@ from transformers import (
     TrainingArguments,
 )
 
-from peft import CPTConfig, get_peft_model
+from peft import CPTConfig, TaskType, get_peft_model
 
 
 TEMPLATE = {"input": "input: {}", "intra_seperator": " ", "output": "output: {}", "inter_seperator": "\n"}
@@ -225,6 +225,14 @@ def test_model_initialization_random(global_tokenizer, config_random):
 
     model = get_peft_model(base_model, config_random)
     assert model is not None, "PEFT model initialization failed"
+
+
+def test_model_initialization_wrong_task_type_warns():
+    # TODO: adjust this test to check for an error with PEFT v0.18.0
+    msg = "CPTConfig only supports task_type = CAUSAL_LM, setting it automatically"
+    with pytest.warns(FutureWarning, match=msg):
+        config = CPTConfig(task_type=TaskType.SEQ_CLS)
+    assert config.task_type == TaskType.CAUSAL_LM
 
 
 def test_model_training_random(sst_data, global_tokenizer, collator, config_random):
