@@ -564,7 +564,7 @@ class LoraModel(BaseTuner):
 
         adapters_ranks: list[int] = [
             # When allocating tensors for the new adapter, we need the maximum possible rank to not overflow
-            config.r if not config.rank_pattern else max([config.r, *config.rank_pattern.values()])
+            config.r if not config.rank_pattern else max(config.r, *config.rank_pattern.values())
             for config in (self.peft_config[adapter] for adapter in adapters)
         ]
 
