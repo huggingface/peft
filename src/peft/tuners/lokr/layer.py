@@ -75,8 +75,8 @@ class LoKrLayer(nn.Module, LycorisLayer):
             self.lokr_w1_a[adapter_name] = nn.Parameter(torch.empty(shape[0][0], r))
             self.lokr_w1_b[adapter_name] = nn.Parameter(torch.empty(r, shape[1][0]))
 
-        if len(shape) == 4:
-            # Conv2d
+        # Handle both Conv2d and Conv1d
+        if len(shape) == 4:  # Conv2d
             if use_w2:
                 self.lokr_w2[adapter_name] = nn.Parameter(torch.empty(shape[0][1], shape[1][1], *shape[2:]))
             elif use_effective_conv2d:
@@ -86,6 +86,16 @@ class LoKrLayer(nn.Module, LycorisLayer):
             else:
                 self.lokr_w2_a[adapter_name] = nn.Parameter(torch.empty(shape[0][1], r))
                 self.lokr_w2_b[adapter_name] = nn.Parameter(torch.empty(r, shape[1][1] * shape[2] * shape[3]))
+        elif len(shape) == 3:  # Conv1d
+            if use_w2:
+                self.lokr_w2[adapter_name] = nn.Parameter(torch.empty(shape[0][1], shape[1][1], shape[2]))
+            elif use_effective_conv2d:  # Even for Conv1d, use the effective parameter for kernel dimension
+                self.lokr_t2[adapter_name] = nn.Parameter(torch.empty(r, r, shape[2]))
+                self.lokr_w2_a[adapter_name] = nn.Parameter(torch.empty(r, shape[0][1]))  # b, 1-mode
+                self.lokr_w2_b[adapter_name] = nn.Parameter(torch.empty(r, shape[1][1]))  # d, 2-mode
+            else:
+                self.lokr_w2_a[adapter_name] = nn.Parameter(torch.empty(shape[0][1], r))
+                self.lokr_w2_b[adapter_name] = nn.Parameter(torch.empty(r, shape[1][1] * shape[2]))
         else:
             # Linear
             if use_w2:
@@ -201,7 +211,28 @@ class LoKrLayer(nn.Module, LycorisLayer):
 
             use_w1 = not (decompose_both and r < max(shape[0][0], shape[1][0]) / 2)
             use_w2 = r >= max(shape[0][1], shape[1][1]) / 2
-            use_effective_conv2d = use_effective_conv2d and base_layer.kernel_size != (1, 1)
+            # Handle 1x1 convolutions differently
+            if base_layer.kernel_size == (1, 1):
+                # For 1x1 convolutions, always disable use_effective_conv2d
+                use_effective_conv2d = False
+            else:
+                use_effective_conv2d = use_effective_conv2d
+        elif isinstance(base_layer, nn.Conv1d):
+            in_dim, out_dim = base_layer.in_channels, base_layer.out_channels
+            k_size = (base_layer.kernel_size[0],)  # Convert to a tuple with single element
+
+            in_m, in_n = factorization(in_dim, decompose_factor)
+            out_l, out_k = factorization(out_dim, decompose_factor)
+            shape = ((out_l, out_k), (in_m, in_n), *k_size)  # ((a, b), (c, d), k)
+
+            use_w1 = not (decompose_both and r < max(shape[0][0], shape[1][0]) / 2)
+            use_w2 = r >= max(shape[0][1], shape[1][1]) / 2
+            # Handle kernel_size=1 Conv1d differently
+            if base_layer.kernel_size[0] == 1:
+                # For kernel_size=1, always disable use_effective_conv2d
+                use_effective_conv2d = False
+            else:
+                use_effective_conv2d = use_effective_conv2d
         else:
             raise TypeError(f"LoKr is not implemented for base layers of type {type(base_layer).__name__}")
 
@@ -237,7 +268,16 @@ class LoKrLayer(nn.Module, LycorisLayer):
 
         # Make weights with Kronecker product
         weight = make_kron(w1, w2, self.scaling[adapter_name])
-        weight = weight.reshape(self.get_base_layer().weight.shape)
+        
+        # Get base layer for reshaping
+        base_layer = self.get_base_layer()
+        
+        # Special optimization for 1x1 convolutions and kernel_size=1 Conv1d
+        is_1x1_conv2d = isinstance(base_layer, nn.Conv2d) and base_layer.kernel_size == (1, 1)
+        is_1_conv1d = isinstance(base_layer, nn.Conv1d) and base_layer.kernel_size[0] == 1
+        
+        # Regular reshape to match base layer shape
+        weight = weight.reshape(base_layer.weight.shape)
 
         # Perform rank dropout during training - drop rows of addition weights
         rank_dropout = self.rank_dropout[adapter_name]
@@ -343,6 +383,51 @@ class Conv2d(LoKrLayer):
         # don't add bias here, because the bias is already included in the output of the base_layer
         base_layer = self.get_base_layer()
         return F.conv2d(
+            input,
+            delta_weight,
+            stride=base_layer.stride,
+            padding=base_layer.padding,
+            dilation=base_layer.dilation,
+            groups=base_layer.groups,
+        )
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "lokr." + rep
+
+
+class Conv1d(LoKrLayer):
+    """LoKr implemented in Conv1d layer"""
+
+    def __init__(
+        self,
+        base_layer: nn.Module,
+        device: Optional[Union[str, torch.device]] = None,
+        dtype: Optional[torch.dtype] = None,
+        adapter_name: str = "default",
+        r: int = 0,
+        alpha: float = 0.0,
+        rank_dropout: float = 0.0,
+        module_dropout: float = 0.0,
+        use_effective_conv2d: bool = False,
+        init_weights: bool = True,
+        **kwargs,
+    ):
+        super().__init__(base_layer)
+
+        # Create adapter and set it active
+        self._active_adapter = adapter_name
+        self.update_layer(
+            adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, use_effective_conv2d, **kwargs
+        )
+
+    def _get_delta_activations(
+        self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
+    ) -> torch.Tensor:
+        delta_weight = self.get_delta_weight(adapter_name)
+        # don't add bias here, because the bias is already included in the output of the base_layer
+        base_layer = self.get_base_layer()
+        return F.conv1d(
             input,
             delta_weight,
             stride=base_layer.stride,
