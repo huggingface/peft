@@ -1,6 +1,10 @@
-import os
-import torch
 import importlib
+
+import torch
+from neural_compressor.torch.quantization import FP8Config, convert, finalize_calibration, prepare
+from optimum.habana.diffusers import GaudiFluxPipeline
+
+
 """
 This exampe demonstrates loading of LoRA adapter (via PEFT) into an FP8 INC-quantized FLUX model.
 
@@ -10,6 +14,7 @@ https://github.com/intel/neural-compressor/tree/master/examples/helloworld/fp8_e
 Requirements:
 pip install optimum-habana sentencepiece neural-compressor[pt] peft
 """
+
 
 # Checks if HPU device is available
 # Adapted from https://github.com/huggingface/accelerate/blob/b451956fd69a135efc283aadaa478f0d33fcbe6a/src/accelerate/utils/imports.py#L435
@@ -31,7 +36,6 @@ if not is_hpu_available():
 
 
 # Example: FLUX model inference on HPU via optimum-habana pipeline
-from optimum.habana.diffusers import GaudiFluxPipeline
 hpu_configs = {
     "use_habana": True,
     "use_hpu_graphs": True,
@@ -42,14 +46,13 @@ pipe = GaudiFluxPipeline.from_pretrained("black-forest-labs/FLUX.1-dev", torch_d
 prompt = "A picture of sks dog in a bucket"
 
 # Quantize FLUX transformer to FP8 using INC (Intel Neural Compressor)
-from neural_compressor.torch.quantization import FP8Config, convert, prepare, finalize_calibration
 quant_configs = {
     "mode": "AUTO",
     "observer": "maxabs",
     "scale_method": "maxabs_hw",
-    "allowlist": {"types": [], "names":  []},
-    "blocklist": {"types": [], "names":  []},
-    "dump_stats_path": "/tmp/hqt_output/measure"
+    "allowlist": {"types": [], "names": []},
+    "blocklist": {"types": [], "names": []},
+    "dump_stats_path": "/tmp/hqt_output/measure",
 }
 config = FP8Config(**quant_configs)
 pipe.transformer = prepare(pipe.transformer, config)

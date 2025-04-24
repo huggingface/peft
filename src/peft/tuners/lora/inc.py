@@ -12,15 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import Optional
+
 import torch
 
 from peft.import_utils import is_inc_available
 from peft.tuners.tuners_utils import BaseTunerLayer
-from typing import Optional
 
 from .layer import Linear
 
+
 if is_inc_available():
+
     class IncLoraLinear(Linear):
         def __init__(
             self,
@@ -64,6 +67,7 @@ def dispatch_inc(target: torch.nn.Module, adapter_name: str, **kwargs):
         from neural_compressor.torch.algorithms.fp8_quant._quant_common.helper_modules import (
             PatchedLinear,
         )
+
         if isinstance(target_base_layer, PatchedLinear):
             new_module = IncLoraLinear(target, adapter_name, **kwargs)
 
