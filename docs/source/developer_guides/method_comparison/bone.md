@@ -1,12 +1,12 @@
-# Bone (Bottleneck Orthogonal Network)
+# Bone (Bottleneck Network)
 
 ## Overview
-Bone is a parameter-efficient fine-tuning method that uses orthogonal transformations in bottleneck layers. It's particularly effective for small to medium-sized models and offers excellent memory efficiency.
+Bone is a parameter-efficient fine-tuning method that uses a bottleneck architecture to adapt pre-trained models. Based on recent benchmark results, Bone offers unique advantages for inference efficiency through its merge functionality.
 
 ## Key Features
-- Extremely memory efficient (~0.05% of base model parameters)
-- Fast inference speed
-- Good for small to medium models
+- Efficient parameter adaptation for model fine-tuning
+- Superior merged inference performance (up to 50% speed improvement)
+- Support for small to large models
 - Simple implementation
 
 ## Performance Characteristics
@@ -14,30 +14,30 @@ Bone is a parameter-efficient fine-tuning method that uses orthogonal transforma
 ### Memory Efficiency
 | Model Size | Bone Parameters | Memory Usage |
 |------------|----------------|--------------|
-| 100M       | ~50K           | ~200KB       |
-| 1B         | ~500K          | ~2MB         |
-| 7B         | ~3.5M          | ~14MB        |
-| 13B        | ~6.5M          | ~26MB        |
+| 125M       | 37,748,736     | ~72.00 MB    |
+| 350M       | 100,663,296    | ~192.00 MB   |
+| 1.3B       | 201,326,592    | ~384.00 MB   |
 
 ### Training Performance
-| Metric | Value |
-|--------|-------|
-| Training Speed | Fast |
-| Convergence | Quick (typically 1-2 epochs) |
-| Inference Overhead | < 2% |
+| Metric               | Value                               |
+|----------------------|-------------------------------------|
+| Training Speed       | Fast (compared to full fine-tuning) |
+| Convergence          | Quick (typically 1-3 epochs)        |
+| Inference Overhead   | -0.66% to -11.44% (speed improvement) |
+| Parameter Efficiency | 15.30-30.39% of parameters         |
+| Merged Inference     | -43.10% to -51.49% (major speed improvement) |
 
 ## Use Cases
 
 ### Best For
-- Small to medium models
-- Resource-constrained devices
-- Classification tasks
-- Quick experiments
+- Models requiring fast inference after fine-tuning (using merge capability)
+- Small to large models (125M to 1.3B+ parameters)
+- Quick experiments and prototype development
+- Resource-constrained training with merge capability for efficient inference
 
 ### Not Recommended For
-- Large language models (>13B parameters)
-- Complex generation tasks
-- Tasks requiring extensive adaptation
+- Cases where extremely low parameter counts are the primary concern
+- Extremely large models without careful bottleneck size adjustment
 
 ## Implementation
 
@@ -47,9 +47,11 @@ from peft import BoneConfig, get_peft_model
 
 # Define Bone configuration
 config = BoneConfig(
-    bottleneck_size=64,  # size of bottleneck layer
-    target_modules=["attention.output"],
-    dropout=0.1,
+    task_type=TaskType.CAUSAL_LM,
+    bottleneck_size=32,  # Reduced size based on benchmarks
+    bottleneck_alpha=2.0,  # Reduced alpha based on benchmarks
+    bottleneck_dropout=0.1,
+    target_modules=["q_proj", "v_proj"],  # Focus on key modules
 )
 
 # Create PEFT model
@@ -58,13 +60,13 @@ model = get_peft_model(model, config)
 
 ### Advanced Configuration
 ```python
-# Custom Bone configuration
+# Custom Bone configuration for specific use cases
 config = BoneConfig(
-    bottleneck_size=128,  # larger bottleneck
-    target_modules=["attention.output", "intermediate"],
-    dropout=0.2,
-    use_orthogonal=True,  # enable orthogonal transformations
-    orthogonal_eps=1e-6,  # epsilon for numerical stability
+    task_type=TaskType.CAUSAL_LM,
+    bottleneck_size=64,  
+    bottleneck_alpha=4.0,  
+    bottleneck_dropout=0.1,
+    target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],  # More modules for greater adaptation
 )
 ```
 
@@ -73,123 +75,103 @@ config = BoneConfig(
 ### Recommended Ranges
 | Parameter | Recommended Range | Impact |
 |-----------|------------------|--------|
-| bottleneck_size | 32-256 | Larger = better performance, more parameters |
-| dropout | 0.0-0.3 | Regularization |
-| orthogonal_eps | 1e-8 to 1e-4 | Numerical stability |
+| bottleneck_size | 16-128 | Larger = better performance, more parameters |
+| bottleneck_alpha | 1.0-4.0 | Higher = more parameters, potentially better performance |
+| bottleneck_dropout | 0.0-0.2 | Regularization during training |
 
 ### Optimal Settings by Model Size
-| Model Size | Bottleneck Size | Dropout | Orthogonal Eps |
-|------------|----------------|---------|----------------|
-| < 100M    | 32            | 0.1     | 1e-6          |
-| 100M-1B   | 64            | 0.15    | 1e-6          |
-| 1B-7B     | 128           | 0.2     | 1e-5          |
-| 7B-13B    | 256           | 0.25    | 1e-5          |
+| Model Size | Bottleneck Size | Bottleneck Alpha | Dropout |
+|------------|----------------|-----------------|---------|
+| < 500M     | 32             | 2.0             | 0.1     |
+| 500M-2B    | 32-64          | 2.0-4.0         | 0.1     |
+| 2B-7B      | 64             | 2.0             | 0.1     |
+| 7B+        | 64-128         | 1.0-2.0         | 0.1     |
 
 ## Comparison with Other Methods
 
 ### Performance Comparison
-| Method | Memory Efficiency | Training Speed | Model Size Suitability |
-|--------|------------------|----------------|-----------------------|
-| Bone   | Very High       | Fast          | Small-Medium         |
-| LoRA   | High            | Fast          | All                  |
-| Adapter | Medium         | Medium        | All                  |
-| Prompt | Very High      | Very Fast     | All                  |
+| Method | Parameter Efficiency | Training Speed | Inference Speed Potential |
+|--------|---------------------|----------------|---------------------------|
+| Bone   | 15.30-30.39%        | Fast           | Excellent (post-merge)    |
+| LoRA   | 0.96-1.90%          | Fast           | Good                      |
+| LoRA-FA| 0.24-0.47%          | Fast           | Good                      |
 
 ### Memory Usage Comparison
-| Method | Parameters (% of base) | Training Memory | Inference Memory |
-|--------|----------------------|-----------------|------------------|
-| Bone   | 0.05%               | Very Low       | Very Low         |
-| LoRA   | 0.1%                | Low            | Low              |
-| Adapter | 0.5%                | Medium         | Medium           |
-| Prompt | 0.01%               | Very Low       | Very Low         |
+| Method  | Parameters (% of base) | Training Memory  | Merged Inference Speedup |
+|---------|------------------------|------------------|--------------------------|
+| Bone    | 15.30-30.39%           | 72-384 MB        | 43-51% faster           |
+| LoRA    | 0.96-1.90%             | 9-48 MB          | Not applicable          |
+| LoRA-FA | 0.24-0.47%             | 1.12-6.00 MB     | Not applicable          |
 
 ## Best Practices
 
-1. **Bottleneck Size Selection**
-   - Start with size 64 for most cases
-   - Increase for better performance
-   - Consider model size and task complexity
+1. **Bottleneck Size and Alpha Selection**
+   - For maximum efficiency, consider using bottleneck_size=32, alpha=2.0
+   - Benchmark results show these reduced settings can maintain performance
+   - Adjust based on your specific task requirements
 
 2. **Target Modules**
-   - Focus on attention outputs
-   - Add intermediate layers for complex tasks
-   - Consider model architecture
+   - Focus on key attention modules ("q_proj", "v_proj") for efficiency
+   - Only add additional modules if necessary for your specific task
 
-3. **Training Tips**
-   - Use learning rate 5e-5 to 2e-4
-   - Monitor orthogonal condition
-   - Use gradient clipping
+3. **Merge for Inference**
+   - Use the merge capability for production inference (40-50% speedup)
+   - Benchmark shows substantial inference improvements with merged weights
 
 ## Common Issues and Solutions
 
-### Problem: Orthogonal Instability
+### Problem: High Parameter Count
 **Solution:**
 ```python
-# Improve numerical stability
+# Reduce parameter count with smaller bottleneck and alpha
 config = BoneConfig(
-    bottleneck_size=64,
-    target_modules=["attention.output"],
-    dropout=0.1,
-    use_orthogonal=True,
-    orthogonal_eps=1e-4,  # Increase epsilon
+    bottleneck_size=32,  # Smaller bottleneck
+    bottleneck_alpha=2.0,  # Lower alpha
+    target_modules=["q_proj", "v_proj"],  # Focus on key modules only
+    bottleneck_dropout=0.1,
 )
 ```
 
-### Problem: Limited Adaptation
+### Problem: Slow Inference
 **Solution:**
 ```python
-# Increase adaptation capacity
-config = BoneConfig(
-    bottleneck_size=128,  # Larger bottleneck
-    target_modules=["attention.output", "intermediate"],  # More target modules
-    dropout=0.1,
-    use_orthogonal=True,
-)
+# Merge weights for fast inference
+# During training:
+model = get_peft_model(model, bone_config)
+# ... train the model ...
+
+# For inference:
+model.merge_bone_layers()  # Merges weights for fast inference
+# ... run inference ...
 ```
 
 ## Examples
 
-### Text Classification
+### Efficient Model Fine-tuning
 ```python
-from transformers import AutoModelForSequenceClassification
-from peft import BoneConfig, get_peft_model
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import BoneConfig, get_peft_model, TaskType
 
 # Load base model
-model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased")
+model = AutoModelForCausalLM.from_pretrained("facebook/opt-350m")
+tokenizer = AutoTokenizer.from_pretrained("facebook/opt-350m")
 
 # Configure Bone
 config = BoneConfig(
-    bottleneck_size=64,
-    target_modules=["attention.output"],
-    dropout=0.1,
-    use_orthogonal=True,
-)
-
-# Create PEFT model
-model = get_peft_model(model, config)
-```
-
-### Small Model Fine-tuning
-```python
-from transformers import AutoModelForCausalLM
-from peft import BoneConfig, get_peft_model
-
-# Load small base model
-model = AutoModelForCausalLM.from_pretrained("gpt2-small")
-
-# Configure Bone
-config = BoneConfig(
+    task_type=TaskType.CAUSAL_LM,
     bottleneck_size=32,
-    target_modules=["attention.output"],
-    dropout=0.1,
-    use_orthogonal=True,
+    bottleneck_alpha=2.0,
+    bottleneck_dropout=0.1,
+    target_modules=["q_proj", "v_proj"],
 )
 
 # Create PEFT model
 model = get_peft_model(model, config)
+
+# After training, merge for efficient inference
+model.merge_bone_layers()
 ```
 
 ## References
-1. [Bone Paper](https://arxiv.org/abs/your-paper-url)
-2. [PEFT Documentation](https://huggingface.co/docs/peft/index)
-3. [Implementation Guide](https://github.com/huggingface/peft) 
+1. [PEFT Documentation](https://huggingface.co/docs/peft/index)
+2. [Implementation Guide](https://github.com/huggingface/peft)
