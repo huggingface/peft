@@ -516,27 +516,27 @@ TEST_CASES = [
     # RandLora #
     ########
     # We have to reduce the default scaling parameter to avoid nans when using large learning rates
-    ("Vanilla MLP 1 RandLora", "MLP", RandLoraConfig, {"target_modules": "lin0", "randlora_alpha": 64}),
-    ("Vanilla MLP 2 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin0"], "randlora_alpha": 64}),
-    ("Vanilla MLP 3 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin1"], "randlora_alpha": 64}),
-    ("Vanilla MLP 4 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin0", "lin1"], "randlora_alpha": 64}),
+    ("Vanilla MLP 1 RandLora", "MLP", RandLoraConfig, {"target_modules": "lin0", "randlora_alpha": 1}),
+    ("Vanilla MLP 2 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin0"], "randlora_alpha": 1}),
+    ("Vanilla MLP 3 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin1"], "randlora_alpha": 1}),
+    ("Vanilla MLP 4 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin0", "lin1"], "randlora_alpha": 1}),
     (
         "Vanilla MLP 5 RandLora",
         "MLP",
         RandLoraConfig,
-        {"target_modules": ["lin0", "lin1"], "sparse": True, "randlora_alpha": 64},
+        {"target_modules": ["lin0", "lin1"], "sparse": True, "randlora_alpha": 1},
     ),
     (
         "Vanilla MLP 6 RandLora",
         "MLP",
         RandLoraConfig,
-        {"target_modules": ["lin0", "lin1"], "very_sparse": True, "randlora_alpha": 64},
+        {"target_modules": ["lin0", "lin1"], "very_sparse": True, "randlora_alpha": 1},
     ),
     (
         "Vanilla MLP 7 RandLora",
         "MLP",
         RandLoraConfig,
-        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "randlora_alpha": 64},
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "randlora_alpha": 1},
     ),
 ]
 
