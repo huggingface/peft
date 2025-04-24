@@ -79,23 +79,6 @@ def test_modules_to_save_targets_module_dict_raises(cls):
         get_peft_model(model=model, peft_config=peft_config)
 
 
-def test_modules_to_save_targets_tuner_layer_raises():
-    # See e.g. issue 2027
-    # Prevent users from (accidentally) targeting the same layer both with a tuner and modules_to_save. Normally, PEFT
-    # will not target the same layer with both a tuner and ModulesToSaveWrapper. However, if modules_to_save is
-    # automatically inferred, e.g. when using AutoModelForSequenceClassification, the ModulesToSaveWrapper is applied ex
-    # post, which can lead to the double wrapping.
-    model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
-    model = AutoModelForSequenceClassification.from_pretrained(model_id)
-
-    # Note: target_modules="all-linear" would also work and is closer to the original issue, but let's explicitly target
-    # "score" here in case that "all-linear" will be fixed to no longer target the score layer.
-    peft_config = LoraConfig(target_modules=["score"], task_type="SEQ_CLS")
-    msg = "modules_to_save cannot be applied to modules of type"
-    with pytest.raises(TypeError, match=msg):
-        get_peft_model(model, peft_config)
-
-
 def test_get_peft_model_revision_warning(tmp_path):
     base_model_id = "peft-internal-testing/tiny-random-BertModel"
     base_revision = "v2.0.0"
@@ -376,3 +359,90 @@ class TestModulesToSaveNameSubstringBug:
             param_merged = sd_merged[key]
             param_unmerged = sd_unmerged[key]
             assert torch.allclose(param_merged, param_unmerged)
+
+
+class TestTargetingAuxiliaryTrainingWrapper:
+    """AuxiliaryTrainingWrapper such as ModulesToSaveWrapper and TrainableTokensWrapper are
+    in general not to be targeted by PEFT methods such as adapters. For example, a ModulesToSaveWrapper's children
+    modules should not be targeted by `LoraConfig(target_modules='all-linear')`, among other things.
+    """
+
+    @pytest.fixture
+    def plain_model_cls(self):
+        class PlainModel(nn.Module):
+            def __init__(self, i, o):
+                super().__init__()
+                self.layer1 = nn.Linear(i, o)
+
+            def forward(self, x):
+                return self.layer1(x)
+
+        return PlainModel
+
+    @pytest.fixture
+    def nested_model_cls(self, plain_model_cls):
+        class NestedModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer1 = nn.Linear(10, 20)
+                self.layer2 = nn.Linear(20, 5)
+                self.layer3 = plain_model_cls(5, 10)
+
+            def forward(self, x):
+                x = self.layer1(x)
+                x = self.layer2(x)
+                x = self.layer3(x)
+                return x
+
+        return NestedModel
+
+    def test_nested_ignores_modules_to_save(self, nested_model_cls, plain_model_cls):
+        # Make sure that `target_modules` is not targeting the nested modules of a module marked as module to save.
+        model = nested_model_cls()
+        config = LoraConfig(
+            target_modules=["layer1"],
+            modules_to_save=["layer3"],
+        )
+
+        peft_model = get_peft_model(model, config)
+        assert isinstance(peft_model.model.layer3.modules_to_save.default, plain_model_cls)
+
+    def test_targeting_module_to_save_raises(self, nested_model_cls):
+        model = nested_model_cls()
+        config = LoraConfig(
+            target_modules=["layer1"],
+            modules_to_save=["layer1"],
+        )
+        msg = "No modules were targeted for adaptation. This might be caused by a combination"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+    def test_modules_to_save_targets_tuner_layer_raises(self):
+        # See e.g. issue 2027 and 2477
+        # Prevent users from (accidentally) targeting the same layer both with a tuner and modules_to_save. Normally, PEFT
+        # will not target the same layer with both a tuner and ModulesToSaveWrapper. However, if modules_to_save is
+        # automatically inferred, e.g. when using AutoModelForSequenceClassification, the ModulesToSaveWrapper is applied ex
+        # post, which can lead to the double wrapping.
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model = AutoModelForSequenceClassification.from_pretrained(model_id)
+
+        # Note: target_modules="all-linear" would also work and is closer to the original issue, but let's explicitly target
+        # "score" here in case that "all-linear" will be fixed to no longer target the score layer.
+        peft_config = LoraConfig(target_modules=["score"], task_type="SEQ_CLS")
+
+        # Since the `score` layer is in `model.modules_to_save` it should be ignored when targeted,
+        # therefore the layer should not be adapted.
+        msg = "No modules were targeted for adaptation. This might be caused by a combination"
+        with pytest.raises(ValueError, match=msg) as e:
+            get_peft_model(model, peft_config)
+
+    def test_targeting_trainable_tokens_raises(self):
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model = AutoModelForSequenceClassification.from_pretrained(model_id)
+
+        peft_config = LoraConfig(target_modules=["embed_tokens"], task_type="SEQ_CLS", trainable_token_indices=[0, 1])
+
+        # While this message might not be the most helpful message, at least it is not silently failing
+        msg = "trainable_token_indices cannot be applied to modules of type <class 'peft.tuners.lora.layer.Embedding'>"
+        with pytest.raises(TypeError, match=msg) as e:
+            get_peft_model(model, peft_config)

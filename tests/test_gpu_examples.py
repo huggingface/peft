@@ -85,6 +85,7 @@ from .testing_utils import (
     require_auto_awq,
     require_auto_gptq,
     require_bitsandbytes,
+    require_deterministic_for_xpu,
     require_eetq,
     require_hqq,
     require_multi_accelerator,
@@ -2880,8 +2881,6 @@ class PeftAqlmGPUTests(unittest.TestCase):
         model.train(training)
 
     @pytest.mark.single_gpu_tests
-    # see https://github.com/Vahe1994/AQLM/pull/139
-    @pytest.mark.xfail(reason="AQLM does not work with PyTorch 2.5 (yet)", strict=True, raises=AttributeError)
     def test_causal_lm_training_aqlm(self):
         r"""
         Test the CausalLM training on a single GPU device. The test would simply fail if the adapters are not set
@@ -4027,6 +4026,7 @@ class TestPTuningReproducibility:
     device = infer_device()
 
     @require_non_cpu
+    @require_deterministic_for_xpu
     def test_p_tuning_exactly_reproducible_after_loading(self, tmp_path):
         # See: https://github.com/huggingface/peft/issues/2043#issuecomment-2321522577
         # Ensure that after loading a p-tuning checkpoint, results are exactly reproducible (before the patch, they were
