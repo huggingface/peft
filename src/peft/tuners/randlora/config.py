@@ -56,7 +56,10 @@ class RandLoraConfig(PeftConfig):
         randlora_dropout (`float`):
             The dropout probability for RandLora layers.
         randlora_alpha (`float`):
-            The scaling coefficient for RandLora layers, this would typically be 20 times the rank.
+            The scaling coefficient for RandLora layers, this would typically be 20 times the rank. Because the
+            `randlora_alpha` coefficient is large by default, it can lead to numerical instabilities especially when
+            learning rates are high. If training is unstable, consider reducing the learning rate or the
+            `randlora_alpha` coefficient.
         fan_in_fan_out (`bool`):
             Set this to True if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 uses
             `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
