@@ -1,10 +1,3 @@
-import importlib
-
-import torch
-from neural_compressor.torch.quantization import FP8Config, convert, finalize_calibration, prepare
-from optimum.habana.diffusers import GaudiFluxPipeline
-
-
 """
 This exampe demonstrates loading of LoRA adapter (via PEFT) into an FP8 INC-quantized FLUX model.
 
@@ -14,6 +7,11 @@ https://github.com/intel/neural-compressor/tree/master/examples/helloworld/fp8_e
 Requirements:
 pip install optimum-habana sentencepiece neural-compressor[pt] peft
 """
+
+import importlib
+
+import torch
+from neural_compressor.torch.quantization import FP8Config, convert, finalize_calibration, prepare
 
 
 # Checks if HPU device is available
@@ -31,9 +29,10 @@ def is_hpu_available():
 
 
 # Ensure HPU device is available before proceeding
-if not is_hpu_available():
+if is_hpu_available():
+    from optimum.habana.diffusers import GaudiFluxPipeline
+else:
     raise RuntimeError("HPU device not found. This code requires Intel Gaudi device to run.")
-
 
 # Example: FLUX model inference on HPU via optimum-habana pipeline
 hpu_configs = {
