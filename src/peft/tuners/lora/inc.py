@@ -12,6 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# NOTE: PEFT tests related to INC are handled under Optimum-Habana repository:
+# - LLMs: https://github.com/huggingface/optimum-habana/blob/main/tests/test_peft_inference.py
+# - Diffusers: https://github.com/huggingface/optimum-habana/blob/main/tests/test_diffusers.py
+
 from typing import Optional
 
 import torch
