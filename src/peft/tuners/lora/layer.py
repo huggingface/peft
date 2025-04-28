@@ -145,6 +145,9 @@ class LoraLayer(BaseTunerLayer):
         elif hasattr(base_layer, "W_q") and base_layer.__class__.__name__ == "HQQLinear":
             # HQQ layers
             in_features, out_features = base_layer.in_features, base_layer.out_features
+        elif base_layer.__class__.__name__ == "PatchedLinear":
+            # INC layers
+            in_features, out_features = base_layer.in_features, base_layer.out_features
         else:
             # possibly support user provided custom layer types using dynamic dispatch
             if hasattr(base_layer, "in_features") and hasattr(base_layer, "out_features"):
