@@ -22,19 +22,19 @@ jobs:
       group: aws-general-8-plus
     steps:
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2  # v3.10.0
       - name: Check out code
         uses: actions/checkout@v3
         with:
           persist-credentials: false
       - name: Login to DockerHub
-        uses: docker/login-action@v2
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772  # v3.4.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
       - name: Build and Push CPU
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@14487ce63c7a62a4a324b0bfb37086795e31c6c1  # v6.16.0
         with:
           context: ./docker/peft-cpu
           push: true
@@ -42,7 +42,7 @@ jobs:
 
       - name: Post to Slack
         if: always()
-        uses: huggingface/hf-workflows/.github/actions/post-slack@main
+        uses: huggingface/hf-workflows/.github/actions/post-slack@3f88d63d3761558a32e8e46fc2a8536e04bb2aea  # main from Feb 2025-02-24
         with:
           slack_channel: ${{ env.CI_SLACK_CHANNEL }}
           title: 🤗 Results of the PEFT-CPU docker build
@@ -55,19 +55,19 @@ jobs:
       group: aws-general-8-plus
     steps:
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2  # v3.10.0
       - name: Check out code
         uses: actions/checkout@v3
         with:
           persist-credentials: false
       - name: Login to DockerHub
-        uses: docker/login-action@v1
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772  # v3.4.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
       - name: Build and Push GPU
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@14487ce63c7a62a4a324b0bfb37086795e31c6c1  # v6.16.0
         with:
           context: ./docker/peft-gpu
           push: true
@@ -75,7 +75,7 @@ jobs:
 
       - name: Post to Slack
         if: always()
-        uses: huggingface/hf-workflows/.github/actions/post-slack@main
+        uses: huggingface/hf-workflows/.github/actions/post-slack@3f88d63d3761558a32e8e46fc2a8536e04bb2aea  # main from Feb 2025-02-24
         with:
           slack_channel: ${{ env.CI_SLACK_CHANNEL }}
           title: 🤗 Results of the PEFT-GPU docker build
@@ -88,19 +88,19 @@ jobs:
       group: aws-general-8-plus
     steps:
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2  # v3.10.0
       - name: Check out code
         uses: actions/checkout@v3
         with:
           persist-credentials: false
       - name: Login to DockerHub
-        uses: docker/login-action@v1
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772  # v3.4.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
       - name: Build and Push GPU
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@14487ce63c7a62a4a324b0bfb37086795e31c6c1  # v6.16.0
         with:
           context: ./docker/peft-gpu-bnb-source
           push: true
@@ -108,7 +108,7 @@ jobs:
 
       - name: Post to Slack
         if: always()
-        uses: huggingface/hf-workflows/.github/actions/post-slack@main
+        uses: huggingface/hf-workflows/.github/actions/post-slack@3f88d63d3761558a32e8e46fc2a8536e04bb2aea  # main from Feb 2025-02-24
         with:
           slack_channel: ${{ env.CI_SLACK_CHANNEL }}
           title: 🤗 Results of the PEFT-GPU (bnb source / HF latest) docker build
@@ -121,19 +121,19 @@ jobs:
       group: aws-general-8-plus
     steps:
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2  # v3.10.0
       - name: Check out code
         uses: actions/checkout@v3
         with:
           persist-credentials: false
       - name: Login to DockerHub
-        uses: docker/login-action@v1
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772  # v3.4.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
       - name: Build and Push GPU
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@14487ce63c7a62a4a324b0bfb37086795e31c6c1  # v6.16.0
         with:
           context: ./docker/peft-gpu-bnb-latest
           push: true
@@ -141,7 +141,7 @@ jobs:
 
       - name: Post to Slack
         if: always()
-        uses: huggingface/hf-workflows/.github/actions/post-slack@main
+        uses: huggingface/hf-workflows/.github/actions/post-slack@3f88d63d3761558a32e8e46fc2a8536e04bb2aea  # main from Feb 2025-02-24
         with:
           slack_channel: ${{ env.CI_SLACK_CHANNEL }}
           title: 🤗 Results of the PEFT-GPU (bnb source / HF source) docker build
