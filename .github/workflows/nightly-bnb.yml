@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-          docker-image-name: ["huggingface/peft-gpu-bnb-source:latest", "huggingface/peft-gpu-bnb-latest:latest", "huggingface/peft-gpu-bnb-multi-source:latest"]
+          docker-image-name: ["huggingface/peft-gpu-bnb-source:latest", "huggingface/peft-gpu-bnb-latest:latest"]
     runs-on:
       group: aws-g6-4xlarge-plus
     env:
@@ -145,7 +145,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        docker-image-name: ["huggingface/peft-gpu-bnb-source:latest", "huggingface/peft-gpu-bnb-latest:latest", "huggingface/peft-gpu-bnb-multi-source:latest"]
+        docker-image-name: ["huggingface/peft-gpu-bnb-source:latest", "huggingface/peft-gpu-bnb-latest:latest"]
     runs-on:
       group: aws-g6-12xlarge-plus
     env:

@@ -31,7 +31,7 @@ RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
 
 # Stage 2
-FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS build-image
+FROM nvidia/cuda:12.6.3-devel-ubuntu22.04 AS build-image
 COPY --from=compile-image /opt/conda /opt/conda
 ENV PATH /opt/conda/bin:$PATH
 
@@ -56,7 +56,7 @@ RUN source activate peft && \
     peft \
     optimum \
     auto-gptq && \
-    git clone https://github.com/TimDettmers/bitsandbytes && cd bitsandbytes && \
+    git clone https://github.com/bitsandbytes-foundation/bitsandbytes && cd bitsandbytes && \
     cmake -B . -DCOMPUTE_BACKEND=cuda -S . && \
     cmake --build . && \
     pip install -e . && \ 

@@ -179,7 +179,7 @@ def skip_deberta_lora_tests(config_cls, model_id):
     if "deberta" not in model_id.lower():
         return
 
-    to_skip = ["lora", "ia3", "boft", "vera", "fourierft", "hra", "bone"]
+    to_skip = ["lora", "ia3", "boft", "vera", "fourierft", "hra", "bone", "randlora"]
     config_name = config_cls.__name__.lower()
     if any(k in config_name for k in to_skip):
         pytest.skip(f"Skip tests that use {config_name} for Deberta models")

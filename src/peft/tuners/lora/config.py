@@ -240,17 +240,17 @@ class LoraConfig(PeftConfig):
             False leads to random initialization of LoRA A and B, meaning that LoRA is not a no-op before training;
             this setting is intended for debugging purposes. Passing 'gaussian' results in Gaussian initialization
             scaled by the LoRA rank for linear and layers. Pass `'loftq'` to use LoftQ initialization. Passing `'eva'`
-            results in a data-driven initialization of <ahref='https://arxiv.org/abs/2410.07170' >Explained Variance
+            results in a data-driven initialization of <a href='https://arxiv.org/abs/2410.07170' >Explained Variance
             Adaptation</a>. EVA initializes LoRA based on the SVD of layer input activations and achieves SOTA
             performance due to its ability to adapt to the finetuning data. Pass `'olora'` to use OLoRA initialization.
-            Passing `'pissa'` results in the initialization of <ahref='https://arxiv.org/abs/2404.02948' >Principal
+            Passing `'pissa'` results in the initialization of <a href='https://arxiv.org/abs/2404.02948' >Principal
             Singular values and Singular vectors Adaptation (PiSSA)</a>, which converges more rapidly than LoRA and
             ultimately achieves superior performance. Moreover, PiSSA reduces the quantization error compared to QLoRA,
             leading to further enhancements. Passing `'pissa_niter_[number of iters]'` initiates Fast-SVD-based PiSSA
             initialization, where `[number of iters]` indicates the number of subspace iterations to perform FSVD, and
             must be a nonnegative integer. When `[number of iters]` is set to 16, it can complete the initialization of
             a 7B model within seconds, and the training effect is approximately equivalent to using SVD. Passing
-            `'corda'` results in the initialization of <ahref='https://arxiv.org/abs/2406.05223' >Context-Oriented
+            `'corda'` results in the initialization of <a href='https://arxiv.org/abs/2406.05223' >Context-Oriented
             Decomposition Adaptation</a>, which converges even more rapidly than PiSSA in Instruction-Previewed Mode,
             and preserves world knowledge better than LoRA in Knowledge-Preserved Mode.
         layers_to_transform (`Union[List[int], int]`):

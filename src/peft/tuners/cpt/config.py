@@ -12,11 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Literal, Optional
 
 from peft.config import PromptLearningConfig
-from peft.utils import PeftType
+from peft.utils import PeftType, TaskType
 
 
 @dataclass
@@ -79,7 +80,14 @@ class CPTConfig(PromptLearningConfig):
         self.num_attention_heads = None  # Number of attention heads (if applicable).
         self.num_transformer_submodules = 1  # Number of transformer submodules used.
         self.peft_type = PeftType.CPT  # Specifies that the PEFT type is CPT.
-        self.task_type = "CAUSAL_LM"  # Ensures task type is causal language modeling.
+        if self.task_type != TaskType.CAUSAL_LM:
+            # TODO: adjust this to raise an error with PEFT v0.18.0
+            warnings.warn(
+                f"{self.__class__.__name__} only supports task_type = {TaskType.CAUSAL_LM.value}, "
+                "setting it automatically. This will raise an error starting from PEFT v0.18.0.",
+                FutureWarning,
+            )
+            self.task_type = TaskType.CAUSAL_LM  # Ensures task type is causal language modeling.
 
         if self.cpt_token_ids is None:
             self.cpt_token_ids = [0]

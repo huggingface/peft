@@ -114,7 +114,7 @@ def test_opt_350m_4bit_double_quant():
     torch.testing.assert_allclose(output, expected)
 
 
-@pytest.mark.skipif(torch.cuda.is_available(), reason="No CUDA device available.")
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device available.")
 def test_opt_350m_4bit_compute_dtype_float16():
     torch.manual_seed(0)
     bnb_config = BitsAndBytesConfig(
