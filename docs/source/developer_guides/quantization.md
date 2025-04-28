@@ -274,6 +274,7 @@ devices is provided [here](https://github.com/huggingface/peft/blob/main/example
 ### Caveats:
 
 - `merge()` and `unmerge()` methods are currently not supported for INC-quantized models.
+- Currently, only **Linear** INC-quantized layers are supported when loading PEFT adapters.
 
 ## Other Supported PEFT Methods
 
