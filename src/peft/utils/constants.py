@@ -80,6 +80,7 @@ TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING = {
         "norm",
     ],
     "qwen2": ["post_attention_layernorm"],
+    "qwen3": ["post_attention_layernorm"],
 }
 
 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
@@ -117,6 +118,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "gemma": ["q_proj", "v_proj"],
     "gemma2": ["q_proj", "v_proj"],
     "qwen2": ["q_proj", "v_proj"],
+    "qwen3": ["q_proj", "v_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
@@ -145,6 +147,7 @@ TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
     "gemma": ["q_proj", "v_proj", "down_proj"],
     "gemma2": ["q_proj", "v_proj", "down_proj"],
     "qwen2": ["q_proj", "v_proj", "down_proj"],
+    "qwen3": ["q_proj", "v_proj", "down_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
@@ -173,6 +176,7 @@ TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
     "gemma": ["down_proj"],
     "gemma2": ["down_proj"],
     "qwen2": ["down_proj"],
+    "qwen3": ["down_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
@@ -196,6 +200,7 @@ TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
     "deberta": ["in_proj"],
     # "layoutlm": ["query", "value"],
     "qwen2": ["q_proj", "v_proj"],
+    "qwen3": ["q_proj", "v_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING = {
@@ -233,6 +238,7 @@ TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING = {
     "gemma": ["q_proj", "v_proj"],
     "gemma2": ["q_proj", "v_proj"],
     "qwen2": ["q_proj", "v_proj"],
+    "qwen3": ["q_proj", "v_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING = {
@@ -269,6 +275,7 @@ TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING = {
     "gemma": ["q_proj", "v_proj"],
     "gemma2": ["q_proj", "v_proj"],
     "qwen2": ["q_proj", "v_proj"],
+    "qwen3": ["q_proj", "v_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING = {
@@ -289,6 +296,7 @@ TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING = {
     "gpt_bigcode": ["c_attn"],
     "deberta": ["in_proj"],
     "qwen2": ["q_proj", "v_proj"],
+    "qwen3": ["q_proj", "v_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING = (
