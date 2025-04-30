@@ -51,6 +51,7 @@ class PeftType(str, enum.Enum):
     ADALORA = "ADALORA"
     BOFT = "BOFT"
     ADAPTION_PROMPT = "ADAPTION_PROMPT"
+    ADAPTION_PROMPT_GPT2 = "ADAPTION_PROMPT_GPT2"
     IA3 = "IA3"
     LOHA = "LOHA"
     LOKR = "LOKR"
