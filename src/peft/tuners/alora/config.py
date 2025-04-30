@@ -1,3 +1,4 @@
+# https://github.com/IBM/activated-lora/blob/main/alora/config.py
 from dataclasses import dataclass, field
 import warnings
 
@@ -7,7 +8,7 @@ from ..lora.config import LoraConfig
 
 
 @dataclass
-class aLoraConfig(LoraConfig):
+class ALoraConfig(LoraConfig):
     """
     aLORA configuration class. Inherits from LoraConfig.
         It subclasses PEFT's LoraConfig, modifies the default rank r to 32 (often best), and adds an additional parameter:

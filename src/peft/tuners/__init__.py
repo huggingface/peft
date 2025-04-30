@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from .alora import ALoraConfig, ALoraModel
 from .adalora import AdaLoraConfig, AdaLoraModel
 from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
 from .boft import BOFTConfig, BOFTModel
@@ -47,6 +48,8 @@ from .xlora import XLoraConfig, XLoraModel
 
 
 __all__ = [
+    "ALoraConfig",
+    "ALoraModel",
     "AdaLoraConfig",
     "AdaLoraModel",
     "AdaptionPromptConfig",

@@ -1,8 +1,8 @@
-from ast import List
-from typing import Any, Optional
+# https://github.com/IBM/activated-lora/blob/main/alora/layer.py
+from typing import Any, Optional, List
 import warnings
 import torch
-from peft.tuners.alora.config import aLoraConfig
+from peft.tuners.alora.config import ALoraConfig
 from peft.tuners.lora.layer import LoraLayer, MultiheadAttention
 from peft.tuners.tuners_utils import BaseTunerLayer
 from torch import Tensor, nn
@@ -215,7 +215,7 @@ class aLoraLinear(nn.Module, aLoraLayer):
 def dispatch_alora(
     target: torch.nn.Module,
     adapter_name: str,
-    alora_config: aLoraConfig,
+    alora_config: ALoraConfig,
     **kwargs,
 ) -> Optional[torch.nn.Module]:
     new_module = None

@@ -46,7 +46,8 @@ from .peft_model import (
     get_model_status,
 )
 from .tuners import (
-    AdaLoraConfig,
+    ALoraConfig,
+    ALoraModel,
     AdaLoraModel,
     AdaptionPromptConfig,
     AdaptionPromptModel,
@@ -121,6 +122,8 @@ __all__ = [
     "PEFT_TYPE_TO_MIXED_MODEL_MAPPING",
     "PEFT_TYPE_TO_TUNER_MAPPING",
     "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
+    "ALoraConfig",
+    "ALoraModel",
     "AdaLoraConfig",
     "AdaLoraModel",
     "AdaptionPromptConfig",

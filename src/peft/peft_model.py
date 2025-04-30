@@ -115,7 +115,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self.peft_type = peft_config.peft_type
         # These args are special PEFT arguments that users can pass. They need to be removed before passing them to
         # forward.
-        self.special_peft_forward_args = {"adapter_names"}
+        self.special_peft_forward_args = {"adapter_names", "alora_offsets"}
 
         self._is_prompt_learning = peft_config.is_prompt_learning
         if self._is_prompt_learning:
