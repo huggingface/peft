@@ -1,0 +1,27 @@
+{
+  "experiment_id": "20250430_135021_162698a0",
+  "experiment_name": "lora_r8",
+  "status": "failed",
+  "model_id": "facebook/opt-125m",
+  "peft_method": "lora",
+  "timestamp": "2025-04-30T13:50:21.583749",
+  "duration": 5.730738338000265,
+  "base_params": 125239296,
+  "trainable_params": 0,
+  "total_params": 0,
+  "param_ratio": 0.0,
+  "base_model_size_mb": 238.875,
+  "adapter_size_mb": 0.0,
+  "peak_gpu_memory_mb": 0.0,
+  "peak_ram_memory_mb": 0.0,
+  "memory_allocated_log": [],
+  "memory_reserved_log": [],
+  "inference_times": {},
+  "inference_overhead": {},
+  "training_throughput": 0.0,
+  "metrics": [
+    {
+      "error": "No module named 'habana_frameworks'"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "experiment_id": "20250430_140109_0e67cd75",
+  "experiment_name": "lora_r16",
+  "status": "success",
+  "model_id": "facebook/opt-350m",
+  "peft_method": "lora",
+  "timestamp": "2025-04-30T14:01:09.900992",
+  "duration": 3.748472068999945,
+  "base_params": 331196416,
+  "trainable_params": 1572864,
+  "total_params": 332769280,
+  "param_ratio": 0.00472659014678278,
+  "base_model_size_mb": 631.70703125,
+  "adapter_size_mb": 3.0,
+  "peak_gpu_memory_mb": 653.95703125,
+  "peak_ram_memory_mb": 1439.3359375,
+  "memory_allocated_log": [
+    631.70703125,
+    645.83203125,
+    653.95703125
+  ],
+  "memory_reserved_log": [
+    636.0,
+    662.0,
+    714.0
+  ],
+  "inference_times": {
+    "short": 0.19560098249985458
+  },
+  "inference_overhead": {
+    "short": 59.934613645828605
+  },
+  "training_throughput": 442.0207757719273,
+  "metrics": []
+}
