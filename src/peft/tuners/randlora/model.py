@@ -86,7 +86,7 @@ class RandLoraModel(BaseTuner):
         >>> from peft import RandLoraConfig, get_peft_model
 
         >>> base_model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
-        >>> config = RandLoraConfig(r=128)
+        >>> config = RandLoraConfig(r=32)
         >>> model = get_peft_model(base_model, config)
         ```
 
