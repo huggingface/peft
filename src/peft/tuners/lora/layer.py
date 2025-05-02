@@ -450,13 +450,18 @@ class LoraLayer(BaseTunerLayer):
         value = self._caches.pop(key)
         return value
 
-    def set_scale(self, adapter, scale):
+    def set_scale(self, adapter: str, scale: float | int) -> None:
+        """Set the scale of the given adapter to the initial scale multiplied by the provided factor
+
+        The initial scale is determined by the configured `r` (rank) and `lora_alpha`.
+        """
         if adapter not in self.scaling:
             # Ignore the case where the adapter is not in the layer
             return
         self.scaling[adapter] = scale * self.lora_alpha[adapter] / self.r[adapter]
 
-    def scale_layer(self, scale: float) -> None:
+    def scale_layer(self, scale: float | int) -> None:
+        """Multiply the current scale of all active adapters by the provided factor"""
         if scale == 1:
             return
 
@@ -466,7 +471,13 @@ class LoraLayer(BaseTunerLayer):
 
             self.scaling[active_adapter] *= scale
 
-    def unscale_layer(self, scale=None) -> None:
+    def unscale_layer(self, scale: Optional[float | int] = None) -> None:
+        """Divide the current scale of all active adapters by the provided factor. If `scale=None` is passed, reset to
+        initial scale
+
+        The initial scale is determined by the configured `r` (rank) and `lora_alpha`.
+
+        """
         for active_adapter in self.active_adapters:
             if active_adapter not in self.lora_A.keys():
                 continue
