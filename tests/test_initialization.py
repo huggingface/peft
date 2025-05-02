@@ -3526,14 +3526,15 @@ class TestScaling:
                 module.unscale_layer(scale)
 
     def test_scaling_simple(self, model):
+        rank, lora_alpha = 8, 16
         config = LoraConfig(
-            r=8,
-            lora_alpha=16,
+            r=rank,
+            lora_alpha=lora_alpha,
             target_modules=["k_proj"],
         )
         model = get_peft_model(model, config)
         scalings = self.get_scalings(model)
-        expected = [2.0] * 5  # 16 / 8
+        expected = [lora_alpha / rank] * 5
         assert scalings == expected
 
         # double

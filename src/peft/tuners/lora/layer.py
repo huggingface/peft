@@ -450,7 +450,7 @@ class LoraLayer(BaseTunerLayer):
     def set_scale(self, adapter: str, scale: float | int) -> None:
         """Set the scale of the given adapter to the initial scale multiplied by the provided factor
 
-        The initial scale is determined by the configured r (rank) and lora_alpha.
+        The initial scale is determined by the configured `r` (rank) and `lora_alpha`.
         """
         if adapter not in self.scaling:
             # Ignore the case where the adapter is not in the layer
@@ -472,7 +472,7 @@ class LoraLayer(BaseTunerLayer):
         """Divide the current scale of all active adapters by the provided factor. If `scale=None` is passed, reset to
         initial scale
 
-        The initial scale is determined by the configured r (rank) and lora_alpha.
+        The initial scale is determined by the configured `r` (rank) and `lora_alpha`.
 
         """
         for active_adapter in self.active_adapters:
