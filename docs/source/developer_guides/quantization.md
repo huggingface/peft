@@ -192,7 +192,7 @@ model = get_peft_model(model, config)
 
 ## HQQ quantization
 
-The models that is quantized using Half-Quadratic Quantization of Large Machine Learning Models ([HQQ](https://mobiusml.github.io/hqq_blog/)) support LoRA adapter tuning. To tune the quantized model, you'll need to install the `hqq` library with: `pip install hqq`.
+The models that are quantized using Half-Quadratic Quantization of Large Machine Learning Models ([HQQ](https://mobiusml.github.io/hqq_blog/)) support LoRA adapter tuning. To tune the quantized model, you'll need to install the `hqq` library with: `pip install hqq`.
 
 ```python
 from hqq.engine.hf import HQQModelForCausalLM
@@ -236,6 +236,45 @@ model = get_peft_model(base_model, peft_config)
 - `NF4` is not implemented in transformers as of yet and is thus also not supported.
 - DoRA only works with `quant_type = "int8_weight_only"` at the moment.
 - There is explicit support for torchao when used with LoRA. However, when torchao quantizes a layer, its class does not change, only the type of the underlying tensor. For this reason, PEFT methods other than LoRA will generally also work with torchao, even if not explicitly supported. Be aware, however, that **merging only works correctly with LoRA and with `quant_type = "int8_weight_only"`**. If you use a different PEFT method or dtype, merging will likely result in an error, and even it doesn't, the results will still be incorrect.
+
+## INC quantization
+
+Intel Neural Compressor ([INC](https://github.com/intel/neural-compressor)) enables model quantization for various devices,
+including Intel Gaudi accelerators (also known as HPU devices). You can perform LoRA fine-tuning on models that have been
+quantized using INC. To use INC with PyTorch models, install the library with: `pip install neural-compressor[pt]`.
+Quantizing a model to FP8 precision for HPU devices can be done with the following single-step quantization workflow:
+
+```python
+import torch
+from neural_compressor.torch.quantization import FP8Config, convert, finalize_calibration, prepare
+quant_configs = {
+    ...
+}
+config = FP8Config(**quant_configs)
+```
+
+Pass the config to the `prepare` method, run inference to gather calibration stats, and call `finalize_calibration`
+and `convert` methods to quantize model to FP8 precision:
+
+```python
+model = prepare(model, config)
+# Run inference to collect calibration statistics
+...
+# Finalize calibration and convert the model to FP8 precision
+finalize_calibration(model)
+model = convert(model)
+# Load PEFT LoRA adapter as usual
+...
+```
+
+An example demonstrating how to load a PEFT LoRA adapter into an INC-quantized FLUX text-to-image model for HPU
+devices is provided [here](https://github.com/huggingface/peft/blob/main/examples/stable_diffusion/inc_flux_lora_hpu.py).
+
+
+### Caveats:
+
+- `merge()` and `unmerge()` methods are currently not supported for INC-quantized models.
+- Currently, only **Linear** INC-quantized layers are supported when loading PEFT adapters.
 
 ## Other Supported PEFT Methods
 
