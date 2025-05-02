@@ -3526,6 +3526,7 @@ class TestScaling:
                 module.unscale_layer(scale)
 
     def test_scaling_simple(self, model):
+        n_layers = 5
         rank, lora_alpha = 8, 16
         config = LoraConfig(
             r=rank,
@@ -3534,31 +3535,31 @@ class TestScaling:
         )
         model = get_peft_model(model, config)
         scalings = self.get_scalings(model)
-        expected = [lora_alpha / rank] * 5
+        expected = [lora_alpha / rank] * n_layers
         assert scalings == expected
 
         # double
         self.scale_layer(model, 2)
         scalings = self.get_scalings(model)
-        expected = [4.0] * 5
+        expected = [4.0] * n_layers
         assert scalings == expected
 
         # back to original
         self.unscale_layer(model, None)
         scalings = self.get_scalings(model)
-        expected = [2.0] * 5
+        expected = [2.0] * n_layers
         assert scalings == expected
 
         # triple
         self.set_scale(model, "default", 3)
         scalings = self.get_scalings(model)
-        expected = [6.0] * 5
+        expected = [6.0] * n_layers
         assert scalings == expected
 
         # back to original
         self.unscale_layer(model, 3)
         scalings = self.get_scalings(model)
-        expected = [2.0] * 5
+        expected = [2.0] * n_layers
         assert scalings == expected
 
     def test_scaling_rank_pattern_alpha_pattern(self, model):
@@ -3677,14 +3678,17 @@ class TestScaling:
 
     def test_scaling_multiple_adapters(self, model):
         # ensure that scaling works with multiple adapters
+        n_layers = 5
+        rank0, lora_alpha0 = 8, 16
         config0 = LoraConfig(
-            r=8,
-            lora_alpha=16,
+            r=rank0,
+            lora_alpha=lora_alpha0,
             target_modules=["k_proj"],
         )
+        rank1, lora_alpha1 = 16, 8
         config1 = LoraConfig(
-            r=16,
-            lora_alpha=8,
+            r=rank1,
+            lora_alpha=lora_alpha1,
             target_modules=["k_proj"],
         )
         model = get_peft_model(model, config0)
@@ -3692,8 +3696,8 @@ class TestScaling:
 
         scalings_default = self.get_scalings(model, "default")
         scalings_other = self.get_scalings(model, "other")
-        expected_default = [2.0] * 5
-        expected_other = [0.5] * 5
+        expected_default = [lora_alpha0 / rank0] * n_layers
+        expected_other = [lora_alpha1 / rank1] * n_layers
         assert scalings_default == expected_default
         assert scalings_other == expected_other
 
@@ -3701,8 +3705,8 @@ class TestScaling:
         self.set_scale(model, "other", 2)
         scalings_default = self.get_scalings(model, "default")
         scalings_other = self.get_scalings(model, "other")
-        expected_default = [2.0] * 5
-        expected_other = [1.0] * 5
+        expected_default = [lora_alpha0 / rank0] * n_layers
+        expected_other = [2 * lora_alpha1 / rank1] * n_layers
         assert scalings_default == expected_default
         assert scalings_other == expected_other
 
@@ -3710,8 +3714,8 @@ class TestScaling:
         self.set_scale(model, "default", 0.25)
         scalings_default = self.get_scalings(model, "default")
         scalings_other = self.get_scalings(model, "other")
-        expected_default = [0.5] * 5
-        expected_other = [1.0] * 5
+        expected_default = [lora_alpha0 / rank0 / 4] * n_layers
+        expected_other = [2 * lora_alpha1 / rank1] * n_layers
         assert scalings_default == expected_default
         assert scalings_other == expected_other
 
@@ -3719,17 +3723,17 @@ class TestScaling:
         self.unscale_layer(model, None)
         scalings_default = self.get_scalings(model, "default")
         scalings_other = self.get_scalings(model, "other")
-        expected_default = [2.0] * 5
-        expected_other = [1.0] * 5  # stays the same as 'other' is not active
+        expected_default = [lora_alpha0 / rank0] * n_layers
+        expected_other = [2 * lora_alpha1 / rank1] * n_layers  # stays the same as 'other' is not active
         assert scalings_default == expected_default
         assert scalings_other == expected_other
 
-        # scale all *active* adapters
+        # scale all *active* adapters by 2
         self.scale_layer(model, 2)
         scalings_default = self.get_scalings(model, "default")
         scalings_other = self.get_scalings(model, "other")
-        expected_default = [4.0] * 5
-        expected_other = [1.0] * 5  # stays the same as 'other' is not active
+        expected_default = [2 * lora_alpha0 / rank0] * n_layers
+        expected_other = [2 * lora_alpha1 / rank1] * n_layers  # stays the same as 'other' is not active
         assert scalings_default == expected_default
         assert scalings_other == expected_other
 
@@ -3740,16 +3744,16 @@ class TestScaling:
         self.unscale_layer(model, None)
         scalings_default = self.get_scalings(model, "default")
         scalings_other = self.get_scalings(model, "other")
-        expected_default = [4.0] * 5  # stays the same as 'other' is not active
-        expected_other = [0.5] * 5
+        expected_default = [2 * lora_alpha0 / rank0] * n_layers  # stays the same as 'other' is not active
+        expected_other = [lora_alpha1 / rank1] * n_layers
         assert scalings_default == expected_default
         assert scalings_other == expected_other
 
-        # scale all *active* adapters
+        # scale all *active* adapters by 3
         self.scale_layer(model, 3)
         scalings_default = self.get_scalings(model, "default")
         scalings_other = self.get_scalings(model, "other")
-        expected_default = [4.0] * 5  # stays the same as 'other' is not active
-        expected_other = [1.5] * 5
+        expected_default = [2 * lora_alpha0 / rank0] * n_layers  # stays the same as 'other' is not active
+        expected_other = [3 * lora_alpha1 / rank1] * n_layers
         assert scalings_default == expected_default
         assert scalings_other == expected_other
