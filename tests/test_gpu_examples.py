@@ -3423,6 +3423,12 @@ class PeftAwqGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
+    # TODO remove marker if/once issue is resolved, most likely requiring a fix in AutoAWQ:
+    # https://github.com/casper-hansen/AutoAWQ/issues/754
+    @pytest.mark.xfail(
+        reason="Multi-GPU test currently not working with AutoAWQ and PyTorch 2.7",
+        strict=True,
+    )
     @require_torch_multi_gpu
     def test_causal_lm_training_multi_gpu(self):
         r"""
