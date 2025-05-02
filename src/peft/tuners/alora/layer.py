@@ -11,7 +11,7 @@ from peft.tuners.lora.layer import LoraLayer, MultiheadAttention
 from peft.tuners.tuners_utils import BaseTunerLayer
 
 
-class aLoraLayer(LoraLayer):
+class ALoraLayer(LoraLayer):
     """
     aLora layer class. Inherits from LoraLayer.
         It subclasses PEFT's LoraLayer, and modifies the forward method to include the aLoRA activation logic.
@@ -123,7 +123,7 @@ class aLoraLayer(LoraLayer):
         return result
 
 
-class aLoraLinear(nn.Module, aLoraLayer):
+class ALoraLinear(nn.Module, ALoraLayer):
     """
     aLora Linear layer class. Inherits from LoraLayer.
         It subclasses PEFT's LoraLayer, and modifies the forward method to include the aLoRA activation logic.
@@ -236,6 +236,6 @@ def dispatch_alora(
             )
             kwargs["fan_in_fan_out"] = alora_config.fan_in_fan_out = False
         kwargs.update(alora_config.loftq_config)
-        new_module = aLoraLinear(target, adapter_name, **kwargs)
+        new_module = ALoraLinear(target, adapter_name, **kwargs)
 
     return new_module

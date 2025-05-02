@@ -41,7 +41,7 @@ from .config import ALoraConfig
 # from peft.eetq import dispatch_eetq
 # from peft.gptq import dispatch_gptq
 # from peft.hqq import dispatch_hqq
-from .layer import aLoraLayer
+from .layer import ALoraLayer
 
 
 # from peft.torchao import dispatch_torchao
@@ -219,7 +219,7 @@ class ALoraModel(BaseTuner):
         # note: AdaLoraLayer is a subclass of LoraLayer, we need to exclude it
         from ...tuners.adalora import AdaLoraLayer
 
-        if isinstance(target, aLoraLayer) and not isinstance(target, AdaLoraLayer):
+        if isinstance(target, ALoraLayer) and not isinstance(target, AdaLoraLayer):
             target.update_layer(
                 adapter_name,
                 r,
@@ -295,7 +295,7 @@ class ALoraModel(BaseTuner):
                         p.requires_grad = True
             elif bias == "lora_only":
                 for m in model.modules():
-                    if isinstance(m, aLoraLayer) and hasattr(m, "bias") and m.bias is not None:
+                    if isinstance(m, ALoraLayer) and hasattr(m, "bias") and m.bias is not None:
                         m.bias.requires_grad = True
             else:
                 raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
@@ -426,7 +426,7 @@ class ALoraModel(BaseTuner):
             adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
         """
         for module in self.model.modules():
-            if isinstance(module, aLoraLayer):
+            if isinstance(module, ALoraLayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
@@ -445,7 +445,7 @@ class ALoraModel(BaseTuner):
         if adapter_names is None:
             hook_handles = []
             for module in self.modules():
-                if isinstance(module, aLoraLayer):
+                if isinstance(module, ALoraLayer):
                     pre_forward = partial(_alora_offsets_pre_forward_hook, alora_offsets=alora_offsets)
                     handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                     hook_handles.append(handle)
@@ -467,7 +467,7 @@ class ALoraModel(BaseTuner):
         # to check that there is at least one layer with the given name, or else something like typos can easily slip.
         expected_adapters = set()
         for layer in self.modules():
-            if isinstance(layer, aLoraLayer):
+            if isinstance(layer, ALoraLayer):
                 expected_adapters |= layer.lora_A.keys()
                 expected_adapters |= layer.lora_embedding_A.keys()
         unique_adapters = {name for name in adapter_names if name != "__base__"}
@@ -477,7 +477,7 @@ class ALoraModel(BaseTuner):
 
         hook_handles = []
         for module in self.modules():
-            if isinstance(module, aLoraLayer) or isinstance(module, ModulesToSaveWrapper):
+            if isinstance(module, ALoraLayer) or isinstance(module, ModulesToSaveWrapper):
                 pre_forward = partial(
                     _adapter_names_pre_forward_hook, adapter_names=adapter_names, alora_offsets=alora_offsets
                 )
@@ -688,7 +688,7 @@ class ALoraModel(BaseTuner):
         key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
-            if isinstance(target, aLoraLayer):
+            if isinstance(target, ALoraLayer):
                 if adapter_name in target.lora_A:
                     target_lora_A = target.lora_A[adapter_name].weight
                     target_lora_B = target.lora_B[adapter_name].weight
@@ -873,7 +873,7 @@ class ALoraModel(BaseTuner):
         new_adapter = None
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
-            if isinstance(target, aLoraLayer):
+            if isinstance(target, ALoraLayer):
                 target.delete_adapter(adapter_name)
                 if new_adapter is None:
                     new_adapter = target.active_adapters[:]
