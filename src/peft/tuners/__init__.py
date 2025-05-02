@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .alora import ALoraConfig, ALoraModel
 from .adalora import AdaLoraConfig, AdaLoraModel
 from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
+from .alora import ALoraConfig, ALoraModel
 from .boft import BOFTConfig, BOFTModel
 from .bone import BoneConfig, BoneModel
 from .cpt import CPTConfig, CPTEmbedding

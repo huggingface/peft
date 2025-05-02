@@ -1,11 +1,13 @@
 # duplicated from src/peft/tuners/lora/__init__.py
 
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_eetq_available
+from peft.utils.peft_types import register_peft_method
+
 from .config import ALoraConfig
 from .model import ALoraModel
-from peft.utils.peft_types import register_peft_method
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_eetq_available
 
-__all__ = ["ALoraConfig", "aLoraLayer", "ALoraModel"]
+
+__all__ = ["ALoraConfig", "ALoraModel", "is_eetq_available"]
 
 register_peft_method(
     name="alora", config_cls=ALoraConfig, model_cls=ALoraModel, prefix="lora_", is_mixed_compatible=True

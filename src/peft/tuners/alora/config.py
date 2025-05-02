@@ -1,6 +1,6 @@
 # https://github.com/IBM/activated-lora/blob/main/alora/config.py
-from dataclasses import dataclass, field
 import warnings
+from dataclasses import dataclass, field
 
 from peft.utils.peft_types import PeftType, TaskType
 
@@ -11,13 +11,13 @@ from ..lora.config import LoraConfig
 class ALoraConfig(LoraConfig):
     """
     aLORA configuration class. Inherits from LoraConfig.
-        It subclasses PEFT's LoraConfig, modifies the default rank r to 32 (often best), and adds an additional parameter:
-        r (`int`):
-            aLora attention dimension (the "rank").
-            Typically needs to be higher than used for standard Lora. Default=32.
+        It subclasses PEFT's LoraConfig, modifies the default rank r to 32 (often best), and adds an additional
+        parameter: r (`int`):
+            aLora attention dimension (the "rank"). Typically needs to be higher than used for standard Lora.
+            Default=32.
         invocation_string (str):
-            String intended to activate the aLoRA. The aLoRA adapted weights will activate
-            1 token after the first token in this string. This string must be present in all input data.
+            String intended to activate the aLoRA. The aLoRA adapted weights will activate 1 token after the first
+            token in this string. This string must be present in all input data.
     """
 
     r: int = field(default=32, metadata={"help": "Lora attention dimension"})
@@ -49,7 +49,7 @@ class ALoraConfig(LoraConfig):
             self.task_type.lower() != "causal_lm"
         ):
             raise ValueError(
-                f"task_type {self.task_type} is not supported for aLora. " "only use TaskType.CAUSAL_LM for aLora."
+                f"task_type {self.task_type} is not supported for aLora. only use TaskType.CAUSAL_LM for aLora."
             )
 
         # Reusing attention layers only

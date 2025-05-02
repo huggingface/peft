@@ -14,16 +14,7 @@ import torch
 from torch import nn
 from tqdm import tqdm
 
-from ..lora.layer import dispatch_default
-
 from ...import_utils import is_bnb_4bit_available, is_bnb_available
-from ..tuners_utils import (
-    BaseTuner,
-    BaseTunerLayer,
-    check_target_module_exists,
-    onload_layer,
-    replicate_layers,
-)
 from ...utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
@@ -34,6 +25,14 @@ from ...utils import (
 )
 from ...utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
 from ...utils.other import get_pattern_key
+from ..lora.layer import dispatch_default
+from ..tuners_utils import (
+    BaseTuner,
+    BaseTunerLayer,
+    check_target_module_exists,
+    onload_layer,
+    replicate_layers,
+)
 
 # from peft.aqlm import dispatch_aqlm
 # from peft.awq import dispatch_awq
@@ -43,6 +42,7 @@ from .config import ALoraConfig
 # from peft.gptq import dispatch_gptq
 # from peft.hqq import dispatch_hqq
 from .layer import aLoraLayer
+
 
 # from peft.torchao import dispatch_torchao
 # from peft.tp_layer import dispatch_megatron
@@ -271,7 +271,9 @@ class ALoraModel(BaseTuner):
                     else (
                         child.W_q
                         if hasattr(child, "W_q")
-                        else child.weight if hasattr(child, "weight") else next(child.parameters())
+                        else child.weight
+                        if hasattr(child, "weight")
+                        else next(child.parameters())
                     )
                 )
                 if not any(p.device == meta for p in module.parameters()):

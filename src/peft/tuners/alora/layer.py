@@ -1,12 +1,14 @@
 # https://github.com/IBM/activated-lora/blob/main/alora/layer.py
-from typing import Any, Optional, List
 import warnings
+from typing import Any, Optional, list
+
 import torch
+from torch import Tensor, nn
+from transformers.pytorch_utils import Conv1D
+
 from peft.tuners.alora.config import ALoraConfig
 from peft.tuners.lora.layer import LoraLayer, MultiheadAttention
 from peft.tuners.tuners_utils import BaseTunerLayer
-from torch import Tensor, nn
-from transformers.pytorch_utils import Conv1D
 
 
 class aLoraLayer(LoraLayer):
@@ -75,7 +77,7 @@ class aLoraLayer(LoraLayer):
         self.out_features = out_features
 
     def _mixed_batch_forward(
-        self, x, *args: Any, adapter_names: List[str], alora_offsets: List[int], **kwargs: Any
+        self, x, *args: Any, adapter_names: list[str], alora_offsets: list[int], **kwargs: Any
     ) -> torch.Tensor:
         # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
         # extra argument that allows mixing different adapters in the same batch at inference time.
@@ -137,14 +139,11 @@ class aLoraLinear(nn.Module, aLoraLayer):
         )
 
     def unmerge(self):
-        raise NotImplementedError(
-            "The 'unmerge' operation is not supported for aLoRA layers. " "aLoRA cannot be merged"
-        )
+        raise NotImplementedError("The 'unmerge' operation is not supported for aLoRA layers. aLoRA cannot be merged")
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         """
-        Forward pass for the aLoRA layer.
-        It applies the lora weights after the offset position.
+        Forward pass for the aLoRA layer. It applies the lora weights after the offset position.
         """
         self._check_forward_args(x, *args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)

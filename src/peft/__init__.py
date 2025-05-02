@@ -46,11 +46,12 @@ from .peft_model import (
     get_model_status,
 )
 from .tuners import (
-    ALoraConfig,
-    ALoraModel,
+    AdaLoraConfig,
     AdaLoraModel,
     AdaptionPromptConfig,
     AdaptionPromptModel,
+    ALoraConfig,
+    ALoraModel,
     BOFTConfig,
     BOFTModel,
     BoneConfig,
