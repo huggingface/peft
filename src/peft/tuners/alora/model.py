@@ -328,12 +328,12 @@ class ALoraModel(BaseTuner):
 
         # avoid eager bnb import
         if is_bnb_available():
-            from bitsandbytes import dispatch_bnb_8bit
+            from ..lora.bnb import dispatch_bnb_8bit
 
             dispatchers.append(dispatch_bnb_8bit)
 
         if is_bnb_4bit_available():
-            from bitsandbytes import dispatch_bnb_4bit
+            from ..lora.bnb import dispatch_bnb_4bit
 
             dispatchers.append(dispatch_bnb_4bit)
 

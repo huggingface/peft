@@ -1,6 +1,6 @@
 # https://github.com/IBM/activated-lora/blob/main/alora/layer.py
 import warnings
-from typing import Any, Optional, list
+from typing import Any, Optional
 
 import torch
 from torch import Tensor, nn
