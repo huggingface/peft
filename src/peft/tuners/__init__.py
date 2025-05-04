@@ -43,6 +43,7 @@ from .randlora import RandLoraConfig, RandLoraModel
 from .trainable_tokens import TrainableTokensConfig, TrainableTokensModel
 from .vblora import VBLoRAConfig, VBLoRAModel
 from .vera import VeraConfig, VeraModel
+from .diag import DiagConfig, DiagModel
 from .xlora import XLoraConfig, XLoraModel
 
 
