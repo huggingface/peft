@@ -76,15 +76,39 @@ class DiagLayer(BaseTunerLayer):
     ) -> None:
         print(f"[DiagLayer] Updating layer for adapter: {adapter_name}")
         if adapter_name not in self.row_weight:
-            base_w = self.get_base_layer().weight
-            full = torch.zeros_like(base_w, dtype=torch.float32)
+            base_layer = self.get_base_layer()
+            base_w = base_layer.weight
+            device = base_w.device
+            
+            # Get base weight shape and determine adapter shape
+            base_shape = base_w.shape
+            print(f"[DiagLayer] Base weight shape: {base_shape}, device: {device}")
+            
+            # Determine adapter weight shape based on base layer type and fan_in_fan_out setting
+            if self.fan_in_fan_out:
+                # For fan_in_fan_out=True, we expect (out_features, in_features)
+                adapter_shape = (self.out_features, self.in_features)
+            else:
+                # For fan_in_fan_out=False, we expect (in_features, out_features)
+                adapter_shape = (self.in_features, self.out_features)
+            
+            # Check if shapes are compatible
+            if base_shape != adapter_shape:
+                print(f"[DiagLayer] Warning: Base weight shape {base_shape} doesn't match expected adapter shape {adapter_shape}.")
+                print(f"[DiagLayer] Adapting to base weight shape {base_shape}.")
+                adapter_shape = base_shape
+            
+            # Initialize row weight with float32 dtype regardless of base layer dtype
+            full = torch.zeros(adapter_shape, dtype=torch.float32, device=device)
             if init_diag_weights:
-                full[0, :] = 1.0
+                # Only set the first row to 1.0
+                full[0, :] = torch.tensor(1.0, dtype=torch.float32, device=device)
             self.row_weight[adapter_name] = nn.Parameter(full)
+            print(f"[DiagLayer] Created row weight with shape: {self.row_weight[adapter_name].shape}, dtype: {self.row_weight[adapter_name].dtype}")
 
             # mask to zero all but first row gradients
             mask = torch.zeros_like(full, requires_grad=False)
-            mask[0, :] = 1.0
+            mask[0, :] = torch.tensor(1.0, dtype=torch.float32, device=device)
             self.register_buffer(f"{adapter_name}_mask", mask, persistent=False)
 
             def _hook(grad, m=mask):
@@ -93,11 +117,14 @@ class DiagLayer(BaseTunerLayer):
 
             # optional bias
             if bias != "none" and adapter_name not in self.row_bias:
-                self.row_bias[adapter_name] = nn.Parameter(torch.zeros(self.out_features, dtype=torch.float32))
+                self.row_bias[adapter_name] = nn.Parameter(
+                    torch.zeros(self.out_features, dtype=torch.float32, device=device)
+                )
 
             self.diag_dropout[adapter_name] = nn.Dropout(p=diag_dropout) if diag_dropout > 0.0 else nn.Identity()
 
-        self.diag_alpha[adapter_name] = diag_alpha
+        # Ensure diag_alpha is float32
+        self.diag_alpha[adapter_name] = torch.tensor(diag_alpha, dtype=torch.float32, device=device)
         if adapter_name not in self.active_adapters:
             self.active_adapters.append(adapter_name)
             print(f"[DiagLayer] Added adapter {adapter_name} to active adapters")
@@ -154,26 +181,68 @@ class DiagLayer(BaseTunerLayer):
                 base.bias.data -= db
 
     def forward(self, x: torch.Tensor, *args, **kwargs):
+        # Debug flag to control verbose logging
+        debug = getattr(self, 'debug_mode', False)
+        
         if not hasattr(self, '_first_forward_called'):
-            print(f"[DiagLayer] First forward pass during training - input shape: {x.shape}, device: {x.device}")
+            print(f"[DiagLayer] First forward pass during training - input shape: {x.shape}, device: {x.device}, dtype: {x.dtype}")
+            base_layer = self.get_base_layer()
+            print(f"[DiagLayer] Base layer weight shape: {base_layer.weight.shape}, device: {base_layer.weight.device}, dtype: {base_layer.weight.dtype}")
+            if self.active_adapters:
+                adapter_name = self.active_adapters[0]
+                print(f"[DiagLayer] Row weight shape: {self.row_weight[adapter_name].shape}, device: {self.row_weight[adapter_name].device}, dtype: {self.row_weight[adapter_name].dtype}")
+            else:
+                print("[DiagLayer] No active adapters")
             self._first_forward_called = True
 
         if self.disable_adapters or self.merged:
             return self.base_layer(x, *args, **kwargs)
 
+        # Get the device and dtype from the base layer once (optimization)
+        base_layer = self.get_base_layer()
+        base_layer_device = base_layer.weight.device
+        base_layer_dtype = base_layer.weight.dtype
+        
+        # Ensure input is on the correct device and dtype
+        if x.device != base_layer_device or x.dtype != base_layer_dtype:
+            x = x.to(device=base_layer_device, dtype=base_layer_dtype)
+        
         out = self.base_layer(x, *args, **kwargs)
+        if debug:
+            print(f"[DiagLayer] Base layer output shape: {out.shape}, device: {out.device}, dtype: {out.dtype}")
+        
         for name in self.active_adapters:
             if name not in self.row_weight:
                 continue
-            if self.in_features == self.out_features:
-                w = self.row_weight[name] * self.diag_alpha[name]
-                out = out + F.linear(x, w.T if self.fan_in_fan_out else w)
+            
+            w = self.row_weight[name] * self.diag_alpha[name]
+            if debug:
+                print(f"[DiagLayer] Using fan_in_fan_out={self.fan_in_fan_out}, w shape: {w.shape}, device: {w.device}, dtype: {w.dtype}, x shape: {x.shape}, device: {x.device}, dtype: {x.dtype}")
+            
+            # Apply dropout to a copy of x to avoid affecting other adapters
+            if self.diag_dropout[name] is not None and not isinstance(self.diag_dropout[name], nn.Identity):
+                x_dropped = self.diag_dropout[name](x)
             else:
-                w = self.row_weight[name] * self.diag_alpha[name]
-                out = out + F.linear(x, w)
+                x_dropped = x
+            
+            # Handle weight shapes based on fan_in_fan_out
+            if self.fan_in_fan_out:
+                # For fan_in_fan_out=True, weight shape is (out_features, in_features)
+                # Need to transpose for F.linear
+                out = out + F.linear(x_dropped, w.T)
+            else:
+                # For fan_in_fan_out=False, weight shape is (in_features, out_features)
+                # Can use directly with F.linear
+                out = out + F.linear(x_dropped, w)
 
             if name in self.row_bias:
-                out = out + self.row_bias[name]
+                bias = self.row_bias[name]
+                if debug:
+                    print(f"[DiagLayer] Adding bias with shape: {bias.shape}, device: {bias.device}, dtype: {bias.dtype}")
+                out = out + bias
+            
+            if debug:
+                print(f"[DiagLayer] After adapter {name}, output shape: {out.shape}, device: {out.device}, dtype: {out.dtype}")
 
         return out
 

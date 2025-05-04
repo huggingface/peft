@@ -89,18 +89,24 @@ class DiagModel(BaseTuner):
 
         # 1. Untangle PEFT wrappers if any ---------------------------------------------------
         base = target.get_base_layer() if hasattr(target, "get_base_layer") else target
+        print(f"[DiagModel] Creating/replacing layer {target_name} with base layer type: {type(base).__name__}")
+        if hasattr(base, 'weight'):
+            print(f"[DiagModel] Base layer weight shape: {base.weight.shape}")
 
         # 2. Skip non‑Linear/Conv1D layers ---------------------------------------------------
         valid_linear_types = (nn.Linear, Linear4bit, Linear8bitLt)
         if not isinstance(base, valid_linear_types + (torch.nn.Conv1d,)):
+            print(f"[DiagModel] Skipping non-linear layer {target_name} of type {type(base).__name__}")
             return
 
         # 3. Respect user‑supplied `target_modules` ------------------------------------------
         if target_name not in diag_config.target_modules:
+            print(f"[DiagModel] Skipping {target_name} not in target_modules")
             return
 
         # 4. Already wrapped? then *update* --------------------------------------------------
         if isinstance(target, DiagLayer):
+            print(f"[DiagModel] Updating existing DiagLayer {target_name}")
             target.update_layer(
                 adapter_name,
                 diag_config.diag_alpha,
@@ -111,6 +117,7 @@ class DiagModel(BaseTuner):
             return
 
         # 5. Fresh wrap ----------------------------------------------------------------------
+        print(f"[DiagModel] Creating new DiagLayer for {target_name}")
         new_module = self._create_new_module(diag_config, adapter_name, target, **optional_kwargs)
         if adapter_name not in self.active_adapter:
             new_module.disable_adapters = True  # freeze if not active
