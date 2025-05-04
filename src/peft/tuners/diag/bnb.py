@@ -6,6 +6,7 @@ from typing import Optional
 import bitsandbytes as bnb
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import check_adapters_to_merge
@@ -18,7 +19,7 @@ from peft.tuners.diag.layer import DiagLayer
 if is_bnb_available():
 
     class Linear8bitLt(torch.nn.Module, DiagLayer):
-        # Diagonal adapter implemented in a dense layer with 8-bit quantization
+        # Row-trainable adapter implemented in a dense layer with 8-bit quantization
         def __init__(
             self,
             base_layer: torch.nn.Module,
@@ -55,13 +56,13 @@ if is_bnb_available():
                 return
 
             for active_adapter in adapter_names:
-                if active_adapter not in self.diag_weights.keys():
+                if active_adapter not in self.row_weight.keys():
                     continue
 
                 warnings.warn(
-                    "Merge diagonal module to 8-bit linear may get different generations due to rounding errors."
+                    "Merge row-trainable module to 8-bit linear may get different generations due to rounding errors."
                 )
-                diag_data = self.get_delta_weight(active_adapter)
+                row_data = self.get_delta_weight(active_adapter)
 
                 weight = self.get_base_layer().weight
                 state = self.get_base_layer().state
@@ -69,7 +70,7 @@ if is_bnb_available():
                     state.SCB = weight.SCB
 
                 output = dequantize_bnb_weight(weight, state)
-                w_data = output.to(diag_data.dtype).to(diag_data.device) + diag_data
+                w_data = output.to(row_data.dtype).to(row_data.device) + row_data
 
                 if safe_merge and not torch.isfinite(w_data).all():
                     raise ValueError(
@@ -89,12 +90,12 @@ if is_bnb_available():
 
             while len(self.merged_adapters) > 0:
                 active_adapter = self.merged_adapters.pop()
-                if active_adapter not in self.diag_weights.keys():
+                if active_adapter not in self.row_weight.keys():
                     continue
                 warnings.warn(
-                    "Unmerge diagonal module to 8-bit linear may get different generations due to rounding errors."
+                    "Unmerge row-trainable module to 8-bit linear may get different generations due to rounding errors."
                 )
-                diag_data = self.get_delta_weight(active_adapter)
+                row_data = self.get_delta_weight(active_adapter)
 
                 weight = self.get_base_layer().weight
                 state = self.get_base_layer().state
@@ -102,7 +103,7 @@ if is_bnb_available():
                     state.SCB = weight.SCB
                 output = dequantize_bnb_weight(weight, state=state)
 
-                w_data = output.to(diag_data.dtype).to(diag_data.device) - diag_data
+                w_data = output.to(row_data.dtype).to(row_data.device) - row_data
 
                 self.get_base_layer().weight = bnb.nn.Int8Params(
                     w_data.to("cpu"), requires_grad=False, has_fp16_weights=weight.has_fp16_weights
@@ -110,14 +111,14 @@ if is_bnb_available():
                 state.reset_grads()
 
         def get_delta_weight(self, adapter) -> torch.Tensor:
-            if adapter not in self.diag_weights.keys():
+            if adapter not in self.row_weight.keys():
                 return torch.zeros_like(self.get_base_layer().weight)
 
-            diag_weight = self.diag_weights[adapter]
+            row_weight = self.row_weight[adapter]
             if self.fan_in_fan_out:
-                diag_weight = diag_weight.T
+                row_weight = row_weight.T
 
-            return diag_weight
+            return row_weight
 
         def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
             if self.disable_adapters:
@@ -128,23 +129,23 @@ if is_bnb_available():
                 result = self.base_layer(x, *args, **kwargs)
             else:
                 result = self.base_layer(x, *args, **kwargs)
-                if self.active_adapter in self.diag_weights.keys():
-                    diag_weight = self.diag_weights[self.active_adapter]
+                if self.active_adapter in self.row_weight.keys():
+                    row_weight = self.row_weight[self.active_adapter]
                     if self.fan_in_fan_out:
-                        diag_weight = diag_weight.T
-                    result = result + (x @ diag_weight)
+                        row_weight = row_weight.T
+                    result = result + F.linear(x, row_weight)
 
             return result
 
         def __repr__(self) -> str:
             rep = super().__repr__()
-            return "diag." + rep
+            return "row." + rep
 
 
 if is_bnb_4bit_available():
 
     class Linear4bit(torch.nn.Module, DiagLayer):
-        # Diagonal adapter implemented in a dense layer with 4-bit quantization
+        # Row-trainable adapter implemented in a dense layer with 4-bit quantization
         def __init__(
             self,
             base_layer: torch.nn.Module,
@@ -181,13 +182,13 @@ if is_bnb_4bit_available():
                 return
 
             for active_adapter in adapter_names:
-                if active_adapter not in self.diag_weights.keys():
+                if active_adapter not in self.row_weight.keys():
                     continue
 
                 warnings.warn(
-                    "Merge diagonal module to 4-bit linear may get different generations due to rounding errors."
+                    "Merge row-trainable module to 4-bit linear may get different generations due to rounding errors."
                 )
-                diag_data = self.get_delta_weight(active_adapter)
+                row_data = self.get_delta_weight(active_adapter)
 
                 weight = self.get_base_layer().weight
                 state = self.get_base_layer().state
@@ -195,15 +196,15 @@ if is_bnb_4bit_available():
                     state.SCB = weight.SCB
 
                 output = dequantize_bnb_weight(weight, state)
-                w_data = output.to(diag_data.dtype).to(diag_data.device) + diag_data
+                w_data = output.to(row_data.dtype).to(row_data.device) + row_data
 
                 if safe_merge and not torch.isfinite(w_data).all():
                     raise ValueError(
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                     )
 
-                self.get_base_layer().weight = bnb.nn.Params4bit(
-                    w_data.to("cpu"), requires_grad=False, **state.__dict__
+                self.get_base_layer().weight = bnb.nn.Int8Params(
+                    w_data.to("cpu"), requires_grad=False, has_fp16_weights=weight.has_fp16_weights
                 ).to(weight.device)
                 state.reset_grads()
                 self.merged_adapters.append(active_adapter)
@@ -215,12 +216,12 @@ if is_bnb_4bit_available():
 
             while len(self.merged_adapters) > 0:
                 active_adapter = self.merged_adapters.pop()
-                if active_adapter not in self.diag_weights.keys():
+                if active_adapter not in self.row_weight.keys():
                     continue
                 warnings.warn(
-                    "Unmerge diagonal module to 4-bit linear may get different generations due to rounding errors."
+                    "Unmerge row-trainable module to 4-bit linear may get different generations due to rounding errors."
                 )
-                diag_data = self.get_delta_weight(active_adapter)
+                row_data = self.get_delta_weight(active_adapter)
 
                 weight = self.get_base_layer().weight
                 state = self.get_base_layer().state
@@ -228,22 +229,22 @@ if is_bnb_4bit_available():
                     state.SCB = weight.SCB
                 output = dequantize_bnb_weight(weight, state=state)
 
-                w_data = output.to(diag_data.dtype).to(diag_data.device) - diag_data
+                w_data = output.to(row_data.dtype).to(row_data.device) - row_data
 
-                self.get_base_layer().weight = bnb.nn.Params4bit(
-                    w_data.to("cpu"), requires_grad=False, **state.__dict__
+                self.get_base_layer().weight = bnb.nn.Int8Params(
+                    w_data.to("cpu"), requires_grad=False, has_fp16_weights=weight.has_fp16_weights
                 ).to(weight.device)
                 state.reset_grads()
 
         def get_delta_weight(self, adapter) -> torch.Tensor:
-            if adapter not in self.diag_weights.keys():
+            if adapter not in self.row_weight.keys():
                 return torch.zeros_like(self.get_base_layer().weight)
 
-            diag_weight = self.diag_weights[adapter]
+            row_weight = self.row_weight[adapter]
             if self.fan_in_fan_out:
-                diag_weight = diag_weight.T
+                row_weight = row_weight.T
 
-            return diag_weight
+            return row_weight
 
         def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
             if self.disable_adapters:
@@ -254,14 +255,14 @@ if is_bnb_4bit_available():
                 result = self.base_layer(x, *args, **kwargs)
             else:
                 result = self.base_layer(x, *args, **kwargs)
-                if self.active_adapter in self.diag_weights.keys():
-                    diag_weight = self.diag_weights[self.active_adapter]
+                if self.active_adapter in self.row_weight.keys():
+                    row_weight = self.row_weight[self.active_adapter]
                     if self.fan_in_fan_out:
-                        diag_weight = diag_weight.T
-                    result = result + (x @ diag_weight)
+                        row_weight = row_weight.T
+                    result = result + F.linear(x, row_weight)
 
             return result
 
         def __repr__(self) -> str:
             rep = super().__repr__()
-            return "diag." + rep 
+            return "row." + rep 

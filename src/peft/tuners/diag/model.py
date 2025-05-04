@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-"""Diagonal‑adapter PEFT tuner
+"""Row-based PEFT tuner
 
-This mirrors HuggingFace's Vera implementation, replacing the shared
-(r x d) & (d x r) projections with a per‑layer *diagonal* scaling.
-Only the implementation differences to Vera are the parameterisation;
-all injection / (un)merging / multi‑adapter plumbing follows the same
-patterns so the trainer can treat both tuners identically.
+This mirrors HuggingFace's Vera implementation, but instead of using shared
+projections, it uses a per-layer weight matrix where only the first row is
+trainable. This provides a parameter-efficient way to adapt the model while
+maintaining the same injection / (un)merging / multi-adapter plumbing as other
+PEFT methods.
 """
 
 from dataclasses import asdict
@@ -42,7 +42,7 @@ else:
 
 
 class DiagModel(BaseTuner):
-    """Parameter‑efficient diagonal adapter à‑la LoRA/Vera but rank‑1.
+    """Parameter‑efficient row-based adapter where only the first row of each weight matrix is trainable.
 
     The public API (prepare, merge_and_unload, unload, etc.) matches
     HuggingFace PEFT tuners.
@@ -85,7 +85,7 @@ class DiagModel(BaseTuner):
         parent: nn.Module,
         **optional_kwargs,
     ) -> None:
-        """Wrap *one* module with our Diag `Linear` if eligible."""
+        """Wrap *one* module with our row-based `Linear` if eligible."""
 
         # 1. Untangle PEFT wrappers if any ---------------------------------------------------
         base = target.get_base_layer() if hasattr(target, "get_base_layer") else target
@@ -160,7 +160,7 @@ class DiagModel(BaseTuner):
                 for name, param in model.named_parameters():
                     if "bias" in name:
                         param.requires_grad = True
-            elif bias_mode == "diag_only":
+            elif bias_mode == "row_only":
                 for m in model.modules():
                     if isinstance(m, DiagLayer) and hasattr(m, "bias") and m.bias is not None:
                         m.bias.requires_grad = True
@@ -200,9 +200,6 @@ class DiagModel(BaseTuner):
     def set_adapter(self, adapter_name: str):
         for m in self.model.modules():
             if isinstance(m, DiagLayer):
-                if m.merged:
-                    warnings.warn("Adapter cannot be set when the model is merged. Unmerging first.")
-                    m.unmerge()
                 m.set_adapter(adapter_name)
         self.active_adapter = adapter_name
 
