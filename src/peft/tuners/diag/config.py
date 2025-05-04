@@ -79,6 +79,12 @@ class DiagConfig(PeftConfig):
     )
 
     def __post_init__(self):
+        print("[DiagConfig] Initializing configuration")
+        print(f"[DiagConfig] Target modules: {self.target_modules}")
+        print(f"[DiagConfig] Alpha: {self.diag_alpha}, Dropout: {self.diag_dropout}")
+        print(f"[DiagConfig] Fan in/out: {self.fan_in_fan_out}, Bias: {self.bias}")
+        print(f"[DiagConfig] Init weights: {self.init_diag_weights}")
+        
         super().__post_init__()
         self.peft_type = PeftType.DIAG
         self.target_modules = (
