@@ -68,7 +68,6 @@ class DiagLayer(BaseTunerLayer):
     def update_layer(
         self,
         adapter_name: str,
-        *,
         diag_alpha: float = 1.0,
         diag_dropout: float = 0.0,
         init_diag_weights: bool = True,
@@ -123,6 +122,10 @@ class DiagLayer(BaseTunerLayer):
 
             self.diag_dropout[adapter_name] = nn.Dropout(p=diag_dropout) if diag_dropout > 0.0 else nn.Identity()
 
+        # Get device from base layer for diag_alpha
+        base_layer = self.get_base_layer()
+        device = base_layer.weight.device
+        
         # Ensure diag_alpha is float32
         self.diag_alpha[adapter_name] = torch.tensor(diag_alpha, dtype=torch.float32, device=device)
         if adapter_name not in self.active_adapters:
@@ -229,11 +232,22 @@ class DiagLayer(BaseTunerLayer):
             if self.fan_in_fan_out:
                 # For fan_in_fan_out=True, weight shape is (out_features, in_features)
                 # Need to transpose for F.linear
-                out = out + F.linear(x_dropped, w.T)
+                adapter_out = F.linear(x_dropped, w.T)
             else:
                 # For fan_in_fan_out=False, weight shape is (in_features, out_features)
                 # Can use directly with F.linear
-                out = out + F.linear(x_dropped, w)
+                adapter_out = F.linear(x_dropped, w)
+
+            # Ensure shapes match before adding
+            if adapter_out.shape != out.shape:
+                print(f"[DiagLayer] Warning: Shape mismatch - adapter_out: {adapter_out.shape}, out: {out.shape}")
+                # Try to reshape adapter_out to match out
+                if len(adapter_out.shape) == len(out.shape):
+                    adapter_out = adapter_out.view(out.shape)
+                else:
+                    raise ValueError(f"Cannot reshape adapter output {adapter_out.shape} to match base output {out.shape}")
+
+            out = out + adapter_out
 
             if name in self.row_bias:
                 bias = self.row_bias[name]
