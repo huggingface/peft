@@ -21,8 +21,8 @@ from torch import nn
 
 from peft.utils.other import transpose
 
-from .dora import DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer
-from .layer import Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd
+from .dora import DoraConv1dLayer, DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer
+from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd
 
 
 class DoraLinearVariant(LoraVariant):
@@ -294,6 +294,13 @@ class _DoraConvNdVariant(LoraVariant):
             base_result=base_result,
         )
         return result
+
+
+class DoraConv1dVariant(_DoraConvNdVariant):
+    @staticmethod
+    def init(module: Conv1d, adapter_name: str, **kwargs: Any) -> None:
+        dora_layer = DoraConv1dLayer(fan_in_fan_out=False)
+        _DoraConvNdVariant.init_convd_variant(module, adapter_name, dora_layer=dora_layer)
 
 
 class DoraConv2dVariant(_DoraConvNdVariant):
