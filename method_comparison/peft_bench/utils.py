@@ -19,19 +19,19 @@ Utilities for PEFT benchmarking.
 import datetime
 import json
 import os
-import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any, Callable, Optional
 
-import psutil  # You might need to install this: pip install psutil
+import psutil
 import torch
 from peft import PeftConfig
 
 
 # Constants
 FILE_NAME_BENCHMARK_PARAMS = "benchmark_params.json"
+FILE_NAME_DEFAULT_CONFIG = "default_config.json"
 
 # Main paths for storing results
 RESULT_PATH = os.path.join(os.path.dirname(__file__), "results")
@@ -73,7 +73,7 @@ class BenchmarkResult:
         """Initialize structured data format."""
         # Default run_info
         self.run_info = {
-            "timestamp": datetime.datetime.now().isoformat(),
+            "timestamp": datetime.datetime.now(tz=datetime.timezone.utc).isoformat(),
             "duration": 0.0,
             "status": self.status.value,
             "hardware": {
@@ -347,7 +347,7 @@ class BenchmarkConfig:
 
 def generate_experiment_id() -> str:
     """Generate a unique experiment ID."""
-    return datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:8]
+    return datetime.datetime.now(tz=datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
 
 
 def validate_experiment_path(path: str) -> tuple[str, "BenchmarkConfig", Any]:
@@ -360,11 +360,16 @@ def validate_experiment_path(path: str) -> tuple[str, "BenchmarkConfig", Any]:
 
     # Check for benchmark params file
     benchmark_params_path = os.path.join(path, FILE_NAME_BENCHMARK_PARAMS)
-    if not os.path.exists(benchmark_params_path):
-        raise FileNotFoundError(f"Benchmark params not found: {benchmark_params_path}")
-
-    # Load benchmark config
-    benchmark_config = BenchmarkConfig.from_json(benchmark_params_path)
+    default_config_path = os.path.join(os.path.dirname(__file__), FILE_NAME_DEFAULT_CONFIG)
+    
+    # Use benchmark_params.json if exists, otherwise use default config
+    if os.path.exists(benchmark_params_path):
+        benchmark_config = BenchmarkConfig.from_json(benchmark_params_path)
+    elif os.path.exists(default_config_path):
+        print(f"No benchmark_params.json found in {path}, using default configuration")
+        benchmark_config = BenchmarkConfig.from_json(default_config_path)
+    else:
+        raise FileNotFoundError(f"Neither benchmark_params.json nor default_config.json found")
 
     # Try to load PEFT config
     try:

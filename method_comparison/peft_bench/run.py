@@ -315,26 +315,21 @@ def main():
     # Configure print function based on verbosity
     print_fn = print if args.verbose else lambda *args, **kwargs: None
 
-    try:
-        # Validate experiment path and load configs
-        experiment_name, benchmark_config, peft_config = validate_experiment_path(args.experiment_path)
+    # Validate experiment path and load configs
+    experiment_name, benchmark_config, peft_config = validate_experiment_path(args.experiment_path)
 
-        print_fn(f"Running benchmark for experiment: {experiment_name}")
+    print_fn(f"Running benchmark for experiment: {experiment_name}")
 
-        # Run the benchmark
-        result = run_benchmark(
-            benchmark_config=benchmark_config,
-            experiment_name=experiment_name,
-            experiment_path=args.experiment_path,
-            print_fn=print_fn,
-        )
+    # Run the benchmark
+    result = run_benchmark(
+        benchmark_config=benchmark_config,
+        experiment_name=experiment_name,
+        experiment_path=args.experiment_path,
+        print_fn=print_fn,
+    )
 
-        # Log and save results
-        log_results(experiment_name, result, print_fn=print)
-
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
+    # Log and save results
+    log_results(experiment_name, result, print_fn=print)
 
     return 0
 

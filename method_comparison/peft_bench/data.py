@@ -42,17 +42,14 @@ def load_test_prompts(config: dict) -> dict[str, list[str]]:
     # Use the specified prompts file or fall back to default
     prompts_file = config.get("prompts_file", DEFAULT_PROMPTS_PATH)
 
-    try:
-        with open(prompts_file) as f:
-            prompts = json.load(f)
+    with open(prompts_file) as f:
+        prompts = json.load(f)
 
-        # Apply textwrap.dedent to remove leading spaces from multiline prompts
-        for category, prompt_list in prompts.items():
-            prompts[category] = [textwrap.dedent(prompt) for prompt in prompt_list]
+    # Apply textwrap.dedent to remove leading spaces from multiline prompts
+    for category, prompt_list in prompts.items():
+        prompts[category] = [textwrap.dedent(prompt) for prompt in prompt_list]
 
-        return prompts
-    except Exception as e:
-        raise ValueError(f"Error loading prompts from {prompts_file}: {e}")
+    return prompts
 
 
 def truncate_prompt_for_model(
