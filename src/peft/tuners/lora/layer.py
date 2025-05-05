@@ -1648,16 +1648,16 @@ class MultiheadAttention(nn.Module, LoraLayer):
             raise TypeError(f"lora.{self.__class__.__name__} does not support mixed adapter batches.")
         super()._check_forward_args(x, *args, **kwargs)
 
-    def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
-        previous_dtype = x.dtype
-        self._check_forward_args(x, *args, **kwargs)
+    def forward(self, query: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        previous_dtype = query.dtype
+        self._check_forward_args(query, *args, **kwargs)
 
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
-            result = self.base_layer(x, *args, **kwargs)
+            result = self.base_layer(query, *args, **kwargs)
         elif self.merged:
-            result = self.base_layer(x, *args, **kwargs)
+            result = self.base_layer(query, *args, **kwargs)
         else:
             out_proj = self.get_base_layer().out_proj
             if out_proj.active_adapters != self.active_adapters:
@@ -1680,7 +1680,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
             active_adapters = [a for a in self.active_adapters if a in self.lora_A]
             try:
                 self.merge(adapter_names=active_adapters)
-                result = self.base_layer(x, *args, **kwargs)
+                result = self.base_layer(query, *args, **kwargs)
             finally:
                 # it's safe to call unmerge(), which unmerges all adapters, because we checked that not self.merged,
                 # i.e. there is was no merged layer before
