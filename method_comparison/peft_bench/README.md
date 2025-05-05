@@ -12,7 +12,7 @@ This directory contains tools to benchmark different Parameter-Efficient Fine-Tu
 ## Usage
 
 ```bash
-cd /home/ved/code/git/peft && DISABLE_FLASH_ATTN=1 PYTHONPATH=. python3 method_comparison/peft_bench/run.py method_comparison/peft_bench/experiments/lora/lora_r16 --verbose
+python run.py --verbose experiments/lora/lora_r16
 ```
 
 ## Configuration
