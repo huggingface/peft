@@ -79,11 +79,7 @@ def train_model(
         peft_config = LoraConfig(
             r=rank,  # Rank of matrix
             lora_alpha=randlora_alpha,
-            target_modules=(
-                randlora_target_modules.split(",")
-                if randlora_target_modules
-                else ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
-            ),
+            target_modules=(randlora_target_modules.split(",") if randlora_target_modules else ["k_proj", "v_proj"]),
             lora_dropout=randlora_dropout,
             bias="none",
         )
@@ -91,11 +87,7 @@ def train_model(
         peft_config = RandLoraConfig(
             r=rank,  # Rank of random bases
             randlora_alpha=randlora_alpha,
-            target_modules=(
-                randlora_target_modules.split(",")
-                if randlora_target_modules
-                else ["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj"]
-            ),
+            target_modules=(randlora_target_modules.split(",") if randlora_target_modules else ["k_proj", "v_proj"]),
             randlora_dropout=randlora_dropout,
             bias="none",
             sparse=sparse,

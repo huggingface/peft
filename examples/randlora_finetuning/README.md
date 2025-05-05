@@ -42,15 +42,21 @@ This 👆🏻 by default will load the model in peft set up with RandLora config
 python examples/randlora_finetuning/randlora_finetuning.py --base_model meta-llama/Meta-Llama-3-8B --data_path timdettmers/openassistant-guanaco --use_lora --randlora_alpha
 ```
 
+RandLora can be made to use sparse or very sparse random bases. These sparse matrices can help reduce overfitting. To add `--very_sparse` to run with very sparse matrice or run the following for sparse matrices:
+
+```bash
+python examples/randlora_finetuning/randlora_finetuning.py --base_model meta-llama/Meta-Llama-3-8B --quantize --sparse
+```
+
 RandLora also supports quantization. To use 4-bit quantization try:
 
 ```bash
 python examples/randlora_finetuning/randlora_finetuning.py --base_model meta-llama/Meta-Llama-3-8B --quantize
 ```
 
-By default the RandLora layers are the attention and MLP layers of LLama model, if you whish to choose a different set of layers for RandLora to be applied on, you can simply define it using:
+By default the RandLora layers are the key and value layers of LLama model. Adding adapters on more layers will increase memory usage. If you whish to choose a different set of layers for RandLora to be applied on, you can simply define it using:
 ```bash
-python examples/randlora_finetuning/randlora_finetuning.py --randlora_target_modules "k_proj,v_proj" 
+python examples/randlora_finetuning/randlora_finetuning.py --randlora_target_modules "q_proj,k_proj,v_proj" 
 ```
 
 ### Full example of the script 
@@ -69,7 +75,7 @@ python randlora_finetuning.py \
     --save_step 100 \
     --device "cuda:0" \
     --rank 32 \
-    --randlora_alpha 64 \
+    --randlora_alpha 640 \
     --randlora_dropout 0.05 \
     --randlora_target_modules "k_proj,v_proj" \
     --hub_model_id "YOUR_HF_REPO" \
