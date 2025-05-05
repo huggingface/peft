@@ -16,148 +16,98 @@
 Main entry point to run the experiments. Contains general setup and the proper training code.
 """
 import argparse
-import datetime
 import gc
-import json
-import os
 import sys
 import time
-from typing import Dict, Any, List, Optional, Tuple
 
 import torch
-import torch.nn.functional as F
-from tqdm import tqdm
-from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
-
-from peft import get_peft_model, PeftModel, LoraConfig, PeftConfig
-from utils import (
+from method_comparison.peft_bench.data import prepare_benchmark_prompts
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, set_seed
+from method_comparison.peft_bench.utils import (
     BenchmarkConfig,
     BenchmarkResult,
     BenchmarkStatus,
     generate_experiment_id,
     get_memory_usage,
     get_model_size_mb,
-    get_trainable_parameters,
     init_cuda,
     log_results,
-    time_function,
     validate_experiment_path,
 )
-from data import prepare_benchmark_prompts, get_prompts_by_length
+
+from peft import PeftConfig, get_peft_model
 
 
-def measure_inference_time(
-    model, 
-    tokenizer, 
-    prompts, 
-    max_new_tokens=20, 
-    num_runs=3, 
-    print_fn=print
-):
+def measure_inference_time(model, tokenizer, prompts, max_new_tokens, num_runs, print_fn):
     """Measure inference time across different prompt categories."""
     inference_times = {}
-    
+    time_per_token = {}
+    generated_tokens = {}
+
     for category, prompt_list in prompts.items():
         if not prompt_list:
             continue
-            
-        # Use first prompt for measurement
-        prompt = prompt_list[0]
-        print_fn(f"Measuring inference time for {category} prompt")
-        
-        # Prepare input
-        inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-        
-        # Warmup run
-        with torch.inference_mode():
-            _ = model.generate(**inputs, max_new_tokens=max_new_tokens)
-            
-        # Measurement runs
-        times = []
-        for i in range(num_runs):
-            torch.cuda.synchronize() if torch.cuda.is_available() else None
-            start_time = time.perf_counter()
-            
+
+        category_times = []
+        category_tokens = []
+
+        # Measure each prompt in the category
+        for prompt in prompt_list:
+            # Prepare input
+            inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+
+            # Warmup run
             with torch.inference_mode():
                 _ = model.generate(**inputs, max_new_tokens=max_new_tokens)
+
+            # Measurement runs
+            prompt_times = []
+            prompt_tokens = []
+            for i in range(num_runs):
+                torch.cuda.synchronize() if torch.cuda.is_available() else None
+                start_time = time.perf_counter()
+
+                with torch.inference_mode():
+                    output = model.generate(**inputs, max_new_tokens=max_new_tokens)
+
+                torch.cuda.synchronize() if torch.cuda.is_available() else None
+                end_time = time.perf_counter()
                 
-            torch.cuda.synchronize() if torch.cuda.is_available() else None
-            end_time = time.perf_counter()
-            times.append(end_time - start_time)
+                # Calculate tokens generated (output minus input)
+                num_tokens_generated = output.shape[1] - inputs.input_ids.shape[1]
+                prompt_tokens.append(num_tokens_generated)
+                prompt_times.append(end_time - start_time)
+
+            # Average for this specific prompt
+            avg_time = sum(prompt_times) / len(prompt_times)
+            avg_tokens = sum(prompt_tokens) / len(prompt_tokens)
             
-        # Record average time
-        inference_times[category] = sum(times) / len(times)
-        
-    return inference_times
+            category_times.append(avg_time)
+            category_tokens.append(avg_tokens)
 
+        # Calculate category averages
+        if category_times:
+            avg_category_time = sum(category_times) / len(category_times)
+            avg_category_tokens = sum(category_tokens) / len(category_tokens)
+            
+            inference_times[category] = avg_category_time
+            generated_tokens[category] = avg_category_tokens
+            
+            # Calculate time per token
+            if avg_category_tokens > 0:
+                time_per_token[category] = avg_category_time / avg_category_tokens
+            else:
+                time_per_token[category] = 0.0
 
-def measure_training_throughput(
-    model, 
-    tokenizer, 
-    prompts, 
-    batch_size=4, 
-    num_steps=10, 
-    print_fn=print
-):
-    """Measure training speed in tokens per second."""
-    # Get training data
-    all_prompts = get_prompts_by_length(prompts, "all")
-    selected_prompts = all_prompts[:batch_size] * (num_steps + 2)  # Ensure enough data
-    
-    # Tokenize
-    inputs = tokenizer(
-        selected_prompts, 
-        return_tensors="pt", 
-        padding=True, 
-        truncation=True
-    ).to(model.device)
-    
-    # Setup optimizer
-    optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5)
-    
-    # Count tokens for throughput calculation
-    total_tokens = inputs["attention_mask"].sum().item()
-    
-    # Warmup step
-    model.train()
-    outputs = model(**inputs, labels=inputs["input_ids"])
-    loss = outputs.loss
-    loss.backward()
-    optimizer.step()
-    optimizer.zero_grad()
-    
-    # Benchmark training steps
-    print_fn(f"Measuring training throughput over {num_steps} steps...")
-    
-    torch.cuda.synchronize() if torch.cuda.is_available() else None
-    start_time = time.perf_counter()
-    
-    for step in range(num_steps):
-        batch_start = step * batch_size
-        batch_end = batch_start + batch_size
-        batch = {k: v[batch_start:batch_end] for k, v in inputs.items()}
-        
-        outputs = model(**batch, labels=batch["input_ids"])
-        loss = outputs.loss
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
-    
-    torch.cuda.synchronize() if torch.cuda.is_available() else None
-    end_time = time.perf_counter()
-    
-    # Calculate throughput
-    elapsed_time = end_time - start_time
-    tokens_per_second = total_tokens / elapsed_time
-    
-    return tokens_per_second
+    return {
+        "inference_times": inference_times,
+        "time_per_token": time_per_token,
+        "generated_tokens": generated_tokens
+    }
 
 
 def run_benchmark(
-    benchmark_config: BenchmarkConfig,
-    experiment_name: str,
-    experiment_path: str,
-    print_fn=print
+    benchmark_config: BenchmarkConfig, experiment_name: str, experiment_path: str, print_fn=print
 ) -> BenchmarkResult:
     """Run benchmarks for the specified PEFT method configuration."""
     # Initialize benchmark result
@@ -168,32 +118,31 @@ def run_benchmark(
         model_id=benchmark_config.model_id,
         peft_method=benchmark_config.peft_method,
     )
-    
+
     # Save initial result to show running status
     result.save()
-    
+
     start_time = time.perf_counter()
-    memory_logs = []
-    
+
     try:
         # Initialize CUDA
         print_fn("Initializing CUDA...")
         gpu_allocated_init, gpu_reserved_init = init_cuda()
-        
+
         # Set random seed
         set_seed(benchmark_config.seed)
-        
+
         # Load base model and tokenizer
         print_fn(f"Loading base model: {benchmark_config.model_id}")
         tokenizer = AutoTokenizer.from_pretrained(benchmark_config.model_id)
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
-            
+
         # Configure model loading parameters
         model_kwargs = {
             "device_map": "auto" if torch.cuda.is_available() else None,
         }
-        
+
         # Add dtype configuration
         if benchmark_config.dtype == "float32":
             model_kwargs["torch_dtype"] = torch.float32
@@ -201,46 +150,52 @@ def run_benchmark(
             model_kwargs["torch_dtype"] = torch.float16
         elif benchmark_config.dtype == "bfloat16":
             model_kwargs["torch_dtype"] = torch.bfloat16
-        
+
         # Add quantization if needed
         if benchmark_config.use_8bit:
-            model_kwargs["load_in_8bit"] = True
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_8bit=True,
+                llm_int8_enable_fp32_cpu_offload=True
+            )
         elif benchmark_config.use_4bit:
-            model_kwargs["load_in_4bit"] = True
-            
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=model_kwargs.get("torch_dtype", torch.float16),
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4"
+            )
+
         # Load the base model
-        base_model = AutoModelForCausalLM.from_pretrained(
-            benchmark_config.model_id,
-            **model_kwargs
-        )
-        
+        base_model = AutoModelForCausalLM.from_pretrained(benchmark_config.model_id, **model_kwargs)
+
         # Track memory after base model load
         ram, gpu_allocated, gpu_reserved = get_memory_usage()
-        memory_logs.append({
-            "stage": "base_model_loaded",
-            "ram_mb": ram,
-            "gpu_allocated_mb": gpu_allocated,
-            "gpu_reserved_mb": gpu_reserved
-        })
-        
+        result.add_memory_log("base_model_loaded", ram, gpu_allocated, gpu_reserved)
+
         # Calculate base model metrics
         base_params = sum(p.numel() for p in base_model.parameters())
         dtype_bytes = 2 if benchmark_config.dtype in ["float16", "bfloat16"] else 4
         base_model_size_mb = get_model_size_mb(base_model, dtype_bytes=dtype_bytes)
-        
+
         # Store in result
-        result.base_params = base_params
-        result.base_model_size_mb = base_model_size_mb
-        
+        result.update_meta_info(
+            param_counts={"base_params": base_params}, size_info={"base_model_size_mb": base_model_size_mb}
+        )
+
         # Prepare prompts for benchmarking
         print_fn("Preparing benchmark prompts...")
         prompts = prepare_benchmark_prompts(
-            config=benchmark_config.to_dict(),
-            tokenizer=tokenizer,
-            num_samples=benchmark_config.num_prompt_samples
+            config=benchmark_config.to_dict(), tokenizer=tokenizer, num_samples=benchmark_config.num_prompt_samples
         )
-        
-        # Measure base model inference
+
+        # Ensure we only use the prompt categories specified in the config
+        prompts = {
+            category: prompt_list
+            for category, prompt_list in prompts.items()
+            if category in benchmark_config.prompt_categories
+        }
+
+        # Measure base model inference for each prompt category
         print_fn("Measuring base model inference times...")
         base_inference_times = measure_inference_time(
             base_model,
@@ -248,45 +203,50 @@ def run_benchmark(
             prompts,
             max_new_tokens=benchmark_config.max_new_tokens,
             num_runs=benchmark_config.num_inference_runs,
-            print_fn=print_fn
+            print_fn=print_fn,
         )
-        
+
         # Apply PEFT method
         print_fn(f"Applying PEFT method: {benchmark_config.peft_method}")
 
-        # Load PEFT configuration from path - use the PeftConfig we imported at the top
+        # Load PEFT configuration from path or create dynamically
         try:
+            print_fn(f"Loading PEFT config from {experiment_path}")
             peft_config = PeftConfig.from_pretrained(experiment_path)
+            print_fn(f"Loaded PEFT config: {peft_config.peft_type}, with parameters: {vars(peft_config)}")
             model = get_peft_model(base_model, peft_config)
         except Exception as e:
-            print_fn(f"Error loading PEFT config: {e}")
-            raise
-        
+            error_msg = f"Error loading PEFT config: {str(e)}"
+            print_fn(error_msg)
+            import traceback
+            print_fn(traceback.format_exc())
+            raise ValueError(error_msg) from e
+
         # Free memory by removing base model reference
         del base_model
         gc.collect()
         torch.cuda.empty_cache() if torch.cuda.is_available() else None
-        
+
         # Track memory after PEFT application
         ram, gpu_allocated, gpu_reserved = get_memory_usage()
-        memory_logs.append({
-            "stage": "peft_model_loaded",
-            "ram_mb": ram,
-            "gpu_allocated_mb": gpu_allocated,
-            "gpu_reserved_mb": gpu_reserved
-        })
-        
+        result.add_memory_log("peft_model_loaded", ram, gpu_allocated, gpu_reserved)
+
         # Calculate PEFT model metrics
-        trainable_params = get_trainable_parameters(model)
+        trainable_params = model.get_nb_trainable_parameters()[0]
         total_params = sum(p.numel() for p in model.parameters())
         adapter_size_mb = trainable_params * dtype_bytes / (1024 * 1024)
-        
-        # Update result
-        result.trainable_params = trainable_params
-        result.total_params = total_params
-        result.param_ratio = trainable_params / total_params if total_params > 0 else 0
-        result.adapter_size_mb = adapter_size_mb
-        
+        param_ratio = trainable_params / total_params if total_params > 0 else 0
+
+        # Update result with parameter information
+        result.update_meta_info(
+            param_counts={
+                "trainable_params": trainable_params,
+                "total_params": total_params,
+                "param_ratio": param_ratio,
+            },
+            size_info={"adapter_size_mb": adapter_size_mb},
+        )
+
         # Measure PEFT model inference
         print_fn("Measuring PEFT model inference times...")
         peft_inference_times = measure_inference_time(
@@ -295,63 +255,53 @@ def run_benchmark(
             prompts,
             max_new_tokens=benchmark_config.max_new_tokens,
             num_runs=benchmark_config.num_inference_runs,
-            print_fn=print_fn
+            print_fn=print_fn,
         )
-        
-        # Calculate inference overhead
+
+        # Calculate inference overhead for each category
         inference_overhead = {
-            k: (peft_inference_times[k] - base_inference_times[k]) / base_inference_times[k] * 100
-            for k in base_inference_times
+            k: (peft_inference_times["inference_times"][k] - base_inference_times["inference_times"][k]) / base_inference_times["inference_times"][k] * 100
+            for k in base_inference_times["inference_times"]
         }
-        
-        # Update result
-        result.inference_times = peft_inference_times
-        result.inference_overhead = inference_overhead
-        
-        # Measure training throughput
-        print_fn("Measuring training throughput...")
-        training_throughput = measure_training_throughput(
-            model,
-            tokenizer,
-            prompts,
-            batch_size=benchmark_config.train_batch_size,
-            num_steps=benchmark_config.train_steps,
-            print_fn=print_fn
+
+        # Process metrics for each prompt category
+        for category in prompts:
+            category_metrics = {
+                "inference_time": peft_inference_times["inference_times"][category],
+                "base_inference_time": base_inference_times["inference_times"][category],
+                "inference_overhead_pct": inference_overhead[category],
+                "time_per_token": peft_inference_times["time_per_token"][category],
+                "generated_tokens": peft_inference_times["generated_tokens"][category],
+            }
+            result.add_metrics_for_category(category, category_metrics)
+
+        # Update inference metrics in the result
+        result.update_train_info(
+            memory_data={
+                "peak_gpu_memory_mb": max(
+                    log["gpu_allocated_mb"] for log in result.train_info["memory"]["memory_logs"]
+                ),
+                "peak_ram_memory_mb": max(log["ram_mb"] for log in result.train_info["memory"]["memory_logs"]),
+            },
+            inference_metrics={"times": peft_inference_times["inference_times"], "overhead": inference_overhead},
         )
-        
-        # Update result
-        result.training_throughput = training_throughput
-        
+
         # Track final memory usage
         ram, gpu_allocated, gpu_reserved = get_memory_usage()
-        memory_logs.append({
-            "stage": "benchmark_complete",
-            "ram_mb": ram,
-            "gpu_allocated_mb": gpu_allocated,
-            "gpu_reserved_mb": gpu_reserved
-        })
-        
-        # Calculate peak memory usage
-        peak_ram = max(log["ram_mb"] for log in memory_logs)
-        peak_gpu = max(log["gpu_allocated_mb"] for log in memory_logs)
-        
-        result.peak_ram_memory_mb = peak_ram
-        result.peak_gpu_memory_mb = peak_gpu
-        result.memory_allocated_log = [log["gpu_allocated_mb"] for log in memory_logs]
-        result.memory_reserved_log = [log["gpu_reserved_mb"] for log in memory_logs]
-        
+        result.add_memory_log("benchmark_complete", ram, gpu_allocated, gpu_reserved)
+
         # Set successful status
         result.status = BenchmarkStatus.SUCCESS
-        
+
     except Exception as e:
         print_fn(f"Benchmark failed with error: {e}")
         result.status = BenchmarkStatus.FAILED
-        result.metrics.append({"error": str(e)})
-    
-    # Record duration
+        result.metrics["error"] = str(e)
+
+    # Record duration and update final status
     end_time = time.perf_counter()
-    result.duration = end_time - start_time
-    
+    result.update_run_info(duration=end_time - start_time, status=result.status)
+
     return result
 
 
@@ -361,31 +311,31 @@ def main():
     parser.add_argument("experiment_path", help="Path to experiment directory")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
     args = parser.parse_args()
-    
+
     # Configure print function based on verbosity
     print_fn = print if args.verbose else lambda *args, **kwargs: None
-    
+
     try:
         # Validate experiment path and load configs
-        experiment_name, benchmark_config, _ = validate_experiment_path(args.experiment_path)
-        
-        print(f"Running benchmark for experiment: {experiment_name}")
-        
+        experiment_name, benchmark_config, peft_config = validate_experiment_path(args.experiment_path)
+
+        print_fn(f"Running benchmark for experiment: {experiment_name}")
+
         # Run the benchmark
         result = run_benchmark(
             benchmark_config=benchmark_config,
             experiment_name=experiment_name,
             experiment_path=args.experiment_path,
-            print_fn=print_fn
+            print_fn=print_fn,
         )
-        
+
         # Log and save results
         log_results(experiment_name, result, print_fn=print)
-        
+
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
-        
+
     return 0
 
 

@@ -1,0 +1,52 @@
+{
+  "experiment_name": "lora_rank_comparison",
+  "model_id": "meta-llama/Llama-2-7b-hf",
+  "peft_method": "lora",
+  "dtype": "bfloat16",
+  
+  "seed": 42,
+  "num_inference_runs": 5,
+  "max_new_tokens": 100,
+  "train_batch_size": 4,
+  "train_steps": 10,
+  
+  "prompt_categories": ["short", "medium", "long"],
+  "num_prompt_samples": 2,
+  "reserve_output_tokens": 50,
+  
+  "use_4bit": false,
+  "use_8bit": false,
+  
+  "peft_config_variants": [
+    {
+      "variant_name": "lora_r8",
+      "peft_method": "lora",
+      "r": 8,
+      "lora_alpha": 16,
+      "lora_dropout": 0.05,
+      "bias": "none",
+      "task_type": "CAUSAL_LM",
+      "target_modules": ["q_proj", "v_proj"]
+    },
+    {
+      "variant_name": "lora_r16",
+      "peft_method": "lora",
+      "r": 16,
+      "lora_alpha": 32,
+      "lora_dropout": 0.05,
+      "bias": "none",
+      "task_type": "CAUSAL_LM",
+      "target_modules": ["q_proj", "v_proj"]
+    },
+    {
+      "variant_name": "lora_r32",
+      "peft_method": "lora",
+      "r": 32,
+      "lora_alpha": 64,
+      "lora_dropout": 0.05,
+      "bias": "none",
+      "task_type": "CAUSAL_LM",
+      "target_modules": ["q_proj", "v_proj"]
+    }
+  ]
+} 
