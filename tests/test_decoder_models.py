@@ -49,7 +49,6 @@ from .testing_utils import load_dataset_english_quotes, set_init_weights_false
 
 PEFT_DECODER_MODELS_TO_TEST = [
     "hf-internal-testing/tiny-random-OPTForCausalLM",
-    "hf-internal-testing/tiny-random-GPTNeoXForCausalLM",
     "hf-internal-testing/tiny-random-GPT2LMHeadModel",
     "hf-internal-testing/tiny-random-BloomForCausalLM",
     "hf-internal-testing/tiny-random-gpt_neo",
@@ -57,6 +56,7 @@ PEFT_DECODER_MODELS_TO_TEST = [
     "hf-internal-testing/tiny-random-GPTBigCodeForCausalLM",
     "trl-internal-testing/tiny-random-LlamaForCausalLM",
     "peft-internal-testing/tiny-dummy-qwen2",
+    "hf-internal-testing/tiny-random-Gemma3ForCausalLM",
 ]
 
 SMALL_GRID_MODELS = [
