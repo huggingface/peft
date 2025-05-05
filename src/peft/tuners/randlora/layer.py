@@ -324,7 +324,6 @@ class Linear(nn.Linear, RandLoraLayer):
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
-
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()

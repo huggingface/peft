@@ -56,7 +56,10 @@ def _kaiming_init(
         `torch.Tensor`: The initialised tensor.
     """
     if isinstance(tensor_or_shape, tuple):
-        tensor = torch.empty(tensor_or_shape, dtype=torch.float32)
+        tensor = torch.empty(
+            tensor_or_shape,
+            dtype=torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16,
+        )
     else:
         tensor = tensor_or_shape
 
@@ -129,7 +132,11 @@ class RandLoraModel(BaseTuner):
                 continue
 
             if module_shape != largest_shape:
-                largest_shape = tuple(max(a, b) for a, b in zip(largest_shape, module_shape))
+                # largest_shape = tuple(max(a, b) for a, b in zip(largest_shape, module_shape))
+                largest_shape = (
+                    max(max(module_shape), max(largest_shape)),
+                    max(min(module_shape), min(largest_shape)),
+                )
 
         if largest_shape is None:
             msg = "No layers types compatible with RandLora were found. Please check `peft_config.target_modules`."
