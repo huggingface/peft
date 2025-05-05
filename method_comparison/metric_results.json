@@ -1,0 +1,9 @@
+[
+  {
+    "metric_name": "mae",
+    "value": 0.2,
+    "method_name": "LoRA",
+    "dataset": "test_dataset",
+    "timestamp": "2025-04-21T17:53:18"
+  }
+]
