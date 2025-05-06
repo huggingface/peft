@@ -115,7 +115,7 @@ def train_model(
     data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
 
     # Compute the total amount of training step for warmup
-    max_steps = int(len(dataset // batch_size) * num_epochs)
+    max_steps = int((len(dataset) // batch_size) * num_epochs)
 
     # Define training arguments
     training_args = TrainingArguments(
@@ -132,7 +132,6 @@ def train_model(
         push_to_hub=push_to_hub,
         hub_model_id=hub_model_id,
         gradient_accumulation_steps=16 // batch_size,
-        torch_dtype=torch_dtype,
         learning_rate=learning_rate,
         hub_token=hf_token,
         label_names=["labels"],
