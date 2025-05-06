@@ -220,8 +220,6 @@ class BOFTLayer(BaseTunerLayer):
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
-        # flag to enable/disable casting of input to weight dtype during forward call
-        self.cast_input_dtype_enabled = True
         self.kwargs = kwargs
 
         base_layer = self.get_base_layer()
@@ -278,7 +276,7 @@ class BOFTLayer(BaseTunerLayer):
         boft_n_butterfly_factor = boft_n_butterfly_factor - 1
         if boft_n_butterfly_factor < 0:
             raise ValueError(
-                f"You can only specify boft_n_butterfly_factor {boft_n_butterfly_factor + 1} to be a positive integer number."
+                f"You can only specify boft_n_butterfly_factor {boft_n_butterfly_factor+1} to be a positive integer number."
             )
 
         # Initialize the MultiplicativeDropoutLayer for boft_dropout > 0.0.
@@ -297,11 +295,11 @@ class BOFTLayer(BaseTunerLayer):
             if boft_n_butterfly_factor != 0:
                 if boft_n_butterfly_factor > int(math.log2(boft_block_num)):
                     raise ValueError(
-                        f"Invalid combination of boft_n_butterfly_factor ({boft_n_butterfly_factor + 1}) and boft_block_num ({boft_block_num})!"
+                        f"Invalid combination of boft_n_butterfly_factor ({boft_n_butterfly_factor+1}) and boft_block_num ({boft_block_num})!"
                     )
                 if boft_block_num % (2**boft_n_butterfly_factor) != 0:
                     raise ValueError(
-                        f"boft_block_num ({boft_block_num}) must be a multiple of 2 raised to the power of boft_n_butterfly_factor ({boft_n_butterfly_factor + 1})!"
+                        f"boft_block_num ({boft_block_num}) must be a multiple of 2 raised to the power of boft_n_butterfly_factor ({boft_n_butterfly_factor+1})!"
                     )
 
             boft_block_size = int(self.in_features // boft_block_num)
@@ -315,18 +313,19 @@ class BOFTLayer(BaseTunerLayer):
             if boft_n_butterfly_factor != 0:
                 if self.in_features < (boft_block_size * (2**boft_n_butterfly_factor)):
                     raise ValueError(
-                        f"Invalid combination of in_features ({self.in_features}), boft_n_butterfly_factor ({boft_n_butterfly_factor + 1}) and boft_block_size ({boft_block_size})!"
+                        f"Invalid combination of in_features ({self.in_features}), boft_n_butterfly_factor ({boft_n_butterfly_factor+1}) and boft_block_size ({boft_block_size})!"
                     )
                 if self.in_features % (boft_block_size * (2**boft_n_butterfly_factor)) != 0:
                     raise ValueError(
-                        f"Invalid combination of in_features ({self.in_features}), boft_n_butterfly_factor ({boft_n_butterfly_factor + 1}) and boft_block_size ({boft_block_size})!"
+                        f"Invalid combination of in_features ({self.in_features}), boft_n_butterfly_factor ({boft_n_butterfly_factor+1}) and boft_block_size ({boft_block_size})!"
                     )
 
             boft_block_num = int(self.in_features // boft_block_size)
 
         else:
             raise ValueError(
-                "Something went wrong, please report this error: https://github.com/huggingface/peft/issues"
+                f"You can only specify either boft_block_size ({boft_block_size}) or boft_block_num ({boft_block_num}), but not both simultaneously or setting both"
+                "to be 0, because boft_block_size x boft_block_num != in_features."
             )
 
         # In OFT you can specify the number of blocks to be 1
@@ -505,14 +504,13 @@ class Linear(nn.Module, BOFTLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.boft_R.keys():
                 base_layer = self.get_base_layer()
-                orig_dtype = base_layer.weight.dtype
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
                     orig_weight = base_layer.weight.data.clone()
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
                     orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight.to(butterfly_oft_mat.dtype))
+                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
                     orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = orig_weight * boft_s
 
@@ -521,16 +519,16 @@ class Linear(nn.Module, BOFTLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    self.base_layer.weight.data = orig_weight.contiguous().to(orig_dtype)
+                    self.base_layer.weight.data = orig_weight.contiguous()
                 else:
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
                     orig_weight = base_layer.weight.data.clone()
                     orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight.to(butterfly_oft_mat.dtype))
+                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
                     orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = orig_weight * boft_s
 
-                    self.base_layer.weight.data = orig_weight.contiguous().to(orig_dtype)
+                    self.base_layer.weight.data = orig_weight.contiguous()
 
                 self.merged_adapters.append(active_adapter)
 
@@ -541,20 +539,17 @@ class Linear(nn.Module, BOFTLayer):
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
-
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
-            base_layer = self.get_base_layer()
-            orig_dtype = base_layer.weight.dtype
             if active_adapter in self.boft_R.keys():
                 butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
 
-                orig_weight = base_layer.weight.data.clone()
+                orig_weight = self.get_base_layer().weight.data.clone()
                 orig_weight = torch.transpose(orig_weight, 0, 1)
-                orig_weight = torch.mm(butterfly_oft_mat.t(), orig_weight.to(butterfly_oft_mat.dtype))
+                orig_weight = torch.mm(butterfly_oft_mat.t(), orig_weight)
                 orig_weight = torch.transpose(orig_weight, 0, 1)
 
-                base_layer.weight.data = (orig_weight * (1 / boft_s)).to(orig_dtype)
+                self.get_base_layer().weight.data = orig_weight * (1 / boft_s)
 
     def get_delta_weight(self, adapter) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -700,7 +695,7 @@ class Conv2d(nn.Module, BOFTLayer):
         boft_n_butterfly_factor = boft_n_butterfly_factor - 1
         if boft_n_butterfly_factor < 0:
             raise ValueError(
-                f"You can only specify boft_n_butterfly_factor {boft_n_butterfly_factor + 1} to be a positive integer number."
+                f"You can only specify boft_n_butterfly_factor {boft_n_butterfly_factor+1} to be a positive integer number."
             )
 
         # Initialize the MultiplicativeDropoutLayer for boft_dropout > 0.0.
@@ -715,6 +710,11 @@ class Conv2d(nn.Module, BOFTLayer):
         conv_filter_dim = self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
 
         # Initialize the BOFT parameters.
+        if not (boft_block_size != 0) ^ (boft_block_num != 0):
+            raise ValueError(
+                f"You can only specify either boft_block_size ({boft_block_size}) or boft_block_num ({boft_block_num}), but not both simultaneously, because boft_block_size x boft_block_num != in_features."
+            )
+
         if boft_block_size == 0 and boft_block_num != 0:
             if conv_filter_dim % boft_block_num != 0:
                 raise ValueError(
@@ -724,11 +724,11 @@ class Conv2d(nn.Module, BOFTLayer):
             if boft_n_butterfly_factor != 0:
                 if boft_n_butterfly_factor > int(math.log2(boft_block_num)):
                     raise ValueError(
-                        f"Invalid combination of boft_n_butterfly_factor ({boft_n_butterfly_factor + 1}) and boft_block_num ({boft_block_num})!"
+                        f"Invalid combination of boft_n_butterfly_factor ({boft_n_butterfly_factor+1}) and boft_block_num ({boft_block_num})!"
                     )
                 if boft_block_num % (2**boft_n_butterfly_factor) != 0:
                     raise ValueError(
-                        f"boft_block_num ({boft_block_num}) must be a multiple of 2 raised to the power of boft_n_butterfly_factor ({boft_n_butterfly_factor + 1})!"
+                        f"boft_block_num ({boft_block_num}) must be a multiple of 2 raised to the power of boft_n_butterfly_factor ({boft_n_butterfly_factor+1})!"
                     )
 
             boft_block_size = int(conv_filter_dim // boft_block_num)
@@ -742,19 +742,17 @@ class Conv2d(nn.Module, BOFTLayer):
             if boft_n_butterfly_factor != 0:
                 if conv_filter_dim < (boft_block_size * (2**boft_n_butterfly_factor)):
                     raise ValueError(
-                        f"Invalid combination of convolutional kernel dimension ({conv_filter_dim}), boft_n_butterfly_factor ({boft_n_butterfly_factor + 1}) and boft_block_size ({boft_block_size})!"
+                        f"Invalid combination of convolutional kernel dimension ({conv_filter_dim}), boft_n_butterfly_factor ({boft_n_butterfly_factor+1}) and boft_block_size ({boft_block_size})!"
                     )
                 if conv_filter_dim % (boft_block_size * (2**boft_n_butterfly_factor)) != 0:
                     raise ValueError(
-                        f"Invalid combination of convolutional kernel dimension ({conv_filter_dim}), boft_n_butterfly_factor ({boft_n_butterfly_factor + 1}) and boft_block_size ({boft_block_size})!"
+                        f"Invalid combination of convolutional kernel dimension ({conv_filter_dim}), boft_n_butterfly_factor ({boft_n_butterfly_factor+1}) and boft_block_size ({boft_block_size})!"
                     )
 
             boft_block_num = int(conv_filter_dim // boft_block_size)
 
         else:
-            raise ValueError(
-                "Something went wrong, please report this error: https://github.com/huggingface/peft/issues"
-            )
+            raise ValueError("Unknown error!")
 
         # In OFT you can specify the number of blocks to be 1
         if boft_n_butterfly_factor != 0:
@@ -810,7 +808,6 @@ class Conv2d(nn.Module, BOFTLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.boft_R.keys():
                 base_layer = self.get_base_layer()
-                orig_dtype = base_layer.weight.dtype
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
@@ -818,33 +815,29 @@ class Conv2d(nn.Module, BOFTLayer):
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
 
                     orig_weight = orig_weight.view(
-                        self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
+                        self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0], self.out_features
                     )
-                    orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight.to(butterfly_oft_mat.dtype))
-                    orig_weight = torch.transpose(orig_weight, 0, 1)
+                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
                     orig_weight = orig_weight * boft_s
                     orig_weight = orig_weight.view(
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
                     )
 
-                    self.base_layer.weight.data = orig_weight.contiguous().to(orig_dtype)
+                    self.base_layer.weight.data = orig_weight.contiguous()
                 else:
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
 
                     orig_weight = base_layer.weight.data.clone()
                     orig_weight = orig_weight.view(
-                        self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
+                        self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0], self.out_features
                     )
-                    orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight.to(butterfly_oft_mat.dtype))
-                    orig_weight = torch.transpose(orig_weight, 0, 1)
+                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
                     orig_weight = orig_weight * boft_s
                     orig_weight = orig_weight.view(
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
                     )
 
-                    self.base_layer.weight.data = orig_weight.contiguous().to(orig_dtype)
+                    self.base_layer.weight.data = orig_weight.contiguous()
 
                 self.merged_adapters.append(active_adapter)
 
@@ -857,28 +850,24 @@ class Conv2d(nn.Module, BOFTLayer):
             return
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
-            base_layer = self.get_base_layer()
-            orig_dtype = base_layer.weight.dtype
             if active_adapter in self.boft_R.keys():
                 butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
 
-                orig_weight = base_layer.weight.data.clone()
+                orig_weight = self.get_base_layer().weight.data.clone()
                 orig_weight = orig_weight.view(
+                    self.in_features * self.get_base_layer().kernel_size[0] * self.get_base_layer().kernel_size[0],
                     self.out_features,
-                    self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0],
                 )
-                orig_weight = torch.transpose(orig_weight, 0, 1)
-                orig_weight = torch.mm(butterfly_oft_mat.t(), orig_weight.to(butterfly_oft_mat.dtype))
-                orig_weight = torch.transpose(orig_weight, 0, 1)
+                orig_weight = torch.mm(butterfly_oft_mat.t(), orig_weight)
                 orig_weight = orig_weight * (1 / boft_s)
                 orig_weight = orig_weight.view(
                     self.out_features,
                     self.in_features,
-                    base_layer.kernel_size[0],
-                    base_layer.kernel_size[0],
+                    self.get_base_layer().kernel_size[0],
+                    self.get_base_layer().kernel_size[0],
                 )
 
-                base_layer.weight.data = orig_weight.to(orig_dtype)
+                self.get_base_layer().weight.data = orig_weight
 
     def get_delta_weight(self, adapter) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -890,7 +879,7 @@ class Conv2d(nn.Module, BOFTLayer):
         """
 
         boft_R = self.boft_R[adapter]
-        boft_s = self.boft_s[adapter].transpose(0, 1)
+        boft_s = self.boft_s[adapter]
 
         N, D, H, _ = boft_R.shape
         boft_R = boft_R.view(N * D, H, H)
@@ -928,13 +917,13 @@ class Conv2d(nn.Module, BOFTLayer):
                 device=x.device,
                 dtype=x.dtype,
             )
-            boft_scale = torch.ones((int(self.out_features), 1), device=x.device, dtype=x.dtype)
+            boft_scale = torch.ones((1, int(self.out_features)), device=x.device, dtype=x.dtype)
 
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.boft_R.keys():
                     continue
                 boft_R = self.boft_R[active_adapter]
-                boft_s = self.boft_s[active_adapter].transpose(0, 1)
+                boft_s = self.boft_s[active_adapter]
                 dropout = self.boft_dropout[active_adapter]
 
                 N, D, H, _ = boft_R.shape
@@ -965,24 +954,20 @@ class Conv2d(nn.Module, BOFTLayer):
 
             orig_weight = self.base_layer.weight.data
             orig_weight = orig_weight.view(
-                self.out_features,
                 self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
+                self.out_features,
             )
-            orig_weight = torch.transpose(orig_weight, 0, 1)
             rotated_weight = torch.mm(boft_rotation, orig_weight)
-            rotated_weight = torch.transpose(rotated_weight, 0, 1)
 
             scaled_rotated_weight = rotated_weight * boft_scale
 
             scaled_rotated_weight = scaled_rotated_weight.view(
                 self.out_features, self.in_features, self.base_layer.kernel_size[0], self.base_layer.kernel_size[0]
             )
-            x = self._cast_input_dtype(x, scaled_rotated_weight.dtype)
-            bias = self._cast_input_dtype(self.base_layer.bias, scaled_rotated_weight.dtype)
             result = F.conv2d(
                 input=x,
                 weight=scaled_rotated_weight,
-                bias=bias,
+                bias=self.base_layer.bias,
                 padding=self.base_layer.padding[0],
                 stride=self.base_layer.stride[0],
             )

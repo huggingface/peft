@@ -48,7 +48,7 @@ class DoraLinearLayer(nn.Module):
                 base_layer = deepcopy(base_layer)
 
             weight = dequantize_module_weight(base_layer)
-            if weight.data.ndim >= 4:  # For handling LoRAs applied to Conv layers.
+            if weight.data.ndim == 4:  # For handling LoRAs applied to Conv2Ds.
                 lora_weight = torch.mm(lora_B.flatten(start_dim=1), lora_A.flatten(start_dim=1))
                 lora_weight = lora_weight.reshape(weight.shape)
             else:
@@ -62,11 +62,13 @@ class DoraLinearLayer(nn.Module):
             weight_norm = weight_norm.to("cpu")
         self.weight = nn.Parameter(weight_norm, requires_grad=True)
 
-    def forward(self, x, *, lora_A, lora_B, scaling, base_layer, base_result=None):
+    def forward(self, x, *, lora_A, lora_B, scaling, base_layer):
         """
         For DoRA, calculate the extra output from LoRA with DoRA applied. This should be added on top of the base layer
         output.
         """
+        lora_result = lora_B(lora_A(x))
+
         # Don't use `lora_weight = lora_B.weight @ lora_A.weight` because this causes errors with FSDP. Instead,
         # calculate the same but using forward.
         x_eye = torch.eye(lora_A.weight.shape[1], device=lora_A.weight.device, dtype=x.dtype)
@@ -84,18 +86,19 @@ class DoraLinearLayer(nn.Module):
         # during backpropagation"
         weight_norm = weight_norm.detach()
         mag_norm_scale = (magnitude / weight_norm).view(1, -1)
+        result_dora = (mag_norm_scale - 1) * (
+            F.linear(x, transpose(weight, self.fan_in_fan_out))
+        ) + mag_norm_scale * lora_result * scaling
 
-        lora_result = lora_B(lora_A(x))
-
-        bias = None
-        if base_result is not None:
-            bias = base_layer.bias
-            if bias is not None:
-                base_result = base_result - bias
-        else:
-            base_result = F.linear(x, transpose(weight, self.fan_in_fan_out))
-
-        result_dora = (mag_norm_scale - 1) * base_result + mag_norm_scale * lora_result * scaling
+        # Note: Computation could potentially be accelerated by using the code below instead of calculating X@W again.
+        # This is only correct if dropout=0, otherwise results will differ:
+        # https://github.com/huggingface/peft/pull/1474#issuecomment-1964682771
+        # bias = self.get_base_layer().bias
+        # if bias is not None:
+        #     result = result - bias
+        # result = mag_norm_scale * result + mag_norm_scale * lora_B(lora_A(x)) * scaling
+        # if bias is not None:
+        #     result = result + bias
 
         return result_dora
 
@@ -130,16 +133,15 @@ class DoraEmbeddingLayer(DoraLinearLayer):
         return "lora.dora." + rep
 
 
-class _DoraConvNdLayer(DoraLinearLayer):
+class DoraConv2dLayer(DoraLinearLayer):
     def get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
         # calculate L2 norm of weight matrix, column-wise
         weight = weight + scaling * lora_weight
-        # the following is needed to have compatibility with the 4/5D weight tensors of Conv2D/3D
-        dim = tuple(range(1, weight.dim()))
-        weight_norm = weight.norm(p=2, dim=dim, keepdim=True).transpose(1, 0)
+        # the following is needed to have compatibility with the 4D weight tensors of Conv2D
+        weight_norm = weight.norm(p=2, dim=(1, 2, 3), keepdim=True).transpose(1, 0)
         return weight_norm
 
-    def forward(self, x, *, lora_A, lora_B, scaling, base_layer, base_result=None):
+    def forward(self, x, *, lora_A, lora_B, scaling, base_layer):
         """
         For DoRA, calculate the extra output from LoRA with DoRA applied. This should be added on top of the base layer
         output.
@@ -157,9 +159,8 @@ class _DoraConvNdLayer(DoraLinearLayer):
         # during backpropagation"
         weight_norm = weight_norm.detach()
         mag_norm_scale = magnitude / weight_norm
-
-        if base_result is None:
-            base_result = self.conv_fn(
+        result_dora = (mag_norm_scale - 1) * (
+            F.conv2d(
                 x,
                 weight,
                 bias=None,
@@ -168,28 +169,10 @@ class _DoraConvNdLayer(DoraLinearLayer):
                 dilation=base_layer.dilation,
                 groups=base_layer.groups,
             )
-        else:
-            bias = base_layer.bias
-            if bias is not None:
-                # reshape bias to (1, -1, 1, ...)
-                bias_shape = (1, -1) + (1,) * (base_result.dim() - 2)
-                base_result = base_result - bias.view(*bias_shape)
+        ) + mag_norm_scale * lora_B(lora_A(x)) * scaling
 
-        result_dora = (mag_norm_scale - 1) * base_result + mag_norm_scale * lora_B(lora_A(x)) * scaling
         return result_dora
 
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "lora.dora." + rep
-
-
-class DoraConv2dLayer(_DoraConvNdLayer):
-    def __init__(self, fan_in_fan_out):
-        super().__init__(fan_in_fan_out)
-        self.conv_fn = F.conv2d
-
-
-class DoraConv3dLayer(_DoraConvNdLayer):
-    def __init__(self, fan_in_fan_out):
-        super().__init__(fan_in_fan_out)
-        self.conv_fn = F.conv3d

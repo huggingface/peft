@@ -11,17 +11,17 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 from typing import Any, Optional
 
 import torch
 
-from peft.import_utils import is_gptqmodel_available
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import get_auto_gptq_quant_linear
 
 
-class GPTQLoraLinear(torch.nn.Module, LoraLayer):
+class QuantLinear(torch.nn.Module, LoraLayer):
     def __init__(
         self,
         base_layer,
@@ -32,7 +32,6 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
         init_lora_weights: bool = True,
         use_rslora: bool = False,
         use_dora: bool = False,
-        lora_bias: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -53,7 +52,6 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
-            lora_bias=lora_bias,
         )
 
     def forward(self, x: torch.Tensor):
@@ -63,11 +61,9 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
         if self.disable_adapters:
             return result
 
-        lora_A_keys = self.lora_A.keys()
         for active_adapter in self.active_adapters:
-            if active_adapter not in lora_A_keys:
+            if active_adapter not in self.lora_A.keys():
                 continue
-
             lora_A = self.lora_A[active_adapter]
             lora_B = self.lora_B[active_adapter]
             dropout = self.lora_dropout[active_adapter]
@@ -76,16 +72,12 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
             requires_conversion = not torch.is_autocast_enabled()
             if requires_conversion:
                 expected_dtype = result.dtype
-                x = self._cast_input_dtype(x, lora_A.weight.dtype)
+                x = x.to(lora_A.weight.dtype)
 
             output = lora_B(lora_A(dropout(x)))
-
             if requires_conversion:
                 output = output.to(expected_dtype)
-
-            if scaling != 1:  # skip scaling == 1 no-op
-                output = output * scaling
-
+            output = output * scaling
             result += output
         return result
 
@@ -112,19 +104,11 @@ def dispatch_gptq(
     else:
         target_base_layer = target
 
-    cfg = kwargs.get("gptq_quantization_config", None)
+    gptq_quantization_config = kwargs.get("gptq_quantization_config", None)
+    AutoGPTQQuantLinear = get_auto_gptq_quant_linear(gptq_quantization_config)
 
-    if is_gptqmodel_available():
-        from gptqmodel.nn_modules.qlinear import BaseQuantLinear
-
-        if isinstance(target_base_layer, BaseQuantLinear):
-            new_module = GPTQLoraLinear(target, adapter_name, **kwargs)
-            target.qweight = target_base_layer.qweight
-    else:
-        quant_linear = get_auto_gptq_quant_linear(cfg)
-
-        if quant_linear is not None and isinstance(target_base_layer, quant_linear):
-            new_module = GPTQLoraLinear(target, adapter_name, **kwargs)
-            target.qweight = target_base_layer.qweight
+    if AutoGPTQQuantLinear is not None and isinstance(target_base_layer, AutoGPTQQuantLinear):
+        new_module = QuantLinear(target, adapter_name, **kwargs)
+        target.qweight = target_base_layer.qweight
 
     return new_module

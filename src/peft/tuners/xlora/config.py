@@ -76,7 +76,6 @@ class XLoraConfig(PeftConfig):
     global_scaling_weight: float = 1.0
 
     def __post_init__(self):
-        super().__post_init__()
         self.peft_type = PeftType.XLORA
 
         if self.hidden_size is None:

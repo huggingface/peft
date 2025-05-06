@@ -27,8 +27,27 @@ from peft.utils.constants import DUMMY_MODEL_CONFIG
 
 from .config import PeftConfig
 from .peft_model import PeftModel
-from .tuners import MixedModel
-from .utils import _set_adapter, _set_trainable
+from .tuners import (
+    AdaLoraModel,
+    IA3Model,
+    LoHaModel,
+    LoKrModel,
+    LoraModel,
+    MixedModel,
+    OFTModel,
+)
+from .tuners.mixed import COMPATIBLE_TUNER_TYPES
+from .utils import PeftType, _set_adapter, _set_trainable
+
+
+PEFT_TYPE_TO_MODEL_MAPPING = {
+    PeftType.LORA: LoraModel,
+    PeftType.LOHA: LoHaModel,
+    PeftType.LOKR: LoKrModel,
+    PeftType.ADALORA: AdaLoraModel,
+    PeftType.IA3: IA3Model,
+    PeftType.OFT: OFTModel,
+}
 
 
 def _prepare_model_for_gradient_checkpointing(model: nn.Module) -> None:
@@ -55,8 +74,6 @@ def _prepare_model_for_gradient_checkpointing(model: nn.Module) -> None:
 
 
 def _check_config_compatible(peft_config: PeftConfig) -> None:
-    from .tuners.mixed import COMPATIBLE_TUNER_TYPES
-
     if peft_config.peft_type not in COMPATIBLE_TUNER_TYPES:
         raise ValueError(
             f"The provided `peft_type` '{peft_config.peft_type.value}' is not compatible with the `PeftMixedModel`. "
@@ -251,7 +268,7 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
             self.modules_to_save = set(modules_to_save)
         else:
             self.modules_to_save.update(modules_to_save)
-        _set_trainable(self, adapter_name, module_names=getattr(peft_config, "modules_to_save", None))
+        _set_trainable(self, adapter_name)
 
     def set_adapter(self, adapter_name: Union[str, list[str]]) -> None:
         """
@@ -332,9 +349,6 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
     @classmethod
     def _split_kwargs(cls, kwargs: dict[str, Any]):
         return PeftModel._split_kwargs(kwargs)
-
-    def _check_new_adapter_config(self, peft_config: PeftConfig, is_trainable: bool) -> None:
-        return PeftModel._check_new_adapter_config(self, peft_config, is_trainable=is_trainable)
 
     def load_adapter(self, model_id: str, adapter_name: str, *args: Any, **kwargs: Any):
         """
@@ -425,7 +439,7 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
                 Additional keyword arguments passed along to the specific PEFT configuration class.
         """
         # note: adapted from PeftModel.from_pretrained
-        from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING, PEFT_TYPE_TO_MIXED_MODEL_MAPPING
+        from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING
 
         # load the config
         if config is None:
@@ -444,7 +458,7 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
             raise ValueError(f"The input config must be a PeftConfig, got {config.__class__}")
 
         # note: this is different from PeftModel.from_pretrained
-        if config.peft_type not in PEFT_TYPE_TO_MIXED_MODEL_MAPPING:
+        if config.peft_type not in PEFT_TYPE_TO_MODEL_MAPPING:
             raise ValueError(f"Adapter of type {config.peft_type} is not supported for mixed models.")
 
         if (getattr(model, "hf_device_map", None) is not None) and len(

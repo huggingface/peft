@@ -190,7 +190,8 @@ class FourierFTModel(BaseTuner):
             kwargs["is_target_conv_1d_layer"] = True
             if not kwargs["fan_in_fan_out"]:
                 warnings.warn(
-                    "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
+                    "fan_in_fan_out is set to False but the target module is `Conv1D`. "
+                    "Setting fan_in_fan_out to True."
                 )
                 kwargs["fan_in_fan_out"] = fourierft_config.fan_in_fan_out = True
         else:
@@ -319,7 +320,6 @@ class FourierFTModel(BaseTuner):
                     new_adapter = target.active_adapter[:]
 
         self.active_adapter = new_adapter or []
-        self._delete_auxiliary_adapter(adapter_name, new_active_adapters=new_adapter)
 
     def merge_and_unload(
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None

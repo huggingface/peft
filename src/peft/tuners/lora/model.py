@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import math
 import operator
+import re
 import warnings
 from contextlib import contextmanager
 from dataclasses import asdict, replace
 from enum import Enum
 from functools import partial, reduce
+from itertools import chain
 from typing import Literal, Optional
 
 import torch
@@ -36,7 +38,6 @@ from peft.tuners.tuners_utils import (
 )
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
-    AuxiliaryTrainingWrapper,
     ModulesToSaveWrapper,
     _freeze_adapter,
     _get_submodules,
@@ -44,7 +45,6 @@ from peft.utils import (
     get_quantization_config,
 )
 from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
-from peft.utils.other import get_pattern_key
 
 from .aqlm import dispatch_aqlm
 from .awq import dispatch_awq
@@ -52,9 +52,7 @@ from .config import LoraConfig
 from .eetq import dispatch_eetq
 from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
-from .inc import dispatch_inc
 from .layer import Conv2d, LoraLayer, dispatch_default
-from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
 
 
@@ -187,10 +185,10 @@ class LoraModel(BaseTuner):
             raise ValueError("Current Key shouldn't be `None`")
 
         # Regexp matching - Find key which matches current target_name in patterns provided
-        r_key = get_pattern_key(lora_config.rank_pattern.keys(), current_key)
-        alpha_key = get_pattern_key(lora_config.alpha_pattern.keys(), current_key)
-        r = lora_config.rank_pattern.get(r_key, lora_config.r)
-        alpha = lora_config.alpha_pattern.get(alpha_key, lora_config.lora_alpha)
+        pattern_keys = list(chain(lora_config.rank_pattern.keys(), lora_config.alpha_pattern.keys()))
+        target_name_key = next(filter(lambda key: re.match(rf".*\.{key}$", current_key), pattern_keys), current_key)
+        r = lora_config.rank_pattern.get(target_name_key, lora_config.r)
+        alpha = lora_config.alpha_pattern.get(target_name_key, lora_config.lora_alpha)
 
         kwargs = {
             "r": r,
@@ -201,17 +199,9 @@ class LoraModel(BaseTuner):
             "use_rslora": lora_config.use_rslora,
             "use_dora": lora_config.use_dora,
             "ephemeral_gpu_offload": lora_config.runtime_config.ephemeral_gpu_offload,
-            "lora_bias": lora_config.lora_bias,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
-        # for torchao merging, we need the get_apply_tensor_subclass from the quantization config
-        try:
-            kwargs["get_apply_tensor_subclass"] = operator.attrgetter(
-                "hf_quantizer.quantization_config.get_apply_tensor_subclass"
-            )(self.model)
-        except AttributeError:
-            pass
 
         quant_methods = ["gptq", "aqlm", "awq"]
         for quant_method in quant_methods:
@@ -231,11 +221,9 @@ class LoraModel(BaseTuner):
                 init_lora_weights=lora_config.init_lora_weights,
                 use_rslora=lora_config.use_rslora,
                 use_dora=lora_config.use_dora,
-                lora_bias=lora_config.lora_bias,
             )
         else:
-            device_map = self.model.hf_device_map if hasattr(self.model, "hf_device_map") else None
-            new_module = self._create_new_module(lora_config, adapter_name, target, device_map=device_map, **kwargs)
+            new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
             if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
@@ -250,20 +238,34 @@ class LoraModel(BaseTuner):
         if hasattr(child, "base_layer"):
             child = child.base_layer
 
+        if not hasattr(new_module, "base_layer"):
+            if hasattr(new_module, "W_q"):  # HQQ
+                new_module.W_q = child.W_q
+            else:
+                new_module.weight = child.weight
+            if hasattr(child, "bias"):
+                new_module.bias = child.bias
+
+        if getattr(child, "state", None) is not None:
+            if hasattr(new_module, "base_layer"):
+                new_module.base_layer.state = child.state
+            else:
+                new_module.state = child.state
+            new_module.to(child.weight.device)
+
         meta = torch.device("meta")
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if (self.prefix in name) or ("ranknum" in name):
-                if hasattr(child, "qweight"):
-                    weight = child.qweight
-                elif hasattr(child, "W_q"):
-                    weight = child.W_q
-                elif hasattr(child, "weight"):
-                    weight = child.weight
-                elif getattr(child, "in_proj_weight", None) is not None:  # MHA
-                    weight = child.in_proj_weight
-                else:
-                    weight = next(child.parameters())
+                weight = (
+                    child.qweight
+                    if hasattr(child, "qweight")
+                    else child.W_q
+                    if hasattr(child, "W_q")
+                    else child.weight
+                    if hasattr(child, "weight")
+                    else next(child.parameters())
+                )
                 if not any(p.device == meta for p in module.parameters()):
                     module.to(weight.device)
 
@@ -332,8 +334,6 @@ class LoraModel(BaseTuner):
                 dispatch_awq,
                 dispatch_gptq,
                 dispatch_hqq,
-                dispatch_inc,
-                dispatch_torchao,
                 dispatch_megatron,
                 dispatch_default,
             ]
@@ -349,8 +349,7 @@ class LoraModel(BaseTuner):
             # no module could be matched
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
-                "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv1d`, `torch.nn.Conv2d`, `torch.nn.Conv3d`, "
-                "`transformers.pytorch_utils.Conv1D`, `torch.nn.MultiheadAttention.`."
+                "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `transformers.pytorch_utils.Conv1D`."
             )
 
         return new_module
@@ -375,7 +374,7 @@ class LoraModel(BaseTuner):
 
     def _set_adapter_layers(self, enabled: bool = True) -> None:
         for module in self.model.modules():
-            if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
+            if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
                 module.enable_adapters(enabled)
 
     def enable_adapter_layers(self) -> None:
@@ -390,14 +389,15 @@ class LoraModel(BaseTuner):
 
         When disabling all adapters, the model output corresponds to the output of the base model.
         """
-        for active_adapter in self.active_adapters:
-            val = self.peft_config[active_adapter].bias
-            if val != "none":
-                msg = (
-                    f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
-                    "output as the the base model would without adaption."
-                )
-                warnings.warn(msg)
+        # print(self.peft_config)
+        # for active_adapter in self.active_adapters:
+        #     val = self.peft_config[active_adapter].bias
+        #     if val != "none":
+        #         msg = (
+        #             f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
+        #             "output as the the base model would without adaption."
+        #         )
+        #         warnings.warn(msg)
         self._set_adapter_layers(enabled=False)
 
     def set_adapter(self, adapter_name: str | list[str]) -> None:
@@ -435,48 +435,12 @@ class LoraModel(BaseTuner):
         if self.training:
             raise ValueError("Cannot pass `adapter_names` when the model is in training mode.")
 
-        # Check that users only passed actually existing adapters.
-        # Note: We cannot do this on the layer level, as each individual layer may not have each adapter. Still, we want
-        # to check that there is at least one layer with the given name, or else something like typos can easily slip.
-        expected_adapters = set()
-        for layer in self.modules():
-            if isinstance(layer, LoraLayer):
-                expected_adapters |= layer.lora_A.keys()
-                expected_adapters |= layer.lora_embedding_A.keys()
-        unique_adapters = {name for name in adapter_names if name != "__base__"}
-        unexpected_adapters = unique_adapters - expected_adapters
-        if unexpected_adapters:
-            raise ValueError(f"Trying to infer with non-existing adapter(s): {', '.join(sorted(unexpected_adapters))}")
-
-        # deal with beam search
-        num_beams = kwargs.get("num_beams", None)
-        uses_beam_search = isinstance(num_beams, int) and (num_beams > 1)
-        original_adapter_names = adapter_names[:]
-        if uses_beam_search:
-            if not isinstance(adapter_names, (list, tuple)):
-                raise TypeError(f"Got adapter names of type {type(adapter_names)}, expected a list of str.")
-            # When there is beam search, the inputs are repeated n times, thus we repeat each adapter name n times and
-            # then flatten the nested list. For encoder-decoder models, this extended list should not be applied to the
-            # encoder part. Further below, the original argument is thus restored for the encoder.
-            adapter_names = sum(([n] * kwargs["num_beams"] for n in adapter_names), [])
-
         hook_handles = []
         for module in self.modules():
-            if isinstance(module, LoraLayer) or isinstance(module, AuxiliaryTrainingWrapper):
+            if isinstance(module, LoraLayer) or isinstance(module, ModulesToSaveWrapper):
                 pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
                 handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                 hook_handles.append(handle)
-
-        if uses_beam_search and hasattr(self.model, "get_encoder"):
-            # For encoder-decoder models, even when applying beam search, the encoder part of the model should not use
-            # the extended adapter_names. This is because the encoder still uses the original, non-extended samples.
-            for module in self.model.get_encoder().modules():
-                if isinstance(module, LoraLayer) or isinstance(module, AuxiliaryTrainingWrapper):
-                    # Add another hook to overwrite the kwargs with the original adapter names -- this is easier than
-                    # trying to exclude the encoder.
-                    pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=original_adapter_names)
-                    handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
-                    hook_handles.append(handle)
 
         yield
 
@@ -522,16 +486,19 @@ class LoraModel(BaseTuner):
             except AttributeError:
                 continue
             with onload_layer(target):
-                if hasattr(target, "unload_and_optionally_merge_module"):
-                    # if layers have special unloading method, like MultiheadAttention, use that
-                    unloaded_module = target.unload_and_optionally_merge_module(
-                        merge=merge, safe_merge=safe_merge, adapter_names=adapter_names
-                    )
-                    self._replace_module(parent, target_name, unloaded_module, target)
-                elif hasattr(target, "base_layer"):
+                if hasattr(target, "base_layer"):
                     if merge:
                         target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
                     self._replace_module(parent, target_name, target.get_base_layer(), target)
+                elif isinstance(target, ModulesToSaveWrapper):
+                    # save any additional trainable modules part of `modules_to_save`
+                    new_module = target.modules_to_save[target.active_adapter]
+                    if hasattr(new_module, "base_layer"):
+                        # check if the module is itself a tuner layer
+                        if merge:
+                            new_module.merge(safe_merge=safe_merge, adapter_names=adapter_names)
+                        new_module = new_module.get_base_layer()
+                    setattr(parent, target_name, new_module)
 
         return self.model
 
@@ -564,12 +531,7 @@ class LoraModel(BaseTuner):
         # if there is only one adapter, we can only use linear merging
         combination_type = "linear" if len(adapters) == 1 else combination_type
 
-        adapters_ranks: list[int] = [
-            # When allocating tensors for the new adapter, we need the maximum possible rank to not overflow
-            config.r if not config.rank_pattern else max(config.r, *config.rank_pattern.values())
-            for config in (self.peft_config[adapter] for adapter in adapters)
-        ]
-
+        adapters_ranks = [self.peft_config[adapter].r for adapter in adapters]
         if combination_type in ("linear", "ties", "dare_ties", "dare_linear", "magnitude_prune"):
             # all adapters ranks should be same, new rank is just this value
             if len(set(adapters_ranks)) != 1:
@@ -875,7 +837,6 @@ class LoraModel(BaseTuner):
                     new_adapter = target.active_adapters[:]
 
         self.active_adapter = new_adapter or []
-        self._delete_auxiliary_adapter(adapter_name, new_active_adapters=new_adapter)
 
     def merge_and_unload(
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
@@ -918,9 +879,9 @@ class LoraModel(BaseTuner):
 
     def subtract_mutated_init(self, output_state_dict: dict[str, torch.Tensor], adapter_name: str, kwargs=None):
         """
-        This function can calculate the updates of the PiSSA/CorDA/OLoRA by comparing the parameters of the
-        PiSSA/CorDA/OLoRA adapter in `output_state_dict` with the initial values of PiSSA/CorDA/OLoRA in
-        `adapter_name`, thus converting PiSSA/CorDA/OLoRA to LoRA.
+        This function can calculate the updates of the [PiSSA | OLoRA] by comparing the parameters of the [PiSSA |
+        OLoRA] adapter in `output_state_dict` with the initial values of [PiSSA | OLoRA] in `adapter_name`, thus
+        converting [PiSSA | OLoRA] to LoRA.
         """
         for name, param in self.model.named_parameters():
             if (

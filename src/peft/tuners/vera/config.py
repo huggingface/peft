@@ -11,11 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import List, Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
@@ -62,14 +61,14 @@ class VeraConfig(PeftConfig):
             The layer indexes to transform, if this argument is specified, it will apply the Vera transformations on
             the layer indexes that are specified in this list. If a single integer is passed, it will apply the Vera
             transformations on the layer at this index.
-        layers_pattern (`Optional[Union[List[str], str]]`):
-            The layer pattern name, used only if `layers_to_transform` is different from `None`. This should target the
-            `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
+        layers_pattern (`str`):
+            The layer pattern name, used only if `layers_to_transform` is different from `None` and if the layer
+            pattern is not in the common layers pattern.
     """
 
     r: int = field(default=256, metadata={"help": "Vera attention dimension"})
 
-    target_modules: Optional[Union[list[str], str]] = field(
+    target_modules: Optional[Union[List[str], str]] = field(
         default=None,
         metadata={
             "help": (
@@ -105,7 +104,7 @@ class VeraConfig(PeftConfig):
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
     )
     bias: str = field(default="none", metadata={"help": "Bias type for Vera. Can be 'none', 'all' or 'vera_only'"})
-    modules_to_save: Optional[list[str]] = field(
+    modules_to_save: Optional[List[str]] = field(
         default=None,
         metadata={
             "help": (
@@ -124,7 +123,7 @@ class VeraConfig(PeftConfig):
             ),
         },
     )
-    layers_to_transform: Optional[Union[list[int], int]] = field(
+    layers_to_transform: Optional[Union[List[int], int]] = field(
         default=None,
         metadata={
             "help": (
@@ -134,26 +133,22 @@ class VeraConfig(PeftConfig):
             )
         },
     )
-    layers_pattern: Optional[Union[list[str], str]] = field(
+    layers_pattern: Optional[str] = field(
         default=None,
         metadata={
             "help": (
-                "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer "
-                "pattern is not in the common layers pattern. This should target the `nn.ModuleList` of the "
-                "model, which is often called `'layers'` or `'h'`."
+                "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer"
+                " pattern is not in the common layers pattern."
             )
         },
     )
 
     def __post_init__(self):
-        super().__post_init__()
         self.peft_type = PeftType.VERA
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
-        # check for layers_to_transform and layers_pattern
-        if self.layers_pattern and not self.layers_to_transform:
-            raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
+
         if not self.save_projection:
             warnings.warn(
                 "Specified to not save vera_A and vera_B within the state dictionary, instead they will be restored "

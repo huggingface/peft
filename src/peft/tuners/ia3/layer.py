@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import warnings
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 import torch
 import torch.nn as nn
@@ -38,7 +38,7 @@ class IA3Layer(BaseTunerLayer):
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
             in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif isinstance(base_layer, (nn.Conv2d, nn.Conv3d)):
+        elif isinstance(base_layer, nn.Conv2d):
             in_features, out_features = base_layer.in_channels, base_layer.out_channels
         elif isinstance(base_layer, nn.Embedding):
             in_features, out_features = base_layer.num_embeddings, base_layer.embedding_dim
@@ -89,7 +89,7 @@ class Linear(nn.Module, IA3Layer):
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, init_ia3_weights)
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -184,7 +184,7 @@ class Linear(nn.Module, IA3Layer):
         return result
 
 
-class _ConvNd(nn.Module, IA3Layer):
+class Conv2d(nn.Module, IA3Layer):
     def __init__(
         self,
         base_layer: nn.Module,
@@ -198,22 +198,22 @@ class _ConvNd(nn.Module, IA3Layer):
         IA3Layer.__init__(self, base_layer, is_feedforward=is_feedforward)
         self.fan_in_fan_out = fan_in_fan_out
         self._active_adapter = adapter_name
-        self._kernel_dim = base_layer.weight.dim()
 
         self.update_layer(adapter_name, init_ia3_weights)
 
     def update_layer(self, adapter_name, init_ia3_weights):
         # Actual trainable parameters
-        num_features = self.in_features if self.is_feedforward else self.out_features
-        weights_size = (1, num_features) + (1,) * (self._kernel_dim - 2)
-        weight = torch.randn(weights_size)
+        if self.is_feedforward:
+            weight = torch.randn((1, self.in_features, 1, 1))
+        else:
+            weight = torch.randn((1, self.out_features, 1, 1))
         self.ia3_l[adapter_name] = nn.Parameter(weight)
         if init_ia3_weights:
             self.reset_ia3_parameters(adapter_name)
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -234,10 +234,9 @@ class _ConvNd(nn.Module, IA3Layer):
         for active_adapter in adapter_names:
             if active_adapter in self.ia3_l.keys():
                 base_layer = self.get_base_layer()
-                orig_dtype = base_layer.weight.data.dtype
                 ia3_scaling = self.ia3_l[active_adapter].data
                 if not self.is_feedforward:
-                    ia3_scaling = ia3_scaling.transpose(0, 1)
+                    ia3_scaling = ia3_scaling.permute(1, 0, 2, 3)
 
                 if safe_merge:
                     output_weight = torch.mul(base_layer.weight.data, ia3_scaling).clone()
@@ -247,13 +246,13 @@ class _ConvNd(nn.Module, IA3Layer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = output_weight.to(orig_dtype)
+                    base_layer.weight.data = output_weight
                 else:
-                    base_layer.weight.data = torch.mul(base_layer.weight.data, ia3_scaling).to(orig_dtype)
+                    base_layer.weight.data = torch.mul(base_layer.weight.data, ia3_scaling)
 
                 if not self.is_feedforward and (base_layer.bias is not None):
                     scaling = self.ia3_l[active_adapter].reshape(base_layer.bias.shape)
-                    base_layer.bias.data = torch.mul(base_layer.bias.data, scaling.data).to(orig_dtype)
+                    base_layer.bias.data = torch.mul(base_layer.bias.data, scaling.data)
 
                 self.merged_adapters.append(active_adapter)
 
@@ -270,17 +269,15 @@ class _ConvNd(nn.Module, IA3Layer):
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.ia3_l.keys():
                 base_layer = self.get_base_layer()
-                orig_dtype = base_layer.weight.data.dtype
                 # divide by (IA)^3 vector. Add tolerace to avoid division by zero
                 ia3_scaling = self.ia3_l[active_adapter].data
                 if not self.is_feedforward:
-                    ia3_scaling = ia3_scaling.transpose(0, 1)
-                base_layer.weight.data = torch.div(base_layer.weight.data, ia3_scaling + 1e-8).to(orig_dtype)
+                    ia3_scaling = ia3_scaling.permute(1, 0, 2, 3)
+                base_layer.weight.data = torch.div(base_layer.weight.data, ia3_scaling + 1e-8)
 
                 if not self.is_feedforward and (base_layer.bias is not None):
                     scaling = self.ia3_l[active_adapter].reshape(base_layer.bias.shape)
-                    orig_dtype = base_layer.bias.data.dtype
-                    base_layer.bias.data = torch.mul(base_layer.bias.data, scaling.data).to(orig_dtype)
+                    base_layer.bias.data = torch.mul(base_layer.bias.data, scaling.data)
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         dtype = previous_dtype = x.dtype
@@ -311,20 +308,3 @@ class _ConvNd(nn.Module, IA3Layer):
 
         result = result.to(previous_dtype)
         return result
-
-
-class Conv2d(_ConvNd):
-    # IA3 implemented in a 2D convolutional layer
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if not self._kernel_dim == 4:
-            raise ValueError(f"Conv2d layer kernel must have 4 dimensions, not {self._kernel_dim}")
-
-
-class Conv3d(_ConvNd):
-    # IA3 implemented in a 3D convolutional layer
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if not self._kernel_dim == 5:
-            raise ValueError(f"Conv2d layer kernel must have 5 dimensions, not {self._kernel_dim}")

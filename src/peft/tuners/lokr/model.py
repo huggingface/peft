@@ -12,13 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Union
+import re
+from itertools import chain
+from typing import Dict, Type, Union
 
 import torch
 from torch import nn
 
 from peft.tuners.lycoris_utils import LycorisConfig, LycorisTuner
-from peft.utils.other import get_pattern_key
 
 from .layer import Conv2d, Linear, LoKrLayer
 
@@ -83,7 +84,7 @@ class LoKrModel(LycorisTuner):
     """
 
     prefix: str = "lokr_"
-    layers_mapping: dict[type[torch.nn.Module], type[LoKrLayer]] = {
+    layers_mapping: Dict[Type[torch.nn.Module], Type[LoKrLayer]] = {
         torch.nn.Conv2d: Conv2d,
         torch.nn.Linear: Linear,
     }
@@ -100,12 +101,14 @@ class LoKrModel(LycorisTuner):
         """
         A private method to create and replace the target module with the adapter module.
         """
-        r_key = get_pattern_key(config.rank_pattern.keys(), current_key)
-        alpha_key = get_pattern_key(config.alpha_pattern.keys(), current_key)
+
+        # Regexp matching - Find key which matches current target_name in patterns provided
+        pattern_keys = list(chain(config.rank_pattern.keys(), config.alpha_pattern.keys()))
+        target_name_key = next(filter(lambda key: re.match(rf"(.*\.)?{key}$", current_key), pattern_keys), target_name)
+
         kwargs = config.to_dict()
-        kwargs["r"] = config.rank_pattern.get(r_key, config.r)
-        kwargs["alpha"] = config.alpha_pattern.get(alpha_key, config.alpha)
-        kwargs["rank_dropout_scale"] = config.rank_dropout_scale
+        kwargs["r"] = config.rank_pattern.get(target_name_key, config.r)
+        kwargs["alpha"] = config.alpha_pattern.get(target_name_key, config.alpha)
 
         if isinstance(target, LoKrLayer):
             target.update_layer(adapter_name, **kwargs)

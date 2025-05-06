@@ -114,10 +114,14 @@ class XLoraClassifier(nn.Module):
             batch_size = input_ids.shape[0]
             device = input_ids.device
             seq_len = input_ids.shape[1]
-        else:
+        elif inputs_embeds is not None:
             batch_size = inputs_embeds.shape[0]
             device = inputs_embeds.device
             seq_len = inputs_embeds.shape[1]
+        else:
+            batch_size = kwargs['hidden_states'].shape[0]
+            device = kwargs['hidden_states'].device
+            seq_len = kwargs['hidden_states'].shape[1]
 
         return torch.full(  # type: ignore
             (batch_size, seq_len, self.n_layers, self.n_classes),
@@ -135,16 +139,22 @@ class XLoraClassifier(nn.Module):
         """
         Using the hidden states of the model, predict `n_classes` LoRA alpha values. Returns the scalings.
         """
+
+        # print(result.hidden_states.shape)
         if input_ids is not None:
             batch_size = input_ids.shape[0]
             seq_len = input_ids.shape[1]
-        else:
+        elif inputs_embeds is not None:
             batch_size = inputs_embeds.shape[0]
             seq_len = inputs_embeds.shape[1]
+        else:
+            batch_size = kwargs['hidden_states'].shape[0]
+            seq_len = kwargs['hidden_states'].shape[1]
+        # breakpoint()
 
-        hidden_states = result.hidden_states  # type: ignore
+        hidden_state = result.hidden_states
 
-        hidden_state = hidden_states[-1]  # Get the last hidden state
+        # hidden_state = hidden_states[-1]  # Get the last hidden state
 
         ### Classifier run
         # hidden_state=[batch_size, seq_len, hidden_size]

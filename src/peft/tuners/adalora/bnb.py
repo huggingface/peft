@@ -129,7 +129,9 @@ if is_bnb_4bit_available():
                 requires_conversion = not torch.is_autocast_enabled()
                 if requires_conversion:
                     expected_dtype = result.dtype
-                    x = self._cast_input_dtype(x, lora_A.dtype)
+                    compute_dtype = lora_A.dtype
+                    if x.dtype != compute_dtype:
+                        x = x.to(compute_dtype)
 
                 output = dropout(x) @ (lora_A * lora_E).T @ lora_B.T
                 if requires_conversion:

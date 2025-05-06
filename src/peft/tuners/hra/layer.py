@@ -14,7 +14,7 @@
 
 import math
 import warnings
-from typing import Any, Optional, Union
+from typing import Any, List, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -37,8 +37,6 @@ class HRALayer(BaseTunerLayer):
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
-        # flag to enable/disable casting of input to weight dtype during forward call
-        self.cast_input_dtype_enabled = True
         self.kwargs = kwargs
 
         base_layer = self.get_base_layer()
@@ -143,7 +141,7 @@ class HRALinear(nn.Module, HRALayer):
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, apply_GS, init_weights, **kwargs)
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -164,24 +162,22 @@ class HRALinear(nn.Module, HRALayer):
         for active_adapter in adapter_names:
             if active_adapter in self.hra_u.keys():
                 base_layer = self.get_base_layer()
-                orig_dtype = base_layer.weight.dtype
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
                     orig_weight = base_layer.weight.data.clone()
                     delta_weight = self.get_delta_weight(active_adapter)
-                    orig_weight = torch.mm(orig_weight.to(delta_weight.dtype), delta_weight)
+                    orig_weight = torch.mm(orig_weight, delta_weight)
 
                     if not torch.isfinite(orig_weight).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weight.to(orig_dtype)
+                    self.base_layer.weight.data = orig_weight
                 else:
                     delta_weight = self.get_delta_weight(active_adapter)
-                    new_weight = torch.mm(base_layer.weight.data.to(delta_weight.dtype), delta_weight)
-                    base_layer.weight.data = new_weight.to(orig_dtype)
+                    self.base_layer.weight.data = torch.mm(self.base_layer.weight.data, delta_weight)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -191,16 +187,12 @@ class HRALinear(nn.Module, HRALayer):
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
-
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
-            base_layer = self.get_base_layer()
-            orig_dtype = base_layer.weight.dtype
             if active_adapter in self.hra_u.keys():
-                orig_weight = base_layer.weight.data.clone()
+                orig_weight = self.get_base_layer().weight.data.clone()
                 delta_weight = self.get_delta_weight(active_adapter, reverse=True)
-                new_weight = torch.mm(orig_weight.to(delta_weight.dtype), delta_weight)
-                base_layer.weight.data = new_weight.to(orig_dtype)
+                self.get_base_layer().weight.data = torch.mm(orig_weight, delta_weight)
 
     def get_delta_weight(self, adapter_name: str, reverse: bool = False) -> torch.Tensor:
         rank = self.hra_r[adapter_name]
@@ -228,7 +220,7 @@ class HRALinear(nn.Module, HRALayer):
 
             for i in indices:
                 ui = opt_u[:, i].view(-1, 1)
-                weight = weight - 2 * weight @ ui @ ui.t()
+                weight = weight @ (torch.eye(shape[0], device=opt_u.device, dtype=opt_u.dtype) - 2 * ui @ ui.t())
 
         return weight
 
@@ -248,18 +240,13 @@ class HRALinear(nn.Module, HRALayer):
                 if active_adapter not in self.hra_u.keys():
                     continue
                 delta_weight = self.get_delta_weight(active_adapter)
-                new_weight = torch.mm(new_weight.to(delta_weight.dtype), delta_weight)
+                new_weight = torch.mm(new_weight, delta_weight)
 
+            x = x.to(self.get_base_layer().weight.data.dtype)
             orig_weight = self.get_base_layer().weight.data
-            orig_weight = self._cast_input_dtype(orig_weight, new_weight.dtype)
             new_weight = torch.mm(orig_weight, new_weight)
-            bias = self._cast_input_dtype(self.base_layer.bias, new_weight.dtype)
 
-            if self.cast_input_dtype_enabled:
-                x = self._cast_input_dtype(x, new_weight.dtype)
-            else:
-                x = x.to(self.get_base_layer().weight.data.dtype)
-            result = F.linear(input=x, weight=new_weight, bias=bias)
+            result = F.linear(input=x, weight=new_weight, bias=self.base_layer.bias)
 
         result = result.to(previous_dtype)
         return result
@@ -286,7 +273,7 @@ class HRAConv2d(nn.Module, HRALayer):
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, apply_GS, init_weights, **kwargs)
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -307,22 +294,21 @@ class HRAConv2d(nn.Module, HRALayer):
         for active_adapter in adapter_names:
             if active_adapter in self.hra_u.keys():
                 base_layer = self.get_base_layer()
-                orig_dtype = base_layer.weight.dtype
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
                     orig_weight = base_layer.weight.data.clone()
                     orig_weight = orig_weight.view(
                         self.out_features,
-                        self.in_features * base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
+                        self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
                     )
                     delta_weight = self.get_delta_weight(active_adapter)
-                    orig_weight = torch.mm(orig_weight.to(delta_weight.dtype), delta_weight)
+                    orig_weight = torch.mm(orig_weight, delta_weight)
                     orig_weight = orig_weight.view(
                         self.out_features,
                         self.in_features,
-                        base_layer.kernel_size[0],
-                        base_layer.kernel_size[0],
+                        self.base_layer.kernel_size[0],
+                        self.base_layer.kernel_size[0],
                     )
 
                     if not torch.isfinite(orig_weight).all():
@@ -330,7 +316,7 @@ class HRAConv2d(nn.Module, HRALayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weight.to(orig_dtype)
+                    self.base_layer.weight.data = orig_weight
                 else:
                     orig_weight = base_layer.weight.data
                     orig_weight = orig_weight.view(
@@ -338,15 +324,15 @@ class HRAConv2d(nn.Module, HRALayer):
                         self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
                     )
                     delta_weight = self.get_delta_weight(active_adapter)
-                    orig_weight = torch.mm(orig_weight.to(delta_weight.dtype), delta_weight)
+                    orig_weight = torch.mm(orig_weight, delta_weight)
                     orig_weight = orig_weight.view(
                         self.out_features,
                         self.in_features,
-                        base_layer.kernel_size[0],
-                        base_layer.kernel_size[0],
+                        self.base_layer.kernel_size[0],
+                        self.base_layer.kernel_size[0],
                     )
 
-                    base_layer.weight.data = orig_weight.to(orig_dtype)
+                    self.base_layer.weight.data = orig_weight
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -358,21 +344,19 @@ class HRAConv2d(nn.Module, HRALayer):
             return
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
-            base_layer = self.get_base_layer()
-            orig_dtype = base_layer.weight.dtype
             if active_adapter in self.hra_u.keys():
-                orig_weight = base_layer.weight.data.clone()
+                orig_weight = self.get_base_layer().weight.data.clone()
                 orig_weight = orig_weight.view(
                     self.out_features,
-                    self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0],
+                    self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
                 )
                 delta_weight = self.get_delta_weight(active_adapter, reverse=True)
-                orig_weight = torch.mm(orig_weight.to(delta_weight.dtype), delta_weight)
+                orig_weight = torch.mm(orig_weight, delta_weight)
                 orig_weight = orig_weight.view(
-                    self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
+                    self.out_features, self.in_features, self.base_layer.kernel_size[0], self.base_layer.kernel_size[0]
                 )
 
-                base_layer.weight.data = orig_weight.to(orig_dtype)
+                self.get_base_layer().weight.data = orig_weight
 
     def get_delta_weight(self, adapter_name: str, reverse: bool = False) -> torch.Tensor:
         rank = self.hra_r[adapter_name]
@@ -400,7 +384,7 @@ class HRAConv2d(nn.Module, HRALayer):
 
             for i in indices:
                 ui = opt_u[:, i].view(-1, 1)
-                weight = weight - 2 * weight @ ui @ ui.t()
+                weight = weight @ (torch.eye(shape[0], device=opt_u.device, dtype=opt_u.dtype) - 2 * ui @ ui.t())
 
         return weight
 
@@ -415,39 +399,30 @@ class HRAConv2d(nn.Module, HRALayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             new_weight = torch.eye(
-                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
-                device=x.device,
+                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0], device=x.device
             )
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.hra_u.keys():
                     continue
                 delta_weight = self.get_delta_weight(active_adapter)
-                new_weight = torch.mm(new_weight.to(delta_weight.dtype), delta_weight)
+                new_weight = torch.mm(new_weight, delta_weight)
+
+            x = x.to(self.base_layer.weight.data.dtype)
 
             orig_weight = self.base_layer.weight.data
             orig_weight = orig_weight.view(
                 self.out_features,
                 self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
             )
-            orig_weight = self._cast_input_dtype(orig_weight, new_weight.dtype)
-            bias = self._cast_input_dtype(self.base_layer.bias, new_weight.dtype)
-
             new_weight = torch.mm(orig_weight, new_weight)
             new_weight = new_weight.view(
-                self.out_features,
-                self.in_features,
-                self.base_layer.kernel_size[0],
-                self.base_layer.kernel_size[0],
+                self.out_features, self.in_features, self.base_layer.kernel_size[0], self.base_layer.kernel_size[0]
             )
 
-            if self.cast_input_dtype_enabled:
-                x = self._cast_input_dtype(x, new_weight.dtype)
-            else:
-                x = x.to(self.get_base_layer().weight.data.dtype)
             result = F.conv2d(
                 input=x,
                 weight=new_weight,
-                bias=bias,
+                bias=self.base_layer.bias,
                 padding=self.base_layer.padding[0],
                 stride=self.base_layer.stride[0],
             )

@@ -32,7 +32,6 @@ class AdaptionPromptConfig(PeftConfig):
     adapter_layers: int = field(default=None, metadata={"help": "Number of adapter layers (from the top)"})
 
     def __post_init__(self):
-        super().__post_init__()
         self.peft_type = PeftType.ADAPTION_PROMPT
 
     @property

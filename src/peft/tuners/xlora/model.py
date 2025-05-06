@@ -125,6 +125,7 @@ def _load_adapter_into_lora_model(
         lora_model.inject_adapter(lora_model.model, adapter_name)
 
     adapter_weights = load_peft_weights(model_id, device=torch_device, subfolder=subfolder, **hf_hub_download_kwargs)
+    # print(adapter_weights)
     new_adapter_weights = {}
     # Rework the keys to contain the adapter numbers
     for old_key in adapter_weights.keys():
@@ -135,9 +136,20 @@ def _load_adapter_into_lora_model(
         # We always want model.model
         key = "model." + key
         new_adapter_weights[key] = adapter_weights[old_key]
+    
+    # print(new_adapter_weights.keys())
 
     # load the weights into the model
     ignore_mismatched_sizes = kwargs.get("ignore_mismatched_sizes", False)
+    # print(lora_model.state_dict().keys())
+    # print("="*100)
+
+    modified_dict = {}
+    for key in new_adapter_weights.keys():
+        new_key = key.replace("model.model.", "model.")
+        modified_dict[new_key] = new_adapter_weights[key]
+    new_adapter_weights = modified_dict
+    
     load_result = set_peft_model_state_dict(
         lora_model,
         new_adapter_weights,
@@ -276,6 +288,7 @@ class XLoraModel(BaseTuner):
                 )
         else:
             for i, (_adapter_name, model_id) in enumerate(adapters_items):
+                # print(i)
                 _load_adapter_into_lora_model(
                     lora_model=self.lora_model,
                     adapter_name=str(i),
@@ -314,7 +327,6 @@ class XLoraModel(BaseTuner):
                     param.requires_grad = False
 
     def generate(self, *args, **kwargs):
-        kwargs["use_cache"] = False
         res = self.lora_model.generate(*args, **kwargs)  # type: ignore
         #  This is necessary because we use PeftModel.disable_adapter() which reenables the adapters
         self._maybe_freeze_all_adapters()
@@ -337,7 +349,7 @@ class XLoraModel(BaseTuner):
             args_real = args[0]
             kwargs_real = args[1]
             kwargs_real.update(kwargs)
-
+            # breakpoint()
             dummy_scalings = self.internal_xlora_classifier.make_dummy_scalings(*args_real, **kwargs_real)
 
             hook_handles = []
@@ -352,9 +364,10 @@ class XLoraModel(BaseTuner):
 
                 try:
                     scaling_pass_kwargs = kwargs_real.copy()
-                    scaling_pass_kwargs["output_hidden_states"] = True
+                    # scaling_pass_kwargs["output_hidden_states"] = True
                     scaling_pass_kwargs["return_dict"] = True
                     try:
+
                         base_output = self.lora_model.model.forward(*args_real, **scaling_pass_kwargs)
                     finally:
                         # Clean everything up

@@ -58,5 +58,4 @@ class MultitaskPromptTuningConfig(PromptTuningConfig):
     num_tasks: Optional[int] = field(default=1, metadata={"help": "number of tasks"})
 
     def __post_init__(self):
-        super().__post_init__()
         self.peft_type = PeftType.MULTITASK_PROMPT_TUNING
