@@ -42,7 +42,7 @@ class LycorisConfig(PeftConfig):
         metadata={
             "help": (
                 "The mapping from layer names or regexp expression to ranks which are different from the default rank specified by `r`. "
-                "For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`."
+                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 8`}"
             )
         },
     )
@@ -51,7 +51,7 @@ class LycorisConfig(PeftConfig):
         metadata={
             "help": (
                 "The mapping from layer names or regexp expression to alphas which are different from the default alpha specified by `alpha`. "
-                "For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`."
+                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 32`}"
             )
         },
     )
@@ -71,14 +71,11 @@ class LycorisLayer(BaseTunerLayer):
         self.alpha = {}
         self.scaling = {}
         self.rank_dropout = {}
-        self.rank_dropout_scale = {}
         self.module_dropout = {}
 
         # Tuner info
         self._disable_adapters = False
         self.merged_adapters = []
-        # flag to enable/disable casting of input to weight dtype during forward call
-        self.cast_input_dtype_enabled = True
 
     @property
     @abstractmethod
@@ -436,4 +433,3 @@ class LycorisTuner(BaseTuner):
                     new_adapter = target.active_adapters[:]
 
         self.active_adapter = new_adapter or []
-        self._delete_auxiliary_adapter(adapter_name, new_active_adapters=new_adapter)

@@ -31,10 +31,6 @@ class LNTuningConfig(PeftConfig):
             '.*decoder.*' or '.*encoder.*'. If this is not specified, modules will be chosen according to the model
             architecture. If the architecture is not known, an error will be raised -- in this case, you should specify
             the target modules manually.
-        exclude_modules (`Optional[Union[List[str], str]]`):
-            The names of the modules to not apply the adapter. When passing a string, a regex match will be performed.
-            When passing a list of strings, either an exact match will be performed or it is checked if the name of the
-            module ends with any of the passed strings.
         modules_to_save (`Optional[Union[List[str], str]]`):
             List of modules to be set as trainable and saved in the final checkpoint. For example, in Sequence
             Classification or Token Classification tasks, the final layer `classifier/score` are randomly initialized
@@ -52,10 +48,6 @@ class LNTuningConfig(PeftConfig):
             ),
         },
     )
-    exclude_modules: Optional[Union[list[str], str]] = field(
-        default=None,
-        metadata={"help": "List of module names or regex expression of the module names to exclude from LNTuning."},
-    )
     modules_to_save: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
@@ -66,5 +58,4 @@ class LNTuningConfig(PeftConfig):
     )
 
     def __post_init__(self):
-        super().__post_init__()
         self.peft_type = PeftType.LN_TUNING

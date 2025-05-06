@@ -55,7 +55,8 @@ class SVDQuantLinear(torch.nn.Module, AdaLoraLayer):
             requires_conversion = not torch.is_autocast_enabled()
             if requires_conversion:
                 expected_dtype = result.dtype
-                x = self._cast_input_dtype(x, torch.float32)
+                if x.dtype != torch.float32:
+                    x = x.float()
 
             output = (dropout(x) @ (lora_A * lora_E).T @ lora_B.T) * scaling / ranknum
             # TODO: here, the dtype conversion is applied on the *whole expression*,

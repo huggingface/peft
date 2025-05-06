@@ -50,12 +50,8 @@ class LoraParallelLinear(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
-        lora_bias: bool = False,
         **kwargs,
     ):
-        if lora_bias:
-            raise ValueError(f"{self.__class__.__name__} does not support lora_bias yet, set it to False")
-
         super().__init__()
         LoraLayer.__init__(self, base_layer=base_layer, **kwargs)
 
@@ -112,10 +108,6 @@ class LoraParallelLinear(nn.Module, LoraLayer):
         gather_output=False,
         **parallel_linear_kwargs,
     ):
-        # collect the kwargs
-        kwargs = locals().copy()
-        del kwargs["self"]
-
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         self.r[adapter_name] = r
@@ -158,15 +150,10 @@ class LoraParallelLinear(nn.Module, LoraLayer):
         else:
             self.scaling[adapter_name] = lora_alpha / r
 
-        self.use_dora[adapter_name] = use_dora
-
         # for inits that require access to the base weight, use gather_param_ctx so that the weight is gathered when using DeepSpeed
         if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
             with gather_params_ctx(self.get_base_layer().weight):
                 self.pissa_init(adapter_name, init_lora_weights)
-        elif isinstance(init_lora_weights, str) and init_lora_weights.startswith("corda"):
-            with gather_params_ctx(self.get_base_layer().weight):
-                self.corda_init(adapter_name, init_lora_weights)
         elif isinstance(init_lora_weights, str) and init_lora_weights.lower() == "olora":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.olora_init(adapter_name)
@@ -179,8 +166,11 @@ class LoraParallelLinear(nn.Module, LoraLayer):
         # call this before dora_init
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
-        if adapter_name in self.lora_variant:
-            self.lora_variant[adapter_name].init(self, **kwargs)
+        if use_dora:
+            self.dora_init(adapter_name)
+            self.use_dora[adapter_name] = True
+        else:
+            self.use_dora[adapter_name] = False
 
         self.set_adapter(self.active_adapters)
 
@@ -208,8 +198,27 @@ class LoraParallelLinear(nn.Module, LoraLayer):
                 lora_B = self.lora_B[active_adapter]
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
-                x = self._cast_input_dtype(x, lora_A.weight.dtype)
-                result = result + lora_B(lora_A(dropout(x))) * scaling
+                x = x.to(lora_A.weight.dtype)
+
+                if not self.use_dora[active_adapter]:
+                    lora_result = lora_A(dropout(x))
+                    if isinstance(lora_result, tuple):
+                        lora_result = lora_result[0]
+                    lora_result = lora_B(lora_result)
+                    if isinstance(lora_result, tuple):
+                        lora_result = lora_result[0]
+                    lora_result = lora_result * scaling
+
+                    result = result + lora_result
+                else:
+                    x = dropout(x)
+                    result = result + self.lora_magnitude_vector[active_adapter](
+                        x,
+                        lora_A=lora_A,
+                        lora_B=lora_B,
+                        scaling=scaling,
+                        base_layer=self.get_base_layer(),
+                    )
 
             result = result.to(torch_result_dtype)
         return result, bias
@@ -240,7 +249,23 @@ class LoraParallelLinear(nn.Module, LoraLayer):
                     # because of the copy operation.
                     orig_weights = base_layer.weight.data.clone()
                     delta_weight = self.get_delta_weight(active_adapter)
-                    orig_weights = orig_weights + delta_weight
+                    if not self.use_dora[active_adapter]:
+                        orig_weights = orig_weights + delta_weight
+                    else:
+                        # handle dora
+                        # since delta_weight already includes scaling, set it to 1 here
+                        weight_norm = (
+                            self.lora_magnitude_vector[active_adapter]
+                            .get_weight_norm(orig_weights, transpose(delta_weight, self.fan_in_fan_out), scaling=1)
+                            .detach()
+                        )
+                        # We need to cache weight_norm because it has to be based on the original weights. We
+                        # cannot calculate it on the fly based on the merged weights when unmerging because its a
+                        # different value
+                        self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+                        dora_factor = self.lora_magnitude_vector[active_adapter].weight / weight_norm
+                        dora_factor = transpose(dora_factor.view(-1, 1), self.fan_in_fan_out)
+                        orig_weights = dora_factor * (orig_weights + delta_weight)
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
@@ -250,7 +275,26 @@ class LoraParallelLinear(nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weights
                 else:
                     delta_weight = self.get_delta_weight(active_adapter)
-                    base_layer.weight.data = base_layer.weight.data + delta_weight
+                    if not self.use_dora[active_adapter]:
+                        base_layer.weight.data = base_layer.weight.data + delta_weight
+                    else:
+                        # handle dora
+                        # since delta_weight already includes scaling, set it to 1 here
+                        weight_norm = (
+                            self.lora_magnitude_vector[active_adapter]
+                            .get_weight_norm(
+                                base_layer.weight, transpose(delta_weight, self.fan_in_fan_out), scaling=1
+                            )
+                            .detach()
+                        )
+                        # We need to cache weight_norm because it has to be based on the original weights. We
+                        # cannot calculate it on the fly based on the merged weights when unmerging because its a
+                        # different value
+                        self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+                        dora_factor = self.lora_magnitude_vector[active_adapter].weight / weight_norm
+                        dora_factor = transpose(dora_factor.view(-1, 1), self.fan_in_fan_out)
+                        new_weight = dora_factor * (base_layer.weight.data + delta_weight)
+                        base_layer.weight.data = new_weight
 
                 self.merged_adapters.append(active_adapter)
 
@@ -266,7 +310,13 @@ class LoraParallelLinear(nn.Module, LoraLayer):
             if active_adapter in self.lora_A.keys():
                 weight = self.get_base_layer().weight
                 delta_weight = self.get_delta_weight(active_adapter)
-                weight.data -= delta_weight
+                if not self.use_dora[active_adapter]:
+                    weight.data -= delta_weight
+                else:
+                    weight_norm = self._cache_pop(f"{active_adapter}-weight_norm")
+                    dora_factor = self.lora_magnitude_vector[active_adapter].weight / weight_norm
+                    weight_orig = weight.data / dora_factor.view(-1, 1) - delta_weight
+                    weight.data = weight_orig
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
