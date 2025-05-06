@@ -17,23 +17,25 @@ Main entry point to run the experiments. Contains general setup and the proper t
 """
 import argparse
 import gc
+import os
 import sys
 import time
 
 import torch
-from method_comparison.peft_bench.data import prepare_benchmark_prompts
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, set_seed
-from method_comparison.peft_bench.utils import (
-    BenchmarkConfig,
-    BenchmarkResult,
-    BenchmarkStatus,
-    generate_experiment_id,
-    get_memory_usage,
-    get_model_size_mb,
-    init_cuda,
-    log_results,
-    validate_experiment_path,
-)
+
+from data import prepare_benchmark_prompts
+from utils import (
+        BenchmarkConfig,
+        BenchmarkResult,
+        BenchmarkStatus,
+        generate_experiment_id,
+        get_memory_usage,
+        get_model_size_mb,
+        init_cuda,
+        log_results,
+        validate_experiment_path,
+    )
 
 from peft import PeftConfig, get_peft_model
 
@@ -315,8 +317,23 @@ def main():
     # Configure print function based on verbosity
     print_fn = print if args.verbose else lambda *args, **kwargs: None
 
+    # Handle relative paths - if the path doesn't exist as provided, try within experiments directory
+    experiment_path = args.experiment_path
+    if not os.path.exists(experiment_path):
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        alt_path = os.path.join(script_dir, experiment_path)
+        if os.path.exists(alt_path):
+            experiment_path = alt_path
+        else:
+            # Try one more time with experiments/ prefix
+            alt_path = os.path.join(script_dir, "experiments", 
+                                    os.path.basename(os.path.dirname(experiment_path)),
+                                    os.path.basename(experiment_path))
+            if os.path.exists(alt_path):
+                experiment_path = alt_path
+
     # Validate experiment path and load configs
-    experiment_name, benchmark_config, peft_config = validate_experiment_path(args.experiment_path)
+    experiment_name, benchmark_config, peft_config = validate_experiment_path(experiment_path)
 
     print_fn(f"Running benchmark for experiment: {experiment_name}")
 
@@ -324,7 +341,7 @@ def main():
     result = run_benchmark(
         benchmark_config=benchmark_config,
         experiment_name=experiment_name,
-        experiment_path=args.experiment_path,
+        experiment_path=experiment_path,
         print_fn=print_fn,
     )
 
