@@ -1,8 +1,5 @@
 # RandLora: Full-rank parameter-efficient fine-tuning of large models 
 
-![randlora](https://huggingface.co/papers/2502.00987)
-
-
 ## Introduction
 [RandLora](https://huggingface.co/papers/2502.00987) is a parameter-efficient fine-tuning technique that is similar to LoRA and VeRA but performs full rank updates to improve performance. RandLora can be particulary usefull when adapting large model to hard tasks that require complex updates while preserving the parameter efficiency of LoRA. The full rank update of RandLora is acheived by linearly scaling random bases. The random bases are a collection of multiple low rank matrices such that the summation of their ranks if greater or equal to the full rank of the parameter matrices. The trainable parameters of RandLora are two diagonal matrices (vectors) that get multiplied with the right hand low rank random bases, in a similar way to VeRA's update. To maintain low memory usage, RandLora uses a custom function that prevents storing unnecessary bases in memory for backpropagation.
 
