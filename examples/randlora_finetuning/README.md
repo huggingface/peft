@@ -27,10 +27,10 @@ trainer = transformers.Trainer(
     tokenizer=tokenizer,
 )
 trainer.train()
-peft_model.save_pretrained("randlora-llama-3-8b")
+peft_model.save_pretrained("randlora-llama-7b")
 ```
 
-There is no additional change needed to your standard PEFT training procedure, simply swap your LoRAConfig for a RandLoraConfig. Note however that RandLora's trainable parameter count is **inversely proportional** to the rank parameter `r`. Lower `r` to increase and increase it to reduce trainable parameters of RandLora.
+There is no additional change needed to your standard PEFT training procedure, simply swap your `LoraConfig` for a `RandLoraConfig`. Note however that RandLora's trainable parameter count is **inversely proportional** to the rank parameter `r`. Lower `r` to increase and increase it to reduce trainable parameters of RandLora.
 
 Run the finetuning script simply by running:
 ```bash
@@ -39,13 +39,13 @@ python examples/randlora_finetuning/randlora_finetuning.py --base_model meta-lla
 This 👆🏻 by default will load the model in peft set up with RandLora config. Now if you wanna quickly compare it with Lora, all you need to do is to input ` --use_lora` in the command line and reduce `--randlora_alpha` to 2x the rank. So same above example would be 👇🏻;
 
 ```bash
-python examples/randlora_finetuning/randlora_finetuning.py --base_model meta-llama/Meta-Llama-3-8B --data_path timdettmers/openassistant-guanaco --use_lora --randlora_alpha
+python examples/randlora_finetuning/randlora_finetuning.py --base_model meta-llama/Meta-Llama-3-8B --data_path timdettmers/openassistant-guanaco --use_lora --rank 32 --randlora_alpha 64
 ```
 
-RandLora can be made to use sparse or very sparse random bases. These sparse matrices can help reduce overfitting. To add `--very_sparse` to run with very sparse matrice or run the following for sparse matrices:
+RandLora can be made to use sparse or very sparse random bases. These sparse matrices can help reduce overfitting. Add `--very_sparse` to run with very sparse matrices or `--sparse` for sparse matrices:
 
 ```bash
-python examples/randlora_finetuning/randlora_finetuning.py --base_model meta-llama/Meta-Llama-3-8B --quantize --sparse
+python examples/randlora_finetuning/randlora_finetuning.py --base_model meta-llama/Meta-Llama-3-8B --sparse
 ```
 
 RandLora also supports quantization. To use 4-bit quantization try:
@@ -54,7 +54,7 @@ RandLora also supports quantization. To use 4-bit quantization try:
 python examples/randlora_finetuning/randlora_finetuning.py --base_model meta-llama/Meta-Llama-3-8B --quantize
 ```
 
-By default the RandLora layers are the key and value layers of LLama model. Adding adapters on more layers will increase memory usage. If you whish to choose a different set of layers for RandLora to be applied on, you can simply define it using:
+By default the RandLora layers are the key and value layers of LLama model. Adding adapters on more layers will increase memory usage. If you wish to choose a different set of layers for RandLora to be applied on, you can simply define it using:
 ```bash
 python examples/randlora_finetuning/randlora_finetuning.py --randlora_target_modules "q_proj,k_proj,v_proj" 
 ```
@@ -82,25 +82,20 @@ python randlora_finetuning.py \
     --push_to_hub
 ```
 
-## Use the model on 🤗
-You can load and use the model as any other 🤗 models.
-```python
-from transformers import AutoModel
-model = AutoModel.from_pretrained("ShirinYamani/huggyllama-llama-7b-finetuned")
-```
-
 ## RandLora vs. LoRA
 RandLora differs from LoRA and other related low rank approximation algorithms by chanllenging the low rank paradigm. RandLora adapters learn **full-rank** updates as the [paper](https://huggingface.co/papers/2502.00987) shows that the low rank constraint of LoRA can constrain performance gains as trainable parameters increase (with higher ranks). As a result, using RandLora is specifically recommended for difficult tasks that are underfit by LoRA. RandLoRA however also often improves performance for common tasks. If increasing LoRA's rank improves performance for your task, RandLora will most likely outperform.
 
-RandLora is expected to:
+RandLora is expected to increase performance over LoRA for equivalent amounts of trainable parameters, mostly for larger equivalent amounts (> LoRA rank 4).
 
-1. Increase performance over LoRA for equivalent amounts of trainable parameters, mostly for larger equivalent amounts (> LoRA rank 4). This performance increase is dependent on using a large randlora_alpha scaling parameter (usually 20x the basis rank). This large parameter can sometimes make training the update unstable, reduce the learning rate or the scaling parameter if this is the case.
+RandLora's perfromance increase comes with two limitations:
 
-2. Increase training time when using very low RandLora basis ranks. RandLora can increase training time when a large amount of random bases is used (low randlora rank). 
+1. Performance is dependent on using a large `randlora_alpha` scaling parameter (usually 20x the basis rank). This large parameter can sometimes make training the update unstable, reduce the learning rate or the scaling parameter if this is the case.
+
+2. Increase training time over LoRA when using very low RandLora basis ranks.
 
 ## RandLora vs. VeRA
 RandLora shares similarities with VeRA in that both algorithms use random basis combinations to address some of LoRA's limitations. The limitations addressed by each algorithm is however different.
-VeRA aims to reduce trainable parameters beyond rank 1 LoRAs while RandLoRA reduces the performance limitation due the low rank of the update as the trainable parameter count increases.
+VeRA aims to reduce trainable parameters beyond rank 1 LoRAs while RandLoRA reduces the performance limitation due to the low rank of the update as the trainable parameter count increases.
 
 RandLora is expected to:
 

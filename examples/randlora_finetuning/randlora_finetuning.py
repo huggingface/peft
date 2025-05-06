@@ -1,3 +1,4 @@
+# This script is based on examples/dora_finetuning/dora_finetuning.py
 import os
 
 import torch
@@ -47,6 +48,9 @@ def train_model(
     # load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(base_model, token=hf_token)
 
+    # Compute type
+    torch_dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
+
     # QRandLora (quantized randlora): IF YOU WANNA QUANTIZE THE MODEL
     if quantize:
         model = AutoModelForCausalLM.from_pretrained(
@@ -60,18 +64,14 @@ def train_model(
                 bnb_4bit_use_double_quant=True,
                 bnb_4bit_quant_type="nf4",
             ),
-            torch_dtype=(
-                torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
-            ),
+            torch_dtype=torch_dtype,
         )
         # setup for quantized training
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
     else:
         model = AutoModelForCausalLM.from_pretrained(
             base_model,
-            torch_dtype=(
-                torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
-            ),
+            torch_dtype=torch_dtype,
             token=hf_token,
         )
     # LoRa config for the PEFT model
@@ -114,23 +114,25 @@ def train_model(
     # Data collator to dynamically pad the batched examples
     data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
 
+    # Compute the total amount of training step for warmup
+    max_steps = int(len(dataset // batch_size) * num_epochs)
+
     # Define training arguments
     training_args = TrainingArguments(
         output_dir=output_dir,
         num_train_epochs=num_epochs,
         per_device_train_batch_size=batch_size,
         per_device_eval_batch_size=batch_size,
-        warmup_steps=100,
+        warmup_steps=int(max_steps * 0.1),  # 10% of total trainig steps
         weight_decay=0.01,
-        max_steps=10,
         logging_dir="./logs",
         logging_steps=eval_step,
         save_steps=save_step,
         save_total_limit=2,
         push_to_hub=push_to_hub,
         hub_model_id=hub_model_id,
-        gradient_accumulation_steps=16,
-        fp16=True,
+        gradient_accumulation_steps=16 // batch_size,
+        torch_dtype=torch_dtype,
         learning_rate=learning_rate,
         hub_token=hf_token,
         label_names=["labels"],
