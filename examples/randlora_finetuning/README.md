@@ -84,7 +84,7 @@ RandLora differs from LoRA and other related low rank approximation algorithms b
 
 RandLora is expected to increase performance over LoRA for equivalent amounts of trainable parameters, mostly for larger equivalent amounts (> LoRA rank 4).
 
-RandLora's perfromance increase comes with two limitations:
+RandLora's performance increase comes with two limitations:
 
 1. Performance is dependent on using a large `randlora_alpha` scaling parameter (usually 20x the basis rank). This large parameter can sometimes make training the update unstable, reduce the learning rate or the scaling parameter if this is the case.
 

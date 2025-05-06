@@ -131,7 +131,8 @@ def train_model(
         save_total_limit=2,
         push_to_hub=push_to_hub,
         hub_model_id=hub_model_id,
-        gradient_accumulation_steps=16 // batch_size,
+        gradient_accumulation_steps=16
+        // batch_size,  # Maintaining a minimum batch size of 16 post accumulation is recommended to ensure good performance
         learning_rate=learning_rate,
         hub_token=hf_token,
         label_names=["labels"],
