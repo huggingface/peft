@@ -12,6 +12,7 @@ from typing import Dict, List, Optional
 import warnings
 
 import torch
+import math
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -81,26 +82,11 @@ class DiagLayer(BaseTunerLayer):
             device = base_w.device
             adapter_shape = base_w.shape
             
-            # Initialize row weight with float32 dtype regardless of base layer dtype
-            if init_diag_weights:
-                full = torch.zeros(adapter_shape, dtype=torch.float32, device=device)
-                full[0].fill_(1.0)  # fill_ is safe and preserves leaf status
-            else:
-                full = torch.zeros(adapter_shape, dtype=torch.float32, device=device)
-            full = nn.Parameter(full, requires_grad=True)
-            self.row_weight[adapter_name] = full
+            full = torch.empty(adapter_shape, dtype=torch.float32, device=device)
+            nn.init.kaiming_uniform_(full, a=math.sqrt(5))
+            self.row_weight[adapter_name] = nn.Parameter(full, requires_grad=True)
 
             print(f"[DiagLayer] Created row weight with shape: {self.row_weight[adapter_name].shape}, dtype: {self.row_weight[adapter_name].dtype}")
-
-            # # Create a mask that only allows gradients for the first row
-            # mask = torch.zeros_like(full, requires_grad=False)
-            # mask[0, :] = 1.0
-            # self.register_buffer(f"{adapter_name}_mask", mask, persistent=False)
-
-            # # Register hook to mask gradients
-            # def _hook(grad):
-            #     return grad * self.get_buffer(f"{adapter_name}_mask")
-            # self.row_weight[adapter_name].register_hook(_hook)
 
             # optional bias
             if bias != "none" and adapter_name not in self.row_bias:
@@ -176,6 +162,7 @@ class DiagLayer(BaseTunerLayer):
                 base.bias.data -= db
 
     def forward(self, x: torch.Tensor, *args, **kwargs):
+        print("forward called!!!!!!!!!!!!!!!!")
         # Debug flag to control verbose logging
         debug = getattr(self, 'debug_mode', False)
         
