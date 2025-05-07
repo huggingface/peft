@@ -105,7 +105,7 @@ class DiagModel(BaseTuner):
             return
 
         # 4. Already wrapped? then *update* --------------------------------------------------
-        if isinstance(target, DiagLayer):
+        if isinstance(target, Linear):
             print(f"[DiagModel] Updating existing DiagLayer {target_name}")
             target.update_layer(
                 adapter_name,
