@@ -155,8 +155,17 @@ class DiagModel(BaseTuner):
     # Trainable‑param masking (mirrors Vera)
     # ------------------------------------------------------------------
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:  # noqa: D401
+        # First, disable gradients for all parameters
         for n, p in model.named_parameters():
-            p.requires_grad = n.startswith(self.prefix)
+            p.requires_grad = False
+
+        # Enable gradients for row weights in DiagLayers
+        for m in model.modules():
+            if isinstance(m, DiagLayer):
+                for adapter_name in m.active_adapters:
+                    if adapter_name in m.row_weight:
+                        m.row_weight[adapter_name].requires_grad = True
+                        print(f"Enabled gradients for row weight: {adapter_name}")
 
         # handle bias training option ----------------------------
         for active in self.active_adapters:
