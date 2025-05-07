@@ -56,7 +56,10 @@ def _kaiming_init(
         `torch.Tensor`: The initialised tensor.
     """
     if isinstance(tensor_or_shape, tuple):
-        tensor = torch.empty(tensor_or_shape, dtype=torch.float32)
+        tensor = torch.empty(
+            tensor_or_shape,
+            dtype=torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16,
+        )
     else:
         tensor = tensor_or_shape
 
@@ -86,7 +89,7 @@ class RandLoraModel(BaseTuner):
         >>> from peft import RandLoraConfig, get_peft_model
 
         >>> base_model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
-        >>> config = RandLoraConfig(r=128)
+        >>> config = RandLoraConfig(r=32)
         >>> model = get_peft_model(base_model, config)
         ```
 
