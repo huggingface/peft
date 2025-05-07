@@ -75,44 +75,32 @@ class DiagLayer(BaseTunerLayer):
     ) -> None:
         print(f"[DiagLayer] Updating layer for adapter: {adapter_name}")
         if adapter_name not in self.row_weight:
+            print(f"[DiagLayer] Creating new row weight for adapter: {adapter_name}")
             base_layer = self.get_base_layer()
             base_w = base_layer.weight
             device = base_w.device
-            
-            # Get base weight shape and determine adapter shape
-            base_shape = base_w.shape
-            print(f"[DiagLayer] Base weight shape: {base_shape}, device: {device}")
-            
-            # Determine adapter weight shape based on base layer type and fan_in_fan_out setting
-            if self.fan_in_fan_out:
-                # For fan_in_fan_out=True, we expect (out_features, in_features)
-                adapter_shape = (self.out_features, self.in_features)
-            else:
-                # For fan_in_fan_out=False, we expect (in_features, out_features)
-                adapter_shape = (self.in_features, self.out_features)
-            
-            # Check if shapes are compatible
-            if base_shape != adapter_shape:
-                print(f"[DiagLayer] Warning: Base weight shape {base_shape} doesn't match expected adapter shape {adapter_shape}.")
-                print(f"[DiagLayer] Adapting to base weight shape {base_shape}.")
-                adapter_shape = base_shape
+            adapter_shape = base_w.shape
             
             # Initialize row weight with float32 dtype regardless of base layer dtype
-            full = torch.zeros(adapter_shape, dtype=torch.float32, device=device)
             if init_diag_weights:
-                # Only set the first row to 1.0
-                full[0, :] = torch.tensor(1.0, dtype=torch.float32, device=device)
-            self.row_weight[adapter_name] = nn.Parameter(full)
+                full = torch.zeros(adapter_shape, dtype=torch.float32, device=device)
+                full[0].fill_(1.0)  # fill_ is safe and preserves leaf status
+            else:
+                full = torch.zeros(adapter_shape, dtype=torch.float32, device=device)
+            full = nn.Parameter(full, requires_grad=True)
+            self.row_weight[adapter_name] = full
+
             print(f"[DiagLayer] Created row weight with shape: {self.row_weight[adapter_name].shape}, dtype: {self.row_weight[adapter_name].dtype}")
 
-            # mask to zero all but first row gradients
-            mask = torch.zeros_like(full, requires_grad=False)
-            mask[0, :] = torch.tensor(1.0, dtype=torch.float32, device=device)
-            self.register_buffer(f"{adapter_name}_mask", mask, persistent=False)
+            # # Create a mask that only allows gradients for the first row
+            # mask = torch.zeros_like(full, requires_grad=False)
+            # mask[0, :] = 1.0
+            # self.register_buffer(f"{adapter_name}_mask", mask, persistent=False)
 
-            def _hook(grad, m=mask):
-                return grad * m
-            self.row_weight[adapter_name].register_hook(_hook)
+            # # Register hook to mask gradients
+            # def _hook(grad):
+            #     return grad * self.get_buffer(f"{adapter_name}_mask")
+            # self.row_weight[adapter_name].register_hook(_hook)
 
             # optional bias
             if bias != "none" and adapter_name not in self.row_bias:
@@ -156,10 +144,14 @@ class DiagLayer(BaseTunerLayer):
         for name in adapter_names:
             if name not in self.row_weight:
                 continue
-            new_w = base.weight.data + self.get_delta_weight(name)
-            if safe_merge and not torch.isfinite(new_w).all():
-                raise ValueError(f"NaNs detected while merging adapter {name}")
-            base.weight.data = new_w
+            if safe_merge:
+                new_w = base.weight.data + self.get_delta_weight(name)
+                if not torch.isfinite(new_w).all():
+                    raise ValueError(f"NaNs detected while merging adapter {name}")
+                base.weight.data = new_w
+            else:
+                base.weight.data += self.get_delta_weight(name)
+
 
             db = self.get_delta_bias(name)
             if db is not None:
