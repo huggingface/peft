@@ -114,7 +114,9 @@ class RandLoraModel(BaseTuner):
         peft_config = self._prepare_adapter_config(config, model_config)
         peft_config = _maybe_include_all_linear_layers(peft_config, self.model)
 
-        largest_shape = None
+        # Cache module shapes for efficiency
+        module_shapes = {}
+
         for key, module in self.model.named_modules():
             if not self._check_target_module_exists(peft_config, key):
                 continue
@@ -127,16 +129,20 @@ class RandLoraModel(BaseTuner):
             else:
                 continue
 
-            if largest_shape is None:
-                largest_shape = module_shape
-                continue
+            module_shapes[key] = module_shape
 
-            if module_shape != largest_shape:
-                largest_shape = tuple(max(a, b) for a, b in zip(largest_shape, module_shape))
-
-        if largest_shape is None:
+        if not module_shapes:
             msg = "No layers types compatible with RandLora were found. Please check `peft_config.target_modules`."
             raise ValueError(msg)
+
+        # Find the largest shape by comparing dimensions
+        max_area = 0
+        largest_shape = None
+        for shape in module_shapes.values():
+            area = shape[0] * shape[1]  # width * height
+            if area > max_area:
+                max_area = area
+                largest_shape = shape
 
         return largest_shape
 
@@ -437,7 +443,7 @@ class RandLoraModel(BaseTuner):
             if inference:
                 config["inference_mode"] = True
         config_dict[key] = config
-        return config
+        return config_dict
 
     def _set_adapter_layers(self, enabled=True):
         for module in self.model.modules():
