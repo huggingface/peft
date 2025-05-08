@@ -136,8 +136,11 @@ class Linear(nn.Linear, DiagLayer):
 
     def get_delta_weight(self, adapter: str) -> torch.Tensor:
         if adapter not in self.row_weight:
-            return torch.zeros_like(self.get_base_layer().weight)
-        return self.row_weight[adapter] * self.diag_alpha[adapter]
+            return torch.zeros_like(self.get_base_layer().weight, dtype=torch.float32)
+
+        w = self.row_weight[adapter] * self.diag_alpha[adapter]
+        return w.T if self.fan_in_fan_out else w
+
 
     def get_delta_bias(self, adapter: str) -> Optional[torch.Tensor]:
         return self.row_bias.get(adapter)
@@ -183,97 +186,37 @@ class Linear(nn.Linear, DiagLayer):
                 base.bias.data -= db
 
     def forward(self, x: torch.Tensor, *args, **kwargs):
-        # print("forward called!!!!!!!!!!!!!!!!")
-        # Store original dtype
-        previous_dtype = x.dtype
-        
-        # Debug flag to control verbose logging
-        debug = getattr(self, 'debug_mode', False)
-        
-        if not hasattr(self, '_first_forward_called'):
-            # print(f"[DiagLayer] First forward pass during training - input shape: {x.shape}, device: {x.device}, dtype: {x.dtype}")
-            base_layer = self.get_base_layer()
-            # print(f"[DiagLayer] Base layer weight shape: {base_layer.weight.shape}, device: {base_layer.weight.device}, dtype: {base_layer.weight.dtype}")
-            if self.active_adapters:
-                adapter_name = self.active_adapters[0]
-                # print(f"[DiagLayer] Row weight shape: {self.row_weight[adapter_name].shape}, device: {self.row_weight[adapter_name].device}, dtype: {self.row_weight[adapter_name].dtype}")
-            else:
-                print("[DiagLayer] No active adapters")
-            self._first_forward_called = True
+        prev_dtype = x.dtype
 
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
             return self.base_layer(x, *args, **kwargs)
-        elif self.merged:
+
+        if self.merged:
             return self.base_layer(x, *args, **kwargs)
-        else:
-            # Get the device and dtype from the base layer once (optimization)
-            base_layer = self.get_base_layer()
-            base_layer_device = base_layer.weight.device
-            
-            # Get compute dtype for 4-bit models
-            if hasattr(base_layer, 'compute_dtype'):
-                compute_dtype = base_layer.compute_dtype
-            else:
-                compute_dtype = torch.float32  # default compute dtype for 4-bit models
-            
-            # Ensure input is on the correct device and compute dtype
-            if x.device != base_layer_device or x.dtype != compute_dtype:
-                x = x.to(device=base_layer_device, dtype=compute_dtype)
-            
-            result = self.base_layer(x, *args, **kwargs)
-            if debug:
-                print(f"[DiagLayer] Base layer output shape: {result.shape}, device: {result.device}, dtype: {result.dtype}")
-            
-            for name in self.active_adapters:
-                if name not in self.row_weight:
-                    continue
-                
-                w = self.row_weight[name] * self.diag_alpha[name]
-                if debug:
-                    print(f"[DiagLayer] Using fan_in_fan_out={self.fan_in_fan_out}, w shape: {w.shape}, device: {w.device}, dtype: {w.dtype}, x shape: {x.shape}, device: {x.device}, dtype: {x.dtype}")
-                
-                # Apply dropout to a copy of x to avoid affecting other adapters
-                if self.diag_dropout[name] is not None and not isinstance(self.diag_dropout[name], nn.Identity):
-                    x_dropped = self.diag_dropout[name](x)
-                else:
-                    x_dropped = x
-                
-                # Handle weight shapes based on fan_in_fan_out
-                if self.fan_in_fan_out:
-                    # For fan_in_fan_out=True, weight shape is (out_features, in_features)
-                    # Need to transpose for F.linear
-                    adapter_out = F.linear(x_dropped, w.T)
-                else:
-                    # For fan_in_fan_out=False, weight shape is (in_features, out_features)
-                    # Can use directly with F.linear
-                    adapter_out = F.linear(x_dropped, w)
 
-                # Ensure shapes match before adding
-                if adapter_out.shape != result.shape:
-                    print(f"[DiagLayer] Warning: Shape mismatch - adapter_out: {adapter_out.shape}, result: {result.shape}")
-                    # Try to reshape adapter_out to match result
-                    if len(adapter_out.shape) == len(result.shape):
-                        adapter_out = adapter_out.view(result.shape)
-                    else:
-                        raise ValueError(f"Cannot reshape adapter output {adapter_out.shape} to match base output {result.shape}")
+        # ── base path ───────────────────────────────────────────────
+        result = self.base_layer(x, *args, **kwargs)   # keep x as-is
 
-                # Use direct addition like VeRA
-                result = result + adapter_out
+        # ── adapter path(s) ─────────────────────────────────────────
+        for name in self.active_adapters:
+            if name not in self.row_weight:
+                continue
 
-                if name in self.row_bias:
-                    bias = self.row_bias[name]
-                    if debug:
-                        print(f"[DiagLayer] Adding bias with shape: {bias.shape}, device: {bias.device}, dtype: {bias.dtype}")
-                    result = result + bias
-                
-                if debug:
-                    print(f"[DiagLayer] After adapter {name}, output shape: {result.shape}, device: {result.device}, dtype: {result.dtype}")
+            w = self.get_delta_weight(name)            # FP32, (out,in)
 
-            # Convert back to original dtype only at the end
-            result = result.to(previous_dtype)
-            return result
+            x_drop = self.diag_dropout[name](x)
+            x_fp32 = x_drop.to(w.dtype)                # cast only this copy
+
+            a = F.linear(x_fp32, w)                    # FP32 matmul
+            if name in self.row_bias:
+                a = a + self.row_bias[name]            # FP32
+
+            result = result + a.to(result.dtype)       # back to base dtype
+
+        return result.to(prev_dtype)                   # restore caller’s dtype
+
 
     def get_base_layer(self):
         return self.base_layer
