@@ -240,9 +240,6 @@ class Linear(nn.Linear, DiagLayer):
                 else:
                     x_dropped = x
                 
-                # Convert input to match adapter parameter dtype (like VeRA)
-                x_dropped = x_dropped.to(dtype=w.dtype)
-                
                 # Handle weight shapes based on fan_in_fan_out
                 if self.fan_in_fan_out:
                     # For fan_in_fan_out=True, weight shape is (out_features, in_features)
