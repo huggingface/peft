@@ -29,8 +29,7 @@ class DiagLayer(BaseTunerLayer):
     other_param_names: tuple[str, ...] = ("diag_alpha", "diag_dropout")
 
     def __init__(self, base_layer: nn.Module, *, fan_in_fan_out: bool = False):
-        super().__init__()
-        print(f"[DiagLayer] Initializing with base layer: {type(base_layer).__name__}")
+        # print(f"[DiagLayer] Initializing with base layer: {type(base_layer).__name__}")
         self.base_layer = base_layer
         self.fan_in_fan_out = fan_in_fan_out
 
@@ -45,26 +44,22 @@ class DiagLayer(BaseTunerLayer):
         self._merged_adapters: List[str] = []
         self._active_adapters: List[str] = []
 
-        # ── infer (in_features, out_features) for many wrapper types ──────
         base = self.get_base_layer()
 
-        # ➊ Plain nn.Linear
         if isinstance(base, nn.Linear):
             self.in_features, self.out_features = base.in_features, base.out_features
 
-        # ➋ bits‑and‑bytes / GPTQ linear wrappers: real shape in weight.ds_shape
         elif hasattr(base, "weight") and hasattr(base.weight, "ds_shape"):
             # ds_shape = (out_features, in_features)
             self.out_features, self.in_features = base.weight.ds_shape
 
-        # ➌ GPT‑2 style Conv1D (weight is (in, out) so we mirror that)
         elif isinstance(base, nn.Conv1d):
             self.in_features, self.out_features = base.in_channels, base.out_channels
 
         else:
             raise ValueError(f"Unsupported base layer type {type(base)}")
 
-        print(f"[DiagLayer] Feature dims  – in: {self.in_features}, out: {self.out_features}")
+        # print(f"[DiagLayer] Feature dims  – in: {self.in_features}, out: {self.out_features}")
 
     def update_layer(
         self,
@@ -74,9 +69,9 @@ class DiagLayer(BaseTunerLayer):
         init_diag_weights: bool = True,
         bias: str = "none",
     ) -> None:
-        print(f"[DiagLayer] Updating layer for adapter: {adapter_name}")
+        # print(f"[DiagLayer] Updating layer for adapter: {adapter_name}")
         if adapter_name not in self.row_weight:
-            print(f"[DiagLayer] Creating new row weight for adapter: {adapter_name}")
+            # print(f"[DiagLayer] Creating new row weight for adapter: {adapter_name}")
             base_layer = self.get_base_layer()
             base_w = base_layer.weight
             device = base_w.device
@@ -86,7 +81,7 @@ class DiagLayer(BaseTunerLayer):
             nn.init.kaiming_uniform_(full, a=math.sqrt(5))
             self.row_weight[adapter_name] = nn.Parameter(full, requires_grad=True)
 
-            print(f"[DiagLayer] Created row weight with shape: {self.row_weight[adapter_name].shape}, dtype: {self.row_weight[adapter_name].dtype}")
+            # print(f"[DiagLayer] Created row weight with shape: {self.row_weight[adapter_name].shape}, dtype: {self.row_weight[adapter_name].dtype}")
 
             # optional bias
             if bias != "none" and adapter_name not in self.row_bias:
@@ -104,13 +99,39 @@ class DiagLayer(BaseTunerLayer):
         self.diag_alpha[adapter_name] = torch.tensor(diag_alpha, dtype=torch.float32, device=device)
         if adapter_name not in self.active_adapters:
             self.active_adapters.append(adapter_name)
-            print(f"[DiagLayer] Added adapter {adapter_name} to active adapters")
+            # print(f"[DiagLayer] Added adapter {adapter_name} to active adapters")
 
     def get_base_layer(self) -> nn.Module:
         return (
             self.base_layer
             if not hasattr(self.base_layer, "get_base_layer")
             else self.base_layer.get_base_layer()
+        )
+
+
+class Linear(nn.Linear, DiagLayer):
+    def __init__(
+        self,
+        base_layer: nn.Linear,
+        adapter_name: str,
+        *,
+        diag_alpha: float = 1.0,
+        diag_dropout: float = 0.0,
+        fan_in_fan_out: bool = False,
+        init_diag_weights: bool = True,
+        bias: str = "none",
+        **kwargs,
+    ) -> None:
+        # Avoid creating new parameters with possibly int8 dtype
+        super(nn.Linear, self).__init__()
+        DiagLayer.__init__(self, base_layer, fan_in_fan_out=fan_in_fan_out)
+        self._active_adapter = adapter_name
+        self.update_layer(
+            adapter_name,
+            diag_alpha=diag_alpha,
+            diag_dropout=diag_dropout,
+            init_diag_weights=init_diag_weights,
+            bias=bias,
         )
 
     def get_delta_weight(self, adapter: str) -> torch.Tensor:
@@ -162,114 +183,98 @@ class DiagLayer(BaseTunerLayer):
                 base.bias.data -= db
 
     def forward(self, x: torch.Tensor, *args, **kwargs):
-        print("forward called!!!!!!!!!!!!!!!!")
+        # print("forward called!!!!!!!!!!!!!!!!")
+        # Store original dtype
+        previous_dtype = x.dtype
+        
         # Debug flag to control verbose logging
         debug = getattr(self, 'debug_mode', False)
         
         if not hasattr(self, '_first_forward_called'):
-            print(f"[DiagLayer] First forward pass during training - input shape: {x.shape}, device: {x.device}, dtype: {x.dtype}")
+            # print(f"[DiagLayer] First forward pass during training - input shape: {x.shape}, device: {x.device}, dtype: {x.dtype}")
             base_layer = self.get_base_layer()
-            print(f"[DiagLayer] Base layer weight shape: {base_layer.weight.shape}, device: {base_layer.weight.device}, dtype: {base_layer.weight.dtype}")
+            # print(f"[DiagLayer] Base layer weight shape: {base_layer.weight.shape}, device: {base_layer.weight.device}, dtype: {base_layer.weight.dtype}")
             if self.active_adapters:
                 adapter_name = self.active_adapters[0]
-                print(f"[DiagLayer] Row weight shape: {self.row_weight[adapter_name].shape}, device: {self.row_weight[adapter_name].device}, dtype: {self.row_weight[adapter_name].dtype}")
+                # print(f"[DiagLayer] Row weight shape: {self.row_weight[adapter_name].shape}, device: {self.row_weight[adapter_name].device}, dtype: {self.row_weight[adapter_name].dtype}")
             else:
                 print("[DiagLayer] No active adapters")
             self._first_forward_called = True
 
-        if self.disable_adapters or self.merged:
+        if self.disable_adapters:
+            if self.merged:
+                self.unmerge()
             return self.base_layer(x, *args, **kwargs)
-
-        # Get the device and dtype from the base layer once (optimization)
-        base_layer = self.get_base_layer()
-        base_layer_device = base_layer.weight.device
-        base_layer_dtype = base_layer.weight.dtype
-        
-        # Ensure input is on the correct device and dtype
-        if x.device != base_layer_device or x.dtype != base_layer_dtype:
-            x = x.to(device=base_layer_device, dtype=base_layer_dtype)
-        
-        out = self.base_layer(x, *args, **kwargs)
-        if debug:
-            print(f"[DiagLayer] Base layer output shape: {out.shape}, device: {out.device}, dtype: {out.dtype}")
-        
-        for name in self.active_adapters:
-            if name not in self.row_weight:
-                continue
+        elif self.merged:
+            return self.base_layer(x, *args, **kwargs)
+        else:
+            # Get the device and dtype from the base layer once (optimization)
+            base_layer = self.get_base_layer()
+            base_layer_device = base_layer.weight.device
+            base_layer_dtype = base_layer.weight.dtype
             
-            w = self.row_weight[name] * self.diag_alpha[name]
+            # Ensure input is on the correct device and dtype
+            if x.device != base_layer_device or x.dtype != base_layer_dtype:
+                x = x.to(device=base_layer_device, dtype=base_layer_dtype)
+            
+            result = self.base_layer(x, *args, **kwargs)
             if debug:
-                print(f"[DiagLayer] Using fan_in_fan_out={self.fan_in_fan_out}, w shape: {w.shape}, device: {w.device}, dtype: {w.dtype}, x shape: {x.shape}, device: {x.device}, dtype: {x.dtype}")
+                print(f"[DiagLayer] Base layer output shape: {result.shape}, device: {result.device}, dtype: {result.dtype}")
             
-            # Apply dropout to a copy of x to avoid affecting other adapters
-            if self.diag_dropout[name] is not None and not isinstance(self.diag_dropout[name], nn.Identity):
-                x_dropped = self.diag_dropout[name](x)
-            else:
-                x_dropped = x
-            
-            # Handle weight shapes based on fan_in_fan_out
-            if self.fan_in_fan_out:
-                # For fan_in_fan_out=True, weight shape is (out_features, in_features)
-                # Need to transpose for F.linear
-                adapter_out = F.linear(x_dropped, w.T)
-            else:
-                # For fan_in_fan_out=False, weight shape is (in_features, out_features)
-                # Can use directly with F.linear
-                adapter_out = F.linear(x_dropped, w)
-
-            # Ensure shapes match before adding
-            if adapter_out.shape != out.shape:
-                print(f"[DiagLayer] Warning: Shape mismatch - adapter_out: {adapter_out.shape}, out: {out.shape}")
-                # Try to reshape adapter_out to match out
-                if len(adapter_out.shape) == len(out.shape):
-                    adapter_out = adapter_out.view(out.shape)
-                else:
-                    raise ValueError(f"Cannot reshape adapter output {adapter_out.shape} to match base output {out.shape}")
-
-            out = out + adapter_out
-
-            if name in self.row_bias:
-                bias = self.row_bias[name]
+            for name in self.active_adapters:
+                if name not in self.row_weight:
+                    continue
+                
+                w = self.row_weight[name] * self.diag_alpha[name]
                 if debug:
-                    print(f"[DiagLayer] Adding bias with shape: {bias.shape}, device: {bias.device}, dtype: {bias.dtype}")
-                out = out + bias
-            
-            if debug:
-                print(f"[DiagLayer] After adapter {name}, output shape: {out.shape}, device: {out.device}, dtype: {out.dtype}")
+                    print(f"[DiagLayer] Using fan_in_fan_out={self.fan_in_fan_out}, w shape: {w.shape}, device: {w.device}, dtype: {w.dtype}, x shape: {x.shape}, device: {x.device}, dtype: {x.dtype}")
+                
+                # Apply dropout to a copy of x to avoid affecting other adapters
+                if self.diag_dropout[name] is not None and not isinstance(self.diag_dropout[name], nn.Identity):
+                    x_dropped = self.diag_dropout[name](x)
+                else:
+                    x_dropped = x
+                
+                # Handle weight shapes based on fan_in_fan_out
+                if self.fan_in_fan_out:
+                    # For fan_in_fan_out=True, weight shape is (out_features, in_features)
+                    # Need to transpose for F.linear
+                    adapter_out = F.linear(x_dropped, w.T)
+                else:
+                    # For fan_in_fan_out=False, weight shape is (in_features, out_features)
+                    # Can use directly with F.linear
+                    adapter_out = F.linear(x_dropped, w)
 
-        return out
+                # Ensure shapes match before adding
+                if adapter_out.shape != result.shape:
+                    print(f"[DiagLayer] Warning: Shape mismatch - adapter_out: {adapter_out.shape}, result: {result.shape}")
+                    # Try to reshape adapter_out to match result
+                    if len(adapter_out.shape) == len(result.shape):
+                        adapter_out = adapter_out.view(result.shape)
+                    else:
+                        raise ValueError(f"Cannot reshape adapter output {adapter_out.shape} to match base output {result.shape}")
 
-    def __repr__(self):
-        return f"DiagLayer({self.get_base_layer().__repr__()})"
+                # Use direct addition like VeRA
+                result = result + adapter_out
 
+                if name in self.row_bias:
+                    bias = self.row_bias[name]
+                    if debug:
+                        print(f"[DiagLayer] Adding bias with shape: {bias.shape}, device: {bias.device}, dtype: {bias.dtype}")
+                    result = result + bias
+                
+                if debug:
+                    print(f"[DiagLayer] After adapter {name}, output shape: {result.shape}, device: {result.device}, dtype: {result.dtype}")
 
-class Linear(nn.Linear, DiagLayer):
-    def __init__(
-        self,
-        base_layer: nn.Linear,
-        adapter_name: str,
-        *,
-        diag_alpha: float = 1.0,
-        diag_dropout: float = 0.0,
-        fan_in_fan_out: bool = False,
-        init_diag_weights: bool = True,
-        bias: str = "none",
-        **kwargs,
-    ) -> None:
-        # Avoid creating new parameters with possibly int8 dtype
-        super(nn.Linear, self).__init__()
-        DiagLayer.__init__(self, base_layer, fan_in_fan_out=fan_in_fan_out)
-        self._active_adapter = adapter_name
-        self.update_layer(
-            adapter_name,
-            diag_alpha=diag_alpha,
-            diag_dropout=diag_dropout,
-            init_diag_weights=init_diag_weights,
-            bias=bias,
-        )
+            # Restore original dtype
+            result = result.to(previous_dtype)
+            return result
 
     def get_base_layer(self):
         return self.base_layer
+    
+    def __repr__(self):
+        return f"DiagLayer({self.get_base_layer().__repr__()})"
 
     @property
     def disable_adapters(self):

@@ -83,30 +83,31 @@ class DiagModel(BaseTuner):
         target: nn.Module,
         target_name: str,
         parent: nn.Module,
+        current_key: str,  # REQUIRED for matching full paths
         **optional_kwargs,
     ) -> None:
-        """Wrap *one* module with our row-based `Linear` if eligible."""
+        """Wrap one module with our DiagLayer if eligible."""
 
-        # 1. Untangle PEFT wrappers if any ---------------------------------------------------
+        # 1. Get base layer
         base = target.get_base_layer() if hasattr(target, "get_base_layer") else target
-        print(f"[DiagModel] Creating/replacing layer {target_name} with base layer type: {type(base).__name__}")
+        print(f"[DiagModel] Creating/replacing layer {current_key} with base layer type: {type(base).__name__}")
         if hasattr(base, 'weight'):
             print(f"[DiagModel] Base layer weight shape: {base.weight.shape}")
 
-        # 2. Skip non‑Linear/Conv1D layers ---------------------------------------------------
+        # 2. Check valid types
         valid_linear_types = (nn.Linear, Linear4bit, Linear8bitLt)
         if not isinstance(base, valid_linear_types + (torch.nn.Conv1d,)):
-            print(f"[DiagModel] Skipping non-linear layer {target_name} of type {type(base).__name__}")
+            print(f"[DiagModel] Skipping {current_key} – not a supported layer type")
             return
 
-        # 3. Respect user‑supplied `target_modules` ------------------------------------------
-        if target_name not in diag_config.target_modules:
-            print(f"[DiagModel] Skipping {target_name} not in target_modules")
+        # 3. Match target_modules with full key
+        if not self._check_target_module_exists(diag_config, current_key):
+            print(f"[DiagModel] Skipping {current_key} – not in target_modules")
             return
 
-        # 4. Already wrapped? then *update* --------------------------------------------------
+        # 4. Already wrapped
         if isinstance(target, Linear):
-            print(f"[DiagModel] Updating existing DiagLayer {target_name}")
+            print(f"[DiagModel] Updating existing DiagLayer {current_key}")
             target.update_layer(
                 adapter_name,
                 diag_config.diag_alpha,
@@ -116,12 +117,13 @@ class DiagModel(BaseTuner):
             )
             return
 
-        # 5. Fresh wrap ----------------------------------------------------------------------
-        print(f"[DiagModel] Creating new DiagLayer for {target_name}")
+        # 5. Fresh wrap
+        print(f"[DiagModel] Wrapping {current_key} with new DiagLayer")
         new_module = self._create_new_module(diag_config, adapter_name, target, **optional_kwargs)
         if adapter_name not in self.active_adapter:
-            new_module.disable_adapters = True  # freeze if not active
+            new_module.disable_adapters = True  # freeze if inactive
         self._replace_module(parent, target_name, new_module, target)
+
 
     # Factory for wrapper -------------------------------------------------------
     @staticmethod
