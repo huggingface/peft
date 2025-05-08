@@ -12,7 +12,6 @@ PEFT methods.
 from dataclasses import asdict
 from enum import Enum
 from typing import Any, Optional, Union
-import warnings
 
 import torch
 import torch.nn as nn
@@ -25,8 +24,8 @@ from peft.utils import (
 )
 from peft.import_utils import is_bnb_available, is_bnb_4bit_available
 
-from .config import DiagConfig
-from .layer import DiagLayer, Linear
+from .config import UILinLoRAConfig
+from .layer import UILinLoRALayer, Linear
 
 # Bits‑and‑Bytes wrappers are imported lazily so that the file can be parsed
 # without having bitsandbytes installed.
@@ -41,25 +40,25 @@ else:
     Linear4bit = nn.Linear
 
 
-class DiagModel(BaseTuner):
+class UILinLoRAModel(BaseTuner):
     """Parameter‑efficient row-based adapter where only the first row of each weight matrix is trainable.
 
     The public API (prepare, merge_and_unload, unload, etc.) matches
     HuggingFace PEFT tuners.
     """
 
-    prefix: str = "diag_"  # used for freezing logic
+    prefix: str = "uilinlora_"  # used for freezing logic
 
     # ---------------------------------------------------------------------
     # Construction helpers
     # ---------------------------------------------------------------------
-    def __init__(self, model, config: DiagConfig, adapter_name: str, *, low_cpu_mem_usage: bool = False):
+    def __init__(self, model, config: UILinLoRAConfig, adapter_name: str, *, low_cpu_mem_usage: bool = False):
         super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
     # ------------------------------------------------------------------
     # Adapter‑config validation
     # ------------------------------------------------------------------
-    def _check_new_adapter_config(self, config: DiagConfig) -> None:  # noqa: D401
+    def _check_new_adapter_config(self, config: UILinLoRAConfig) -> None:  # noqa: D401
         if (len(self.peft_config) > 1) and (config.bias != "none"):
             raise ValueError(
                 f"{self.__class__.__name__} supports only 1 adapter with bias. "
@@ -70,15 +69,15 @@ class DiagModel(BaseTuner):
     # Target‑layer detection helpers (mirrors Vera)
     # ------------------------------------------------------------------
     @staticmethod
-    def _check_target_module_exists(diag_config: DiagConfig, key: str) -> bool:  # noqa: D401
-        return check_target_module_exists(diag_config, key)
+    def _check_target_module_exists(uilinlora_config: UILinLoRAConfig, key: str) -> bool:  # noqa: D401
+        return check_target_module_exists(uilinlora_config, key)
 
     # ------------------------------------------------------------------
     # Injection
     # ------------------------------------------------------------------
     def _create_and_replace(
         self,
-        diag_config: DiagConfig,
+        uilinlora_config: UILinLoRAConfig,
         adapter_name: str,
         target: nn.Module,
         target_name: str,
@@ -86,40 +85,33 @@ class DiagModel(BaseTuner):
         current_key: str,  # REQUIRED for matching full paths
         **optional_kwargs,
     ) -> None:
-        """Wrap one module with our DiagLayer if eligible."""
+        """Wrap one module with our UILinLoRALayer if eligible."""
 
         # 1. Get base layer
         base = target.get_base_layer() if hasattr(target, "get_base_layer") else target
-        # print(f"[DiagModel] Creating/replacing layer {current_key} with base layer type: {type(base).__name__}")
-        if hasattr(base, 'weight'):
-            print(f"[DiagModel] Base layer weight shape: {base.weight.shape}")
 
         # 2. Check valid types
         valid_linear_types = (nn.Linear, Linear4bit, Linear8bitLt)
         if not isinstance(base, valid_linear_types + (torch.nn.Conv1d,)):
-            print(f"[DiagModel] Skipping {current_key} – not a supported layer type")
             return
 
         # 3. Match target_modules with full key
-        if not self._check_target_module_exists(diag_config, current_key):
-            print(f"[DiagModel] Skipping {current_key} – not in target_modules")
+        if not self._check_target_module_exists(uilinlora_config, current_key):
             return
 
         # 4. Already wrapped
         if isinstance(target, Linear):
-            print(f"[DiagModel] Updating existing DiagLayer {current_key}")
             target.update_layer(
                 adapter_name,
-                diag_config.diag_alpha,
-                diag_config.diag_dropout,
-                diag_config.init_diag_weights,
-                diag_config.bias,
+                uilinlora_config.uilinlora_alpha,
+                uilinlora_config.uilinlora_dropout,
+                uilinlora_config.init_uilinlora_weights,
+                uilinlora_config.bias,
             )
             return
 
         # 5. Fresh wrap
-        # print(f"[DiagModel] Wrapping {current_key} with new DiagLayer")
-        new_module = self._create_new_module(diag_config, adapter_name, target, **optional_kwargs)
+        new_module = self._create_new_module(uilinlora_config, adapter_name, target, **optional_kwargs)
         if adapter_name not in self.active_adapter:
             new_module.disable_adapters = True  # freeze if inactive
         self._replace_module(parent, target_name, new_module, target)
@@ -128,17 +120,17 @@ class DiagModel(BaseTuner):
     # Factory for wrapper -------------------------------------------------------
     @staticmethod
     def _create_new_module(
-        diag_config: DiagConfig,
+        uilinlora_config: UILinLoRAConfig,
         adapter_name: str,
         target: nn.Module,
         **kwargs,
-    ) -> DiagLayer:
+    ) -> UILinLoRALayer:
         args = dict(
-            diag_alpha=diag_config.diag_alpha,
-            diag_dropout=diag_config.diag_dropout,
-            fan_in_fan_out=diag_config.fan_in_fan_out,
-            init_diag_weights=diag_config.init_diag_weights,
-            bias=diag_config.bias,
+            uilinlora_alpha=uilinlora_config.uilinlora_alpha,
+            uilinlora_dropout=uilinlora_config.uilinlora_dropout,
+            fan_in_fan_out=uilinlora_config.fan_in_fan_out,
+            init_uilinlora_weights=uilinlora_config.init_uilinlora_weights,
+            bias=uilinlora_config.bias,
             **kwargs,
         )
         base = target  # keep exact wrapper type (8‑bit etc.)
@@ -161,13 +153,12 @@ class DiagModel(BaseTuner):
         for n, p in model.named_parameters():
             p.requires_grad = False
 
-        # Enable gradients for row weights in DiagLayers
+        # Enable gradients for row weights in UILinLoRALayers
         for m in model.modules():
-            if isinstance(m, DiagLayer):
+            if isinstance(m, UILinLoRALayer):
                 for adapter_name in m.active_adapters:
-                    if adapter_name in m.row_weight:
-                        m.row_weight[adapter_name].requires_grad = True
-                        print(f"Enabled gradients for row weight: {adapter_name}")
+                    if adapter_name in m.uilinlora_adapter:
+                        m.uilinlora_adapter[adapter_name].requires_grad = True
 
         # handle bias training option ----------------------------
         for active in self.active_adapters:
@@ -180,7 +171,7 @@ class DiagModel(BaseTuner):
                         param.requires_grad = True
             elif bias_mode == "row_only":
                 for m in model.modules():
-                    if isinstance(m, DiagLayer) and hasattr(m, "bias") and m.bias is not None:
+                    if isinstance(m, UILinLoRALayer) and hasattr(m, "bias") and m.bias is not None:
                         m.bias.requires_grad = True
             else:
                 raise NotImplementedError(bias_mode)
@@ -190,12 +181,12 @@ class DiagModel(BaseTuner):
     # ------------------------------------------------------------------
     def merge_adapter(self) -> None:  # noqa: D401
         for m in self.model.modules():
-            if isinstance(m, DiagLayer):
+            if isinstance(m, UILinLoRALayer):
                 m.merge()
 
     def unmerge_adapter(self) -> None:  # noqa: D401
         for m in self.model.modules():
-            if isinstance(m, DiagLayer):
+            if isinstance(m, UILinLoRALayer):
                 m.unmerge()
 
     # ------------------------------------------------------------------
@@ -203,7 +194,7 @@ class DiagModel(BaseTuner):
     # ------------------------------------------------------------------
     def _set_adapter_layers(self, enabled: bool = True) -> None:
         for m in self.model.modules():
-            if isinstance(m, DiagLayer):
+            if isinstance(m, UILinLoRALayer):
                 m.disable_adapters = not enabled
 
     def enable_adapter_layers(self):
@@ -217,14 +208,14 @@ class DiagModel(BaseTuner):
     # ------------------------------------------------------------------
     def set_adapter(self, adapter_name: str):
         for m in self.model.modules():
-            if isinstance(m, DiagLayer):
+            if isinstance(m, UILinLoRALayer):
                 m.set_adapter(adapter_name)
         self.active_adapter = adapter_name
 
     # ------------------------------------------------------------------
     # Config helpers
     # ------------------------------------------------------------------
-    def _prepare_adapter_config(self, cfg: DiagConfig, model_cfg):  # noqa: D401
+    def _prepare_adapter_config(self, cfg: UILinLoRAConfig, model_cfg):  # noqa: D401
         if cfg.target_modules is None:
             if model_cfg["model_type"] not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
                 raise ValueError("Please specify `target_modules` in `peft_config`.")
