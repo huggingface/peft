@@ -1,9 +1,9 @@
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, TrainingArguments, Trainer, EvalPrediction
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, TrainingArguments, Trainer
 from datasets import load_dataset
-from peft import DiagConfig, get_peft_model
+from peft import UILinLoRAConfig, get_peft_model
 import numpy as np
 import torch
 
@@ -20,14 +20,14 @@ base_model = AutoModelForSequenceClassification.from_pretrained(
         # load_in_4bit=True,
         device_map="auto")
 
-diag_cfg = DiagConfig(
+uilinlora_cfg = UILinLoRAConfig(
         target_modules=["q_proj","v_proj"],
-        diag_alpha=1.0,
-        diag_dropout=0.0,
+        uilinlora_alpha=1.0,
+        uilinlora_dropout=0.0,
         fan_in_fan_out=False,
         bias="none",
-        init_diag_weights=True)
-model = get_peft_model(base_model, diag_cfg)
+        init_uilinlora_weights=True)
+model = get_peft_model(base_model, uilinlora_cfg)
 
 model.config.pad_token_id = tok.pad_token_id
 
@@ -99,6 +99,6 @@ trainer.train()
 
 
 # after trainer.train()
-adapter_dir = "diag_adapter"
+adapter_dir = "uilinlora_adapter"
 model.save_pretrained(adapter_dir, safe_serialization=True)  # adapter only
 tok.save_pretrained(adapter_dir)                             # optional, for easy reload
