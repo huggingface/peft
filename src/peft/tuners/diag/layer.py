@@ -75,7 +75,7 @@ class DiagLayer(BaseTunerLayer):
             base_layer = self.get_base_layer()
             base_w = base_layer.weight
             device = base_w.device
-            adapter_shape = base_w.shape
+            adapter_shape = (self.out_features, self.in_features)
             
             full = torch.empty(adapter_shape, dtype=torch.float32, device=device)
             nn.init.kaiming_uniform_(full, a=math.sqrt(5))
@@ -211,11 +211,16 @@ class Linear(nn.Linear, DiagLayer):
             # Get the device and dtype from the base layer once (optimization)
             base_layer = self.get_base_layer()
             base_layer_device = base_layer.weight.device
-            base_layer_dtype = base_layer.weight.dtype
             
-            # Ensure input is on the correct device and dtype
-            if x.device != base_layer_device or x.dtype != base_layer_dtype:
-                x = x.to(device=base_layer_device, dtype=base_layer_dtype)
+            # Get compute dtype for 4-bit models
+            if hasattr(base_layer, 'compute_dtype'):
+                compute_dtype = base_layer.compute_dtype
+            else:
+                compute_dtype = torch.float32  # default compute dtype for 4-bit models
+            
+            # Ensure input is on the correct device and compute dtype
+            if x.device != base_layer_device or x.dtype != compute_dtype:
+                x = x.to(device=base_layer_device, dtype=compute_dtype)
             
             result = self.base_layer(x, *args, **kwargs)
             if debug:
@@ -234,6 +239,9 @@ class Linear(nn.Linear, DiagLayer):
                     x_dropped = self.diag_dropout[name](x)
                 else:
                     x_dropped = x
+                
+                # Convert input to match adapter parameter dtype (like VeRA)
+                x_dropped = x_dropped.to(dtype=w.dtype)
                 
                 # Handle weight shapes based on fan_in_fan_out
                 if self.fan_in_fan_out:
@@ -266,7 +274,7 @@ class Linear(nn.Linear, DiagLayer):
                 if debug:
                     print(f"[DiagLayer] After adapter {name}, output shape: {result.shape}, device: {result.device}, dtype: {result.dtype}")
 
-            # Restore original dtype
+            # Convert back to original dtype only at the end
             result = result.to(previous_dtype)
             return result
 
