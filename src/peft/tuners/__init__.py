@@ -43,7 +43,7 @@ from .randlora import RandLoraConfig, RandLoraModel
 from .trainable_tokens import TrainableTokensConfig, TrainableTokensModel
 from .vblora import VBLoRAConfig, VBLoRAModel
 from .vera import VeraConfig, VeraModel
-from .diag import DiagConfig, DiagModel
+from .uilinlora import UILinLoRAConfig, UILinLoRAModel
 from .xlora import XLoraConfig, XLoraModel
 
 
@@ -95,6 +95,8 @@ __all__ = [
     "RandLoraModel",
     "TrainableTokensConfig",
     "TrainableTokensModel",
+    "UILinLoRAConfig",
+    "UILinLoRAModel",
     "VBLoRAConfig",
     "VBLoRAModel",
     "VeraConfig",

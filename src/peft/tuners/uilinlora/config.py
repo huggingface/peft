@@ -8,9 +8,9 @@ from peft.utils import PeftType
 
 
 @dataclass
-class DiagConfig(PeftConfig):
+class UILinLoRAConfig(PeftConfig):
     """
-    This is the configuration class to store the configuration of a [`DiagModel`].
+    This is the configuration class to store the configuration of a [`UILinLoRAModel`].
 
     Args:
         target_modules (`Optional[Union[List[str], str]]`):
@@ -21,9 +21,9 @@ class DiagConfig(PeftConfig):
             the model is a PreTrainedModel, the output layer excluded). If this is not specified, modules will be
             chosen according to the model architecture. If the architecture is not known, an error will be raised -- in
             this case, you should specify the target modules manually.
-        diag_alpha (`float`):
+        uilinlora_alpha (`float`):
             The alpha parameter for row-based scaling.
-        diag_dropout (`float`):
+        uilinlora_dropout (`float`):
             The dropout probability for row-based layers.
         fan_in_fan_out (`bool`):
             Set this to True if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 uses
@@ -34,7 +34,7 @@ class DiagConfig(PeftConfig):
             will not produce the same output as the base model would have without adaptation.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
-        init_diag_weights (`bool`):
+        init_uilinlora_weights (`bool`):
             Whether to initialize the weights of the row-based adapter. If True, the first row will be initialized
             to 1.0, meaning the adapter will initially be a no-op. If False, the weights will be randomly initialized.
     """
@@ -52,8 +52,8 @@ class DiagConfig(PeftConfig):
             ),
         },
     )
-    diag_alpha: float = field(default=1.0, metadata={"help": "Row-based alpha"})
-    diag_dropout: float = field(default=0.0, metadata={"help": "Row-based dropout"})
+    uilinlora_alpha: float = field(default=1.0, metadata={"help": "uilinlora alpha"})
+    uilinlora_dropout: float = field(default=0.0, metadata={"help": "uilinlora dropout"})
     fan_in_fan_out: bool = field(
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
@@ -67,7 +67,7 @@ class DiagConfig(PeftConfig):
             "help": "List of modules apart from row-based layers to be set as trainable and saved in the final checkpoint."
         },
     )
-    init_diag_weights: bool = field(
+    init_uilinlora_weights: bool = field(
         default=True,
         metadata={
             "help": (
@@ -78,15 +78,9 @@ class DiagConfig(PeftConfig):
         },
     )
 
-    def __post_init__(self):
-        print("[DiagConfig] Initializing configuration")
-        print(f"[DiagConfig] Target modules: {self.target_modules}")
-        print(f"[DiagConfig] Alpha: {self.diag_alpha}, Dropout: {self.diag_dropout}")
-        print(f"[DiagConfig] Fan in/out: {self.fan_in_fan_out}, Bias: {self.bias}")
-        print(f"[DiagConfig] Init weights: {self.init_diag_weights}")
-        
+    def __post_init__(self):        
         super().__post_init__()
-        self.peft_type = PeftType.DIAG
+        self.peft_type = PeftType.UILINLORA
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         ) 

@@ -1,13 +1,4 @@
 from __future__ import annotations
-
-"""Row-trainable PEFT layer.
-
-* Same public plumbing as HuggingFace's VeraLayer (merge, unmerge,
-  active adapter switching, etc.).
-* Works with normal, 8‑bit, 4‑bit and GPTQ linear wrappers.
-* Only the first row of the weight matrix is trainable.
-"""
-
 from typing import Dict, List, Optional
 import warnings
 
@@ -18,26 +9,25 @@ import torch.nn.functional as F
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
-__all__ = ["DiagLayer", "Linear"]
+__all__ = ["UILinLoRALayer", "Linear"]
 
 
 # ---------------------------------------------------------------------------
 # Mixin with row-trainable logic
 # ---------------------------------------------------------------------------
-class DiagLayer(BaseTunerLayer):
-    adapter_layer_names: tuple[str, ...] = ("row_weight", "row_bias")
-    other_param_names: tuple[str, ...] = ("diag_alpha", "diag_dropout")
+class UILinLoRALayer(BaseTunerLayer):
+    adapter_layer_names: tuple[str, ...] = ("uilinlora_adapter", "uilinlora_bias")
+    other_param_names: tuple[str, ...] = ("uilinlora_alpha", "uilinlora_dropout")
 
     def __init__(self, base_layer: nn.Module, *, fan_in_fan_out: bool = False):
-        # print(f"[DiagLayer] Initializing with base layer: {type(base_layer).__name__}")
         self.base_layer = base_layer
         self.fan_in_fan_out = fan_in_fan_out
 
         # ── adapter containers ────────────────────────────────────────────
-        self.row_weight = nn.ParameterDict()
-        self.row_bias = nn.ParameterDict()
-        self.diag_dropout = nn.ModuleDict()
-        self.diag_alpha: Dict[str, float] = {}
+        self.uilinlora_adapter = nn.ParameterDict()
+        self.uilinlora_bias = nn.ParameterDict()
+        self.uilinlora_dropout = nn.ModuleDict()
+        self.uilinlora_alpha: Dict[str, float] = {}
 
         # ── runtime state ─────────────────────────────────────────────────
         self._disable_adapters: bool = False
@@ -59,19 +49,15 @@ class DiagLayer(BaseTunerLayer):
         else:
             raise ValueError(f"Unsupported base layer type {type(base)}")
 
-        # print(f"[DiagLayer] Feature dims  – in: {self.in_features}, out: {self.out_features}")
-
     def update_layer(
         self,
         adapter_name: str,
-        diag_alpha: float = 1.0,
-        diag_dropout: float = 0.0,
-        init_diag_weights: bool = True,
+        uilinlora_alpha: float = 1.0,
+        uilinlora_dropout: float = 0.0,
+        init_uilinlora_weights: bool = True,
         bias: str = "none",
     ) -> None:
-        # print(f"[DiagLayer] Updating layer for adapter: {adapter_name}")
-        if adapter_name not in self.row_weight:
-            # print(f"[DiagLayer] Creating new row weight for adapter: {adapter_name}")
+        if adapter_name not in self.uilinlora_adapter:
             base_layer = self.get_base_layer()
             base_w = base_layer.weight
             device = base_w.device
@@ -79,27 +65,25 @@ class DiagLayer(BaseTunerLayer):
             
             full = torch.empty(adapter_shape, dtype=torch.float32, device=device)
             nn.init.kaiming_uniform_(full, a=math.sqrt(5))
-            self.row_weight[adapter_name] = nn.Parameter(full, requires_grad=True)
+            self.uilinlora_adapter[adapter_name] = nn.Parameter(full, requires_grad=True)
 
-            # print(f"[DiagLayer] Created row weight with shape: {self.row_weight[adapter_name].shape}, dtype: {self.row_weight[adapter_name].dtype}")
 
             # optional bias
-            if bias != "none" and adapter_name not in self.row_bias:
-                self.row_bias[adapter_name] = nn.Parameter(
+            if bias != "none" and adapter_name not in self.uilinlora_bias:
+                self.uilinlora_bias[adapter_name] = nn.Parameter(
                     torch.zeros(self.out_features, dtype=torch.float32, device=device)
                 )
 
-            self.diag_dropout[adapter_name] = nn.Dropout(p=diag_dropout) if diag_dropout > 0.0 else nn.Identity()
+            self.uilinlora_dropout[adapter_name] = nn.Dropout(p=uilinlora_dropout) if uilinlora_dropout > 0.0 else nn.Identity()
 
-        # Get device from base layer for diag_alpha
+        # Get device from base layer for uilinlora_alpha
         base_layer = self.get_base_layer()
         device = base_layer.weight.device
         
-        # Ensure diag_alpha is float32
-        self.diag_alpha[adapter_name] = torch.tensor(diag_alpha, dtype=torch.float32, device=device)
+        # Ensure uilinlora_alpha is float32
+        self.uilinlora_alpha[adapter_name] = torch.tensor(uilinlora_alpha, dtype=torch.float32, device=device)
         if adapter_name not in self.active_adapters:
             self.active_adapters.append(adapter_name)
-            # print(f"[DiagLayer] Added adapter {adapter_name} to active adapters")
 
     def get_base_layer(self) -> nn.Module:
         return (
@@ -109,41 +93,41 @@ class DiagLayer(BaseTunerLayer):
         )
 
 
-class Linear(nn.Linear, DiagLayer):
+class Linear(nn.Linear, UILinLoRALayer):
     def __init__(
         self,
         base_layer: nn.Linear,
         adapter_name: str,
         *,
-        diag_alpha: float = 1.0,
-        diag_dropout: float = 0.0,
+        uilinlora_alpha: float = 1.0,
+        uilinlora_dropout: float = 0.0,
         fan_in_fan_out: bool = False,
-        init_diag_weights: bool = True,
+        init_uilinlora_weights: bool = True,
         bias: str = "none",
         **kwargs,
     ) -> None:
         # Avoid creating new parameters with possibly int8 dtype
         super(nn.Linear, self).__init__()
-        DiagLayer.__init__(self, base_layer, fan_in_fan_out=fan_in_fan_out)
+        UILinLoRALayer.__init__(self, base_layer, fan_in_fan_out=fan_in_fan_out)
         self._active_adapter = adapter_name
         self.update_layer(
             adapter_name,
-            diag_alpha=diag_alpha,
-            diag_dropout=diag_dropout,
-            init_diag_weights=init_diag_weights,
+            uilinlora_alpha=uilinlora_alpha,
+            uilinlora_dropout=uilinlora_dropout,
+            init_uilinlora_weights=init_uilinlora_weights,
             bias=bias,
         )
 
     def get_delta_weight(self, adapter: str) -> torch.Tensor:
-        if adapter not in self.row_weight:
+        if adapter not in self.uilinlora_adapter:
             return torch.zeros_like(self.get_base_layer().weight, dtype=torch.float32)
 
-        w = self.row_weight[adapter] * self.diag_alpha[adapter]
+        w = self.uilinlora_adapter[adapter] * self.uilinlora_alpha[adapter]
         return w.T if self.fan_in_fan_out else w
 
 
     def get_delta_bias(self, adapter: str) -> Optional[torch.Tensor]:
-        return self.row_bias.get(adapter)
+        return self.uilinlora_bias.get(adapter)
 
     def merge(self, *, safe_merge: bool = False, adapter_names: Optional[List[str]] = None):
         adapter_names = check_adapters_to_merge(self, adapter_names)
@@ -152,7 +136,7 @@ class Linear(nn.Linear, DiagLayer):
 
         base = self.get_base_layer()
         for name in adapter_names:
-            if name not in self.row_weight:
+            if name not in self.uilinlora_adapter:
                 continue
             if safe_merge:
                 new_w = base.weight.data + self.get_delta_weight(name)
@@ -178,7 +162,7 @@ class Linear(nn.Linear, DiagLayer):
         base = self.get_base_layer()
         while self.merged_adapters:
             name = self.merged_adapters.pop()
-            if name not in self.row_weight:
+            if name not in self.uilinlora_adapter:
                 continue
             base.weight.data -= self.get_delta_weight(name)
             db = self.get_delta_bias(name)
@@ -201,17 +185,17 @@ class Linear(nn.Linear, DiagLayer):
 
         # ── adapter path(s) ─────────────────────────────────────────
         for name in self.active_adapters:
-            if name not in self.row_weight:
+            if name not in self.uilinlora_adapter:
                 continue
 
             w = self.get_delta_weight(name)            # FP32, (out,in)
 
-            x_drop = self.diag_dropout[name](x)
+            x_drop = self.uilinlora_dropout[name](x)
             x_fp32 = x_drop.to(w.dtype)                # cast only this copy
 
             a = F.linear(x_fp32, w)                    # FP32 matmul
-            if name in self.row_bias:
-                a = a + self.row_bias[name]            # FP32
+            if name in self.uilinlora_bias:
+                a = a + self.uilinlora_bias[name]            # FP32
 
             result = result + a.to(result.dtype)       # back to base dtype
 
@@ -222,7 +206,7 @@ class Linear(nn.Linear, DiagLayer):
         return self.base_layer
     
     def __repr__(self):
-        return f"DiagLayer({self.get_base_layer().__repr__()})"
+        return f"UILinLoRALayer({self.get_base_layer().__repr__()})"
 
     @property
     def disable_adapters(self):
