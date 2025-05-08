@@ -251,7 +251,6 @@ class Linear(nn.Linear, VeraLayer):
         return output_tensor
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        print("forward called!!!!!!!!!!!!!!!!")
         previous_dtype = x.dtype
 
         if self.disable_adapters:

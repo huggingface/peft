@@ -90,7 +90,7 @@ class DiagModel(BaseTuner):
 
         # 1. Get base layer
         base = target.get_base_layer() if hasattr(target, "get_base_layer") else target
-        print(f"[DiagModel] Creating/replacing layer {current_key} with base layer type: {type(base).__name__}")
+        # print(f"[DiagModel] Creating/replacing layer {current_key} with base layer type: {type(base).__name__}")
         if hasattr(base, 'weight'):
             print(f"[DiagModel] Base layer weight shape: {base.weight.shape}")
 
@@ -118,7 +118,7 @@ class DiagModel(BaseTuner):
             return
 
         # 5. Fresh wrap
-        print(f"[DiagModel] Wrapping {current_key} with new DiagLayer")
+        # print(f"[DiagModel] Wrapping {current_key} with new DiagLayer")
         new_module = self._create_new_module(diag_config, adapter_name, target, **optional_kwargs)
         if adapter_name not in self.active_adapter:
             new_module.disable_adapters = True  # freeze if inactive
