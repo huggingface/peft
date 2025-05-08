@@ -110,32 +110,28 @@ if is_bnb_available():
                 ).to(weight.device)
                 state.reset_grads()
 
-        def get_delta_weight(self, adapter) -> torch.Tensor:
-            if adapter not in self.row_weight.keys():
-                return torch.zeros_like(self.get_base_layer().weight)
+        def get_delta_weight(self, adapter: str) -> torch.Tensor:
+            if adapter not in self.row_weight:
+                return torch.zeros_like(self.get_base_layer().weight, dtype=torch.float32)
 
-            row_weight = self.row_weight[adapter]
-            if self.fan_in_fan_out:
-                row_weight = row_weight.T
+            w = self.row_weight[adapter] * self.diag_alpha[adapter]
+            return w.T if self.fan_in_fan_out else w
 
-            return row_weight
-
-        def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        def forward(self, x: torch.Tensor, *args, **kwargs):
             if self.disable_adapters:
                 if self.merged:
                     self.unmerge()
-                result = self.base_layer(x, *args, **kwargs)
-            elif self.merged:
-                result = self.base_layer(x, *args, **kwargs)
-            else:
-                result = self.base_layer(x, *args, **kwargs)
-                if self.active_adapter in self.row_weight.keys():
-                    row_weight = self.row_weight[self.active_adapter]
-                    if self.fan_in_fan_out:
-                        row_weight = row_weight.T
-                    result = result + F.linear(x, row_weight)
+                return self.base_layer(x, *args, **kwargs)
 
+            if self.merged:
+                return self.base_layer(x, *args, **kwargs)
+
+            result = self.base_layer(x, *args, **kwargs)
+            w = self.get_delta_weight(self._active_adapter)   # FP32
+            x_fp32 = x.to(w.dtype)
+            result = result + F.linear(x_fp32, w)
             return result
+
 
         def __repr__(self) -> str:
             rep = super().__repr__()
@@ -236,32 +232,28 @@ if is_bnb_4bit_available():
                 ).to(weight.device)
                 state.reset_grads()
 
-        def get_delta_weight(self, adapter) -> torch.Tensor:
-            if adapter not in self.row_weight.keys():
-                return torch.zeros_like(self.get_base_layer().weight)
+        def get_delta_weight(self, adapter: str) -> torch.Tensor:
+            if adapter not in self.row_weight:
+                return torch.zeros_like(self.get_base_layer().weight, dtype=torch.float32)
 
-            row_weight = self.row_weight[adapter]
-            if self.fan_in_fan_out:
-                row_weight = row_weight.T
+            w = self.row_weight[adapter] * self.diag_alpha[adapter]
+            return w.T if self.fan_in_fan_out else w
 
-            return row_weight
-
-        def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        def forward(self, x: torch.Tensor, *args, **kwargs):
             if self.disable_adapters:
                 if self.merged:
                     self.unmerge()
-                result = self.base_layer(x, *args, **kwargs)
-            elif self.merged:
-                result = self.base_layer(x, *args, **kwargs)
-            else:
-                result = self.base_layer(x, *args, **kwargs)
-                if self.active_adapter in self.row_weight.keys():
-                    row_weight = self.row_weight[self.active_adapter]
-                    if self.fan_in_fan_out:
-                        row_weight = row_weight.T
-                    result = result + F.linear(x, row_weight)
+                return self.base_layer(x, *args, **kwargs)
 
+            if self.merged:
+                return self.base_layer(x, *args, **kwargs)
+
+            result = self.base_layer(x, *args, **kwargs)
+            w = self.get_delta_weight(self._active_adapter)   # FP32
+            x_fp32 = x.to(w.dtype)
+            result = result + F.linear(x_fp32, w)
             return result
+
 
         def __repr__(self) -> str:
             rep = super().__repr__()
