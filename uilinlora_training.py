@@ -4,7 +4,6 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, TrainingArguments, Trainer
 from datasets import load_dataset
 from peft import UILinLoRAConfig, get_peft_model
-import numpy as np
 import torch
 
 torch.set_printoptions(threshold=torch.inf)  # Display all elements
