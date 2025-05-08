@@ -135,16 +135,14 @@ class RandLoraModel(BaseTuner):
             msg = "No layers types compatible with RandLora were found. Please check `peft_config.target_modules`."
             raise ValueError(msg)
 
-        # Find the largest shape by comparing dimensions
-        max_area = 0
-        largest_shape = None
-        for shape in module_shapes.values():
-            area = shape[0] * shape[1]  # width * height
-            if area > max_area:
-                max_area = area
-                largest_shape = shape
+        # Find the largest input and output dimensions separately
+        max_out_dim = 0
+        max_in_dim = 0
+        for out_dim, in_dim in module_shapes.values():
+            max_out_dim = max(max_out_dim, out_dim)
+            max_in_dim = max(max_in_dim, in_dim)
 
-        return largest_shape
+        return max_out_dim, max_in_dim
 
     def _init_randlora_A_randlora_B_sparse(self, config: RandLoraConfig, adapter_name: str, sparsity: int = 3) -> None:
         """
