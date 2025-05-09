@@ -138,17 +138,20 @@ class Linear(nn.Linear, UILinLoRALayer):
 
         U = getattr(self, f"{adapter}_U")  # shape: (out_features, rank)
         V = getattr(self, f"{adapter}_V")  # shape: (rank, in_features)
-        D = getattr(self, f"{adapter}_D")  # shape: (in_features,)
-        E = getattr(self, f"{adapter}_E")  # shape: (out_features,)
+        Dv = self.uilinlora_D[adapter]
+        Ev = self.uilinlora_E[adapter]
         Σ = torch.diag(diag)  # shape: (rank, rank)
 
-        # Reshape D and E to be diagonal matrices
-        D = torch.diag(D)  # shape: (in_features, in_features)
-        E = torch.diag(E)  # shape: (out_features, out_features)
+        # 1. low-rank product
+        core = U @ Σ @ V  # shape: (out_features, in_features)
 
-        # Compute the delta weight matrix
-        ΔW = E @ U @ Σ @ V @ D
-        return self._meta[adapter]["sf"] * ΔW
+        # 2. per-column scale
+        core = core * Dv  # broadcast on columns
+
+        # 3. per-row scale
+        core = Ev.unsqueeze(1) * core  # broadcast on rows
+
+        return self._meta[adapter]["sf"] * core.to(self.get_base_layer().weight.dtype)
 
     def get_delta_bias(self, adapter: str) -> Optional[torch.Tensor]:
         return self.uilinlora_bias.get(adapter)
@@ -163,12 +166,12 @@ class Linear(nn.Linear, UILinLoRALayer):
             if name not in self.uilinlora_sigma:
                 continue
             if safe_merge:
-                new_w = base.weight.data + self.get_delta_weight(name)
+                new_w = base.weight.data + self.get_delta_weight(name).detach()
                 if not torch.isfinite(new_w).all():
                     raise ValueError(f"NaNs detected while merging adapter {name}")
                 base.weight.data = new_w
             else:
-                base.weight.data += self.get_delta_weight(name)
+                base.weight.data += self.get_delta_weight(name).detach()
 
             db = self.get_delta_bias(name)
             if db is not None:
@@ -187,7 +190,7 @@ class Linear(nn.Linear, UILinLoRALayer):
             name = self.merged_adapters.pop()
             if name not in self.uilinlora_sigma:
                 continue
-            base.weight.data -= self.get_delta_weight(name)
+            base.weight.data -= self.get_delta_weight(name).detach()
             db = self.get_delta_bias(name)
             if db is not None and base.bias is not None:
                 base.bias.data -= db
@@ -209,13 +212,14 @@ class Linear(nn.Linear, UILinLoRALayer):
             if name not in self.uilinlora_sigma:
                 continue
 
-            w = self.get_delta_weight(name)
+            w = self.get_delta_weight(name).detach()
             x_drop = self.uilinlora_dropout[name](x)
             x_fp32 = x_drop.to(w.dtype)
 
             a = F.linear(x_fp32, w)
             if name in self.uilinlora_bias:
                 a = a + self.uilinlora_bias[name]
+            a = a.to(result.dtype)
 
             result = result + a.to(result.dtype)
 

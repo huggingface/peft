@@ -62,7 +62,7 @@ if is_bnb_available():
                 warnings.warn(
                     "Merge row-trainable module to 8-bit linear may get different generations due to rounding errors."
                 )
-                row_data = self.get_delta_weight(active_adapter)
+                row_data = self.get_delta_weight(active_adapter).detach()
 
                 weight = self.get_base_layer().weight
                 state = self.get_base_layer().state
@@ -95,7 +95,7 @@ if is_bnb_available():
                 warnings.warn(
                     "Unmerge row-trainable module to 8-bit linear may get different generations due to rounding errors."
                 )
-                row_data = self.get_delta_weight(active_adapter)
+                row_data = self.get_delta_weight(active_adapter).detach()
 
                 weight = self.get_base_layer().weight
                 state = self.get_base_layer().state
@@ -119,8 +119,8 @@ if is_bnb_available():
                 diag = torch.relu(diag)                       # (r,)
 
             # buffers
-            U  = getattr(self, f"{adapter}_U")                # (out, r)
-            V  = getattr(self, f"{adapter}_V")                # (r,  in)
+            U  = getattr(self, f"{adapter}_U")       # (out, r)
+            V  = getattr(self, f"{adapter}_V")       # (r,  in)
             Dv = self.uilinlora_D[adapter]                   # (in,)
             Ev = self.uilinlora_E[adapter]                   # (out,)
             Σ  = torch.diag(diag)                             # (r, r)
@@ -137,7 +137,7 @@ if is_bnb_available():
             # 4. respect fan_in_fan_out wrappers
             core = transpose(core, self.fan_in_fan_out)
 
-            return self._meta[adapter]["sf"] * core.to(torch.float32)
+            return self._meta[adapter]["sf"] * core.to(self.get_base_layer().weight.dtype)
 
         def forward(self, x: torch.Tensor, *args, **kwargs):
             if self.disable_adapters:
@@ -153,8 +153,10 @@ if is_bnb_available():
                 if name not in self.uilinlora_sigma:
                     continue
                 w = self.get_delta_weight(name)
-                x_fp32 = x.to(w.dtype)
-                result = result + F.linear(x_fp32, w)
+                x_cast = x.to(w.dtype)
+                a = F.linear(x_cast, w)
+                a = a.to(result.dtype)
+                result = result + a
 
             return result
 
@@ -214,7 +216,7 @@ if is_bnb_4bit_available():
                 warnings.warn(
                     "Merge row-trainable module to 4-bit linear may get different generations due to rounding errors."
                 )
-                row_data = self.get_delta_weight(active_adapter)
+                row_data = self.get_delta_weight(active_adapter).detach()
 
                 weight = self.get_base_layer().weight
                 kwargs = weight.__dict__
@@ -244,7 +246,7 @@ if is_bnb_4bit_available():
                 warnings.warn(
                     "Unmerge row-trainable module to 4-bit linear may get different generations due to rounding errors."
                 )
-                row_data = self.get_delta_weight(active_adapter)
+                row_data = self.get_delta_weight(active_adapter).detach()
 
                 weight = self.get_base_layer().weight
                 kwargs = weight.__dict__
@@ -263,11 +265,11 @@ if is_bnb_4bit_available():
                 diag = torch.relu(diag)                       # (r,)
 
             # buffers
-            U  = getattr(self, f"{adapter}_U")                # (out, r)
-            V  = getattr(self, f"{adapter}_V")                # (r,  in)
-            Dv = self.uilinlora_D[adapter]                   # (in,)
-            Ev = self.uilinlora_E[adapter]                   # (out,)
-            Σ  = torch.diag(diag)                             # (r, r)
+            U  = getattr(self, f"{adapter}_U")    # (out, r)
+            V  = getattr(self, f"{adapter}_V")      # (r,  in)
+            Dv = self.uilinlora_D[adapter]                  # (in,)
+            Ev = self.uilinlora_E[adapter]                  # (out,)
+            Σ  = torch.diag(diag)                            # (r, r)
 
             # 1. low-rank product
             core = U @ Σ @ V                                  # (out, in)
@@ -281,7 +283,7 @@ if is_bnb_4bit_available():
             # 4. respect fan_in_fan_out wrappers
             core = transpose(core, self.fan_in_fan_out)
 
-            return self._meta[adapter]["sf"] * core.to(torch.float32)
+            return self._meta[adapter]["sf"] * core.to(self.get_base_layer().weight.dtype)
 
         def forward(self, x: torch.Tensor, *args, **kwargs):
             if self.disable_adapters:
@@ -297,9 +299,12 @@ if is_bnb_4bit_available():
             for name in self.active_adapters:
                 if name not in self.uilinlora_sigma:
                     continue
-                w = self.get_delta_weight(name)
-                x_fp32 = x.to(w.dtype)
-                result = result + F.linear(x_fp32, w)
+                w = self.get_delta_weight(name).detach()
+                x_cast = x.to(w.dtype)
+                a = F.linear(x_cast, w)
+                a = a.to(result.dtype)
+                result = result + a
+
 
             return result
 
