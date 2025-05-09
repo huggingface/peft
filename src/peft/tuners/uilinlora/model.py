@@ -208,33 +208,28 @@ class UILinLoRAModel(BaseTuner):
     # ------------------------------------------------------------------
     # Trainable‑param masking (mirrors Vera)
     # ------------------------------------------------------------------
-    def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:  # noqa: D401
-        # First, disable gradients for all parameters
+    def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
         for n, p in model.named_parameters():
-            p.requires_grad = False
+            if self.prefix not in n:
+                p.requires_grad = False
 
-        # Enable gradients for row weights in UILinLoRALayers
-        for m in model.modules():
-            if isinstance(m, UILinLoRALayer):
-                for adapter_name in m.active_adapters:
-                    if adapter_name in m.uilinlora_adapter:
-                        m.uilinlora_adapter[adapter_name].requires_grad = True
-
-        # handle bias training option ----------------------------
-        for active in self.active_adapters:
-            bias_mode = self.peft_config[active].bias
-            if bias_mode == "none":
+        for active_adapter in self.active_adapters:
+            bias = self.peft_config[active_adapter].bias
+            if bias == "none":
                 continue
-            if bias_mode == "all":
-                for name, param in model.named_parameters():
-                    if "bias" in name:
-                        param.requires_grad = True
-            elif bias_mode == "row_only":
+
+            if bias == "all":
+                for n, p in model.named_parameters():
+                    if "bias" in n:
+                        p.requires_grad = True
+            elif bias == "uilinlora_only":
                 for m in model.modules():
-                    if isinstance(m, UILinLoRALayer) and hasattr(m, "bias") and m.bias is not None:
-                        m.bias.requires_grad = True
+                    if isinstance(m, UILinLoRALayer) and hasattr(m, "uilinlora_bias"):
+                        if active_adapter in m.uilinlora_bias:
+                            m.uilinlora_bias[active_adapter].requires_grad = True
             else:
-                raise NotImplementedError(bias_mode)
+                raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
+
 
     # ------------------------------------------------------------------
     # (Un)merging helpers

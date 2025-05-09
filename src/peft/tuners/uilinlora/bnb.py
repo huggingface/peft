@@ -11,6 +11,7 @@ import torch.nn.functional as F
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import check_adapters_to_merge
 from peft.utils.integrations import dequantize_bnb_weight
+from peft.utils.other import transpose
 
 from peft.tuners.uilinlora.layer import UILinLoRALayer
 
@@ -55,7 +56,7 @@ if is_bnb_available():
                 return
 
             for active_adapter in adapter_names:
-                if active_adapter not in self.uilinlora_adapter.keys():
+                if active_adapter not in self.uilinlora_sigma.keys():
                     continue
 
                 warnings.warn(
@@ -89,7 +90,7 @@ if is_bnb_available():
 
             while len(self.merged_adapters) > 0:
                 active_adapter = self.merged_adapters.pop()
-                if active_adapter not in self.uilinlora_adapter.keys():
+                if active_adapter not in self.uilinlora_sigma.keys():
                     continue
                 warnings.warn(
                     "Unmerge row-trainable module to 8-bit linear may get different generations due to rounding errors."
@@ -110,29 +111,33 @@ if is_bnb_available():
                 state.reset_grads()
 
         def get_delta_weight(self, adapter: str) -> torch.Tensor:
-            if adapter not in self.uilinlora_adapter:
+            if adapter not in self.uilinlora_sigma:
                 return torch.zeros_like(self.get_base_layer().weight, dtype=torch.float32)
 
-            diag = self.uilinlora_adapter[adapter]
+            diag = self.uilinlora_sigma[adapter]
             if self._meta[adapter]["pos"]:
-                diag = torch.relu(diag)
+                diag = torch.relu(diag)                       # (r,)
 
-            U = getattr(self, f"{adapter}_U")  # shape: (out_features, rank)
-            V = getattr(self, f"{adapter}_V")  # shape: (rank, in_features)
-            D = getattr(self, f"{adapter}_D")  # shape: (in_features,)
-            E = getattr(self, f"{adapter}_E")  # shape: (out_features,)
-            Σ = torch.diag(diag)  # shape: (rank, rank)
+            # buffers
+            U  = getattr(self, f"{adapter}_U")                # (out, r)
+            V  = getattr(self, f"{adapter}_V")                # (r,  in)
+            Dv = getattr(self, f"{adapter}_D")                # (in,)
+            Ev = getattr(self, f"{adapter}_E")                # (out,)
+            Σ  = torch.diag(diag)                             # (r, r)
 
-            # Create diagonal matrices for D and E
-            D = torch.diag_embed(D) if D.ndim == 1 else D  # shape: (in_features, in_features)
-            E = torch.diag_embed(E) if E.ndim == 1 else E  # shape: (out_features, out_features)
+            # 1. low-rank product
+            core = U @ Σ @ V                                  # (out, in)
 
-            # Compute U @ Σ @ V first
-            UΣV = U @ Σ @ V  # shape: (out_features, in_features)
-            
-            # Apply D and E using matrix multiplication
-            ΔW = E @ UΣV @ D  # shape: (out_features, in_features)
-            return self._meta[adapter]["sf"] * ΔW
+            # 2. per-column scale
+            core = core * Dv                                  # broadcast on columns
+
+            # 3. per-row scale
+            core = Ev.unsqueeze(1) * core                     # broadcast on rows
+
+            # 4. respect fan_in_fan_out wrappers
+            core = transpose(core, self.fan_in_fan_out)
+
+            return self._meta[adapter]["sf"] * core.to(torch.float32)
 
         def forward(self, x: torch.Tensor, *args, **kwargs):
             if self.disable_adapters:
@@ -145,7 +150,7 @@ if is_bnb_available():
 
             result = self.base_layer(x, *args, **kwargs)
             for name in self.active_adapters:
-                if name not in self.uilinlora_adapter:
+                if name not in self.uilinlora_sigma:
                     continue
                 w = self.get_delta_weight(name)
                 x_fp32 = x.to(w.dtype)
@@ -203,7 +208,7 @@ if is_bnb_4bit_available():
                 return
 
             for active_adapter in adapter_names:
-                if active_adapter not in self.uilinlora_adapter.keys():
+                if active_adapter not in self.uilinlora_sigma.keys():
                     continue
 
                 warnings.warn(
@@ -234,7 +239,7 @@ if is_bnb_4bit_available():
 
             while len(self.merged_adapters) > 0:
                 active_adapter = self.merged_adapters.pop()
-                if active_adapter not in self.uilinlora_adapter.keys():
+                if active_adapter not in self.uilinlora_sigma.keys():
                     continue
                 warnings.warn(
                     "Unmerge row-trainable module to 4-bit linear may get different generations due to rounding errors."
@@ -250,10 +255,10 @@ if is_bnb_4bit_available():
                 )
 
         def get_delta_weight(self, adapter: str) -> torch.Tensor:
-            if adapter not in self.uilinlora_adapter:
+            if adapter not in self.uilinlora_sigma:
                 return torch.zeros_like(self.get_base_layer().weight, dtype=torch.float32)
 
-            diag = self.uilinlora_adapter[adapter]
+            diag = self.uilinlora_sigma[adapter]
             if self._meta[adapter]["pos"]:
                 diag = torch.relu(diag)                       # (r,)
 
@@ -290,7 +295,7 @@ if is_bnb_4bit_available():
             result = self.base_layer(x, *args, **kwargs)
 
             for name in self.active_adapters:
-                if name not in self.uilinlora_adapter:
+                if name not in self.uilinlora_sigma:
                     continue
                 w = self.get_delta_weight(name)
                 x_fp32 = x.to(w.dtype)
