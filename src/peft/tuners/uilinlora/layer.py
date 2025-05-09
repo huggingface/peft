@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.utils.integrations import dequantize_module_weight
 
 __all__ = ["UILinLoRALayer", "Linear"]
 
@@ -46,20 +47,33 @@ class UILinLoRALayer(BaseTunerLayer):
         bias: str = "none",
         **kwargs,
     ):
-        if adapter_name in self.uilinlora_adapter:
+        if adapter_name in self.uilinlora_sigma:
             return
 
         base_w = self.get_base_layer().weight.detach()
-        r = rank if isinstance(rank, int) else rank[self.layer_idx]
+        
+        # Try to dequantize if it's a quantized weight
+        try:
+            base_w = dequantize_module_weight(self.get_base_layer())
+        except (TypeError, AttributeError):
+            # If dequantization fails, use the original weight
+            pass
+        
+        # Ensure base_w is a 2D matrix
+        if base_w.dim() > 2:
+            base_w = base_w.view(base_w.size(0), -1)
+        elif base_w.dim() == 1:
+            base_w = base_w.view(1, -1)
 
         U, S, Vh = torch.linalg.svd(base_w.float(), full_matrices=False)
-        ids = torch.argsort(S)[:r]
+        ids = torch.argsort(S)[:rank]
+        print(f"ids shape: {ids.shape}")
         U_r, V_r = U[:, ids], Vh[ids, :]
 
         self.register_buffer(f"{adapter_name}_U", U_r, persistent=True)
         self.register_buffer(f"{adapter_name}_V", V_r, persistent=True)
 
-        diag = torch.full((r,), 1e-7)
+        diag = torch.full((rank,), 1e-7)
         self.uilinlora_sigma[adapter_name] = nn.Parameter(diag)
 
         d_in = torch.ones(self.in_features)
@@ -115,10 +129,10 @@ class Linear(nn.Linear, UILinLoRALayer):
         )
 
     def get_delta_weight(self, adapter: str) -> torch.Tensor:
-        if adapter not in self.uilinlora_adapter:
+        if adapter not in self.uilinlora_sigma:
             return torch.zeros_like(self.get_base_layer().weight, dtype=torch.float32)
 
-        diag = self.uilinlora_adapter[adapter]
+        diag = self.uilinlora_sigma[adapter]
         if self._meta[adapter]["pos"]:
             diag = torch.relu(diag)
 
@@ -146,7 +160,7 @@ class Linear(nn.Linear, UILinLoRALayer):
 
         base = self.get_base_layer()
         for name in adapter_names:
-            if name not in self.uilinlora_adapter:
+            if name not in self.uilinlora_sigma:
                 continue
             if safe_merge:
                 new_w = base.weight.data + self.get_delta_weight(name)
@@ -171,7 +185,7 @@ class Linear(nn.Linear, UILinLoRALayer):
         base = self.get_base_layer()
         while self.merged_adapters:
             name = self.merged_adapters.pop()
-            if name not in self.uilinlora_adapter:
+            if name not in self.uilinlora_sigma:
                 continue
             base.weight.data -= self.get_delta_weight(name)
             db = self.get_delta_bias(name)
@@ -192,7 +206,7 @@ class Linear(nn.Linear, UILinLoRALayer):
         result = self.base_layer(x, *args, **kwargs)
 
         for name in self.active_adapters:
-            if name not in self.uilinlora_adapter:
+            if name not in self.uilinlora_sigma:
                 continue
 
             w = self.get_delta_weight(name)
