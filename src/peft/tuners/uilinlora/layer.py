@@ -11,7 +11,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 __all__ = ["UILinLoRALayer", "Linear"]
 
 class UILinLoRALayer(BaseTunerLayer):
-    adapter_layer_names = ("uilinlora_adapter",)
+    adapter_layer_names = ("uilinlora_sigma", "uilinlora_D", "uilinlora_E")
     other_param_names = ("uilinlora_alpha", "uilinlora_dropout", "rank", "scaling_factor", "enforce_sv_positive")
 
     def __init__(self, base_layer: nn.Module, *, fan_in_fan_out: bool = False, layer_idx: int = 0):
@@ -22,7 +22,9 @@ class UILinLoRALayer(BaseTunerLayer):
         self.fan_in_fan_out = fan_in_fan_out
         self.layer_idx = layer_idx
 
-        self.uilinlora_adapter = nn.ParameterDict()
+        self.uilinlora_sigma = nn.ParameterDict()
+        self.uilinlora_D = nn.ParameterDict()
+        self.uilinlora_E = nn.ParameterDict()
         self.uilinlora_dropout = nn.ModuleDict()
         self.uilinlora_bias = nn.ParameterDict()
         self._meta: Dict[str, dict] = {}
@@ -54,16 +56,17 @@ class UILinLoRALayer(BaseTunerLayer):
         ids = torch.argsort(S)[:r]
         U_r, V_r = U[:, ids], Vh[ids, :]
 
-        self.register_buffer(f"{adapter_name}_U", U_r, persistent=False)
-        self.register_buffer(f"{adapter_name}_V", V_r, persistent=False)
+        self.register_buffer(f"{adapter_name}_U", U_r, persistent=True)
+        self.register_buffer(f"{adapter_name}_V", V_r, persistent=True)
 
-        diag = torch.full((r,), 1e-7, dtype=torch.float32)
-        self.uilinlora_adapter[adapter_name] = nn.Parameter(diag)
+        diag = torch.full((r,), 1e-7)
+        self.uilinlora_sigma[adapter_name] = nn.Parameter(diag)
 
         d_in = torch.ones(self.in_features)
         d_out = torch.ones(self.out_features)
-        self.register_buffer(f"{adapter_name}_D", d_in, persistent=False)
-        self.register_buffer(f"{adapter_name}_E", d_out, persistent=False)
+        self.uilinlora_D[adapter_name] = nn.Parameter(d_in)
+        self.uilinlora_E[adapter_name] = nn.Parameter(d_out)
+
 
         self._meta[adapter_name] = dict(sf=scaling_factor, pos=enforce_sv_positive)
         self.active_adapters.append(adapter_name)
@@ -71,7 +74,7 @@ class UILinLoRALayer(BaseTunerLayer):
         self.uilinlora_dropout[adapter_name] = nn.Dropout(uilinlora_dropout)
 
         if bias != "none":
-            b = torch.zeros(self.out_features, dtype=torch.float32)
+            b = torch.zeros(self.out_features)
             self.uilinlora_bias[adapter_name] = nn.Parameter(b)
 
     def get_base_layer(self) -> nn.Module:
