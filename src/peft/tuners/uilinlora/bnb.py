@@ -121,8 +121,8 @@ if is_bnb_available():
             # buffers
             U  = getattr(self, f"{adapter}_U")                # (out, r)
             V  = getattr(self, f"{adapter}_V")                # (r,  in)
-            Dv = getattr(self, f"{adapter}_D")                # (in,)
-            Ev = getattr(self, f"{adapter}_E")                # (out,)
+            Dv = self.uilinlora_D[adapter]                   # (in,)
+            Ev = self.uilinlora_E[adapter]                   # (out,)
             Σ  = torch.diag(diag)                             # (r, r)
 
             # 1. low-rank product
@@ -265,8 +265,8 @@ if is_bnb_4bit_available():
             # buffers
             U  = getattr(self, f"{adapter}_U")                # (out, r)
             V  = getattr(self, f"{adapter}_V")                # (r,  in)
-            Dv = getattr(self, f"{adapter}_D")                # (in,)
-            Ev = getattr(self, f"{adapter}_E")                # (out,)
+            Dv = self.uilinlora_D[adapter]                   # (in,)
+            Ev = self.uilinlora_E[adapter]                   # (out,)
             Σ  = torch.diag(diag)                             # (r, r)
 
             # 1. low-rank product
