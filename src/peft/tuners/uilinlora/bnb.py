@@ -140,6 +140,8 @@ if is_bnb_available():
             return self._meta[adapter]["sf"] * core.to(self.get_base_layer().weight.dtype)
 
         def forward(self, x: torch.Tensor, *args, **kwargs):
+            prev_dtype = x.dtype
+
             if self.disable_adapters:
                 if self.merged:
                     self.unmerge()
@@ -149,16 +151,23 @@ if is_bnb_available():
                 return self.base_layer(x, *args, **kwargs)
 
             result = self.base_layer(x, *args, **kwargs)
+
             for name in self.active_adapters:
                 if name not in self.uilinlora_sigma:
                     continue
-                w = self.get_delta_weight(name)
-                x_cast = x.to(w.dtype)
-                a = F.linear(x_cast, w)
-                a = a.to(result.dtype)
-                result = result + a
 
-            return result
+                w = self.get_delta_weight(name).detach()
+                x_drop = self.uilinlora_dropout[name](x)
+                x_fp32 = x_drop.to(w.dtype)
+
+                a = F.linear(x_fp32, w)
+                if name in self.uilinlora_bias:
+                    a = a + self.uilinlora_bias[name]
+                a = a.to(result.dtype)
+
+                result = result + a.to(result.dtype)
+
+            return result.to(prev_dtype)
 
 
         def __repr__(self) -> str:
@@ -286,6 +295,8 @@ if is_bnb_4bit_available():
             return self._meta[adapter]["sf"] * core.to(self.get_base_layer().weight.dtype)
 
         def forward(self, x: torch.Tensor, *args, **kwargs):
+            prev_dtype = x.dtype
+
             if self.disable_adapters:
                 if self.merged:
                     self.unmerge()
@@ -299,14 +310,19 @@ if is_bnb_4bit_available():
             for name in self.active_adapters:
                 if name not in self.uilinlora_sigma:
                     continue
+
                 w = self.get_delta_weight(name).detach()
-                x_cast = x.to(w.dtype)
-                a = F.linear(x_cast, w)
+                x_drop = self.uilinlora_dropout[name](x)
+                x_fp32 = x_drop.to(w.dtype)
+
+                a = F.linear(x_fp32, w)
+                if name in self.uilinlora_bias:
+                    a = a + self.uilinlora_bias[name]
                 a = a.to(result.dtype)
-                result = result + a
 
+                result = result + a.to(result.dtype)
 
-            return result
+            return result.to(prev_dtype)
 
 
         def __repr__(self) -> str:
