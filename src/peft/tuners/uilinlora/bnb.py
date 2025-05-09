@@ -255,24 +255,28 @@ if is_bnb_4bit_available():
 
             diag = self.uilinlora_adapter[adapter]
             if self._meta[adapter]["pos"]:
-                diag = torch.relu(diag)
+                diag = torch.relu(diag)                       # (r,)
 
-            U = getattr(self, f"{adapter}_U")  # shape: (out_features, rank)
-            V = getattr(self, f"{adapter}_V")  # shape: (rank, in_features)
-            D = getattr(self, f"{adapter}_D")  # shape: (in_features,)
-            E = getattr(self, f"{adapter}_E")  # shape: (out_features,)
-            Σ = torch.diag(diag)  # shape: (rank, rank)
+            # buffers
+            U  = getattr(self, f"{adapter}_U")                # (out, r)
+            V  = getattr(self, f"{adapter}_V")                # (r,  in)
+            Dv = getattr(self, f"{adapter}_D")                # (in,)
+            Ev = getattr(self, f"{adapter}_E")                # (out,)
+            Σ  = torch.diag(diag)                             # (r, r)
 
-            # Create diagonal matrices for D and E
-            D = torch.diag_embed(D) if D.ndim == 1 else D  # shape: (in_features, in_features)
-            E = torch.diag_embed(E) if E.ndim == 1 else E  # shape: (out_features, out_features)
+            # 1. low-rank product
+            core = U @ Σ @ V                                  # (out, in)
 
-            # Compute U @ Σ @ V first
-            UΣV = U @ Σ @ V  # shape: (out_features, in_features)
-            
-            # Apply D and E using matrix multiplication
-            ΔW = E @ UΣV @ D  # shape: (out_features, in_features)
-            return self._meta[adapter]["sf"] * ΔW
+            # 2. per-column scale
+            core = core * Dv                                  # broadcast on columns
+
+            # 3. per-row scale
+            core = Ev.unsqueeze(1) * core                     # broadcast on rows
+
+            # 4. respect fan_in_fan_out wrappers
+            core = transpose(core, self.fan_in_fan_out)
+
+            return self._meta[adapter]["sf"] * core.to(torch.float32)
 
         def forward(self, x: torch.Tensor, *args, **kwargs):
             if self.disable_adapters:
