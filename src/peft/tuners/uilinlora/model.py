@@ -1,22 +1,13 @@
 from __future__ import annotations
-
-"""Row-based PEFT tuner
-
-This mirrors HuggingFace's Vera implementation, but instead of using shared
-projections, it uses a per-layer weight matrix where only the first row is
-trainable. This provides a parameter-efficient way to adapt the model while
-maintaining the same injection / (un)merging / multi-adapter plumbing as other
-PEFT methods.
-"""
-
 from dataclasses import asdict
 from enum import Enum
 from typing import Any, Optional, Union
+import warnings
 
 import torch
 import torch.nn as nn
 
-from peft.tuners.tuners_utils import BaseTuner, check_target_module_exists
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
@@ -82,7 +73,7 @@ class UILinLoRAModel(BaseTuner):
         target: nn.Module,
         target_name: str,
         parent: nn.Module,
-        current_key: str,  # REQUIRED for matching full paths
+        current_key: str,
         **optional_kwargs,
     ) -> None:
         """Wrap one module with our UILinLoRALayer if eligible."""
@@ -98,6 +89,17 @@ class UILinLoRAModel(BaseTuner):
         # 3. Match target_modules with full key
         if not self._check_target_module_exists(uilinlora_config, current_key):
             return
+        
+        bias = hasattr(target, "bias") and target.bias is not None
+        kwargs = {
+            "rank": uilinlora_config.rank,
+            "uilinlora_dropout": uilinlora_config.uilinlora_dropout,
+            "fan_in_fan_out": uilinlora_config.fan_in_fan_out,
+            "init_weights": uilinlora_config.init_uilinlora_weights,
+            "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
+            "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
+        }
+        kwargs["bias"] = bias
 
         # 4. Already wrapped
         if isinstance(target, Linear):
@@ -111,7 +113,7 @@ class UILinLoRAModel(BaseTuner):
             return
 
         # 5. Fresh wrap
-        new_module = self._create_new_module(uilinlora_config, adapter_name, target, **optional_kwargs)
+        new_module = self._create_new_module(uilinlora_config, adapter_name, target, **optional_kwargs, **kwargs)
         if adapter_name not in self.active_adapter:
             new_module.disable_adapters = True  # freeze if inactive
         self._replace_module(parent, target_name, new_module, target)
@@ -125,17 +127,75 @@ class UILinLoRAModel(BaseTuner):
         target: nn.Module,
         **kwargs,
     ) -> UILinLoRALayer:
-        args = dict(
-            uilinlora_alpha=uilinlora_config.uilinlora_alpha,
-            uilinlora_dropout=uilinlora_config.uilinlora_dropout,
-            fan_in_fan_out=uilinlora_config.fan_in_fan_out,
-            init_uilinlora_weights=uilinlora_config.init_uilinlora_weights,
-            bias=uilinlora_config.bias,
-            **kwargs,
+        # ── lazy-import bitsandbytes wrappers ─────────────────────────────
+        if is_bnb_available():
+            import bitsandbytes as bnb
+            from .bnb import Linear8bitLt            # your quant wrapper
+
+        if is_bnb_4bit_available():
+            from .bnb import Linear4bit
+        
+        # caller may pass these markers
+        loaded_in_8bit = kwargs.get("loaded_in_8bit", False)
+        loaded_in_4bit = kwargs.get("loaded_in_4bit", False)
+        bias           = kwargs.pop("bias", "none")
+
+        # unwrap if target is already a PEFT layer
+        target_base = target.get_base_layer() if isinstance(target, BaseTunerLayer) else target
+
+        # ──────────────────────────────────────────────────────────────────
+        # choose the correct UILinLoRA wrapper
+        # ──────────────────────────────────────────────────────────────────
+        if loaded_in_8bit and isinstance(target_base, bnb.nn.Linear8bitLt):
+            eightbit_kwargs       = kwargs.copy()
+            eightbit_kwargs.update(
+                has_fp16_weights = target_base.state.has_fp16_weights,
+                threshold        = target_base.state.threshold,
+                index            = target_base.index,
+            )
+            cls = Linear8bitLt
+
+        elif loaded_in_4bit and isinstance(target_base, bnb.nn.Linear4bit):
+            fourbit_kwargs        = kwargs.copy()
+            fourbit_kwargs.update(
+                compute_dtype       = target_base.compute_dtype,
+                compress_statistics = target_base.weight.compress_statistics,
+                quant_type          = target_base.weight.quant_type,
+            )
+            cls = Linear4bit
+            kwargs = fourbit_kwargs
+
+        else:
+            # plain FP32/FP16 path
+            cls = Linear
+            # fan_in_fan_out sanity like VeRA
+            if isinstance(target_base, nn.Linear) and kwargs.get("fan_in_fan_out", False):
+                warnings.warn("fan_in_fan_out=True on torch.nn.Linear – forcing to False.")
+                kwargs["fan_in_fan_out"] = uilinlora_config.fan_in_fan_out = False
+
+        # mark conv1d layers
+        if hasattr(torch.nn, "Conv1d") and isinstance(target_base, torch.nn.Conv1d):
+            kwargs["is_target_conv_1d_layer"] = True
+            if not kwargs.get("fan_in_fan_out", False):
+                warnings.warn("Conv1d needs fan_in_fan_out=True – forcing it.")
+                kwargs["fan_in_fan_out"] = uilinlora_config.fan_in_fan_out = True
+
+        # ── common args forwarded to every wrapper ────────────────────────
+        common = dict(
+            rank           = uilinlora_config.rank,
+            scaling_factor = uilinlora_config.scaling_factor,
+            enforce_sv_positive = uilinlora_config.enforce_sv_positive,
+            bias           = bias,
+            uilinlora_alpha = uilinlora_config.uilinlora_alpha,
+            uilinlora_dropout = uilinlora_config.uilinlora_dropout,
+            init_uilinlora_weights = uilinlora_config.init_uilinlora_weights,
+            fan_in_fan_out = uilinlora_config.fan_in_fan_out,
         )
-        base = target  # keep exact wrapper type (8‑bit etc.)
-        is_conv1d = isinstance(base, torch.nn.Conv1d)
-        return Linear(base, adapter_name, is_target_conv_1d_layer=is_conv1d, **args)
+        kwargs.update(common)
+
+        # instantiate and return
+        return cls(target, adapter_name, **kwargs)
+
 
     # ------------------------------------------------------------------
     # Replacement helper (device‑aware, like Vera)

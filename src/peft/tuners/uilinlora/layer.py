@@ -3,7 +3,6 @@ from typing import Dict, List, Optional
 import warnings
 
 import torch
-import math
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -11,87 +10,72 @@ from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
 __all__ = ["UILinLoRALayer", "Linear"]
 
-
-# ---------------------------------------------------------------------------
-# Mixin with row-trainable logic
-# ---------------------------------------------------------------------------
 class UILinLoRALayer(BaseTunerLayer):
-    adapter_layer_names: tuple[str, ...] = ("uilinlora_adapter", "uilinlora_bias")
-    other_param_names: tuple[str, ...] = ("uilinlora_alpha", "uilinlora_dropout")
+    adapter_layer_names = ("uilinlora_adapter",)
+    other_param_names = ("uilinlora_alpha", "uilinlora_dropout", "rank", "scaling_factor", "enforce_sv_positive")
 
-    def __init__(self, base_layer: nn.Module, *, fan_in_fan_out: bool = False):
+    def __init__(self, base_layer: nn.Module, *, fan_in_fan_out: bool = False, layer_idx: int = 0):
+        super().__init__()
         self.base_layer = base_layer
+        self.in_features = base_layer.in_features
+        self.out_features = base_layer.out_features
         self.fan_in_fan_out = fan_in_fan_out
+        self.layer_idx = layer_idx
 
-        # ── adapter containers ────────────────────────────────────────────
         self.uilinlora_adapter = nn.ParameterDict()
-        self.uilinlora_bias = nn.ParameterDict()
         self.uilinlora_dropout = nn.ModuleDict()
-        self.uilinlora_alpha: Dict[str, float] = {}
+        self.uilinlora_bias = nn.ParameterDict()
+        self._meta: Dict[str, dict] = {}
 
-        # ── runtime state ─────────────────────────────────────────────────
-        self._disable_adapters: bool = False
-        self._merged_adapters: List[str] = []
         self._active_adapters: List[str] = []
-
-        base = self.get_base_layer()
-
-        if isinstance(base, nn.Linear):
-            self.in_features, self.out_features = base.in_features, base.out_features
-
-        elif hasattr(base, "weight") and hasattr(base.weight, "ds_shape"):
-            # ds_shape = (out_features, in_features)
-            self.out_features, self.in_features = base.weight.ds_shape
-
-        elif isinstance(base, nn.Conv1d):
-            self.in_features, self.out_features = base.in_channels, base.out_channels
-
-        else:
-            raise ValueError(f"Unsupported base layer type {type(base)}")
+        self._merged_adapters: List[str] = []
+        self._disable_adapters: bool = False
 
     def update_layer(
         self,
         adapter_name: str,
+        *,
+        rank: int | list[int] = 4,
+        scaling_factor: float = 1.0,
+        enforce_sv_positive: bool = True,
         uilinlora_alpha: float = 1.0,
         uilinlora_dropout: float = 0.0,
         init_uilinlora_weights: bool = True,
         bias: str = "none",
-    ) -> None:
-        if adapter_name not in self.uilinlora_adapter:
-            base_layer = self.get_base_layer()
-            base_w = base_layer.weight
-            device = base_w.device
-            adapter_shape = (self.out_features, self.in_features)
-            
-            full = torch.empty(adapter_shape, dtype=torch.float32, device=device)
-            nn.init.kaiming_uniform_(full, a=math.sqrt(5))
-            self.uilinlora_adapter[adapter_name] = nn.Parameter(full, requires_grad=True)
+        **kwargs,
+    ):
+        if adapter_name in self.uilinlora_adapter:
+            return
 
+        base_w = self.get_base_layer().weight.detach()
+        r = rank if isinstance(rank, int) else rank[self.layer_idx]
 
-            # optional bias
-            if bias != "none" and adapter_name not in self.uilinlora_bias:
-                self.uilinlora_bias[adapter_name] = nn.Parameter(
-                    torch.zeros(self.out_features, dtype=torch.float32, device=device)
-                )
+        U, S, Vh = torch.linalg.svd(base_w.float(), full_matrices=False)
+        ids = torch.argsort(S)[:r]
+        U_r, V_r = U[:, ids], Vh[ids, :]
 
-            self.uilinlora_dropout[adapter_name] = nn.Dropout(p=uilinlora_dropout) if uilinlora_dropout > 0.0 else nn.Identity()
+        self.register_buffer(f"{adapter_name}_U", U_r, persistent=False)
+        self.register_buffer(f"{adapter_name}_V", V_r, persistent=False)
 
-        # Get device from base layer for uilinlora_alpha
-        base_layer = self.get_base_layer()
-        device = base_layer.weight.device
-        
-        # Ensure uilinlora_alpha is float32
-        self.uilinlora_alpha[adapter_name] = torch.tensor(uilinlora_alpha, dtype=torch.float32, device=device)
-        if adapter_name not in self.active_adapters:
-            self.active_adapters.append(adapter_name)
+        diag = torch.full((r,), 1e-7, dtype=torch.float32)
+        self.uilinlora_adapter[adapter_name] = nn.Parameter(diag)
+
+        d_in = torch.ones(self.in_features)
+        d_out = torch.ones(self.out_features)
+        self.register_buffer(f"{adapter_name}_D", d_in, persistent=False)
+        self.register_buffer(f"{adapter_name}_E", d_out, persistent=False)
+
+        self._meta[adapter_name] = dict(sf=scaling_factor, pos=enforce_sv_positive)
+        self.active_adapters.append(adapter_name)
+
+        self.uilinlora_dropout[adapter_name] = nn.Dropout(uilinlora_dropout)
+
+        if bias != "none":
+            b = torch.zeros(self.out_features, dtype=torch.float32)
+            self.uilinlora_bias[adapter_name] = nn.Parameter(b)
 
     def get_base_layer(self) -> nn.Module:
-        return (
-            self.base_layer
-            if not hasattr(self.base_layer, "get_base_layer")
-            else self.base_layer.get_base_layer()
-        )
-
+        return self.base_layer if not hasattr(self.base_layer, "get_base_layer") else self.base_layer.get_base_layer()
 
 class Linear(nn.Linear, UILinLoRALayer):
     def __init__(
@@ -106,12 +90,21 @@ class Linear(nn.Linear, UILinLoRALayer):
         bias: str = "none",
         **kwargs,
     ) -> None:
-        # Avoid creating new parameters with possibly int8 dtype
-        super(nn.Linear, self).__init__()
-        UILinLoRALayer.__init__(self, base_layer, fan_in_fan_out=fan_in_fan_out)
+        # Initialize nn.Linear with the base layer's parameters
+        nn.Linear.__init__(
+            self,
+            in_features=base_layer.in_features,
+            out_features=base_layer.out_features,
+            bias=base_layer.bias is not None
+        )
+        # Initialize UILinLoRALayer
+        UILinLoRALayer.__init__(self, base_layer, fan_in_fan_out=fan_in_fan_out, layer_idx=kwargs.pop("layer_idx", 0))
         self._active_adapter = adapter_name
         self.update_layer(
             adapter_name,
+            rank=kwargs.pop("rank"),
+            scaling_factor=kwargs.pop("scaling_factor"),
+            enforce_sv_positive=kwargs.pop("enforce_sv_positive"),
             uilinlora_alpha=uilinlora_alpha,
             uilinlora_dropout=uilinlora_dropout,
             init_uilinlora_weights=init_uilinlora_weights,
@@ -122,9 +115,23 @@ class Linear(nn.Linear, UILinLoRALayer):
         if adapter not in self.uilinlora_adapter:
             return torch.zeros_like(self.get_base_layer().weight, dtype=torch.float32)
 
-        w = self.uilinlora_adapter[adapter] * self.uilinlora_alpha[adapter]
-        return w.T if self.fan_in_fan_out else w
+        diag = self.uilinlora_adapter[adapter]
+        if self._meta[adapter]["pos"]:
+            diag = torch.relu(diag)
 
+        U = getattr(self, f"{adapter}_U")  # shape: (out_features, rank)
+        V = getattr(self, f"{adapter}_V")  # shape: (rank, in_features)
+        D = getattr(self, f"{adapter}_D")  # shape: (in_features,)
+        E = getattr(self, f"{adapter}_E")  # shape: (out_features,)
+        Σ = torch.diag(diag)  # shape: (rank, rank)
+
+        # Reshape D and E to be diagonal matrices
+        D = torch.diag(D)  # shape: (in_features, in_features)
+        E = torch.diag(E)  # shape: (out_features, out_features)
+
+        # Compute the delta weight matrix
+        ΔW = E @ U @ Σ @ V @ D
+        return self._meta[adapter]["sf"] * ΔW
 
     def get_delta_bias(self, adapter: str) -> Optional[torch.Tensor]:
         return self.uilinlora_bias.get(adapter)
@@ -145,7 +152,6 @@ class Linear(nn.Linear, UILinLoRALayer):
                 base.weight.data = new_w
             else:
                 base.weight.data += self.get_delta_weight(name)
-
 
             db = self.get_delta_bias(name)
             if db is not None:
@@ -180,31 +186,27 @@ class Linear(nn.Linear, UILinLoRALayer):
         if self.merged:
             return self.base_layer(x, *args, **kwargs)
 
-        # ── base path ───────────────────────────────────────────────
-        result = self.base_layer(x, *args, **kwargs)   # keep x as-is
+        result = self.base_layer(x, *args, **kwargs)
 
-        # ── adapter path(s) ─────────────────────────────────────────
         for name in self.active_adapters:
             if name not in self.uilinlora_adapter:
                 continue
 
-            w = self.get_delta_weight(name)            # FP32, (out,in)
-
+            w = self.get_delta_weight(name)
             x_drop = self.uilinlora_dropout[name](x)
-            x_fp32 = x_drop.to(w.dtype)                # cast only this copy
+            x_fp32 = x_drop.to(w.dtype)
 
-            a = F.linear(x_fp32, w)                    # FP32 matmul
+            a = F.linear(x_fp32, w)
             if name in self.uilinlora_bias:
-                a = a + self.uilinlora_bias[name]            # FP32
+                a = a + self.uilinlora_bias[name]
 
-            result = result + a.to(result.dtype)       # back to base dtype
+            result = result + a.to(result.dtype)
 
-        return result.to(prev_dtype)                   # restore caller’s dtype
-
+        return result.to(prev_dtype)
 
     def get_base_layer(self):
         return self.base_layer
-    
+
     def __repr__(self):
         return f"UILinLoRALayer({self.get_base_layer().__repr__()})"
 
@@ -231,4 +233,3 @@ class Linear(nn.Linear, UILinLoRALayer):
     @merged_adapters.setter
     def merged_adapters(self, value: List[str]):
         self._merged_adapters = value
-
