@@ -26,7 +26,6 @@ uilinlora_cfg = UILinLoRAConfig(
         uilinlora_alpha=1.0,
         uilinlora_dropout=0.0,
         fan_in_fan_out=False,
-        bias="none",
         init_uilinlora_weights=True)
 model = get_peft_model(base_model, uilinlora_cfg)
 
@@ -81,9 +80,9 @@ tokenized_datasets.set_format(type="torch", columns=["input_ids", "attention_mas
 
 # ---------- trainer ----------
 args = TrainingArguments(
-        output_dir="vera-tiny-sst2",
+        output_dir="uilinlora-roberta-base-sst2",
         per_device_train_batch_size=32,
-        num_train_epochs=1,
+        num_train_epochs=3,
         learning_rate=3e-3,
         eval_strategy="epoch",
         save_strategy="no",
