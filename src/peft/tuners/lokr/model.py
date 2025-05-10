@@ -85,6 +85,7 @@ class LoKrModel(LycorisTuner):
     prefix: str = "lokr_"
     layers_mapping: dict[type[torch.nn.Module], type[LoKrLayer]] = {
         torch.nn.Conv2d: Conv2d,
+        torch.nn.Conv1d: Conv1d,
         torch.nn.Linear: Linear,
     }
 
