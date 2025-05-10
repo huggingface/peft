@@ -72,7 +72,7 @@ class UILinLoRAConfig(PeftConfig):
     )
     rank: int | list[int] = field(default=128,  metadata={"help": "#SVs to train"})
     scaling_factor: float = field(default=1.0)
-    enforce_sv_positive: bool = field(default=True)
+    enforce_sv_positive: bool = field(default=False)
 
 
     def __post_init__(self):        
