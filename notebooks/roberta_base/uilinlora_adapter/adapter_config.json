@@ -4,7 +4,6 @@
     "parent_library": "transformers.models.roberta.modeling_roberta"
   },
   "base_model_name_or_path": "roberta-base",
-  "bias": "none",
   "enforce_sv_positive": true,
   "fan_in_fan_out": false,
   "inference_mode": true,
