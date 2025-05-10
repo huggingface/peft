@@ -43,8 +43,6 @@ class UILinLoRALayer(BaseTunerLayer):
         d_initial: float = 1e-7,
         **kwargs,
     ):
-        print("update_layer adapter_name", adapter_name)
-        print("update_layer self.uilinlora_sigma.keys()", self.uilinlora_sigma.keys())
         if adapter_name in self.uilinlora_sigma.keys():
             return
 
@@ -125,7 +123,6 @@ class Linear(nn.Linear, UILinLoRALayer):
         This is a proper, differentiable version safe for inspection or merging.
         """
         diag = self.uilinlora_sigma[adapter]
-        print("pos: ", self._meta[adapter]["pos"])
         if self._meta[adapter]["pos"]:
             diag = torch.relu(diag.clone())
 
@@ -194,18 +191,14 @@ class Linear(nn.Linear, UILinLoRALayer):
                 self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
 
     def forward(self, x: torch.Tensor, *args, **kwargs):
-        print("forward !!!")
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
-            print("1")
             return self.base_layer(x, *args, **kwargs)
 
         if self.merged:
-            print("2")
             return self.base_layer(x, *args, **kwargs)
 
-        print("3")
         result = self.base_layer(x, *args, **kwargs)
 
         for name in self.active_adapters:
@@ -221,12 +214,6 @@ class Linear(nn.Linear, UILinLoRALayer):
             D = self.uilinlora_D[name]                   # (in,)
             E = self.uilinlora_E[name]   
             
-            print("E.shape", E.shape)
-            print("U.shape", U.shape)
-            print("V.shape", V.shape)
-            print("D.shape", D.shape)
-            print("diag.shape", diag.shape)
-            print("x.shape", x.shape)
 
             x_casted = x.to(diag.dtype)
             
