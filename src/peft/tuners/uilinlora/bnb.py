@@ -140,8 +140,6 @@ if is_bnb_available():
             return self._meta[adapter]["sf"] * core.to(self.get_base_layer().weight.dtype)
 
         def forward(self, x: torch.Tensor, *args, **kwargs):
-            prev_dtype = x.dtype
-
             if self.disable_adapters:
                 if self.merged:
                     self.unmerge()
@@ -150,24 +148,37 @@ if is_bnb_available():
             if self.merged:
                 return self.base_layer(x, *args, **kwargs)
 
+            # Base layer forward first (already fp16 / bf16 on a 4-bit module)
             result = self.base_layer(x, *args, **kwargs)
+            compute_dtype = x.dtype            # fp16 or bf16 — whatever the model runs in
 
             for name in self.active_adapters:
                 if name not in self.uilinlora_sigma:
                     continue
 
-                w = self.get_delta_weight(name).detach()
-                x_drop = self.uilinlora_dropout[name](x)
-                x_fp32 = x_drop.to(w.dtype)
+                # --- diagonal scaling (σ) --------------------------------
+                diag = self.uilinlora_sigma[name].to(compute_dtype)
+                if self._meta[name]["pos"]:
+                    diag = torch.relu(diag)
 
-                a = F.linear(x_fp32, w)
-                if name in self.uilinlora_bias:
-                    a = a + self.uilinlora_bias[name]
-                a = a.to(result.dtype)
+                # --- frozen buffers, cast once ---------------------------
+                U = getattr(self, f"{name}_U").to(compute_dtype)              # (out, r)
+                V = getattr(self, f"{name}_V").to(compute_dtype)              # (r,  in)
+                D = self.uilinlora_D[name].to(compute_dtype)                  # (in,)
+                E = self.uilinlora_E[name].to(compute_dtype)                  # (out,)
 
-                result = result + a.to(result.dtype)
+                # fuse per-column & per-row scales
+                V_scaled = V * D.unsqueeze(0)                                 # (r, in)
+                U_scaled = U * E.unsqueeze(1)                                 # (out, r)
 
-            return result.to(prev_dtype)
+                # --- adapter computation ---------------------------------
+                x_drop = self.uilinlora_dropout[name](x)                      # stay in fp16/bf16
+                x_proj = F.linear(x_drop, V_scaled) * diag                    # (B, r)
+                delta  = F.linear(x_proj, U_scaled)                           # (B, out)
+
+                result = result + self._meta[name]["sf"] * delta
+
+            return result
 
 
         def __repr__(self) -> str:
@@ -266,37 +277,25 @@ if is_bnb_4bit_available():
                 )
 
         def get_delta_weight(self, adapter: str) -> torch.Tensor:
-            if adapter not in self.uilinlora_sigma:
-                return torch.zeros_like(self.get_base_layer().weight, dtype=torch.float32)
-
             diag = self.uilinlora_sigma[adapter]
             if self._meta[adapter]["pos"]:
-                diag = torch.relu(diag)                       # (r,)
+                diag = torch.relu(diag.clone())
 
-            # buffers
-            U  = getattr(self, f"{adapter}_U")    # (out, r)
-            V  = getattr(self, f"{adapter}_V")      # (r,  in)
-            Dv = self.uilinlora_D[adapter]                  # (in,)
-            Ev = self.uilinlora_E[adapter]                  # (out,)
-            Σ  = torch.diag(diag)                            # (r, r)
+            U = getattr(self, f"{adapter}_U")         # (out, r)
+            V = getattr(self, f"{adapter}_V")         # (r, in)
+            D = self.uilinlora_D[adapter]             # (in,)
+            E = self.uilinlora_E[adapter]             # (out,)
 
-            # 1. low-rank product
-            core = U @ Σ @ V                                  # (out, in)
+            # Broadcast D and E
+            VD = V * D.unsqueeze(0).clone()                   # (r, in)
+            UE = U * E.unsqueeze(1).clone()                   # (out, r)
 
-            # 2. per-column scale
-            core = core * Dv                                  # broadcast on columns
+            Σ = torch.diag(diag)                      # (r, r)
 
-            # 3. per-row scale
-            core = Ev.unsqueeze(1) * core                     # broadcast on rows
-
-            # 4. respect fan_in_fan_out wrappers
-            core = transpose(core, self.fan_in_fan_out)
-
+            core = UE @ Σ @ VD                        # (out, in)
             return self._meta[adapter]["sf"] * core.to(self.get_base_layer().weight.dtype)
 
         def forward(self, x: torch.Tensor, *args, **kwargs):
-            prev_dtype = x.dtype
-
             if self.disable_adapters:
                 if self.merged:
                     self.unmerge()
@@ -305,24 +304,38 @@ if is_bnb_4bit_available():
             if self.merged:
                 return self.base_layer(x, *args, **kwargs)
 
+            # Base layer forward first (already fp16 / bf16 on a 4-bit module)
             result = self.base_layer(x, *args, **kwargs)
+            compute_dtype = x.dtype            # fp16 or bf16 — whatever the model runs in
 
             for name in self.active_adapters:
                 if name not in self.uilinlora_sigma:
                     continue
 
-                w = self.get_delta_weight(name).detach()
-                x_drop = self.uilinlora_dropout[name](x)
-                x_fp32 = x_drop.to(w.dtype)
+                # --- diagonal scaling (σ) --------------------------------
+                diag = self.uilinlora_sigma[name].to(compute_dtype)
+                if self._meta[name]["pos"]:
+                    diag = torch.relu(diag)
 
-                a = F.linear(x_fp32, w)
-                if name in self.uilinlora_bias:
-                    a = a + self.uilinlora_bias[name]
-                a = a.to(result.dtype)
+                # --- frozen buffers, cast once ---------------------------
+                U = getattr(self, f"{name}_U").to(compute_dtype)              # (out, r)
+                V = getattr(self, f"{name}_V").to(compute_dtype)              # (r,  in)
+                D = self.uilinlora_D[name].to(compute_dtype)                  # (in,)
+                E = self.uilinlora_E[name].to(compute_dtype)                  # (out,)
 
-                result = result + a.to(result.dtype)
+                # fuse per-column & per-row scales
+                V_scaled = V * D.unsqueeze(0)                                 # (r, in)
+                U_scaled = U * E.unsqueeze(1)                                 # (out, r)
 
-            return result.to(prev_dtype)
+                # --- adapter computation ---------------------------------
+                x_drop = self.uilinlora_dropout[name](x)                      # stay in fp16/bf16
+                x_proj = F.linear(x_drop, V_scaled) * diag                    # (B, r)
+                delta  = F.linear(x_proj, U_scaled)                           # (B, out)
+
+                result = result + self._meta[name]["sf"] * delta
+
+            return result
+
 
 
         def __repr__(self) -> str:
