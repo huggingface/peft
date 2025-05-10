@@ -28,10 +28,6 @@ class UILinLoRAConfig(PeftConfig):
         fan_in_fan_out (`bool`):
             Set this to True if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 uses
             `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
-        bias (`str`):
-            Bias type for row-based adapter. Can be 'none', 'all' or 'row_only'. If 'all' or 'row_only', the corresponding biases
-            will be updated during training. Be aware that this means that, even when disabling the adapters, the model
-            will not produce the same output as the base model would have without adaptation.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
         init_uilinlora_weights (`bool`):
@@ -57,9 +53,6 @@ class UILinLoRAConfig(PeftConfig):
     fan_in_fan_out: bool = field(
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
-    )
-    bias: str = field(
-        default="none", metadata={"help": "Bias type for row-based adapter. Can be 'none', 'all' or 'row_only'"}
     )
     modules_to_save: Optional[list[str]] = field(
         default=None,

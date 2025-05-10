@@ -213,22 +213,22 @@ class UILinLoRAModel(BaseTuner):
             if self.prefix not in n:
                 p.requires_grad = False
 
-        for active_adapter in self.active_adapters:
-            bias = self.peft_config[active_adapter].bias
-            if bias == "none":
-                continue
+        # for active_adapter in self.active_adapters:
+        #     bias = self.peft_config[active_adapter].bias
+        #     if bias == "none":
+        #         continue
 
-            if bias == "all":
-                for n, p in model.named_parameters():
-                    if "bias" in n:
-                        p.requires_grad = True
-            elif bias == "uilinlora_only":
-                for m in model.modules():
-                    if isinstance(m, UILinLoRALayer) and hasattr(m, "uilinlora_bias"):
-                        if active_adapter in m.uilinlora_bias:
-                            m.uilinlora_bias[active_adapter].requires_grad = True
-            else:
-                raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
+        #     if bias == "all":
+        #         for n, p in model.named_parameters():
+        #             if "bias" in n:
+        #                 p.requires_grad = True
+        #     elif bias == "uilinlora_only":
+        #         for m in model.modules():
+        #             if isinstance(m, UILinLoRALayer) and hasattr(m, "uilinlora_bias"):
+        #                 if active_adapter in m.uilinlora_bias:
+        #                     m.uilinlora_bias[active_adapter].requires_grad = True
+        #     else:
+        #         raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
 
 
     # ------------------------------------------------------------------
