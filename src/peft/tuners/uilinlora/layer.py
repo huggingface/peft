@@ -15,22 +15,17 @@ class UILinLoRALayer(BaseTunerLayer):
     adapter_layer_names = ("uilinlora_sigma", "uilinlora_D", "uilinlora_E")
     other_param_names = ("uilinlora_alpha", "uilinlora_dropout", "rank", "scaling_factor", "enforce_sv_positive")
 
-    def __init__(self, base_layer: nn.Module, *, fan_in_fan_out: bool = False):
-        super().__init__()
+    def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer
         self.in_features = base_layer.in_features
         self.out_features = base_layer.out_features
-        self.fan_in_fan_out = fan_in_fan_out
 
         self.uilinlora_sigma = nn.ParameterDict()
         self.uilinlora_D = nn.ParameterDict()
         self.uilinlora_E = nn.ParameterDict()
         self.uilinlora_dropout = nn.ModuleDict()
         self._meta: Dict[str, dict] = {}
-
-        self._active_adapters: List[str] = []
-        self._merged_adapters: List[str] = []
-        self._disable_adapters: bool = False
+        self.kwargs = kwargs
 
     @property
     def merged(self) -> bool:
@@ -70,8 +65,8 @@ class UILinLoRALayer(BaseTunerLayer):
         ids = torch.argsort(S)[:rank]
         U_r, V_r = U[:, ids], Vh[ids, :]
 
-        self.register_buffer(f"{adapter_name}_U", U_r, persistent=True)
-        self.register_buffer(f"{adapter_name}_V", V_r, persistent=True)
+        self.register_buffer(f"{adapter_name}_U", U_r.detach(), persistent=True)
+        self.register_buffer(f"{adapter_name}_V", V_r.detach(), persistent=True)
 
         # Initialize parameters
         self.uilinlora_sigma[adapter_name] = nn.Parameter(torch.full((rank,), d_initial))
@@ -110,7 +105,9 @@ class Linear(nn.Linear, UILinLoRALayer):
         # Initialize nn.Linear with the base layer's parameters
         super(nn.Linear, self).__init__()
         # Initialize UILinLoRALayer
-        UILinLoRALayer.__init__(self, base_layer, fan_in_fan_out=fan_in_fan_out)
+        UILinLoRALayer.__init__(self, base_layer, **kwargs)
+        self.fan_in_fan_out = fan_in_fan_out
+
         self._active_adapter = adapter_name
         self.update_layer(
             adapter_name,
@@ -128,8 +125,9 @@ class Linear(nn.Linear, UILinLoRALayer):
         This is a proper, differentiable version safe for inspection or merging.
         """
         diag = self.uilinlora_sigma[adapter]
+        print("pos: ", self._meta[adapter]["pos"])
         if self._meta[adapter]["pos"]:
-            diag = torch.relu(diag)
+            diag = torch.relu(diag.clone())
 
         U = getattr(self, f"{adapter}_U")         # (out, r)
         V = getattr(self, f"{adapter}_V")         # (r, in)
@@ -137,8 +135,8 @@ class Linear(nn.Linear, UILinLoRALayer):
         E = self.uilinlora_E[adapter]             # (out,)
 
         # Broadcast D and E
-        VD = V * D.unsqueeze(0)                   # (r, in)
-        UE = U * E.unsqueeze(1)                   # (out, r)
+        VD = V * D.unsqueeze(0).clone()                   # (r, in)
+        UE = U * E.unsqueeze(1).clone()                   # (out, r)
 
         Σ = torch.diag(diag)                      # (r, r)
 
@@ -197,22 +195,22 @@ class Linear(nn.Linear, UILinLoRALayer):
 
     def forward(self, x: torch.Tensor, *args, **kwargs):
         print("forward !!!")
-        print("self.active_adapters", self.active_adapters)
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
+            print("1")
             return self.base_layer(x, *args, **kwargs)
 
         if self.merged:
+            print("2")
             return self.base_layer(x, *args, **kwargs)
 
+        print("3")
         result = self.base_layer(x, *args, **kwargs)
 
         for name in self.active_adapters:
             if name not in self.uilinlora_sigma.keys():
-                print("name not in self.uilinlora_sigma.keys()", name)
                 continue
-            print("name in self.uilinlora_sigma.keys()", name)
 
             diag = self.uilinlora_sigma[name]
             if self._meta[name]["pos"]:
@@ -221,7 +219,14 @@ class Linear(nn.Linear, UILinLoRALayer):
             U = getattr(self, f"{name}_U")               # (out, r)
             V = getattr(self, f"{name}_V")               # (r, in)
             D = self.uilinlora_D[name]                   # (in,)
-            E = self.uilinlora_E[name]                   # (out,)
+            E = self.uilinlora_E[name]   
+            
+            print("E.shape", E.shape)
+            print("U.shape", U.shape)
+            print("V.shape", V.shape)
+            print("D.shape", D.shape)
+            print("diag.shape", diag.shape)
+            print("x.shape", x.shape)
 
             x_casted = x.to(diag.dtype)
             
@@ -230,7 +235,6 @@ class Linear(nn.Linear, UILinLoRALayer):
             delta = F.linear(x_proj, U * E.unsqueeze(1))                             # (B, out)
 
             result = result + self._meta[name]["sf"] * delta
-        print("result shape", result.shape)
 
         return result
 
