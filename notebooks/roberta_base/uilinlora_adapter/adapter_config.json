@@ -4,7 +4,7 @@
     "parent_library": "transformers.models.roberta.modeling_roberta"
   },
   "base_model_name_or_path": "roberta-base",
-  "enforce_sv_positive": true,
+  "enforce_sv_positive": false,
   "fan_in_fan_out": false,
   "inference_mode": true,
   "init_uilinlora_weights": true,
@@ -14,7 +14,8 @@
   "revision": null,
   "scaling_factor": 1.0,
   "target_modules": [
-    "classifier.dense"
+    "query",
+    "value"
   ],
   "task_type": null,
   "uilinlora_alpha": 1.0,
