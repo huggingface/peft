@@ -115,7 +115,7 @@ from transformers import (
     AutoTokenizer, AutoModelForSequenceClassification,
     TrainingArguments, BitsAndBytesConfig, Trainer
 )
-from peft import UILinLoRAConfig, get_peft_model
+from peft import UILinLoRAConfig, get_peft_model, TaskType
 
 # ---------------------------  custom trainer  --------------------------- #
 class UILinLoRATrainer(Trainer):
@@ -176,7 +176,8 @@ def main():
             uilinlora_alpha=1.0,
             uilinlora_dropout=0.0,
             fan_in_fan_out=False,
-            init_uilinlora_weights=True)
+            init_uilinlora_weights=True,
+            task_type=TaskType.SEQ_CLS)
     model = get_peft_model(base, uilinlora_cfg)
     model.classifier.requires_grad_(True)   # make head trainable
     model.config.pad_token_id = tokenizer.pad_token_id
@@ -190,7 +191,7 @@ def main():
         evaluation_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=True,
-        metric_for_best_model="accuracy",
+        metric_for_best_model="eval_accuracy",
         greater_is_better=True,
         warmup_ratio=0.06,
         lr_scheduler_type="linear",
@@ -207,7 +208,7 @@ def main():
         tokenizer=tokenizer,
         compute_metrics=compute_metrics,
         head_lr=1e-3,
-        adapter_lr=4e-3,
+        adapter_lr=4e-3
     )
 
     trainer.train()
