@@ -21,7 +21,7 @@ from torch import nn
 
 from peft.tuners.lycoris_utils import LycorisConfig, LycorisTuner
 
-from .layer import Conv2d, Linear, LoHaLayer
+from .layer import Conv1d, Conv2d, Linear, LoHaLayer
 
 
 class LoHaModel(LycorisTuner):
