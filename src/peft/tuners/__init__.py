@@ -14,6 +14,7 @@
 
 from .adalora import AdaLoraConfig, AdaLoraModel
 from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
+from .alora import ALoraConfig, ALoraModel
 from .boft import BOFTConfig, BOFTModel
 from .bone import BoneConfig, BoneModel
 from .cpt import CPTConfig, CPTEmbedding
@@ -47,6 +48,8 @@ from .xlora import XLoraConfig, XLoraModel
 
 
 __all__ = [
+    "ALoraConfig",
+    "ALoraModel",
     "AdaLoraConfig",
     "AdaLoraModel",
     "AdaptionPromptConfig",
