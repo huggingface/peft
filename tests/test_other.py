@@ -500,9 +500,9 @@ class TestAdapterTargeting:
                 return key.removesuffix(f".{adapter_name}")
             return key.split(f".{adapter_name}.")[0]
 
-        adapter_invariant_keys1 = {remove_adapter_portion(adapter1_name, n) for n in state_dict_keys_1}
+        adapter_invariant_keys1 = {remove_adapter_portion(adapter1_name, key) for key in state_dict_keys_1}
         adapter_invariant_keys2 = {
-            remove_adapter_portion(adapter2_name, remove_adapter_portion(adapter1_name, n)) for n in state_dict_keys_2
+            remove_adapter_portion(adapter2_name, remove_adapter_portion(adapter1_name, key)) for key in state_dict_keys_2
         }
 
         assert adapter_invariant_keys1 == adapter_invariant_keys2
