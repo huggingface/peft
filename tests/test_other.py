@@ -492,7 +492,7 @@ class TestAdapterTargeting:
         # Expected:
         # - a.b.<adapter_name_1>.xyz
         # - a.b.<adapter_name_2>.xyz
-        # Not expected:
+        # We're not expecting this to happen and test against it:
         # - a.b.<adapter_name_1>.xyz
         # - a.<adapter_name_2>.xyz
         def remove_adapter_portion(adapter_name, key):
@@ -502,7 +502,8 @@ class TestAdapterTargeting:
 
         adapter_invariant_keys1 = {remove_adapter_portion(adapter1_name, key) for key in state_dict_keys_1}
         adapter_invariant_keys2 = {
-            remove_adapter_portion(adapter2_name, remove_adapter_portion(adapter1_name, key)) for key in state_dict_keys_2
+            remove_adapter_portion(adapter2_name, remove_adapter_portion(adapter1_name, key))
+            for key in state_dict_keys_2
         }
 
         assert adapter_invariant_keys1 == adapter_invariant_keys2
