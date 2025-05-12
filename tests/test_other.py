@@ -19,7 +19,7 @@ import torch
 from torch import nn
 from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
 
-from peft import LoraConfig, PeftModel, get_peft_model
+from peft import LoraConfig, PeftModel, VeraConfig, get_peft_model
 from peft.utils.other import ModulesToSaveWrapper
 
 
@@ -446,3 +446,64 @@ class TestTargetingAuxiliaryTrainingWrapper:
         msg = "trainable_token_indices cannot be applied to modules of type <class 'peft.tuners.lora.layer.Embedding'>"
         with pytest.raises(TypeError, match=msg) as e:
             get_peft_model(model, peft_config)
+
+
+class TestAdapterTargeting:
+    """Make sure that already existing adapters cannot be targeted to avoid conflicts."""
+
+    @pytest.fixture
+    def base_model_cls(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(10, 20)
+                self.l2 = torch.nn.Conv2d(1, 1, 2)
+
+            def forward(self, x):
+                return self.l2(self.l1(x))
+
+        return M
+
+    @pytest.mark.parametrize(
+        "config_cls, config_kwargs",
+        [
+            (LoraConfig, {"target_modules": "l1.*"}),
+            (LoraConfig, {"target_modules": "l2.*"}),
+            (VeraConfig, {"target_modules": "l1.*"}),
+            (VeraConfig, {"target_modules": "(l1|vera_A).*"}),  # also target the shared layer
+        ],
+    )
+    def test_self_targeting_is_ignored(self, base_model_cls, config_cls, config_kwargs):
+        base_model = base_model_cls()
+        config1 = config_cls(**config_kwargs)
+        config2 = config_cls(**config_kwargs)
+
+        adapter1_name = "ADAPTER_1_512858"  # sufficiently unique names to make reliable testing easier
+        adapter2_name = "ADAPTER_2_845781"
+
+        peft_model = get_peft_model(base_model, config1, adapter_name=adapter1_name)
+        state_dict_keys_1 = peft_model.state_dict().keys()
+
+        peft_model.add_adapter(adapter2_name, config2)
+        state_dict_keys_2 = peft_model.state_dict().keys()
+
+        # Ideally there should be no new modules targeted beyond existing ModuleDicts. Therefore the keys
+        # of the new state dict should only differ after the adapter name portion of the keys - not before.
+        # Expected:
+        # - a.b.<adapter_name_1>.xyz
+        # - a.b.<adapter_name_2>.xyz
+        # We're not expecting this to happen and test against it:
+        # - a.b.<adapter_name_1>.xyz
+        # - a.<adapter_name_2>.xyz
+        def remove_adapter_portion(adapter_name, key):
+            if key.endswith(f".{adapter_name}"):
+                return key.removesuffix(f".{adapter_name}")
+            return key.split(f".{adapter_name}.")[0]
+
+        adapter_invariant_keys1 = {remove_adapter_portion(adapter1_name, key) for key in state_dict_keys_1}
+        adapter_invariant_keys2 = {
+            remove_adapter_portion(adapter2_name, remove_adapter_portion(adapter1_name, key))
+            for key in state_dict_keys_2
+        }
+
+        assert adapter_invariant_keys1 == adapter_invariant_keys2
