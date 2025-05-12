@@ -48,7 +48,7 @@ class DoraLinearLayer(nn.Module):
                 base_layer = deepcopy(base_layer)
 
             weight = dequantize_module_weight(base_layer)
-            if weight.data.ndim >= 3:
+            if weight.data.ndim >= 3:  # For handling LoRAs applied to Conv layers.
                 lora_weight = torch.mm(lora_B.flatten(start_dim=1), lora_A.flatten(start_dim=1))
                 lora_weight = lora_weight.reshape(weight.shape)
             else:
