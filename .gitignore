@@ -147,3 +147,23 @@ notebooks/roberta_base/**/checkpoint-*/
 nohup.out
 notebooks/roberta_base/uilinlora-roberta-base-sst2/checkpoint-8/adapter_config.json
 .gitignore
+
+# Model checkpoints and large files
+**/checkpoint-*/
+**/model.safetensors
+**/pytorch_model.bin
+**/adapter_model.bin
+**/adapter_config.json
+**/training_args.bin
+**/optimizer.pt
+**/scheduler.pt
+**/*.pt
+**/*.bin
+**/*.safetensors
+**/wandb/
+**/runs/
+**/logs/
+**/output/
+**/results/
+**/tmp/
+**/temp/
