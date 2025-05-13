@@ -277,6 +277,48 @@ class TestLoraInitialization:
         # as long as they are not zero, in order to avoid identity transformation.
         assert not torch.allclose(weight_B, torch.zeros_like(weight_B))
 
+    def test_lora_init_orthogonal(self):
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        config = LoraConfig(target_modules=["linear"], init_lora_weights="orthogonal")
+        model = get_peft_model(model, config)
+
+        weight_A = model.linear.lora_A["default"].weight
+        weight_B = model.linear.lora_B["default"].weight
+
+        assert not torch.allclose(weight_A, torch.zeros_like(weight_A))
+        assert not torch.allclose(weight_B, torch.zeros_like(weight_B))
+        assert (weight_B @ weight_A).abs().max() < 1e-6
+
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_lora_init_orthogonal_half_precision_dtype(self, dtype):
+        try:
+            torch.zeros(1, dtype=dtype)
+        except Exception:
+            pytest.skip(f"dtype {dtype} not supported on this system, skipping test")
+
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        config = LoraConfig(target_modules=["linear"], init_lora_weights="orthogonal")
+        model = get_peft_model(model, config).to(dtype)
+
+        weight_A = model.linear.lora_A["default"].weight
+        weight_B = model.linear.lora_B["default"].weight
+
+        assert weight_A.dtype == dtype
+        assert weight_B.dtype == dtype
+
+    def test_lora_init_orthogonal_odd_rank_raises(self):
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        config = LoraConfig(target_modules=["linear"], init_lora_weights="orthogonal", r=7)
+        msg = "Orthogonal initialization requires the LoRA rank to be even, got 7 instead."
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
     def test_lora_scaling_default(self):
         # default is True
         torch.manual_seed(0)
@@ -1255,6 +1297,7 @@ class TestLoraInitialization:
             {"init_lora_weights": "olora"},
             {"init_lora_weights": "pissa"},
             {"init_lora_weights": "pissa_niter_3"},
+            {"init_lora_weights": "orthogonal"},
         ],
     )
     def test_lora_with_bias_incompatible_arguments(self, extra_kwargs):
