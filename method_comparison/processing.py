@@ -81,7 +81,20 @@ def load_jsons(path):
 
 def load_df(path, task_name, print_fn=print):
     jsons = load_jsons(path)
+    print_fn(f"Loaded {len(jsons)} JSON files")
+    if not jsons:
+        print_fn(f"No JSON files found in {path}")
+        return pd.DataFrame()
+
     preprocessed = preprocess(jsons, task_name=task_name, print_fn=print_fn)
+    print_fn(f"Preprocessed data has {len(preprocessed)} rows")
+    if not preprocessed:
+        print_fn("No data after preprocessing")
+        return pd.DataFrame()
+
+    df = pd.DataFrame(preprocessed)
+    print_fn(f"DataFrame columns: {df.columns.tolist()}")
+
     dtype_dict = {
         "task_name": "string",
         "experiment_name": "string",
@@ -109,12 +122,17 @@ def load_df(path, task_name, print_fn=print):
         "system_info": "string",
         "created_at": "string",
     }
-    df = pd.DataFrame(preprocessed)
+
+    # Only convert columns that exist in the DataFrame
+    existing_columns = set(df.columns)
+    dtype_dict = {col: dtype for col, dtype in dtype_dict.items() if col in existing_columns}
     df = df.astype(dtype_dict)
-    df["created_at"] = pd.to_datetime(df["created_at"])
-    # round training time to nearest second
-    df["train_time"] = df["train_time"].round().astype(int)
-    df["total_time"] = df["total_time"].round().astype(int)
+
+    if "created_at" in df.columns:
+        df["created_at"] = pd.to_datetime(df["created_at"])
+        # round training time to nearest second
+        df["train_time"] = df["train_time"].round().astype(int)
+        df["total_time"] = df["total_time"].round().astype(int)
 
     # reorder columns for better viewing, pinned_columns arg in Gradio seems not to work correctly
     important_columns = [

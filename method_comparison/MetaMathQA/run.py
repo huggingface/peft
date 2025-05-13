@@ -26,9 +26,9 @@ import sys
 import tempfile
 import textwrap
 import time
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from functools import partial
-from typing import Any, Callable, ContextManager, Literal, Optional
+from typing import Any, Callable, Literal, Optional
 
 import torch
 from data import (
@@ -141,7 +141,7 @@ def train(
     total_tokens = []  # total number of tokens over all epochs
     if use_amp:
         grad_scaler: GradScaler | DummyGradScaler = GradScaler(device="cuda")
-        autocast_ctx: Callable[[], ContextManager[Any]] = partial(autocast, device_type="cuda")
+        autocast_ctx: Callable[[], AbstractContextManager[Any]] = partial(autocast, device_type="cuda")
     else:
         grad_scaler = DummyGradScaler()
         autocast_ctx = nullcontext
