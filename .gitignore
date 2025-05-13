@@ -144,3 +144,6 @@ wandb
 method_comparison/MetaMathQA/cancelled_results/
 method_comparison/MetaMathQA/temporary_results/
 notebooks/roberta_base/**/checkpoint-*/
+nohup.out
+notebooks/roberta_base/uilinlora-roberta-base-sst2/checkpoint-8/adapter_config.json
+.gitignore
