@@ -40,7 +40,7 @@ class UILinLoRALayer(BaseTunerLayer):
         enforce_sv_positive: bool = False,
         uilinlora_dropout: float = 0.0,
         init_uilinlora_weights: bool = True,
-        d_initial: float = 1e-7,
+        d_initial: float = 1e-1,
         **kwargs,
     ):
         if adapter_name in self.uilinlora_sigma.keys():
