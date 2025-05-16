@@ -862,7 +862,7 @@ class ModelConv2D1x1(nn.Module):
         self.conv2d = nn.Conv2d(1, 10, kernel_size=(1, 1), padding=0)
         self.relu = nn.ReLU()
         self.flat = nn.Flatten()
-        self.lino = nn.Linear(10 * 5 * 5, 2)
+        self.lin0 = nn.Linear(10 * 5 * 5, 2)
         self.sm = nn.LogSoftmax(dim=-1)
         self.dtype = torch.float
 
@@ -872,7 +872,7 @@ class ModelConv2D1x1(nn.Module):
         X = self.conv2d(X)
         X = self.relu(X)
         X = self.flat(X)
-        X = self.lino(X)
+        X = self.lin0(X)
         X = self.sm(X)
         return X
 
@@ -883,7 +883,7 @@ class ModelConv1D(nn.Module):
         self.conv1d = nn.Conv1d(in_channels=3, out_channels=10, kernel_size=1)
         self.relu = nn.ReLU()
         self.flat = nn.Flatten()
-        self.lino = nn.Linear(10 * 10, 2)
+        self.lin0 = nn.Linear(10 * 10, 2)
         self.dtype = torch.float
 
     def forward(self, x):
@@ -892,7 +892,7 @@ class ModelConv1D(nn.Module):
         x = self.conv1d(x)
         x = self.relu(x)
         x = self.flat(x)
-        x = self.lino(x)
+        x = self.lin0(x)
         return x
 
 
