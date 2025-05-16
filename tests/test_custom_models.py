@@ -863,12 +863,12 @@ class ModelConv2D1x1(nn.Module):
         self.relu = nn.ReLU()
         self.flat = nn.Flatten()
         self.lin0 = nn.Linear(10 * 5 * 5, 2)
-        self.sm = nn.LogSoftmax(dim=-1)
-        self.dtype = torch.float
+        self.sm = nn.LogSoftmax(dim=-1)   
+        self.dtype = torch.float          
 
     def forward(self, X):
         X = X.to(self.dtype)
-        X = X.reshape(-1, 1, 5, 5)
+        X = X.reshape(-1, 1, 5, 5)  
         X = self.conv2d(X)
         X = self.relu(X)
         X = self.flat(X)
