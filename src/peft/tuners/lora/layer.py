@@ -33,7 +33,7 @@ from peft.utils.integrations import (
 from peft.utils.other import transpose
 
 from .config import LoraConfig
-
+from .dora import DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer, _DoraConvNdLayer
 
 class LoraVariant:
     """
@@ -107,6 +107,9 @@ class LoraLayer(BaseTunerLayer):
         self.cast_input_dtype_enabled: bool = True
         self.lora_variant: dict[str, LoraVariant] = {}
         self.kwargs = kwargs
+        
+        # Diag value
+        self.lora_diag = nn.ParameterDict({})
 
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
@@ -217,7 +220,20 @@ class LoraLayer(BaseTunerLayer):
             self.scaling[adapter_name] = lora_alpha / r
 
         self.use_dora[adapter_name] = use_dora
+        
+        ############ kasa ############# 
+        self.lora_diag[adapter_name] = nn.Parameter(torch.randn(r), requires_grad=True)
+        
+        weight = self.get_base_layer().weight
+        dtype = weight.dtype
+        svd_rank = self.in_features - r
+        weight = weight.to(torch.float32)
+        U, S, Vh = torch.linalg.svd(weight.data, full_matrices=False)
+        U_principle, S_principle, Vh_principle = U[:, :svd_rank], S[:svd_rank], Vh[:svd_rank, :]
+        self.get_base_layer().weight.data = (U_principle @ torch.diag(S_principle) @ Vh_principle).to(dtype)
 
+        #########################
+        
         # for inits that require access to the base weight, use gather_param_ctx so that the weight is gathered when using DeepSpeed
         if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
             with gather_params_ctx(self.get_base_layer().weight):
