@@ -34,7 +34,7 @@ class VBLoRAModel(BaseTuner):
     """
     Creates VBLoRA model from a pretrained transformers model.
 
-    The method is described in detail in https://arxiv.org/abs/2405.15179.
+    The method is described in detail in https://huggingface.co/papers/2405.15179.
 
     Args:
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.

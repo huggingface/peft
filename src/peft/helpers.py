@@ -162,7 +162,7 @@ def rescale_adapter_scale(model, multiplier):
     transformers and diffusers models that have directly loaded LoRA adapters.
 
     For LoRA, applying this context manager with multiplier in [0, 1] is strictly equivalent to applying
-    [wise-ft](https://arxiv.org/abs/2109.01903) (see [#1940](https://github.com/huggingface/peft/issues/1940) for
+    [wise-ft](https://huggingface.co/papers/2109.01903) (see [#1940](https://github.com/huggingface/peft/issues/1940) for
     details). It can improve the performances of the model if there is a distribution shiftbetween the training data
     used for fine-tuning, and the test data used during inference.
 

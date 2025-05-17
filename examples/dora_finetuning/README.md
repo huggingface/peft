@@ -4,7 +4,7 @@
 
 
 ## Introduction
-[DoRA](https://arxiv.org/abs/2402.09353) is a novel approach that leverages low rank adaptation through weight decomposition analysis to investigate the inherent differences between full fine-tuning and LoRA. DoRA initially decomposes the pretrained weight into its magnitude and directional components and finetunes both of them. Because the directional component is large in terms of parameter numbers, we further decompose it with LoRA for efficient finetuning. This results in enhancing both the learning capacity and training stability of LoRA while avoiding any additional inference overhead.
+[DoRA](https://huggingface.co/papers/2402.09353) is a novel approach that leverages low rank adaptation through weight decomposition analysis to investigate the inherent differences between full fine-tuning and LoRA. DoRA initially decomposes the pretrained weight into its magnitude and directional components and finetunes both of them. Because the directional component is large in terms of parameter numbers, we further decompose it with LoRA for efficient finetuning. This results in enhancing both the learning capacity and training stability of LoRA while avoiding any additional inference overhead.
 
 ## Quick start
 ```python

@@ -40,7 +40,7 @@ from .layer import Conv2d, Linear, OFTLayer
 class OFTModel(BaseTuner):
     """
     Creates Orthogonal Finetuning model from a pretrained model. The method is described in
-    https://arxiv.org/abs/2306.07280
+    https://huggingface.co/papers/2306.07280
 
     Args:
         model (`torch.nn.Module`): The model to which the adapter tuner layers will be attached.
