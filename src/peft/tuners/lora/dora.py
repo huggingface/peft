@@ -76,7 +76,7 @@ class DoraLinearLayer(nn.Module):
         weight = dequantize_module_weight(base_layer)
         weight = weight.to(x.dtype)
         weight_norm = self.get_weight_norm(weight, lora_weight.detach(), scaling)
-        # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
+        # see section 4.3 of DoRA (https://huggingface.co/papers/2402.09353)
         # "[...] we suggest treating ||V +∆V ||_c in
         # Eq. (5) as a constant, thereby detaching it from the gradient
         # graph. This means that while ||V + ∆V ||_c dynamically
@@ -114,7 +114,7 @@ class DoraEmbeddingLayer(DoraLinearLayer):
         magnitude = self.weight
         weight = base_layer.weight
         weight_norm = self.get_weight_norm(weight, lora_weight.detach(), scaling)
-        # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
+        # see section 4.3 of DoRA (https://huggingface.co/papers/2402.09353)
         # "[...] we suggest treating ||V +∆V ||_c in
         # Eq. (5) as a constant, thereby detaching it from the gradient
         # graph. This means that while ||V + ∆V ||_c dynamically
@@ -149,7 +149,7 @@ class _DoraConvNdLayer(DoraLinearLayer):
         lora_weight = lora_weight.reshape(weight.shape)
         magnitude = self.weight
         weight_norm = self.get_weight_norm(weight, lora_weight.detach(), scaling)
-        # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
+        # see section 4.3 of DoRA (https://huggingface.co/papers/2402.09353)
         # "[...] we suggest treating ||V +∆V ||_c in
         # Eq. (5) as a constant, thereby detaching it from the gradient
         # graph. This means that while ||V + ∆V ||_c dynamically

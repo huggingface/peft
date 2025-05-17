@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # Orthogonal Finetuning (OFT and BOFT) 
 
-This conceptual guide gives a brief overview of [OFT](https://arxiv.org/abs/2306.07280) and [BOFT](https://arxiv.org/abs/2311.06243), a parameter-efficient fine-tuning technique that utilizes orthogonal matrix to multiplicatively transform the pretrained weight matrices.
+This conceptual guide gives a brief overview of [OFT](https://huggingface.co/papers/2306.07280) and [BOFT](https://huggingface.co/papers/2311.06243), a parameter-efficient fine-tuning technique that utilizes orthogonal matrix to multiplicatively transform the pretrained weight matrices.
 
 To achieve efficient fine-tuning, OFT represents the weight updates with an orthogonal transformation. The orthogonal transformation is parameterized by an orthogonal matrix multiplied to the pretrained weight matrix. These new matrices can be trained to adapt to the new data while keeping the overall number of changes low. The original weight matrix remains frozen and doesn’t receive any further adjustments. To produce the final results, both the original and the adapted weights are multiplied togethor.
 
@@ -30,7 +30,7 @@ Orthogonal Butterfly (BOFT) generalizes OFT with Butterfly factorization and fur
 BOFT has some advantages compared to LoRA: 
 
 * BOFT proposes a simple yet generic way to finetune pretrained models to downstream tasks, yielding a better preservation of pretraining knowledge and a better parameter efficiency.
-* Through the orthogonality, BOFT introduces a structural constraint, i.e., keeping the [hyperspherical energy](https://arxiv.org/abs/1805.09298) unchanged during finetuning. This can effectively reduce the forgetting of pretraining knowledge.
+* Through the orthogonality, BOFT introduces a structural constraint, i.e., keeping the [hyperspherical energy](https://huggingface.co/papers/1805.09298) unchanged during finetuning. This can effectively reduce the forgetting of pretraining knowledge.
 * BOFT uses the butterfly factorization to efficiently parameterize the orthogonal matrix, which yields a compact yet expressive learning space (i.e., hypothesis class).
 * The sparse matrix decomposition in BOFT brings in additional inductive biases that are beneficial to generalization.
 

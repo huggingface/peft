@@ -35,7 +35,7 @@ from .layer import BoneLayer, BoneLinear
 class BoneModel(BaseTuner):
     """
     Creates Householder reflection adaptation (Bone) model from a pretrained model. The method is described in
-    https://arxiv.org/abs/2409.15371
+    https://huggingface.co/papers/2409.15371
 
     Args:
         model (`torch.nn.Module`): The model to which the adapter tuner layers will be attached.

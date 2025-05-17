@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # The implementation is based on "Parameter-Efficient Orthogonal Finetuning
-# via Butterfly Factorization" (https://arxiv.org/abs/2311.06243) in ICLR 2024.
+# via Butterfly Factorization" (https://huggingface.co/papers/2311.06243) in ICLR 2024.
 
 from __future__ import annotations
 
