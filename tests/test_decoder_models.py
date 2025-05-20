@@ -228,7 +228,7 @@ class TestDecoderModels(PeftCommonTester):
         pytest.skip(reason)
 
     def prepare_inputs_for_testing(self):
-        input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.tPeftCommonTesterorch_device)
+        input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
         attention_mask = torch.tensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
         return {"input_ids": input_ids, "attention_mask": attention_mask}
 
