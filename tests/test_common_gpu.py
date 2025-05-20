@@ -18,6 +18,7 @@ import unittest
 import pytest
 import torch
 import torch.nn.functional as F
+from accelerate.utils.memory import clear_device_cache
 from parameterized import parameterized
 from torch import nn
 from transformers import (
@@ -56,8 +57,6 @@ from peft import (
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_xpu_available
 from peft.tuners.lora.config import LoraRuntimeConfig
 from peft.utils import infer_device
-
-from accelerate.utils.memory import clear_device_cache
 
 from .testing_utils import (
     device_count,

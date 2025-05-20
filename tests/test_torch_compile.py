@@ -24,6 +24,7 @@ import os
 
 import pytest
 import torch
+from accelerate.utils.memory import clear_device_cache
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -51,8 +52,6 @@ from peft import (
     VeraConfig,
     get_peft_model,
 )
-
-from accelerate.utils.memory import clear_device_cache
 
 from .testing_utils import load_dataset_english_quotes, require_bitsandbytes
 

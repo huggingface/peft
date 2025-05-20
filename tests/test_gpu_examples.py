@@ -2436,9 +2436,7 @@ class TestOLoRA:
         assert torch.isfinite(logits).all()
 
 
-@pytest.mark.skipif(
-    not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU"
-)
+@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU")
 @require_bitsandbytes
 class TestLoftQ:
     r"""
@@ -4543,9 +4541,7 @@ class TestPrefixTuning:
         model.generate(**inputs)  # does not raise
 
 
-@pytest.mark.skipif(
-    not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU"
-)
+@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU")
 @pytest.mark.single_gpu_tests
 class TestHotSwapping:
     """

@@ -20,6 +20,7 @@ import unittest
 
 import pytest
 import torch
+from accelerate.utils.memory import clear_device_cache
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -27,8 +28,6 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
-
-from accelerate.utils.memory import clear_device_cache
 
 from peft import (
     AdaLoraConfig,

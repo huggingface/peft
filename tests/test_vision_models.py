@@ -19,6 +19,7 @@ import gc
 import numpy as np
 import pytest
 import torch
+from accelerate.utils.memory import clear_device_cache
 from safetensors.torch import load_file
 from transformers import (
     AutoImageProcessor,
@@ -37,8 +38,6 @@ from peft import (
     PrefixTuningConfig,
     get_peft_model,
 )
-
-from accelerate.utils.memory import clear_device_cache
 
 from .testing_utils import load_cat_image
 
