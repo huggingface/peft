@@ -57,6 +57,8 @@ from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_xpu_av
 from peft.tuners.lora.config import LoraRuntimeConfig
 from peft.utils import infer_device
 
+from accelerate.utils.memory import clear_device_cache
+
 from .testing_utils import (
     device_count,
     load_cat_image,
@@ -99,11 +101,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        elif is_xpu_available():
-            torch.xpu.empty_cache()
+        clear_device_cache(garbage_collection=True)
         gc.collect()
 
     @require_bitsandbytes

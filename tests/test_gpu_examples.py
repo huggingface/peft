@@ -2080,7 +2080,7 @@ class OffloadSaveTests(unittest.TestCase):
         assert torch.allclose(post_unload_merge_olayer, pre_merge_olayer)
 
 
-@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU")
+@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU")
 @pytest.mark.single_gpu_tests
 class TestPiSSA:
     r"""
@@ -2292,7 +2292,7 @@ class TestPiSSA:
         assert not torch.allclose(output_finetuned_pissa, output_converted, atol=tol, rtol=tol)
 
 
-@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU")
+@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU")
 @pytest.mark.single_gpu_tests
 class TestOLoRA:
     r"""
@@ -2437,7 +2437,7 @@ class TestOLoRA:
 
 
 @pytest.mark.skipif(
-    not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a hardware accelerator"
+    not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU"
 )
 @require_bitsandbytes
 class TestLoftQ:
@@ -2831,11 +2831,7 @@ class MixedPrecisionTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        elif is_xpu_available():
-            torch.xpu.empty_cache()
+        clear_device_cache(garbage_collection=True)
         gc.collect()
 
     @pytest.mark.single_gpu_tests
@@ -3096,8 +3092,7 @@ class PeftAqlmGPUTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
     def _check_inference_finite(self, model, batch):
         # try inference without Trainer class
@@ -3182,8 +3177,7 @@ class PeftHqqGPUTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
     @pytest.mark.single_gpu_tests
     @parameterized.expand([False, True])
@@ -3277,8 +3271,7 @@ class PeftHqqGPUTests(unittest.TestCase):
         assert torch.isfinite(output_normal).all()
 
         del model
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
         # now load with HQQ
         quant_config = HqqConfig(nbits=4, group_size=64)
@@ -3312,8 +3305,7 @@ class PeftHqqGPUTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model.save_pretrained(tmp_dir)
             del model
-            gc.collect()
-            torch.cuda.empty_cache()
+            clear_device_cache(garbage_collection=True)
 
             quant_config = HqqConfig(nbits=4, group_size=64)
             model = AutoModelForCausalLM.from_pretrained(
@@ -3356,8 +3348,7 @@ class PeftAwqGPUTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
     def _check_inference_finite(self, model, batch):
         # try inference without Trainer class
@@ -3527,8 +3518,7 @@ class PeftEetqGPUTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
     def _check_inference_finite(self, model, batch):
         # try inference without Trainer class
@@ -3688,8 +3678,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
     @parameterized.expand(supported_quant_types)
     @pytest.mark.single_gpu_tests
@@ -4555,7 +4544,7 @@ class TestPrefixTuning:
 
 
 @pytest.mark.skipif(
-    not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a hardware accelerator"
+    not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU"
 )
 @pytest.mark.single_gpu_tests
 class TestHotSwapping:

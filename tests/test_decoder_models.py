@@ -44,7 +44,7 @@ from peft import (
 )
 
 from .testing_common import PeftCommonTester
-from .testing_utils import load_dataset_english_quotes, set_init_weights_false
+from .testing_utils import device_count, load_dataset_english_quotes, set_init_weights_false
 
 
 PEFT_DECODER_MODELS_TO_TEST = [
@@ -228,7 +228,7 @@ class TestDecoderModels(PeftCommonTester):
         pytest.skip(reason)
 
     def prepare_inputs_for_testing(self):
-        input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
+        input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.tPeftCommonTesterorch_device)
         attention_mask = torch.tensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
         return {"input_ids": input_ids, "attention_mask": attention_mask}
 
@@ -606,7 +606,7 @@ class TestDecoderModels(PeftCommonTester):
 
         # skip if multi GPU, since this results in DataParallel usage by Trainer, which fails with "CUDA device
         # assertion", breaking subsequent tests
-        if torch.cuda.device_count() > 1:
+        if device_count() > 1:
             pytest.skip("Skip on multi-GPU setups")
         peft_config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
         base_model = self.transformers_class.from_pretrained(model_id)

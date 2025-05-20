@@ -28,6 +28,8 @@ from transformers import (
     TrainingArguments,
 )
 
+from accelerate.utils.memory import clear_device_cache
+
 from peft import (
     AdaLoraConfig,
     LoraConfig,
@@ -61,10 +63,8 @@ class PeftGPTQModelCommonTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
+        clear_device_cache(garbage_collection=True)
         gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            gc.collect()
 
     def test_lora_gptq_quantization_from_pretrained_safetensors(self):
         r"""
@@ -123,8 +123,7 @@ class PeftGPTQModelTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
     def _check_inference_finite(self, model, batch):
         # try inference without Trainer class
