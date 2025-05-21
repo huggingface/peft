@@ -426,18 +426,19 @@ class BaseTuner(nn.Module, ABC):
         # in a bad (half-initialized) state.
         self._check_new_adapter_config(peft_config)
 
-        _check_for_modules_to_save = getattr(peft_config, "modules_to_save", None) is not None
-
         model_config = self.get_model_config(model)
 
         peft_config = self._prepare_adapter_config(peft_config, model_config)
 
         self._prepare_model(peft_config, model)
-        key_list = [key for key, _ in model.named_modules()]
+
+        named_modules = list(model.named_modules())
+        key_list = [key for key, _ in named_modules]
 
         uses_dummy_target_modules = getattr(peft_config, "target_modules", None) == DUMMY_TARGET_MODULES
         if uses_dummy_target_modules:
             # dummy adapter, we allow not matching any module
+            named_modules = []
             key_list = []
 
         # update peft_config.target_modules if required
@@ -469,8 +470,23 @@ class BaseTuner(nn.Module, ABC):
             if len(new_target_modules) < len(peft_config.target_modules):
                 peft_config.target_modules = new_target_modules
 
-        for key in key_list:
+        existing_adapter_map = {}
+        for key, module in named_modules:
+            if isinstance(module, BaseTunerLayer):
+                existing_adapter_map[key] = module
+
+        for key, module in named_modules:
             if not key:
+                continue
+
+            # It is possible that we're adding an additional adapter, so if we encounter a key that clearly belongs to a
+            # previous adapter we can skip here since we don't want to interfere with adapter internals.
+            for adapter_key in existing_adapter_map:
+                if key.startswith(adapter_key + "."):
+                    excluded_modules.append(key)
+                    break
+
+            if excluded_modules and excluded_modules[-1] == key:
                 continue
 
             result = self._check_target_module_exists(peft_config, key)
