@@ -838,10 +838,10 @@ class Embedding(nn.Module, LoraLayer):
         init_lora_weights,
         use_rslora,
         use_dora,
-        use_sinelora,
         lora_bias,
-        sinelora_frequency,
-        sinelora_scaling,
+        use_sinelora: bool = False,
+        sinelora_frequency: float = 200.0,
+        sinelora_scaling: Optional[float] = None,
     ):
         # collect the kwargs
         kwargs = locals().copy()
@@ -850,7 +850,7 @@ class Embedding(nn.Module, LoraLayer):
         if use_sinelora:
             self.sinelora_frequency = sinelora_frequency
             self.sinelora_scaling = sinelora_scaling
-            
+
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
@@ -1027,7 +1027,7 @@ class Embedding(nn.Module, LoraLayer):
             norm_type=base_layer.norm_type,
             scale_grad_by_freq=base_layer.scale_grad_by_freq,
             sparse=base_layer.sparse,
-        )
+        ) 
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         # TODO: no dtype conversion here, unlike in Linear, is that correct?
@@ -1371,13 +1371,12 @@ class Conv1d(_ConvNd):
             raise ValueError(f"Conv1d layer kernel must have 3 dimensions, not {self._kernel_dim}")
         self.conv_fn = F.conv1d
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+    def resolve_lora_variant(self, *, use_dora: bool, use_sinelora: bool, **kwargs) -> Optional[LoraVariant]:
         if not use_dora:
-            return None
-
-        from .variants import DoraConv1dVariant
-
-        return DoraConv1dVariant()
+            from .variants import DoraConv1dVariant
+        elif use_sinelora:
+            from .variants import SineLoraConv1dVariant
+        return None
 
 
 class Conv3d(_ConvNd):

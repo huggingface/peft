@@ -24,6 +24,7 @@ from peft.utils.other import transpose
 
 from .dora import DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer
 from .layer import Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd
+from transformers.pytorch_utils import Conv1D
 
 
 class DoraLinearVariant(LoraVariant):
@@ -293,15 +294,53 @@ class DoraConv3dVariant(_DoraConvNdVariant):
 class SineLoraLinearVariant(LoraVariant):
     @staticmethod
     def init(module: Linear, adapter_name: str, **kwargs) -> None:
-        module.sinelora_frequency = kwargs['sinelora_frequency']
+        module.sinelora_frequency = kwargs["sinelora_frequency"]
 
-        module.sinelora_scaling = kwargs['sinelora_scaling']
+        module.sinelora_scaling = kwargs["sinelora_scaling"]
         if module.sinelora_scaling is None:
             module.sinelora_scaling = math.sqrt(module.in_features)
 
     @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        delta_weight = (
+            torch.sin(module.sinelora_frequency * lora_A.weight.T @ lora_B.weight.T).T
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+        unmerged_weight = orig_weight - delta_weight
+        return unmerged_weight
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        delta_weight = (
+            torch.sin(module.sinelora_frequency * (lora_A.weight.T @ lora_B.weight.T)).T
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+        merged_weight = orig_weight + delta_weight
+        if not torch.isfinite(merged_weight).all():
+            raise ValueError(f"NaNs detected in merged weights for adapter {active_adapter}")
+        module._cache_store(f"{active_adapter}-delta_weight", delta_weight)
+        return merged_weight
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        delta_weight = (
+            torch.sin(module.sinelora_frequency * (lora_A.weight.T @ lora_B.weight.T)).T
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+        module._cache_store(f"{active_adapter}-delta_weight", delta_weight)
+        orig_weight.data += delta_weight
+    @staticmethod
     def forward(module: Linear, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
-
         lora_A = module.lora_A[active_adapter]
         lora_B = module.lora_B[active_adapter]
         lora_scaling = module.scaling[active_adapter]
@@ -312,27 +351,85 @@ class SineLoraLinearVariant(LoraVariant):
             * lora_scaling
         )
         result = result + sine_output
+        return result
 
-
-class SineLoraEmbeddingVariant(SineLoraLinearVariant):
+class SineLoraEmbeddingVariant(LoraVariant):
     @staticmethod
     def init(module: Embedding, adapter_name: str, **kwargs) -> None:
-        module.sinelora_frequency = kwargs['sinelora_frequency']
+        module.sinelora_frequency = kwargs["sinelora_frequency"]
 
-        sinelora_scaling = kwargs['sinelora_scaling']
+        sinelora_scaling = kwargs["sinelora_scaling"]
         if sinelora_scaling is None:
             module.sinelora_scaling = math.sqrt(module.in_features)
-
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        lora_embedding_A = module.lora_embedding_A[active_adapter]
+        lora_embedding_B = module.lora_embedding_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        delta_weight = (
+            torch.sin(module.sinelora_frequency * lora_embedding_A.T @ lora_embedding_B.T)
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+        unmerged_weight = orig_weight - delta_weight
+        return unmerged_weight
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        lora_embedding_A = module.lora_embedding_A[active_adapter]
+        lora_embedding_B = module.lora_embedding_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        delta_weight = (
+            torch.sin(module.sinelora_frequency * (lora_embedding_A.T @ lora_embedding_B.T))
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+        merged_weight = orig_weight + delta_weight
+        if not torch.isfinite(merged_weight).all():
+            raise ValueError(f"NaNs detected in merged weights for adapter {active_adapter}")
+        module._cache_store(f"{active_adapter}-delta_weight", delta_weight)
+        return merged_weight
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        lora_embedding_A = module.lora_embedding_A[active_adapter]
+        lora_embedding_B = module.lora_embedding_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        delta_weight = (
+            torch.sin(module.sinelora_frequency * (lora_embedding_A.T @ lora_embedding_B.T))
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+        module._cache_store(f"{active_adapter}-delta_weight", delta_weight)
+        orig_weight.data += delta_weight
     @staticmethod
     def forward(module: Embedding, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
         lora_embedding_A = module.lora_embedding_A[active_adapter]
         lora_embedding_B = module.lora_embedding_B[active_adapter]
         lora_scaling = module.scaling[active_adapter]
         sine_output = (
-            module._embed(x)
-            @ torch.sin(module.sinelora_frequency * lora_embedding_A.weight.T @ lora_embedding_B.weight.T)
-            / module.sinelora_scaling
-            * lora_scaling
+            module._embed(x,
+             torch.sin(module.sinelora_frequency * lora_embedding_A.T @ lora_embedding_B.T)/ module.sinelora_scaling * lora_scaling)
         )
         result = result + sine_output
         return result
+
+class DoraEmbeddingLayer(DoraLinearLayer):
+    def forward(self, x, *, lora_A, lora_B, scaling, base_layer, embed_fn):
+        """
+        For DoRA, calculate the extra output from LoRA with DoRA applied. This should be added on top of the base layer
+        output.
+        """
+        lora_weight = (lora_A @ lora_B).T
+        magnitude = self.weight
+        weight = base_layer.weight
+        weight_norm = self.get_weight_norm(weight, lora_weight.detach(), scaling)
+        # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
+        # "[...] we suggest treating ||V +∆V ||_c in
+        # Eq. (5) as a constant, thereby detaching it from the gradient
+        # graph. This means that while ||V + ∆V ||_c dynamically
+        # reflects the updates of ∆V , it won’t receive any gradient
+        # during backpropagation"
+        weight_norm = weight_norm.detach()
+        mag_norm_scale = magnitude / weight_norm
+        result_dora = mag_norm_scale * (embed_fn(x, lora_A) @ lora_B) * scaling
+        return mag_norm_scale, result_dora
+
