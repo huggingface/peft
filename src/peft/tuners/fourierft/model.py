@@ -39,7 +39,7 @@ class FourierFTModel(BaseTuner):
     """
     Creates FourierFT model from a pretrained transformers model.
 
-    The method is described in detail in https://arxiv.org/abs/2405.03003.
+    The method is described in detail in https://huggingface.co/papers/2405.03003.
 
     Args:
         model ([`torch.nn.Module`]): The model to be adapted.

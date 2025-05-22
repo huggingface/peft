@@ -158,7 +158,7 @@ class XLoraModel(BaseTuner):
     Creates an X-LoRA (Mixture of LoRA experts), model from a pretrained transformers model. Currently, this X-LoRA
     implementation only works with models with a transformer architecture.
 
-    The method is described in detail in https://arxiv.org/abs/2402.07148.
+    The method is described in detail in https://huggingface.co/papers/2402.07148.
 
     Args:
         model ([`torch.nn.Module`]): The model to be adapted.

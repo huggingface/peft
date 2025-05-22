@@ -26,7 +26,7 @@ from .layer import Conv2d, Linear, LoHaLayer
 class LoHaModel(LycorisTuner):
     """
     Creates Low-Rank Hadamard Product model from a pretrained model. The method is partially described in
-    https://arxiv.org/abs/2108.06098 Current implementation heavily borrows from
+    https://huggingface.co/papers/2108.06098 Current implementation heavily borrows from
     https://github.com/KohakuBlueleaf/LyCORIS/blob/eb460098187f752a5d66406d3affade6f0a07ece/lycoris/modules/loha.py
 
     Args:
