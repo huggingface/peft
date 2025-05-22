@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # OFT
 
-[Orthogonal Finetuning (OFT)](https://hf.co/papers/2306.07280) is a method developed for adapting text-to-image diffusion models. It works by reparameterizing the pretrained weight matrices with it's orthogonal matrix to preserve information in the pretrained model. To reduce the number of parameters, OFT introduces a block-diagonal structure in the orthogonal matrix.
+[Orthogonal Finetuning (OFT)](https://hf.co/papers/2306.07280) is a method developed for adapting text-to-image diffusion models. It works by reparameterizing the pretrained weight matrices with its orthogonal matrix to preserve information in the pretrained model. To reduce the number of parameters, OFT introduces a block-diagonal structure in the orthogonal matrix.
 
 The abstract from the paper is:
 
