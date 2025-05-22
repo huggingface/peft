@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import warnings
-from typing import Any, List, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -84,12 +84,13 @@ class FourierFTLayer(BaseTunerLayer):
             nn.init.zeros_(self.fourierft_spectrum[adapter_name])
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
+        # careful: ifft2 does not work with float16 or bfloat16
         spectrum = self.fourierft_spectrum[adapter]
         indices = self.indices[adapter].to(spectrum.device)
-        dense_spectrum = torch.zeros(self.out_features, self.in_features, device=spectrum.device, dtype=spectrum.dtype)
-        dense_spectrum[indices[0, :], indices[1, :]] = spectrum
+        dense_spectrum = torch.zeros(self.out_features, self.in_features, device=spectrum.device)
+        dense_spectrum[indices[0, :], indices[1, :]] = spectrum.float()
         delta_weight = torch.fft.ifft2(dense_spectrum).real * self.fourierft_scaling[adapter]
-        return delta_weight
+        return delta_weight.to(spectrum.dtype)
 
 
 class FourierFTLinear(nn.Module, FourierFTLayer):
@@ -111,7 +112,7 @@ class FourierFTLinear(nn.Module, FourierFTLayer):
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, n_frequency, scaling, init_weights, random_loc_seed)
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 

@@ -14,12 +14,12 @@
 
 import warnings
 from collections import Counter, defaultdict
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from contextlib import nullcontext
 from copy import deepcopy
 from functools import partial
 from itertools import cycle
-from typing import Dict, Iterable, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -293,7 +293,7 @@ def _get_eva_state_dict(
     target_module_check_fn: callable,
     forward_fn: Optional[callable],
     prepare_model_inputs_fn: Optional[callable],
-    prepare_layer_inputs_fn: Union[callable, Dict[str, callable], None],
+    prepare_layer_inputs_fn: Union[callable, dict[str, callable], None],
     gather_distributed_inputs: bool,
     show_progress_bar: bool,
 ) -> dict:
@@ -565,7 +565,7 @@ def get_eva_state_dict(
     peft_config: Optional[LoraConfig] = None,
     forward_fn: Optional[callable] = forward_fn_dict,
     prepare_model_inputs_fn: Optional[callable] = prepare_model_inputs_fn_language_modeling,
-    prepare_layer_inputs_fn: Union[callable, Dict[str, callable], None] = prepare_layer_inputs_fn_language_modeling,
+    prepare_layer_inputs_fn: Union[callable, dict[str, callable], None] = prepare_layer_inputs_fn_language_modeling,
     adapter_name: str = "default",
     gather_distributed_inputs: bool = True,
     show_progress_bar: bool = True,
@@ -663,7 +663,7 @@ def initialize_lora_eva_weights(
     eva_state_dict: Optional[dict] = None,
     forward_fn: Optional[callable] = forward_fn_dict,
     prepare_model_inputs_fn: Optional[callable] = prepare_model_inputs_fn_language_modeling,
-    prepare_layer_inputs_fn: Union[callable, Dict[str, callable], None] = prepare_layer_inputs_fn_language_modeling,
+    prepare_layer_inputs_fn: Union[callable, dict[str, callable], None] = prepare_layer_inputs_fn_language_modeling,
     adapter_name: str = "default",
     gather_distributed_inputs: bool = True,
     show_progress_bar: bool = True,

@@ -4,7 +4,7 @@ line-length = 119
 target-version = ['py38']
 
 [tool.ruff]
-target-version = "py38"
+target-version = "py39"
 line-length = 119
 extend-exclude = ["*.ipynb"]
 
@@ -26,6 +26,7 @@ ignore = [
     "E501", # Line length (handled by ruff-format)
     "F841", # unused variable
     "UP007", # X | Y style Unions
+    "C420", # dict.fromkeys
 ]
 
 [tool.ruff.lint.isort]

@@ -18,8 +18,9 @@ import inspect
 import os
 import re
 import warnings
+from collections.abc import Sequence
 from contextlib import nullcontext
-from typing import Any, Optional, Sequence, Union
+from typing import Any, Optional, Union
 
 import accelerate
 import torch
@@ -43,6 +44,7 @@ from .constants import (
     TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
+    TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
     WEIGHTS_NAME,
@@ -70,6 +72,7 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
+    "TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING",
     "WEIGHTS_NAME",
@@ -348,10 +351,8 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
     ) -> torch.Tensor:
         raise NotImplementedError
 
-    def _forward_disabled(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
-        """The forward call when all 'adapters' are disabled. For example this could entail
-        restoring (unmerging) a base model and returning its forward return values.
-        """
+    def _forward_wrapped_passthrough(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        """The forward call when no adapter is involved in the forward computation, only the base model"""
         raise NotImplementedError
 
     def _mixed_batch_forward(
@@ -393,7 +394,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         adapter_names = kwargs.pop("adapter_names", None)
 
         if self.disable_adapters or any(adapter not in self._adapters for adapter in self.active_adapters):
-            return self._forward_wrapped_disabled(x, *args, **kwargs)
+            return self._forward_wrapped_passthrough(x, *args, **kwargs)
 
         if adapter_names is None:
             return self._forward_wrapped(x, *args, **kwargs)
@@ -425,6 +426,10 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
                     raise ValueError(f"Adapter {adapter_name} not found in {self._adapters}")
 
                 self._active_adapter.append(adapter_name)
+
+    def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
+        """Delete an adapter from the layer, set a new active adapter if necessary"""
+        raise NotImplementedError
 
     def adapter_state_dict(self, adapter_name):
         """Return the state dict of this module for a given adapter."""
@@ -462,12 +467,14 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         return "modules_to_save"
 
     def _forward_wrapped(self, x, *args, **kwargs):
+        if not self.active_adapters:
+            return self._forward_wrapped_passthrough(x, *args, **kwargs)
         return self.modules_to_save[self.active_adapters[0]](x, *args, **kwargs)
 
     def _forward_wrapped_mixed_batch(self, x, active_adapter, *args, **kwargs):
         return self.modules_to_save[active_adapter](x, *args, **kwargs)
 
-    def _forward_wrapped_disabled(self, x, *args, **kwargs):
+    def _forward_wrapped_passthrough(self, x, *args, **kwargs):
         return self.original_module(x, *args, **kwargs)
 
     def _hasattr_wrapped(self, name, modules):
@@ -549,6 +556,45 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         self.modules_to_save[self.active_adapters[0]].requires_grad_(False)
         self.modules_to_save[adapter_name].requires_grad_(True)
         self._active_adapter = adapter_name
+
+    def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
+        """
+        Delete the adapter if present.
+
+        This method will also set a new active adapter if the deleted adapter was the active adapter. It is important
+        that the new adapter is chosen by the caller in a deterministic way, so that the same adapter is chosen on all
+        layers.
+        """
+        if adapter_name not in self.modules_to_save:
+            return
+
+        # set new active adapter, if necessary
+        # note: there can only ever be one active adapter, unlike for LoRA etc.
+        if isinstance(new_active_adapters, (list, tuple)) and len(new_active_adapters) > 1:
+            name = self.__class__.__name__
+            raise ValueError(
+                f"Attempted to set multiple ({new_active_adapters}) adapters at once for {name}, which is not allowed."
+            )
+
+        if adapter_name in self._adapters:
+            self._adapters.remove(adapter_name)
+
+        if not new_active_adapters:
+            # no active adapter now
+            del self.modules_to_save[adapter_name]
+            self._active_adapter = []
+            return
+
+        new_active_adapter = new_active_adapters[0]
+        if new_active_adapter not in self.modules_to_save:
+            # a new active adapter was chosen but it seems like it has no modules_to_save
+            del self.modules_to_save[adapter_name]
+            self._active_adapter = []
+            return
+
+        if new_active_adapter != self.active_adapters[0]:
+            self.set_adapter(new_active_adapter)
+        del self.modules_to_save[adapter_name]
 
     def adapter_state_dict_load_map(self, adapter_name):
         # Maps the module keys as they are in the saved state dict to the in-memory state dict.
@@ -643,14 +689,16 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         )
 
     def _forward_wrapped(self, x, *args, **kwargs):
+        if not self.active_adapters:
+            return self._forward_wrapped_passthrough(x, *args, **kwargs)
         return self.token_adapter(x)
 
     def _forward_wrapped_mixed_batch(self, x, active_adapter, *args, **kwargs):
         return self.token_adapter.forward_adapters(x, [active_adapter])
 
-    def _forward_wrapped_disabled(self, x, *args, **kwargs):
-        # we already disabled the adapter so we can safely forward call to the adapter
-        # since it will know best what to do when being disabled.
+    def _forward_wrapped_passthrough(self, x, *args, **kwargs):
+        # the token adapter knows how to deal with disabled adapter / no active adapter, don't call original_module
+        # directly
         return self.token_adapter(x, *args, **kwargs)
 
     def update(self, active_adapter, **kwargs):
@@ -688,6 +736,39 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
     def set_adapter(self, adapter_names: Union[str, list[str]]):
         super().set_adapter(adapter_names)
         self.token_adapter.set_adapter(adapter_names)
+
+    def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
+        """
+        Delete the adapter if present.
+
+        This method will also set a new active adapter if the deleted adapter was the active adapter. It is important
+        that the new adapter is chosen by the caller in a deterministic way, so that the same adapter is chosen on all
+        layers.
+        """
+        self.token_adapter.delete_adapter(adapter_name)
+
+        # set new active adapter, if necessary
+        # note: there can only ever be one active adapter, unlike for LoRA etc.
+        if isinstance(new_active_adapters, (list, tuple)) and len(new_active_adapters) > 1:
+            name = self.__class__.__name__
+            raise ValueError(
+                f"Attempted to set multiple ({new_active_adapters}) adapters at once for {name}, which is not allowed."
+            )
+
+        if adapter_name in self._adapters:
+            self._adapters.remove(adapter_name)
+
+        if not new_active_adapters:
+            self._active_adapter = []
+            return
+
+        if new_active_adapters[0] not in self.token_adapter.trainable_tokens_delta:
+            # a new active adapter was chosen but it seems like it has no trainable_tokens
+            self._active_adapter = []
+            return
+
+        new_active_adapter = new_active_adapters[0]
+        self.set_adapter(new_active_adapter)
 
     def unload_and_optionally_merge_module(
         self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]
@@ -748,6 +829,11 @@ def _set_trainable(
     """
     if wrapper_cls is None:
         wrapper_cls = ModulesToSaveWrapper
+
+    if not module_names:
+        # This is useful for the case that the PEFT config does not have `modules_to_save`, e.g.
+        # in the case of prompt tuning and friends.
+        return
 
     trainable_modules = []
     found_modules = set()
@@ -1121,3 +1207,64 @@ def get_pattern_key(pattern_keys: Sequence[str], key_to_match: str) -> str:
         return key
 
     return key_to_match
+
+
+def set_additional_trainable_modules(model, peft_config, model_config, adapter_name):
+    """Handle the resolution of additional trainable modules (also called AuxiliaryTrainingWrapper)
+    by checking the config if such modules are requested and adding them to the model.
+
+    Currently trainable tokens and modules to save are considered additional trainable modules.
+    """
+    if getattr(peft_config, "modules_to_save", None) is not None:
+        # this may add a new ModulesToSaveWrapper
+        _set_trainable(model, adapter_name, module_names=getattr(peft_config, "modules_to_save", None))
+
+    if getattr(peft_config, "trainable_token_indices", None) is not None:
+        if isinstance(peft_config.trainable_token_indices, dict):
+            target_layers = peft_config.trainable_token_indices
+        else:
+            layer_name = _get_input_embeddings_name(model, "embed_tokens")
+            target_layers = {layer_name: peft_config.trainable_token_indices}
+
+        modules_to_save = getattr(peft_config, "modules_to_save", None)
+        if modules_to_save is not None:
+            for target_layer in target_layers:
+                if target_layer in modules_to_save:
+                    raise ValueError(
+                        "The embedding layer is already marked to be trained fully, either specify "
+                        f'`modules_to_save=[..., "{target_layer}", ...]` or '
+                        f"`trainable_tokens={{'{target_layer}': x}}` but not both."
+                    )
+
+        for target_layer, token_indices in target_layers.items():
+            _set_trainable(
+                model,
+                adapter_name,
+                module_names=[target_layer],
+                strict_module_check=True,
+                wrapper_cls=TrainableTokensWrapper,
+                token_indices=token_indices,
+            )
+
+        # There might be the possibility that we have output weights that are tied to the input weights.
+        # In that case we will tie any module that wants tied weights to the token adapter to make sure that
+        # any modification is reflected in the tied layers as well.
+        if (
+            model_config.get("tie_word_embeddings", False)
+            # some models may be misconfigured to have weight tying enabled but don't define tied weights keys
+            and model._tied_weights_keys is not None
+            and isinstance(model.get_input_embeddings(), TrainableTokensWrapper)
+        ):
+            # the embedding layer is modified and we want weight tying.
+            module_keys = [".".join(n.split(".")[:-1]) for n in model._tied_weights_keys]
+
+            token_adapter = model.get_input_embeddings().token_adapter
+            _set_trainable(
+                model,
+                adapter_name,
+                module_names=module_keys,
+                strict_module_check=True,
+                wrapper_cls=TrainableTokensWrapper,
+                token_indices=token_adapter.token_indices[adapter_name],
+                tied_adapter=model.get_input_embeddings().token_adapter,
+            )

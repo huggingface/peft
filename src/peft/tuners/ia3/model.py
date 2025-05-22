@@ -403,6 +403,7 @@ class IA3Model(BaseTuner):
                     new_adapter = target.active_adapters[:]
 
         self.active_adapter = new_adapter or []
+        self._delete_auxiliary_adapter(adapter_name, new_active_adapters=new_adapter)
 
     def _check_add_weighted_adapter(self, adapters: list[str]) -> tuple[str, str]:
         """

@@ -52,6 +52,7 @@ from .config import LoraConfig
 from .eetq import dispatch_eetq
 from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
+from .inc import dispatch_inc
 from .layer import Conv2d, LoraLayer, dispatch_default
 from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
@@ -334,6 +335,7 @@ class LoraModel(BaseTuner):
                 dispatch_awq,
                 dispatch_gptq,
                 dispatch_hqq,
+                dispatch_inc,
                 dispatch_torchao,
                 dispatch_megatron,
                 dispatch_default,
@@ -565,7 +567,12 @@ class LoraModel(BaseTuner):
         # if there is only one adapter, we can only use linear merging
         combination_type = "linear" if len(adapters) == 1 else combination_type
 
-        adapters_ranks = [self.peft_config[adapter].r for adapter in adapters]
+        adapters_ranks: list[int] = [
+            # When allocating tensors for the new adapter, we need the maximum possible rank to not overflow
+            config.r if not config.rank_pattern else max(config.r, *config.rank_pattern.values())
+            for config in (self.peft_config[adapter] for adapter in adapters)
+        ]
+
         if combination_type in ("linear", "ties", "dare_ties", "dare_linear", "magnitude_prune"):
             # all adapters ranks should be same, new rank is just this value
             if len(set(adapters_ranks)) != 1:
@@ -871,6 +878,7 @@ class LoraModel(BaseTuner):
                     new_adapter = target.active_adapters[:]
 
         self.active_adapter = new_adapter or []
+        self._delete_auxiliary_adapter(adapter_name, new_active_adapters=new_adapter)
 
     def merge_and_unload(
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None

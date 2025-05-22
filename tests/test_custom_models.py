@@ -16,6 +16,7 @@
 # limitations under the License.
 import copy
 import os
+import platform
 import re
 import shutil
 import tempfile
@@ -45,6 +46,7 @@ from peft import (
     LoraConfig,
     OFTConfig,
     PeftModel,
+    RandLoraConfig,
     TaskType,
     TrainableTokensConfig,
     VBLoRAConfig,
@@ -111,6 +113,7 @@ TEST_CASES = [
         {"target_modules": ["conv1d"], "trainable_token_indices": {"emb": [0, 10]}},
     ),
     ("Conv1d LoRA", "Conv1d", LoraConfig, {"target_modules": ["conv1d"]}),
+    ("Conv1d LoRA with DoRA", "Conv1d", LoraConfig, {"target_modules": ["conv1d"], "use_dora": True}),
     ("Conv2d 1 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
     ("Conv2d 1 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"], "use_dora": True}),
@@ -122,14 +125,25 @@ TEST_CASES = [
     ("Conv3d 1 LoRA with DoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d"], "use_dora": True}),
     ("Conv3d 2 LoRA with DoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d", "lin0"], "use_dora": True}),
     # LoRA with lora_B bias enabled (note: embedding is not supported)
+    # It's important to set lora_alpha != r to ensure that scaling is taken into account correctly
     (
         "Vanilla MLP 1 LoRA with lora_b bias",
         "MLP",
         LoraConfig,
-        {"target_modules": ["lin0", "lin1"], "lora_bias": True},
+        {"target_modules": ["lin0", "lin1"], "lora_bias": True, "lora_alpha": 32},
     ),
-    ("Conv2d 1 LoRA with lora_b bias", "Conv2d", LoraConfig, {"target_modules": ["conv2d"], "lora_bias": True}),
-    ("Conv3d 1 LoRA with lora_b bias", "Conv3d", LoraConfig, {"target_modules": ["conv3d"], "lora_bias": True}),
+    (
+        "Conv2d 1 LoRA with lora_b bias",
+        "Conv2d",
+        LoraConfig,
+        {"target_modules": ["conv2d"], "lora_bias": True, "lora_alpha": 32},
+    ),
+    (
+        "Conv3d 1 LoRA with lora_b bias",
+        "Conv3d",
+        LoraConfig,
+        {"target_modules": ["conv3d"], "lora_bias": True, "lora_alpha": 32},
+    ),
     ("MHA 1 LoRA", "MHA", LoraConfig, {"target_modules": ["mha"]}),
     ("MHA 2 LoRA", "MHA", LoraConfig, {"target_modules": ["mha", "lin0"]}),
     #######
@@ -506,6 +520,32 @@ TEST_CASES = [
     ("Embedding + transformers Conv1D LoRA + SineLoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb"], "use_sinelora": True}),
 
     
+    ########
+    # RandLora #
+    ########
+    # We have to reduce the default scaling parameter to avoid nans when using large learning rates
+    ("Vanilla MLP 1 RandLora", "MLP", RandLoraConfig, {"target_modules": "lin0", "randlora_alpha": 1}),
+    ("Vanilla MLP 2 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin0"], "randlora_alpha": 1}),
+    ("Vanilla MLP 3 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin1"], "randlora_alpha": 1}),
+    ("Vanilla MLP 4 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin0", "lin1"], "randlora_alpha": 1}),
+    (
+        "Vanilla MLP 5 RandLora",
+        "MLP",
+        RandLoraConfig,
+        {"target_modules": ["lin0", "lin1"], "sparse": True, "randlora_alpha": 1},
+    ),
+    (
+        "Vanilla MLP 6 RandLora",
+        "MLP",
+        RandLoraConfig,
+        {"target_modules": ["lin0", "lin1"], "very_sparse": True, "randlora_alpha": 1},
+    ),
+    (
+        "Vanilla MLP 7 RandLora",
+        "MLP",
+        RandLoraConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "randlora_alpha": 1},
+    ),
 ]
 
 # For this test matrix, each tuple consists of:
@@ -612,6 +652,14 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_weights": False},
         {"target_modules": ["lin0"], "init_weights": False},
     ),
+    # Note: RandLora may present the same problem mentioned above for Vera.
+    (
+        "RandLora Same",
+        "randlora",
+        RandLoraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
     (
         "HRA Same",
         "hra",
@@ -679,6 +727,7 @@ PREFIXES = {
     BOFTConfig: "boft_",
     LNTuningConfig: "ln_tuning_",
     VeraConfig: "vera_lambda_",
+    RandLoraConfig: "randlora_",
     FourierFTConfig: "fourierft_",
     HRAConfig: "hra_",
     VBLoRAConfig: "vblora_",
@@ -695,9 +744,10 @@ class MLP(nn.Module):
         self.drop = nn.Dropout(0.5)
         self.lin1 = nn.Linear(20, 2, bias=bias)
         self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
 
     def forward(self, X):
-        X = X.float()
+        X = X.to(self.dtype)
         X = self.lin0(X)
         X = self.relu(X)
         X = self.drop(X)
@@ -715,9 +765,10 @@ class MLPWithGRU(nn.Module):
         self.gru = nn.GRU(input_size=20, hidden_size=20, num_layers=1, batch_first=True, bias=bias)
         self.fc = nn.Linear(20, 2, bias=bias)
         self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
 
     def forward(self, X):
-        X = X.float()
+        X = X.to(self.dtype)
         X = self.lin0(X)
         X = self.relu(X)
         X = self.drop(X)
@@ -739,9 +790,10 @@ class MLP_LayerNorm(nn.Module):
         self.layernorm1 = nn.LayerNorm(20, 20)
         self.lin1 = nn.Linear(20, 2, bias=bias)
         self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
 
     def forward(self, X):
-        X = X.float()
+        X = X.to(self.dtype)
         X = self.layernorm0(X)
         X = self.lin0(X)
         X = self.relu(X)
@@ -760,9 +812,10 @@ class MLP2(nn.Module):
         self.drop = nn.Dropout(0.5)
         self.lin1 = nn.Linear(32, 2, bias=bias)
         self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
 
     def forward(self, X):
-        X = X.float()
+        X = X.to(self.dtype)
         X = self.lin0(X)
         X = self.relu(X)
         X = self.drop(X)
@@ -859,9 +912,11 @@ class ModelConv1D(nn.Module):
         self.flat = nn.Flatten()
         self.lin0 = nn.Linear(9, 2)
         self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
 
     def forward(self, X):
-        X = X.float().reshape(-1, 1, 10)
+        X = X.to(self.dtype)
+        X = X.reshape(-1, 1, 10)
         X = self.conv1d(X)
         X = self.relu(X)
         X = self.flat(X)
@@ -878,9 +933,11 @@ class ModelConv2D(nn.Module):
         self.flat = nn.Flatten()
         self.lin0 = nn.Linear(10, 2)
         self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
 
     def forward(self, X):
-        X = X.float().reshape(-1, 5, 3, 3)
+        X = X.to(self.dtype)
+        X = X.reshape(-1, 5, 3, 3)
         X = self.conv2d(X)
         X = self.relu(X)
         X = self.flat(X)
@@ -898,9 +955,10 @@ class ModelConv2D2(nn.Module):
         self.flat = nn.Flatten()
         self.lin1 = nn.Linear(32, 2)
         self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
 
     def forward(self, X):
-        X = X.float()
+        X = X.to(self.dtype)
         X = self.lin0(X)
         X = self.relu(X)
         X = X.reshape(-1, 8, 3, 3)
@@ -920,9 +978,11 @@ class ModelConv2DGroups(nn.Module):
         self.flat = nn.Flatten()
         self.lin0 = nn.Linear(5, 2)
         self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
 
     def forward(self, X):
-        X = X.float().reshape(-1, 5, 3, 3)
+        X = X.to(self.dtype)
+        X = X.reshape(-1, 5, 3, 3)
         X = self.conv2d(X)
         X = self.relu(X)
         X = self.flat(X)
@@ -939,12 +999,14 @@ class ModelConv3D(nn.Module):
         self.flat = nn.Flatten()
         self.lin0 = nn.Linear(10, 2)
         self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
 
     def forward(self, X):
+        X = X.to(self.dtype)
         # If necessary, convert from 2D image to 3D volume
         if X.dim() == 2:
             X = torch.stack([X] * 3, dim=-1)
-        X = X.float().reshape(-1, 5, 3, 3, 3)
+        X = X.reshape(-1, 5, 3, 3, 3)
         X = self.conv3d(X)
         X = self.relu(X)
         X = self.flat(X)
@@ -959,9 +1021,10 @@ class ModelMha(nn.Module):
         self.mha = nn.MultiheadAttention(10, 2)
         self.lin0 = nn.Linear(10, 2)
         self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
 
     def forward(self, X):
-        X = X.float()
+        X = X.to(self.dtype)
         X, _ = self.mha(X, X, X)
         X = self.lin0(X)
         X = self.sm(X)
@@ -1192,6 +1255,172 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert torch.isfinite(output).all()
 
     @parameterized.expand(TEST_CASES)
+    def test_forward_float16(self, test_name, model_id, config_cls, config_kwargs):
+        # The user manually sets the dtype of the base model to fp16 precision. This should not cause an error for the
+        # different PEFT methods.
+        try:
+            torch.zeros(1, dtype=torch.float16)
+        except Exception:
+            # skip this test if float16 is not supported on this machine
+            self.skipTest(reason="Test requires float16 support")
+
+        # skip on MacOS
+        if platform.system() == "Darwin":
+            self.skipTest(reason="MacOS does not support multiple ops in float16")
+
+        X = self.prepare_inputs_for_testing()
+        model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16).to(self.torch_device)
+        model.dtype = torch.float16
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model.eval()
+
+        # check that none of this raises an error
+        model(**X)
+
+        if model_id in ["Conv2dGroups"]:
+            # this model does not support merging
+            return
+
+        model.merge_adapter(safe_merge=False)
+        model(**X)
+        model.unmerge_adapter()
+        model(**X)
+        model.merge_adapter(safe_merge=True)
+        model(**X)
+        model.unmerge_adapter()
+        model(**X)
+        model = model.merge_and_unload()
+        model(**X)
+
+    @parameterized.expand(TEST_CASES)
+    def test_forward_bfloat16(self, test_name, model_id, config_cls, config_kwargs):
+        # The user manually sets the dtype of the base model to bf16 precision. This should not cause an error for the
+        # different PEFT methods.
+        try:
+            torch.zeros(1, dtype=torch.bfloat16)
+        except Exception:
+            # skip this test if float16 is not supported on this machine
+            self.skipTest(reason="Test requires bfloat16 support")
+
+        # skip on MacOS
+        if platform.system() == "Darwin":
+            self.skipTest(reason="MacOS does not support multiple ops in bfloat16")
+
+        X = self.prepare_inputs_for_testing()
+        model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16).to(self.torch_device)
+        model.dtype = torch.bfloat16
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model.eval()
+
+        # check that none of this raises an error
+        model(**X)
+
+        if model_id in ["Conv2dGroups"]:
+            # this model does not support merging
+            return
+
+        model.merge_adapter(safe_merge=False)
+        model(**X)
+        model.unmerge_adapter()
+        model(**X)
+        model.merge_adapter(safe_merge=True)
+        model(**X)
+        model.unmerge_adapter()
+        model(**X)
+        model = model.merge_and_unload()
+        model(**X)
+
+    @parameterized.expand(TEST_CASES)
+    def test_forward_float16_no_autocast(self, test_name, model_id, config_cls, config_kwargs):
+        # Same as above but don't autocast adapter weights to float32 automatically
+        try:
+            torch.zeros(1, dtype=torch.float16)
+        except Exception:
+            # skip this test if float16 is not supported on this machine
+            self.skipTest(reason="Test requires float16 support")
+
+        # skip on MacOS
+        if platform.system() == "Darwin":
+            self.skipTest(reason="MacOS does not support multiple ops in float16")
+
+        X = self.prepare_inputs_for_testing()
+        model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16).to(self.torch_device)
+        model.dtype = torch.float16
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config, autocast_adapter_dtype=False)
+        model.eval()
+
+        # check that none of this raises an error
+        model(**X)
+
+        if model_id in ["Conv2dGroups"]:
+            # this model does not support merging
+            return
+
+        model.merge_adapter(safe_merge=False)
+        model(**X)
+        model.unmerge_adapter()
+        model(**X)
+        model.merge_adapter(safe_merge=True)
+        model(**X)
+        model.unmerge_adapter()
+        model(**X)
+        model = model.merge_and_unload()
+        model(**X)
+
+    @parameterized.expand(TEST_CASES)
+    def test_forward_bfloat16_no_autocast(self, test_name, model_id, config_cls, config_kwargs):
+        # Same as above but don't autocast adapter weights to float32 automatically
+        try:
+            torch.zeros(1, dtype=torch.bfloat16)
+        except Exception:
+            # skip this test if float16 is not supported on this machine
+            self.skipTest(reason="Test requires bfloat16 support")
+
+        # skip on MacOS
+        if platform.system() == "Darwin":
+            self.skipTest(reason="MacOS does not support multiple ops in bfloat16")
+
+        X = self.prepare_inputs_for_testing()
+        model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16).to(self.torch_device)
+        model.dtype = torch.bfloat16
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config, autocast_adapter_dtype=False)
+        model.eval()
+
+        # check that none of this raises an error
+        model(**X)
+
+        if model_id in ["Conv2dGroups"]:
+            # this model does not support merging
+            return
+
+        model.merge_adapter(safe_merge=False)
+        model(**X)
+        model.unmerge_adapter()
+        model(**X)
+        model.merge_adapter(safe_merge=True)
+        model(**X)
+        model.unmerge_adapter()
+        model(**X)
+        model = model.merge_and_unload()
+        model(**X)
+
+    @parameterized.expand(TEST_CASES)
     def test_only_params_are_updated(self, test_name, model_id, config_cls, config_kwargs):
         # An explicit test that when using an adapter on a custom model, only the adapter parameters are updated during
         # training
@@ -1255,7 +1484,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             lr = 0.1  # otherwise we get nan
         elif "mha" in model_id.lower():
             lr = 1e-3  # we get exploding gradients with MHA when learning rate is too high
-        elif issubclass(config_cls, VBLoRAConfig):
+        elif issubclass(config_cls, VBLoRAConfig) or issubclass(config_cls, RandLoraConfig):
             lr = 0.01  # otherwise we get nan
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
@@ -1585,6 +1814,122 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         self._test_delete_inactive_adapter(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(TEST_CASES)
+    def test_delete_unknown_adapter_raises(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_delete_unknown_adapter_raises(model_id, config_cls, config_kwargs)
+
+    def test_delete_adapter_with_multiple_adapters_works(self):
+        # Add 3 adapters, delete the active one, the next one should be active, delete the inactive one, the active one
+        # should stay the same.
+        config0 = LoraConfig(target_modules=["lin0"])
+        config1 = LoraConfig(target_modules=["lin0"])
+        config2 = LoraConfig(target_modules=["lin0"])
+        model = get_peft_model(MLP(), config0, adapter_name="adapter0").to(self.torch_device)
+        model.add_adapter("adapter1", config1)
+        model.add_adapter("adapter2", config2)
+
+        inputs = self.prepare_inputs_for_testing()
+        assert model.active_adapters == ["adapter0"]
+        model(**inputs)  # does not raise
+
+        # delete the active adapter, next one should become active
+        model.delete_adapter("adapter0")
+        assert model.active_adapters == ["adapter1"]
+        model(**inputs)  # does not raise
+
+        # delete an inactive adapter, should not affect the active adapter
+        model.delete_adapter("adapter2")
+        assert model.active_adapters == ["adapter1"]
+        model(**inputs)  # does not raise
+
+    def test_delete_adapter_multiple_adapters_with_modules_to_save(self):
+        # There are 3 adapters. Adapter 0 has modules_to_save. Delete it, we should switch to adapter 1, which does not
+        # have modules_to_save. Then, we delete it too, switching to adapter 2, which has modules_to_save. Finally, we
+        # delete the last adapter (state is updated but forward is no longer possible).
+        model = MLP()
+        inputs = self.prepare_inputs_for_testing()
+
+        config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        config1 = LoraConfig(target_modules=["lin0"])
+        config2 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        model = get_peft_model(model, config0, adapter_name="adapter0").to(self.torch_device)
+        model.add_adapter("adapter1", config1)
+        model.add_adapter("adapter2", config2)
+
+        assert model.active_adapters == ["adapter0"]
+        assert model.modules_to_save == {"lin1"}
+        assert set(model.base_model.model.lin1.modules_to_save) == {"adapter0", "adapter2"}
+        model(**inputs)  # does not raise
+
+        # delete active adapter, should switch to the next adapter (which does not have modules_to_save)
+        model.delete_adapter("adapter0")
+        assert model.active_adapters == ["adapter1"]
+        assert model.modules_to_save == {"lin1"}
+        assert set(model.base_model.model.lin1.modules_to_save) == {"adapter2"}
+        model(**inputs)  # does not raise
+
+        # delete active adapter, should switch to the next adapter (which *does* have modules_to_save)
+        model.delete_adapter("adapter1")
+        assert model.active_adapters == ["adapter2"]
+        assert model.modules_to_save == {"lin1"}
+        assert set(model.base_model.model.lin1.modules_to_save) == {"adapter2"}
+        model(**inputs)  # does not raise
+
+        # delete last adapter
+        model.delete_adapter("adapter2")
+        assert model.active_adapters == []
+        assert model.modules_to_save is None
+        assert set(model.base_model.model.lin1.modules_to_save) == set()
+
+    def test_delete_adapter_multiple_adapters_with_trainable_token_indices(self):
+        # Same as the previous test, just using trainable_token_indices instead of modules_to_save
+        # Note that we need to use a transformers model for trainable_token_indices
+        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+        inputs = {"input_ids": torch.arange(10).view(-1, 1).to(self.torch_device)}
+
+        config0 = LoraConfig(target_modules=["q_proj"], trainable_token_indices=[0, 1])
+        config1 = LoraConfig(target_modules=["q_proj"])
+        config2 = LoraConfig(target_modules=["q_proj"], trainable_token_indices=[1, 3])
+        model = get_peft_model(model, config0, adapter_name="adapter0").to(self.torch_device)
+        model.add_adapter("adapter1", config1)
+        model.add_adapter("adapter2", config2)
+
+        embed_tokens = model.base_model.model.model.decoder.embed_tokens
+        lm_head = model.base_model.model.lm_head
+
+        assert model.active_adapters == ["adapter0"]
+        assert set(embed_tokens.token_adapter.trainable_tokens_delta) == {"adapter0", "adapter2"}
+        assert set(embed_tokens.token_adapter.trainable_tokens_original) == {"adapter0", "adapter2"}
+        assert set(lm_head.token_adapter.trainable_tokens_delta) == {"adapter0", "adapter2"}
+        assert set(lm_head.token_adapter.trainable_tokens_original) == {"adapter0", "adapter2"}
+        model(**inputs)  # does not raise
+
+        # delete active adapter, should switch to the next adapter (which does not have modules_to_save)
+        model.delete_adapter("adapter0")
+        assert model.active_adapters == ["adapter1"]
+        assert set(embed_tokens.token_adapter.trainable_tokens_delta) == {"adapter2"}
+        assert set(embed_tokens.token_adapter.trainable_tokens_original) == {"adapter2"}
+        assert set(lm_head.token_adapter.trainable_tokens_delta) == {"adapter2"}
+        assert set(lm_head.token_adapter.trainable_tokens_original) == {"adapter2"}
+        model(**inputs)  # does not raise
+
+        # delete active adapter, should switch to the next adapter (which *does* have modules_to_save)
+        model.delete_adapter("adapter1")
+        assert model.active_adapters == ["adapter2"]
+        assert set(embed_tokens.token_adapter.trainable_tokens_delta) == {"adapter2"}
+        assert set(embed_tokens.token_adapter.trainable_tokens_original) == {"adapter2"}
+        assert set(lm_head.token_adapter.trainable_tokens_delta) == {"adapter2"}
+        assert set(lm_head.token_adapter.trainable_tokens_original) == {"adapter2"}
+        model(**inputs)  # does not raise
+
+        # delete last adapter
+        model.delete_adapter("adapter2")
+        assert model.active_adapters == []
+        assert set(embed_tokens.token_adapter.trainable_tokens_delta) == set()
+        assert set(embed_tokens.token_adapter.trainable_tokens_original) == set()
+        assert set(lm_head.token_adapter.trainable_tokens_delta) == set()
+        assert set(lm_head.token_adapter.trainable_tokens_original) == set()
+
+    @parameterized.expand(TEST_CASES)
     def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
 
@@ -1725,6 +2070,18 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         )
         with pytest.raises(ValueError, match=msg):
             model.add_weighted_adapter(["default", "other"], weights=[1.0, 1.0], adapter_name="merged")
+
+    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig])
+    def test_add_weighted_adapter_cat_with_rank_pattern(self, config_cls):
+        # Fixes a bug described in #2512, which resulted from the rank_pattern not being taken into account
+        config0 = LoraConfig(target_modules=["lin0", "lin1"], r=8)
+        config1 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 16})
+        model = MLP()
+        model = get_peft_model(model, config0).to(self.torch_device)
+        model.add_adapter("other", config1)
+        model.add_weighted_adapter(
+            ["default", "other"], weights=[1.0, 1.0], adapter_name="merged", combination_type="cat"
+        )
 
     def test_multiple_adapters_no_needless_copy_modules_to_save(self):
         # See 2206
@@ -3583,6 +3940,148 @@ class RequiresGradTester(unittest.TestCase):
             "base_model.model.lin1.vera_lambda_d.adapter1",
             "base_model.model.lin2.vera_lambda_b.adapter1",
             "base_model.model.lin2.vera_lambda_d.adapter1",
+        )
+
+    def test_requires_grad_randlora_different_targets(self):
+        # Test two different RandLora adapters that target different modules. Most notably, ensure that randbasis_A and randbasis_B
+        # don't require grads.
+
+        # requires a model with at least 2 layers with the same shapes
+        class MLP2(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.relu = nn.ReLU()
+                self.lin0 = nn.Linear(10, 20, bias=bias)
+                self.lin1 = nn.Linear(20, 20, bias=bias)  # lin1 and lin2 have same shape
+                self.lin2 = nn.Linear(20, 20, bias=bias)
+                self.lin3 = nn.Linear(20, 2, bias=bias)
+                self.sm = nn.LogSoftmax(dim=-1)
+
+            def forward(self, X):
+                X = X.float()
+                X = self.lin0(X)
+                X = self.relu(X)
+                X = self.lin1(X)
+                X = self.relu(X)
+                X = self.lin2(X)
+                X = self.relu(X)
+                X = self.lin3(X)
+                X = self.sm(X)
+                return X
+
+        config0 = RandLoraConfig(target_modules=["lin1"])
+        peft_model = get_peft_model(MLP2(), config0)
+
+        config1 = RandLoraConfig(target_modules=["lin2"])
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.randlora_lambda.default",
+            "base_model.model.lin1.randlora_gamma.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.randlora_lambda.default",
+            "base_model.model.lin1.randlora_gamma.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin2.randlora_lambda.adapter1",
+            "base_model.model.lin2.randlora_gamma.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin2.randlora_lambda.adapter1",
+            "base_model.model.lin2.randlora_gamma.adapter1",
+        )
+
+    def test_requires_grad_randlora_same_targets(self):
+        # Test two different RandLora adapters that target the same module. Most notably, ensure that randbasis_A and randbasis_B
+        # don't require grads.
+
+        # requires a model with at least 2 layers with the same shapes
+        class MLP2(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.relu = nn.ReLU()
+                self.lin0 = nn.Linear(10, 20, bias=bias)
+                self.lin1 = nn.Linear(20, 20, bias=bias)  # lin1 and lin2 have same shape
+                self.lin2 = nn.Linear(20, 20, bias=bias)
+                self.lin3 = nn.Linear(20, 2, bias=bias)
+                self.sm = nn.LogSoftmax(dim=-1)
+
+            def forward(self, X):
+                X = X.float()
+                X = self.lin0(X)
+                X = self.relu(X)
+                X = self.lin1(X)
+                X = self.relu(X)
+                X = self.lin2(X)
+                X = self.relu(X)
+                X = self.lin3(X)
+                X = self.sm(X)
+                return X
+
+        config0 = RandLoraConfig(target_modules=["lin1", "lin2"])
+        peft_model = get_peft_model(MLP2(), config0)
+
+        config1 = RandLoraConfig(target_modules=["lin1", "lin2"])
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.randlora_lambda.default",
+            "base_model.model.lin1.randlora_gamma.default",
+            "base_model.model.lin2.randlora_lambda.default",
+            "base_model.model.lin2.randlora_gamma.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.randlora_lambda.default",
+            "base_model.model.lin1.randlora_gamma.default",
+            "base_model.model.lin2.randlora_lambda.default",
+            "base_model.model.lin2.randlora_gamma.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.randlora_lambda.adapter1",
+            "base_model.model.lin1.randlora_gamma.adapter1",
+            "base_model.model.lin2.randlora_lambda.adapter1",
+            "base_model.model.lin2.randlora_gamma.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.randlora_lambda.adapter1",
+            "base_model.model.lin1.randlora_gamma.adapter1",
+            "base_model.model.lin2.randlora_lambda.adapter1",
+            "base_model.model.lin2.randlora_gamma.adapter1",
         )
 
     def test_requires_grad_vblora_different_targets(self):

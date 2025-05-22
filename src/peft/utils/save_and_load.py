@@ -22,6 +22,7 @@ import torch
 from huggingface_hub import file_exists, hf_hub_download
 from huggingface_hub.errors import EntryNotFoundError, LocalEntryNotFoundError
 from safetensors.torch import load_file as safe_load_file
+from transformers.utils import http_user_agent
 
 from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
 
@@ -509,6 +510,9 @@ def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_down
             if hf_hub_download_kwargs.get("subfolder", None) is not None
             else weights_name
         )
+
+    if "user_agent" not in hf_hub_download_kwargs:
+        hf_hub_download_kwargs["user_agent"] = http_user_agent()
 
     if os.path.exists(os.path.join(path, SAFETENSORS_WEIGHTS_NAME)):
         filename = os.path.join(path, SAFETENSORS_WEIGHTS_NAME)
