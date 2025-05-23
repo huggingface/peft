@@ -1308,8 +1308,22 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         ):
             device_map = kwargs.get("device_map", "auto")
             max_memory = kwargs.get("max_memory", None)
-            offload_dir = kwargs.get("offload_folder", None)
+            offload_folder = kwargs.get("offload_folder", None)
+            offload_dir = kwargs.get("offload_dir", None)
             offload_index = kwargs.get("offload_index", None)
+
+            if offload_dir is not None and offload_folder is not None:
+                raise ValueError(
+                    "Cannot use `offload_folder` when `offload_dir` is specified."
+                )
+            elif offload_dir is None:
+                # to keep backwards compatibility
+                offload_dir = offload_folder
+                warnings.warn(
+                    "The `offload_folder` argument is deprecated and will be removed in a future version. "
+                    "Please use `offload_dir` instead.",
+                    category=DeprecationWarning
+                )
 
             dispatch_model_kwargs = {}
             # Safety checker for previous `accelerate` versions
