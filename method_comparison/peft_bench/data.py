@@ -25,8 +25,8 @@ import numpy as np
 from transformers import PreTrainedTokenizer
 
 
-# Path to the default prompts file
-DEFAULT_PROMPTS_PATH = os.path.join(os.path.dirname(__file__), "prompts.json")
+DEFAULT_PROMPTS_PATH = os.path.join(os.path.dirname(__file__), "configs", "prompts.json")
+
 
 
 def load_test_prompts(config: dict) -> dict[str, list[str]]:
@@ -44,10 +44,6 @@ def load_test_prompts(config: dict) -> dict[str, list[str]]:
 
     with open(prompts_file) as f:
         prompts = json.load(f)
-
-    # Apply textwrap.dedent to remove leading spaces from multiline prompts
-    for category, prompt_list in prompts.items():
-        prompts[category] = [textwrap.dedent(prompt) for prompt in prompt_list]
 
     return prompts
 

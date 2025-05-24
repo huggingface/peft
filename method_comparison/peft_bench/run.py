@@ -20,6 +20,7 @@ import gc
 import os
 import sys
 import time
+from typing import Optional
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, set_seed
@@ -125,6 +126,7 @@ def run_benchmark(
     result.save()
 
     start_time = time.perf_counter()
+    e_main_benchmark: Optional[Exception] = None # Initialize e for the main try-except
 
     try:
         # Initialize CUDA
@@ -217,12 +219,12 @@ def run_benchmark(
             peft_config = PeftConfig.from_pretrained(experiment_path)
             print_fn(f"Loaded PEFT config: {peft_config.peft_type}, with parameters: {vars(peft_config)}")
             model = get_peft_model(base_model, peft_config)
-        except Exception as e:
-            error_msg = f"Error loading PEFT config: {str(e)}"
+        except Exception as exc:
+            error_msg = f"Error loading PEFT config: {str(exc)}"
             print_fn(error_msg)
             import traceback
             print_fn(traceback.format_exc())
-            raise ValueError(error_msg) from e
+            raise ValueError(error_msg) from exc
 
         # Free memory by removing base model reference
         del base_model
@@ -277,15 +279,17 @@ def run_benchmark(
             }
             result.add_metrics_for_category(category, category_metrics)
 
-        # Update inference metrics in the result
-        result.update_train_info(
+        # Update generation_info with peak memory usage
+        # Note: Detailed inference times and overheads are now part of by_category metrics
+        result.update_generation_info(
             memory_data={
                 "peak_gpu_memory_mb": max(
-                    log["gpu_allocated_mb"] for log in result.train_info["memory"]["memory_logs"]
-                ),
-                "peak_ram_memory_mb": max(log["ram_mb"] for log in result.train_info["memory"]["memory_logs"]),
-            },
-            inference_metrics={"times": peft_inference_times["inference_times"], "overhead": inference_overhead},
+                    log["gpu_allocated_mb"] for log in result.generation_info["memory"]["memory_logs"]
+                ) if result.generation_info["memory"]["memory_logs"] else 0,
+                "peak_ram_memory_mb": max(
+                    log["ram_mb"] for log in result.generation_info["memory"]["memory_logs"]
+                ) if result.generation_info["memory"]["memory_logs"] else 0,
+            }
         )
 
         # Track final memory usage
@@ -295,14 +299,15 @@ def run_benchmark(
         # Set successful status
         result.status = BenchmarkStatus.SUCCESS
 
-    except Exception as e:
-        print_fn(f"Benchmark failed with error: {e}")
+    except Exception as exc:
+        print_fn(f"Benchmark failed with error: {exc}")
         result.status = BenchmarkStatus.FAILED
-        result.metrics["error"] = str(e)
+        e_main_benchmark = exc # Capture the exception
 
-    # Record duration and update final status
+    # Record duration and update final status, including error if any
     end_time = time.perf_counter()
-    result.update_run_info(duration=end_time - start_time, status=result.status)
+    error_message = str(e_main_benchmark) if e_main_benchmark is not None else None
+    result.update_run_info(duration=end_time - start_time, status=result.status, error=error_message)
 
     return result
 
@@ -317,20 +322,17 @@ def main():
     # Configure print function based on verbosity
     print_fn = print if args.verbose else lambda *args, **kwargs: None
 
-    # Handle relative paths - if the path doesn't exist as provided, try within experiments directory
     experiment_path = args.experiment_path
-    if not os.path.exists(experiment_path):
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        alt_path = os.path.join(script_dir, experiment_path)
-        if os.path.exists(alt_path):
-            experiment_path = alt_path
-        else:
-            # Try one more time with experiments/ prefix
-            alt_path = os.path.join(script_dir, "experiments", 
-                                    os.path.basename(os.path.dirname(experiment_path)),
-                                    os.path.basename(experiment_path))
-            if os.path.exists(alt_path):
-                experiment_path = alt_path
+    # Restrict to method_comparison/peft_bench only
+    allowed_root = os.path.abspath(os.path.join(os.path.dirname(__file__)))
+    abs_experiment_path = os.path.abspath(experiment_path)
+    if not abs_experiment_path.startswith(allowed_root):
+        print(f"Experiment path must be inside {allowed_root}, got: {abs_experiment_path}. Skipping execution.")
+        return 0
+    if not os.path.exists(abs_experiment_path):
+        print(f"Experiment path not found: {abs_experiment_path}. Skipping execution.")
+        return 0
+    experiment_path = abs_experiment_path
 
     # Validate experiment path and load configs
     experiment_name, benchmark_config, peft_config = validate_experiment_path(experiment_path)

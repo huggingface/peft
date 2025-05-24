@@ -12,7 +12,7 @@ This directory contains tools to benchmark different Parameter-Efficient Fine-Tu
 ## Usage
 
 ```bash
-python run.py --verbose experiments/lora/lora_r16
+python run.py --verbose configs
 ```
 
 ## Configuration
