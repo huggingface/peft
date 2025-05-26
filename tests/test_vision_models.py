@@ -67,11 +67,11 @@ class TestPastKV:
         )
         processor = AutoProcessor.from_pretrained(model_id)
         raw_image = np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8)
-        inputs = processor(prompt, raw_image, return_tensors="pt")
+        inputs = processor(text=prompt, images=raw_image, return_tensors="pt")
 
         # get peft model
         peft_config = PrefixTuningConfig(task_type="CAUSAL_LM", num_virtual_tokens=20)
-        model.language_model = get_peft_model(model.language_model, peft_config)
+        model = get_peft_model(model, peft_config)
         # check that this does not raise
         model(**inputs, output_hidden_states=True)
 
