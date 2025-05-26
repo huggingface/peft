@@ -1144,7 +1144,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
     def test_initialize_dora_with_bnb_on_cpu(self, kbit):
         # 1674
         # The issue is that to initialize DoRA, we need to dequantize the weights. That only works on GPU for bnb.
-        # Therefore, intializing DoRA with bnb on CPU used to fail.
+        # Therefore, initializing DoRA with bnb on CPU used to fail.
         model_id = "facebook/opt-125m"
         if kbit == "4bit":
             bnb_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4")

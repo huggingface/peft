@@ -155,7 +155,7 @@ class RandLoraModel(BaseTuner):
         # deterministic init of randlora_A and randlora_B if we know the key
         generator = torch.Generator(device="cpu").manual_seed(config.projection_prng_key)
 
-        # The gamma matrix is applied on A meaning it can be unique (shared) accross the n scaling matrices.
+        # The gamma matrix is applied on A meaning it can be unique (shared) across the n scaling matrices.
         # We also set randlora_A as the smallest matrix to reduce trainable parameters.
         randlora_A = torch.rand((config.r, 1, min_dim), generator=generator)
 
@@ -192,7 +192,7 @@ class RandLoraModel(BaseTuner):
         # deterministic init of randlora_A and randlora_B if we know the key
         generator = torch.Generator(device="cpu").manual_seed(config.projection_prng_key)
 
-        # The gamma matrix is applied on A meaning it can be unique (shared) accross the n scaling matrices.
+        # The gamma matrix is applied on A meaning it can be unique (shared) across the n scaling matrices.
         # We also set randlora_A as the smallest matrix to reduce trainable parameters.
         randlora_A = _kaiming_init((config.r, 1, min_dim), generator=generator)
 
@@ -453,7 +453,7 @@ class RandLoraModel(BaseTuner):
             if val != "none":
                 msg = (
                     f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
-                    "output as the the base model would without adaption."
+                    "output as the base model would without adaption."
                 )
                 warnings.warn(msg)
         self._set_adapter_layers(enabled=False)

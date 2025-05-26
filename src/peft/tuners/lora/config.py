@@ -467,7 +467,7 @@ class LoraConfig(PeftConfig):
         default=None,
         metadata={
             "help": (
-                "The configuration of EVA. If this is passed, then EVA will be used to intialize the LoRA layers. "
+                "The configuration of EVA. If this is passed, then EVA will be used to initialize the LoRA layers. "
                 "Also set `init_lora_weights='eva'` in this case. "
             )
         },
