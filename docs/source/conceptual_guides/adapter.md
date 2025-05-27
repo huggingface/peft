@@ -52,7 +52,7 @@ In principle, LoRA can be applied to any subset of weight matrices in a neural n
 
 ## Mixture of LoRA Experts (X-LoRA)
 
-[X-LoRA](https://arxiv.org/abs/2402.07148) is a mixture of experts method for LoRA which works by using dense or sparse gating to dynamically activate LoRA experts. The LoRA experts as well as the base model are frozen during training, resulting in a low parameter count as only the gating layers must be trained. In particular, the gating layers output scalings which (depending on config) are granular on the layer and token level. Additionally, during inference, X-LoRA dynamically activates LoRA adapters to recall knowledge and effectively mix them:
+[X-LoRA](https://huggingface.co/papers/2402.07148) is a mixture of experts method for LoRA which works by using dense or sparse gating to dynamically activate LoRA experts. The LoRA experts as well as the base model are frozen during training, resulting in a low parameter count as only the gating layers must be trained. In particular, the gating layers output scalings which (depending on config) are granular on the layer and token level. Additionally, during inference, X-LoRA dynamically activates LoRA adapters to recall knowledge and effectively mix them:
 
 The below graphic demonstrates how the scalings change for different prompts for each token. This highlights the activation of different adapters as the generation progresses and the sequence creates new context.
 

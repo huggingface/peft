@@ -21,7 +21,7 @@ Quantization represents data with fewer bits, making it a useful technique for r
 * optimizing which model weights are quantized with the [AWQ](https://hf.co/papers/2306.00978) algorithm
 * independently quantizing each row of a weight matrix with the [GPTQ](https://hf.co/papers/2210.17323) algorithm
 * quantizing to 8-bit and 4-bit precision with the [bitsandbytes](https://github.com/TimDettmers/bitsandbytes) library
-* quantizing to as low as 2-bit precision with the [AQLM](https://arxiv.org/abs/2401.06118) algorithm
+* quantizing to as low as 2-bit precision with the [AQLM](https://huggingface.co/papers/2401.06118) algorithm
 
 However, after a model is quantized it isn't typically further trained for downstream tasks because training can be unstable due to the lower precision of the weights and activations. But since PEFT methods only add *extra* trainable parameters, this allows you to train a quantized model with a PEFT adapter on top! Combining quantization with PEFT can be a good strategy for training even the largest models on a single GPU. For example, [QLoRA](https://hf.co/papers/2305.14314) is a method that quantizes a model to 4-bits and then trains it with LoRA. This method allows you to finetune a 65B parameter model on a single 48GB GPU!
 
@@ -135,7 +135,7 @@ Once quantized, you can post-train GPTQ models with PEFT APIs.
 
 ## AQLM quantization
 
-Additive Quantization of Language Models ([AQLM](https://arxiv.org/abs/2401.06118)) is a Large Language Models compression method. It quantizes multiple weights together and takes advantage of interdependencies between them. AQLM represents groups of 8-16 weights as a sum of multiple vector codes. This allows it to compress models down to as low as 2-bit with considerably low accuracy losses.
+Additive Quantization of Language Models ([AQLM](https://huggingface.co/papers/2401.06118)) is a Large Language Models compression method. It quantizes multiple weights together and takes advantage of interdependencies between them. AQLM represents groups of 8-16 weights as a sum of multiple vector codes. This allows it to compress models down to as low as 2-bit with considerably low accuracy losses.
 
 Since the AQLM quantization process is computationally expensive, the use of prequantized models is recommended. A partial list of available models can be found in the official aqlm [repository](https://github.com/Vahe1994/AQLM).
 

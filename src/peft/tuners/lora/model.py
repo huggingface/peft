@@ -68,7 +68,7 @@ class LoraModel(BaseTuner):
     """
     Creates Low Rank Adapter (LoRA) model from a pretrained transformers model.
 
-    The method is described in detail in https://arxiv.org/abs/2106.09685.
+    The method is described in detail in https://huggingface.co/papers/2106.09685.
 
     Args:
         model ([`torch.nn.Module`]): The model to be adapted.

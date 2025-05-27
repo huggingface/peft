@@ -35,7 +35,7 @@ from .layer import HRAConv2d, HRALayer, HRALinear
 class HRAModel(BaseTuner):
     """
     Creates Householder reflection adaptation (HRA) model from a pretrained model. The method is described in
-    https://arxiv.org/abs/2405.17484
+    https://huggingface.co/papers/2405.17484
 
     Args:
         model (`torch.nn.Module`): The model to which the adapter tuner layers will be attached.

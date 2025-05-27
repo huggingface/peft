@@ -73,7 +73,7 @@ class LoftQConfig:
 class EvaConfig:
     """
     This is the sub-configuration class to store the configuration for a data-driven initialization via EVA. EVA was
-    introduced in <a href='https://arxiv.org/abs/2410.07170'>Explained Variance Adaptation</a>.
+    introduced in <a href='https://huggingface.co/papers/2410.07170'>Explained Variance Adaptation</a>.
 
     Args:
         rho (`float`):
@@ -228,9 +228,9 @@ class LoraConfig(PeftConfig):
             will be updated during training. Be aware that this means that, even when disabling the adapters, the model
             will not produce the same output as the base model would have without adaptation.
         use_rslora (`bool`):
-            When set to True, uses <a href='https://doi.org/10.48550/arXiv.2312.03732'>Rank-Stabilized LoRA</a> which
-            sets the adapter scaling factor to `lora_alpha/math.sqrt(r)`, since it was proven to work better.
-            Otherwise, it will use the original default value of `lora_alpha/r`.
+            When set to True, uses [Rank-Stabilized LoRA](https://huggingface.co/papers/2312.03732) which sets the
+            adapter scaling factor to `lora_alpha/math.sqrt(r)`, since it was proven to work better. Otherwise, it will
+            use the original default value of `lora_alpha/r`.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
         init_lora_weights (`bool` | `Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "corda", "loftq"]`):
@@ -240,19 +240,20 @@ class LoraConfig(PeftConfig):
             False leads to random initialization of LoRA A and B, meaning that LoRA is not a no-op before training;
             this setting is intended for debugging purposes. Passing 'gaussian' results in Gaussian initialization
             scaled by the LoRA rank for linear and layers. Pass `'loftq'` to use LoftQ initialization. Passing `'eva'`
-            results in a data-driven initialization of <a href='https://arxiv.org/abs/2410.07170' >Explained Variance
-            Adaptation</a>. EVA initializes LoRA based on the SVD of layer input activations and achieves SOTA
+            results in a data-driven initialization of <a href='https://huggingface.co/papers/2410.07170' >Explained
+            Variance Adaptation</a>. EVA initializes LoRA based on the SVD of layer input activations and achieves SOTA
             performance due to its ability to adapt to the finetuning data. Pass `'olora'` to use OLoRA initialization.
-            Passing `'pissa'` results in the initialization of <a href='https://arxiv.org/abs/2404.02948' >Principal
-            Singular values and Singular vectors Adaptation (PiSSA)</a>, which converges more rapidly than LoRA and
-            ultimately achieves superior performance. Moreover, PiSSA reduces the quantization error compared to QLoRA,
-            leading to further enhancements. Passing `'pissa_niter_[number of iters]'` initiates Fast-SVD-based PiSSA
-            initialization, where `[number of iters]` indicates the number of subspace iterations to perform FSVD, and
-            must be a nonnegative integer. When `[number of iters]` is set to 16, it can complete the initialization of
-            a 7B model within seconds, and the training effect is approximately equivalent to using SVD. Passing
-            `'corda'` results in the initialization of <a href='https://arxiv.org/abs/2406.05223' >Context-Oriented
-            Decomposition Adaptation</a>, which converges even more rapidly than PiSSA in Instruction-Previewed Mode,
-            and preserves world knowledge better than LoRA in Knowledge-Preserved Mode.
+            Passing `'pissa'` results in the initialization of <a href='https://huggingface.co/papers/2404.02948'
+            >Principal Singular values and Singular vectors Adaptation (PiSSA)</a>, which converges more rapidly than
+            LoRA and ultimately achieves superior performance. Moreover, PiSSA reduces the quantization error compared
+            to QLoRA, leading to further enhancements. Passing `'pissa_niter_[number of iters]'` initiates
+            Fast-SVD-based PiSSA initialization, where `[number of iters]` indicates the number of subspace iterations
+            to perform FSVD, and must be a nonnegative integer. When `[number of iters]` is set to 16, it can complete
+            the initialization of a 7B model within seconds, and the training effect is approximately equivalent to
+            using SVD. Passing `'corda'` results in the initialization of <a
+            href='https://huggingface.co/papers/2406.05223' >Context-Oriented Decomposition Adaptation</a>, which
+            converges even more rapidly than PiSSA in Instruction-Previewed Mode, and preserves world knowledge better
+            than LoRA in Knowledge-Preserved Mode.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
@@ -296,7 +297,7 @@ class LoraConfig(PeftConfig):
             handled by a separate learnable parameter. This can improve the performance of LoRA especially at low
             ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger overhead than pure
             LoRA, so it is recommended to merge weights for inference. For more information, see
-            https://arxiv.org/abs/2402.09353.
+            https://huggingface.co/papers/2402.09353.
         layer_replication (`List[Tuple[int, int]]`):
             Build a new stack of layers by stacking the original model layers according to the ranges specified. This
             allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
@@ -340,7 +341,7 @@ class LoraConfig(PeftConfig):
         default=False,
         metadata={
             "help": (
-                "When set to True, uses <a href='https://doi.org/10.48550/arXiv.2312.03732'>Rank-Stabilized LoRA</a>"
+                "When set to True, uses [Rank-Stabilized LoRA](https://huggingface.co/papers/2312.03732)"
                 " which sets the adapter scaling factor to `lora_alpha/math.sqrt(r)`, since it"
                 " was proven to work better. Otherwise, it will use the original default"
                 " value of `lora_alpha/r`."
@@ -485,7 +486,7 @@ class LoraConfig(PeftConfig):
         default=False,
         metadata={
             "help": (
-                "Enable <a href='https://arxiv.org/abs/2402.09353'>'Weight-Decomposed Low-Rank Adaptation' (DoRA)</a>. This technique decomposes the updates of the "
+                "Enable <a href='https://huggingface.co/papers/2402.09353'>'Weight-Decomposed Low-Rank Adaptation' (DoRA)</a>. This technique decomposes the updates of the "
                 "weights into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the "
                 "magnitude is handled by a separate learnable parameter. This can improve the performance of LoRA, "
                 "especially at low ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger"

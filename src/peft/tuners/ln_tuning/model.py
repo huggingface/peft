@@ -31,7 +31,7 @@ class LNTuningModel(BaseTuner):
     """
     Creates LayerNorm tuning from a pretrained transformer model.
 
-    The method is described in detail in https://arxiv.org/abs/2312.11420.
+    The method is described in detail in https://huggingface.co/papers/2312.11420.
 
     Args:
         model ([`torch.nn.Module`]): The model to be adapted.

@@ -26,8 +26,8 @@ from .layer import Conv2d, Linear, LoKrLayer
 class LoKrModel(LycorisTuner):
     """
     Creates Low-Rank Kronecker Product model from a pretrained model. The original method is partially described in
-    https://arxiv.org/abs/2108.06098 and in https://arxiv.org/abs/2309.14859 Current implementation heavily borrows
-    from
+    https://huggingface.co/papers/2108.06098 and in https://huggingface.co/papers/2309.14859 Current implementation
+    heavily borrows from
     https://github.com/KohakuBlueleaf/LyCORIS/blob/eb460098187f752a5d66406d3affade6f0a07ece/lycoris/modules/lokr.py
 
     Args:
