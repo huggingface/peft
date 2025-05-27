@@ -230,8 +230,8 @@ TEST_CASES = [
     ("Conv2d 2 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d", "lin0"]}),
     ("Conv2d 3 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d"], "use_effective_conv2d": True}),
     ("Conv2d 4 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True}),
-    ("Conv1D LoHa", "Conv1d", LoHaConfig, {"target_modules": ["conv1d"]}),
-    ("Conv2d 1x1 LoHa", "Conv2d1x1", LoHaConfig, {"target_modules": ["conv2d"]}),
+    ("Conv1d LOHA", "Conv1d", LoHaConfig, {"target_modules": ["conv1d"]}),
+    ("Conv2d 1x1 LOHA", "Conv2d1x1", LoHaConfig, {"target_modules": ["conv2d"]}),
     # LoKr
     ("Vanilla MLP 1 LOKR", "MLP", LoKrConfig, {"target_modules": "lin0"}),
     ("Vanilla MLP 2 LOKR", "MLP", LoKrConfig, {"target_modules": ["lin0"]}),
@@ -254,8 +254,8 @@ TEST_CASES = [
     ("Conv2d 2 LOKR", "Conv2d", LoKrConfig, {"target_modules": ["conv2d", "lin0"]}),
     ("Conv2d 3 LOKR", "Conv2d", LoKrConfig, {"target_modules": ["conv2d"], "use_effective_conv2d": True}),
     ("Conv2d 4 LOKR", "Conv2d", LoKrConfig, {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True}),
-    ("Conv1D LoKr", "Conv1d", LoKrConfig, {"target_modules": ["conv1d"]}),
-    ("Conv2d 1x1 LoKr", "Conv2d1x1", LoKrConfig, {"target_modules": ["conv2d"]}),
+    ("Conv1d LOKR", "Conv1d", LoKrConfig, {"target_modules": ["conv1d"]}),
+    ("Conv2d 1x1 LOKR", "Conv2d1x1", LoKrConfig, {"target_modules": ["conv2d"]}),
     (
         "Conv2d 5 LOKR",
         "Conv2d",

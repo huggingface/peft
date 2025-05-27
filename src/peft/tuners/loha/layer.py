@@ -135,10 +135,12 @@ class LoHaLayer(nn.Module, LycorisLayer):
         if isinstance(base_layer, nn.Linear):
             shape = tuple(base_layer.weight.shape)
         elif isinstance(base_layer, nn.Conv2d):
-            # Handle 1x1 convolutions differently
+            # For 1x1 convolutions, disable effective_conv2d to avoid unnecessary tensor reshaping overhead.
+            # Since 1x1 convolutions are essentially pointwise operations (matrix multiplications), 
+            # they can be more efficiently handled with the flattened weight representation,
+            # similar to how Linear layers work. This optimization reduces computational cost
+            # without affecting the mathematical equivalence of the operation.
             if base_layer.kernel_size == (1, 1):
-                # For 1x1 convolutions, use a more direct shape without using effective_conv2d
-                shape = (base_layer.out_channels, base_layer.in_channels, *base_layer.kernel_size)
                 use_effective_conv2d = False
             else:
                 use_effective_conv2d = use_effective_conv2d
@@ -150,10 +152,11 @@ class LoHaLayer(nn.Module, LycorisLayer):
                     base_layer.in_channels * base_layer.kernel_size[0] * base_layer.kernel_size[1],
                 )
         elif isinstance(base_layer, nn.Conv1d):
-            # Handle kernel_size=1 Conv1d differently
+            # For Conv1d with kernel_size=1, disable effective_conv2d for the same optimization reasons 
+            # as 1x1 Conv2d. Kernel size 1 means no spatial/temporal context, making it equivalent 
+            # to a Linear layer applied across the channel dimension. Using flattened representation
+            # avoids unnecessary reshaping and improves computational efficiency.
             if base_layer.kernel_size[0] == 1:
-                # For kernel_size=1, use a more direct shape without using effective_conv2d
-                shape = (base_layer.out_channels, base_layer.in_channels, base_layer.kernel_size[0])
                 use_effective_conv2d = False
             else:
                 use_effective_conv2d = use_effective_conv2d
@@ -203,9 +206,6 @@ class LoHaLayer(nn.Module, LycorisLayer):
 
         base_layer = self.get_base_layer()
         
-        # Special optimization for 1x1 convolutions and kernel_size=1 Conv1d
-        is_1x1_conv2d = isinstance(base_layer, nn.Conv2d) and base_layer.kernel_size == (1, 1)
-        is_1_conv1d = isinstance(base_layer, nn.Conv1d) and base_layer.kernel_size[0] == 1
         
         # Reshape to match base layer shape
         weight = weight.reshape(base_layer.weight.shape)

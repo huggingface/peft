@@ -211,9 +211,12 @@ class LoKrLayer(nn.Module, LycorisLayer):
 
             use_w1 = not (decompose_both and r < max(shape[0][0], shape[1][0]) / 2)
             use_w2 = r >= max(shape[0][1], shape[1][1]) / 2
-            # Handle 1x1 convolutions differently
+            # For 1x1 convolutions, disable effective_conv2d to avoid unnecessary tensor reshaping overhead.
+            # Since 1x1 convolutions are essentially pointwise operations (matrix multiplications), 
+            # they can be more efficiently handled with the flattened weight representation,
+            # similar to how Linear layers work. This optimization reduces computational cost
+            # without affecting the mathematical equivalence of the operation.
             if base_layer.kernel_size == (1, 1):
-                # For 1x1 convolutions, always disable use_effective_conv2d
                 use_effective_conv2d = False
             else:
                 use_effective_conv2d = use_effective_conv2d
@@ -227,9 +230,11 @@ class LoKrLayer(nn.Module, LycorisLayer):
 
             use_w1 = not (decompose_both and r < max(shape[0][0], shape[1][0]) / 2)
             use_w2 = r >= max(shape[0][1], shape[1][1]) / 2
-            # Handle kernel_size=1 Conv1d differently
+            # For Conv1d with kernel_size=1, disable effective_conv2d for the same optimization reasons 
+            # as 1x1 Conv2d. Kernel size 1 means no spatial/temporal context, making it equivalent 
+            # to a Linear layer applied across the channel dimension. Using flattened representation
+            # avoids unnecessary reshaping and improves computational efficiency.
             if base_layer.kernel_size[0] == 1:
-                # For kernel_size=1, always disable use_effective_conv2d
                 use_effective_conv2d = False
             else:
                 use_effective_conv2d = use_effective_conv2d
@@ -272,9 +277,6 @@ class LoKrLayer(nn.Module, LycorisLayer):
         # Get base layer for reshaping
         base_layer = self.get_base_layer()
         
-        # Special optimization for 1x1 convolutions and kernel_size=1 Conv1d
-        is_1x1_conv2d = isinstance(base_layer, nn.Conv2d) and base_layer.kernel_size == (1, 1)
-        is_1_conv1d = isinstance(base_layer, nn.Conv1d) and base_layer.kernel_size[0] == 1
         
         # Regular reshape to match base layer shape
         weight = weight.reshape(base_layer.weight.shape)
