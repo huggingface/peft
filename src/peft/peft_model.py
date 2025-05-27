@@ -606,7 +606,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 deepspeed_distributed_tensor_shape = getattr(value, "ds_shape", None)
 
                 # Handle VLM case with separate text and vision configs
-                if 'text_config' in self.base_model.config:
+                if "text_config" in self.base_model.config:
                     vocab_size = self.base_model.config.text_config.vocab_size
                 else:
                     vocab_size = self.base_model.config.vocab_size
