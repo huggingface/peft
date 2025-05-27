@@ -891,6 +891,10 @@ def _set_adapter(model, adapter_name):
 
 
 def _prepare_prompt_learning_config(peft_config, model_config):
+    # In case of VLM we focus on the language model portion of the model.
+    if "text_config" in model_config:
+        model_config = model_config["text_config"]
+
     if peft_config.num_layers is None:
         if "num_hidden_layers" in model_config:
             num_layers = model_config["num_hidden_layers"]
