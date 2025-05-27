@@ -2067,7 +2067,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig])
     def test_add_weighted_adapter_cat_with_rank_pattern(self, config_cls):
         # Fixes a bug described in #2512, which resulted from the rank_pattern not being taken into account
-        config0 = LoraConfig(target_modules=["lin0", "lin1"], r=8)
+        config0 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 2})
         config1 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 16})
         model = MLP()
         model = get_peft_model(model, config0).to(self.torch_device)
