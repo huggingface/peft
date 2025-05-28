@@ -1,5 +1,5 @@
 # EVA: Explained Variance Adaptation
-## Introduction ([Paper](https://arxiv.org/abs/2410.07170), [code](https://github.com/ml-jku/EVA))
+## Introduction ([Paper](https://huggingface.co/papers/2410.07170), [code](https://github.com/ml-jku/EVA))
 Explained Variance Adaptation (EVA) is a novel initialization method for LoRA style adapters which initializes adapter weights in a data driven manner and adaptively allocates ranks according to the variance they explain. EVA improves average performance on a multitude of tasks across various domains, such as Language generation and understanding, Image classification, and Decision Making.
 
 The abstract from the paper is:
@@ -109,7 +109,7 @@ EVA initialization can be parallelized across multiple GPUs. In this case inputs
 
 ## Customizing EVA
 
-By default, EVA is designed to work with standard transformer language models. However we integrated three different paramters which can be used to customize EVA for other types of models.
+By default, EVA is designed to work with standard transformer language models. However we integrated three different parameters which can be used to customize EVA for other types of models.
 1. `forward_fn`: Defines how the forward pass during EVA initialization should be computed.
 2. `prepare_model_inputs_fn`: Can be used if it is necessary to use information contained in the original model_input to prepare the input for SVD in individual layers.
 3. `prepare_layer_inputs_fn`: Defines how layer inputs should be prepared for SVD.

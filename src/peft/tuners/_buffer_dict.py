@@ -55,10 +55,10 @@ class BufferDict(Module):
                 (string, `torch.Tensor`).
         """
         super().__init__()
+        self.persistent = persistent
+
         if buffers is not None:
             self.update(buffers)
-
-        self.persistent = persistent
 
     def __getitem__(self, key):
         return self._buffers[key]
@@ -125,19 +125,17 @@ class BufferDict(Module):
                 "iterable of key/value pairs, but got " + type(buffers).__name__
             )
 
-        if isinstance(buffers, collections.abc.Mapping):
-            if isinstance(buffers, (OrderedDict, BufferDict)):
-                for key, buffer in buffers.items():
-                    self[key] = buffer
-            else:
-                for key, buffer in sorted(buffers.items()):
-                    self[key] = buffer
+        if isinstance(buffers, (OrderedDict, BufferDict)):
+            for key, buffer in buffers.items():
+                self[key] = buffer
+        elif isinstance(buffers, collections.abc.Mapping):
+            for key, buffer in sorted(buffers.items()):
+                self[key] = buffer
         else:
             for j, p in enumerate(buffers):
                 if not isinstance(p, collections.abc.Iterable):
                     raise TypeError(
-                        "BufferDict update sequence element "
-                        "#" + str(j) + " should be Iterable; is" + type(p).__name__
+                        "BufferDict update sequence element #" + str(j) + " should be Iterable; is" + type(p).__name__
                     )
                 if not len(p) == 2:
                     raise ValueError(

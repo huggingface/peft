@@ -97,7 +97,7 @@ class _BaseAutoPeftModel:
             expected_target_class = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[task_type]
             if cls._target_peft_class.__name__ != expected_target_class.__name__:
                 raise ValueError(
-                    f"Expected target PEFT class: {expected_target_class.__name__}, but you have asked for: {cls._target_peft_class.__name__ }"
+                    f"Expected target PEFT class: {expected_target_class.__name__}, but you have asked for: {cls._target_peft_class.__name__}"
                     " make sure that you are loading the correct model for your task type."
                 )
         elif task_type is None and getattr(peft_config, "auto_mapping", None) is not None:
@@ -130,11 +130,14 @@ class _BaseAutoPeftModel:
                 token=token,
             )
 
-        if tokenizer_exists:
+        if tokenizer_exists and hasattr(base_model, "get_input_embeddings"):
             tokenizer = AutoTokenizer.from_pretrained(
                 pretrained_model_name_or_path, trust_remote_code=kwargs.get("trust_remote_code", False)
             )
-            base_model.resize_token_embeddings(len(tokenizer))
+            embedding_size = base_model.get_input_embeddings().weight.shape[0]
+            if len(tokenizer) > embedding_size:
+                # only resize if the tokenizer has a larger vocab size than there are embeddings
+                base_model.resize_token_embeddings(len(tokenizer))
 
         return cls._target_peft_class.from_pretrained(
             base_model,

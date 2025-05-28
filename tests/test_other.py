@@ -12,13 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
 
 import pytest
 import torch
 from torch import nn
 from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
 
-from peft import LoraConfig, PeftModel, get_peft_model
+from peft import LoraConfig, PeftModel, VeraConfig, get_peft_model
 from peft.utils.other import ModulesToSaveWrapper
 
 
@@ -78,23 +79,6 @@ def test_modules_to_save_targets_module_dict_raises(cls):
         get_peft_model(model=model, peft_config=peft_config)
 
 
-def test_modules_to_save_targets_tuner_layer_raises():
-    # See e.g. issue 2027
-    # Prevent users from (accidentally) targeting the same layer both with a tuner and modules_to_save. Normally, PEFT
-    # will not target the same layer with both a tuner and ModulesToSaveWrapper. However, if modules_to_save is
-    # automatically inferred, e.g. when using AutoModelForSequenceClassification, the ModulesToSaveWrapper is applied ex
-    # post, which can lead to the double wrapping.
-    model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
-    model = AutoModelForSequenceClassification.from_pretrained(model_id)
-
-    # Note: target_modules="all-linear" would also work and is closer to the original issue, but let's explicitly target
-    # "score" here in case that "all-linear" will be fixed to no longer target the score layer.
-    peft_config = LoraConfig(target_modules=["score"], task_type="SEQ_CLS")
-    msg = "modules_to_save cannot be applied to modules of type"
-    with pytest.raises(TypeError, match=msg):
-        get_peft_model(model, peft_config)
-
-
 def test_get_peft_model_revision_warning(tmp_path):
     base_model_id = "peft-internal-testing/tiny-random-BertModel"
     base_revision = "v2.0.0"
@@ -107,8 +91,86 @@ def test_get_peft_model_revision_warning(tmp_path):
         _ = get_peft_model(base_model, lora_config, revision=overwrite_revision)
 
 
+def test_load_multiple_adapters_different_modules_to_save(tmp_path):
+    # This tests the error described in #2422 where loading multiple adapters with different modules_to_save
+    # attributes fails (due to a regression from #2376).
+
+    model = AutoModelForCausalLM.from_pretrained("trl-internal-testing/tiny-random-LlamaForCausalLM")
+
+    def peft_config(**kwargs):
+        return LoraConfig(target_modules="all-linear", **kwargs)
+
+    original_model = copy.deepcopy(model)
+
+    peft_config_0 = peft_config(modules_to_save=["0.post_attention_layernorm"])
+    peft_config_1 = peft_config(modules_to_save=["0.post_attention_layernorm"])
+    peft_config_2 = peft_config(modules_to_save=["1.post_attention_layernorm"])
+
+    # Save adapter 0, nothing fancy, should be equal to base model weighs
+    peft_model = get_peft_model(copy.deepcopy(original_model), peft_config_0)
+    peft_model.save_pretrained(tmp_path / "adapter_0")
+
+    # Save adapter 1, modules to save weights are modified randomly, should be unique to adapter 1
+    peft_model = get_peft_model(copy.deepcopy(original_model), peft_config_1)
+    peft_model.model.model.layers[0].post_attention_layernorm.weight.data = torch.rand_like(
+        peft_model.model.model.layers[0].post_attention_layernorm.weight.data
+    )
+    adapter_1_saved = peft_model.model.model.layers[0].post_attention_layernorm.weight.data.clone()
+    peft_model.save_pretrained(tmp_path / "adapter_1")
+
+    # Save adapter 2, modules to save weights are modified randomly, should be unique to adapter 2
+    peft_model = get_peft_model(copy.deepcopy(original_model), peft_config_2)
+    peft_model.model.model.layers[1].post_attention_layernorm.weight.data = torch.rand_like(
+        peft_model.model.model.layers[1].post_attention_layernorm.weight.data
+    )
+    adapter_2_saved = peft_model.model.model.layers[1].post_attention_layernorm.weight.data.clone()
+    peft_model.save_pretrained(tmp_path / "adapter_2")
+
+    del peft_model
+
+    combined_model = PeftModel.from_pretrained(original_model, tmp_path / "adapter_0", adapter_name="adapter_0")
+    combined_model.load_adapter(tmp_path / "adapter_1", adapter_name="adapter_1")
+    combined_model.load_adapter(tmp_path / "adapter_2", adapter_name="adapter_2")
+
+    # For adapter 0 we expect every mentioned modules to save layer of this test to be equal to the original model
+    # since we didn't modify it for adapter 0 and only adapter 0 is active.
+    combined_model.set_adapter("adapter_0")
+    assert torch.allclose(
+        combined_model.model.model.layers[0].post_attention_layernorm.weight,
+        original_model.model.layers[0].post_attention_layernorm.weight,
+    )
+    assert torch.allclose(
+        combined_model.model.model.layers[1].post_attention_layernorm.weight,
+        original_model.model.layers[1].post_attention_layernorm.weight,
+    )
+
+    # For adapter 1 we expect that the modified module to save 0.post_attention_layernorm is modified, the other
+    # module to save layers mentioned above should be untouched.
+    combined_model.set_adapter("adapter_1")
+    assert torch.allclose(
+        combined_model.model.model.layers[0].post_attention_layernorm.weight,
+        adapter_1_saved,
+    )
+    assert torch.allclose(
+        combined_model.model.model.layers[1].post_attention_layernorm.weight,
+        original_model.model.layers[1].post_attention_layernorm.weight,
+    )
+
+    # For adapter 2 we expect its module to save layer (1.post_attention_layernorm) to be modified but the other
+    # module to save weights should be kept original.
+    combined_model.set_adapter("adapter_2")
+    assert torch.allclose(
+        combined_model.model.model.layers[0].post_attention_layernorm.weight,
+        original_model.model.layers[0].post_attention_layernorm.weight,
+    )
+    assert torch.allclose(
+        combined_model.model.model.layers[1].post_attention_layernorm.weight,
+        adapter_2_saved,
+    )
+
+
 class TestModulesToSaveAttributeAccess:
-    """Test attribute accces on the ModulesToSaveWrapper class.
+    """Test attribute access on the ModulesToSaveWrapper class.
 
     When we have modules_to_save, the original module is wrapped. As long as only forward was called on this wrapped
     module, we were good. However, if, for instance, model parameters were directly accessed by another module, this
@@ -297,3 +359,151 @@ class TestModulesToSaveNameSubstringBug:
             param_merged = sd_merged[key]
             param_unmerged = sd_unmerged[key]
             assert torch.allclose(param_merged, param_unmerged)
+
+
+class TestTargetingAuxiliaryTrainingWrapper:
+    """AuxiliaryTrainingWrapper such as ModulesToSaveWrapper and TrainableTokensWrapper are
+    in general not to be targeted by PEFT methods such as adapters. For example, a ModulesToSaveWrapper's children
+    modules should not be targeted by `LoraConfig(target_modules='all-linear')`, among other things.
+    """
+
+    @pytest.fixture
+    def plain_model_cls(self):
+        class PlainModel(nn.Module):
+            def __init__(self, i, o):
+                super().__init__()
+                self.layer1 = nn.Linear(i, o)
+
+            def forward(self, x):
+                return self.layer1(x)
+
+        return PlainModel
+
+    @pytest.fixture
+    def nested_model_cls(self, plain_model_cls):
+        class NestedModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer1 = nn.Linear(10, 20)
+                self.layer2 = nn.Linear(20, 5)
+                self.layer3 = plain_model_cls(5, 10)
+
+            def forward(self, x):
+                x = self.layer1(x)
+                x = self.layer2(x)
+                x = self.layer3(x)
+                return x
+
+        return NestedModel
+
+    def test_nested_ignores_modules_to_save(self, nested_model_cls, plain_model_cls):
+        # Make sure that `target_modules` is not targeting the nested modules of a module marked as module to save.
+        model = nested_model_cls()
+        config = LoraConfig(
+            target_modules=["layer1"],
+            modules_to_save=["layer3"],
+        )
+
+        peft_model = get_peft_model(model, config)
+        assert isinstance(peft_model.model.layer3.modules_to_save.default, plain_model_cls)
+
+    def test_targeting_module_to_save_raises(self, nested_model_cls):
+        model = nested_model_cls()
+        config = LoraConfig(
+            target_modules=["layer1"],
+            modules_to_save=["layer1"],
+        )
+        msg = "No modules were targeted for adaptation. This might be caused by a combination"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+    def test_modules_to_save_targets_tuner_layer_raises(self):
+        # See e.g. issue 2027 and 2477
+        # Prevent users from (accidentally) targeting the same layer both with a tuner and modules_to_save. Normally, PEFT
+        # will not target the same layer with both a tuner and ModulesToSaveWrapper. However, if modules_to_save is
+        # automatically inferred, e.g. when using AutoModelForSequenceClassification, the ModulesToSaveWrapper is applied ex
+        # post, which can lead to the double wrapping.
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model = AutoModelForSequenceClassification.from_pretrained(model_id)
+
+        # Note: target_modules="all-linear" would also work and is closer to the original issue, but let's explicitly target
+        # "score" here in case that "all-linear" will be fixed to no longer target the score layer.
+        peft_config = LoraConfig(target_modules=["score"], task_type="SEQ_CLS")
+
+        # Since the `score` layer is in `model.modules_to_save` it should be ignored when targeted,
+        # therefore the layer should not be adapted.
+        msg = "No modules were targeted for adaptation. This might be caused by a combination"
+        with pytest.raises(ValueError, match=msg) as e:
+            get_peft_model(model, peft_config)
+
+    def test_targeting_trainable_tokens_raises(self):
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model = AutoModelForSequenceClassification.from_pretrained(model_id)
+
+        peft_config = LoraConfig(target_modules=["embed_tokens"], task_type="SEQ_CLS", trainable_token_indices=[0, 1])
+
+        # While this message might not be the most helpful message, at least it is not silently failing
+        msg = "trainable_token_indices cannot be applied to modules of type <class 'peft.tuners.lora.layer.Embedding'>"
+        with pytest.raises(TypeError, match=msg) as e:
+            get_peft_model(model, peft_config)
+
+
+class TestAdapterTargeting:
+    """Make sure that already existing adapters cannot be targeted to avoid conflicts."""
+
+    @pytest.fixture
+    def base_model_cls(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(10, 20)
+                self.l2 = torch.nn.Conv2d(1, 1, 2)
+
+            def forward(self, x):
+                return self.l2(self.l1(x))
+
+        return M
+
+    @pytest.mark.parametrize(
+        "config_cls, config_kwargs",
+        [
+            (LoraConfig, {"target_modules": "l1.*"}),
+            (LoraConfig, {"target_modules": "l2.*"}),
+            (VeraConfig, {"target_modules": "l1.*"}),
+            (VeraConfig, {"target_modules": "(l1|vera_A).*"}),  # also target the shared layer
+        ],
+    )
+    def test_self_targeting_is_ignored(self, base_model_cls, config_cls, config_kwargs):
+        base_model = base_model_cls()
+        config1 = config_cls(**config_kwargs)
+        config2 = config_cls(**config_kwargs)
+
+        adapter1_name = "ADAPTER_1_512858"  # sufficiently unique names to make reliable testing easier
+        adapter2_name = "ADAPTER_2_845781"
+
+        peft_model = get_peft_model(base_model, config1, adapter_name=adapter1_name)
+        state_dict_keys_1 = peft_model.state_dict().keys()
+
+        peft_model.add_adapter(adapter2_name, config2)
+        state_dict_keys_2 = peft_model.state_dict().keys()
+
+        # Ideally there should be no new modules targeted beyond existing ModuleDicts. Therefore the keys
+        # of the new state dict should only differ after the adapter name portion of the keys - not before.
+        # Expected:
+        # - a.b.<adapter_name_1>.xyz
+        # - a.b.<adapter_name_2>.xyz
+        # We're not expecting this to happen and test against it:
+        # - a.b.<adapter_name_1>.xyz
+        # - a.<adapter_name_2>.xyz
+        def remove_adapter_portion(adapter_name, key):
+            if key.endswith(f".{adapter_name}"):
+                return key.removesuffix(f".{adapter_name}")
+            return key.split(f".{adapter_name}.")[0]
+
+        adapter_invariant_keys1 = {remove_adapter_portion(adapter1_name, key) for key in state_dict_keys_1}
+        adapter_invariant_keys2 = {
+            remove_adapter_portion(adapter2_name, remove_adapter_portion(adapter1_name, key))
+            for key in state_dict_keys_2
+        }
+
+        assert adapter_invariant_keys1 == adapter_invariant_keys2

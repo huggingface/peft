@@ -34,7 +34,7 @@ class VBLoRAModel(BaseTuner):
     """
     Creates VBLoRA model from a pretrained transformers model.
 
-    The method is described in detail in https://arxiv.org/abs/2405.15179.
+    The method is described in detail in https://huggingface.co/papers/2405.15179.
 
     Args:
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
@@ -213,8 +213,7 @@ class VBLoRAModel(BaseTuner):
             kwargs["is_target_conv_1d_layer"] = True
             if not kwargs["fan_in_fan_out"]:
                 warnings.warn(
-                    "fan_in_fan_out is set to False but the target module is `Conv1D`. "
-                    "Setting fan_in_fan_out to True."
+                    "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
                 )
                 kwargs["fan_in_fan_out"] = vblora_config.fan_in_fan_out = True
         else:
@@ -277,7 +276,7 @@ class VBLoRAModel(BaseTuner):
             if val != "none":
                 msg = (
                     f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
-                    "output as the the base model would without adaption."
+                    "output as the base model would without adaption."
                 )
                 warnings.warn(msg)
         self._set_adapter_layers(enabled=False)
@@ -362,6 +361,7 @@ class VBLoRAModel(BaseTuner):
                     new_adapter = target.active_adapter[:]
 
         self.active_adapter = new_adapter or []
+        self._delete_auxiliary_adapter(adapter_name, new_active_adapters=new_adapter)
 
     def merge_and_unload(
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None

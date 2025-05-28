@@ -36,6 +36,7 @@ from peft.tuners.tuners_utils import (
 )
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
+    AuxiliaryTrainingWrapper,
     ModulesToSaveWrapper,
     _freeze_adapter,
     _get_submodules,
@@ -51,6 +52,7 @@ from .config import LoraConfig
 from .eetq import dispatch_eetq
 from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
+from .inc import dispatch_inc
 from .layer import Conv2d, LoraLayer, dispatch_default
 from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
@@ -66,7 +68,7 @@ class LoraModel(BaseTuner):
     """
     Creates Low Rank Adapter (LoRA) model from a pretrained transformers model.
 
-    The method is described in detail in https://arxiv.org/abs/2106.09685.
+    The method is described in detail in https://huggingface.co/papers/2106.09685.
 
     Args:
         model ([`torch.nn.Module`]): The model to be adapted.
@@ -330,6 +332,7 @@ class LoraModel(BaseTuner):
                 dispatch_awq,
                 dispatch_gptq,
                 dispatch_hqq,
+                dispatch_inc,
                 dispatch_torchao,
                 dispatch_megatron,
                 dispatch_default,
@@ -346,7 +349,7 @@ class LoraModel(BaseTuner):
             # no module could be matched
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
-                "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `torch.nn.Conv3d`, "
+                "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv1d`, `torch.nn.Conv2d`, `torch.nn.Conv3d`, "
                 "`transformers.pytorch_utils.Conv1D`, `torch.nn.MultiheadAttention.`."
             )
 
@@ -372,7 +375,7 @@ class LoraModel(BaseTuner):
 
     def _set_adapter_layers(self, enabled: bool = True) -> None:
         for module in self.model.modules():
-            if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
+            if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
                 module.enable_adapters(enabled)
 
     def enable_adapter_layers(self) -> None:
@@ -392,7 +395,7 @@ class LoraModel(BaseTuner):
             if val != "none":
                 msg = (
                     f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
-                    "output as the the base model would without adaption."
+                    "output as the base model would without adaption."
                 )
                 warnings.warn(msg)
         self._set_adapter_layers(enabled=False)
@@ -459,7 +462,7 @@ class LoraModel(BaseTuner):
 
         hook_handles = []
         for module in self.modules():
-            if isinstance(module, LoraLayer) or isinstance(module, ModulesToSaveWrapper):
+            if isinstance(module, LoraLayer) or isinstance(module, AuxiliaryTrainingWrapper):
                 pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
                 handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                 hook_handles.append(handle)
@@ -468,7 +471,7 @@ class LoraModel(BaseTuner):
             # For encoder-decoder models, even when applying beam search, the encoder part of the model should not use
             # the extended adapter_names. This is because the encoder still uses the original, non-extended samples.
             for module in self.model.get_encoder().modules():
-                if isinstance(module, LoraLayer) or isinstance(module, ModulesToSaveWrapper):
+                if isinstance(module, LoraLayer) or isinstance(module, AuxiliaryTrainingWrapper):
                     # Add another hook to overwrite the kwargs with the original adapter names -- this is easier than
                     # trying to exclude the encoder.
                     pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=original_adapter_names)
@@ -529,15 +532,6 @@ class LoraModel(BaseTuner):
                     if merge:
                         target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
                     self._replace_module(parent, target_name, target.get_base_layer(), target)
-                elif isinstance(target, ModulesToSaveWrapper):
-                    # save any additional trainable modules part of `modules_to_save`
-                    new_module = target.modules_to_save[target.active_adapter]
-                    if hasattr(new_module, "base_layer"):
-                        # check if the module is itself a tuner layer
-                        if merge:
-                            new_module.merge(safe_merge=safe_merge, adapter_names=adapter_names)
-                        new_module = new_module.get_base_layer()
-                    setattr(parent, target_name, new_module)
 
         return self.model
 
@@ -570,7 +564,12 @@ class LoraModel(BaseTuner):
         # if there is only one adapter, we can only use linear merging
         combination_type = "linear" if len(adapters) == 1 else combination_type
 
-        adapters_ranks = [self.peft_config[adapter].r for adapter in adapters]
+        adapters_ranks: list[int] = [
+            # When allocating tensors for the new adapter, we need the maximum possible rank to not overflow
+            config.r if not config.rank_pattern else max(config.r, *config.rank_pattern.values())
+            for config in (self.peft_config[adapter] for adapter in adapters)
+        ]
+
         if combination_type in ("linear", "ties", "dare_ties", "dare_linear", "magnitude_prune"):
             # all adapters ranks should be same, new rank is just this value
             if len(set(adapters_ranks)) != 1:
@@ -876,6 +875,7 @@ class LoraModel(BaseTuner):
                     new_adapter = target.active_adapters[:]
 
         self.active_adapter = new_adapter or []
+        self._delete_auxiliary_adapter(adapter_name, new_active_adapters=new_adapter)
 
     def merge_and_unload(
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None

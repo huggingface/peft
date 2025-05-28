@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from random import randint
-from typing import Any, Dict, List, Union
+from typing import Any, Union
 
 # datasets imports
 import datasets
@@ -337,7 +337,7 @@ def load_model_hook(models, input_dir):
 class DataCollatorSpeechSeq2SeqWithPadding:
     processor: Any
 
-    def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
+    def __call__(self, features: list[dict[str, Union[list[int], torch.Tensor]]]) -> dict[str, torch.Tensor]:
         # split inputs and labels since they have to be of different lengths and need different padding methods
         # first treat the audio inputs by simply returning torch tensors
         input_features = [{"input_features": feature["input_features"]} for feature in features]
@@ -494,7 +494,7 @@ def main():
     raw_datasets = raw_datasets.cast_column("audio", Audio(sampling_rate=16000))
 
     logger.info("Dataset loaded: %s", raw_datasets)
-    logger.info(f'{raw_datasets["train"][0]}')
+    logger.info(f"{raw_datasets['train'][0]}")
 
     vectorized_datasets = raw_datasets.map(
         prepare_dataset,

@@ -12,14 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import re
-from itertools import chain
-from typing import Dict, Type, Union
+from typing import Union
 
 import torch
 from torch import nn
 
 from peft.tuners.lycoris_utils import LycorisConfig, LycorisTuner
+from peft.utils.other import get_pattern_key
 
 from .layer import Conv1d, Conv2d, Linear, LoHaLayer
 
@@ -27,7 +26,7 @@ from .layer import Conv1d, Conv2d, Linear, LoHaLayer
 class LoHaModel(LycorisTuner):
     """
     Creates Low-Rank Hadamard Product model from a pretrained model. The method is partially described in
-    https://arxiv.org/abs/2108.06098 Current implementation heavily borrows from
+    https://huggingface.co/papers/2108.06098 Current implementation heavily borrows from
     https://github.com/KohakuBlueleaf/LyCORIS/blob/eb460098187f752a5d66406d3affade6f0a07ece/lycoris/modules/loha.py
 
     Args:
@@ -83,7 +82,7 @@ class LoHaModel(LycorisTuner):
     """
 
     prefix: str = "hada_"
-    layers_mapping: Dict[Type[torch.nn.Module], Type[LoHaLayer]] = {
+    layers_mapping: dict[type[torch.nn.Module], type[LoHaLayer]] = {
         torch.nn.Conv2d: Conv2d,
         torch.nn.Conv1d: Conv1d,
         torch.nn.Linear: Linear,
@@ -101,14 +100,11 @@ class LoHaModel(LycorisTuner):
         """
         A private method to create and replace the target module with the adapter module.
         """
-
-        # Regexp matching - Find key which matches current target_name in patterns provided
-        pattern_keys = list(chain(config.rank_pattern.keys(), config.alpha_pattern.keys()))
-        target_name_key = next(filter(lambda key: re.match(rf"(.*\.)?{key}$", current_key), pattern_keys), target_name)
-
+        r_key = get_pattern_key(config.rank_pattern.keys(), current_key)
+        alpha_key = get_pattern_key(config.alpha_pattern.keys(), current_key)
         kwargs = config.to_dict()
-        kwargs["r"] = config.rank_pattern.get(target_name_key, config.r)
-        kwargs["alpha"] = config.alpha_pattern.get(target_name_key, config.alpha)
+        kwargs["r"] = config.rank_pattern.get(r_key, config.r)
+        kwargs["alpha"] = config.alpha_pattern.get(alpha_key, config.alpha)
 
         if isinstance(target, LoHaLayer):
             target.update_layer(adapter_name, **kwargs)

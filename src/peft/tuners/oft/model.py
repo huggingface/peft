@@ -15,7 +15,7 @@
 import warnings
 from dataclasses import asdict
 from enum import Enum
-from typing import List, Optional
+from typing import Optional
 
 import torch
 from torch import nn
@@ -40,7 +40,7 @@ from .layer import Conv2d, Linear, OFTLayer
 class OFTModel(BaseTuner):
     """
     Creates Orthogonal Finetuning model from a pretrained model. The method is described in
-    https://arxiv.org/abs/2306.07280
+    https://huggingface.co/papers/2306.07280
 
     Args:
         model (`torch.nn.Module`): The model to which the adapter tuner layers will be attached.
@@ -264,7 +264,7 @@ class OFTModel(BaseTuner):
             if val != "none":
                 msg = (
                     f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
-                    "output as the the base model would without adaption."
+                    "output as the base model would without adaption."
                 )
                 warnings.warn(msg)
         self._set_adapter_layers(enabled=False)
@@ -293,7 +293,7 @@ class OFTModel(BaseTuner):
         merge=True,
         progressbar: bool = False,
         safe_merge: bool = False,
-        adapter_names: Optional[List[str]] = None,
+        adapter_names: Optional[list[str]] = None,
     ):
         if merge:
             self._check_merge_allowed()
@@ -343,9 +343,10 @@ class OFTModel(BaseTuner):
                     new_adapter = target.active_adapters[:]
 
         self.active_adapter = new_adapter or []
+        self._delete_auxiliary_adapter(adapter_name, new_active_adapters=new_adapter)
 
     def merge_and_unload(
-        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None
+        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ) -> torch.nn.Module:
         r"""
         This method merges the OFT layers into the base model. This is needed if someone wants to use the base model as

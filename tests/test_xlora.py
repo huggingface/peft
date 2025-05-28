@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import os
+from functools import wraps
 
 import huggingface_hub
 import pytest
@@ -23,6 +24,25 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import LoraConfig, PeftType, TaskType, XLoraConfig, get_peft_model
 from peft.peft_model import PeftModel
 from peft.utils import infer_device
+
+
+def flaky(num_tries: int):
+    """Decorator for test functions that are flaky"""
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for _ in range(num_tries):
+                try:
+                    return func(*args, **kwargs)
+                except AssertionError as e:
+                    print(f"Failed test {func.__name__} with error: {e}")
+                    continue
+            raise AssertionError(f"Failed test {func.__name__} after {num_tries} tries")
+
+        return wrapper
+
+    return decorator
 
 
 class TestXlora:
@@ -42,9 +62,18 @@ class TestXlora:
     @pytest.fixture(scope="class")
     def saved_lora_adapters(self, lora_dir):
         file_names = []
-        for i in range(1, self.num_loras + 1):
+
+        lora_configs = [
+            LoraConfig(task_type="CAUSAL_LM", target_modules=["q_proj", "v_proj"], init_lora_weights=False)
+            for _ in range(self.num_loras)
+        ]
+        # have 1 LoRA with different target modules
+        lora_configs[-1] = LoraConfig(
+            task_type="CAUSAL_LM", target_modules=["k_proj", "q_proj", "v_proj"], init_lora_weights=False
+        )
+
+        for i, lora_config in enumerate(lora_configs, start=1):
             torch.manual_seed(i)
-            lora_config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False)
             model = AutoModelForCausalLM.from_pretrained(self.model_id)
             peft_model = get_peft_model(model, lora_config)
             file_name = os.path.join(lora_dir, f"checkpoint-{i}")
@@ -128,8 +157,6 @@ class TestXlora:
         )
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
 
-    # TODO: fix the xfailing test
-    @pytest.mark.xfail
     def test_scalings_logging_methods(self, tokenizer, model):
         model.enable_scalings_logging()
 
@@ -182,8 +209,8 @@ class TestXlora:
 
         assert str(model) is not None
 
-    # TODO: On CI (but not locally), this test seems to have become flaky with the latest transformers changes (v4.45).
-    @pytest.mark.xfail
+    # On CI (but not locally), this test is flaky since transformers v4.45.0.
+    @flaky(num_tries=5)
     def test_save_load_functional(self, tokenizer, model, tmp_path):
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
@@ -271,7 +298,7 @@ class TestXlora:
         assert model.internal_xlora_classifier.override_scaling_pass_value == 2
         assert model.internal_xlora_classifier.config.scaling_pass_value == 2
 
-        # Set it to 2 and make sure it is 1/a
+        # Set it to None and make sure it is 1/n
         model.set_scaling_pass_value(None)
         assert model.internal_xlora_classifier.override_scaling_pass_value == 1 / self.num_loras
         assert model.internal_xlora_classifier.config.scaling_pass_value == 1 / self.num_loras

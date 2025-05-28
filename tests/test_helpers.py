@@ -16,11 +16,13 @@
 import pytest
 import torch
 from diffusers import StableDiffusionPipeline
+from torch import nn
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import LoraConfig, get_peft_model
-from peft.helpers import check_if_peft_model, rescale_adapter_scale
+from peft.helpers import check_if_peft_model, disable_input_dtype_casting, rescale_adapter_scale
 from peft.tuners.lora.layer import LoraLayer
+from peft.utils import infer_device
 
 
 class TestCheckIsPeftModel:
@@ -179,7 +181,7 @@ class TestScalingAdapters:
         assert torch.allclose(logits_base_model, logits_lora_model)
 
     def test_diffusers_pipeline(self):
-        model_id = "hf-internal-testing/tiny-stable-diffusion-torch"
+        model_id = "hf-internal-testing/tiny-sd-pipe"
         pipeline = StableDiffusionPipeline.from_pretrained(model_id)
 
         text_encoder_kwargs = {
@@ -208,8 +210,9 @@ class TestScalingAdapters:
         text_scales_before_scaling = self.get_scale_from_modules(pipeline.text_encoder)
         unet_scales_before_scaling = self.get_scale_from_modules(pipeline.unet)
 
-        with rescale_adapter_scale(model=pipeline.text_encoder, multiplier=0.5), rescale_adapter_scale(
-            model=pipeline.unet, multiplier=0.5
+        with (
+            rescale_adapter_scale(model=pipeline.text_encoder, multiplier=0.5),
+            rescale_adapter_scale(model=pipeline.unet, multiplier=0.5),
         ):
             text_scales_during_scaling = self.get_scale_from_modules(pipeline.text_encoder)
             unet_scales_during_scaling = self.get_scale_from_modules(pipeline.unet)
@@ -369,3 +372,102 @@ class TestScalingAdapters:
             logits_merged_scaling = model(**inputs).logits
 
         assert torch.allclose(logits_merged_scaling, logits_unmerged_scaling, atol=1e-4, rtol=1e-4)
+
+
+class TestDisableInputDtypeCasting:
+    """Test the context manager `disable_input_dtype_casting` that temporarily disables input dtype casting
+    in the model.
+
+    The test works as follows:
+
+    We create a simple MLP and convert it to a PeftModel. The model dtype is set to float16. Then a pre-foward hook is
+    added that casts the model parameters to float32. Moreover, a post-forward hook is added that casts the weights
+    back to float16. The input dtype is float32.
+
+    Without the disable_input_dtype_casting context, what would happen is that PEFT detects that the input dtype is
+    float32 but the weight dtype is float16, so it casts the input to float16. Then the pre-forward hook casts the
+    weight to float32, which results in a RuntimeError.
+
+    With the disable_input_dtype_casting context, the input dtype is left as float32 and there is no error. We also add
+    a hook to record the dtype of the result from the LoraLayer to ensure that it is indeed float32.
+
+    """
+
+    device = infer_device()
+    dtype_record = []
+
+    @torch.no_grad()
+    def cast_params_to_fp32_pre_hook(self, module, input):
+        for param in module.parameters(recurse=False):
+            param.data = param.data.float()
+        return input
+
+    @torch.no_grad()
+    def cast_params_to_fp16_hook(self, module, input, output):
+        for param in module.parameters(recurse=False):
+            param.data = param.data.half()
+        return output
+
+    def record_dtype_hook(self, module, input, output):
+        self.dtype_record.append(output[0].dtype)
+
+    @pytest.fixture
+    def inputs(self):
+        return torch.randn(4, 10, device=self.device, dtype=torch.float32)
+
+    @pytest.fixture
+    def base_model(self):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 20, bias=bias)
+                self.lin1 = nn.Linear(20, 2, bias=bias)
+                self.sm = nn.LogSoftmax(dim=-1)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                X = self.sm(X)
+                return X
+
+        return MLP()
+
+    @pytest.fixture
+    def model(self, base_model):
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        model = get_peft_model(base_model, config).to(device=self.device, dtype=torch.float16)
+        # Register hooks on the submodule that holds parameters
+        for module in model.modules():
+            if sum(p.numel() for p in module.parameters()) > 0:
+                module.register_forward_pre_hook(self.cast_params_to_fp32_pre_hook)
+                module.register_forward_hook(self.cast_params_to_fp16_hook)
+            if isinstance(module, LoraLayer):
+                module.register_forward_hook(self.record_dtype_hook)
+        return model
+
+    def test_disable_input_dtype_casting_active(self, model, inputs):
+        self.dtype_record.clear()
+        with disable_input_dtype_casting(model, active=True):
+            model(inputs)
+        assert self.dtype_record == [torch.float32]
+
+    def test_no_disable_input_dtype_casting(self, model, inputs):
+        msg = r"expected m.*1 and m.*2 to have the same dtype"
+        with pytest.raises(RuntimeError, match=msg):
+            model(inputs)
+
+    def test_disable_input_dtype_casting_inactive(self, model, inputs):
+        msg = r"expected m.*1 and m.*2 to have the same dtype"
+        with pytest.raises(RuntimeError, match=msg):
+            with disable_input_dtype_casting(model, active=False):
+                model(inputs)
+
+    def test_disable_input_dtype_casting_inactive_after_existing_context(self, model, inputs):
+        # this is to ensure that when the context is left, we return to the previous behavior
+        with disable_input_dtype_casting(model, active=True):
+            model(inputs)
+
+        # after the context exited, we're back to the error
+        msg = r"expected m.*1 and m.*2 to have the same dtype"
+        with pytest.raises(RuntimeError, match=msg):
+            model(inputs)

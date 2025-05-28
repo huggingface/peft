@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import warnings
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -163,7 +163,7 @@ class Linear(nn.Linear, VeraLayer):
         self.update_layer(adapter_name, vera_A, vera_B, r, vera_dropout, init_weights, d_initial=d_initial)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -247,11 +247,6 @@ class Linear(nn.Linear, VeraLayer):
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
-
-            # cast back the weights
-            # TODO: why?
-            self.vera_lambda_d[adapter].data = lambda_d.to(dtype)
-            self.vera_lambda_b[adapter].data = lambda_b.to(dtype)
 
         return output_tensor
 

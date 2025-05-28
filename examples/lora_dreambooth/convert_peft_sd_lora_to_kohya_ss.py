@@ -1,6 +1,5 @@
 import argparse
 import os
-from typing import Dict
 
 import torch
 from diffusers import UNet2DConditionModel
@@ -19,7 +18,7 @@ LORA_ADAPTER_NAME = "default"
 
 def get_module_kohya_state_dict(
     module: PeftModel, prefix: str, dtype: torch.dtype, adapter_name: str = LORA_ADAPTER_NAME
-) -> Dict[str, torch.Tensor]:
+) -> dict[str, torch.Tensor]:
     kohya_ss_state_dict = {}
     for peft_key, weight in get_peft_model_state_dict(module, adapter_name=adapter_name).items():
         kohya_key = peft_key.replace("base_model.model", prefix)
@@ -30,7 +29,7 @@ def get_module_kohya_state_dict(
 
         # Set alpha parameter
         if "lora_down" in kohya_key:
-            alpha_key = f'{kohya_key.split(".")[0]}.alpha'
+            alpha_key = f"{kohya_key.split('.')[0]}.alpha"
             kohya_ss_state_dict[alpha_key] = torch.tensor(module.peft_config[adapter_name].lora_alpha).to(dtype)
 
     return kohya_ss_state_dict

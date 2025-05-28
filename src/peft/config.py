@@ -16,10 +16,10 @@ import json
 import os
 import warnings
 from dataclasses import asdict, dataclass, field
-from typing import Dict, Optional, Union
+from typing import Optional, Union
 
 from huggingface_hub import hf_hub_download
-from transformers.utils import PushToHubMixin
+from transformers.utils import PushToHubMixin, http_user_agent
 
 from .utils import CONFIG_NAME, PeftType, TaskType
 
@@ -68,7 +68,7 @@ class PeftConfigMixin(PushToHubMixin):
                 f"Invalid task type: '{self.task_type}'. Must be one of the following task types: {', '.join(TaskType)}."
             )
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         r"""
         Returns the configuration for your adapter model as a dictionary.
         """
@@ -155,12 +155,15 @@ class PeftConfigMixin(PushToHubMixin):
             if "got an unexpected keyword argument" not in str(exc):
                 raise exc
 
-            filtered_kwargs, unexpected_kwargs = _check_and_remove_unused_kwargs(cls, kwargs)
+            filtered_kwargs, unexpected_kwargs = _check_and_remove_unused_kwargs(config_cls, kwargs)
             if not MIN_EXPECTED_CONFIG_KEYS.issubset(set(filtered_kwargs.keys())):
-                raise TypeError(f"The config that is trying to be loaded is not a valid {cls.__name__} config.")
+                raise TypeError(
+                    f"The {cls.__name__} config that is trying to be loaded is missing required keys: "
+                    f"{MIN_EXPECTED_CONFIG_KEYS}."
+                )
 
             warnings.warn(
-                f"Unexpected keyword arguments {sorted(unexpected_kwargs)} for class {cls.__name__}, these are "
+                f"Unexpected keyword arguments {sorted(unexpected_kwargs)} for class {config_cls.__name__}, these are "
                 "ignored. This probably means that you're loading a configuration file that was saved using a "
                 "higher version of the library and additional parameters have been introduced since. It is "
                 "highly recommended to upgrade the PEFT version before continuing (e.g. by running `pip install "
@@ -187,6 +190,8 @@ class PeftConfigMixin(PushToHubMixin):
         )
 
         hf_hub_download_kwargs, class_kwargs, _ = cls._split_kwargs(kwargs)
+        if "user_agent" not in hf_hub_download_kwargs:
+            hf_hub_download_kwargs["user_agent"] = http_user_agent()
 
         if os.path.isfile(os.path.join(path, CONFIG_NAME)):
             config_file = os.path.join(path, CONFIG_NAME)

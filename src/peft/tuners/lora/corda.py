@@ -13,10 +13,11 @@
 # limitations under the License.
 
 # Reference code: https://github.com/iboing/CorDA/blob/main/cordalib/decomposition.py
-# Reference paper: https://arxiv.org/abs/2406.05223
+# Reference paper: https://huggingface.co/papers/2406.05223
 
 import os
-from typing import Any, Callable, Iterable, Optional
+from collections.abc import Iterable
+from typing import Any, Callable, Optional
 
 import torch
 import torch.nn as nn

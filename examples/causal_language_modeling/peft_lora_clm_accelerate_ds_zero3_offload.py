@@ -297,9 +297,9 @@ def main():
 
         correct = 0
         total = 0
-        assert len(eval_preds) == len(
-            dataset["train"][label_column]
-        ), f"{len(eval_preds)} != {len(dataset['train'][label_column])}"
+        assert len(eval_preds) == len(dataset["train"][label_column]), (
+            f"{len(eval_preds)} != {len(dataset['train'][label_column])}"
+        )
         for pred, true in zip(eval_preds, dataset["train"][label_column]):
             if pred.strip() == true.strip():
                 correct += 1
