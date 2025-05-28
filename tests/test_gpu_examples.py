@@ -89,7 +89,7 @@ from .testing_utils import (
     require_deterministic_for_xpu,
     require_eetq,
     require_hqq,
-    require_multi_accelerator,
+    require_torch_multi_accelerator,
     require_non_cpu,
     require_non_xpu,
     require_optimum,
@@ -501,7 +501,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
-    @require_multi_accelerator
+    @require_torch_multi_accelerator
     def test_causal_lm_training_multi_gpu(self):
         r"""
         Test the CausalLM training on a multi-GPU device. This test is a converted version of
@@ -625,7 +625,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
-    @require_multi_accelerator
+    @require_torch_multi_accelerator
     def test_seq2seq_lm_training_multi_gpu(self):
         r"""
         Test the Seq2SeqLM training on a multi-GPU device. This test is a converted version of
@@ -4484,7 +4484,7 @@ class TestEvaInitializationGPU:
 class TestPrefixTuning:
     device = infer_device()
 
-    @require_multi_accelerator
+    @require_torch_multi_accelerator
     def test_prefix_tuning_multiple_devices_decoder_model(self):
         # See issue 2134
         model_id = "hf-internal-testing/tiny-random-MistralForCausalLM"
@@ -4509,7 +4509,7 @@ class TestPrefixTuning:
         model = get_peft_model(model, peft_config)
         model.generate(**inputs)  # does not raise
 
-    @require_multi_accelerator
+    @require_torch_multi_accelerator
     def test_prefix_tuning_multiple_devices_encoder_decoder_model(self):
         # See issue 2134
         model_id = "hf-internal-testing/tiny-random-T5Model"

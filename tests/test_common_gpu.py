@@ -63,7 +63,7 @@ from .testing_utils import (
     load_cat_image,
     require_bitsandbytes,
     require_deterministic_for_xpu,
-    require_multi_accelerator,
+    require_torch_multi_accelerator,
     require_non_cpu,
 )
 
@@ -698,7 +698,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, IA3Linear4bit)
 
     @pytest.mark.multi_gpu_tests
-    @require_multi_accelerator
+    @require_torch_multi_accelerator
     def test_lora_causal_lm_multi_gpu_inference(self):
         r"""
         Test if LORA can be used for inference on multiple GPUs.
@@ -726,7 +726,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         # this should work without any problem
         _ = model.generate(input_ids=input_ids)
 
-    @require_multi_accelerator
+    @require_torch_multi_accelerator
     @pytest.mark.multi_gpu_tests
     @require_bitsandbytes
     def test_lora_seq2seq_lm_multi_gpu_inference(self):
@@ -754,7 +754,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         # this should work without any problem
         _ = model.generate(input_ids=input_ids)
 
-    @require_multi_accelerator
+    @require_torch_multi_accelerator
     @pytest.mark.multi_gpu_tests
     @require_bitsandbytes
     def test_adaption_prompt_8bit(self):
@@ -777,7 +777,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
         _ = model(random_input)
 
-    @require_multi_accelerator
+    @require_torch_multi_accelerator
     @pytest.mark.multi_gpu_tests
     @require_bitsandbytes
     def test_adaption_prompt_4bit(self):
@@ -1490,7 +1490,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         # The results should be the same
         assert torch.allclose(out_peft_model_cpu, out_peft_model_ego)
 
-    @require_multi_accelerator
+    @require_torch_multi_accelerator
     @pytest.mark.multi_gpu_tests
     def test_dora_ephemeral_gpu_offload_multigpu(self):
         torch.manual_seed(0)
