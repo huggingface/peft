@@ -375,7 +375,7 @@ def evaluation_loop(model, eval_dataloader, processor, normalizer, metric, force
     normalized_predictions = []
     normalized_references = []
     for _, batch in enumerate(tqdm(eval_dataloader)):
-        with torch.cuda.amp.autocast():
+        with torch.autocast():
             with torch.no_grad():
                 generated_tokens = (
                     model.generate(
