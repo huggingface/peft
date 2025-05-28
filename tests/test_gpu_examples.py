@@ -4162,9 +4162,10 @@ class TestAutoCast(unittest.TestCase):
         # Prepare dummy inputs
         input_ids = torch.randint(0, 1000, (2, 10)).to(self.device)
         if precision == torch.bfloat16:
-            is_xpu = self.device == "xpu"
-            is_cuda_bf16 = self.device == "cuda" and torch.cuda.is_bf16_supported()
-            if not (is_xpu or is_cuda_bf16):
+            is_bf16_supported = (torch.cuda.is_available() and torch.cuda.is_bf16_supported()) or (
+                is_xpu_available() and torch.xpu.is_bf16_supported()
+            )
+            if not is_bf16_supported:
                 self.skipTest("Bfloat16 not supported on this device")
 
         # Forward pass with test precision

@@ -1593,9 +1593,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert not torch.allclose(logits, logits_hra)
 
 
-@pytest.mark.skipif(
-    not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a hardware accelerator"
-)
+@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU")
 @pytest.mark.single_gpu_tests
 class TestSameAdapterDifferentDevices:
     device = infer_device()

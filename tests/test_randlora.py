@@ -291,7 +291,7 @@ class TestRandLora:
         if dtype == torch.bfloat16:
             # skip if bf16 is not supported on hardware, see #1872
             is_bf16_supported = (torch.cuda.is_available() and torch.cuda.is_bf16_supported()) or (
-                is_xpu_available() and torch.xpu.torch.cuda.is_bf16_supported()
+                is_xpu_available() and torch.xpu.is_bf16_supported()
             )
             if not is_bf16_supported:
                 pytest.skip("bfloat16 not supported on this system, skipping the test")
