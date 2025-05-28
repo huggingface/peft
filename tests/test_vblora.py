@@ -191,7 +191,10 @@ class TestVBLoRA:
     def test_vblora_dtypes(self, dtype):
         mlp = self.get_mlp()
         if dtype == torch.bfloat16:
-            if not is_xpu_available() and not (torch.cuda.is_available() and torch.cuda.is_bf16_supported()):
+            is_bf16_supported = (torch.cuda.is_available() and torch.cuda.is_bf16_supported()) or (
+                is_xpu_available() and torch.xpu.torch.cuda.is_bf16_supported()
+            )
+            if not is_bf16_supported:
                 pytest.skip("bfloat16 not supported on this system, skipping the test")
 
         config = VBLoRAConfig(
