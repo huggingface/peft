@@ -1,5 +1,5 @@
 # EVA: Explained Variance Adaptation
-## Introduction ([Paper](https://arxiv.org/abs/2410.07170), [code](https://github.com/ml-jku/EVA))
+## Introduction ([Paper](https://huggingface.co/papers/2410.07170), [code](https://github.com/ml-jku/EVA))
 Explained Variance Adaptation (EVA) is a novel initialization method for LoRA style adapters which initializes adapter weights in a data driven manner and adaptively allocates ranks according to the variance they explain. EVA improves average performance on a multitude of tasks across various domains, such as Language generation and understanding, Image classification, and Decision Making.
 
 The abstract from the paper is:

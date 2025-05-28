@@ -49,7 +49,7 @@ class LoraFAOptimizer(Optimizer):
         closure (Callable, optional): A closure that reevaluates the model and returns the loss.
 
     Reference:
-        - LoRA-FA: https://arxiv.org/abs/2308.03303
+        - LoRA-FA: https://huggingface.co/papers/2308.03303
     """
 
     def __init__(

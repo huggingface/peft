@@ -31,7 +31,7 @@ class CPTConfig(PromptLearningConfig):
     - Loss weighting
     - Projection settings
 
-    For more details, see the paper: https://arxiv.org/abs/2410.17222
+    For more details, see the paper: https://huggingface.co/papers/2410.17222
     """
 
     # Token-related configurations
