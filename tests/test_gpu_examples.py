@@ -3648,8 +3648,7 @@ class PeftEetqGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
 
-@require_non_xpu
-@require_torch_gpu
+@require_non_cpu
 @require_torchao
 class PeftTorchaoGPUTests(unittest.TestCase):
     r"""
@@ -3838,8 +3837,8 @@ class PeftTorchaoGPUTests(unittest.TestCase):
 
     @parameterized.expand(supported_quant_types)
     @pytest.mark.multi_gpu_tests
-    @require_torch_multi_gpu
-    def test_causal_lm_training_multi_gpu_torchao(self, quant_type):
+    @require_torch_multi_accelerator
+    def test_causal_lm_training_multi_accelerator_torchao(self, quant_type):
         from transformers import TorchAoConfig
 
         device_map = {
@@ -3918,8 +3917,8 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
-    @require_torch_multi_gpu
-    def test_causal_lm_training_multi_gpu_torchao_int4_raises(self):
+    @require_torch_multi_accelerator
+    def test_causal_lm_training_multi_accelerator_torchao_int4_raises(self):
         # int4_weight_only raises an error:
         # RuntimeError: derivative for aten::_weight_int4pack_mm is not implemented
         # TODO: Once proper torchao support for int4 is added, remove this test and add int4 to supported_quant_types
