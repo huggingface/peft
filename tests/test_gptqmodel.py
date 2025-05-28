@@ -45,7 +45,6 @@ from .testing_utils import (
     require_gptqmodel,
     require_optimum,
     require_torch_multi_accelerator,
-    require_torch_multi_gpu,
 )
 
 
@@ -257,8 +256,8 @@ class PeftGPTQModelTests(unittest.TestCase):
     @require_torch_multi_accelerator
     def test_causal_lm_training_multi_accelerator(self):
         r"""
-        Test the CausalLM training on a multi-accelerator device. The test would simply fail if the adapters are not set
-        correctly.
+        Test the CausalLM training on a multi-accelerator device. The test would simply fail if the adapters are not
+        set correctly.
         """
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -269,7 +268,6 @@ class PeftGPTQModelTests(unittest.TestCase):
                 quantization_config=self.quantization_config,
             )
 
-            print(f"device count: {range(device_count)}")
             assert set(model.hf_device_map.values()) == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)

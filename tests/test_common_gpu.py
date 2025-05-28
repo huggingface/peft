@@ -63,8 +63,8 @@ from .testing_utils import (
     load_cat_image,
     require_bitsandbytes,
     require_deterministic_for_xpu,
-    require_torch_multi_accelerator,
     require_non_cpu,
+    require_torch_multi_accelerator,
 )
 
 
