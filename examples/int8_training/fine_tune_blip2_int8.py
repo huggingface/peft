@@ -17,6 +17,7 @@ from torch.utils.data import DataLoader, Dataset
 from transformers import AutoModelForVision2Seq, AutoProcessor, BitsAndBytesConfig
 
 from peft import LoraConfig, get_peft_model
+from peft.utils import infer_device
 
 
 # Let's define the LoraConfig
@@ -78,7 +79,7 @@ train_dataloader = DataLoader(train_dataset, shuffle=True, batch_size=2, collate
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5)
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
+device = infere_device()
 
 model.train()
 

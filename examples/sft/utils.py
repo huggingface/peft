@@ -13,6 +13,7 @@ from transformers import (
 )
 
 from peft import LoraConfig
+from peft.utils import infer_device
 
 
 DEFAULT_CHATML_CHAT_TEMPLATE = "{% for message in messages %}\n{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}{% if loop.last and add_generation_prompt %}{{'<|im_start|>assistant\n' }}{% endif %}{% endfor %}"
@@ -109,11 +110,12 @@ def create_and_prepare_model(args, data_args, training_args):
             bnb_4bit_quant_storage=quant_storage_dtype,
         )
 
+        device_type = infer_device()
+        torch_accelerator_module = getattr(torch, device_type, torch.cuda)
         if compute_dtype == torch.float16 and args.use_4bit_quantization:
-            major, _ = torch.cuda.get_device_capability()
-            if major >= 8:
+            if torch_accelerator_module.is_bf16_supported():
                 print("=" * 80)
-                print("Your GPU supports bfloat16, you can accelerate training with the argument --bf16")
+                print("Your accelerator supports bfloat16, you can accelerate training with the argument --bf16")
                 print("=" * 80)
         elif args.use_8bit_quantization:
             bnb_config = BitsAndBytesConfig(load_in_8bit=args.use_8bit_quantization)

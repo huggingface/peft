@@ -41,6 +41,7 @@ def train_model(
     # Setup device
     device = torch.device(device)
     print(f"Using device: {device}")
+    torch_accelerator_module = getattr(torch, device.type, torch.cuda)
 
     # load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(base_model, token=hf_token)
@@ -53,7 +54,7 @@ def train_model(
             quantization_config=BitsAndBytesConfig(
                 load_in_4bit=True,
                 bnb_4bit_compute_dtype=(
-                    torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
+                    torch.bfloat16 if torch_accelerator_module.is_available() and torch_accelerator_module.is_bf16_supported() else torch.float16
                 ),
                 bnb_4bit_use_double_quant=True,
                 bnb_4bit_quant_type="nf4",
@@ -117,8 +118,8 @@ def train_model(
         hub_token=hf_token,
     )
 
-    # Clear CUDA cache to free memory
-    torch.cuda.empty_cache()
+    # Clear accelerator cache to free memory
+    torch_accelerator_module.empty_cache()
 
     # Initialize the Trainer
     trainer = Trainer(

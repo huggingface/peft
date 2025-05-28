@@ -8,7 +8,7 @@ from diffusers import DDIMScheduler
 from PIL import Image
 from torchvision import transforms
 from utils.pipeline_controlnet import LightControlNetPipeline
-
+from peft.utils import infer_device
 
 def image_grid(imgs, rows, cols):
     assert len(imgs) == rows * cols
@@ -76,7 +76,9 @@ def log_validation(val_dataset, text_encoder, unet, controlnet, args, accelerato
         tracker.log({"validation": formatted_images})
 
     del pipeline
-    torch.cuda.empty_cache()
+    device_type = infer_device()
+    torch_accelerator_module = getattr(torch, device_type, torch.cuda)
+    torch_accelerator_module.empty_cache()
 
 
 def make_dataset(args, tokenizer, accelerator, split="train"):

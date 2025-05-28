@@ -78,6 +78,8 @@ python dora_finetuning.py \
     --hub_model_id "YOUR_HF_REPO" \
     --push_to_hub
 ```
+You can specify device as `--device "xpu:0"` if your device is an Intel XPU. 
+
 ## Use the model on 🤗
 You can load and use the model as any other 🤗 models.
 ```python
