@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import EvaConfig, LoraConfig, get_peft_model, initialize_lora_eva_weights
-
+from peft.utils import infer_device
 
 # config
 model_name = "meta-llama/Llama-3.1-8B"
@@ -60,8 +60,9 @@ peft_config = LoraConfig(
     eva_config=eva_config
 )
 
-# move model to GPU
-model = model.cuda()
+# move model to accelerator
+torch_device = infer_device()
+model = model.to(device)
 
 # to optimize memory usage during EVA initialization, set low_cpu_mem_usage=True
 peft_model = get_peft_model(model, peft_config, low_cpu_mem_usage=True)

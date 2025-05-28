@@ -803,7 +803,7 @@ def main(args):
         cur_class_images = len(list(class_images_dir.iterdir()))
 
         if cur_class_images < args.num_class_images:
-            torch_dtype = torch.float16 if accelerator.device.type == ["cuda", "xpu"] else torch.float32
+            torch_dtype = torch.float16 if accelerator.device.type in ["cuda", "xpu"] else torch.float32
             if args.prior_generation_precision == "fp32":
                 torch_dtype = torch.float32
             elif args.prior_generation_precision == "fp16":

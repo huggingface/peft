@@ -7,10 +7,12 @@
 ```python
 import torch
 from peft import RandLoraConfig, get_peft_model
+from peft.utils import infer_device
 from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer
 from datasets import load_dataset
 
-model = AutoModelForCausalLM.from_pretrained("huggyllama/llama-7b", device_map="cuda")
+device = infer_device()
+model = AutoModelForCausalLM.from_pretrained("huggyllama/llama-7b", device_map=device)
 tokenizer = AutoTokenizer.from_pretrained("huggyllama/llama-7b")
 dataset = load_dataset("timdettmers/openassistant-guanaco", split="train")
 randlora_config = RandLoraConfig()

@@ -30,9 +30,11 @@ from tqdm import tqdm
 from transformers import AutoTokenizer
 from utils.args_loader import parse_args
 from utils.dataset import make_dataset
+from peft.utils import infer_device
 
 
-detect_model = face_alignment.FaceAlignment(face_alignment.LandmarksType.TWO_D, device="cuda:0", flip_input=False)
+device_type = infer_device()
+detect_model = face_alignment.FaceAlignment(face_alignment.LandmarksType.TWO_D, device=f"{device_type}:0", flip_input=False)
 
 # with open('./data/celebhq-text/prompt_val_blip_full.json', 'rt') as f:    # fill50k, COCO
 #     for line in f:
