@@ -27,6 +27,7 @@ import torch
 from accelerate import infer_auto_device_map
 from accelerate.test_utils.testing import run_command
 from accelerate.utils import patch_environment
+from accelerate.utils.imports import is_bf16_available
 from accelerate.utils.memory import clear_device_cache
 from datasets import Audio, Dataset, DatasetDict, load_dataset
 from packaging import version
@@ -4161,10 +4162,7 @@ class TestAutoCast(unittest.TestCase):
         # Prepare dummy inputs
         input_ids = torch.randint(0, 1000, (2, 10)).to(self.device)
         if precision == torch.bfloat16:
-            is_bf16_supported = (torch.cuda.is_available() and torch.cuda.is_bf16_supported()) or (
-                is_xpu_available() and torch.xpu.is_bf16_supported()
-            )
-            if not is_bf16_supported:
+            if not is_bf16_available():
                 self.skipTest("Bfloat16 not supported on this device")
 
         # Forward pass with test precision
