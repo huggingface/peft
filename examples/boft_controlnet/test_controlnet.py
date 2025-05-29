@@ -38,13 +38,10 @@ from utils.unet_2d_condition import UNet2DConditionNewModel
 
 sys.path.append("../../src")
 from peft import PeftModel  # noqa: E402
-from peft.utils import infer_device
 
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.10.0.dev0")
-device_type = infer_device()
-device = torch.device(f"{device_type}:0")
 
 def main(args):
     logging_dir = Path(args.output_dir, args.logging_dir)
@@ -55,6 +52,8 @@ def main(args):
         log_with=args.report_to,
         project_dir=logging_dir,
     )
+    device_type = accelerator.device.type
+    device = torch.device(f"{device_type}:0")
 
     # Load the tokenizer
     if args.tokenizer_name:

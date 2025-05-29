@@ -18,7 +18,7 @@ class TorchTracemalloc:
         self.torch_accelerator_module = getattr(torch, device_type, torch.cuda)
         gc.collect()
         self.torch_accelerator_module.empty_cache()
-        self.torch_accelerator_module.reset_max_memory_allocated()  # reset the peak gauge to zero
+        self.torch_accelerator_module.reset_peak_memory_stats()  # reset the peak gauge to zero
         self.begin = self.torch_accelerator_module.memory_allocated()
         self.process = psutil.Process()
 

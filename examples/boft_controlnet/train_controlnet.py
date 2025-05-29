@@ -215,6 +215,9 @@ def main(args):
         text_encoder.to(accelerator.device, dtype=weight_dtype)
 
     if args.enable_xformers_memory_efficient_attention:
+        if torch.xpu.is_available():
+            logger.warning("XPU doesn't support xFormers as of now, ignore enable_xformers_memory_efficient_attention setting")
+            args.enable_xformers_memory_efficient_attention = False
         if is_xformers_available():
             import xformers
 
@@ -527,7 +530,7 @@ def main(args):
             f"CPU Total Peak Memory consumed during the train (max): {tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)}"
         )
 
-    # Create the pipeline using using the trained modules and save it.
+    # Create the pipeline using the trained modules and save it.
     accelerator.wait_for_everyone()
     accelerator.end_training()
 

@@ -20,7 +20,8 @@ import PIL.Image
 import torch
 from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
 from diffusers.pipelines.controlnet.pipeline_controlnet import StableDiffusionControlNetPipeline
-from diffusers.utils import BaseOutput, is_compiled_module, logging
+from diffusers.utils import BaseOutput, logging
+from diffusers.utils.torch_utils import is_compiled_module
 from torch.nn import functional as F
 from utils.light_controlnet import ControlNetModel
 
