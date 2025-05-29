@@ -27,6 +27,8 @@ import torch.nn as nn
 from torch import autocast
 from torch.optim import Optimizer
 
+from accelerate.utils.imports import is_bf16_available
+
 from ..peft_model import PeftModel
 from ..utils.other import infer_device
 
@@ -148,13 +150,9 @@ class LoraFAOptimizer(Optimizer):
                     AA_T_inv = torch.linalg.pinv(AA_T + delta * torch.eye(A.shape[0]).to(A.device))
 
                     device_type = infer_device()
-                    bf16_supported = False
-                    if device_type == "cuda" and torch.cuda.is_bf16_supported():
-                        bf16_supported = True
-                    elif device_type == "xpu" and torch.xpu.is_bf16_supported():
-                        bf16_supported = True
+                    bf16_available = True if is_bf16_available() else False
 
-                    if bf16_supported:
+                    if bf16_available:
                         with autocast(device_type=device_type, dtype=torch.bfloat16):
                             grad_B = (1 / scaling_factor**2) * (grad_B_orin @ AA_T_inv)
                     else:
