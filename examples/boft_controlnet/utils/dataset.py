@@ -9,7 +9,6 @@ from PIL import Image
 from torchvision import transforms
 from utils.pipeline_controlnet import LightControlNetPipeline
 
-
 def image_grid(imgs, rows, cols):
     assert len(imgs) == rows * cols
 
@@ -76,7 +75,8 @@ def log_validation(val_dataset, text_encoder, unet, controlnet, args, accelerato
         tracker.log({"validation": formatted_images})
 
     del pipeline
-    torch.cuda.empty_cache()
+    torch_accelerator_module = getattr(torch, accelerator.device.type, torch.cuda)
+    torch_accelerator_module.empty_cache()
 
 
 def make_dataset(args, tokenizer, accelerator, split="train"):

@@ -4,6 +4,7 @@ import threading
 import psutil
 import torch
 
+from peft.utils import infer_device
 
 # Converting Bytes to Megabytes
 def b2mb(x):
@@ -13,10 +14,12 @@ def b2mb(x):
 # This context manager is used to track the peak memory usage of the process
 class TorchTracemalloc:
     def __enter__(self):
+        device_type = infer_device()
+        self.torch_accelerator_module = getattr(torch, device_type, torch.cuda)
         gc.collect()
-        torch.cuda.empty_cache()
-        torch.cuda.reset_max_memory_allocated()  # reset the peak gauge to zero
-        self.begin = torch.cuda.memory_allocated()
+        self.torch_accelerator_module.empty_cache()
+        self.torch_accelerator_module.reset_max_memory_allocated()  # reset the peak gauge to zero
+        self.begin = self.torch_accelerator_module.memory_allocated()
         self.process = psutil.Process()
 
         self.cpu_begin = self.cpu_mem_used()
@@ -46,9 +49,9 @@ class TorchTracemalloc:
         self.peak_monitoring = False
 
         gc.collect()
-        torch.cuda.empty_cache()
-        self.end = torch.cuda.memory_allocated()
-        self.peak = torch.cuda.max_memory_allocated()
+        self.torch_accelerator_module.empty_cache()
+        self.end = self.torch_accelerator_module.memory_allocated()
+        self.peak = self.torch_accelerator_module.max_memory_allocated()
         self.used = b2mb(self.end - self.begin)
         self.peaked = b2mb(self.peak - self.begin)
 
