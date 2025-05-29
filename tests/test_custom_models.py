@@ -1009,7 +1009,7 @@ class ModelConv2DGroups(nn.Module):
         return X
 
 
-class ModelConv1D(nn.Module):
+class ModelConv1DKernel1(nn.Module):
     def __init__(self):
         super().__init__()
         self.conv1d = nn.Conv1d(in_channels=3, out_channels=10, kernel_size=1)
@@ -1098,8 +1098,8 @@ class MockTransformerWrapper:
         if model_id == "Conv2d1x1":
             return ModelConv2D1x1().to(torch_dtype)
 
-        if model_id == "Conv1d":
-            return ModelConv1D().to(torch_dtype)
+        if model_id == "Conv1dKernel1":
+            return ModelConv1DKernel1().to(torch_dtype)
 
         if model_id == "Conv2dGroups":
             return ModelConv2DGroups().to(torch_dtype)
@@ -4808,3 +4808,5 @@ class TestDynamicDispatch:
         # we should still get a warning message
         msg = "Unsupported layer type '<class 'torch.nn.modules.rnn.LSTM'>' encountered, proceed at your own risk."
         assert str(recwarn.list[-1].message) == msg
+
+

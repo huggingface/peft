@@ -140,6 +140,10 @@ dmypy.json
 # More test things
 wandb
 
+<<<<<<< Updated upstream
 # method_comparison logs
 method_comparison/MetaMathQA/cancelled_results/
 method_comparison/MetaMathQA/temporary_results/
+=======
+**/.claude/settings.local.json
+>>>>>>> Stashed changes
