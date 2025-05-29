@@ -72,7 +72,7 @@ def test_opt_350m_4bit():
     torch.testing.assert_allclose(output, expected)
 
 
-@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="No CUDA device available.")
+@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="No CUDA or XPU device available.")
 def test_opt_350m_8bit():
     torch.manual_seed(0)
     bnb_config = BitsAndBytesConfig(load_in_8bit=True)
@@ -137,7 +137,7 @@ def test_opt_350m_4bit_compute_dtype_float16():
     torch.testing.assert_allclose(output, expected)
 
 
-@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="No CUDA device available.")
+@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="No CUDA or XPU device available.")
 def test_opt_350m_4bit_quant_type_nf4():
     torch.manual_seed(0)
     bnb_config = BitsAndBytesConfig(
@@ -161,7 +161,7 @@ def test_opt_350m_4bit_quant_type_nf4():
     torch.testing.assert_allclose(output, expected)
 
 
-@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="No CUDA device available.")
+@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="No CUDA or XPU device available.")
 def test_opt_350m_4bit_quant_storage():
     # note: using torch.float32 instead of the default torch.uint8 does not seem to affect the result
     torch.manual_seed(0)
@@ -186,7 +186,7 @@ def test_opt_350m_4bit_quant_storage():
     torch.testing.assert_allclose(output, expected)
 
 
-@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="No CUDA device available.")
+@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="No CUDA or XPU device available.")
 def test_opt_350m_8bit_threshold():
     torch.manual_seed(0)
     bnb_config = BitsAndBytesConfig(
@@ -213,7 +213,7 @@ def test_opt_350m_8bit_threshold():
 ###########
 
 
-@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="No CUDA device available.")
+@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="No CUDA or XPU device available.")
 def test_flan_t5_4bit():
     torch.manual_seed(0)
     bnb_config = BitsAndBytesConfig(
@@ -237,7 +237,7 @@ def test_flan_t5_4bit():
     torch.testing.assert_allclose(output, expected)
 
 
-@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="No CUDA device available.")
+@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="No CUDA or XPU device available.")
 @pytest.mark.xfail  # might not be reproducible depending on hardware
 def test_flan_t5_8bit():
     torch.manual_seed(0)

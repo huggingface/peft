@@ -22,6 +22,7 @@ from typing import Optional, Union
 
 import torch
 import torch.nn as nn
+from accelerate.utils.imports import is_bf16_available
 from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
 
@@ -58,7 +59,7 @@ def _kaiming_init(
     if isinstance(tensor_or_shape, tuple):
         tensor = torch.empty(
             tensor_or_shape,
-            dtype=torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16,
+            dtype=torch.bfloat16 if is_bf16_available() else torch.float16,
         )
     else:
         tensor = tensor_or_shape
