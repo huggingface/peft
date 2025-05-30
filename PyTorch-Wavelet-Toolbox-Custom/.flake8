@@ -1,0 +1,47 @@
+
+#########################
+# Flake8 Configuration  #
+# (.flake8)             #
+#########################
+[flake8]
+ignore =
+    # pickle
+    S301
+    S403
+    S404
+    S603
+    # Line break before binary operator (flake8 is wrong)
+    W503
+    # Ignore the spaces black puts before columns.
+    E203
+    # allow path extensions for testing.
+    E402
+    DAR101
+    DAR201
+    # flake and pylance disagree on linebreaks in strings.
+    N400
+    # asserts are ok in test.
+    S101
+    C901
+extend-select = B950
+extend-ignore = E501,E701,E704
+exclude =
+    .tox,
+    .git,
+    __pycache__,
+    docs/conf.py,
+    build,
+    dist,
+    *.pyc,
+    *.bib,
+    *.egg-info,
+    .cache,
+    .eggs,
+    data.
+    src/ptwt/__init__.py
+max-line-length = 80
+max-complexity = 20
+import-order-style = pycharm
+application-import-names =
+    ptwt
+    tests
