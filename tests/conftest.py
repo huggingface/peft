@@ -42,21 +42,29 @@ def pytest_collection_modifyitems(config, items):
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
     """
-    Plug into the pytest test report generation to skip a specific MacOS failure caused by transformers
-    https://github.com/huggingface/transformers/pull/37785, which results in torch.load failing when using torch < 2.6.
-    Since the MacOS x86 runners need to use an older torch version, this is necessary to get the CI green.
+    Plug into the pytest test report generation to skip a specific MacOS failure caused by transformers.
+
+    Failure 0 was introduced by https://github.com/huggingface/transformers/pull/37785, which results in torch.load
+    failing when using torch < 2.6.
+
+    Failure 1 was introduced by https://github.com/huggingface/transformers/pull/37919, which results in a DTensor
+    import being triggered in the save_pretrained, which fails with MacOS and torch 2.2 (possibly also later MacOS
+    versions).
+
+    Since the MacOS x86 runners need to use an older torch version, those stesp are necessary to get the CI green.
     """
     outcome = yield
     rep = outcome.get_result()
     # ref:
     # https://github.com/huggingface/transformers/blob/858ce6879a4aa7fa76a7c4e2ac20388e087ace26/src/transformers/utils/import_utils.py#L1418
-    error_msg = re.compile(r"^Due to a serious vulnerability issue in `torch.load`")
+    error_msg_0 = re.compile(r"^Due to a serious vulnerability issue in `torch.load`")
+    error_msg_1 = re.compile(r"ImportError: cannot import name 'DTensor' from 'torch.distributed.tensor'")
 
     # note: pytest uses hard-coded strings, we cannot import and use constants
     # https://docs.pytest.org/en/stable/reference/reference.html#pytest.TestReport
     if (rep.when == "call") and rep.failed and (platform.system() == "Darwin"):
-        exc = call.excinfo.value
-        if error_msg.search(str(exc)):
+        exc_msg = str(call.excinfo.value)
+        if error_msg_0.search(exc_msg) or error_msg_1.search(exc_msg):
             # turn this failure into an xfail:
             rep.outcome = "skipped"
             # for this attribute, see:
