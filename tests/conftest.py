@@ -51,14 +51,14 @@ def pytest_runtest_makereport(item, call):
     import being triggered in the save_pretrained, which fails with MacOS and torch 2.2 (possibly also later MacOS
     versions).
 
-    Since the MacOS x86 runners need to use an older torch version, those stesp are necessary to get the CI green.
+    Since the MacOS x86 runners need to use an older torch version, those steps are necessary to get the CI green.
     """
     outcome = yield
     rep = outcome.get_result()
     # ref:
     # https://github.com/huggingface/transformers/blob/858ce6879a4aa7fa76a7c4e2ac20388e087ace26/src/transformers/utils/import_utils.py#L1418
-    error_msg_0 = re.compile(r"^Due to a serious vulnerability issue in `torch.load`")
-    error_msg_1 = re.compile(r"ImportError: cannot import name 'DTensor' from 'torch.distributed.tensor'")
+    error_msg_0 = re.compile(r"Due to a serious vulnerability issue in `torch.load`")
+    error_msg_1 = re.compile(r"cannot import name 'DTensor' from 'torch.distributed.tensor'")
 
     # note: pytest uses hard-coded strings, we cannot import and use constants
     # https://docs.pytest.org/en/stable/reference/reference.html#pytest.TestReport
@@ -69,4 +69,4 @@ def pytest_runtest_makereport(item, call):
             rep.outcome = "skipped"
             # for this attribute, see:
             # https://github.com/pytest-dev/pytest/blob/bd6877e5874b50ee57d0f63b342a67298ee9a1c3/src/_pytest/reports.py#L266C5-L266C13
-            rep.wasxfail = "Known macOS-only failure from updated dependency"
+            rep.wasxfail = "Errors known to occur on MacOS with older torch versions, won't be fixed"
