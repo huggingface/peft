@@ -1313,17 +1313,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             offload_index = kwargs.get("offload_index", None)
 
             if offload_dir is not None and offload_folder is not None:
+                # see https://github.com/huggingface/peft/issues/2541
                 raise ValueError(
                     "Cannot use `offload_folder` when `offload_dir` is specified."
                 )
             elif offload_dir is None:
                 # to keep backwards compatibility
                 offload_dir = offload_folder
-                warnings.warn(
-                    "The `offload_folder` argument is deprecated and will be removed in a future version. "
-                    "Please use `offload_dir` instead.",
-                    category=DeprecationWarning
-                )
 
             dispatch_model_kwargs = {}
             # Safety checker for previous `accelerate` versions
