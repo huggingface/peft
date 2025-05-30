@@ -60,9 +60,11 @@ def pytest_runtest_makereport(item, call):
     error_msg_0 = re.compile(r"Due to a serious vulnerability issue in `torch.load`")
     error_msg_1 = re.compile(r"cannot import name 'DTensor' from 'torch.distributed.tensor'")
 
-    # note: pytest uses hard-coded strings, we cannot import and use constants
-    # https://docs.pytest.org/en/stable/reference/reference.html#pytest.TestReport
-    if (rep.when == "call") and rep.failed and (platform.system() == "Darwin"):
+    # notes:
+    # - pytest uses hard-coded strings, we cannot import and use constants
+    #   https://docs.pytest.org/en/stable/reference/reference.html#pytest.TestReport
+    # - errors can happen during call (running the test) but also setup (e.g. in fixtures)
+    if rep.failed and (rep.when in ("setup", "call")) and (platform.system() == "Darwin"):
         exc_msg = str(call.excinfo.value)
         if error_msg_0.search(exc_msg) or error_msg_1.search(exc_msg):
             # turn this failure into an xfail:
