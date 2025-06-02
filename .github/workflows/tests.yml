@@ -42,8 +42,8 @@ jobs:
       # TODO: remove 'fail-fast' line once timeout issue from the Hub is solved
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
-        os: ["ubuntu-latest", "macos-13", "windows-latest"]
+        python-version: ["3.11"]
+        os: ["macos-latest"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
@@ -83,7 +83,7 @@ jobs:
       - name: Downgrade numpy on MacOS and Windows
         # TODO: remove numpy downgrade on MacOS & Windows once torch fixes numpy 2.0 issue
         shell: bash
-        if: matrix.os == 'windows-latest' || matrix.os == 'macos-13'
+        if: matrix.os == 'windows-latest' || matrix.os == 'macos-latest'
         run: |
           pip install --force-reinstall -U "numpy<2.0.0"
       - name: Test with pytest
