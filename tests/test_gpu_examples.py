@@ -27,6 +27,7 @@ import torch
 from accelerate import infer_auto_device_map
 from accelerate.test_utils.testing import run_command
 from accelerate.utils import patch_environment
+from accelerate.utils.imports import is_bf16_available
 from accelerate.utils.memory import clear_device_cache
 from datasets import Audio, Dataset, DatasetDict, load_dataset
 from packaging import version
@@ -89,11 +90,11 @@ from .testing_utils import (
     require_deterministic_for_xpu,
     require_eetq,
     require_hqq,
-    require_multi_accelerator,
     require_non_cpu,
     require_non_xpu,
     require_optimum,
     require_torch_gpu,
+    require_torch_multi_accelerator,
     require_torch_multi_gpu,
     require_torchao,
     torch_device,
@@ -501,7 +502,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
-    @require_multi_accelerator
+    @require_torch_multi_accelerator
     def test_causal_lm_training_multi_gpu(self):
         r"""
         Test the CausalLM training on a multi-GPU device. This test is a converted version of
@@ -625,7 +626,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
-    @require_multi_accelerator
+    @require_torch_multi_accelerator
     def test_seq2seq_lm_training_multi_gpu(self):
         r"""
         Test the Seq2SeqLM training on a multi-GPU device. This test is a converted version of
@@ -2080,7 +2081,7 @@ class OffloadSaveTests(unittest.TestCase):
         assert torch.allclose(post_unload_merge_olayer, pre_merge_olayer)
 
 
-@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU")
+@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU")
 @pytest.mark.single_gpu_tests
 class TestPiSSA:
     r"""
@@ -2292,7 +2293,7 @@ class TestPiSSA:
         assert not torch.allclose(output_finetuned_pissa, output_converted, atol=tol, rtol=tol)
 
 
-@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU")
+@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU")
 @pytest.mark.single_gpu_tests
 class TestOLoRA:
     r"""
@@ -2831,11 +2832,7 @@ class MixedPrecisionTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        elif is_xpu_available():
-            torch.xpu.empty_cache()
+        clear_device_cache(garbage_collection=True)
         gc.collect()
 
     @pytest.mark.single_gpu_tests
@@ -3096,8 +3093,7 @@ class PeftAqlmGPUTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
     def _check_inference_finite(self, model, batch):
         # try inference without Trainer class
@@ -3182,8 +3178,7 @@ class PeftHqqGPUTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
     @pytest.mark.single_gpu_tests
     @parameterized.expand([False, True])
@@ -3277,8 +3272,7 @@ class PeftHqqGPUTests(unittest.TestCase):
         assert torch.isfinite(output_normal).all()
 
         del model
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
         # now load with HQQ
         quant_config = HqqConfig(nbits=4, group_size=64)
@@ -3312,8 +3306,7 @@ class PeftHqqGPUTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model.save_pretrained(tmp_dir)
             del model
-            gc.collect()
-            torch.cuda.empty_cache()
+            clear_device_cache(garbage_collection=True)
 
             quant_config = HqqConfig(nbits=4, group_size=64)
             model = AutoModelForCausalLM.from_pretrained(
@@ -3356,8 +3349,7 @@ class PeftAwqGPUTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
     def _check_inference_finite(self, model, batch):
         # try inference without Trainer class
@@ -3527,8 +3519,7 @@ class PeftEetqGPUTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
     def _check_inference_finite(self, model, batch):
         # try inference without Trainer class
@@ -3658,8 +3649,7 @@ class PeftEetqGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
 
-@require_non_xpu
-@require_torch_gpu
+@require_non_cpu
 @require_torchao
 class PeftTorchaoGPUTests(unittest.TestCase):
     r"""
@@ -3688,8 +3678,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
     @parameterized.expand(supported_quant_types)
     @pytest.mark.single_gpu_tests
@@ -3849,8 +3838,8 @@ class PeftTorchaoGPUTests(unittest.TestCase):
 
     @parameterized.expand(supported_quant_types)
     @pytest.mark.multi_gpu_tests
-    @require_torch_multi_gpu
-    def test_causal_lm_training_multi_gpu_torchao(self, quant_type):
+    @require_torch_multi_accelerator
+    def test_causal_lm_training_multi_accelerator_torchao(self, quant_type):
         from transformers import TorchAoConfig
 
         device_map = {
@@ -3929,8 +3918,8 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
-    @require_torch_multi_gpu
-    def test_causal_lm_training_multi_gpu_torchao_int4_raises(self):
+    @require_torch_multi_accelerator
+    def test_causal_lm_training_multi_accelerator_torchao_int4_raises(self):
         # int4_weight_only raises an error:
         # RuntimeError: derivative for aten::_weight_int4pack_mm is not implemented
         # TODO: Once proper torchao support for int4 is added, remove this test and add int4 to supported_quant_types
@@ -4173,9 +4162,7 @@ class TestAutoCast(unittest.TestCase):
         # Prepare dummy inputs
         input_ids = torch.randint(0, 1000, (2, 10)).to(self.device)
         if precision == torch.bfloat16:
-            is_xpu = self.device == "xpu"
-            is_cuda_bf16 = self.device == "cuda" and torch.cuda.is_bf16_supported()
-            if not (is_xpu or is_cuda_bf16):
+            if not is_bf16_available():
                 self.skipTest("Bfloat16 not supported on this device")
 
         # Forward pass with test precision
@@ -4494,7 +4481,7 @@ class TestEvaInitializationGPU:
 class TestPrefixTuning:
     device = infer_device()
 
-    @require_multi_accelerator
+    @require_torch_multi_accelerator
     def test_prefix_tuning_multiple_devices_decoder_model(self):
         # See issue 2134
         model_id = "hf-internal-testing/tiny-random-MistralForCausalLM"
@@ -4519,7 +4506,7 @@ class TestPrefixTuning:
         model = get_peft_model(model, peft_config)
         model.generate(**inputs)  # does not raise
 
-    @require_multi_accelerator
+    @require_torch_multi_accelerator
     def test_prefix_tuning_multiple_devices_encoder_decoder_model(self):
         # See issue 2134
         model_id = "hf-internal-testing/tiny-random-T5Model"
@@ -4554,9 +4541,7 @@ class TestPrefixTuning:
         model.generate(**inputs)  # does not raise
 
 
-@pytest.mark.skipif(
-    not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a hardware accelerator"
-)
+@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU")
 @pytest.mark.single_gpu_tests
 class TestHotSwapping:
     """
