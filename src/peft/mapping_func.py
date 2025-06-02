@@ -120,6 +120,22 @@ def get_peft_model(
 
     if peft_config.is_prompt_learning:
         peft_config = _prepare_prompt_learning_config(peft_config, model_config)
+        
+    #Prevent applying LoRA to disallowed modules in Mamba-based architectures
+    lora_like_types = {"LORA", "ADALORA", "XLORA", "RANDLORA"}
+    forbidden_modules = {"out_proj", "conv1d"}
+    mamba_model_types = {"falcon_h1", "mamba", "mamba2", "falcon_mamba"}
+    if (
+        peft_config.peft_type in lora_like_types
+        and hasattr(model, "config")
+        and getattr(model.config, "model_type", None) in mamba_model_types
+    ):
+        if any(mod in forbidden_modules for mod in peft_config.target_modules):
+            raise ValueError(
+                f"[PEFT:{peft_config.peft_type}] `target_modules` {peft_config.target_modules} contain forbidden modules "
+                f"for Mamba-based models (`model_type={model.config.model_type}`): {forbidden_modules}. "
+                f"Please exclude them to avoid compatibility issues."
+            )    
     return MODEL_TYPE_TO_PEFT_MODEL_MAPPING[peft_config.task_type](
         model,
         peft_config,
