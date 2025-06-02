@@ -12,6 +12,7 @@ on:
 env:
   HF_HOME: .cache/huggingface
   TRANSFORMERS_IS_CI: 1
+  PYTORCH_MPS_HIGH_WATERMARK_RATIO: "0.0"
 
 permissions: {}
 
