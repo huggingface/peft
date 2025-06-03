@@ -124,6 +124,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self.add_adapter(adapter_name, peft_config, low_cpu_mem_usage=low_cpu_mem_usage)
         else:
             self._peft_config = None
+            print("peft_config = ", peft_config)
+            print("peft_config.peft_type = ", peft_config.peft_type)
+            print("PEFT_TYPE_TO_TUNER_MAPPING = ", PEFT_TYPE_TO_TUNER_MAPPING)
+            print("-------------------------------------")
             cls = PEFT_TYPE_TO_TUNER_MAPPING[peft_config.peft_type]
             ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
             with ctx():

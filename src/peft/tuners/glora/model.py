@@ -1,0 +1,232 @@
+import re
+import warnings
+from dataclasses import asdict
+from enum import Enum
+from typing import Any, Union
+
+import torch.nn as nn
+from tqdm import tqdm
+
+from peft.tuners.tuners_utils import BaseTuner
+from peft.utils import (
+    TRANSFORMERS_MODELS_TO_GLORA_TARGET_MODULES_MAPPING,
+    ModulesToSaveWrapper,
+    _freeze_adapter,
+    _get_submodules,
+)
+from peft.utils.peft_types import PeftType
+
+from .config import GLoraConfig
+from .layer import Linear as GLoraLinear
+
+
+def mark_only_glora_as_trainable(model: nn.Module, bias: str = "none") -> None:
+    """
+    Freezes all parameters of the model except the GLORA parameters.
+    If bias is 'glora_only', 'all', or 'some_other_custom', it handles bias terms as well.
+    """
+    for n, p in model.named_parameters():
+        if "glora_" not in n:
+            p.requires_grad = False
+
+    if bias == "none":
+        return
+    elif bias == "all":
+        for n, p in model.named_parameters():
+            if "bias" in n:
+                p.requires_grad = True
+    elif bias == "glora_only":
+        for m in model.modules():
+            if isinstance(m, GLoraLinear) and hasattr(m, "bias") and m.bias is not None:
+                m.bias.requires_grad = True
+
+
+class GLoraModel(BaseTuner):
+    """
+    Creates Generalized Low Rank Adapter (GLora) model from a pretrained transformers model.
+    """
+
+    def __init__(
+        self, model: nn.Module, config: Union[GLoraConfig, dict[str, GLoraConfig]], adapter_name: str = "default"
+    ):
+        super().__init__()
+        self.model = model
+        self.forward = self.model.forward
+
+        self.peft_config: dict[str, GLoraConfig] = {}
+        self.active_adapter: Union[str, list[str]] = adapter_name
+        self.peft_type = PeftType.GLORA
+        self.adapters_config_history: dict[str, Any] = {}
+
+        if isinstance(config, GLoraConfig):
+            self.peft_config[adapter_name] = config
+            self.add_adapter(adapter_name, config)
+        elif isinstance(config, dict):
+            for name, cfg in config.items():
+                self.peft_config[name] = cfg
+                self.add_adapter(name, cfg)
+        else:
+            raise TypeError(f"Unsupported config type: {type(config)}")
+
+    def add_adapter(self, adapter_name: str, config: GLoraConfig):
+        if adapter_name in self.peft_config and hasattr(self.peft_config[adapter_name], "_active"):
+            return
+
+        model_config_dict = self.model.config.to_dict() if hasattr(self.model.config, "to_dict") else self.model.config
+        current_config = self._prepare_glora_config(config, model_config_dict)
+        self.peft_config[adapter_name] = current_config
+
+        self._find_and_replace(adapter_name)
+
+        mark_only_glora_as_trainable(
+            self.model, bias=current_config.bias if hasattr(current_config, "bias") else "none"
+        )
+
+        if hasattr(current_config, "inference_mode") and current_config.inference_mode:
+            _freeze_adapter(self.model, adapter_name)
+
+    def _check_target_module_exists(self, glora_config: GLoraConfig, key: str) -> bool:
+        if isinstance(glora_config.target_modules, str):
+            return bool(re.fullmatch(glora_config.target_modules, key))
+        elif isinstance(glora_config.target_modules, list):
+            return any(key.endswith(target_key) for target_key in glora_config.target_modules)
+        return False
+
+    def _create_new_module(self, glora_config: GLoraConfig, adapter_name: str, target: nn.Module) -> GLoraLinear:
+        bias = hasattr(target, "bias") and target.bias is not None
+        if not isinstance(target, nn.Linear):
+            raise ValueError(
+                f"Target module {target} is not a nn.Linear layer, which is required for GLORA replacement."
+            )
+
+        in_features, out_features = target.in_features, target.out_features
+        kwargs_glora = {"r": glora_config.r}
+
+        new_module = GLoraLinear(adapter_name, in_features, out_features, bias=bias, **kwargs_glora)
+        return new_module
+
+    def _find_and_replace(self, adapter_name: str):
+        glora_config = self.peft_config[adapter_name]
+        is_target_modules_in_base_model = False
+        key_list = [key for key, _ in self.model.named_modules()]  # Cache keys
+
+        for key in key_list:
+            if not self._check_target_module_exists(glora_config, key):
+                continue
+
+            is_target_modules_in_base_model = True
+            parent, target, target_name = _get_submodules(self.model, key)
+
+            if isinstance(target, GLoraLinear):
+                warnings.warn(
+                    f"Module {key} is already a GLoraLinear. Skipping replacement for new adapter '{adapter_name}'. Multiple GLORA adapters on the same layer might need explicit support in GLoraLinear."
+                )
+            elif isinstance(target, nn.Linear):
+                new_module = self._create_new_module(glora_config, adapter_name, target)
+                self._replace_module(parent, target_name, new_module, target)
+
+        if not is_target_modules_in_base_model:
+            raise ValueError(
+                f"Target modules {glora_config.target_modules} not found in the base model. "
+                f"Please check the target modules and try again."
+            )
+
+    def _replace_module(self, parent_module: nn.Module, child_name: str, new_module: nn.Module, old_module: nn.Module):
+        setattr(parent_module, child_name, new_module)
+        new_module.weight = old_module.weight
+        if hasattr(old_module, "bias") and old_module.bias is not None:
+            new_module.bias = old_module.bias
+
+        if getattr(old_module, "state", None) is not None:
+            new_module.state = old_module.state
+            new_module.to(old_module.weight.device)
+
+    def __getattr__(self, name: str):
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            return getattr(self.model, name)
+
+    @staticmethod
+    def _prepare_glora_config(peft_config: GLoraConfig, model_config: dict) -> GLoraConfig:
+        if peft_config.target_modules is None:
+            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_GLORA_TARGET_MODULES_MAPPING:
+                raise ValueError(
+                    f"Please specify `target_modules` in `GLoraConfig` for model_type {model_config['model_type']}"
+                )
+            peft_config.target_modules = TRANSFORMERS_MODELS_TO_GLORA_TARGET_MODULES_MAPPING[
+                model_config["model_type"]
+            ]
+        return peft_config
+
+    def merge_and_unload(self, progressbar: bool = False):
+        """
+        This method merges the GLora layers into the base model.
+        """
+        if getattr(self, "hf_device_map", None):
+            raise ValueError("Merging LoRA weights is not supported when using HF device map.")
+
+        key_list = [key for key, _ in self.model.named_modules()]
+        desc = "Merging GLORA layers"
+
+        for key in tqdm(key_list, disable=not progressbar, desc=desc):
+            try:
+                parent, target, target_name = _get_submodules(self.model, key)
+            except AttributeError:
+                continue
+
+            if isinstance(target, GLoraLinear):
+                if target.eval_config is None:
+                    raise ValueError(
+                        f"eval_config not set for GLoraLinear layer {key}. Cannot merge deterministically. Please call model.set_adapter_eval_config(...) before merging."
+                    )
+
+                target.merge()
+                new_module = nn.Linear(target.in_features, target.out_features, bias=(target.bias is not None))
+                new_module.weight.data = target.weight.data.clone()  # Get merged weight
+                if target.bias is not None:
+                    new_module.bias.data = target.bias.data.clone()  # Get merged bias
+
+                self._replace_module(parent, target_name, new_module.to(target.weight.device), target)
+
+            if isinstance(target, ModulesToSaveWrapper):
+                pass
+        return self.model
+
+    def set_adapter_eval_config(self, adapter_name: str, eval_config: dict[str, str]):
+        """
+        Sets the evaluation configuration for all GLoraLinear layers associated with a given adapter.
+        The eval_config dictionary should specify the path choices for A, B, C, D, E.
+        Example: {'A':'LoRA_4', 'B':'none', 'C':'vector', 'D':'constant', 'E':'none'}
+        """
+        if adapter_name not in self.peft_config:
+            raise ValueError(f"Adapter {adapter_name} not found.")
+
+        for module in self.model.modules():
+            if isinstance(module, GLoraLinear):
+                if module.active_adapter == adapter_name:
+                    module.eval_config = eval_config
+                    self.adapters_config_history[adapter_name] = eval_config
+
+    def print_trainable_parameters(self):
+        trainable_params = 0
+        all_param = 0
+        for _, param in self.named_parameters():
+            all_param += param.numel()
+            if param.requires_grad:
+                trainable_params += param.numel()
+        print(
+            f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param:.4f}"
+        )
+
+    def get_peft_config_as_dict(self, inference: bool = False) -> dict[str, Any]:
+        config_dict = {}
+        for adapter_name, peft_config_obj in self.peft_config.items():
+            config = asdict(peft_config_obj)
+            if inference:
+                config["inference_mode"] = True
+            for k, v in config.items():
+                if isinstance(v, Enum):
+                    config[k] = v.value
+            config_dict[adapter_name] = config
+        return config_dict
