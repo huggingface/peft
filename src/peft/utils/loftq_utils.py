@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # Reference code: https://github.com/yxli2123/LoftQ/blob/main/utils.py
-# Reference paper: https://arxiv.org/abs/2310.08659
+# Reference paper: https://huggingface.co/papers/2310.08659
 
 from __future__ import annotations
 

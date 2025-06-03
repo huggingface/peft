@@ -605,9 +605,15 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 # For reference refer to issue: https://github.com/huggingface/peft/issues/996
                 deepspeed_distributed_tensor_shape = getattr(value, "ds_shape", None)
 
-                if value.shape[0] == self.base_model.config.vocab_size or (
+                # Handle VLM case with separate text and vision configs
+                if "text_config" in self.base_model.config:
+                    vocab_size = self.base_model.config.text_config.vocab_size
+                else:
+                    vocab_size = self.base_model.config.vocab_size
+
+                if value.shape[0] == vocab_size or (
                     deepspeed_distributed_tensor_shape is not None
-                    and deepspeed_distributed_tensor_shape[0] == self.base_model.config.vocab_size
+                    and deepspeed_distributed_tensor_shape[0] == vocab_size
                 ):
                     word_embeddings = transformer_backbone.get_submodule(named_param.replace(".weight", ""))
                     break

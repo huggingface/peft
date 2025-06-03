@@ -78,7 +78,7 @@ def require_torch_multi_gpu(test_case):
         return test_case
 
 
-def require_multi_accelerator(test_case):
+def require_torch_multi_accelerator(test_case):
     """
     Decorator marking a test that requires multiple hardware accelerators. These tests are skipped on a machine without
     multiple accelerators.

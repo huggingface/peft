@@ -25,7 +25,7 @@ class RandLoraConfig(PeftConfig):
     """
     This is the configuration class to store the configuration of a [`RandLoraModel`].
 
-    Paper: https://arxiv.org/pdf/2502.00987.
+    Paper: https://huggingface.co/papers/2502.00987.
 
     Args:
         r (`int`, *optional*, defaults to `32`):
@@ -44,9 +44,9 @@ class RandLoraConfig(PeftConfig):
             Whether to use sparse random bases as described in the RandLora paper. The bases are ternary sparse bases
             (only containing -1, 0 and 1) where the attribution probability is 1/6 for -1 and 1 and 2/3 for 0. These
             sparse matrices aim to be used for matmul free computation in the future, see
-            https://arxiv.org/pdf/2406.02528v1 The current implementation is a proof of concept however where the
-            sparseness is not used to improve speed or memory usage. Using sparse matrices typically does not reduce
-            performance and can even help reduce overfitting. Defaults to `False`.
+            https://huggingface.co/papers/2406.02528v1 The current implementation is a proof of concept however where
+            the sparseness is not used to improve speed or memory usage. Using sparse matrices typically does not
+            reduce performance and can even help reduce overfitting. Defaults to `False`.
         very_sparse (`bool`):
             Whether to use highly sparse random bases as described in the RandLora paper. The very sparse bases are
             ternary sparse bases (only containing -1, 0 and 1) given a matrix with smallest dimension d, the

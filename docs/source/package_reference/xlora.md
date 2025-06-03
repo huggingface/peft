@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # X-LoRA
 
-Mixture of LoRA Experts ([X-LoRA](https://arxiv.org/abs/2402.07148)) is a PEFT method enabling sparse or dense mixture of LoRA experts based on a high granularity (token, layer, sequence) scalings matrix. This leverages frozen LoRA adapters and a frozen base model to drastically reduces the number of parameters that need to be fine-tuned.
+Mixture of LoRA Experts ([X-LoRA](https://huggingface.co/papers/2402.07148)) is a PEFT method enabling sparse or dense mixture of LoRA experts based on a high granularity (token, layer, sequence) scalings matrix. This leverages frozen LoRA adapters and a frozen base model to drastically reduces the number of parameters that need to be fine-tuned.
 
 A unique aspect of X-LoRA is its versatility: it can be applied to any `transformers` base model with LoRA adapters. This means that, despite the mixture of experts strategy, no changes to the model code must be made.
 
