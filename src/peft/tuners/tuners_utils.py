@@ -113,7 +113,27 @@ def onload_layer(layer):
             offload_state_dict(safetensors_filename, layer.base_layer._hf_hook.weights_map)
         layer.base_layer._hf_hook.post_forward(layer.base_layer, torch.tensor([]))
 
+def _check_lora_target_modules_mamba(peft_config: PeftConfig, model: nn.Module, target_name: str):
+    """
+    Prevent applying LoRA to incompatible modules in specific architectures (e.g., Mamba).
+    """
+    import pdb;pdb.set_trace()
+    lora_like_types = {"LORA", "ADALORA", "XLORA", "RANDLORA"}
+    incompatible_modules = {"out_proj", "conv1d"}
+    mamba_model_types = {"falcon_h1", "mamba", "mamba2", "falcon_mamba"}
 
+    if (
+        peft_config.peft_type in lora_like_types
+        and hasattr(model, "config")
+        and getattr(model.config, "model_type", None) in mamba_model_types
+    ):
+        if any(mod in incompatible_modules for mod in peft_config.target_modules):
+            raise ValueError(
+                f"[PEFT:{peft_config.peft_type}] target_modules {peft_config.target_modules} contain incompatible modules "
+                f"for Mamba-based models (model_type={model.config.model_type}): {incompatible_modules}. "
+                "Please exclude them to avoid compatibility issues."
+            )
+                
 class BaseTuner(nn.Module, ABC):
     r"""
     A base tuner model that provides the common methods and attributes for all tuners that are injectable into a
@@ -400,23 +420,9 @@ class BaseTuner(nn.Module, ABC):
 
     def _check_target_module_compatiblity(self, peft_config: PeftConfig, model: nn.Module, target_name: str):
         """
-        Prevent applying LoRA to forbidden modules in specific architectures (e.g., Mamba).
+        Prevent applying LoRA to incompatible modules in specific architectures (e.g., Mamba).
         """
-        lora_like_types = {"LORA", "ADALORA", "XLORA", "RANDLORA"}
-        forbidden_modules = {"out_proj", "conv1d"}
-        mamba_model_types = {"falcon_h1", "mamba", "mamba2", "falcon_mamba"}
-
-        if (
-            peft_config.peft_type in lora_like_types
-            and hasattr(model, "config")
-            and getattr(model.config, "model_type", None) in mamba_model_types
-        ):
-            if any(mod in forbidden_modules for mod in peft_config.target_modules):
-                raise ValueError(
-                    f"[PEFT:{peft_config.peft_type}] target_modules {peft_config.target_modules} contain forbidden modules "
-                    f"for Mamba-based models (model_type={model.config.model_type}): {forbidden_modules}. "
-                    "Please exclude them to avoid compatibility issues."
-                )
+        return _check_lora_target_modules_mamba(peft_config, model, target_name)
 
     def inject_adapter(
         self, model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True, low_cpu_mem_usage: bool = False

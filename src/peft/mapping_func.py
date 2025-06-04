@@ -120,7 +120,6 @@ def get_peft_model(
 
     if peft_config.is_prompt_learning:
         peft_config = _prepare_prompt_learning_config(peft_config, model_config)
-
     return MODEL_TYPE_TO_PEFT_MODEL_MAPPING[peft_config.task_type](
         model,
         peft_config,
