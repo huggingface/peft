@@ -130,9 +130,9 @@ def _check_lora_target_modules_mamba(peft_config: PeftConfig, model: nn.Module, 
     ):
         if target_name in incompatible_modules:
             raise ValueError(
-                f"[PEFT:{peft_config.peft_type}] target_modules {peft_config.target_modules} contain incompatible modules "
-                f"for Mamba-based models (model_type={model.config.model_type}): {incompatible_modules}. "
-                "Please exclude them to avoid compatibility issues."
+                f"[PEFT:{peft_config.peft_type}] Module '{target_name}' is incompatible with Mamba-based models "
+                f"(model_type='{model.config.model_type}'). Incompatible modules: {incompatible_modules}. "
+                "Please remove it from `target_modules` to avoid compatibility issues."
             )
 
 
