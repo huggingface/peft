@@ -113,11 +113,12 @@ def onload_layer(layer):
             offload_state_dict(safetensors_filename, layer.base_layer._hf_hook.weights_map)
         layer.base_layer._hf_hook.post_forward(layer.base_layer, torch.tensor([]))
 
+
 def _check_lora_target_modules_mamba(peft_config: PeftConfig, model: nn.Module, target_name: str):
     """
     Prevent applying LoRA to incompatible modules in specific architectures (e.g., Mamba).
     """
-    import pdb;pdb.set_trace()
+
     lora_like_types = {"LORA", "ADALORA", "XLORA", "RANDLORA"}
     incompatible_modules = {"out_proj", "conv1d"}
     mamba_model_types = {"falcon_h1", "mamba", "mamba2", "falcon_mamba"}
@@ -133,7 +134,8 @@ def _check_lora_target_modules_mamba(peft_config: PeftConfig, model: nn.Module, 
                 f"for Mamba-based models (model_type={model.config.model_type}): {incompatible_modules}. "
                 "Please exclude them to avoid compatibility issues."
             )
-                
+
+
 class BaseTuner(nn.Module, ABC):
     r"""
     A base tuner model that provides the common methods and attributes for all tuners that are injectable into a
@@ -522,8 +524,8 @@ class BaseTuner(nn.Module, ABC):
                 unmatched_modules.append(key)
             else:
                 self.targeted_module_names.append(key)
-                self._check_target_module_compatiblity(peft_config, model, key)
                 parent, target, target_name = _get_submodules(model, key)
+                self._check_target_module_compatiblity(peft_config, model, target_name)
                 ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
                 with ctx():
                     self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)

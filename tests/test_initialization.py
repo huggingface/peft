@@ -1271,10 +1271,6 @@ class TestLoraInitialization:
 
         config = LoraConfig(
             task_type="CAUSAL_LM",
-            inference_mode=False,
-            r=8,
-            lora_alpha=16,
-            lora_dropout=0.1,
             target_modules=["out_proj", "conv1d"],  # Forbidden modules for Mamba-based models
         )
         msg = "incompatible modules for Mamba-based models"
