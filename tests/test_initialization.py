@@ -1273,7 +1273,7 @@ class TestLoraInitialization:
             task_type="CAUSAL_LM",
             target_modules=["out_proj", "conv1d"],  # Forbidden modules for Mamba-based models
         )
-        msg = "incompatible modules for Mamba-based models"
+        msg = "is incompatible with Mamba-based models"
         with pytest.raises(ValueError, match=msg):
             get_peft_model(model, config)
 
