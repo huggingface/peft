@@ -1277,7 +1277,7 @@ class TestLoraInitialization:
             lora_dropout=0.1,
             target_modules=["out_proj", "conv1d"],  # Forbidden modules for Mamba-based models
         )
-        msg = "incompatible modules for mamba based models"
+        msg = "incompatible modules for Mamba-based models"
         with pytest.raises(ValueError, match=msg):
             get_peft_model(model, config)
 
