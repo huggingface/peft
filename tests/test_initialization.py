@@ -1269,7 +1269,7 @@ class TestLoraInitialization:
         # ('out_proj', 'conv1d') in Mamba-based architectures like Falcon-Mamba tiny.
         model = AutoModelForCausalLM.from_pretrained("tiiuae/falcon-mamba-tiny-dev")
 
-        peft_config = LoraConfig(
+        config = LoraConfig(
             task_type="CAUSAL_LM",
             inference_mode=False,
             r=8,
