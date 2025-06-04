@@ -422,7 +422,7 @@ class BaseTuner(nn.Module, ABC):
         """
         Prevent applying LoRA to incompatible modules in specific architectures (e.g., Mamba).
         """
-        return _check_lora_target_modules_mamba(peft_config, model, target_name)
+        _check_lora_target_modules_mamba(peft_config, model, target_name)
 
     def inject_adapter(
         self, model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True, low_cpu_mem_usage: bool = False
