@@ -1264,6 +1264,19 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match=msg):
             LoraConfig(target_modules=["linear"], lora_bias=True, **extra_kwargs)
 
+    def test_lora_incompatible_mamba_modules(self):
+        # Ensure LoRA raises an error when applying to forbidden modules
+        # ('out_proj', 'conv1d') in Mamba-based architectures like Falcon-Mamba tiny.
+        model = AutoModelForCausalLM.from_pretrained("tiiuae/falcon-mamba-tiny-dev")
+
+        config = LoraConfig(
+            task_type="CAUSAL_LM",
+            target_modules=["out_proj", "conv1d"],  # Forbidden modules for Mamba-based models
+        )
+        msg = "is incompatible with Mamba-based models"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
 
 class TestLokrInitialization:
     torch_device = infer_device()
