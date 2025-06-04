@@ -20,6 +20,7 @@ import unittest
 
 import pytest
 import torch
+from accelerate.utils.memory import clear_device_cache
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -39,10 +40,11 @@ from peft.tuners.lora import GPTQLoraLinear
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
 
 from .testing_utils import (
+    device_count,
     load_dataset_english_quotes,
     require_gptqmodel,
     require_optimum,
-    require_torch_multi_gpu,
+    require_torch_multi_accelerator,
 )
 
 
@@ -61,10 +63,8 @@ class PeftGPTQModelCommonTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
+        clear_device_cache(garbage_collection=True)
         gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            gc.collect()
 
     def test_lora_gptq_quantization_from_pretrained_safetensors(self):
         r"""
@@ -123,8 +123,7 @@ class PeftGPTQModelTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
     def _check_inference_finite(self, model, batch):
         # try inference without Trainer class
@@ -254,11 +253,11 @@ class PeftGPTQModelTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
-    @require_torch_multi_gpu
-    def test_causal_lm_training_multi_gpu(self):
+    @require_torch_multi_accelerator
+    def test_causal_lm_training_multi_accelerator(self):
         r"""
-        Test the CausalLM training on a multi-GPU device. The test would simply fail if the adapters are not set
-        correctly.
+        Test the CausalLM training on a multi-accelerator device. The test would simply fail if the adapters are not
+        set correctly.
         """
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -269,7 +268,7 @@ class PeftGPTQModelTests(unittest.TestCase):
                 quantization_config=self.quantization_config,
             )
 
-            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+            assert set(model.hf_device_map.values()) == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
