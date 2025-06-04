@@ -397,7 +397,7 @@ class BaseTuner(nn.Module, ABC):
                 "You can untie the embeddings by loading the model with `tie_word_embeddings=False`. For example:"
                 + example_code
             )
-    
+
     def _check_target_module_compatiblity(self, peft_config: PeftConfig, model: nn.Module, target_name: str):
         """
         Prevent applying LoRA to forbidden modules in specific architectures (e.g., Mamba).
@@ -417,7 +417,7 @@ class BaseTuner(nn.Module, ABC):
                     f"for Mamba-based models (model_type={model.config.model_type}): {forbidden_modules}. "
                     "Please exclude them to avoid compatibility issues."
                 )
-        
+
     def inject_adapter(
         self, model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True, low_cpu_mem_usage: bool = False
     ) -> None:

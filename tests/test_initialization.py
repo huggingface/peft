@@ -1263,10 +1263,10 @@ class TestLoraInitialization:
         msg = "The argument lora_bias=True is"
         with pytest.raises(ValueError, match=msg):
             LoraConfig(target_modules=["linear"], lora_bias=True, **extra_kwargs)
-    
+
     def test_lora_forbidden_mamba_modules(self):
-        #Ensure LoRA raises an error when applying to forbidden modules
-        #('out_proj', 'conv1d') in Mamba-based architectures like Falcon-H1.
+        # Ensure LoRA raises an error when applying to forbidden modules
+        # ('out_proj', 'conv1d') in Mamba-based architectures like Falcon-H1.
         model = AutoModelForCausalLM.from_pretrained("tiiuae/Falcon-H1-0.5B-Instruct")
 
         peft_config = LoraConfig(
@@ -1275,11 +1275,11 @@ class TestLoraInitialization:
             r=8,
             lora_alpha=16,
             lora_dropout=0.1,
-            target_modules=["out_proj", "conv1d"]  # Forbidden modules for Mamba-based models
+            target_modules=["out_proj", "conv1d"],  # Forbidden modules for Mamba-based models
         )
 
         # This should raise the error if your patched PEFT is in effect
-        model = get_peft_model(model, peft_config)        
+        model = get_peft_model(model, peft_config)
 
 
 class TestLokrInitialization:
