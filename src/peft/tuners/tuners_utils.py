@@ -413,7 +413,7 @@ class BaseTuner(nn.Module, ABC):
         ):
             if any(mod in forbidden_modules for mod in peft_config.target_modules):
                 raise ValueError(
-                    f"[PEFT:{peft_config.peft_type}] target_modules {peft_config.target_modules} contain forbidden modules "
+                    f"[PEFT:{peft_config.peft_type}] target_modules {peft_config.target_modules} contain incompatible modules "
                     f"for Mamba-based models (model_type={model.config.model_type}): {forbidden_modules}. "
                     "Please exclude them to avoid compatibility issues."
                 )
