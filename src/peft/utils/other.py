@@ -44,6 +44,7 @@ from .constants import (
     TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
+    TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
     WEIGHTS_NAME,
@@ -71,6 +72,7 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
+    "TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING",
     "WEIGHTS_NAME",
@@ -828,6 +830,11 @@ def _set_trainable(
     if wrapper_cls is None:
         wrapper_cls = ModulesToSaveWrapper
 
+    if not module_names:
+        # This is useful for the case that the PEFT config does not have `modules_to_save`, e.g.
+        # in the case of prompt tuning and friends.
+        return
+
     trainable_modules = []
     found_modules = set()
     # disable removal of duplicates to support targeting tied weights
@@ -884,6 +891,10 @@ def _set_adapter(model, adapter_name):
 
 
 def _prepare_prompt_learning_config(peft_config, model_config):
+    # In case of VLM we focus on the language model portion of the model.
+    if "text_config" in model_config:
+        model_config = model_config["text_config"]
+
     if peft_config.num_layers is None:
         if "num_hidden_layers" in model_config:
             num_layers = model_config["num_hidden_layers"]
@@ -1200,3 +1211,64 @@ def get_pattern_key(pattern_keys: Sequence[str], key_to_match: str) -> str:
         return key
 
     return key_to_match
+
+
+def set_additional_trainable_modules(model, peft_config, model_config, adapter_name):
+    """Handle the resolution of additional trainable modules (also called AuxiliaryTrainingWrapper)
+    by checking the config if such modules are requested and adding them to the model.
+
+    Currently trainable tokens and modules to save are considered additional trainable modules.
+    """
+    if getattr(peft_config, "modules_to_save", None) is not None:
+        # this may add a new ModulesToSaveWrapper
+        _set_trainable(model, adapter_name, module_names=getattr(peft_config, "modules_to_save", None))
+
+    if getattr(peft_config, "trainable_token_indices", None) is not None:
+        if isinstance(peft_config.trainable_token_indices, dict):
+            target_layers = peft_config.trainable_token_indices
+        else:
+            layer_name = _get_input_embeddings_name(model, "embed_tokens")
+            target_layers = {layer_name: peft_config.trainable_token_indices}
+
+        modules_to_save = getattr(peft_config, "modules_to_save", None)
+        if modules_to_save is not None:
+            for target_layer in target_layers:
+                if target_layer in modules_to_save:
+                    raise ValueError(
+                        "The embedding layer is already marked to be trained fully, either specify "
+                        f'`modules_to_save=[..., "{target_layer}", ...]` or '
+                        f"`trainable_tokens={{'{target_layer}': x}}` but not both."
+                    )
+
+        for target_layer, token_indices in target_layers.items():
+            _set_trainable(
+                model,
+                adapter_name,
+                module_names=[target_layer],
+                strict_module_check=True,
+                wrapper_cls=TrainableTokensWrapper,
+                token_indices=token_indices,
+            )
+
+        # There might be the possibility that we have output weights that are tied to the input weights.
+        # In that case we will tie any module that wants tied weights to the token adapter to make sure that
+        # any modification is reflected in the tied layers as well.
+        if (
+            model_config.get("tie_word_embeddings", False)
+            # some models may be misconfigured to have weight tying enabled but don't define tied weights keys
+            and model._tied_weights_keys is not None
+            and isinstance(model.get_input_embeddings(), TrainableTokensWrapper)
+        ):
+            # the embedding layer is modified and we want weight tying.
+            module_keys = [".".join(n.split(".")[:-1]) for n in model._tied_weights_keys]
+
+            token_adapter = model.get_input_embeddings().token_adapter
+            _set_trainable(
+                model,
+                adapter_name,
+                module_names=module_keys,
+                strict_module_check=True,
+                wrapper_cls=TrainableTokensWrapper,
+                token_indices=token_adapter.token_indices[adapter_name],
+                tied_adapter=model.get_input_embeddings().token_adapter,
+            )

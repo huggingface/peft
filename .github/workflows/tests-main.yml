@@ -35,7 +35,7 @@ jobs:
           make test
       - name: Post to Slack
         if: always()
-        uses: huggingface/hf-workflows/.github/actions/post-slack@main
+        uses: huggingface/hf-workflows/.github/actions/post-slack@3f88d63d3761558a32e8e46fc2a8536e04bb2aea  # main from Feb 2025-02-24
         with:
           slack_channel: ${{ secrets.SLACK_CHANNEL_ID }}
           title: 🤗 Results of transformers main tests

@@ -24,7 +24,7 @@ from .utils import is_adaption_prompt_trainable
 
 class AdaptionPromptModel(nn.Module):
     """
-    Implements adaption prompts as described in https://arxiv.org/pdf/2303.16199.pdf.
+    Implements adaption prompts as described in https://huggingface.co/papers/2303.16199.
 
     The top L attention modules are replaced with AdaptedAttention modules that wrap the original ones, but insert
     trainable prompts with gates (for zero init).

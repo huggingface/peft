@@ -39,7 +39,7 @@ class FourierFTModel(BaseTuner):
     """
     Creates FourierFT model from a pretrained transformers model.
 
-    The method is described in detail in https://arxiv.org/abs/2405.03003.
+    The method is described in detail in https://huggingface.co/papers/2405.03003.
 
     Args:
         model ([`torch.nn.Module`]): The model to be adapted.
@@ -243,7 +243,7 @@ class FourierFTModel(BaseTuner):
             if val != "none":
                 msg = (
                     f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
-                    "output as the the base model would without adaption."
+                    "output as the base model would without adaption."
                 )
                 warnings.warn(msg)
         self._set_adapter_layers(enabled=False)

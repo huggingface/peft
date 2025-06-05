@@ -119,6 +119,11 @@ def is_hqq_available():
 
 
 @lru_cache
+def is_inc_available():
+    return importlib.util.find_spec("neural_compressor") is not None
+
+
+@lru_cache
 def is_torchao_available():
     if importlib.util.find_spec("torchao") is None:
         return False

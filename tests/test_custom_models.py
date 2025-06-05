@@ -46,6 +46,7 @@ from peft import (
     LoraConfig,
     OFTConfig,
     PeftModel,
+    RandLoraConfig,
     TaskType,
     TrainableTokensConfig,
     VBLoRAConfig,
@@ -112,6 +113,7 @@ TEST_CASES = [
         {"target_modules": ["conv1d"], "trainable_token_indices": {"emb": [0, 10]}},
     ),
     ("Conv1d LoRA", "Conv1d", LoraConfig, {"target_modules": ["conv1d"]}),
+    ("Conv1d LoRA with DoRA", "Conv1d", LoraConfig, {"target_modules": ["conv1d"], "use_dora": True}),
     ("Conv2d 1 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
     ("Conv2d 1 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"], "use_dora": True}),
@@ -511,6 +513,32 @@ TEST_CASES = [
         TrainableTokensConfig,
         {"target_modules": ["emb"], "token_indices": [0, 1, 3], "init_weights": False},
     ),
+    ########
+    # RandLora #
+    ########
+    # We have to reduce the default scaling parameter to avoid nans when using large learning rates
+    ("Vanilla MLP 1 RandLora", "MLP", RandLoraConfig, {"target_modules": "lin0", "randlora_alpha": 1}),
+    ("Vanilla MLP 2 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin0"], "randlora_alpha": 1}),
+    ("Vanilla MLP 3 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin1"], "randlora_alpha": 1}),
+    ("Vanilla MLP 4 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin0", "lin1"], "randlora_alpha": 1}),
+    (
+        "Vanilla MLP 5 RandLora",
+        "MLP",
+        RandLoraConfig,
+        {"target_modules": ["lin0", "lin1"], "sparse": True, "randlora_alpha": 1},
+    ),
+    (
+        "Vanilla MLP 6 RandLora",
+        "MLP",
+        RandLoraConfig,
+        {"target_modules": ["lin0", "lin1"], "very_sparse": True, "randlora_alpha": 1},
+    ),
+    (
+        "Vanilla MLP 7 RandLora",
+        "MLP",
+        RandLoraConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "randlora_alpha": 1},
+    ),
 ]
 
 # For this test matrix, each tuple consists of:
@@ -617,6 +645,14 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_weights": False},
         {"target_modules": ["lin0"], "init_weights": False},
     ),
+    # Note: RandLora may present the same problem mentioned above for Vera.
+    (
+        "RandLora Same",
+        "randlora",
+        RandLoraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
     (
         "HRA Same",
         "hra",
@@ -684,6 +720,7 @@ PREFIXES = {
     BOFTConfig: "boft_",
     LNTuningConfig: "ln_tuning_",
     VeraConfig: "vera_lambda_",
+    RandLoraConfig: "randlora_",
     FourierFTConfig: "fourierft_",
     HRAConfig: "hra_",
     VBLoRAConfig: "vblora_",
@@ -1440,7 +1477,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             lr = 0.1  # otherwise we get nan
         elif "mha" in model_id.lower():
             lr = 1e-3  # we get exploding gradients with MHA when learning rate is too high
-        elif issubclass(config_cls, VBLoRAConfig):
+        elif issubclass(config_cls, VBLoRAConfig) or issubclass(config_cls, RandLoraConfig):
             lr = 0.01  # otherwise we get nan
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
@@ -2026,6 +2063,18 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         )
         with pytest.raises(ValueError, match=msg):
             model.add_weighted_adapter(["default", "other"], weights=[1.0, 1.0], adapter_name="merged")
+
+    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig])
+    def test_add_weighted_adapter_cat_with_rank_pattern(self, config_cls):
+        # Fixes a bug described in #2512, which resulted from the rank_pattern not being taken into account
+        config0 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 2})
+        config1 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 16})
+        model = MLP()
+        model = get_peft_model(model, config0).to(self.torch_device)
+        model.add_adapter("other", config1)
+        model.add_weighted_adapter(
+            ["default", "other"], weights=[1.0, 1.0], adapter_name="merged", combination_type="cat"
+        )
 
     def test_multiple_adapters_no_needless_copy_modules_to_save(self):
         # See 2206
@@ -3884,6 +3933,148 @@ class RequiresGradTester(unittest.TestCase):
             "base_model.model.lin1.vera_lambda_d.adapter1",
             "base_model.model.lin2.vera_lambda_b.adapter1",
             "base_model.model.lin2.vera_lambda_d.adapter1",
+        )
+
+    def test_requires_grad_randlora_different_targets(self):
+        # Test two different RandLora adapters that target different modules. Most notably, ensure that randbasis_A and randbasis_B
+        # don't require grads.
+
+        # requires a model with at least 2 layers with the same shapes
+        class MLP2(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.relu = nn.ReLU()
+                self.lin0 = nn.Linear(10, 20, bias=bias)
+                self.lin1 = nn.Linear(20, 20, bias=bias)  # lin1 and lin2 have same shape
+                self.lin2 = nn.Linear(20, 20, bias=bias)
+                self.lin3 = nn.Linear(20, 2, bias=bias)
+                self.sm = nn.LogSoftmax(dim=-1)
+
+            def forward(self, X):
+                X = X.float()
+                X = self.lin0(X)
+                X = self.relu(X)
+                X = self.lin1(X)
+                X = self.relu(X)
+                X = self.lin2(X)
+                X = self.relu(X)
+                X = self.lin3(X)
+                X = self.sm(X)
+                return X
+
+        config0 = RandLoraConfig(target_modules=["lin1"])
+        peft_model = get_peft_model(MLP2(), config0)
+
+        config1 = RandLoraConfig(target_modules=["lin2"])
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.randlora_lambda.default",
+            "base_model.model.lin1.randlora_gamma.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.randlora_lambda.default",
+            "base_model.model.lin1.randlora_gamma.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin2.randlora_lambda.adapter1",
+            "base_model.model.lin2.randlora_gamma.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin2.randlora_lambda.adapter1",
+            "base_model.model.lin2.randlora_gamma.adapter1",
+        )
+
+    def test_requires_grad_randlora_same_targets(self):
+        # Test two different RandLora adapters that target the same module. Most notably, ensure that randbasis_A and randbasis_B
+        # don't require grads.
+
+        # requires a model with at least 2 layers with the same shapes
+        class MLP2(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.relu = nn.ReLU()
+                self.lin0 = nn.Linear(10, 20, bias=bias)
+                self.lin1 = nn.Linear(20, 20, bias=bias)  # lin1 and lin2 have same shape
+                self.lin2 = nn.Linear(20, 20, bias=bias)
+                self.lin3 = nn.Linear(20, 2, bias=bias)
+                self.sm = nn.LogSoftmax(dim=-1)
+
+            def forward(self, X):
+                X = X.float()
+                X = self.lin0(X)
+                X = self.relu(X)
+                X = self.lin1(X)
+                X = self.relu(X)
+                X = self.lin2(X)
+                X = self.relu(X)
+                X = self.lin3(X)
+                X = self.sm(X)
+                return X
+
+        config0 = RandLoraConfig(target_modules=["lin1", "lin2"])
+        peft_model = get_peft_model(MLP2(), config0)
+
+        config1 = RandLoraConfig(target_modules=["lin1", "lin2"])
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.randlora_lambda.default",
+            "base_model.model.lin1.randlora_gamma.default",
+            "base_model.model.lin2.randlora_lambda.default",
+            "base_model.model.lin2.randlora_gamma.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.randlora_lambda.default",
+            "base_model.model.lin1.randlora_gamma.default",
+            "base_model.model.lin2.randlora_lambda.default",
+            "base_model.model.lin2.randlora_gamma.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.randlora_lambda.adapter1",
+            "base_model.model.lin1.randlora_gamma.adapter1",
+            "base_model.model.lin2.randlora_lambda.adapter1",
+            "base_model.model.lin2.randlora_gamma.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.randlora_lambda.adapter1",
+            "base_model.model.lin1.randlora_gamma.adapter1",
+            "base_model.model.lin2.randlora_lambda.adapter1",
+            "base_model.model.lin2.randlora_gamma.adapter1",
         )
 
     def test_requires_grad_vblora_different_targets(self):

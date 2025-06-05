@@ -145,6 +145,9 @@ class LoraLayer(BaseTunerLayer):
         elif hasattr(base_layer, "W_q") and base_layer.__class__.__name__ == "HQQLinear":
             # HQQ layers
             in_features, out_features = base_layer.in_features, base_layer.out_features
+        elif base_layer.__class__.__name__ == "PatchedLinear":
+            # INC layers
+            in_features, out_features = base_layer.in_features, base_layer.out_features
         else:
             # possibly support user provided custom layer types using dynamic dispatch
             if hasattr(base_layer, "in_features") and hasattr(base_layer, "out_features"):
@@ -467,13 +470,18 @@ class LoraLayer(BaseTunerLayer):
         value = self._caches.pop(key)
         return value
 
-    def set_scale(self, adapter, scale):
+    def set_scale(self, adapter: str, scale: float | int) -> None:
+        """Set the scale of the given adapter to the initial scale multiplied by the provided factor
+
+        The initial scale is determined by the configured `r` (rank) and `lora_alpha`.
+        """
         if adapter not in self.scaling:
             # Ignore the case where the adapter is not in the layer
             return
         self.scaling[adapter] = scale * self.lora_alpha[adapter] / self.r[adapter]
 
-    def scale_layer(self, scale: float) -> None:
+    def scale_layer(self, scale: float | int) -> None:
+        """Multiply the current scale of all active adapters by the provided factor"""
         if scale == 1:
             return
 
@@ -483,7 +491,13 @@ class LoraLayer(BaseTunerLayer):
 
             self.scaling[active_adapter] *= scale
 
-    def unscale_layer(self, scale=None) -> None:
+    def unscale_layer(self, scale: Optional[float | int] = None) -> None:
+        """Divide the current scale of all active adapters by the provided factor. If `scale=None` is passed, reset to
+        initial scale
+
+        The initial scale is determined by the configured `r` (rank) and `lora_alpha`.
+
+        """
         for active_adapter in self.active_adapters:
             if active_adapter not in self.lora_A.keys():
                 continue
@@ -1654,16 +1668,16 @@ class MultiheadAttention(nn.Module, LoraLayer):
             raise TypeError(f"lora.{self.__class__.__name__} does not support mixed adapter batches.")
         super()._check_forward_args(x, *args, **kwargs)
 
-    def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
-        previous_dtype = x.dtype
-        self._check_forward_args(x, *args, **kwargs)
+    def forward(self, query: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        previous_dtype = query.dtype
+        self._check_forward_args(query, *args, **kwargs)
 
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
-            result = self.base_layer(x, *args, **kwargs)
+            result = self.base_layer(query, *args, **kwargs)
         elif self.merged:
-            result = self.base_layer(x, *args, **kwargs)
+            result = self.base_layer(query, *args, **kwargs)
         else:
             out_proj = self.get_base_layer().out_proj
             if out_proj.active_adapters != self.active_adapters:
@@ -1686,7 +1700,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
             active_adapters = [a for a in self.active_adapters if a in self.lora_A]
             try:
                 self.merge(adapter_names=active_adapters)
-                result = self.base_layer(x, *args, **kwargs)
+                result = self.base_layer(query, *args, **kwargs)
             finally:
                 # it's safe to call unmerge(), which unmerges all adapters, because we checked that not self.merged,
                 # i.e. there is was no merged layer before

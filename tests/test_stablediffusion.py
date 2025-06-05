@@ -14,16 +14,16 @@
 
 import copy
 from dataclasses import asdict, replace
-from unittest import TestCase
 
 import numpy as np
+import pytest
 from diffusers import StableDiffusionPipeline
-from parameterized import parameterized
 
 from peft import (
     BOFTConfig,
     HRAConfig,
     LoHaConfig,
+    LoKrConfig,
     LoraConfig,
     OFTConfig,
     get_peft_model,
@@ -33,98 +33,191 @@ from peft import (
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
 
-from .testing_common import ClassInstantier, PeftCommonTester
-from .testing_utils import temp_seed
+from .testing_common import PeftCommonTester
+from .testing_utils import set_init_weights_false, temp_seed
 
 
 PEFT_DIFFUSERS_SD_MODELS_TO_TEST = ["hf-internal-testing/tiny-sd-pipe"]
-CONFIG_TESTING_KWARGS = (
-    {
-        "text_encoder": {
-            "r": 8,
-            "lora_alpha": 32,
-            "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
-            "lora_dropout": 0.0,
-            "bias": "none",
+DIFFUSERS_CONFIGS = [
+    (
+        LoraConfig,
+        {
+            "text_encoder": {
+                "r": 8,
+                "lora_alpha": 32,
+                "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
+                "lora_dropout": 0.0,
+                "bias": "none",
+                "init_lora_weights": False,
+            },
+            "unet": {
+                "r": 8,
+                "lora_alpha": 32,
+                "target_modules": [
+                    "proj_in",
+                    "proj_out",
+                    "to_k",
+                    "to_q",
+                    "to_v",
+                    "to_out.0",
+                    "ff.net.0.proj",
+                    "ff.net.2",
+                ],
+                "lora_dropout": 0.0,
+                "bias": "none",
+                "init_lora_weights": False,
+            },
         },
-        "unet": {
-            "r": 8,
-            "lora_alpha": 32,
-            "target_modules": ["proj_in", "proj_out", "to_k", "to_q", "to_v", "to_out.0", "ff.net.0.proj", "ff.net.2"],
-            "lora_dropout": 0.0,
-            "bias": "none",
+    ),
+    (
+        LoHaConfig,
+        {
+            "text_encoder": {
+                "r": 8,
+                "alpha": 32,
+                "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
+                "rank_dropout": 0.0,
+                "module_dropout": 0.0,
+                "init_weights": False,
+            },
+            "unet": {
+                "r": 8,
+                "alpha": 32,
+                "target_modules": [
+                    "proj_in",
+                    "proj_out",
+                    "to_k",
+                    "to_q",
+                    "to_v",
+                    "to_out.0",
+                    "ff.net.0.proj",
+                    "ff.net.2",
+                ],
+                "rank_dropout": 0.0,
+                "module_dropout": 0.0,
+                "init_weights": False,
+            },
         },
-    },
-    {
-        "text_encoder": {
-            "r": 8,
-            "alpha": 32,
-            "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
-            "rank_dropout": 0.0,
-            "module_dropout": 0.0,
+    ),
+    (
+        LoKrConfig,
+        {
+            "text_encoder": {
+                "r": 8,
+                "alpha": 32,
+                "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
+                "rank_dropout": 0.0,
+                "module_dropout": 0.0,
+                "init_weights": False,
+            },
+            "unet": {
+                "r": 8,
+                "alpha": 32,
+                "target_modules": [
+                    "proj_in",
+                    "proj_out",
+                    "to_k",
+                    "to_q",
+                    "to_v",
+                    "to_out.0",
+                    "ff.net.0.proj",
+                    "ff.net.2",
+                ],
+                "rank_dropout": 0.0,
+                "module_dropout": 0.0,
+                "init_weights": False,
+            },
         },
-        "unet": {
-            "r": 8,
-            "alpha": 32,
-            "target_modules": ["proj_in", "proj_out", "to_k", "to_q", "to_v", "to_out.0", "ff.net.0.proj", "ff.net.2"],
-            "rank_dropout": 0.0,
-            "module_dropout": 0.0,
+    ),
+    (
+        OFTConfig,
+        {
+            "text_encoder": {
+                "r": 1,
+                "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
+                "module_dropout": 0.0,
+                "init_weights": False,
+            },
+            "unet": {
+                "r": 1,
+                "target_modules": [
+                    "proj_in",
+                    "proj_out",
+                    "to_k",
+                    "to_q",
+                    "to_v",
+                    "to_out.0",
+                    "ff.net.0.proj",
+                    "ff.net.2",
+                ],
+                "module_dropout": 0.0,
+                "init_weights": False,
+            },
         },
-    },
-    {
-        "text_encoder": {
-            "r": 1,
-            "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
-            "module_dropout": 0.0,
+    ),
+    (
+        BOFTConfig,
+        {
+            "text_encoder": {
+                "boft_block_num": 1,
+                "boft_block_size": 0,
+                "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
+                "boft_dropout": 0.0,
+                "init_weights": False,
+            },
+            "unet": {
+                "boft_block_num": 1,
+                "boft_block_size": 0,
+                "target_modules": [
+                    "proj_in",
+                    "proj_out",
+                    "to_k",
+                    "to_q",
+                    "to_v",
+                    "to_out.0",
+                    "ff.net.0.proj",
+                    "ff.net.2",
+                ],
+                "boft_dropout": 0.0,
+                "init_weights": False,
+            },
         },
-        "unet": {
-            "r": 1,
-            "target_modules": ["proj_in", "proj_out", "to_k", "to_q", "to_v", "to_out.0", "ff.net.0.proj", "ff.net.2"],
-            "module_dropout": 0.0,
+    ),
+    (
+        HRAConfig,
+        {
+            "text_encoder": {
+                "r": 8,
+                "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
+                "init_weights": False,
+            },
+            "unet": {
+                "r": 8,
+                "target_modules": [
+                    "proj_in",
+                    "proj_out",
+                    "to_k",
+                    "to_q",
+                    "to_v",
+                    "to_out.0",
+                    "ff.net.0.proj",
+                    "ff.net.2",
+                ],
+                "init_weights": False,
+            },
         },
-    },
-    {
-        "text_encoder": {
-            "boft_block_num": 1,
-            "boft_block_size": 0,
-            "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
-            "boft_dropout": 0.0,
-        },
-        "unet": {
-            "boft_block_num": 1,
-            "boft_block_size": 0,
-            "target_modules": ["proj_in", "proj_out", "to_k", "to_q", "to_v", "to_out.0", "ff.net.0.proj", "ff.net.2"],
-            "boft_dropout": 0.0,
-        },
-    },
-    {
-        "text_encoder": {
-            "r": 8,
-            "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
-        },
-        "unet": {
-            "r": 8,
-            "target_modules": ["proj_in", "proj_out", "to_k", "to_q", "to_v", "to_out.0", "ff.net.0.proj", "ff.net.2"],
-        },
-    },
-)
-CLASSES_MAPPING = {
-    "lora": (LoraConfig, CONFIG_TESTING_KWARGS[0]),
-    "loha": (LoHaConfig, CONFIG_TESTING_KWARGS[1]),
-    "lokr": (LoHaConfig, CONFIG_TESTING_KWARGS[1]),
-    "oft": (OFTConfig, CONFIG_TESTING_KWARGS[2]),
-    "boft": (BOFTConfig, CONFIG_TESTING_KWARGS[3]),
-    "hra": (HRAConfig, CONFIG_TESTING_KWARGS[4]),
-}
+    ),
+]
 
 
-PeftStableDiffusionTestConfigManager = ClassInstantier(CLASSES_MAPPING)
+def skip_if_not_lora(config_cls):
+    if config_cls != LoraConfig:
+        pytest.skip("Skipping test because it is only applicable to LoraConfig")
 
 
-class StableDiffusionModelTester(TestCase, PeftCommonTester):
+class TestStableDiffusionModel(PeftCommonTester):
     r"""
     Tests that diffusers StableDiffusion model works with PEFT as expected.
-
     """
 
     transformers_class = StableDiffusionPipeline
@@ -165,20 +258,14 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
             "num_inference_steps": 3,
         }
 
-    @parameterized.expand(
-        PeftStableDiffusionTestConfigManager.get_grid_parameters(
-            {
-                "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
-                "lora_kwargs": {"init_lora_weights": [False]},
-                "loha_kwargs": {"init_weights": [False]},
-                "oft_kwargs": {"init_weights": [False]},
-                "boft_kwargs": {"init_weights": [False]},
-                "hra_kwargs": {"init_weights": [False]},
-            },
-        )
-    )
-    def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", PEFT_DIFFUSERS_SD_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", DIFFUSERS_CONFIGS)
+    def test_merge_layers(self, model_id, config_cls, config_kwargs):
+        if (config_cls == LoKrConfig) and (self.torch_device != "cuda"):
+            pytest.skip("Merging test with LoKr fails without GPU")
+
         # Instantiate model & adapters
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         model = self.instantiate_sd_peft(model_id, config_cls, config_kwargs)
 
         # Generate output for peft modified StableDiffusion
@@ -199,19 +286,12 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
         # Images are in uint8 drange, so use large atol
         assert np.allclose(peft_output, merged_output, atol=1.0)
 
-    @parameterized.expand(
-        PeftStableDiffusionTestConfigManager.get_grid_parameters(
-            {
-                "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
-                "lora_kwargs": {"init_lora_weights": [False]},
-                "loha_kwargs": {"init_weights": [False]},
-                "oft_kwargs": {"init_weights": [False]},
-                "boft_kwargs": {"init_weights": [False]},
-                "hra_kwargs": {"init_weights": [False]},
-            },
-        )
-    )
-    def test_merge_layers_safe_merge(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", PEFT_DIFFUSERS_SD_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", DIFFUSERS_CONFIGS)
+    def test_merge_layers_safe_merge(self, model_id, config_cls, config_kwargs):
+        if (config_cls == LoKrConfig) and (self.torch_device != "cuda"):
+            pytest.skip("Merging test with LoKr fails without GPU")
+
         # Instantiate model & adapters
         model = self.instantiate_sd_peft(model_id, config_cls, config_kwargs)
 
@@ -233,19 +313,12 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
         # Images are in uint8 drange, so use large atol
         assert np.allclose(peft_output, merged_output, atol=1.0)
 
-    @parameterized.expand(
-        PeftStableDiffusionTestConfigManager.get_grid_parameters(
-            {
-                "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
-                "lora_kwargs": {"init_lora_weights": [False]},
-            },
-            filter_params_func=lambda tests: [
-                x for x in tests if all(s not in x[0] for s in ["loha", "lokr", "oft", "hra"])
-            ],
-        )
-    )
-    def test_add_weighted_adapter_base_unchanged(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", PEFT_DIFFUSERS_SD_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", DIFFUSERS_CONFIGS)
+    def test_add_weighted_adapter_base_unchanged(self, model_id, config_cls, config_kwargs):
+        skip_if_not_lora(config_cls)
         # Instantiate model & adapters
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         model = self.instantiate_sd_peft(model_id, config_cls, config_kwargs)
 
         # Get current available adapter config
@@ -262,28 +335,15 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
         assert asdict(text_encoder_adapter_config) == asdict(model.text_encoder.peft_config[text_encoder_adapter_name])
         assert asdict(unet_adapter_config) == asdict(model.unet.peft_config[unet_adapter_name])
 
-    @parameterized.expand(
-        PeftStableDiffusionTestConfigManager.get_grid_parameters(
-            {
-                "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
-                "lora_kwargs": {"init_lora_weights": [False]},
-                "loha_kwargs": {"init_weights": [False]},
-                "lokr_kwargs": {"init_weights": [False]},
-                "oft_kwargs": {"init_weights": [False]},
-                "boft_kwargs": {"init_weights": [False]},
-                "hra_kwargs": {"init_weights": [False]},
-            },
-        )
-    )
-    def test_disable_adapter(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", PEFT_DIFFUSERS_SD_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", DIFFUSERS_CONFIGS)
+    def test_disable_adapter(self, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_disable_adapter(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(
-        PeftStableDiffusionTestConfigManager.get_grid_parameters(
-            {"model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST},
-        )
-    )
-    def test_load_model_low_cpu_mem_usage(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", PEFT_DIFFUSERS_SD_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", DIFFUSERS_CONFIGS)
+    def test_load_model_low_cpu_mem_usage(self, model_id, config_cls, config_kwargs):
         # Instantiate model & adapters
         pipe = self.instantiate_sd_peft(model_id, config_cls, config_kwargs)
 
