@@ -15,6 +15,7 @@
 """
 Main entry point to run the experiments. Contains general setup and the proper training code.
 """
+
 import argparse
 import gc
 import os
@@ -23,20 +24,18 @@ import time
 from typing import Optional
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, set_seed
-
 from data import prepare_benchmark_prompts
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, set_seed
 from utils import (
-        BenchmarkConfig,
-        BenchmarkResult,
-        BenchmarkStatus,
-        generate_experiment_id,
-        get_memory_usage,
-        get_model_size_mb,
-        init_cuda,
-        log_results,
-        validate_experiment_path,
-    )
+    BenchmarkConfig,
+    BenchmarkResult,
+    BenchmarkStatus,
+    generate_experiment_id,
+    get_memory_usage,
+    init_cuda,
+    log_results,
+    validate_experiment_path,
+)
 
 from peft import PeftConfig, get_peft_model
 
@@ -53,6 +52,7 @@ def measure_inference_time(model, tokenizer, prompts, max_new_tokens, num_runs, 
 
         category_times = []
         category_tokens = []
+        category_time_per_token = []
 
         # Measure each prompt in the category
         for prompt in prompt_list:
@@ -66,6 +66,7 @@ def measure_inference_time(model, tokenizer, prompts, max_new_tokens, num_runs, 
             # Measurement runs
             prompt_times = []
             prompt_tokens = []
+            prompt_time_per_token = []
             for i in range(num_runs):
                 torch.cuda.synchronize() if torch.cuda.is_available() else None
                 start_time = time.perf_counter()
@@ -75,38 +76,40 @@ def measure_inference_time(model, tokenizer, prompts, max_new_tokens, num_runs, 
 
                 torch.cuda.synchronize() if torch.cuda.is_available() else None
                 end_time = time.perf_counter()
-                
+
                 # Calculate tokens generated (output minus input)
                 num_tokens_generated = output.shape[1] - inputs.input_ids.shape[1]
+                inference_time = end_time - start_time
+
                 prompt_tokens.append(num_tokens_generated)
-                prompt_times.append(end_time - start_time)
+                prompt_times.append(inference_time)
+
+                # Calculate time per token for this specific run
+                if num_tokens_generated > 0:
+                    prompt_time_per_token.append(inference_time / num_tokens_generated)
+                else:
+                    prompt_time_per_token.append(0.0)
 
             # Average for this specific prompt
             avg_time = sum(prompt_times) / len(prompt_times)
             avg_tokens = sum(prompt_tokens) / len(prompt_tokens)
-            
+            avg_time_per_token = sum(prompt_time_per_token) / len(prompt_time_per_token)
+
             category_times.append(avg_time)
             category_tokens.append(avg_tokens)
+            category_time_per_token.append(avg_time_per_token)
 
         # Calculate category averages
         if category_times:
             avg_category_time = sum(category_times) / len(category_times)
             avg_category_tokens = sum(category_tokens) / len(category_tokens)
-            
+            avg_category_time_per_token = sum(category_time_per_token) / len(category_time_per_token)
+
             inference_times[category] = avg_category_time
             generated_tokens[category] = avg_category_tokens
-            
-            # Calculate time per token
-            if avg_category_tokens > 0:
-                time_per_token[category] = avg_category_time / avg_category_tokens
-            else:
-                time_per_token[category] = 0.0
+            time_per_token[category] = avg_category_time_per_token
 
-    return {
-        "inference_times": inference_times,
-        "time_per_token": time_per_token,
-        "generated_tokens": generated_tokens
-    }
+    return {"inference_times": inference_times, "time_per_token": time_per_token, "generated_tokens": generated_tokens}
 
 
 def run_benchmark(
@@ -126,7 +129,7 @@ def run_benchmark(
     result.save()
 
     start_time = time.perf_counter()
-    e_main_benchmark: Optional[Exception] = None # Initialize e for the main try-except
+    e_main_benchmark: Optional[Exception] = None  # Initialize e for the main try-except
 
     try:
         # Initialize CUDA
@@ -158,15 +161,14 @@ def run_benchmark(
         # Add quantization if needed
         if benchmark_config.use_8bit:
             model_kwargs["quantization_config"] = BitsAndBytesConfig(
-                load_in_8bit=True,
-                llm_int8_enable_fp32_cpu_offload=True
+                load_in_8bit=True, llm_int8_enable_fp32_cpu_offload=True
             )
         elif benchmark_config.use_4bit:
             model_kwargs["quantization_config"] = BitsAndBytesConfig(
                 load_in_4bit=True,
                 bnb_4bit_compute_dtype=model_kwargs.get("torch_dtype", torch.float16),
                 bnb_4bit_use_double_quant=True,
-                bnb_4bit_quant_type="nf4"
+                bnb_4bit_quant_type="nf4",
             )
 
         # Load the base model
@@ -176,28 +178,11 @@ def run_benchmark(
         ram, gpu_allocated, gpu_reserved = get_memory_usage()
         result.add_memory_log("base_model_loaded", ram, gpu_allocated, gpu_reserved)
 
-        # Calculate base model metrics
-        base_params = sum(p.numel() for p in base_model.parameters())
-        dtype_bytes = 2 if benchmark_config.dtype in ["float16", "bfloat16"] else 4
-        base_model_size_mb = get_model_size_mb(base_model, dtype_bytes=dtype_bytes)
-
-        # Store in result
-        result.update_meta_info(
-            param_counts={"base_params": base_params}, size_info={"base_model_size_mb": base_model_size_mb}
-        )
-
         # Prepare prompts for benchmarking
         print_fn("Preparing benchmark prompts...")
         prompts = prepare_benchmark_prompts(
             config=benchmark_config.to_dict(), tokenizer=tokenizer, num_samples=benchmark_config.num_prompt_samples
         )
-
-        # Ensure we only use the prompt categories specified in the config
-        prompts = {
-            category: prompt_list
-            for category, prompt_list in prompts.items()
-            if category in benchmark_config.prompt_categories
-        }
 
         # Measure base model inference for each prompt category
         print_fn("Measuring base model inference times...")
@@ -223,6 +208,7 @@ def run_benchmark(
             error_msg = f"Error loading PEFT config: {str(exc)}"
             print_fn(error_msg)
             import traceback
+
             print_fn(traceback.format_exc())
             raise ValueError(error_msg) from exc
 
@@ -238,6 +224,7 @@ def run_benchmark(
         # Calculate PEFT model metrics
         trainable_params = model.get_nb_trainable_parameters()[0]
         total_params = sum(p.numel() for p in model.parameters())
+        dtype_bytes = 2 if benchmark_config.dtype in ["float16", "bfloat16"] else 4
         adapter_size_mb = trainable_params * dtype_bytes / (1024 * 1024)
         param_ratio = trainable_params / total_params if total_params > 0 else 0
 
@@ -264,7 +251,9 @@ def run_benchmark(
 
         # Calculate inference overhead for each category
         inference_overhead = {
-            k: (peft_inference_times["inference_times"][k] - base_inference_times["inference_times"][k]) / base_inference_times["inference_times"][k] * 100
+            k: (peft_inference_times["inference_times"][k] - base_inference_times["inference_times"][k])
+            / base_inference_times["inference_times"][k]
+            * 100
             for k in base_inference_times["inference_times"]
         }
 
@@ -285,10 +274,12 @@ def run_benchmark(
             memory_data={
                 "peak_gpu_memory_mb": max(
                     log["gpu_allocated_mb"] for log in result.generation_info["memory"]["memory_logs"]
-                ) if result.generation_info["memory"]["memory_logs"] else 0,
-                "peak_ram_memory_mb": max(
-                    log["ram_mb"] for log in result.generation_info["memory"]["memory_logs"]
-                ) if result.generation_info["memory"]["memory_logs"] else 0,
+                )
+                if result.generation_info["memory"]["memory_logs"]
+                else 0,
+                "peak_ram_memory_mb": max(log["ram_mb"] for log in result.generation_info["memory"]["memory_logs"])
+                if result.generation_info["memory"]["memory_logs"]
+                else 0,
             }
         )
 
@@ -302,7 +293,7 @@ def run_benchmark(
     except Exception as exc:
         print_fn(f"Benchmark failed with error: {exc}")
         result.status = BenchmarkStatus.FAILED
-        e_main_benchmark = exc # Capture the exception
+        e_main_benchmark = exc  # Capture the exception
 
     # Record duration and update final status, including error if any
     end_time = time.perf_counter()
@@ -335,7 +326,7 @@ def main():
     experiment_path = abs_experiment_path
 
     # Validate experiment path and load configs
-    experiment_name, benchmark_config, peft_config = validate_experiment_path(experiment_path)
+    experiment_name, benchmark_config = validate_experiment_path(experiment_path)
 
     print_fn(f"Running benchmark for experiment: {experiment_name}")
 

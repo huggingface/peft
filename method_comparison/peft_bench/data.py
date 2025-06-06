@@ -18,15 +18,12 @@ Data handling utilities for PEFT benchmarking.
 
 import json
 import os
-import textwrap
 from typing import Optional
 
-import numpy as np
 from transformers import PreTrainedTokenizer
 
 
 DEFAULT_PROMPTS_PATH = os.path.join(os.path.dirname(__file__), "configs", "prompts.json")
-
 
 
 def load_test_prompts(config: dict) -> dict[str, list[str]]:
@@ -93,6 +90,7 @@ def prepare_benchmark_prompts(
 ) -> dict[str, list[str]]:
     """
     Prepare prompts for benchmarking, ensuring appropriate length and variety.
+    Always returns all prompt categories for consistent benchmarking.
 
     Args:
         config: Benchmark configuration
@@ -102,12 +100,12 @@ def prepare_benchmark_prompts(
         seed: Random seed (kept for backwards compatibility)
 
     Returns:
-        Dictionary with processed prompts by category
+        Dictionary with processed prompts by category (all categories included)
     """
     # Load prompts
     all_prompts = load_test_prompts(config)
 
-    # Process each category
+    # Process each category - always include all categories for consistent benchmarking
     processed_prompts = {}
     for category, prompts in all_prompts.items():
         # Take the first num_samples prompts
