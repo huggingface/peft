@@ -7,8 +7,5 @@
     "num_inference_runs": 10,
     "train_batch_size": 2,
     "train_steps": 3,
-    "prompt_categories": [
-        "short"
-    ],
     "num_prompt_samples": 1
 }
