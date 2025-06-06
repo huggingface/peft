@@ -19,6 +19,7 @@ from peft.import_utils import is_gptqmodel_available
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import get_auto_gptq_quant_linear
+from .layer import LoraLayer, LoraVariant
 
 
 class GPTQLoraLinear(torch.nn.Module, LoraLayer):
@@ -32,6 +33,7 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
         init_lora_weights: bool = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        use_qalora: bool = False,
         lora_bias: bool = False,
         **kwargs,
     ):
@@ -53,8 +55,22 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
+            use_qalora=use_qalora,
             lora_bias=lora_bias,
+            qalora_group_size=kwargs["qalora_group_size"]
         )
+
+    def resolve_lora_variant(self, *, use_dora: bool, use_qalora: bool, **kwargs) -> Optional[LoraVariant]:
+        if use_qalora:
+            from .variants import QALoraLinearVariant
+
+            return QALoraLinearVariant()
+        if not use_dora:
+            return None
+
+        from .variants import DoraLinearVariant
+
+        return DoraLinearVariant()
 
     def forward(self, x: torch.Tensor):
         # note: logic differs from default Linear because merging is not supported

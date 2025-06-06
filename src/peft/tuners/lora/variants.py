@@ -130,6 +130,195 @@ class DoraLinearVariant(LoraVariant):
         return result
 
 
+class QALoraLinearVariant(LoraVariant):
+    @staticmethod
+    def init(module: Linear, adapter_name: str, **kwargs: Any) -> None:
+        """
+        Initializes QALoRA specific parameters for a given adapter.
+
+        Args:
+            module (Linear): The linear module to be adapted.
+            adapter_name (str): The name of the adapter.
+            **kwargs: Additional keyword arguments.
+                qalora_group_size (int, optional): The size of groups for pooling. Defaults to 16.
+        """
+        # Store the qalora_group_size as a module attribute
+        # It's expected that qalora_group_size is passed in kwargs from LoraConfig
+        qalora_group_size = kwargs.get("qalora_group_size", 16)  # Default to 16 if not specified in kwargs
+        if not hasattr(module, "qalora_group_size"):
+            module.qalora_group_size = {}
+        module.qalora_group_size[adapter_name] = qalora_group_size
+
+        # Store original dimensions for use in get_delta_weight
+        if not hasattr(module, "orig_in_features"):
+            module.orig_in_features = {}
+        module.orig_in_features[adapter_name] = module.in_features
+
+        # Create and store pooling factor for scaling
+        if not hasattr(module, "qalora_scaling_factor"):
+            module.qalora_scaling_factor = {}
+
+        if module.in_features % qalora_group_size == 0:
+            # Paper's pseudocode for QALoRA forward pass scales the pooled input x_pooled by (D_in / L_pseudo),
+            # where L_pseudo is the group_size.
+            # The get_delta_weight calculation also uses a paper_scaling_factor.
+            # For consistency with the paper's forward pass logic,
+            # this factor could represent (D_in / group_size) or simply group_size
+            # depending on interpretation.
+            # Let's assume paper_scaling_factor is related to how x_pooled is scaled before LoRA.
+            # The current implementation calculates it as module.in_features / qalora_group_size,
+            # which is the number of groups (L).
+            # If the intention is to scale by group_size, this should be `qalora_group_size`.
+            # For now, keeping the existing logic for qalora_scaling_factor:
+            module.qalora_scaling_factor[adapter_name] = module.in_features / qalora_group_size
+        else:
+            # No special scaling if dimensions don't align
+            module.qalora_scaling_factor[adapter_name] = 1.0
+
+    @staticmethod
+    def get_delta_weight(module: Linear, active_adapter: str) -> torch.Tensor:
+        """
+        Computes the QALoRA delta weight.
+        The formula (B_std @ (A_std @ P.T)) @ P is used for delta_w_core.
+
+        Args:
+            module (Linear): The adapted linear module.
+            active_adapter (str): The currently active adapter.
+
+        Returns:
+            torch.Tensor: The calculated delta weight.
+        """
+        if (
+            not hasattr(module, "qalora_group_size")
+            or active_adapter not in module.qalora_group_size
+            or not hasattr(module, "qalora_scaling_factor")
+            or active_adapter not in module.qalora_scaling_factor
+        ):
+            # Fall back to standard LoRA delta weight
+            lora_A_weight = module.lora_A[active_adapter].weight
+            lora_B_weight = module.lora_B[active_adapter].weight
+            return (lora_B_weight @ lora_A_weight) * module.scaling[active_adapter]
+
+        group_size = module.qalora_group_size[active_adapter]
+        in_features = module.orig_in_features.get(active_adapter, module.in_features)
+
+        # This is L (number of groups) as calculated in init.
+        # Pseudocode suggests scaling by group_size.
+        paper_scaling_factor = module.qalora_scaling_factor.get(active_adapter, 1.0)
+
+        if in_features % group_size == 0:
+            pooled_dim = in_features // group_size
+
+            lora_A_weight = module.lora_A[active_adapter].weight  # Shape: (rank, in_features)
+            lora_B_weight = module.lora_B[active_adapter].weight  # Shape: (out_features, rank)
+            device = lora_A_weight.device
+            dtype = lora_A_weight.dtype
+
+            # --- Vectorized creation of pooling_matrix ---
+            # P has shape (pooled_dim, in_features)
+            # Each row i of P has 1.0/group_size for columns i*group_size to (i+1)*group_size - 1
+            eye_matrix = torch.eye(pooled_dim, device=device, dtype=dtype)
+            pooling_matrix = (1.0 / group_size) * eye_matrix.repeat_interleave(group_size, dim=1)
+            # --- End Vectorized pooling_matrix ---
+
+            # A_std shape: (rank, in_features)
+            # P.T shape: (in_features, pooled_dim)
+            # A_pseudo = A_std @ P.T  shape: (rank, pooled_dim)
+            A_pseudo = lora_A_weight @ pooling_matrix.T
+
+            # B_std shape: (out_features, rank)
+            # B_std @ A_pseudo shape: (out_features, pooled_dim)
+            B_A_pseudo = lora_B_weight @ A_pseudo
+
+            # (B_std @ A_pseudo) @ P shape: (out_features, in_features)
+            delta_w_core = B_A_pseudo @ pooling_matrix
+
+            # Apply LoRA scaling 's' and the QALoRA specific scaling
+            return delta_w_core * module.scaling[active_adapter] * paper_scaling_factor
+        else:
+            # Fall back to standard LoRA
+            lora_A_weight = module.lora_A[active_adapter].weight
+            lora_B_weight = module.lora_B[active_adapter].weight
+            return (lora_B_weight @ lora_A_weight) * module.scaling[active_adapter]
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
+        delta_weight = QALoraLinearVariant.get_delta_weight(module, active_adapter)
+        new_weight = orig_weight + delta_weight
+        new_weight = new_weight.to(orig_dtype)
+        return new_weight
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        orig_dtype = orig_weight.dtype
+        delta_weight = QALoraLinearVariant.get_delta_weight(module, active_adapter)
+        orig_weight.data = (orig_weight.data + delta_weight).to(orig_dtype)
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
+        delta_weight = QALoraLinearVariant.get_delta_weight(module, active_adapter)
+        new_weight = orig_weight - delta_weight
+        new_weight = new_weight.to(orig_dtype)
+        return new_weight
+
+    @staticmethod
+    def forward(module: Linear, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
+        lora_A_layer = module.lora_A[active_adapter]
+        lora_B_layer = module.lora_B[active_adapter]
+
+        lora_A_weight = lora_A_layer.weight
+        lora_B_weight = lora_B_layer.weight
+
+        dropout = module.lora_dropout[active_adapter]
+        lora_scaling_coefficient = module.scaling[active_adapter]
+
+        group_size = module.qalora_group_size.get(active_adapter, 16)
+        paper_scaling_factor = module.qalora_scaling_factor.get(active_adapter, 1.0)
+
+        x_dropped = dropout(x) if module.training and not isinstance(dropout, nn.Identity) else x
+
+        orig_shape = x_dropped.shape
+        in_features = orig_shape[-1]
+
+        x_2d = x_dropped.reshape(-1, in_features) if len(orig_shape) > 2 else x_dropped
+
+        if in_features % group_size == 0:
+            pooled_dim = in_features // group_size
+
+            # 1. Group and pool the input x_2d
+            x_grouped = x_2d.reshape(x_2d.shape[0], pooled_dim, group_size)
+            x_pooled = x_grouped.mean(dim=-1)
+
+            # 2. Apply QALoRA specific scaling
+            x_pooled_scaled = x_pooled * paper_scaling_factor
+
+            # --- Vectorized creation of lora_A_pooled_weight ---
+            # lora_A_weight shape: (rank, in_features) = (rank, pooled_dim * group_size)
+            # Reshape to (rank, pooled_dim, group_size) then mean over group_size dimension.
+            # lora_A_pooled_weight shape: (rank, pooled_dim)
+            lora_A_weight_reshaped = lora_A_weight.reshape(lora_A_weight.shape[0], pooled_dim, group_size)
+            lora_A_pooled_weight = lora_A_weight_reshaped.mean(dim=2)
+            # --- End Vectorized lora_A_pooled_weight ---
+
+            intermediate = x_pooled_scaled @ lora_A_pooled_weight.t()
+            delta = intermediate @ lora_B_weight.t()
+            delta = delta * lora_scaling_coefficient
+        else:
+            if isinstance(lora_A_layer, nn.Linear) and isinstance(lora_B_layer, nn.Linear):
+                intermediate = lora_A_layer(x_2d)
+                delta = lora_B_layer(intermediate) * lora_scaling_coefficient
+            else:
+                intermediate = x_2d @ lora_A_weight.t()
+                delta = intermediate @ lora_B_weight.t() * lora_scaling_coefficient
+
+        if len(orig_shape) > 2:
+            delta = delta.reshape(orig_shape[:-1] + (delta.shape[-1],))
+
+        return result + delta
+
+
 class DoraEmbeddingVariant(DoraLinearVariant):
     @staticmethod
     def init(module: Embedding, adapter_name: str, **kwargs: Any) -> None:
