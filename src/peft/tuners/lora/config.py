@@ -233,7 +233,7 @@ class LoraConfig(PeftConfig):
             use the original default value of `lora_alpha/r`.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
-        init_lora_weights (`bool` | `Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "corda", "loftq"]`):
+        init_lora_weights (`bool` | `Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "corda", "loftq", "orthogonal"]`):
             How to initialize the weights of the adapter layers. Passing True (default) results in the default
             initialization from the reference implementation from Microsoft, with the LoRA B weight being set to 0.
             This means that without further training, the LoRA adapter will be a no-op. Setting the initialization to
@@ -253,7 +253,9 @@ class LoraConfig(PeftConfig):
             using SVD. Passing `'corda'` results in the initialization of <a
             href='https://huggingface.co/papers/2406.05223' >Context-Oriented Decomposition Adaptation</a>, which
             converges even more rapidly than PiSSA in Instruction-Previewed Mode, and preserves world knowledge better
-            than LoRA in Knowledge-Preserved Mode.
+            than LoRA in Knowledge-Preserved Mode. Passing `"orthogonal"` results in LoRA A and B being intialized
+            orthogonally; in this, it resembles `"olora"`, but the base weights are left untouched (requires `r` to be
+            even, only supported for linear layers for now).
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
@@ -357,7 +359,8 @@ class LoraConfig(PeftConfig):
         },
     )
     init_lora_weights: (
-        bool | Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "corda", "loftq"]
+        bool
+        | Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "corda", "loftq", "orthogonal"]
     ) = field(
         default=True,
         metadata={
@@ -376,7 +379,8 @@ class LoraConfig(PeftConfig):
                 "[number of iters] indicates the number of subspace iterations to perform fsvd, and must be a "
                 "nonnegative integer. "
                 "Passing `'corda'` results in CorDA initialization. "
-                "Pass `'loftq'` to use LoftQ initialization."
+                "Pass `'loftq'` to use LoftQ initialization. "
+                "Pass `'orthogonal'` for orthogonal initialization of LoRA A and B."
             ),
         },
     )
