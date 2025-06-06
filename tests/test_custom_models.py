@@ -21,13 +21,11 @@ import re
 import shutil
 import tempfile
 import time
-import unittest
 from contextlib import contextmanager
 from functools import partial
 
 import pytest
 import torch
-from parameterized import parameterized
 from safetensors.torch import load_file as safe_load_file
 from torch import nn
 from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
@@ -1072,7 +1070,7 @@ class MockTransformerWrapper:
         raise ValueError(f"model_id {model_id} not implemented")
 
 
-class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
+class TestPeftCustomModel(PeftCommonTester):
     """
     Implements the tests for custom models.
 
@@ -1087,15 +1085,15 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         X = torch.arange(90).view(9, 10).to(self.torch_device)
         return {"X": X}
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_attributes_parametrized(self, test_name, model_id, config_cls, config_kwargs):
         self._test_model_attr(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_adapter_name(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adapter_name(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_prepare_for_training_parametrized(self, test_name, model_id, config_cls, config_kwargs):
         # This test does not work with custom models because it assumes that
         # there is always a method get_input_embeddings that returns a layer
@@ -1103,27 +1101,27 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # checks that LoRA works as expected.
         pass
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_save_pretrained(self, test_name, model_id, config_cls, config_kwargs):
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_save_pretrained_pickle(self, test_name, model_id, config_cls, config_kwargs):
         self._test_save_pretrained(model_id, config_cls, config_kwargs, safe_serialization=False)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_load_model_low_cpu_mem_usage(self, test_name, model_id, config_cls, config_kwargs):
         self._test_load_model_low_cpu_mem_usage(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_from_pretrained_config_construction(self, test_name, model_id, config_cls, config_kwargs):
         self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_load_multiple_adapters(self, test_name, model_id, config_cls, config_kwargs):
         self._test_load_multiple_adapters(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
         # https://github.com/huggingface/peft/pull/2403
         if model_id in ["Conv2dGroups"]:
@@ -1146,7 +1144,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             config_kwargs["init_weights"] = False
         self._test_merge_layers(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
         # https://github.com/huggingface/peft/pull/2403
         if model_id in ["Conv2dGroups"]:
@@ -1161,7 +1159,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             config_kwargs["init_ia3_weights"] = False
         self._test_merge_layers_fp16(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_is_idempotent(self, test_name, model_id, config_cls, config_kwargs):
         # https://github.com/huggingface/peft/pull/2403
         if model_id in ["Conv2dGroups"]:
@@ -1177,7 +1175,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             config_kwargs["init_ia3_weights"] = False
         self._test_merge_layers_is_idempotent(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_safe_merge(self, test_name, model_id, config_cls, config_kwargs):
         # https://github.com/huggingface/peft/pull/2403
         if model_id in ["Conv2dGroups"]:
@@ -1201,39 +1199,39 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             config_kwargs["init_weights"] = False
         self._test_safe_merge(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_generate(self, test_name, model_id, config_cls, config_kwargs):
         # Custom models do not (necessarily) have a generate method, so this test is not performed
         pass
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_generate_half_prec(self, test_name, model_id, config_cls, config_kwargs):
         # Custom models do not (necessarily) have a generate method, so this test is not performed
         pass
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_training_custom_models(self, test_name, model_id, config_cls, config_kwargs):
         self._test_training(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_training_custom_models_layer_indexing(self, test_name, model_id, config_cls, config_kwargs):
         # At the moment, layer indexing only works when layer names conform to a specific pattern, which is not
         # guaranteed here. Therefore, this test is not performed.
         pass
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_training_custom_models_gradient_checkpointing(self, test_name, model_id, config_cls, config_kwargs):
         self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_inference_safetensors(self, test_name, model_id, config_cls, config_kwargs):
         self._test_inference_safetensors(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_peft_model_device_map(self, test_name, model_id, config_cls, config_kwargs):
         self._test_peft_model_device_map(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_forward_output_finite(self, test_name, model_id, config_cls, config_kwargs):
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
@@ -1247,7 +1245,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             output = model(**X)
         assert torch.isfinite(output).all()
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_forward_float16(self, test_name, model_id, config_cls, config_kwargs):
         # The user manually sets the dtype of the base model to fp16 precision. This should not cause an error for the
         # different PEFT methods.
@@ -1255,11 +1253,11 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             torch.zeros(1, dtype=torch.float16)
         except Exception:
             # skip this test if float16 is not supported on this machine
-            self.skipTest(reason="Test requires float16 support")
+            pytest.skip(reason="Test requires float16 support")
 
         # skip on MacOS
         if platform.system() == "Darwin":
-            self.skipTest(reason="MacOS does not support multiple ops in float16")
+            pytest.skip(reason="MacOS does not support multiple ops in float16")
 
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16).to(self.torch_device)
@@ -1289,7 +1287,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model = model.merge_and_unload()
         model(**X)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_forward_bfloat16(self, test_name, model_id, config_cls, config_kwargs):
         # The user manually sets the dtype of the base model to bf16 precision. This should not cause an error for the
         # different PEFT methods.
@@ -1297,11 +1295,11 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             torch.zeros(1, dtype=torch.bfloat16)
         except Exception:
             # skip this test if float16 is not supported on this machine
-            self.skipTest(reason="Test requires bfloat16 support")
+            pytest.skip(reason="Test requires bfloat16 support")
 
         # skip on MacOS
         if platform.system() == "Darwin":
-            self.skipTest(reason="MacOS does not support multiple ops in bfloat16")
+            pytest.skip(reason="MacOS does not support multiple ops in bfloat16")
 
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16).to(self.torch_device)
@@ -1331,18 +1329,18 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model = model.merge_and_unload()
         model(**X)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_forward_float16_no_autocast(self, test_name, model_id, config_cls, config_kwargs):
         # Same as above but don't autocast adapter weights to float32 automatically
         try:
             torch.zeros(1, dtype=torch.float16)
         except Exception:
             # skip this test if float16 is not supported on this machine
-            self.skipTest(reason="Test requires float16 support")
+            pytest.skip(reason="Test requires float16 support")
 
         # skip on MacOS
         if platform.system() == "Darwin":
-            self.skipTest(reason="MacOS does not support multiple ops in float16")
+            pytest.skip(reason="MacOS does not support multiple ops in float16")
 
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16).to(self.torch_device)
@@ -1372,18 +1370,18 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model = model.merge_and_unload()
         model(**X)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_forward_bfloat16_no_autocast(self, test_name, model_id, config_cls, config_kwargs):
         # Same as above but don't autocast adapter weights to float32 automatically
         try:
             torch.zeros(1, dtype=torch.bfloat16)
         except Exception:
             # skip this test if float16 is not supported on this machine
-            self.skipTest(reason="Test requires bfloat16 support")
+            pytest.skip(reason="Test requires bfloat16 support")
 
         # skip on MacOS
         if platform.system() == "Darwin":
-            self.skipTest(reason="MacOS does not support multiple ops in bfloat16")
+            pytest.skip(reason="MacOS does not support multiple ops in bfloat16")
 
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16).to(self.torch_device)
@@ -1413,7 +1411,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model = model.merge_and_unload()
         model(**X)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_only_params_are_updated(self, test_name, model_id, config_cls, config_kwargs):
         # An explicit test that when using an adapter on a custom model, only the adapter parameters are updated during
         # training
@@ -1459,7 +1457,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             else:
                 assert torch.allclose(param_before, param_after, atol=tol, rtol=tol)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_parameters_after_loading_model(self, test_name, model_id, config_cls, config_kwargs):
         # An explicit test that when loading a trained model, the parameters are loaded correctly
         # see issue #808
@@ -1506,7 +1504,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
                 param_after = params_after[name]
                 assert torch.allclose(param_before, param_after, atol=tol, rtol=tol)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_disable_adapters(self, test_name, model_id, config_cls, config_kwargs):
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device).eval()
@@ -1566,7 +1564,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert torch.allclose(outputs_before, outputs_disabled)
         assert torch.allclose(outputs_after, outputs_enabled_after_disable)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_disable_adapters_with_merging(self, test_name, model_id, config_cls, config_kwargs):
         # https://github.com/huggingface/peft/pull/2403
         if model_id in ["Conv2dGroups"]:
@@ -1649,7 +1647,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # check that enabling + disabling adapters does not change the results
         assert torch.allclose(outputs_after, outputs_enabled_after_disable, atol=atol, rtol=rtol)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_disable_adapter_with_bias_warns(self, test_name, model_id, config_cls, config_kwargs):
         # When training biases in lora, disabling adapters does not reset the biases, so the output is not what users
         # might expect. Therefore, a warning should be given.
@@ -1658,10 +1656,10 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # thing with decoder, encoder_decoder, etc.
         if config_cls != LoraConfig or config_cls != BOFTConfig:
             # skip this test for other configs as bias is specific to Lora
-            self.skipTest("Testing bias warnings only for LoraConfig or BOFTConfig")
+            pytest.skip("Testing bias warnings only for LoraConfig or BOFTConfig")
 
         if not issubclass(config_cls, (LoraConfig, BOFTConfig)):
-            self.skipTest("Bias argument is only supported for LoRA or BOFT models")
+            pytest.skip("Bias argument is only supported for LoRA or BOFT models")
 
         def run_with_disable(config_kwargs, bias):
             config_kwargs = config_kwargs.copy()
@@ -1695,7 +1693,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # given, therefore, we check that the unittest gives us an AssertionError if we check for a warning
         bias_warning_was_given = False
         try:
-            with self.assertWarns(UserWarning) as cm:
+            with pytest.warns(UserWarning) as cm:
                 run_with_disable(config_kwargs, bias="none")
                 # if we get here, it means there was no AssertionError, i.e. there are warnings -- let's check that they
                 # are not related to the bias setting
@@ -1708,7 +1706,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             # This is bad, there was a warning about the bias when there should not have been any.
             self.fail("There should be no warning when bias is set to 'none'")
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_active_adapter(self, test_name, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = config_cls(
@@ -1738,7 +1736,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # model.active_adapter would not work, thus we have to check the base_model directly
         assert model.base_model.active_adapter == ["default", "other"]
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_disable_adapters_exiting_context_restores_previous_state(
         self, test_name, model_id, config_cls, config_kwargs
     ):
@@ -1766,7 +1764,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             pass
         assert all(module.disable_adapters for module in tuner_modules)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_disable_adapters_exiting_context_irregular_state(self, test_name, model_id, config_cls, config_kwargs):
         # When we have a model where some adapters are enabled and others are disabled, we should get a warning when
         # entering the disable_adapter context because we cannot correctly restore the state of the adapters from
@@ -1791,22 +1789,22 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert {module.disable_adapters for module in tuner_modules} == {True, False}
         # check that we get a warning with irregular states
         msg = "The model contains some adapter layers that are enabled and others that are disabled"
-        with self.assertWarnsRegex(UserWarning, expected_regex=msg):
+        with pytest.warns(UserWarning, match=msg):
             with model.disable_adapter():
                 pass
 
         # when encountering irregular adapters, we enable all adapters at the end of the context
         assert all(not module.disable_adapters for module in tuner_modules)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_delete_adapter(self, test_name, model_id, config_cls, config_kwargs):
         self._test_delete_adapter(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_delete_inactive_adapter(self, test_name, model_id, config_cls, config_kwargs):
         self._test_delete_inactive_adapter(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_delete_unknown_adapter_raises(self, test_name, model_id, config_cls, config_kwargs):
         self._test_delete_unknown_adapter_raises(model_id, config_cls, config_kwargs)
 
@@ -1922,7 +1920,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert set(lm_head.token_adapter.trainable_tokens_delta) == set()
         assert set(lm_head.token_adapter.trainable_tokens_original) == set()
 
-    @parameterized.expand(TEST_CASES)
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
 
@@ -1949,7 +1947,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert "default" in model.base_model.classifier.modules_to_save
         assert "other" in model.base_model.classifier.modules_to_save
 
-    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig])
+    @pytest.mark.parametrize("config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig])
     def test_multiple_adapters_mixed_modules_to_save(self, config_cls):
         # See issue 1574
         # Check that we can have a model where one adapter has modules_to_save and the other doesn't. It should be
@@ -1977,7 +1975,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model.set_adapter("other")
         model(**inputs)
 
-    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig])
+    @pytest.mark.parametrize("config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig])
     def test_multiple_adapters_mixed_modules_to_save_order_switched(self, config_cls):
         # See issue 1574
         # Same test as test_multiple_adapters_mixed_modules_to_save, but this time the 2nd adapter has modules_to_save.
@@ -2064,7 +2062,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         with pytest.raises(ValueError, match=msg):
             model.add_weighted_adapter(["default", "other"], weights=[1.0, 1.0], adapter_name="merged")
 
-    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig])
+    @pytest.mark.parametrize("config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig])
     def test_add_weighted_adapter_cat_with_rank_pattern(self, config_cls):
         # Fixes a bug described in #2512, which resulted from the rank_pattern not being taken into account
         config0 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 2})
@@ -2131,7 +2129,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # rough check that the model card is pre-filled
         assert len(model_card) > 1000
 
-    @parameterized.expand(["auto", True, False])
+    @pytest.mark.parametrize("save_embedding_layers", ["auto", True, False])
     def test_targeting_lora_to_embedding_layer(self, save_embedding_layers):
         model = ModelEmbWithEmbeddingUtils()
         config = LoraConfig(target_modules=["embed_tokens", "lin0"], init_lora_weights=False)
@@ -2158,7 +2156,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
                 assert "base_model.model.embed_tokens.base_layer.weight" not in state_dict
             del state_dict
 
-    @parameterized.expand(["auto", True, False])
+    @pytest.mark.parametrize("save_embedding_layers", ["auto", True, False])
     def test_targeting_lora_to_embedding_layer_non_transformers(self, save_embedding_layers):
         model = ModelEmbConv1D()
         config = LoraConfig(target_modules=["emb", "lin0"], init_lora_weights=False)
@@ -2208,7 +2206,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
                 # windows error
                 pass
 
-    @parameterized.expand(
+    @pytest.mark.parametrize(
+        "config0",
         [
             LoraConfig(target_modules=["lin0"], init_lora_weights=False),
             LoKrConfig(target_modules=["lin0"], init_weights=False),
@@ -2219,7 +2218,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
             HRAConfig(target_modules=["lin0"], init_weights=False),
             BoneConfig(target_modules=["lin0"], init_weights=False, r=2),
-        ]
+        ],
     )
     def test_adapter_name_makes_no_difference(self, config0):
         # It should not matter whether we use the default adapter name or a custom one
@@ -2332,7 +2331,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         for k in state_dict:
             assert torch.allclose(state_dict[k], state_dict_loaded[k])
 
-    @parameterized.expand([False, True])
+    @pytest.mark.parametrize("with_forward_call", [False, True])
     def test_mha_gradients_set_correctly(self, with_forward_call):
         # check for this bug: https://github.com/huggingface/peft/issues/761#issuecomment-1893804738
         base_model = ModelMha()
@@ -2364,7 +2363,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is True
 
 
-class TestMultiRankAdapter(unittest.TestCase):
+class TestMultiRankAdapter:
     """Tests related to multirank LoRA adapters"""
 
     def test_multirank(self):
@@ -2432,7 +2431,7 @@ class TestMultiRankAdapter(unittest.TestCase):
                     )
 
 
-class TestRepr(unittest.TestCase):
+class TestLayerRepr:
     """Tests related to the repr of adapted models"""
 
     def test_repr_lora_linear(self):
@@ -2480,7 +2479,7 @@ class TestRepr(unittest.TestCase):
         assert "default" in print_output
 
 
-class MultipleActiveAdaptersTester(unittest.TestCase):
+class TestMultipleActiveAdapters:
     """
     A test class to test the functionality of multiple active adapters.
 
@@ -2507,7 +2506,9 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
             return MLP(bias=False)
         return MLP(bias=True)
 
-    @parameterized.expand(MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES)
+    @pytest.mark.parametrize(
+        "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES
+    )
     def test_multiple_active_adapters_forward(
         self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
     ):
@@ -2563,7 +2564,9 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
             new_combined_output = peft_model(**X)
             assert torch.allclose(new_combined_output, combined_output, atol=1e-5)
 
-    @parameterized.expand(MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES)
+    @pytest.mark.parametrize(
+        "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES
+    )
     def test_multiple_active_adapters_merge_and_unmerge(
         self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
     ):
@@ -2596,7 +2599,9 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
 
         assert torch.allclose(disabled_adapter_output, base_output, atol=1e-4)
 
-    @parameterized.expand(MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES)
+    @pytest.mark.parametrize(
+        "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES
+    )
     def test_merge_layers_multi(self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2):
         torch.manual_seed(0)
 
@@ -2673,7 +2678,7 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
         assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3)
 
 
-class RequiresGradTester(unittest.TestCase):
+class TestRequiresGrad:
     """Test that requires_grad is set correctly in specific circumstances
 
     # See issue #899.
