@@ -1,5 +1,5 @@
 {
-    "base_model_name_or_path": "facebook/opt-350m",
+    "base_model_name_or_path": null,
     "bias": "none",
     "fan_in_fan_out": false,
     "inference_mode": false,
