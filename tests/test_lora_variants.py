@@ -120,7 +120,7 @@ class TestLoraVariants:
         """Ensure that the parameters added by the DoRA variant are participating in the output computation."""
         layer_names = ["linear1", "linear2", "conv1d", "conv2d", "embedding"]
         peft_config = LoraConfig(target_modules=layer_names, use_dora=True)
-        base_model, peft_config, peft_model = self.custom_model_with_loss_backpropagated(peft_config)
+        base_model, peft_model = self.custom_model_with_loss_backpropagated(peft_config)
 
         for layer in layer_names:
             assert getattr(peft_model.base_model.model, layer).lora_magnitude_vector["default"].weight.grad is not None
