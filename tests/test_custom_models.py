@@ -2477,9 +2477,9 @@ class TestMultiRankAdapter(unittest.TestCase):
                 if isinstance(module, BaseTunerLayer):
                     rank_expected = rank_pattern.get(key, r)
                     rank_current = module.lora_A[adapter].weight.shape[0]
-                    assert (
-                        rank_current == rank_expected
-                    ), f"Rank {rank_current} is not equal to expected {rank_expected}"
+                    assert rank_current == rank_expected, (
+                        f"Rank {rank_current} is not equal to expected {rank_expected}"
+                    )
 
 
 class TestRepr(unittest.TestCase):
