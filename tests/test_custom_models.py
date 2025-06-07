@@ -968,20 +968,25 @@ class ModelConv2D2(nn.Module):
 class ModelConv2DGroups(nn.Module):
     def __init__(self):
         super().__init__()
-        self.conv2d = nn.Conv2d(5, 5, 3, groups=5)
+        # groups is set as 8 since default r=8
+        # hence to make r divisible by groups
+        self.conv2d = nn.Conv2d(16, 16, 3, groups=8)
         self.relu = nn.ReLU()
         self.flat = nn.Flatten()
-        self.lin0 = nn.Linear(5, 2)
+        self.lin0 = nn.Linear(90, 288)
+        self.lin1 = nn.Linear(16, 2)
         self.sm = nn.LogSoftmax(dim=-1)
         self.dtype = torch.float
 
     def forward(self, X):
         X = X.to(self.dtype)
-        X = X.reshape(-1, 5, 3, 3)
+        X = X.flatten()
+        X = self.lin0(X)
+        X = X.reshape(2, 16, 3, 3)
         X = self.conv2d(X)
         X = self.relu(X)
         X = self.flat(X)
-        X = self.lin0(X)
+        X = self.lin1(X)
         X = self.sm(X)
         return X
 
