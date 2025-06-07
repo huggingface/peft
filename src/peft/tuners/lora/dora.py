@@ -50,7 +50,7 @@ class DoraLinearLayer(nn.Module):
             weight = dequantize_module_weight(base_layer)
             if weight.data.ndim >= 3:  # For handling LoRAs applied to Conv layers.
                 r = lora_A.shape[0]
-                lora_weight = torch.mm(lora_B.view([-1,r]), lora_A.view([r,-1]))
+                lora_weight = torch.mm(lora_B.view([-1, r]), lora_A.view([r, -1]))
                 lora_weight = lora_weight.reshape(weight.shape)
             else:
                 lora_weight = lora_B @ lora_A
@@ -147,7 +147,7 @@ class _DoraConvNdLayer(DoraLinearLayer):
         """
         weight = base_layer.weight
         r = lora_A.weight.shape[0]
-        lora_weight = torch.mm(lora_B.weight.view([-1,r]), lora_A.weight.view([r,-1]))
+        lora_weight = torch.mm(lora_B.weight.view([-1, r]), lora_A.weight.view([r, -1]))
         lora_weight = lora_weight.reshape(weight.shape)
         magnitude = self.weight
         weight_norm = self.get_weight_norm(weight, lora_weight.detach(), scaling)
