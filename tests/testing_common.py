@@ -19,7 +19,6 @@ import re
 import shutil
 import tempfile
 import warnings
-from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import replace
 from unittest import mock
@@ -182,68 +181,6 @@ CLASSES_MAPPING = {
 DECODER_MODELS_EXTRA = {"cpt": (CPTConfig, CONFIG_TESTING_KWARGS[15])}
 
 
-# Adapted from https://github.com/huggingface/transformers/blob/48327c57182fdade7f7797d1eaad2d166de5c55b/src/transformers/activations.py#LL166C7-L166C22
-class ClassInstantier(OrderedDict):
-    def __getitem__(self, key, *args, **kwargs):
-        # check if any of the kwargs is inside the config class kwargs
-        if any(kwarg in self[key][1] for kwarg in kwargs):
-            new_config_kwargs = self[key][1].copy()
-            new_config_kwargs.update(kwargs)
-            return (self[key][0], new_config_kwargs)
-
-        return super().__getitem__(key, *args, **kwargs)
-
-    def get_grid_parameters(self, grid_parameters, filter_params_func=None):
-        r"""
-        Returns a list of all possible combinations of the parameters in the config classes.
-
-        Args:
-            grid_parameters (`dict`):
-                A dictionary containing the parameters to be tested. There should be at least the key "model_ids" which
-                contains a list of model ids to be tested. The other keys should be the name of the config class
-                post-fixed with "_kwargs" and the value should be a dictionary containing the parameters to be tested
-                for that config class.
-            filter_params_func (`callable`, `optional`):
-                A function that takes a list of tuples and returns a list of tuples. This function is used to filter
-                out the tests that needs for example to be skipped.
-
-        Returns:
-            generated_tests (`list`):
-                A list of tuples containing the name of the test, the model id, the config class and the config class
-                kwargs.
-        """
-        generated_tests = []
-        model_list = grid_parameters["model_ids"]
-        task_type = grid_parameters["task_type"] if "task_type" in grid_parameters else None
-
-        for model_id in model_list:
-            for key, value in self.items():
-                if f"{key}_kwargs" in grid_parameters:
-                    peft_configs = []
-                    current_peft_config = value[1].copy()
-                    for current_key, current_value in grid_parameters[f"{key}_kwargs"].items():
-                        for kwarg in current_value:
-                            current_peft_config.update({current_key: kwarg})
-
-                            if task_type is not None:
-                                current_peft_config.update({"task_type": task_type})
-
-                            peft_configs.append(current_peft_config.copy())
-                else:
-                    current_peft_config = value[1].copy()
-                    if task_type is not None:
-                        current_peft_config.update({"task_type": task_type})
-                    peft_configs = [current_peft_config]
-
-                for peft_config in peft_configs:
-                    generated_tests.append((f"test_{model_id}_{key}", model_id, value[0], peft_config))
-
-        if filter_params_func is not None:
-            generated_tests = filter_params_func(generated_tests)
-
-        return generated_tests
-
-
 @contextmanager
 def hub_online_once(model_id: str):
     """Set env[HF_HUB_OFFLINE]=1 (and patch transformers/hugging_face_hub to think that it was always that way)
@@ -295,10 +232,6 @@ def hub_online_once(model_id: str):
         if HUB_MODEL_ACCESSES.get(model_id) == 0:
             del HUB_MODEL_ACCESSES[model_id]
         raise
-
-
-PeftTestConfigManager = ClassInstantier(CLASSES_MAPPING)
-PeftTestConfigManagerForDecoderModels = ClassInstantier({**CLASSES_MAPPING, **DECODER_MODELS_EXTRA})
 
 
 class PeftCommonTester:
