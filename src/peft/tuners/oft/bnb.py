@@ -22,7 +22,6 @@ import torch
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.integrations import dequantize_bnb_weight
-from peft.utils.other import transpose
 
 from .layer import OFTLayer
 
@@ -383,7 +382,7 @@ if is_bnb_4bit_available():
                 # newer PyTorch versions but this would need extensive testing to be
                 # sure.
                 # result = result.clone()
-                
+
                 for active_adapter in self.active_adapters:
                     if active_adapter not in self.oft_R.keys():
                         continue
@@ -395,7 +394,7 @@ if is_bnb_4bit_available():
                         x = self._cast_input_dtype(x, oft_R.weight.dtype)
 
                     x = oft_R(x)
-                
+
                 result = self.base_layer(x, *args, **kwargs)
 
             return result

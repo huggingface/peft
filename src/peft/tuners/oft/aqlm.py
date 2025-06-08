@@ -69,7 +69,7 @@ class AqlmOFTLinear(torch.nn.Module, OFTLayer):
             if requires_conversion:
                 expected_dtype = x.dtype
                 x = self._cast_input_dtype(x, oft_R.weight.dtype)
-        
+
             x = oft_R(x)
 
         result = self.base_layer(x)

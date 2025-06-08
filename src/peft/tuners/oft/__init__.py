@@ -23,11 +23,11 @@ from .model import OFTModel
 
 __all__ = [
     "Conv2d",
+    "GPTQOFTLinear",
     "Linear",
     "OFTConfig",
     "OFTLayer",
     "OFTModel",
-    "GPTQOFTLinear",
 ]
 
 register_peft_method(name="oft", config_cls=OFTConfig, model_cls=OFTModel)

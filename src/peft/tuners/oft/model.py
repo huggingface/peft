@@ -342,7 +342,7 @@ class OFTModel(BaseTuner):
             raise ValueError("Cannot merge OFT layers when the model is gptq quantized")
         if self.peft_config.get("layer_replication"):
             raise ValueError("Cannot merge OFT layers when base model layers are replicated")
-        
+
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
         if peft_config.target_modules is None:

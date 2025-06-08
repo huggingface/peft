@@ -60,7 +60,7 @@ if is_eetq_available():
 
         def forward(self, x: torch.Tensor):
             if self.disable_adapters:
-                return result
+                return self.quant_linear_module(x)
 
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.oft_R.keys():

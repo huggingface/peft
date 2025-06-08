@@ -104,7 +104,7 @@ class AwqOFTLinear(torch.nn.Module, OFTLayer):
         x_rotated = x_rotated_reshaped.reshape(*batch_dims, self.in_features)
         '''
         x_rotated = oft_r(x)
-        
+
         result = self.quant_linear_module(x_rotated)
         return result
 
