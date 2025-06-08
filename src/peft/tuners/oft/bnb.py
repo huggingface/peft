@@ -259,9 +259,7 @@ if is_bnb_4bit_available():
                 if active_adapter not in self.oft_R.keys():
                     continue
 
-                warnings.warn(
-                    "Merge oft module to 4-bit linear may get different generations due to rounding errors."
-                )
+                warnings.warn("Merge oft module to 4-bit linear may get different generations due to rounding errors.")
                 # Refer to https://gist.github.com/ChrisHayduk/1a53463331f52dca205e55982baf9930
                 weight = self.get_base_layer().weight
                 kwargs = weight.__dict__

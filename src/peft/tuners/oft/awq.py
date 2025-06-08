@@ -76,7 +76,7 @@ class AwqOFTLinear(torch.nn.Module, OFTLayer):
             coft = self.coft[active_adapter]
             eps = self.eps[active_adapter]
 
-            '''
+            """
             requires_conversion = not torch.is_autocast_enabled()
             if requires_conversion:
                 expected_dtype = x.dtype
@@ -102,7 +102,7 @@ class AwqOFTLinear(torch.nn.Module, OFTLayer):
         x_rotated_reshaped = torch.einsum('...rk,rkc->...rc', x_reshaped, oft_rotation)
         # x_rotated_reshaped = torch.einsum('rkc,...rk->...rc', oft_rotation.transpose(-1, -2), x_reshaped)
         x_rotated = x_rotated_reshaped.reshape(*batch_dims, self.in_features)
-        '''
+        """
         x_rotated = oft_r(x)
 
         result = self.quant_linear_module(x_rotated)

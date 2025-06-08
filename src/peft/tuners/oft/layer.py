@@ -24,6 +24,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
 from .config import OFTConfig
 
+
 class MultiplicativeDropoutLayer(nn.Module):
     """
     Implements the multiplicative dropout layer for OFT.
@@ -69,7 +70,19 @@ class MultiplicativeDropoutLayer(nn.Module):
 
 
 class OFTRotationModule(nn.Module):
-    def __init__(self, r, n_elements, block_size, coft=False, eps=6e-5, kernel_size=(0, 0), stride=(0, 0), padding=(0, 0), in_channels=0, out_channels=0):
+    def __init__(
+        self,
+        r,
+        n_elements,
+        block_size,
+        coft=False,
+        eps=6e-5,
+        kernel_size=(0, 0),
+        stride=(0, 0),
+        padding=(0, 0),
+        in_channels=0,
+        out_channels=0,
+    ):
         super().__init__()
         self.r = r
         self.n_elements = n_elements
@@ -83,15 +96,14 @@ class OFTRotationModule(nn.Module):
 
     def pytorch_skew_symmetric(self, vec, block_size):
         batch_size = vec.shape[0]
-        matrix = torch.zeros(batch_size, block_size, block_size, 
-                            device=vec.device, dtype=vec.dtype)
-        
+        matrix = torch.zeros(batch_size, block_size, block_size, device=vec.device, dtype=vec.dtype)
+
         # Create indices for upper triangle (excluding diagonal)
         rows, cols = torch.triu_indices(block_size, block_size, 1, device=vec.device)
         matrix[:, rows, cols] = vec
         matrix = matrix - matrix.transpose(-2, -1)
         return matrix
-        
+
     def _cayley_batch(self, Q: torch.Tensor, block_size: int, num_neumann_terms: int = 4) -> torch.Tensor:
         """
         Perform the Cayley parametrization on a batch of skew-symmetric matrices.
@@ -116,9 +128,9 @@ class OFTRotationModule(nn.Module):
                 for i in range(3, num_neumann_terms):
                     Q_power = torch.bmm(Q_power, Q_skew)
                     R.add_(Q_power, alpha=2.0)
-                    
+
         return R
-    
+
     # Copied from https://github.com/Zeju1997/oft/blob/84cebb965df69781e3d9c3c875f5980b421eaf24/oft-control/oft.py#L52
     def _project_batch(self, oft_R, eps=1e-5):
         # scaling factor for each of the smaller block matrix
@@ -133,7 +145,7 @@ class OFTRotationModule(nn.Module):
         mask = (norm_diff <= eps).bool()
         out = torch.where(mask, oft_R, I + eps * (diff / norm_diff))
         return out
-    
+
     # Copied from https://github.com/Zeju1997/oft/blob/84cebb965df69781e3d9c3c875f5980b421eaf24/oft-control/oft.py#L155
     def _block_diagonal(self, oft_R: torch.Tensor, rank: int) -> torch.Tensor:
         if oft_R.shape[0] == 1:
@@ -146,7 +158,7 @@ class OFTRotationModule(nn.Module):
         A = torch.block_diag(*blocks)
 
         return A
-    
+
     def _unfold(self, x):
         """
         Unfold with stride=1, padding=0 to preserve spatial dimensions.
@@ -158,7 +170,7 @@ class OFTRotationModule(nn.Module):
             kernel_height, kernel_width = self.kernel_size, self.kernel_size
         else:
             kernel_height, kernel_width = self.kernel_size
-        
+
         stride_h = stride_w = 1
         pad_h = pad_w = 0
 
@@ -170,9 +182,9 @@ class OFTRotationModule(nn.Module):
         x_unfolded = x.unfold(2, kernel_height, stride_h).unfold(3, kernel_width, stride_w)
         x_unfolded = x_unfolded.permute(0, 2, 3, 1, 4, 5).contiguous()
         x_unfolded = x_unfolded.view(batch_size * out_height * out_width, -1)
-        
+
         return x_unfolded
-    
+
     def _fold(self, x_unfolded, orig_shape):
         """
         Fold back to preserve spatial dimensions.
@@ -183,27 +195,27 @@ class OFTRotationModule(nn.Module):
             kernel_height, kernel_width = self.kernel_size, self.kernel_size
         else:
             kernel_height, kernel_width = self.kernel_size
-        
+
         # With stride=1, padding=0:
         out_height = in_height - kernel_height + 1
         out_width = in_width - kernel_width + 1
-        
+
         # Reshape: [B*H_out*W_out, C*K_H*K_W] -> [B, H_out, W_out, C, K_H, K_W]
         x_reshaped = x_unfolded.view(batch_size, out_height, out_width, in_channels, kernel_height, kernel_width)
-        
+
         # Permute to: [B, C, H_out, W_out, K_H, K_W]
         x_reshaped = x_reshaped.permute(0, 3, 1, 2, 4, 5).contiguous()
-        
+
         # Use F.fold to reconstruct 4D tensor
         x_folded = F.fold(
             x_reshaped.view(batch_size, in_channels * kernel_height * kernel_width, out_height * out_width),
             output_size=(in_height, in_width),
             kernel_size=(kernel_height, kernel_width),
-            stride=(1, 1)
+            stride=(1, 1),
         )
-        
-        return x_folded    
-    
+
+        return x_folded
+
     def forward(self, x):
         # This module doesn't need to implement the orthogonal transform
         # It's primarily a container for the parameter
@@ -228,11 +240,11 @@ class OFTRotationModule(nn.Module):
         if x.ndim == 2:
             folded_shape = x.shape
             x_reshaped = x.reshape(x.shape[0], self.r, self.block_size)
-            x_rotated_reshaped = torch.einsum('...rk,rkc->...rc', x_reshaped, orth_rotate)
+            x_rotated_reshaped = torch.einsum("...rk,rkc->...rc", x_reshaped, orth_rotate)
             x_rotated = x_rotated_reshaped.reshape(*folded_shape)
         else:
             x_reshaped = x.reshape(orig_shape[0], orig_shape[1], self.r, self.block_size)
-            x_rotated_reshaped = torch.einsum('...rk,rkc->...rc', x_reshaped, orth_rotate)
+            x_rotated_reshaped = torch.einsum("...rk,rkc->...rc", x_reshaped, orth_rotate)
             x_rotated = x_rotated_reshaped.reshape(*orig_shape)
 
         if x.ndim == 2:
@@ -249,7 +261,7 @@ class OFTRotationModule(nn.Module):
                 The name of the adapter for which the delta weight should be computed.
         """
         weight = self.weight
-        
+
         if self.coft:
             with torch.no_grad():
                 weight = self._project_batch(weight, eps=self.eps)
@@ -258,7 +270,7 @@ class OFTRotationModule(nn.Module):
         orth_rotate = self._cayley_batch(weight, self.block_size)
 
         return self._block_diagonal(orth_rotate, self.r)
-    
+
 
 class OFTLayer(BaseTunerLayer):
     """
@@ -266,7 +278,7 @@ class OFTLayer(BaseTunerLayer):
     """
 
     # All names of layers that may contain (trainable) adapter weights
-    adapter_layer_names: tuple[str, ...] = ("oft_R", )
+    adapter_layer_names: tuple[str, ...] = ("oft_R",)
     # All names of other parameters that may contain adapter-related parameters
     other_param_names: tuple[str, ...] = ("r", "oft_block_size", "oft_dropout")
 
@@ -430,9 +442,11 @@ class OFTLayer(BaseTunerLayer):
         n_elements = oft_block_size * (oft_block_size - 1) // 2
         if block_share:
             self.oft_R[adapter_name] = OFTRotationModule(1, n_elements, oft_block_size, coft, eps)
-        else:     
-            self.oft_R[adapter_name] = OFTRotationModule(r, n_elements, oft_block_size, coft, eps) #, self.get_base_layer().weight.data.dtype, self.get_base_layer().weight.data.device)
-        
+        else:
+            self.oft_R[adapter_name] = OFTRotationModule(
+                r, n_elements, oft_block_size, coft, eps
+            )  # , self.get_base_layer().weight.data.dtype, self.get_base_layer().weight.data.device)
+
         # Initialize weights
         self.reset_oft_parameters(adapter_name, init_weights)
 
@@ -509,14 +523,14 @@ class Linear(nn.Module, OFTLayer):
         self._active_adapter = adapter_name
 
         self.update_layer(
-            adapter_name, 
-            r, 
-            oft_block_size=oft_block_size, 
-            module_dropout=module_dropout, 
-            coft=coft, 
-            eps=eps, 
-            block_share=block_share, 
-            init_weights=init_weights
+            adapter_name,
+            r,
+            oft_block_size=oft_block_size,
+            module_dropout=module_dropout,
+            coft=coft,
+            eps=eps,
+            block_share=block_share,
+            init_weights=init_weights,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
@@ -620,7 +634,7 @@ class Linear(nn.Module, OFTLayer):
 
                 x = self._cast_input_dtype(x, oft_R.weight.dtype)
                 x = oft_R(x)
-            
+
             result = self.base_layer(x, *args, **kwargs)
 
         result = result.to(previous_dtype)
@@ -656,14 +670,14 @@ class Conv2d(nn.Module, OFTLayer):
 
         # Create adapter and set it active
         self.update_layer(
-            adapter_name, 
-            r, 
-            oft_block_size=oft_block_size, 
-            module_dropout=module_dropout, 
-            coft=coft, 
-            eps=eps, 
-            block_share=block_share, 
-            init_weights=init_weights
+            adapter_name,
+            r,
+            oft_block_size=oft_block_size,
+            module_dropout=module_dropout,
+            coft=coft,
+            eps=eps,
+            block_share=block_share,
+            init_weights=init_weights,
         )
 
     def update_layer(self, adapter_name, r, oft_block_size, module_dropout, coft, eps, block_share, init_weights):
@@ -681,7 +695,7 @@ class Conv2d(nn.Module, OFTLayer):
         base_layer = self.get_base_layer()
         if base_layer.dilation[0] > 1:
             raise ValueError("Conv2d with dilation > 1 is not supported by OFT.")
-        
+
         conv_filter_dim = self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
 
         if r == 0 and oft_block_size != 0:
@@ -710,10 +724,14 @@ class Conv2d(nn.Module, OFTLayer):
         # Create weights with provided shape
         n_elements = oft_block_size * (oft_block_size - 1) // 2
         if block_share:
-            self.oft_R[adapter_name] = OFTRotationModule(1, n_elements, oft_block_size, coft, eps, kernel_size=base_layer.kernel_size)
+            self.oft_R[adapter_name] = OFTRotationModule(
+                1, n_elements, oft_block_size, coft, eps, kernel_size=base_layer.kernel_size
+            )
 
         else:
-            self.oft_R[adapter_name] = OFTRotationModule(r, n_elements, oft_block_size, coft, eps, kernel_size=base_layer.kernel_size)
+            self.oft_R[adapter_name] = OFTRotationModule(
+                r, n_elements, oft_block_size, coft, eps, kernel_size=base_layer.kernel_size
+            )
 
         # Initialize weights
         self.reset_oft_parameters(adapter_name, init_weights)

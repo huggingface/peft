@@ -146,11 +146,15 @@ class OFTConfig(PeftConfig):
     )
     use_cayley_neumann: bool = field(
         default=True,
-        metadata={"help": "Whether to use the Cayley-Neumann Formulation of OFT or not. Set to True to improve computational efficiency."},
+        metadata={
+            "help": "Whether to use the Cayley-Neumann Formulation of OFT or not. Set to True to improve computational efficiency."
+        },
     )
     num_cayley_neumann_terms: int = field(
         default=5,
-        metadata={"help": "Number of Cayley-Neumann terms to use. Higher number results in less approximation error for orthogonality."},
+        metadata={
+            "help": "Number of Cayley-Neumann terms to use. Higher number results in less approximation error for orthogonality."
+        },
     )
 
     def __post_init__(self):
