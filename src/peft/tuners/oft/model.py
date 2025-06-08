@@ -42,7 +42,7 @@ from .eetq import dispatch_eetq
 from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
 from .inc import dispatch_inc
-from .layer import Conv2d, OFTLayer, dispatch_default
+from .layer import OFTLayer, dispatch_default
 
 
 class OFTModel(BaseTuner):

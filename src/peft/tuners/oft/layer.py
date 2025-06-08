@@ -22,6 +22,7 @@ import torch.nn.functional as F
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
+from .config import OFTConfig
 
 class MultiplicativeDropoutLayer(nn.Module):
     """
