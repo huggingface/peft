@@ -26,7 +26,8 @@ __all__ = [
     "Linear",
     "OFTConfig",
     "OFTLayer",
-    "OFTModel"
+    "OFTModel",
+    "GPTQOFTLinear",
 ]
 
 register_peft_method(name="oft", config_cls=OFTConfig, model_cls=OFTModel)

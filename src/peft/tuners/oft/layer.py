@@ -13,8 +13,6 @@
 # limitations under the License.
 from __future__ import annotations
 
-import time
-import math
 import warnings
 from typing import Any, Optional, Union
 
@@ -22,8 +20,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.profiler import record_function
-
-# from .skew_symmetric import SkewSymmetric
+from .skew_symmetric import SkewSymmetric
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
@@ -287,13 +284,9 @@ class OFTLayer(BaseTunerLayer):
         self.base_layer = base_layer
         self.oft_R = nn.ParameterDict({})
         self.oft_block_size = {}
-        # self.oft_s = nn.ParameterDict({})
         self.r = {}
         self.oft_block_size = {}
         self.oft_dropout = nn.ModuleDict({})
-        # self.coft = {}
-        # self.eps = {}
-        # self.block_share = {}
         # For Embedding layer
         self.oft_embedding_R = nn.ParameterDict({})
         # Mark the weight as unmerged
@@ -434,40 +427,12 @@ class OFTLayer(BaseTunerLayer):
                 "Something went wrong, please report this error: https://github.com/huggingface/peft/issues"
             )
 
-        # self.coft[adapter_name] = coft
-        # self.block_share[adapter_name] = block_share
-        # self.eps[adapter_name] = eps * math.ceil(self.out_features / r) * math.ceil(self.out_features / r)
-
         # Create weights with provided shape
         n_elements = oft_block_size * (oft_block_size - 1) // 2
         if block_share:
-            # self.oft_R[adapter_name] = nn.Parameter(
-            #     torch.empty(1, math.ceil(self.in_features / r), math.ceil(self.in_features / r))
-            # )
             self.oft_R[adapter_name] = OFTRotationModule(1, n_elements, oft_block_size, coft, eps)
         else:     
-            # self.oft_R[adapter_name] = nn.Linear(self.in_features, self.in_features, bias=False)
-            # self.oft_R[adapter_name] = nn.Parameter(
-            #     torch.empty(r, n_elements, dtype=self.get_base_layer().weight.data.dtype)
-            # )
             self.oft_R[adapter_name] = OFTRotationModule(r, n_elements, oft_block_size, coft, eps) #, self.get_base_layer().weight.data.dtype, self.get_base_layer().weight.data.device)
-            
-        # self.oft_s[adapter_name] = nn.Parameter(torch.empty(int(self.out_features), 1))
-        # self.oft_s[adapter_name] = nn.Parameter(torch.ones(1))
-
-        # if hasattr(self.get_base_layer(), 'weight'):
-        #     device = self.get_base_layer().weight.device
-        # elif hasattr(self.get_base_layer(), 'qweight'):
-        #     device = self.get_base_layer().qweight.device
-        # elif hasattr(self.get_base_layer(), 'codebooks'):
-        #     device = self.get_base_layer().codebooks[0].device
-        # else:
-        #     # Handle the case where neither attribute exists, if necessary
-        #     # This might indicate an unexpected layer type.
-        #     raise AttributeError("The base layer has neither 'weight' nor 'qweight' attribute.")
-
-        # self.layout = torch.eye(r).unsqueeze(0).to(torch.int64)
-        # self.oft_matmul = matmul(self.layout, oft_block_size, 'qoft_dsd', trans_a=False, trans_b=False, device=self.get_base_layer().weight.device)
         
         # Initialize weights
         self.reset_oft_parameters(adapter_name, init_weights)
@@ -475,10 +440,6 @@ class OFTLayer(BaseTunerLayer):
         # set oft r and block size
         self.r[adapter_name] = r
         self.oft_block_size[adapter_name] = oft_block_size
-
-        # TODO: tmp store r and oft_block_size
-        # self.rank = r
-        # self.bs = oft_block_size
 
         # Move new weights to device
         self._move_adapter_to_device_of_base_layer(adapter_name)
@@ -500,107 +461,7 @@ class OFTLayer(BaseTunerLayer):
                 # nn.init.ones_(self.oft_s[adapter_name])
             else:
                 raise ValueError(f"Unknown initialization {init_weights=}")
-    '''
-    def pytorch_skew_symmetric(self, vec, block_size):
-        batch_size = vec.shape[0]
-        matrix = torch.zeros(batch_size, block_size, block_size, 
-                            device=vec.device, dtype=vec.dtype)
-        
-        # Create indices for upper triangle (excluding diagonal)
-        rows, cols = torch.triu_indices(block_size, block_size, 1, device=vec.device)
-        
-        # Fill upper triangle
-        matrix[:, rows, cols] = vec
-        
-        # Make skew-symmetric
-        matrix = matrix - matrix.transpose(-2, -1)
-        
-        return matrix 
-    
-    def _cayley_batch(self, Q: torch.Tensor, block_size: int, num_neumann_terms: int = 5) -> torch.Tensor:
-        """
-        Perform the Cayley parametrization on a batch of skew-symmetric matrices.
 
-        Args:
-            data: A batch of skew-symmetric matrices of shape (b, r, c).
-        """
-        # previous_dtype = Q.dtype
-
-        # total_start_time = time.time()
-        # timings = {}
-
-       # Q = Q.to(torch.float32)
-        b, _ = Q.shape
-
-        # Q_skew_start = time.time()
-        # Q_skew = 0.5 * (Q - Q.transpose(1, 2))
-        # Q_skew = SkewSymmetric.apply(Q, block_size)
-        Q_skew = self.pytorch_skew_symmetric(Q, block_size)
-        #timings["Q_skew"] = time.time() - Q_skew_start
-
-        #R_start = time.time()
-        R = torch.eye(block_size, device=Q.device, dtype=Q.dtype).repeat(b, 1, 1)
-        if num_neumann_terms > 1:
-            # R.add_(Q_skew, alpha=2.0)
-            R = R + 2.0 * Q_skew
-            if num_neumann_terms > 2:
-                Q_squared = torch.bmm(Q_skew, Q_skew)
-                # R.add_(Q_squared, alpha=2.0)
-                R = R + 2.0 * Q_squared
-
-                Q_power = Q_squared
-                for i in range(3, num_neumann_terms):
-                    Q_power = torch.bmm(Q_power, Q_skew)
-                    # R.add_(Q_power, alpha=2.0)
-                    R = R + 2.0 * Q_power
-        
-        #R_end = time.time()
-        #timings["R"] = R_end - R_start
-
-        #timings["total"] = time.time() - total_start_time
-        #breakpoint()
-        return R #.to(previous_dtype)
-    
-    def _cayley_batch_inv(self, Q: torch.Tensor, block_size: int, num_neumann_terms: int = 5) -> torch.Tensor:
-        b, _ = Q.shape
-        Q_skew = SkewSymmetric.apply(Q, block_size)
-        previous_dtype = Q_skew.dtype
-        if previous_dtype != torch.float32:
-            Q_skew = Q_skew.to(torch.float32)
-        I = torch.eye(block_size, device=Q.device, dtype=Q.dtype).repeat(b, 1, 1)
-        R = torch.linalg.solve(I + Q_skew, I - Q_skew, left=False)
-        if previous_dtype != torch.float32:
-            R = R.to(previous_dtype)
-        return R
-
-    # Copied from https://github.com/Zeju1997/oft/blob/84cebb965df69781e3d9c3c875f5980b421eaf24/oft-control/oft.py#L155
-    def _block_diagonal(self, oft_R: torch.Tensor, rank: int) -> torch.Tensor:
-        if oft_R.shape[0] == 1:
-            # block share
-            blocks = [oft_R[0, ...] for i in range(rank)]
-        else:
-            blocks = [oft_R[i, ...] for i in range(rank)]
-
-        # Use torch.block_diag to create the block diagonal matrix
-        A = torch.block_diag(*blocks)
-
-        return A
-
-    # Copied from https://github.com/Zeju1997/oft/blob/84cebb965df69781e3d9c3c875f5980b421eaf24/oft-control/oft.py#L52
-    def _project_batch(self, oft_R, eps=1e-5):
-        # scaling factor for each of the smaller block matrix
-        eps = eps * 1 / torch.sqrt(torch.tensor(oft_R.shape[0]))
-        I = (  # noqa: E741
-            torch.zeros((oft_R.size(1), oft_R.size(1)), device=oft_R.device, dtype=oft_R.dtype)
-            .unsqueeze(0)
-            .expand_as(oft_R)
-        )
-        diff = oft_R - I
-        norm_diff = torch.norm(oft_R - I, dim=(1, 2), keepdim=True)
-        mask = (norm_diff <= eps).bool()
-        out = torch.where(mask, oft_R, I + eps * (diff / norm_diff))
-        return out
-    '''
     def adjust_oft_parameters(self, in_features, params):
         """
         Adjust the OFT parameters to be divisible by the in_features dimension.
@@ -740,167 +601,10 @@ class Linear(nn.Module, OFTLayer):
 
         return self.oft_R[adapter_name].get_weight()
 
-    '''
-    def forward_benchmark_memory(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        previous_dtype = x.dtype
-
-        if self.disable_adapters:
-            if self.merged:
-                with record_function("Linear::unmerge_in_forward"): # Record if unmerge happens here
-                    self.unmerge()
-            with record_function("Linear::base_layer_forward (disabled)"):
-                result = self.base_layer(x, *args, **kwargs)
-        elif self.merged:
-            with record_function("Linear::base_layer_forward (merged)"):
-                result = self.base_layer(x, *args, **kwargs)
-        else:
-            # --- Record OFT-specific forward path ---
-            with record_function("Linear::oft_forward_path"):
-                # Record initialization
-                with record_function("Linear::oft_init_rot_scale"):
-                    oft_Rotation = torch.eye(self.in_features, device=x.device)
-                    oft_scale = torch.ones((int(self.out_features), 1), device=x.device)
-
-                # The loop itself isn't easily recordable as one block,
-                # but the operations inside are recorded via _cayley_batch etc.
-                # Or we can record the whole loop calculation part
-                with record_function("Linear::oft_adapter_loop"):
-                    for active_adapter in self.active_adapters:
-                        if active_adapter not in self.oft_R.keys():
-                            continue
-                        # Retrieve parameters (fast, likely negligible memory)
-                        oft_R = self.oft_R[active_adapter]
-                        oft_block_size = self.oft_block_size[active_adapter]
-                        # oft_s = self.oft_s[active_adapter]
-                        dropout = self.oft_dropout[active_adapter]
-                        rank = self.r[active_adapter]
-                        coft = self.coft[active_adapter]
-                        eps = self.eps[active_adapter]
-
-                        # COFT projection (uses recorded _project_batch)
-                        if coft:
-                            with torch.no_grad():
-                                oft_R.copy_(self._project_batch(oft_R, eps=eps))
-
-                        # Cayley transform (uses recorded _cayley_batch)
-                        with record_function("Linear::adapter_loop_cayley"):
-                             orth_rotate = self._cayley_batch(oft_R, oft_block_size)
-
-                        # Dropout
-                        with record_function("Linear::adapter_loop_dropout"):
-                            orth_rotate = dropout(orth_rotate)
-
-                        # Matmul/Block Diagonal Step
-                        with record_function("Linear::adapter_loop_matmul"):
-                            current_oft_Rot_dtype = oft_Rotation.dtype
-                            if orth_rotate.dtype != current_oft_Rot_dtype:
-                                orth_rotate = orth_rotate.to(current_oft_Rot_dtype)
-                            # Assuming oft_matmul calls the custom kernel
-                            # The profiler might show the kernel name or just this block
-                            oft_Rotation = self.oft_matmul(orth_rotate, oft_Rotation.unsqueeze(0)).squeeze(0)
-                            oft_Rotation = oft_Rotation.to(current_oft_Rot_dtype) # Cast back
-
-                        # Scaling (small tensor usually)
-                        with record_function("Linear::adapter_loop_scaling"):
-                             oft_scale = oft_s.to(oft_scale.dtype) * oft_scale # Ensure dtype match before multiply
-
-                # Cast input dtype (usually small memory impact unless input is huge)
-                with record_function("Linear::cast_input_dtype"):
-                     x = x.to(self.get_base_layer().weight.data.dtype)
-
-                # Weight transformation
-                with record_function("Linear::oft_weight_transform"):
-                    orig_weight = self.get_base_layer().weight.data
-                    orig_weight = torch.transpose(orig_weight, 0, 1)
-                    rotated_weight = torch.mm(oft_Rotation, orig_weight.to(oft_Rotation.dtype))
-                    rotated_weight = torch.transpose(rotated_weight, 0, 1)
-                    scaled_rotated_weight = rotated_weight * oft_scale.to(rotated_weight.dtype)
-
-                # Final Linear layer
-                with record_function("Linear::final_F.linear"):
-                    # Cast bias if needed
-                    final_weight_dtype = scaled_rotated_weight.dtype
-                    x = self._cast_input_dtype(x, final_weight_dtype)
-                    bias = self.get_base_layer().bias
-                    if bias is not None:
-                        bias = self._cast_input_dtype(bias, final_weight_dtype)
-
-                    result = F.linear(input=x, weight=scaled_rotated_weight, bias=bias)
-
-        # Cast result back to original dtype
-        with record_function("Linear::cast_output_dtype"):
-            result = result.to(previous_dtype)
-        return result
-    '''
-
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         self._check_forward_args(x, *args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
 
-        # previous_dtype = x.dtype
-
-        if self.disable_adapters:
-            if self.merged:
-                self.unmerge()
-            result = self.base_layer(x, *args, **kwargs)
-        elif self.merged:
-            result = self.base_layer(x, *args, **kwargs)
-        else:
-            # oft_Rotation = torch.eye(self.in_features, device=x.device)
-            # oft_Rotation = torch.eye(self.bs, device=x.device, dtype=x.dtype).repeat(self.rank, 1, 1)
-
-            # oft_scale = torch.ones((int(self.out_features), 1), device=x.device)
-            # oft_scale = torch.ones(1, device=x.device)
-
-            for active_adapter in self.active_adapters:
-                if active_adapter not in self.oft_R.keys():
-                    continue
-                oft_R = self.oft_R[active_adapter]
-                # oft_block_size = self.oft_block_size[active_adapter]
-                # oft_s = self.oft_s[active_adapter]
-                # dropout = self.oft_dropout[active_adapter]
-
-                # rank = self.r[active_adapter]
-                # coft = self.coft[active_adapter]
-                # eps = self.eps[active_adapter]
-
-                x = self._cast_input_dtype(x, oft_R.weight.dtype)
-                x = oft_R(x)
-
-                '''
-                if coft:
-                    with torch.no_grad():
-                        oft_R.copy_(self._project_batch(oft_R, eps=eps))
-                orth_rotate = self._cayley_batch(oft_R, oft_block_size)
-
-                current_oft_Rot_dtype = oft_Rotation.dtype
-                if orth_rotate.dtype != current_oft_Rot_dtype:
-                    orth_rotate = orth_rotate.to(current_oft_Rot_dtype)
-                # oft_Rotation = self.oft_matmul(orth_rotate, oft_Rotation.unsqueeze(0)).squeeze(0)
-                oft_Rotation = torch.bmm(orth_rotate, oft_Rotation)
-                oft_Rotation = oft_Rotation.to(current_oft_Rot_dtype)
-
-                # oft_scale = oft_s * oft_scale
-
-
-            # x = self._cast_input_dtype(x, oft_R.dtype)
-            x = x.to(self.get_base_layer().weight.data.dtype)
-            # x = dropout(x) # * oft_scale
-
-            batch_dims = x.shape[:-1]
-            x_reshaped = x.view(*batch_dims, rank, -1)
-            x_rotated_reshaped = torch.einsum('...rk,rkc->...rc', x_reshaped, oft_Rotation)
-            x_rotated = x_rotated_reshaped.reshape(*batch_dims, self.in_features)
-            x_rotated = x_rotated.to(self.get_base_layer().weight.dtype)
-            '''
-            
-            result = self.base_layer(x, *args, **kwargs)
-
-        # result = result.to(previous_dtype)
-        return result
-
-    '''
-    def forward_working_backup(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
 
         if self.disable_adapters:
@@ -910,208 +614,19 @@ class Linear(nn.Module, OFTLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            oft_Rotation = torch.eye(self.in_features, device=x.device)
-            oft_scale = torch.ones((int(self.out_features), 1), device=x.device)
-
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.oft_R.keys():
                     continue
                 oft_R = self.oft_R[active_adapter]
-                oft_block_size = self.oft_block_size[active_adapter]
-                oft_s = self.oft_s[active_adapter]
-                dropout = self.oft_dropout[active_adapter]
 
-                rank = self.r[active_adapter]
-                coft = self.coft[active_adapter]
-                eps = self.eps[active_adapter]
-
-                if coft:
-                    with torch.no_grad():
-                        oft_R.copy_(self._project_batch(oft_R, eps=eps))
-
-                orth_rotate = self._cayley_batch(oft_R, oft_block_size)
-                orth_rotate = dropout(orth_rotate)
-
-
-                current_oft_Rot_dtype = oft_Rotation.dtype
-                if orth_rotate.dtype != current_oft_Rot_dtype:
-                    orth_rotate = orth_rotate.to(current_oft_Rot_dtype)
-                oft_Rotation = self.oft_matmul(orth_rotate, oft_Rotation.unsqueeze(0)).squeeze(0)
-                oft_Rotation = oft_Rotation.to(current_oft_Rot_dtype)
-
-
-                # oft_mat = self._block_diagonal(orth_rotate, rank)
-                # oft_Rotation = oft_mat @ oft_Rotation
-                # oft_scale = oft_s * oft_scale
-
-            x = x.to(self.get_base_layer().weight.data.dtype)
-
-            orig_weight = self.get_base_layer().weight.data
-            orig_weight = torch.transpose(orig_weight, 0, 1)
-            rotated_weight = torch.mm(oft_Rotation, orig_weight.to(oft_Rotation.dtype))
-            rotated_weight = torch.transpose(rotated_weight, 0, 1)
-            scaled_rotated_weight = rotated_weight * oft_scale
-
-            x = self._cast_input_dtype(x, scaled_rotated_weight.dtype)
-            bias = self._cast_input_dtype(self.get_base_layer().bias, scaled_rotated_weight.dtype)
-            result = F.linear(input=x, weight=scaled_rotated_weight, bias=bias)
+                x = self._cast_input_dtype(x, oft_R.weight.dtype)
+                x = oft_R(x)
+            
+            result = self.base_layer(x, *args, **kwargs)
 
         result = result.to(previous_dtype)
         return result
 
-    def forward_benchmark_time(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        self.counter += 1
-
-        previous_dtype = x.dtype
-        torch_result_dtype = x.dtype # Use torch_result_dtype to restore at the end
-
-        # GPU Warm-up: Perform a few small operations
-        if x.is_cuda:
-            for _ in range(3): # Number of warm-up iterations
-                warmup_tensor_a = torch.randn(10, 10, device=x.device, dtype=previous_dtype)
-                warmup_tensor_b = torch.randn(10, 10, device=x.device, dtype=previous_dtype)
-                _ = warmup_tensor_a @ warmup_tensor_b
-            torch.cuda.synchronize(device=x.device) # Ensure warm-up ops are complete
-
-        # Timing the whole forward method
-        total_start_time = time.time()
-        timings = {}
-
-        if self.disable_adapters:
-            if self.merged:
-                unmerge_start = time.time()
-                self.unmerge()
-                timings["unmerge"] = time.time() - unmerge_start
-            base_layer_start = time.time()
-            result = self.base_layer(x, *args, **kwargs)
-            timings["base_layer"] = time.time() - base_layer_start
-        elif self.merged:
-            base_layer_start = time.time()
-            result = self.base_layer(x, *args, **kwargs)
-            timings["base_layer_merged"] = time.time() - base_layer_start
-        else:
-            # Time initialization
-            init_start = time.time()
-            oft_Rotation = torch.eye(self.in_features, device=x.device, dtype=previous_dtype) # Changed to previous_dtype
-            oft_scale = torch.ones((int(self.out_features), 1), device=x.device, dtype=previous_dtype) # Changed to previous_dtype
-            timings["initialization"] = time.time() - init_start
-
-            adapter_loop_total_time = 0
-            coft_projection_total_time = 0
-            cayley_total_time = 0
-            dropout_total_time = 0
-            block_diag_total_time = 0 # Removed as _block_diagonal is commented out
-            oft_matmul_total_time = 0 # Added for self.oft_matmul
-            scaling_total_time = 0
-
-            for active_adapter in self.active_adapters:
-                adapter_loop_start = time.time()
-                if active_adapter not in self.oft_R.keys():
-                    continue
-
-                # Param retrieval is usually very fast, not timed separately
-                oft_R = self.oft_R[active_adapter]
-                oft_block_size = self.oft_block_size[active_adapter]
-                oft_s = self.oft_s[active_adapter]
-                dropout = self.oft_dropout[active_adapter]
-                rank = self.r[active_adapter] # rank needed if using _block_diagonal
-                coft = self.coft[active_adapter]
-                eps = self.eps[active_adapter]
-
-                # Time COFT projection
-                coft_start = time.time()
-                if coft:
-                    with torch.no_grad():
-                        oft_R.copy_(self._project_batch(oft_R, eps=eps))
-                coft_projection_total_time += time.time() - coft_start
-
-                # Time Cayley transform
-                cayley_start = time.time()
-                orth_rotate = self._cayley_batch(oft_R, oft_block_size)
-                cayley_total_time += time.time() - cayley_start
-
-                # Time dropout
-                dropout_start = time.time()
-                orth_rotate = dropout(orth_rotate)
-                dropout_total_time += time.time() - dropout_start
-
-                # Time block diagonal (if used)
-                oft_matmul_start = time.time()
-                # breakpoint()
-                # oft_mat = self._block_diagonal(orth_rotate, rank)
-                # oft_Rotation = oft_mat @ oft_Rotation
-                current_oft_Rot_dtype = oft_Rotation.dtype
-                if orth_rotate.dtype != current_oft_Rot_dtype:
-                    orth_rotate = orth_rotate.to(current_oft_Rot_dtype)
-                oft_Rotation = self.oft_matmul(orth_rotate, oft_Rotation.unsqueeze(0)).squeeze(0)
-                oft_Rotation = oft_Rotation.to(current_oft_Rot_dtype)
-
-                # Time oft_matmul
-                # oft_matmul_start = time.time()
-                # Ensure dtypes match for matmul if using custom kernel
-                # oft_Rotation might need casting depending on oft_matmul implementation
-                # Assuming oft_matmul handles dtypes or orth_rotate/oft_Rotation match
-                oft_matmul_total_time += time.time() - oft_matmul_start
-
-                # Time scaling
-                scaling_start = time.time()
-                # Ensure oft_s and oft_scale have compatible dtypes for multiplication
-                oft_scale = oft_s.to(oft_scale.dtype) * oft_scale
-                scaling_total_time += time.time() - scaling_start
-
-                adapter_loop_total_time += time.time() - adapter_loop_start
-
-            timings["adapter_loop_total"] = adapter_loop_total_time
-            timings["coft_projection_total"] = coft_projection_total_time
-            timings["cayley_transform_total"] = cayley_total_time
-            timings["dropout_total"] = dropout_total_time
-            timings["oft_matmul_total"] = oft_matmul_total_time # Added
-            timings["scaling_total"] = scaling_total_time # Added
-
-
-            # Time weight transformation
-            weight_transform_start = time.time()
-            # Cast x right before F.linear as per original logic
-            # x = x.to(self.get_base_layer().weight.data.dtype) # Moved down
-
-            orig_weight = self.get_base_layer().weight.data
-            orig_weight_dtype = orig_weight.dtype # Store original weight dtype
-            orig_weight = torch.transpose(orig_weight, 0, 1)
-            # Ensure dtypes match for torch.mm
-            oft_Rotation_dtype = oft_Rotation.dtype
-            rotated_weight = torch.mm(oft_Rotation, orig_weight.to(oft_Rotation_dtype))
-            rotated_weight = torch.transpose(rotated_weight, 0, 1)
-            # Ensure dtypes match for scaling
-            scaled_rotated_weight = rotated_weight * oft_scale.to(rotated_weight.dtype)
-            timings["weight_transformation"] = time.time() - weight_transform_start
-
-            # Time final linear operation (including dtype casting)
-            linear_op_start = time.time()
-            final_weight_dtype = scaled_rotated_weight.dtype
-            x = self._cast_input_dtype(x, final_weight_dtype) # Cast x to final weight dtype
-            bias = self.get_base_layer().bias
-            if bias is not None:
-                bias = self._cast_input_dtype(bias, final_weight_dtype) # Cast bias to final weight dtype
-
-            result = F.linear(input=x, weight=scaled_rotated_weight, bias=bias)
-            timings["final_linear_op_incl_cast"] = time.time() - linear_op_start
-
-        total_end_time = time.time()
-        timings["total_forward_time"] = total_end_time - total_start_time
-
-        # Print timings
-        if self.counter == 100:
-            total_time = total_end_time - total_start_time
-            print("--- Forward Backup Timings ---")
-            for op, duration in timings.items():
-                print(f"{op}: {duration:.6f}s, percentage: {duration/total_time:.6f}")
-                print("----------------------------")
-
-            breakpoint()
-
-        result = result.to(torch_result_dtype) # Restore original dtype
-        return result
-    '''
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "oft." + rep
@@ -1196,18 +711,10 @@ class Conv2d(nn.Module, OFTLayer):
         # Create weights with provided shape
         n_elements = oft_block_size * (oft_block_size - 1) // 2
         if block_share:
-            # self.oft_R[adapter_name] = nn.Parameter(
-            #     torch.empty(1, math.ceil(conv_filter_dim / r), math.ceil(conv_filter_dim / r))
-            # )
-            self.oft_R[adapter_name] = OFTRotationModule(r, n_elements, oft_block_size, coft, eps, kernel_size=base_layer.kernel_size)
+            self.oft_R[adapter_name] = OFTRotationModule(1, n_elements, oft_block_size, coft, eps, kernel_size=base_layer.kernel_size)
 
         else:
-            # self.oft_R[adapter_name] = nn.Parameter(
-            #     torch.empty(r, math.ceil(conv_filter_dim / r), math.ceil(conv_filter_dim / r))
-            # )
             self.oft_R[adapter_name] = OFTRotationModule(r, n_elements, oft_block_size, coft, eps, kernel_size=base_layer.kernel_size)
-        # self.oft_s[adapter_name] = nn.Parameter(torch.empty(int(self.out_features), 1))
-        # self.oft_s[adapter_name] = nn.Parameter(torch.ones(1))
 
         # Initialize weights
         self.reset_oft_parameters(adapter_name, init_weights)
@@ -1338,12 +845,6 @@ class Conv2d(nn.Module, OFTLayer):
 
                 oft_R = self.oft_R[active_adapter]
                 x = oft_R(x)
-                # oft_s = self.oft_s[active_adapter]
-                # dropout = self.oft_dropout[active_adapter]
-
-                # rank = self.r[active_adapter]
-                # coft = self.coft[active_adapter]
-                # eps = self.eps[active_adapter]
 
             result = self.base_layer(x, *args, **kwargs)
 
