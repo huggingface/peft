@@ -717,10 +717,6 @@ class Conv2d(nn.Module, OFTLayer):
                 "Something went wrong, please report this error: https://github.com/huggingface/peft/issues"
             )
 
-        # self.coft[adapter_name] = coft
-        # self.block_share[adapter_name] = block_share
-        # self.eps[adapter_name] = eps * math.ceil(self.out_features / r) * math.ceil(self.out_features / r)
-
         # Create weights with provided shape
         n_elements = oft_block_size * (oft_block_size - 1) // 2
         if block_share:
@@ -778,7 +774,6 @@ class Conv2d(nn.Module, OFTLayer):
                     orig_weights = torch.transpose(orig_weights, 0, 1)
                     orig_weights = torch.mm(oft_mat, orig_weights.to(oft_mat.dtype))
                     orig_weights = torch.transpose(orig_weights, 0, 1)
-                    # orig_weights = orig_weights * oft_s
                     orig_weights = orig_weights.view(
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
                     )
@@ -794,7 +789,6 @@ class Conv2d(nn.Module, OFTLayer):
                     orig_weights = torch.transpose(orig_weights, 0, 1)
                     orig_weights = torch.mm(oft_mat, orig_weights.to(oft_mat.dtype))
                     orig_weights = torch.transpose(orig_weights, 0, 1)
-                    # orig_weights = orig_weights * oft_s
                     orig_weights = orig_weights.view(
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
                     )
