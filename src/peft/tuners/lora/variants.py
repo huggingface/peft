@@ -243,25 +243,16 @@ class QALoraLinearVariant(LoraVariant):
 
     @staticmethod
     def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
-        orig_dtype = orig_weight.dtype
-        delta_weight = QALoraLinearVariant.get_delta_weight(module, active_adapter)
-        new_weight = orig_weight + delta_weight
-        new_weight = new_weight.to(orig_dtype)
-        return new_weight
+        raise NotImplementedError("QALoRA for GPTQ layers does not support 'safe_merge'.")
 
     @staticmethod
     def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
-        orig_dtype = orig_weight.dtype
-        delta_weight = QALoraLinearVariant.get_delta_weight(module, active_adapter)
-        orig_weight.data = (orig_weight.data + delta_weight).to(orig_dtype)
+        raise NotImplementedError("QALoRA for GPTQ layers does not support 'merge_unsafe'.")
 
     @staticmethod
     def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
-        orig_dtype = orig_weight.dtype
-        delta_weight = QALoraLinearVariant.get_delta_weight(module, active_adapter)
-        new_weight = orig_weight - delta_weight
-        new_weight = new_weight.to(orig_dtype)
-        return new_weight
+        raise NotImplementedError("QALoRA for GPTQ layers does not support 'unmerge'.")
+
 
     @staticmethod
     def forward(module: Linear, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
