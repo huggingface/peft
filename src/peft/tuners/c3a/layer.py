@@ -1,0 +1,200 @@
+# coding=utf-8
+# Copyright 2023-present the HuggingFace Inc. team.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import warnings
+from typing import Any, List, Optional
+import math
+import torch
+import torch.nn as nn
+
+from peft.tuners.tuners_utils import BaseTunerLayer
+from .utils import BlockCircularConvolution, get_circulant_fast
+
+class C3ALayer(BaseTunerLayer):
+    # All names of layers that may contain (trainable) adapter weights
+    adapter_layer_names = ("c3a_kernel",)
+    # All names of other parameters that may contain adapter-related parameters
+    other_param_names = ("block_size",)
+
+    def __init__(self, base_layer: nn.Module, **kwargs) -> None:
+        self.base_layer = base_layer
+        self.block_size = {}
+        self.c3a_kernel = nn.ParameterDict({})
+        # Mark the weight as unmerged
+        self._disable_adapters = False
+        self.merged_adapters = []
+        self.kwargs = kwargs
+
+        base_layer = self.get_base_layer()
+        if isinstance(base_layer, nn.Linear):
+            self.in_features, self.out_features = base_layer.in_features, base_layer.out_features
+        else:
+            raise ValueError(f"Unsupported layer type {type(base_layer)}")
+
+    def get_delta_weight(self, adapter) -> torch.Tensor:
+        if adapter not in self.c3a_kernel.keys():
+            raise ValueError(f"Adapter {adapter} not found.")
+        base_layer_weight = self.get_base_layer().weight
+        c3a_kernel = self.c3a_kernel[adapter]
+
+        previous_dtype = c3a_kernel.dtype
+        delta_weight = get_circulant_fast(c3a_kernel.float())
+        return delta_weight.to(previous_dtype) / base_layer_weight.size(-1)
+
+    def update_layer(self, adapter_name, block_size, init_weights):
+        if block_size <= 0:
+            raise ValueError(f"`block_size` should be a positive integer value but the value passed is {block_size}")
+        assert self.in_features % block_size == 0, f"The block size should be a factor of the input size. However, the input size is {self.in_features} and the block size is {block_size}"
+        assert self.out_features % block_size == 0, f"The block size should be a factor of the output size. However, the output size is {self.out_features} and the block size is {block_size}"
+        
+        self.block_size[adapter_name] = block_size
+
+        weight = getattr(self.get_base_layer(), "weight", None)
+        self.c3a_kernel[adapter_name] = nn.Parameter(
+            torch.zeros(self.out_features//block_size, self.in_features//block_size, block_size, dtype=weight.dtype, device=weight.device)
+        )
+
+        if weight is not None:
+            # the layer is already completely initialized, this is an update
+            if weight.dtype.is_floating_point or weight.dtype.is_complex:
+                self.to(weight.device, dtype=weight.dtype)
+            else:
+                self.to(weight.device)
+
+        self.reset_c3a_parameters(adapter_name, init_weights)
+        self.set_adapter(self.active_adapters)
+
+    @torch.no_grad()
+    def reset_c3a_parameters(self, adapter_name, init_weights):
+        if init_weights is False:
+            return
+
+        if adapter_name in self.c3a_kernel.keys():
+            if init_weights == "gaussian":
+                nn.init.normal_(self.c3a_kernel[adapter_name])
+            elif init_weights in ["xavier_uniform", True]:
+                fan_in, fan_out = self.in_features, self.out_features
+                std = 1.0 * math.sqrt(2.0 / float(fan_in + fan_out))
+                a = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
+                nn.init.uniform_(self.c3a_kernel[adapter_name], -a, a)
+            elif init_weights == "kaiming_uniform":
+                fan_in = self.in_features
+                a = 1.0 * math.sqrt(1.0 / float(fan_in))
+                nn.init.uniform_(self.c3a_kernel[adapter_name], -a, a)
+            else:
+                raise ValueError(f"Unknown init_weights: {init_weights}")
+
+#  ------------------------------------------------------------------------------------------
+#  Copyright (c) Microsoft Corporation. All rights reserved.
+#  Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
+#  ------------------------------------------------------------------------------------------
+
+
+class C3ALinear(nn.Module, C3ALayer):
+    # Lora implemented in a dense layer
+    def __init__(
+        self,
+        base_layer,
+        adapter_name: str,
+        block_size: int,
+        init_weights: bool = True,
+        **kwargs,
+    ) -> None:
+        super().__init__()
+        C3ALayer.__init__(self, base_layer, **kwargs)
+        self._active_adapter = adapter_name
+        self.update_layer(adapter_name, block_size, init_weights)
+
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+        """
+        Merge the active adapter weights into the base weights
+
+        Args:
+            safe_merge (`bool`, *optional*):
+                If True, the merge operation will be performed in a copy of the original weights and check for NaNs
+                before merging the weights. This is useful if you want to check if the merge operation will produce
+                NaNs. Defaults to `False`.
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
+        """
+        if self.merged:
+            warnings.warn(
+                f"Already following adapters were merged {','.join(self.merged_adapters)}. "
+                f"You are now additionally merging {','.join(self.active_adapters)}."
+            )
+
+        if adapter_names is None:
+            adapter_names = self.active_adapters
+
+        for active_adapter in adapter_names:
+            if active_adapter in self.c3a_kernel.keys():
+                base_layer = self.get_base_layer()
+                if safe_merge:
+                    # Note that safe_merge will be slower than the normal merge
+                    # because of the copy operation.
+                    orig_weights = base_layer.weight.data.clone()
+                    # orig_weights += self.get_delta_weight(active_adapter)
+                    delta_weight = self.get_delta_weight(active_adapter)
+                    orig_weights = orig_weights + delta_weight
+
+                    if not torch.isfinite(orig_weights).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                        )
+
+                    base_layer.weight.data = orig_weights
+                else:
+                    delta_weight = self.get_delta_weight(active_adapter)
+                    base_layer.weight.data = base_layer.weight.data + delta_weight
+                        
+                self.merged_adapters.append(active_adapter)
+
+    def unmerge(self) -> None:
+        """
+        This method unmerges all merged adapter layers from the base weights.
+        """
+        if not self.merged:
+            warnings.warn("Already unmerged. Nothing to do.")
+            return
+        while len(self.merged_adapters) > 0:
+            active_adapter = self.merged_adapters.pop()
+            if active_adapter in self.c3a_kernel.keys():
+                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
+            
+    def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        previous_dtype = x.dtype
+
+        if self.disable_adapters:
+            if self.merged:
+                self.unmerge()
+            result = self.base_layer(x, *args, **kwargs)
+        elif self.merged:
+            result = self.base_layer(x, *args, **kwargs)
+        else:
+            result = self.base_layer(x, *args, **kwargs)
+            for active_adapter in self.active_adapters:
+                if active_adapter not in self.c3a_kernel.keys():
+                    continue
+                c3a_kernel = self.c3a_kernel[active_adapter]
+                x = BlockCircularConvolution.apply(x.float(), c3a_kernel.float()) / x.size(-1)
+                result += x.to(result.dtype)
+    
+        result = result.to(previous_dtype)
+        return result
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "c3a." + rep

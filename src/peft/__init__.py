@@ -97,6 +97,8 @@ from .tuners import (
     VeraModel,
     XLoraConfig,
     XLoraModel,
+    C3AConfig,
+    C3AModel,
     get_eva_state_dict,
     initialize_lora_eva_weights,
 )
@@ -182,6 +184,8 @@ __all__ = [
     "PromptTuningInit",
     "RandLoraConfig",
     "RandLoraModel",
+    "C3AConfig",
+    "C3AModel",
     "TaskType",
     "TrainableTokensConfig",
     "TrainableTokensModel",
