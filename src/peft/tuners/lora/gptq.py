@@ -57,7 +57,7 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
             use_dora=use_dora,
             use_qalora=use_qalora,
             lora_bias=lora_bias,
-            qalora_group_size=kwargs["qalora_group_size"]
+            qalora_group_size=kwargs["qalora_group_size"],
         )
 
     def resolve_lora_variant(self, *, use_dora: bool, use_qalora: bool, **kwargs) -> Optional[LoraVariant]:
@@ -80,29 +80,33 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
             return result
 
         lora_A_keys = self.lora_A.keys()
+        torch_result_dtype = result.dtype
+
         for active_adapter in self.active_adapters:
             if active_adapter not in lora_A_keys:
                 continue
+            torch_result_dtype = result.dtype
+
 
             lora_A = self.lora_A[active_adapter]
             lora_B = self.lora_B[active_adapter]
             dropout = self.lora_dropout[active_adapter]
             scaling = self.scaling[active_adapter]
 
-            requires_conversion = not torch.is_autocast_enabled()
-            if requires_conversion:
-                expected_dtype = result.dtype
-                x = self._cast_input_dtype(x, lora_A.weight.dtype)
+            # requires_conversion = not torch.is_autocast_enabled()
+            x = self._cast_input_dtype(x, lora_A.weight.dtype)
 
-            output = lora_B(lora_A(dropout(x)))
+            if active_adapter not in self.lora_variant:  # vanilla LoRA
+                result = result + lora_B(lora_A(dropout(x))) * scaling
+            else:
+                result = self.lora_variant[active_adapter].forward(
+                    self,
+                    active_adapter=active_adapter,
+                    x=x,
+                    result=result,
+                )
 
-            if requires_conversion:
-                output = output.to(expected_dtype)
-
-            if scaling != 1:  # skip scaling == 1 no-op
-                output = output * scaling
-
-            result += output
+            result = result.to(torch_result_dtype)
         return result
 
     def __repr__(self) -> str:
