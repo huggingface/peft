@@ -46,16 +46,9 @@ from peft.utils import (
 from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
 from peft.utils.other import get_pattern_key
 
-from .aqlm import dispatch_aqlm
-from .awq import dispatch_awq
-from .config import LoraConfig
-from .eetq import dispatch_eetq
-from .gptq import dispatch_gptq
-from .hqq import dispatch_hqq
-from .inc import dispatch_inc
+from .config import HiRAConfig
 from .layer import Conv2d, LoraLayer, dispatch_default
-from .torchao import dispatch_torchao
-from .tp_layer import dispatch_megatron
+from ...utils.constants import TRANSFORMERS_MODELS_TO_HIRA_TARGET_MODULES_MAPPING
 
 
 def _adapter_names_pre_forward_hook(target, args, kwargs, adapter_names):
@@ -64,11 +57,11 @@ def _adapter_names_pre_forward_hook(target, args, kwargs, adapter_names):
     return args, kwargs
 
 
-class LoraModel(BaseTuner):
+class HiRAModel(BaseTuner):
     """
-    Creates Low Rank Adapter (LoRA) model from a pretrained transformers model.
+    Creates HiRA Adapter model from a pretrained transformers model.
 
-    The method is described in detail in https://huggingface.co/papers/2106.09685.
+    The method is described in detail in https://openreview.net/pdf?id=TwJrTz9cRS.
 
     Args:
         model ([`torch.nn.Module`]): The model to be adapted.
@@ -84,29 +77,29 @@ class LoraModel(BaseTuner):
 
         ```py
         >>> from transformers import AutoModelForSeq2SeqLM
-        >>> from peft import LoraModel, LoraConfig
+        >>> from peft import HiRAModel, HiRAConfig
 
-        >>> config = LoraConfig(
+        >>> config = HiRAConfig(
         ...     task_type="SEQ_2_SEQ_LM",
-        ...     r=8,
-        ...     lora_alpha=32,
+        ...     r=32,
+        ...     hira_alpha=1,
         ...     target_modules=["q", "v"],
-        ...     lora_dropout=0.01,
+        ...     hira_dropout=0.01,
         ... )
 
         >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
-        >>> lora_model = LoraModel(model, config, "default")
+        >>> hira_model = HiRAModel(model, config, "default")
         ```
 
         ```py
         >>> import torch
         >>> import transformers
-        >>> from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
+        >>> from peft import HiRAConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 
         >>> rank = ...
         >>> target_modules = ["q_proj", "k_proj", "v_proj", "out_proj", "fc_in", "fc_out", "wte"]
-        >>> config = LoraConfig(
-        ...     r=4, lora_alpha=16, target_modules=target_modules, lora_dropout=0.1, bias="none", task_type="CAUSAL_LM"
+        >>> config = HiRAConfig(
+        ...     r=32, target_modules=target_modules, hira_dropout=0.1, bias="none", task_type="CAUSAL_LM"
         ... )
         >>> quantization_config = transformers.BitsAndBytesConfig(load_in_8bit=True)
 
@@ -129,7 +122,7 @@ class LoraModel(BaseTuner):
         ...     quantization_config=quantization_config,
         ... )
         >>> model = prepare_model_for_kbit_training(model)
-        >>> lora_model = get_peft_model(model, config)
+        >>> hira_model = get_peft_model(model, config)
         ```
 
     **Attributes**:
@@ -137,12 +130,12 @@ class LoraModel(BaseTuner):
         - **peft_config** ([`LoraConfig`]): The configuration of the Lora model.
     """
 
-    prefix: str = "lora_"
+    prefix: str = "hira_"
 
     def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
         super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
-    def _check_new_adapter_config(self, config: LoraConfig) -> None:
+    def _check_new_adapter_config(self, config: HiRAConfig) -> None:
         """
         A helper method to check the config when a new adapter is being added.
 
@@ -158,10 +151,10 @@ class LoraModel(BaseTuner):
             )
 
     @staticmethod
-    def _check_target_module_exists(lora_config, key):
-        return check_target_module_exists(lora_config, key)
+    def _check_target_module_exists(hira_config, key):
+        return check_target_module_exists(hira_config, key)
 
-    def _prepare_model(self, peft_config: LoraConfig, model: nn.Module):
+    def _prepare_model(self, peft_config: HiRAConfig, model: nn.Module):
         r"""
         A private method to modify the model structure before adapter is applied.
 
@@ -176,7 +169,7 @@ class LoraModel(BaseTuner):
 
     def _create_and_replace(
         self,
-        lora_config,
+        hira_config,
         adapter_name,
         target,
         target_name,
@@ -187,21 +180,19 @@ class LoraModel(BaseTuner):
             raise ValueError("Current Key shouldn't be `None`")
 
         # Regexp matching - Find key which matches current target_name in patterns provided
-        r_key = get_pattern_key(lora_config.rank_pattern.keys(), current_key)
-        alpha_key = get_pattern_key(lora_config.alpha_pattern.keys(), current_key)
-        r = lora_config.rank_pattern.get(r_key, lora_config.r)
-        alpha = lora_config.alpha_pattern.get(alpha_key, lora_config.lora_alpha)
+        r_key = get_pattern_key(hira_config.rank_pattern.keys(), current_key)
+        alpha_key = get_pattern_key(hira_config.alpha_pattern.keys(), current_key)
+        r = hira_config.rank_pattern.get(r_key, hira_config.r)
+        alpha = hira_config.alpha_pattern.get(alpha_key, hira_config.lora_alpha)
 
         kwargs = {
             "r": r,
-            "lora_alpha": alpha,
-            "lora_dropout": lora_config.lora_dropout,
-            "fan_in_fan_out": lora_config.fan_in_fan_out,
-            "init_lora_weights": lora_config.init_lora_weights,
-            "use_rslora": lora_config.use_rslora,
-            "use_dora": lora_config.use_dora,
-            "ephemeral_gpu_offload": lora_config.runtime_config.ephemeral_gpu_offload,
-            "lora_bias": lora_config.lora_bias,
+            "hira_alpha": alpha,
+            "hira_dropout": hira_config.hira_dropout,
+            "fan_in_fan_out": hira_config.fan_in_fan_out,
+            "init_hira_weights": hira_config.init_hira_weights,
+            "ephemeral_gpu_offload": hira_config.runtime_config.ephemeral_gpu_offload,
+            "hira_bias": hira_config.lora_bias,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
@@ -219,23 +210,18 @@ class LoraModel(BaseTuner):
             if quantization_config is not None:
                 kwargs[f"{quant_method}_quantization_config"] = quantization_config
 
-        # note: AdaLoraLayer is a subclass of LoraLayer, we need to exclude it
-        from peft.tuners.adalora import AdaLoraLayer
-
-        if isinstance(target, LoraLayer) and not isinstance(target, AdaLoraLayer):
+        if isinstance(target, LoraLayer):
             target.update_layer(
                 adapter_name,
                 r,
-                lora_alpha=alpha,
-                lora_dropout=lora_config.lora_dropout,
-                init_lora_weights=lora_config.init_lora_weights,
-                use_rslora=lora_config.use_rslora,
-                use_dora=lora_config.use_dora,
-                lora_bias=lora_config.lora_bias,
+                hira_alpha=alpha,
+                hira_dropout=hira_config.hira_dropout,
+                init_hira_weights=hira_config.init_hira_weights,
+                hira_bias=hira_config.hira_bias,
             )
         else:
             device_map = self.model.hf_device_map if hasattr(self.model, "hf_device_map") else None
-            new_module = self._create_new_module(lora_config, adapter_name, target, device_map=device_map, **kwargs)
+            new_module = self._create_new_module(hira_config, adapter_name, target, device_map=device_map, **kwargs)
             if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
@@ -281,21 +267,21 @@ class LoraModel(BaseTuner):
                 for n, p in model.named_parameters():
                     if "bias" in n:
                         p.requires_grad = True
-            elif bias == "lora_only":
+            elif bias == "hira_only":
                 for m in model.modules():
-                    if isinstance(m, LoraLayer) and hasattr(m, "bias") and m.bias is not None:
+                    if isinstance(m, HiRALayer) and hasattr(m, "bias") and m.bias is not None:
                         m.bias.requires_grad = True
             else:
                 raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
 
     @staticmethod
-    def _create_new_module(lora_config, adapter_name, target, **kwargs):
-        # Collect dispatcher functions to decide what backend to use for the replaced LoRA layer. The order matters,
+    def _create_new_module(hira_config: HiRAConfig, adapter_name, target, **kwargs):
+        # Collect dispatcher functions to decide what backend to use for the replaced HiRA layer. The order matters,
         # because the first match is always used. Therefore, the default layers should be checked last.
         dispatchers = []
 
-        if lora_config._custom_modules:
-            # Experimental custom LoRA module support. Allows users to pass a custom mapping for unsupported layer
+        if hira_config._custom_modules:
+            # Experimental custom HiRA module support. Allows users to pass a custom mapping for unsupported layer
             # types by impelementing their own LoRA layers.
             def dynamic_dispatch_func(target, adapter_name, lora_config, **kwargs):
                 new_module = None
@@ -305,7 +291,7 @@ class LoraModel(BaseTuner):
                 else:
                     target_base_layer = target
 
-                for key, custom_cls in lora_config._custom_modules.items():
+                for key, custom_cls in hira_config._custom_modules.items():
                     if isinstance(target_base_layer, key):
                         new_module = custom_cls(target, adapter_name, **kwargs)
                         break
@@ -324,7 +310,7 @@ class LoraModel(BaseTuner):
             from .bnb import dispatch_bnb_4bit
 
             dispatchers.append(dispatch_bnb_4bit)
-
+        # TODO: Needs check here
         dispatchers.extend(
             [
                 dispatch_eetq,
@@ -341,7 +327,7 @@ class LoraModel(BaseTuner):
 
         new_module = None
         for dispatcher in dispatchers:
-            new_module = dispatcher(target, adapter_name, lora_config=lora_config, **kwargs)
+            new_module = dispatcher(target, adapter_name, hira_config=hira_config, **kwargs)
             if new_module is not None:  # first match wins
                 break
 
@@ -416,7 +402,7 @@ class LoraModel(BaseTuner):
             adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
         """
         for module in self.model.modules():
-            if isinstance(module, LoraLayer):
+            if isinstance(module, HiRALayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
@@ -440,9 +426,9 @@ class LoraModel(BaseTuner):
         # to check that there is at least one layer with the given name, or else something like typos can easily slip.
         expected_adapters = set()
         for layer in self.modules():
-            if isinstance(layer, LoraLayer):
-                expected_adapters |= layer.lora_A.keys()
-                expected_adapters |= layer.lora_embedding_A.keys()
+            if isinstance(layer, HiRALayer):
+                expected_adapters |= layer.hira_A.keys()
+                expected_adapters |= layer.hira_embedding_A.keys()
         unique_adapters = {name for name in adapter_names if name != "__base__"}
         unexpected_adapters = unique_adapters - expected_adapters
         if unexpected_adapters:
@@ -462,7 +448,7 @@ class LoraModel(BaseTuner):
 
         hook_handles = []
         for module in self.modules():
-            if isinstance(module, LoraLayer) or isinstance(module, AuxiliaryTrainingWrapper):
+            if isinstance(module, HiRALayer) or isinstance(module, AuxiliaryTrainingWrapper):
                 pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
                 handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                 hook_handles.append(handle)
@@ -471,7 +457,7 @@ class LoraModel(BaseTuner):
             # For encoder-decoder models, even when applying beam search, the encoder part of the model should not use
             # the extended adapter_names. This is because the encoder still uses the original, non-extended samples.
             for module in self.model.get_encoder().modules():
-                if isinstance(module, LoraLayer) or isinstance(module, AuxiliaryTrainingWrapper):
+                if isinstance(module, HiRALayer) or isinstance(module, AuxiliaryTrainingWrapper):
                     # Add another hook to overwrite the kwargs with the original adapter names -- this is easier than
                     # trying to exclude the encoder.
                     pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=original_adapter_names)
@@ -490,17 +476,17 @@ class LoraModel(BaseTuner):
         """
         super()._check_merge_allowed()
         if getattr(self.model, "quantization_method", None) == "gptq":
-            raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
+            raise ValueError("Cannot merge HiRA layers when the model is gptq quantized")
         if self.peft_config.get("layer_replication"):
-            raise ValueError("Cannot merge LORA layers when base model layers are replicated")
+            raise ValueError("Cannot merge HiRA layers when base model layers are replicated")
 
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
         if peft_config.target_modules is None:
-            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
+            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_HIRA_TARGET_MODULES_MAPPING:
                 raise ValueError("Please specify `target_modules` in `peft_config`")
             peft_config.target_modules = set(
-                TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
+                TRANSFORMERS_MODELS_TO_HIRA_TARGET_MODULES_MAPPING[model_config["model_type"]]
             )
         return peft_config
 
@@ -564,27 +550,27 @@ class LoraModel(BaseTuner):
         # if there is only one adapter, we can only use linear merging
         combination_type = "linear" if len(adapters) == 1 else combination_type
 
-        adapters_ranks: list[int] = [
-            # When allocating tensors for the new adapter, we need the maximum possible rank to not overflow
-            config.r if not config.rank_pattern else max(config.r, *config.rank_pattern.values())
+        adapters_rs: list[int] = [
+            # When allocating tensors for the new adapter, we need the maximum possible r to not overflow
+            config.r if not config.r_pattern else max(config.r, *config.r_pattern.values())
             for config in (self.peft_config[adapter] for adapter in adapters)
         ]
 
         if combination_type in ("linear", "ties", "dare_ties", "dare_linear", "magnitude_prune"):
             # all adapters ranks should be same, new rank is just this value
-            if len(set(adapters_ranks)) != 1:
+            if len(set(adapters_rs)) != 1:
                 raise ValueError(
                     "All adapters must have the same r value when using combination_type linear, ties, dare_ties or "
                     "dare_linear."
                 )
-            new_rank = adapters_ranks[0]
+            new_r = adapters_rs[0]
         elif combination_type == "cat":
             # adapters ranks may be different, new rank is sum of all ranks
             # be careful, because output adapter rank may be really big if mixing a lot of adapters
-            new_rank = sum(adapters_ranks)
+            new_r = sum(adapters_rs)
         elif combination_type.endswith("svd"):
             # new rank is the max of all ranks of the adapters if not provided
-            new_rank = svd_rank or max(adapters_ranks)
+            new_r = svd_rank or max(adapters_rs)
         else:
             raise ValueError(f"Invalid combination_type: {combination_type}")
 
@@ -606,7 +592,7 @@ class LoraModel(BaseTuner):
         else:
             raise TypeError(f"Invalid type {target_module_types[0]} found in target_modules")
 
-        return combination_type, new_rank, new_target_modules
+        return combination_type, new_r, new_target_modules
 
     def add_weighted_adapter(
         self,
@@ -673,10 +659,10 @@ class LoraModel(BaseTuner):
         self.peft_config[adapter_name] = replace(
             self.peft_config[adapters[0]],
             r=new_rank,
-            lora_alpha=new_rank,
+            hira_alpha=new_rank,
             target_modules=new_target_modules,
             alpha_pattern={},
-            rank_pattern={},
+            r_pattern={},
         )
         self.inject_adapter(self.model, adapter_name)
 
@@ -686,38 +672,38 @@ class LoraModel(BaseTuner):
         key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
-            if isinstance(target, LoraLayer):
-                if adapter_name in target.lora_A:
-                    target_lora_A = target.lora_A[adapter_name].weight
-                    target_lora_B = target.lora_B[adapter_name].weight
-                elif adapter_name in target.lora_embedding_A:
-                    target_lora_A = target.lora_embedding_A[adapter_name]
-                    target_lora_B = target.lora_embedding_B[adapter_name]
+            if isinstance(target, HiRALayer):
+                if adapter_name in target.hira_A:
+                    target_hira_A = target.hira_A[adapter_name].weight
+                    target_hira_B = target.hira_B[adapter_name].weight
+                elif adapter_name in target.hira_embedding_A:
+                    target_hira_A = target.hira_embedding_A[adapter_name]
+                    target_hira_B = target.hira_embedding_B[adapter_name]
                 else:
                     continue
 
-                target_lora_A.data = target_lora_A.data * 0.0
-                target_lora_B.data = target_lora_B.data * 0.0
+                target_hira_A.data = target_hira_A.data * 0.0
+                target_hira_B.data = target_hira_B.data * 0.0
                 if combination_type == "cat":
-                    loras_A, loras_B = [], []
+                    hiras_A, hiras_B = [], []
                     for adapter, weight in zip(adapters, weights):
-                        if adapter in target.lora_A:
-                            current_adapter_lora_A = target.lora_A[adapter].weight
-                            current_adapter_lora_B = target.lora_B[adapter].weight
-                        elif adapter in target.lora_embedding_A:
-                            current_adapter_lora_A = target.lora_embedding_A[adapter]
-                            current_adapter_lora_B = target.lora_embedding_B[adapter]
+                        if adapter in target.hira_A:
+                            current_adapter_hira_A = target.hira_A[adapter].weight
+                            current_adapter_hira_B = target.hira_B[adapter].weight
+                        elif adapter in target.hira_embedding_A:
+                            current_adapter_hira_A = target.hira_embedding_A[adapter]
+                            current_adapter_hira_B = target.hira_embedding_B[adapter]
                         else:
                             continue
-                        loras_A.append(current_adapter_lora_A.data * weight * target.scaling[adapter])
-                        loras_B.append(current_adapter_lora_B.data)
+                        hiras_A.append(current_adapter_hira_A.data * weight * target.scaling[adapter])
+                        hiras_B.append(current_adapter_hira_B.data)
 
-                    if len(loras_A) == 0:
-                        raise ValueError("No matching LoRAs found. Please raise an issue on GitHub.")
-                    loras_A = torch.cat(loras_A, dim=0)
-                    loras_B = torch.cat(loras_B, dim=1)
-                    target_lora_A.data[: loras_A.shape[0], :] = loras_A
-                    target_lora_B.data[:, : loras_B.shape[1]] = loras_B
+                    if len(hiras_A) == 0:
+                        raise ValueError("No matching HiRAs found. Please raise an issue on GitHub.")
+                    hiras_A = torch.cat(hiras_A, dim=0)
+                    hiras_B = torch.cat(hiras_B, dim=1)
+                    target_hira_A.data[: hiras_A.shape[0], :] = hiras_A
+                    target_hira_B.data[:, : hiras_B.shape[1]] = hiras_B
                 elif combination_type in [
                     "svd",
                     "ties_svd",
@@ -725,14 +711,14 @@ class LoraModel(BaseTuner):
                     "dare_ties_svd",
                     "magnitude_prune_svd",
                 ]:
-                    target_lora_A.data, target_lora_B.data = self._svd_generalized_task_arithmetic_weighted_adapter(
+                    target_hira_A.data, target_hira_B.data = self._svd_generalized_task_arithmetic_weighted_adapter(
                         combination_type,
                         adapters,
                         weights,
                         new_rank,
                         target,
-                        target_lora_A,
-                        target_lora_B,
+                        target_hira_A,
+                        target_hira_B,
                         density,
                         majority_sign_method,
                         svd_clamp,
@@ -740,121 +726,10 @@ class LoraModel(BaseTuner):
                         driver=svd_driver,
                     )
                 elif combination_type in ["linear", "ties", "dare_linear", "dare_ties", "magnitude_prune"]:
-                    target_lora_A.data, target_lora_B.data = self._generalized_task_arithmetic_weighted_adapter(
+                    target_hira_A.data, target_hira_B.data = self._generalized_task_arithmetic_weighted_adapter(
                         combination_type, adapters, weights, target, density, majority_sign_method
                     )
 
-    def _svd_generalized_task_arithmetic_weighted_adapter(
-        self,
-        combination_type,
-        adapters,
-        weights,
-        new_rank,
-        target,
-        target_lora_A,
-        target_lora_B,
-        density,
-        majority_sign_method,
-        clamp=None,
-        full_matrices=True,
-        driver=None,
-    ):
-        valid_adapters = []
-        valid_weights = []
-        is_embedding = any(adapter in target.lora_embedding_A for adapter in adapters)
-        for adapter, weight in zip(adapters, weights):
-            if adapter in target.lora_A or adapter in target.lora_embedding_A:
-                valid_adapters.append(adapter)
-                valid_weights.append(weight * target.scaling[adapter])
-
-        # if no valid adapter, nothing to do
-        if len(valid_adapters) == 0:
-            raise ValueError("No matching LoRAs found. Please raise an issue on Github.")
-        delta_weight = [target.get_delta_weight(adapter) for adapter in valid_adapters]
-        valid_weights = torch.tensor(valid_weights).to(delta_weight[0].device)
-        if combination_type == "svd":
-            delta_weight = task_arithmetic(delta_weight, valid_weights)
-        elif combination_type == "ties_svd":
-            delta_weight = ties(delta_weight, valid_weights, density, majority_sign_method)
-        elif combination_type == "dare_linear_svd":
-            delta_weight = dare_linear(delta_weight, valid_weights, density)
-        elif combination_type == "dare_ties_svd":
-            delta_weight = dare_ties(delta_weight, valid_weights, density, majority_sign_method)
-        elif combination_type == "magnitude_prune_svd":
-            delta_weight = magnitude_prune(delta_weight, valid_weights, density)
-        else:
-            raise ValueError(f"Invalid value passed to combination type: {combination_type}")
-
-        conv2d = isinstance(target, Conv2d)
-        if conv2d:
-            conv2d_1x1 = target.weight.size()[2:4] == (1, 1)
-            if not conv2d_1x1:
-                delta_weight = delta_weight.flatten(start_dim=1)
-            else:
-                delta_weight = delta_weight.squeeze()
-        if (hasattr(target, "fan_in_fan_out") and target.fan_in_fan_out) or is_embedding:
-            delta_weight = delta_weight.T
-
-        # based on https://github.com/kohya-ss/sd-scripts/blob/main/networks/svd_merge_lora.py#L114-L131
-        U, S, Vh = torch.linalg.svd(delta_weight, full_matrices=full_matrices, driver=driver)
-        U = U[:, :new_rank]
-        S = S[:new_rank]
-        U = U @ torch.diag(S)
-        Vh = Vh[:new_rank, :]
-        if clamp is not None:
-            dist = torch.cat([U.flatten(), Vh.flatten()])
-            hi_val = torch.quantile(dist, clamp)
-            low_val = -hi_val
-            U = U.clamp(low_val, hi_val)
-            Vh = Vh.clamp(low_val, hi_val)
-        if conv2d:
-            U = U.reshape(target_lora_B.data.shape)
-            Vh = Vh.reshape(target_lora_A.data.shape)
-        return Vh, U
-
-    def _generalized_task_arithmetic_weighted_adapter(
-        self,
-        combination_type,
-        adapters,
-        weights,
-        target,
-        density,
-        majority_sign_method,
-    ):
-        # account weights for LoRA A and B layers.
-        valid_weights = []
-        lora_A_deltas = []
-        lora_B_deltas = []
-        for adapter, weight in zip(adapters, weights):
-            if adapter in target.lora_A:
-                current_adapter_lora_A = target.lora_A[adapter].weight
-                current_adapter_lora_B = target.lora_B[adapter].weight
-            elif adapter in target.lora_embedding_A:
-                current_adapter_lora_A = target.lora_embedding_A[adapter]
-                current_adapter_lora_B = target.lora_embedding_B[adapter]
-            else:
-                continue
-            valid_weights.append(math.sqrt(weight * target.scaling[adapter]))
-            lora_A_deltas.append(current_adapter_lora_A.data)
-            lora_B_deltas.append(current_adapter_lora_B.data)
-        valid_weights = torch.tensor(valid_weights).to(lora_A_deltas[0].device)
-        lora_deltas = [lora_A_deltas, lora_B_deltas]
-        dtype = lora_A_deltas[0].dtype
-        for i, task_tensors in enumerate(lora_deltas):
-            if combination_type == "linear":
-                lora_deltas[i] = task_arithmetic(task_tensors, valid_weights)
-            elif combination_type == "ties":
-                lora_deltas[i] = ties(task_tensors, valid_weights, density, majority_sign_method)
-            elif combination_type == "dare_linear":
-                lora_deltas[i] = dare_linear(task_tensors, valid_weights, density)
-            elif combination_type == "dare_ties":
-                lora_deltas[i] = dare_ties(task_tensors, valid_weights, density, majority_sign_method)
-            elif combination_type == "magnitude_prune":
-                lora_deltas[i] = magnitude_prune(task_tensors, valid_weights, density)
-            else:
-                raise ValueError("Invalid combination type")
-        lora_deltas = [delta.to(dtype) for delta in lora_deltas]
-        return lora_deltas
 
     def delete_adapter(self, adapter_name: str) -> None:
         """
@@ -871,7 +746,7 @@ class LoraModel(BaseTuner):
         new_adapter = None
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
-            if isinstance(target, LoraLayer):
+            if isinstance(target, HiRALayer):
                 target.delete_adapter(adapter_name)
                 if new_adapter is None:
                     new_adapter = target.active_adapters[:]
@@ -883,7 +758,7 @@ class LoraModel(BaseTuner):
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ) -> torch.nn.Module:
         r"""
-        This method merges the LoRa layers into the base model. This is needed if someone wants to use the base model
+        This method merges the HiRA layers into the base model. This is needed if someone wants to use the base model
         as a standalone model.
 
         Args:
@@ -902,7 +777,7 @@ class LoraModel(BaseTuner):
         >>> from peft import PeftModel
 
         >>> base_model = AutoModelForCausalLM.from_pretrained("tiiuae/falcon-40b")
-        >>> peft_model_id = "smangrul/falcon-40B-int4-peft-lora-sfttrainer-sample"
+        >>> peft_model_id = "smangrul/falcon-40B-int4-peft-hira-sfttrainer-sample"
         >>> model = PeftModel.from_pretrained(base_model, peft_model_id)
         >>> merged_model = model.merge_and_unload()
         ```
@@ -913,45 +788,7 @@ class LoraModel(BaseTuner):
 
     def unload(self) -> torch.nn.Module:
         """
-        Gets back the base model by removing all the lora modules without merging. This gives back the original base
+        Gets back the base model by removing all the hira modules without merging. This gives back the original base
         model.
         """
         return self._unload_and_optionally_merge(merge=False)
-
-    def subtract_mutated_init(self, output_state_dict: dict[str, torch.Tensor], adapter_name: str, kwargs=None):
-        """
-        This function can calculate the updates of the PiSSA/CorDA/OLoRA by comparing the parameters of the
-        PiSSA/CorDA/OLoRA adapter in `output_state_dict` with the initial values of PiSSA/CorDA/OLoRA in
-        `adapter_name`, thus converting PiSSA/CorDA/OLoRA to LoRA.
-        """
-        for name, param in self.model.named_parameters():
-            if (
-                param.data.dtype != torch.float32
-                and param.data.dtype != torch.float16
-                and param.data.dtype != torch.bfloat16
-            ) and adapter_name.startswith("pissa"):
-                warnings.warn(
-                    r"Note that Quant(W_res) + AB != Quant(W) + \Delta(AB); "
-                    "the converted LoRA, when combined with W or Quant(W), may introduce a certain gap in the fine-tuned model. "
-                    "Therefore, we recommend directly using the Quant(W_res) in conjunction with the PiSSA adapter. "
-                )
-        mutated_init_state_dict = get_peft_model_state_dict(
-            self,
-            state_dict=kwargs.get("state_dict", None),
-            adapter_name=adapter_name,
-        )
-        tensors_lora = {}
-        for name in output_state_dict.keys():
-            ## W = W^{res} + A_0 \times B_0,
-            ## W + \Delta W = W^{res} + A \times B,
-            ## \Delta W = A \times B - A_0 \times B_0 = [A | A_0] \times [B | -B_0]^T = A'B'.
-            if "lora_A" in name:
-                tensors_lora[name] = torch.cat(
-                    [output_state_dict[name], mutated_init_state_dict[".".join(name.split(".")[1:])]], dim=0
-                )
-            elif "lora_B" in name:
-                tensors_lora[name] = torch.cat(
-                    [output_state_dict[name], -mutated_init_state_dict[".".join(name.split(".")[1:])]], dim=1
-                )
-
-        return tensors_lora
