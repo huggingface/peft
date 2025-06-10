@@ -1942,6 +1942,16 @@ class PeftModelForCausalLM(PeftModel):
                     model_kwargs["input_ids"] = model_kwargs["input_ids"][:, -1:]
 
             if (attention_mask := model_kwargs.get("attention_mask", None)) is not None:
+                if isinstance(attention_mask, dict):
+                    # see: https://github.com/huggingface/transformers/pull/37866
+                    # For now, just deal with the case of a single attention mask
+                    if len(attention_mask) != 1:
+                        raise ValueError(
+                            f"Expected a single attention mask, got {len(attention_mask)} instead, please open an "
+                            "issue (https://github.com/huggingface/peft/issues) and report the error."
+                        )
+                    attention_mask = list(attention_mask.values())[0]
+
                 size = model_kwargs["input_ids"].shape[0], peft_config.num_virtual_tokens
                 prefix_attention_mask = torch.ones(size).to(model_kwargs["input_ids"].device)
                 if attention_mask.dim() == 4:
