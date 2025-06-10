@@ -3763,7 +3763,14 @@ class TestScaling:
 
 class TestLoadPeftKeyMapping:
     # See discussion in https://github.com/huggingface/transformers/pull/38627
-    # Here we only test prefix tuning (prompt learning method) and LoRA (non-prompt learning method) as the other PEFT
+
+    # transformers PR #37033 re-arranges the way visual language models are built by moving the LM head from the
+    # language model to the top-level VLM (among other things). A consequence of this is that the keys in the PEFT
+    # state_dict now also follow the new architecture. This test class serves to ensure that old checkpoints can be
+    # loaded with the changed architecture. Unfortunately, new checkpoints cannot be loaded with the old architecture,
+    # the corresponding test is marked as xfail.
+
+    # Note: We only test prefix tuning (prompt learning method) and LoRA (non-prompt learning method) as the other PEFT
     # methods should work the same way. It would be excessive to test all of them here.
 
     @pytest.fixture
@@ -4036,6 +4043,7 @@ class TestLoadPeftKeyMapping:
         # save the old model, load it into the new model, should work without issues (backwards compatibility)
         self.check_lora_load_no_warning(old_model, new_model, tmp_path)
 
+    @pytest.mark.xfail(reason="Loading new checkpoints with old transformers is not supported.")
     def test_key_mapping_save_new_load_old_lora(self, old_model, new_model, tmp_path):
         # save the new model, load it into the old model, should work without issues (forwards compatibility)
         self.check_lora_load_no_warning(new_model, old_model, tmp_path)
