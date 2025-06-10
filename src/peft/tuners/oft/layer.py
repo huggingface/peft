@@ -78,10 +78,8 @@ class OFTRotationModule(nn.Module):
         coft=False,
         eps=6e-5,
         kernel_size=(0, 0),
-        stride=(0, 0),
-        padding=(0, 0),
-        in_channels=0,
-        out_channels=0,
+        use_cayley_neumann=True,
+        num_cayley_neumann_terms=5,
     ):
         super().__init__()
         self.r = r
@@ -93,6 +91,8 @@ class OFTRotationModule(nn.Module):
         self.eps = eps
         # Conv2d specific parameters
         self.kernel_size = kernel_size
+        self.use_cayley_neumann = use_cayley_neumann
+        self.num_cayley_neumann_terms = num_cayley_neumann_terms
 
     def pytorch_skew_symmetric(self, vec, block_size):
         batch_size = vec.shape[0]
@@ -104,7 +104,7 @@ class OFTRotationModule(nn.Module):
         matrix = matrix - matrix.transpose(-2, -1)
         return matrix
 
-    def _cayley_batch(self, Q: torch.Tensor, block_size: int, num_neumann_terms: int = 4) -> torch.Tensor:
+    def _cayley_batch(self, Q: torch.Tensor, block_size: int, use_cayley_neumann: bool = True, num_neumann_terms: int = 5) -> torch.Tensor:
         """
         Perform the Cayley parametrization on a batch of skew-symmetric matrices.
 
@@ -116,18 +116,22 @@ class OFTRotationModule(nn.Module):
 
         # Q_skew = SkewSymmetric.apply(Q, block_size)
         Q_skew = self.pytorch_skew_symmetric(Q, block_size)
+        
+        if use_cayley_neumann:
+            R = torch.eye(block_size, device=Q.device, dtype=Q.dtype).repeat(b, 1, 1)
+            if num_neumann_terms > 1:
+                R.add_(Q_skew, alpha=2.0)
+                if num_neumann_terms > 2:
+                    Q_squared = torch.bmm(Q_skew, Q_skew)
+                    R.add_(Q_squared, alpha=2.0)
 
-        R = torch.eye(block_size, device=Q.device, dtype=Q.dtype).repeat(b, 1, 1)
-        if num_neumann_terms > 1:
-            R.add_(Q_skew, alpha=2.0)
-            if num_neumann_terms > 2:
-                Q_squared = torch.bmm(Q_skew, Q_skew)
-                R.add_(Q_squared, alpha=2.0)
-
-                Q_power = Q_squared
-                for i in range(3, num_neumann_terms):
-                    Q_power = torch.bmm(Q_power, Q_skew)
-                    R.add_(Q_power, alpha=2.0)
+                    Q_power = Q_squared
+                    for i in range(3, num_neumann_terms):
+                        Q_power = torch.bmm(Q_power, Q_skew)
+                        R.add_(Q_power, alpha=2.0)
+        else:
+            I = torch.eye(Q_skew.shape[-1], device=Q_skew.device).unsqueeze(0).expand(b, Q_skew.shape[-1], Q_skew.shape[-1])
+            R = torch.linalg.solve(I + Q_skew, I - Q_skew, left=False)
 
         return R
 
@@ -231,7 +235,7 @@ class OFTRotationModule(nn.Module):
             with torch.no_grad():
                 self.weight.copy_(self._project_batch(self.weight, eps=self.eps))
 
-        orth_rotate = self._cayley_batch(self.weight, self.block_size)
+        orth_rotate = self._cayley_batch(self.weight, self.block_size, self.use_cayley_neumann, self.num_cayley_neumann_terms)
 
         # Unfold the input for Conv2d layer
         if x.ndim == 4:
@@ -394,7 +398,7 @@ class OFTLayer(BaseTunerLayer):
             msg = "Cannot pass `adapter_names` when there are merged adapters, please call `unmerge_adapter` first."
             raise ValueError(msg)
 
-    def update_layer(self, adapter_name, r, oft_block_size, module_dropout, coft, eps, block_share, init_weights):
+    def update_layer(self, adapter_name, r, oft_block_size, module_dropout, coft, eps, block_share, init_weights, use_cayley_neumann=True, num_cayley_neumann_terms=5):
         """
         Update the linear layer with trainable OFT weights. Override for other layer types.
         """
@@ -441,11 +445,13 @@ class OFTLayer(BaseTunerLayer):
         # Create weights with provided shape
         n_elements = oft_block_size * (oft_block_size - 1) // 2
         if block_share:
-            self.oft_R[adapter_name] = OFTRotationModule(1, n_elements, oft_block_size, coft, eps)
+            self.oft_R[adapter_name] = OFTRotationModule(
+                1, n_elements, oft_block_size, coft, eps, use_cayley_neumann=use_cayley_neumann, num_cayley_neumann_terms=num_cayley_neumann_terms
+            )
         else:
             self.oft_R[adapter_name] = OFTRotationModule(
-                r, n_elements, oft_block_size, coft, eps
-            )  # , self.get_base_layer().weight.data.dtype, self.get_base_layer().weight.data.device)
+                r, n_elements, oft_block_size, coft, eps, use_cayley_neumann=use_cayley_neumann, num_cayley_neumann_terms=num_cayley_neumann_terms
+            )
 
         # Initialize weights
         self.reset_oft_parameters(adapter_name, init_weights)
@@ -464,14 +470,12 @@ class OFTLayer(BaseTunerLayer):
         """
         if init_weights is False:
             nn.init.normal_(self.oft_R[adapter_name], mean=0.0, std=0.1)
-            # nn.init.normal_(self.oft_s[adapter_name], mean=1.0, std=0.1)
             return
 
         if adapter_name in self.oft_R.keys():
             if init_weights is True:
                 # initialize oft_R to zero
                 nn.init.zeros_(self.oft_R[adapter_name].weight)
-                # nn.init.ones_(self.oft_s[adapter_name])
             else:
                 raise ValueError(f"Unknown initialization {init_weights=}")
 
@@ -531,6 +535,8 @@ class Linear(nn.Module, OFTLayer):
             eps=eps,
             block_share=block_share,
             init_weights=init_weights,
+            use_cayley_neumann=use_cayley_neumann,
+            num_cayley_neumann_terms=num_cayley_neumann_terms,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
@@ -660,6 +666,8 @@ class Conv2d(nn.Module, OFTLayer):
         eps: float = 6e-5,
         block_share: bool = False,
         init_weights: Union[bool, str] = True,
+        use_cayley_neumann: bool = True,
+        num_cayley_neumann_terms: int = 5,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -678,9 +686,11 @@ class Conv2d(nn.Module, OFTLayer):
             eps=eps,
             block_share=block_share,
             init_weights=init_weights,
+            use_cayley_neumann=use_cayley_neumann,
+            num_cayley_neumann_terms=num_cayley_neumann_terms,
         )
 
-    def update_layer(self, adapter_name, r, oft_block_size, module_dropout, coft, eps, block_share, init_weights):
+    def update_layer(self, adapter_name, r, oft_block_size, module_dropout, coft, eps, block_share, init_weights, use_cayley_neumann=True, num_cayley_neumann_terms=5):
         """
         Update the conv2d layer with trainable OFT weights.
         """
@@ -721,12 +731,12 @@ class Conv2d(nn.Module, OFTLayer):
         n_elements = oft_block_size * (oft_block_size - 1) // 2
         if block_share:
             self.oft_R[adapter_name] = OFTRotationModule(
-                1, n_elements, oft_block_size, coft, eps, kernel_size=base_layer.kernel_size
+                1, n_elements, oft_block_size, coft, eps, kernel_size=base_layer.kernel_size, use_cayley_neumann=use_cayley_neumann, num_cayley_neumann_terms=num_cayley_neumann_terms
             )
 
         else:
             self.oft_R[adapter_name] = OFTRotationModule(
-                r, n_elements, oft_block_size, coft, eps, kernel_size=base_layer.kernel_size
+                r, n_elements, oft_block_size, coft, eps, kernel_size=base_layer.kernel_size, use_cayley_neumann=use_cayley_neumann, num_cayley_neumann_terms=num_cayley_neumann_terms
             )
 
         # Initialize weights

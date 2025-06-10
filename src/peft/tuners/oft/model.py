@@ -164,6 +164,7 @@ class OFTModel(BaseTuner):
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
         else:
+            breakpoint()
             target.update_layer(
                 adapter_name,
                 r=oft_config.r,
