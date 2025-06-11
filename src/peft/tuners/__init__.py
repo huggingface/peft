@@ -32,6 +32,10 @@ from .lora import (
     get_eva_state_dict,
     initialize_lora_eva_weights,
 )
+from .shira import (
+    ShiraConfig,
+    ShiraModel
+)
 from .mixed import MixedModel
 from .multitask_prompt_tuning import MultitaskPromptEmbedding, MultitaskPromptTuningConfig, MultitaskPromptTuningInit
 from .oft import OFTConfig, OFTModel
