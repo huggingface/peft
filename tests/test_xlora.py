@@ -337,7 +337,7 @@ class TestXlora:
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
 
     def test_xlora_loading_valid(self):
-        # This test also simulatenously tests the loading-from-hub functionality!
+        # This test also simultaneously tests the loading-from-hub functionality!
         torch.manual_seed(123)
 
         model_id = "facebook/opt-125m"
