@@ -459,8 +459,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # don't have the "base_model.model." prefix, which we need to remove before mapping. Instead just using
         # "base_model.". This could be fine, we could only remove "base_model.", However, the subsequent sub-module
         # could also be called "model", resulting in what looks like "base_model.model.". To avoid this confusion, we
-        # skip prefix tuning. Since it should be applied to the language model part directly and applies itself on the
-        # outer model (unlike LoRA et al), skipping should be fine.
+        # skip prompt learning. Since it applies itself directly to the pre-trained model (unlike LoRA et al that target
+        # sub-modules), skipping should be fine.
         if (key_mapping is None) and (not config.is_prompt_learning):
             key_mapping = getattr(model, "_checkpoint_conversion_mapping", {})
 

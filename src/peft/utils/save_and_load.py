@@ -583,10 +583,14 @@ def load_peft_weights(
         remapped_adapters_weights = adapters_weights
     else:
         # See discussion in https://github.com/huggingface/transformers/pull/38627
+        # Remap adapter weight names according to the provided key_mapping.
         remapped_adapters_weights = {}
-        prefix = "base_model.model."
         for key, val in adapters_weights.items():
-            if not key.startswith(prefix):
+            if key.startswith("base_model.model."):
+                prefix = "base_model.model."
+            elif key.startswith("base_model."):
+                prefix = "base_model."
+            else:
                 raise ValueError(
                     "An error occurred while trying to load a PEFT state_dict with key_mapping. This should not "
                     "happen. Please open an issue on https://github.com/huggingface/peft/issues and report the error."

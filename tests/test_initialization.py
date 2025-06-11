@@ -3770,8 +3770,8 @@ class TestLoadPeftKeyMapping:
     # loaded with the changed architecture. Unfortunately, new checkpoints cannot be loaded with the old architecture,
     # the corresponding test is marked as xfail.
 
-    # Note: We only test prefix tuning (prompt learning method) and LoRA (non-prompt learning method) as the other PEFT
-    # methods should work the same way. It would be excessive to test all of them here.
+    # Note: We only test prefix tuning (prompt learning method), LoRA (non-prompt learning method), and VBLoRA (shared
+    # parameters) as the other PEFT methods should work the same way. It would be excessive to test all of them here.
 
     @pytest.fixture
     def fake_model_config(self):
@@ -4031,6 +4031,37 @@ class TestLoadPeftKeyMapping:
         weight = loaded.prompt_encoder.default.embedding.weight
         assert torch.allclose(weight, torch.full_like(weight, 1.0))
 
+    def check_vblora_load_no_warning(self, model1, model2, path):
+        # helper method: save with model1, load with model2, ensure that there is no warning about missing keys and that
+        # the parameters are loaded correctly
+        model1 = copy.deepcopy(model1)
+        model2 = copy.deepcopy(model2)
+
+        config = VBLoRAConfig(target_modules=["attn"], vector_length=2, num_vectors=4)
+        peft_model = get_peft_model(copy.deepcopy(model1), config)
+
+        # set all values to 1.0 or 2.0 so we can check that they are loaded correctly
+        peft_model.base_model.vblora_vector_bank["default"].data.fill_(1.0)
+        for name, param in peft_model.named_parameters():
+            if "logits" in name:
+                param.data.fill_(2.0)
+
+        peft_model.save_pretrained(path)
+        del peft_model
+
+        # ensure that there is no warning: UserWarning: Found missing adapter keys while loading the checkpoint
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            loaded = PeftModel.from_pretrained(copy.deepcopy(model2), path)
+            assert not any("Found missing adapter keys" in str(warning.message) for warning in w)
+
+        # sanity check on parameter values to not only rely on the absence of warnings
+        param = loaded.base_model.vblora_vector_bank["default"]
+        assert torch.allclose(param, torch.full_like(param, 1.0))
+        for name, param in loaded.named_parameters():
+            if "logits" in name:
+                assert torch.allclose(param, torch.full_like(param, 2.0))
+
     def test_key_mapping_save_new_load_new_lora(self, new_model, tmp_path):
         # save and load the new model, should work without issues
         self.check_lora_load_no_warning(new_model, new_model, tmp_path)
@@ -4043,7 +4074,7 @@ class TestLoadPeftKeyMapping:
         # save the old model, load it into the new model, should work without issues (backwards compatibility)
         self.check_lora_load_no_warning(old_model, new_model, tmp_path)
 
-    @pytest.mark.xfail(reason="Loading new checkpoints with old transformers is not supported.")
+    @pytest.mark.xfail(reason="Loading new checkpoints with old transformers is not supported.", strict=True)
     def test_key_mapping_save_new_load_old_lora(self, old_model, new_model, tmp_path):
         # save the new model, load it into the old model, should work without issues (forwards compatibility)
         self.check_lora_load_no_warning(new_model, old_model, tmp_path)
@@ -4063,3 +4094,20 @@ class TestLoadPeftKeyMapping:
     def test_key_mapping_save_new_load_old_prefix_tuning(self, old_model, new_model, tmp_path):
         # save the new model, load it into the old model, should work without issues (forwards compatibility)
         self.check_prefix_tuning_load_no_warning(new_model, old_model, tmp_path)
+
+    def test_key_mapping_save_new_load_new_vblora(self, new_model, tmp_path):
+        # save and load the new model, should work without issues
+        self.check_vblora_load_no_warning(new_model, new_model, tmp_path)
+
+    def test_key_mapping_save_old_load_old_vblora(self, old_model, tmp_path):
+        # save and load the old model, should work without issues
+        self.check_vblora_load_no_warning(old_model, old_model, tmp_path)
+
+    def test_key_mapping_save_old_load_new_vblora(self, old_model, new_model, tmp_path):
+        # save the old model, load it into the new model, should work without issues (backwards compatibility)
+        self.check_vblora_load_no_warning(old_model, new_model, tmp_path)
+
+    @pytest.mark.xfail(reason="Loading new checkpoints with old transformers is not supported.", strict=True)
+    def test_key_mapping_save_new_load_old_vblora(self, old_model, new_model, tmp_path):
+        # save the new model, load it into the old model, should work without issues (forwards compatibility)
+        self.check_vblora_load_no_warning(new_model, old_model, tmp_path)
