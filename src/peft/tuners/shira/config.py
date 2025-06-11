@@ -15,7 +15,7 @@ class ShiraConfig(PeftConfig):
     This is the configuration class to store the configuration of a [`ShiraModel`].
 
     Args:
-        r (`int`, *optional*, defaults to `256`):
+        r (`int`, *optional*, defaults to `32`):
             As SHiRA is high rank, it does not really make sense to choose a "rank".  However, we would like a way to be consistent
             with LoRA adapter types in terms of parameter count for direct comparison.  Thus, for a given target module, the number
             of SHiRA parameters will be set to r(m+d) where the original tensor dimensions are m x d.  This means the number of
@@ -37,7 +37,15 @@ class ShiraConfig(PeftConfig):
             List of modules apart from SHiRA layers to be set as trainable and saved in the final checkpoint.
     """
 
-    r: int = field(default=32, metadata={"help": "SHiRA attention dimension"})
+    r: int = field(default=32, metadata={"help": (
+                                                    "As SHiRA is high rank, it does not really make sense to choose a 'rank'."  
+                                                    "However, we would like a way to be consistent with LoRA adapter types in "
+                                                    "terms of parameter count for direct comparison.  Thus, for a given target " 
+                                                    "module, the number of SHiRA parameters will be set to r(m+d) where the original " 
+                                                    "tensor dimensions are m x d.  This means the number of additional parameters " 
+                                                    "is the same as a LoRA adapter."
+                                                    )
+                                                })
     mask_fn_tag: str = field(default='random_mask', metadata={"help": ("Name of the mask function. Since the mask_fn is not serializable, this field can be used to keep a record of mask_fn. This string is not used in the implementation.")})
     mask_fn: Callable[[nn.Module, int, Any], torch.tensor] = field(default=None, metadata={"help": (
                                                                 "An optional user-defined mask_fn to compute the mask value from base_weights. " 
