@@ -33,8 +33,8 @@ tests_core_single_gpu:
 
 # exclude gemma tests, as generation fails with torch.compile, these failures
 # trigger side effects that make other tests fail with 'RuntimeError: Offset
-# increment outside graph capture encountered unexpectedly.' TODO re-enable
-# gemma once/if it is fixed
+# increment outside graph capture encountered unexpectedly.' 
+# TODO re-enable gemma once/if it is fixed
 tests_common_gpu:
 	python -m pytest tests/test_decoder_models.py -k "not gemma" $(if $(IS_GITHUB_CI),--report-log "common_decoder.log",)
 	python -m pytest tests/test_encoder_decoder_models.py $(if $(IS_GITHUB_CI),--report-log "common_encoder_decoder.log",)
