@@ -35,6 +35,7 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
         use_dora: bool = False,
         use_qalora: bool = False,
         lora_bias: bool = False,
+        qalora_group_size: int = 32,
         **kwargs,
     ):
         super().__init__()
@@ -57,20 +58,22 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
             use_dora=use_dora,
             use_qalora=use_qalora,
             lora_bias=lora_bias,
-            qalora_group_size=kwargs["qalora_group_size"],
+            qalora_group_size=qalora_group_size,
         )
 
     def resolve_lora_variant(self, *, use_dora: bool, use_qalora: bool, **kwargs) -> Optional[LoraVariant]:
-        if use_qalora:
-            from .variants import QALoraLinearVariant
-
-            return QALoraLinearVariant()
-        if not use_dora:
-            return None
-
-        from .variants import DoraLinearVariant
-
-        return DoraLinearVariant()
+        if use_dora and use_qalora:
+            NotImplementedError
+        elif use_dora:
+            from .variants import DoraLinearVariant
+            variant = DoraLinearVariant()
+        elif use_qalora:
+            if self.in_features % kwargs["qalora_group_size"] == 0:
+                from .variants import QALoraLinearVariant
+                variant = QALoraLinearVariant()
+        else:
+            variant = None
+        return variant
 
     def forward(self, x: torch.Tensor):
         # note: logic differs from default Linear because merging is not supported
@@ -80,7 +83,6 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
             return result
 
         lora_A_keys = self.lora_A.keys()
-        torch_result_dtype = result.dtype
 
         for active_adapter in self.active_adapters:
             if active_adapter not in lora_A_keys:
@@ -93,7 +95,6 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
             dropout = self.lora_dropout[active_adapter]
             scaling = self.scaling[active_adapter]
 
-            # requires_conversion = not torch.is_autocast_enabled()
             x = self._cast_input_dtype(x, lora_A.weight.dtype)
 
             if active_adapter not in self.lora_variant:  # vanilla LoRA

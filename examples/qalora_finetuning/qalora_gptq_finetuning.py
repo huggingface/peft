@@ -49,7 +49,6 @@ def check_adapter_gradients(model) -> None:
             if adapter_name:
                 print(f"\nQALoRA module found: {name}")
                 print(f"  - Group size: {module.qalora_group_size[adapter_name]}")
-                print(f"  - Scaling factor: {module.qalora_scaling_factor.get(adapter_name, 'N/A')}")
 
                 # Check adapter matrices
                 if hasattr(module, "lora_A") and adapter_name in module.lora_A:

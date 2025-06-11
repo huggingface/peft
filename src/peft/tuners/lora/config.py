@@ -498,10 +498,9 @@ class LoraConfig(PeftConfig):
         default=False,
         metadata={
             "help": (
-                "Enable <a href='https://huggingface.co/papers/2309.14717'>Quantization-Aware Low-Rank Adaptation (QALoRA)</a>. This technique combines quantization-aware training "
+                "It is only implemented in GPTQ for now. Enable <a href='https://huggingface.co/papers/2309.14717'>Quantization-Aware Low-Rank Adaptation (QALoRA)</a>. This technique combines quantization-aware training "
                 "with LoRA to improve performance for quantized models. This can improve the performance of LoRA, "
-                "especially at low ranks. Right now, QALoRA only supports linear layers. QALoRA introduces a bigger "
-                "overhead than pure LoRA, so it is recommended to merge weights for inference."
+                "especially at low ranks. Right now, QALoRA only supports linear layers."
             )
         },
     )

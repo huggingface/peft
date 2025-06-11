@@ -186,26 +186,18 @@ class LoraLayer(BaseTunerLayer):
         use_dora: bool = False,
         use_qalora: bool = False,
         lora_bias: bool = False,
+        qalora_group_size: int = 32,
         **kwargs
     ):
-        params_for_variant_init = {
-            "adapter_name": adapter_name,
-            "r": r,
-            "lora_alpha": lora_alpha,
-            "lora_dropout": lora_dropout,
-            "init_lora_weights": init_lora_weights,
-            "use_rslora": use_rslora,
-            "use_dora": use_dora,
-            "use_qalora": use_qalora,
-            "lora_bias": lora_bias,
-            **kwargs  # Unpack extra_kwargs here
-        }
+        # collect the kwargs
+        kwargs = locals().copy()
+        del kwargs["self"]
 
         # This code works for linear layers, override for other layer types
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
-        lora_variant = self.resolve_lora_variant(use_dora=use_dora, use_qalora=use_qalora)
+        lora_variant = self.resolve_lora_variant(use_dora=use_dora, use_qalora=use_qalora, qalora_group_size=qalora_group_size)
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 
@@ -250,7 +242,7 @@ class LoraLayer(BaseTunerLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
         if adapter_name in self.lora_variant:
-            self.lora_variant[adapter_name].init(self, **params_for_variant_init)
+            self.lora_variant[adapter_name].init(self, **kwargs)
 
         self.set_adapter(self.active_adapters)
 
