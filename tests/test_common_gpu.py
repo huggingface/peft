@@ -1574,7 +1574,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     @require_non_cpu
     @pytest.mark.single_gpu_tests
     def test_r_odd_hra_inference(self):
-        # check that an untrained HRA adapter can't be initialized as an identity tranformation
+        # check that an untrained HRA adapter can't be initialized as an identity transformation
         # when r is an odd number
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
