@@ -7,7 +7,7 @@ from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 from peft import LoraConfig, get_peft_model
-
+from peft.utils import infer_device
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
@@ -36,11 +36,13 @@ First, run the cells below to install the requirements:
 Here let's load the `opt-6.7b` model, its weights in half-precision (float16) are about 13GB on the Hub! If we load them in 8-bit we would require around 7GB of memory instead.
 """
 
+device_type = infer_device()
+torch_accelerator_module = getattr(torch, device_type, torch.cuda)
 
-free_in_GB = int(torch.cuda.mem_get_info()[0] / 1024**3)
+free_in_GB = int(torch_accelerator_module.mem_get_info()[0] / 1024**3)
 max_memory = f"{free_in_GB - 2}GB"
 
-n_gpus = torch.cuda.device_count()
+n_gpus = torch_accelerator_module.device_count()
 max_memory = {i: max_memory for i in range(n_gpus)}
 
 model = AutoModelForCausalLM.from_pretrained(
@@ -184,7 +186,7 @@ batch = tokenizer("Two things are infinite: ", return_tensors="pt")
 
 model.config.use_cache = False  # silence the warnings. Please re-enable for inference!
 model.eval()
-with torch.cuda.amp.autocast():
+with torch.autocast():
     output_tokens = model.generate(**batch, max_new_tokens=50)
 
 print("\n\n", tokenizer.decode(output_tokens[0], skip_special_tokens=True))

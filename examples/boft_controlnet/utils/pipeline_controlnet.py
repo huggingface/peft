@@ -20,10 +20,12 @@ import PIL.Image
 import torch
 from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
 from diffusers.pipelines.controlnet.pipeline_controlnet import StableDiffusionControlNetPipeline
-from diffusers.utils import BaseOutput, is_compiled_module, logging
+from diffusers.utils import BaseOutput, logging
+from diffusers.utils.torch_utils import is_compiled_module
 from torch.nn import functional as F
 from utils.light_controlnet import ControlNetModel
 
+from peft.utils import infer_device
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -426,7 +428,10 @@ class LightControlNetPipeline(StableDiffusionControlNetPipeline):
         if hasattr(self, "final_offload_hook") and self.final_offload_hook is not None:
             self.unet.to("cpu")
             self.controlnet.to("cpu")
-            torch.cuda.empty_cache()
+
+            device_type = infer_device()
+            torch_accelerator_module = getattr(torch, device_type, torch.cuda)
+            torch_accelerator_module.empty_cache()
 
         if not output_type == "latent":
             image = self.vae.decode(latents / self.vae.config.scaling_factor, return_dict=False)[0]
