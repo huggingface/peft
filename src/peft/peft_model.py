@@ -41,7 +41,7 @@ from transformers.utils import PushToHubMixin
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils.constants import DUMMY_MODEL_CONFIG
 from peft.utils.integrations import init_empty_weights
-from peft.utils.other import set_additional_trainable_modules
+from peft.utils.other import create_attention_mask, set_additional_trainable_modules
 
 from . import __version__
 from .config import PeftConfig
@@ -739,7 +739,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     dtype=past_key_values[0].dtype,
                     device=past_key_values[0].device,
                 )
-                cache_position = torch.arange(peft_config.num_virtual_tokens)
+                cache_position = torch.arange(peft_config.num_virtual_tokens, device=past_key_values[0].device)
                 for layer_idx in range(peft_config.num_layers):
                     key_states, value_states = past_key_values[0][layer_idx], past_key_values[1][layer_idx]
                     new_cache.update(
@@ -1961,7 +1961,22 @@ class PeftModelForCausalLM(PeftModel):
                     # to   [batch_size, total_sequence_length]
                     bs = attention_mask.shape[0]
                     total_seq_len = prefix_attention_mask.shape[1] + attention_mask.shape[2]
-                    model_kwargs["attention_mask"] = torch.ones((bs, total_seq_len), dtype=attention_mask.dtype)
+                    attention_mask_2d = torch.ones((bs, total_seq_len), dtype=attention_mask.dtype)
+                    if model_kwargs["cache_position"][0] == 0:
+                        # heuristic to determine if we're in prefill stage
+                        cache_position_ = torch.arange(total_seq_len, device=model_kwargs["input_ids"].device)
+                    else:
+                        cache_position_ = model_kwargs["cache_position"]
+                    attention_mask_new = create_attention_mask(
+                        self.get_base_model(),
+                        model_input=None,
+                        attention_mask=attention_mask_2d,
+                        past_key_values=model_kwargs.get("past_key_values"),
+                        cache_position=cache_position_,
+                        batch_size=bs,
+                        sequence_length=total_seq_len,
+                    )
+                    model_kwargs["attention_mask"] = attention_mask_new
                 else:
                     # 2d attention mask
                     model_kwargs["attention_mask"] = torch.cat((prefix_attention_mask, attention_mask), dim=1)
