@@ -49,32 +49,37 @@ This structure ensures consistent comparison while allowing flexibility where ne
 
 ### Default Configuration (`default_benchmark_params.json`)
 
-Contains shared benchmark settings that apply to all experiments:
-```json
-{
-    "model_id": "facebook/opt-350m",
-    "peft_method": "lora",
-    "dtype": "float16",
-    "seed": 42,
-    "max_new_tokens": 20,
-    "num_inference_runs": 10,
-    "train_batch_size": 2,
-    "train_steps": 3,
-    "num_prompt_samples": 1
-}
-```
+Contains shared benchmark settings that apply to all experiments. Here are the key configuration fields:
+
+- `model_id`: The Hugging Face model ID to use as the base model (e.g., "facebook/opt-350m")
+- `peft_method`: The PEFT method to apply (e.g., "lora", "prefix_tuning", etc.)
+- `dtype`: Model precision ("float16", "float32", or "bfloat16")
+- `seed`: Random seed for reproducibility
+- `max_new_tokens`: Maximum number of tokens to generate during inference
+- `num_inference_runs`: Number of inference runs per prompt for statistical reliability
+- `train_batch_size`: Batch size for training
+- `train_steps`: Number of training steps
+- `num_prompt_samples`: Number of prompt samples to use per category (short/medium/long)
+
+Each experiment can override these settings by providing its own `benchmark_params.json` file.
 
 ### Experiment Structure
 
 Each experiment directory should contain:
-- `adapter_config.json` - **Required**: PEFT adapter configuration
-- `benchmark_params.json` - **Optional**: Experiment-specific benchmark overrides
 
-Example experiment directory:
+1. `adapter_config.json`: PEFT adapter configuration. For details on available parameters and their meanings, refer to the [PEFT documentation](https://huggingface.co/docs/peft/main/en/developer_guides/adapters).
+
+2. (Optional) `benchmark_params.json`: Override specific benchmark parameters for this experiment.
+
+Example directory structure:
 ```
-experiments/lora/lora_r8/
-├── adapter_config.json      # LoRA configuration with r=8
-└── benchmark_params.json    # Optional benchmark overrides
+experiments/
+└── lora/
+    ├── lora_r8/                # LoRA rank 8 experiment
+    │   ├── adapter_config.json # PEFT adapter configuration
+    │   └── benchmark_params.json # Optional benchmark overrides
+    └── lora_r16/               # LoRA rank 16 experiment
+        └── adapter_config.json
 ```
 
 ### Experiment-Specific Overrides Example
@@ -138,16 +143,19 @@ Results are saved in a structured JSON format with three main sections:
 - Execution metadata (timestamp, duration, status)
 - Hardware information (GPU type, CUDA version, etc.)
 - Error information (if applicable)
+- PEFT and benchmark configurations
 
 ### `generation_info`
 - Memory usage logs at different stages
 - Per-category metrics (inference time, time per token, etc.)
 - Overall aggregated metrics
+- Individual sample results for detailed analysis
 
 ### `meta_info`
 - Model information (ID, PEFT method)
-- Parameter counts (trainable, total, ratio)
+- Parameter counts (adapter, total, ratio)
 - Model size information (base model, adapter)
+- System and package information
 
 ## Key Metrics
 
@@ -162,8 +170,8 @@ Results are saved in a structured JSON format with three main sections:
 - **Memory Logs**: Detailed tracking at each stage
 
 ### Parameter Efficiency
-- **Trainable Parameters**: Number of parameters being fine-tuned
-- **Parameter Ratio**: Percentage of total parameters being trained
+- **Adapter Parameters**: Number of parameters in the PEFT adapter
+- **Parameter Ratio**: Percentage of total model parameters that are in the adapter
 - **Adapter Size**: Memory footprint of the adapter in MB
 
 ## File Structure
@@ -206,30 +214,3 @@ peft_bench/
    ```bash
    python run.py experiments/lora/lora_r32 --verbose
    ```
-
-## Best Practices
-
-1. **Consistent Comparison**: Use the same base model and benchmark settings across experiments
-2. **Multiple Runs**: The framework automatically runs multiple inference iterations for statistical reliability
-3. **Memory Monitoring**: Results include detailed memory tracking for resource planning
-4. **Prompt Diversity**: All experiments use the same prompt categories for fair comparison
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Import Errors**: Ensure you're running from the correct directory and have the required dependencies
-2. **CUDA Memory**: Adjust `use_4bit` or `use_8bit` in configuration for large models
-3. **Path Issues**: Use absolute paths or run from the peft_bench directory
-
-### Environment Variables
-
-- `DISABLE_FLASH_ATTN=1` - Disable flash attention (set automatically)
-
-## Contributing
-
-When adding new features:
-1. Follow the existing code structure
-2. Add appropriate type hints
-3. Update this README if adding new functionality
-4. Run `make style` to ensure code formatting 
