@@ -115,7 +115,9 @@ class RandLoraModel(BaseTuner):
         peft_config = self._prepare_adapter_config(config, model_config)
         peft_config = _maybe_include_all_linear_layers(peft_config, self.model)
 
-        largest_shape = None
+        # Cache module shapes for efficiency
+        module_shapes = {}
+
         for key, module in self.model.named_modules():
             if not self._check_target_module_exists(peft_config, key):
                 continue
@@ -128,18 +130,20 @@ class RandLoraModel(BaseTuner):
             else:
                 continue
 
-            if largest_shape is None:
-                largest_shape = module_shape
-                continue
+            module_shapes[key] = module_shape
 
-            if module_shape != largest_shape:
-                largest_shape = tuple(max(a, b) for a, b in zip(largest_shape, module_shape))
-
-        if largest_shape is None:
+        if not module_shapes:
             msg = "No layers types compatible with RandLora were found. Please check `peft_config.target_modules`."
             raise ValueError(msg)
 
-        return largest_shape
+        # Find the largest input and output dimensions separately
+        max_out_dim = 0
+        max_in_dim = 0
+        for out_dim, in_dim in module_shapes.values():
+            max_out_dim = max(max_out_dim, out_dim)
+            max_in_dim = max(max_in_dim, in_dim)
+
+        return max_out_dim, max_in_dim
 
     def _init_randlora_A_randlora_B_sparse(self, config: RandLoraConfig, adapter_name: str, sparsity: int = 3) -> None:
         """
@@ -438,7 +442,7 @@ class RandLoraModel(BaseTuner):
             if inference:
                 config["inference_mode"] = True
         config_dict[key] = config
-        return config
+        return config_dict
 
     def _set_adapter_layers(self, enabled=True):
         for module in self.model.modules():
