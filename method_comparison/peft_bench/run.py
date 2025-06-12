@@ -195,10 +195,13 @@ def run_benchmark(
         ram, gpu_allocated, gpu_reserved = get_memory_usage()
         result.add_memory_log("base_model_loaded", ram, gpu_allocated, gpu_reserved)
 
-        # Prepare prompts for benchmarking
+        # Prepare benchmark prompts
         print_fn("Preparing benchmark prompts...")
         prompts = prepare_benchmark_prompts(
-            config=benchmark_config.to_dict(), tokenizer=tokenizer, num_samples=benchmark_config.num_prompt_samples
+            config=benchmark_config.to_dict(),
+            tokenizer=tokenizer,
+            max_input_length=None,
+            seed=benchmark_config.seed,
         )
 
         # Measure base model inference for each prompt category

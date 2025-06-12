@@ -1,8 +1,9 @@
 {
-    "model_id": "facebook/opt-350m",
+    "model_id": "meta-llama/Llama-3.2-3B",
     "peft_method": "lora",
     "dtype": "float16",
     "seed": 42,
+    "num_inference_runs": 10,
     "max_new_tokens": 20,
-    "num_inference_runs": 10
+    "reserve_output_tokens": 50
 }

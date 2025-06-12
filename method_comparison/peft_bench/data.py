@@ -85,7 +85,6 @@ def prepare_benchmark_prompts(
     config: dict,
     tokenizer: PreTrainedTokenizer,
     max_input_length: Optional[int] = None,
-    num_samples: int = 5,
     seed: int = 42,
 ) -> dict[str, list[str]]:
     """
@@ -96,7 +95,6 @@ def prepare_benchmark_prompts(
         config: Benchmark configuration
         tokenizer: Model tokenizer
         max_input_length: Maximum input length (overrides model default if provided)
-        num_samples: Number of prompts to use from each category
         seed: Random seed (kept for backwards compatibility)
 
     Returns:
@@ -108,10 +106,7 @@ def prepare_benchmark_prompts(
     # Process each category - always include all categories for consistent benchmarking
     processed_prompts = {}
     for category, prompts in all_prompts.items():
-        # Take the first num_samples prompts
-        selected_prompts = prompts[:num_samples] if len(prompts) > num_samples else prompts
-
-        # Truncate prompts if needed
+        # Use all prompts for each category
         truncated_prompts = [
             truncate_prompt_for_model(
                 prompt,
@@ -119,7 +114,7 @@ def prepare_benchmark_prompts(
                 max_length=max_input_length,
                 reserve_output_tokens=config.get("reserve_output_tokens", 50),
             )
-            for prompt in selected_prompts
+            for prompt in prompts
         ]
 
         processed_prompts[category] = truncated_prompts
