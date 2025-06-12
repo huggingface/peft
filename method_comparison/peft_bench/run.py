@@ -38,62 +38,73 @@ from utils import (
 )
 
 from peft import PeftConfig, get_peft_model
+import transformers
+import peft
+import datasets
+import bitsandbytes
 
 
 def measure_inference_time(model, tokenizer, prompts, max_new_tokens, num_runs, print_fn):
-    """Measure inference time across different prompt categories."""
+    """Measure inference time for each prompt category."""
     inference_times = {}
     time_per_token = {}
     generated_tokens = {}
+    individual_samples = {}
 
-    for category, prompt_list in prompts.items():
-        if not prompt_list:
-            continue
-
+    for category, category_prompts in prompts.items():
+        print_fn(f"\nMeasuring inference time for {category} prompts...")
         category_times = []
         category_tokens = []
         category_time_per_token = []
+        category_samples = []
 
-        # Measure each prompt in the category
-        for prompt in prompt_list:
-            # Prepare input
-            inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-
-            # Warmup run
-            with torch.inference_mode():
-                _ = model.generate(**inputs, max_new_tokens=max_new_tokens)
-
-            # Measurement runs
+        for prompt in category_prompts:
             prompt_times = []
             prompt_tokens = []
             prompt_time_per_token = []
-            for i in range(num_runs):
-                torch.cuda.synchronize() if torch.cuda.is_available() else None
+
+            for _ in range(num_runs):
+                # Prepare input
+                inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+
+                # Measure inference time
                 start_time = time.perf_counter()
-
-                with torch.inference_mode():
-                    output = model.generate(**inputs, max_new_tokens=max_new_tokens)
-
-                torch.cuda.synchronize() if torch.cuda.is_available() else None
+                outputs = model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens,
+                    pad_token_id=tokenizer.pad_token_id,
+                )
                 end_time = time.perf_counter()
 
-                # Calculate tokens generated (output minus input)
-                num_tokens_generated = output.shape[1] - inputs.input_ids.shape[1]
+                # Calculate metrics
                 inference_time = end_time - start_time
+                num_tokens = len(outputs[0]) - len(inputs["input_ids"][0])
+                time_per_token_val = inference_time / num_tokens if num_tokens > 0 else 0
 
-                prompt_tokens.append(num_tokens_generated)
                 prompt_times.append(inference_time)
+                prompt_tokens.append(num_tokens)
+                prompt_time_per_token.append(time_per_token_val)
 
-                # Calculate time per token for this specific run
-                if num_tokens_generated > 0:
-                    prompt_time_per_token.append(inference_time / num_tokens_generated)
-                else:
-                    prompt_time_per_token.append(0.0)
-
-            # Average for this specific prompt
+            # Calculate averages for this prompt
             avg_time = sum(prompt_times) / len(prompt_times)
             avg_tokens = sum(prompt_tokens) / len(prompt_tokens)
             avg_time_per_token = sum(prompt_time_per_token) / len(prompt_time_per_token)
+
+            # Store individual sample results
+            sample_result = {
+                "inference_time": avg_time,
+                "generated_tokens": avg_tokens,
+                "time_per_token": avg_time_per_token,
+                "individual_runs": [
+                    {
+                        "inference_time": t,
+                        "generated_tokens": tok,
+                        "time_per_token": tpt
+                    }
+                    for t, tok, tpt in zip(prompt_times, prompt_tokens, prompt_time_per_token)
+                ]
+            }
+            category_samples.append(sample_result)
 
             category_times.append(avg_time)
             category_tokens.append(avg_tokens)
@@ -108,8 +119,14 @@ def measure_inference_time(model, tokenizer, prompts, max_new_tokens, num_runs, 
             inference_times[category] = avg_category_time
             generated_tokens[category] = avg_category_tokens
             time_per_token[category] = avg_category_time_per_token
+            individual_samples[category] = category_samples
 
-    return {"inference_times": inference_times, "time_per_token": time_per_token, "generated_tokens": generated_tokens}
+    return {
+        "inference_times": inference_times,
+        "time_per_token": time_per_token,
+        "generated_tokens": generated_tokens,
+        "individual_samples": individual_samples
+    }
 
 
 def run_benchmark(
@@ -224,18 +241,30 @@ def run_benchmark(
         # Calculate PEFT model metrics
         trainable_params = model.get_nb_trainable_parameters()[0]
         total_params = sum(p.numel() for p in model.parameters())
+        base_params = sum(p.numel() for p in model.base_model.parameters())
         dtype_bytes = 2 if benchmark_config.dtype in ["float16", "bfloat16"] else 4
         adapter_size_mb = trainable_params * dtype_bytes / (1024 * 1024)
+        base_model_size_mb = base_params * dtype_bytes / (1024 * 1024)
         param_ratio = trainable_params / total_params if total_params > 0 else 0
 
         # Update result with parameter information
         result.update_meta_info(
             param_counts={
+                "base_params": base_params,
                 "trainable_params": trainable_params,
                 "total_params": total_params,
                 "param_ratio": param_ratio,
             },
-            size_info={"adapter_size_mb": adapter_size_mb},
+            size_info={
+                "base_model_size_mb": base_model_size_mb,
+                "adapter_size_mb": adapter_size_mb
+            },
+            package_info={
+                "transformers-version": transformers.__version__,
+                "peft-version": peft.__version__,
+                "datasets-version": datasets.__version__ if hasattr(datasets, "__version__") else None,
+                "bitsandbytes-version": bitsandbytes.__version__ if hasattr(bitsandbytes, "__version__") else None,
+            }
         )
 
         # Measure PEFT model inference
@@ -266,20 +295,23 @@ def run_benchmark(
                 "time_per_token": peft_inference_times["time_per_token"][category],
                 "generated_tokens": peft_inference_times["generated_tokens"][category],
             }
-            result.add_metrics_for_category(category, category_metrics)
+            result.add_metrics_for_category(
+                category,
+                category_metrics,
+                individual_samples=peft_inference_times["individual_samples"][category]
+            )
 
         # Update generation_info with peak memory usage
-        # Note: Detailed inference times and overheads are now part of by_category metrics
         result.update_generation_info(
             memory_data={
                 "peak_gpu_memory_mb": max(
-                    log["gpu_allocated_mb"] for log in result.generation_info["memory"]["memory_logs"]
-                )
-                if result.generation_info["memory"]["memory_logs"]
-                else 0,
-                "peak_ram_memory_mb": max(log["ram_mb"] for log in result.generation_info["memory"]["memory_logs"])
-                if result.generation_info["memory"]["memory_logs"]
-                else 0,
+                    (log["gpu_allocated_mb"] for log in result.generation_info["memory"]["memory_logs"]),
+                    default=0
+                ),
+                "peak_ram_memory_mb": max(
+                    (log["ram_mb"] for log in result.generation_info["memory"]["memory_logs"]),
+                    default=0
+                ),
             }
         )
 
@@ -298,7 +330,20 @@ def run_benchmark(
     # Record duration and update final status, including error if any
     end_time = time.perf_counter()
     error_message = str(e_main_benchmark) if e_main_benchmark is not None else None
-    result.update_run_info(duration=end_time - start_time, status=result.status, error=error_message)
+    
+    # Convert PEFT config to dict for storage
+    peft_config_dict = peft_config.to_dict() if 'peft_config' in locals() else None
+    for key, value in peft_config_dict.items() if peft_config_dict else {}:
+        if isinstance(value, set):
+            peft_config_dict[key] = list(value)
+    
+    result.update_run_info(
+        duration=end_time - start_time,
+        status=result.status,
+        error=error_message,
+        peft_config=peft_config_dict,
+        benchmark_config=benchmark_config.to_dict()
+    )
 
     return result
 
