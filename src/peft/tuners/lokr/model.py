@@ -20,7 +20,7 @@ from torch import nn
 from peft.tuners.lycoris_utils import LycorisConfig, LycorisTuner
 from peft.utils.other import get_pattern_key
 
-from .layer import Conv2d, Linear, LoKrLayer
+from .layer import Conv1d, Conv2d, Linear, LoKrLayer
 
 
 class LoKrModel(LycorisTuner):
@@ -85,6 +85,7 @@ class LoKrModel(LycorisTuner):
     prefix: str = "lokr_"
     layers_mapping: dict[type[torch.nn.Module], type[LoKrLayer]] = {
         torch.nn.Conv2d: Conv2d,
+        torch.nn.Conv1d: Conv1d,
         torch.nn.Linear: Linear,
     }
 
