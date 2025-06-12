@@ -25,6 +25,7 @@ from typing import Any, Callable, Optional
 
 import psutil
 import torch
+import platform
 
 
 # Constants
@@ -79,7 +80,7 @@ class BenchmarkResult:
             },
         }
 
-        # Default meta_info
+        # Default meta_info with enhanced system information
         self.meta_info = {
             "model_id": self.model_id,
             "peft_method": self.peft_method,
@@ -93,6 +94,26 @@ class BenchmarkResult:
                 "base_model_size_mb": 0.0,
                 "adapter_size_mb": 0.0,
             },
+            "package_info": {
+                "transformers-version": None,
+                "transformers-commit-hash": None,
+                "peft-version": None,
+                "peft-commit-hash": None,
+                "datasets-version": None,
+                "datasets-commit-hash": None,
+                "bitsandbytes-version": None,
+                "bitsandbytes-commit-hash": None,
+                "torch-version": torch.__version__,
+                "torch-commit-hash": None,
+            },
+            "system_info": {
+                "system": platform.system(),
+                "release": platform.release(),
+                "version": platform.version(),
+                "machine": platform.machine(),
+                "processor": platform.processor(),
+                "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "N/A",
+            },
         }
 
         self.generation_info = {
@@ -103,13 +124,14 @@ class BenchmarkResult:
             },
             "by_category": {},  # Will hold metrics for each prompt category (e.g., inference_time, overhead_pct)
             "overall": {},  # Overall metrics across all categories
-            # training_throughput can be removed or renamed if not relevant, e.g. tokens_per_second
         }
 
-    def update_meta_info(self, param_counts: dict, size_info: dict):
+    def update_meta_info(self, param_counts: dict, size_info: dict, package_info: Optional[dict] = None):
         """Update model metadata information."""
         self.meta_info["parameters"].update(param_counts)
         self.meta_info["model_size"].update(size_info)
+        if package_info:
+            self.meta_info["package_info"].update(package_info)
 
     def update_generation_info(self, memory_data: dict = None, performance_metrics: dict = None):
         """Update generation performance information, primarily for memory and high-level performance."""
@@ -129,16 +151,24 @@ class BenchmarkResult:
             }
         )
 
-    def add_metrics_for_category(self, category: str, metrics: dict):
+    def add_metrics_for_category(self, category: str, metrics: dict, individual_samples: list = None):
         """Add metrics for a specific prompt category under generation_info."""
-        self.generation_info["by_category"][category] = metrics
+        category_data = {
+            "metrics": metrics,
+            "samples": individual_samples if individual_samples is not None else []
+        }
+        self.generation_info["by_category"][category] = category_data
 
-    def update_run_info(self, duration: float, status: BenchmarkStatus, error: Optional[str] = None):
+    def update_run_info(self, duration: float, status: BenchmarkStatus, error: Optional[str] = None, peft_config: Optional[dict] = None, benchmark_config: Optional[dict] = None):
         """Update run information."""
         self.run_info["duration"] = duration
         self.run_info["status"] = status.value
         if error:
             self.run_info["error"] = error
+        if peft_config:
+            self.run_info["peft_config"] = peft_config
+        if benchmark_config:
+            self.run_info["benchmark_config"] = benchmark_config
 
     def compute_overall_metrics(self):
         """Compute overall metrics across all categories within generation_info."""
@@ -210,8 +240,6 @@ class BenchmarkConfig:
     seed: int
     num_inference_runs: int
     max_new_tokens: int
-    train_batch_size: int
-    train_steps: int
 
     # Data settings
     num_prompt_samples: int
@@ -236,11 +264,8 @@ class BenchmarkConfig:
         if self.max_new_tokens <= 0:
             raise ValueError(f"Invalid max_new_tokens: {self.max_new_tokens}")
 
-        if self.train_batch_size <= 0:
-            raise ValueError(f"Invalid train_batch_size: {self.train_batch_size}")
-
-        if self.train_steps <= 0:
-            raise ValueError(f"Invalid train_steps: {self.train_steps}")
+        if self.num_prompt_samples <= 0:
+            raise ValueError(f"Invalid num_prompt_samples: {self.num_prompt_samples}")
 
     @classmethod
     def from_dict(cls, config_dict: dict) -> "BenchmarkConfig":
@@ -389,13 +414,20 @@ def log_results(
 
     print_fn("\nDetailed Metrics (from generation_info.by_category):")
     if benchmark_result.generation_info.get("by_category"):
-        for category, cat_metrics in benchmark_result.generation_info["by_category"].items():
+        for category, cat_data in benchmark_result.generation_info["by_category"].items():
             print_fn(f"  Category: {category}")
-            print_fn(f"    Inference Time: {cat_metrics.get('inference_time', 0):.4f} seconds")
-            print_fn(f"    Base Inference Time: {cat_metrics.get('base_inference_time', 0):.4f} seconds")
-            print_fn(f"    Inference Overhead: {cat_metrics.get('inference_overhead_pct', 0):.2f}%")
-            print_fn(f"    Time Per Token: {cat_metrics.get('time_per_token', 0):.6f} seconds/token")
-            print_fn(f"    Generated Tokens: {cat_metrics.get('generated_tokens', 0):.1f}")
+            metrics = cat_data.get("metrics", {})
+            print_fn(f"    Inference Time: {metrics.get('inference_time', 0):.4f} seconds")
+            print_fn(f"    Base Inference Time: {metrics.get('base_inference_time', 0):.4f} seconds")
+            print_fn(f"    Inference Overhead: {metrics.get('inference_overhead_pct', 0):.2f}%")
+            print_fn(f"    Time Per Token: {metrics.get('time_per_token', 0):.6f} seconds/token")
+            print_fn(f"    Generated Tokens: {metrics.get('generated_tokens', 0):.1f}")
+            
+            # Print sample statistics if available
+            samples = cat_data.get("samples", [])
+            if samples:
+                print_fn(f"    Number of Samples: {len(samples)}")
+                print_fn(f"    Average Generated Tokens: {sum(s.get('generated_tokens', 0) for s in samples) / len(samples):.1f}")
     else:
         print_fn("  No per-category metrics available.")
 
