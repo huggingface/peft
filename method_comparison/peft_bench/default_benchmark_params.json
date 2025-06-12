@@ -5,7 +5,5 @@
     "seed": 42,
     "max_new_tokens": 20,
     "num_inference_runs": 10,
-    "train_batch_size": 2,
-    "train_steps": 3,
     "num_prompt_samples": 1
 }
