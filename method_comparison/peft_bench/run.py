@@ -330,13 +330,13 @@ def run_benchmark(
     # Record duration and update final status, including error if any
     end_time = time.perf_counter()
     error_message = str(e_main_benchmark) if e_main_benchmark is not None else None
-    
+
     # Convert PEFT config to dict for storage
     peft_config_dict = peft_config.to_dict() if 'peft_config' in locals() else None
     for key, value in peft_config_dict.items() if peft_config_dict else {}:
         if isinstance(value, set):
             peft_config_dict[key] = list(value)
-    
+
     result.update_run_info(
         duration=end_time - start_time,
         status=result.status,
@@ -348,7 +348,7 @@ def run_benchmark(
     return result
 
 
-def main():
+def main()-> None:
     """Main entry point for the benchmark runner."""
     parser = argparse.ArgumentParser(description="Run PEFT method benchmarks")
     parser.add_argument("experiment_path", help="Path to experiment directory")
@@ -386,7 +386,7 @@ def main():
     # Log and save results
     log_results(experiment_name, result, print_fn=print)
 
-    return 0
+    return
 
 
 if __name__ == "__main__":

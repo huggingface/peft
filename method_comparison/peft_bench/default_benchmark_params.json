@@ -4,6 +4,5 @@
     "dtype": "float16",
     "seed": 42,
     "max_new_tokens": 20,
-    "num_inference_runs": 10,
-    "num_prompt_samples": 1
+    "num_inference_runs": 10
 }

@@ -241,14 +241,11 @@ class BenchmarkConfig:
     num_inference_runs: int
     max_new_tokens: int
 
-    # Data settings
-    num_prompt_samples: int
-    reserve_output_tokens: int = 50
-
     # Optional settings with defaults
     dtype: str = "float16"
     use_4bit: bool = False
     use_8bit: bool = False
+    reserve_output_tokens: int = 50
 
     def __post_init__(self) -> None:
         """Validate configuration."""
@@ -263,9 +260,6 @@ class BenchmarkConfig:
 
         if self.max_new_tokens <= 0:
             raise ValueError(f"Invalid max_new_tokens: {self.max_new_tokens}")
-
-        if self.num_prompt_samples <= 0:
-            raise ValueError(f"Invalid num_prompt_samples: {self.num_prompt_samples}")
 
     @classmethod
     def from_dict(cls, config_dict: dict) -> "BenchmarkConfig":
@@ -422,7 +416,7 @@ def log_results(
             print_fn(f"    Inference Overhead: {metrics.get('inference_overhead_pct', 0):.2f}%")
             print_fn(f"    Time Per Token: {metrics.get('time_per_token', 0):.6f} seconds/token")
             print_fn(f"    Generated Tokens: {metrics.get('generated_tokens', 0):.1f}")
-            
+
             # Print sample statistics if available
             samples = cat_data.get("samples", [])
             if samples:
