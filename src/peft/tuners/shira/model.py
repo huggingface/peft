@@ -67,12 +67,6 @@ class ShiraModel(BaseTuner):
         Raise a ValueError if there is something wrong with the config or if it conflicts with existing adapters.
 
         """
-        if (len(self.peft_config) > 1) and (config.bias != "none"):
-            raise ValueError(
-                f"{self.__class__.__name__} supports only 1 adapter with bias. When using multiple adapters, "
-                "set bias to 'none' for all adapters."
-            )
-
         for existing_config in self.peft_config.values():
             if existing_config is config:
                 # skip the current config
