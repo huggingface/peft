@@ -187,7 +187,7 @@ class QALoraLinearVariant(LoraVariant):
         lora_B_weight = lora_B_layer.weight
 
         dropout = module.lora_dropout[active_adapter]
-        lora_scaling_coefficient = module.scaling[active_adapter] # This is the LoRA scaling (alpha/r)
+        lora_scaling_coefficient = module.scaling[active_adapter]  # This is the LoRA scaling (alpha/r)
 
         group_size = module.qalora_group_size[active_adapter]
         # paper_scaling_factor is now calculated on-demand
@@ -199,49 +199,40 @@ class QALoraLinearVariant(LoraVariant):
 
         x_2d = x_dropped.reshape(-1, in_features) if len(orig_shape) > 2 else x_dropped
 
-        if module.in_features is not None and module.in_features % group_size == 0: # Use module.in_features for consistency with init
-            pooled_dim = module.in_features // group_size
+        pooled_dim = module.in_features // group_size
 
-            # 1. Group and pool the input x_2d
-            # Ensure x_2d's in_features matches module.in_features for this path
-            if x_2d.shape[-1] != module.in_features:
-                # This case should ideally not happen if input x matches layer's expected in_features
-                # Or, if dynamic in_features is truly supported, then pooling should adapt.
-                # For now, let's assume x_2d.shape[-1] is the correct in_features for this specific forward pass.
-                # If module.in_features is the strict definition, then an error or warning might be needed.
-                # Re-evaluate if in_features for pooling should be x_2d.shape[-1] or module.in_features
-                # Sticking to module.in_features as it's used for the divisibility check.
-                pass # Assuming x_2d.shape[-1] == module.in_features for this QALoRA path
+        # 1. Group and pool the input x_2d
+        # Add a channel dimension: (N_samples, 1, module.in_features)
+        x_for_pooling = x_2d.unsqueeze(1)
 
-            x_grouped = x_2d.reshape(x_2d.shape[0], pooled_dim, group_size)
-            x_pooled = x_grouped.mean(dim=-1)
+        # kernel_size is the size of the pooling window (our group_size)
+        # stride is the step size of the window (also group_size for non-overlapping pooling)
+        x_pooled_avgpool = torch.nn.functional.avg_pool1d(x_for_pooling, kernel_size=group_size, stride=group_size)
 
-            # Calculate paper_scaling_factor on-demand
-            paper_scaling_factor = module.in_features / group_size
+        # Remove the channel dimension again to obtain (N_samples, pooled_dim)
+        x_pooled = x_pooled_avgpool.squeeze(1)
 
-            # 2. Apply QALoRA specific scaling
-            x_pooled_scaled = x_pooled * paper_scaling_factor
+        # Entferne die Channel-Dimension wieder, um (N_samples, pooled_dim) zu erhalten
+        x_pooled = x_pooled_avgpool.squeeze(1)
 
-            lora_A_weight_reshaped = lora_A_weight.reshape(lora_A_weight.shape[0], pooled_dim, group_size)
-            lora_A_pooled_weight = lora_A_weight_reshaped.mean(dim=2)
+        # Calculate paper_scaling_factor on-demand
+        paper_scaling_factor = module.in_features / group_size
 
-            intermediate = x_pooled_scaled @ lora_A_pooled_weight.t()
-            delta = intermediate @ lora_B_weight.t()
-            delta = delta * lora_scaling_coefficient # Apply LoRA scaling (alpha/r)
-        else:
-            # Standard LoRA path
-            if isinstance(lora_A_layer, nn.Linear) and isinstance(lora_B_layer, nn.Linear):
-                intermediate = lora_A_layer(x_2d)
-                delta = lora_B_layer(intermediate) * lora_scaling_coefficient
-            else:
-                # Fallback for non-nn.Linear LoRA layers (e.g., if weights are directly manipulated)
-                intermediate = x_2d @ lora_A_weight.t()
-                delta = intermediate @ lora_B_weight.t() * lora_scaling_coefficient
+        # 2. Apply QALoRA specific scaling
+        x_pooled_scaled = x_pooled * paper_scaling_factor
+
+        lora_A_weight_reshaped = lora_A_weight.reshape(lora_A_weight.shape[0], pooled_dim, group_size)
+        lora_A_pooled_weight = lora_A_weight_reshaped.mean(dim=2)
+
+        intermediate = x_pooled_scaled @ lora_A_pooled_weight.t()
+        delta = intermediate @ lora_B_weight.t()
+        delta = delta * lora_scaling_coefficient  # Apply LoRA scaling (alpha/r)
 
         if len(orig_shape) > 2:
             delta = delta.reshape(orig_shape[:-1] + (delta.shape[-1],))
 
         return result + delta
+
 
 class DoraEmbeddingVariant(DoraLinearVariant):
     @staticmethod

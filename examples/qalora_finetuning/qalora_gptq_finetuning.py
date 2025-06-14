@@ -21,62 +21,6 @@ from transformers import (
 from peft import LoraConfig, get_peft_model
 
 
-def check_adapter_gradients(model) -> None:
-    """
-    Verify that QALoRA adapters are properly initialized with correct gradient settings.
-    Checks if adapter parameters are trainable while base model weights are frozen.
-
-    Args:
-        model: The PEFT model with QALoRA adapters
-    """
-    print("\n=== QALoRA Implementation Verification ===")
-
-    total_params = 0
-    trainable_params = 0
-    qalora_modules = 0
-
-    # Check trainable parameters
-    for name, param in model.named_parameters():
-        total_params += param.numel()
-        if param.requires_grad:
-            trainable_params += param.numel()
-
-    # Check for QALoRA modules
-    for name, module in model.named_modules():
-        if hasattr(module, "qalora_group_size"):
-            qalora_modules += 1
-            adapter_name = next(iter(module.qalora_group_size.keys()), None)
-            if adapter_name:
-                print(f"\nQALoRA module found: {name}")
-                print(f"  - Group size: {module.qalora_group_size[adapter_name]}")
-
-                # Check adapter matrices
-                if hasattr(module, "lora_A") and adapter_name in module.lora_A:
-                    a_shape = module.lora_A[adapter_name].weight.shape
-                    a_grad = module.lora_A[adapter_name].weight.requires_grad
-                    print(f"  - lora_A shape: {a_shape}, requires_grad: {a_grad}")
-
-                if hasattr(module, "lora_B") and adapter_name in module.lora_B:
-                    b_shape = module.lora_B[adapter_name].weight.shape
-                    b_grad = module.lora_B[adapter_name].weight.requires_grad
-                    print(f"  - lora_B shape: {b_shape}, requires_grad: {b_grad}")
-
-                # Check base weights
-                if hasattr(module, "weight"):
-                    base_grad = module.weight.requires_grad
-                    print(f"  - Base weight requires_grad: {base_grad} (should be False)")
-
-    # Print summary
-    print("\nParameter summary:")
-    print(f"  - Total parameters: {total_params:,}")
-    print(f"  - Trainable parameters: {trainable_params:,} ({trainable_params / total_params * 100:.2f}%)")
-    print(f"  - QALoRA modules found: {qalora_modules}")
-
-    if qalora_modules > 0 and trainable_params > 0:
-        print("✅ QALoRA implementation verification: PASSED")
-    else:
-        print("❌ QALoRA implementation verification: FAILED")
-
 
 def print_parameter_memory(model, optimizer_name: str = "adam") -> None:
     """
@@ -99,7 +43,7 @@ def print_parameter_memory(model, optimizer_name: str = "adam") -> None:
         opt_size = 0
 
         if param.requires_grad:
-            if optimizer_name.lower() == "adam":
+            if optimizer_name.lower() in ["adam", "adamw"]:
                 opt_size = param_size * 2  # Adam keeps 2 extra states (m, v)
             elif optimizer_name.lower() == "sgd":
                 opt_size = param_size  # SGD with momentum keeps 1 extra state
@@ -130,6 +74,7 @@ def load_or_quantize_model(
 ) -> AutoModelForCausalLM:
     """
     Load a pre-quantized model from cache or quantize and cache a new one.
+    Automatically detects if the model is already GPTQ-quantized.
 
     Args:
         base_model: Model identifier or path
@@ -140,16 +85,49 @@ def load_or_quantize_model(
     Returns:
         The loaded (quantized) model
     """
+    # First, check if the model is already GPTQ-quantized by trying to load it
+    print(f"Checking if {base_model} is already GPTQ-quantized...")
+    try:
+        # Try to load the model and check if it has GPTQ quantization
+        test_model = AutoModelForCausalLM.from_pretrained(
+            base_model,
+            device_map="auto",
+            torch_dtype=torch.float16,
+            trust_remote_code=True,  # Some GPTQ models might need this
+        )
+
+        # Check if the model has GPTQ quantization attributes
+        has_gptq = False
+        for module in test_model.modules():
+            if hasattr(module, "qweight") or hasattr(module, "qzeros") or "gptq" in str(type(module)).lower():
+                has_gptq = True
+                break
+
+        if has_gptq:
+            print(f"✅ Model {base_model} is already GPTQ-quantized. Using directly.")
+            return test_model
+        else:
+            print(f"Model {base_model} is not GPTQ-quantized. Will quantize it.")
+            # Clean up the test model to free memory
+            del test_model
+            torch.cuda.empty_cache() if torch.cuda.is_available() else None
+
+    except Exception as e:
+        print(f"Could not load model {base_model} directly: {e}")
+        print("Will attempt to quantize it...")
+
+    # If we get here, the model needs to be quantized
     os.makedirs(cache_dir, exist_ok=True)
-    model_id = base_model.replace("/", "_")
+    model_id = base_model.replace("/", "_").replace("\\", "_")  # Handle Windows paths too
     quantized_model_path = os.path.join(cache_dir, f"{model_id}_gptq_{bits}bit")
 
-    # Check if the quantized model already exists in cache
+    # Check if we already have a cached quantized version
     if os.path.exists(quantized_model_path) and os.path.exists(os.path.join(quantized_model_path, "config.json")):
         print(f"Loading pre-quantized model from cache: {quantized_model_path}")
         return AutoModelForCausalLM.from_pretrained(quantized_model_path, device_map="auto")
 
     print(f"Quantizing model and saving to cache: {quantized_model_path}")
+
     # Configure GPTQ for first-time quantization
     gptq_config = GPTQConfig(
         bits=bits,
@@ -161,7 +139,9 @@ def load_or_quantize_model(
     )
 
     # Load and quantize the model
-    model = AutoModelForCausalLM.from_pretrained(base_model, device_map="auto", quantization_config=gptq_config)
+    model = AutoModelForCausalLM.from_pretrained(
+        base_model, device_map="auto", quantization_config=gptq_config, torch_dtype=torch.float16
+    )
 
     # Save the quantized model to cache
     print(f"Saving quantized model to {quantized_model_path}")
@@ -215,6 +195,8 @@ def train_model(
     lora_target_modules: str,
     hub_model_id: str,
     push_to_hub: bool,
+    qalora_group_size: int,
+    bits: int,
 ) -> None:
     """
     Train a model with QALoRA and GPTQ quantization.
@@ -252,7 +234,7 @@ def train_model(
         tokenizer.pad_token = tokenizer.eos_token
 
     # Load or quantize model
-    model = load_or_quantize_model(base_model, tokenizer)
+    model = load_or_quantize_model(base_model, tokenizer, bits=bits)
 
     # Configure LoRA
     target_modules = (
@@ -266,7 +248,7 @@ def train_model(
         task_type="CAUSAL_LM",
         use_dora=use_dora,
         use_qalora=use_qalora,
-        qalora_group_size=8,  # Explicitly set group size for QALoRA
+        qalora_group_size=qalora_group_size,  # Explicitly set group size for QALoRA
         r=lora_r,
         lora_alpha=lora_alpha,
         target_modules=target_modules,
@@ -276,10 +258,8 @@ def train_model(
 
     # Get PEFT model with adapters
     model = get_peft_model(model, lora_config)
-    model.save_pretrained(output_dir)
 
     model.print_trainable_parameters()
-    check_adapter_gradients(model)
 
     # Move model to device if not already there
     if device.type != "cuda" or not hasattr(model, "device") or model.device.type != "cuda":
@@ -359,11 +339,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fine-tune LLMs with QALoRA and GPTQ quantization")
 
     # Model and dataset parameters
-    parser.add_argument("--base_model", type=str, default="HuggingFaceTB/SmolLM2-135M", help="Base model path or name")
+    parser.add_argument("--base_model", type=str, default="TheBloke/Llama-2-7b-GPTQ", help="Base model path or name")
     parser.add_argument("--data_path", type=str, default="wikitext", help="Dataset path or name")
     parser.add_argument(
         "--output_dir", type=str, default="./qalora_output", help="Output directory for the fine-tuned model"
     )
+    parser.add_argument("--bits", type=int, default=4, help="Init quantization bits")
 
     # Training parameters
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size")
@@ -375,6 +356,7 @@ if __name__ == "__main__":
     # Adapter configuration
     parser.add_argument("--use_dora", action="store_true", help="Apply DoRA")
     parser.add_argument("--use_qalora", action="store_true", help="Apply QALoRA")
+    parser.add_argument("--qalora_group_size", type=int, default=32, help="LoRA rank")
     parser.add_argument("--quantize", action="store_true", help="Use GPTQ quantization")
     parser.add_argument("--lora_r", type=int, default=8, help="LoRA rank")
     parser.add_argument("--lora_alpha", type=int, default=16, help="LoRA alpha")
@@ -419,4 +401,6 @@ if __name__ == "__main__":
         lora_target_modules=args.lora_target_modules,
         hub_model_id=args.hub_model_id,
         push_to_hub=args.push_to_hub,
+        qalora_group_size=args.qalora_group_size,
+        bits=args.bits,
     )

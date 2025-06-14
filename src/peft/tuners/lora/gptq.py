@@ -63,7 +63,7 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
 
     def resolve_lora_variant(self, *, use_dora: bool, use_qalora: bool, **kwargs) -> Optional[LoraVariant]:
         if use_dora and use_qalora:
-            NotImplementedError
+            raise NotImplementedError(f"Dora and QA_lora at the same time is not supported for {self.__class__.__name__} (yet).")
         elif use_dora:
             from .variants import DoraLinearVariant
             variant = DoraLinearVariant()

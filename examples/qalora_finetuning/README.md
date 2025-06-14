@@ -125,7 +125,7 @@ outputs = model.generate(**inputs, max_length=100)
 print(tokenizer.decode(outputs[0], skip_special_tokens=True))
 ```
 
-## QALoRA vs. LoRA vs. DoRA
+## QALoRA vs. LoRA
 
 QALoRA offers several advantages over standard LoRA:
 
@@ -134,11 +134,6 @@ QALoRA offers several advantages over standard LoRA:
 2. **Hardware accessibility**: Enables fine-tuning of larger models (13B, 70B) on consumer GPUs that would be impossible with standard LoRA.
 
 3. **Performance preservation**: Despite quantization, QALoRA can achieve comparable performance to full-precision LoRA in many tasks.
-
-Compared to DoRA:
-- DoRA focuses on improved expressivity through weight decomposition
-- QALoRA focuses on memory efficiency through quantization awareness
-- Both can be used with quantized models, but QALoRA is specifically designed for this use case
 
 
 ## Implementation Details: Merging with Quantized Models
