@@ -130,6 +130,110 @@ class DoraLinearVariant(LoraVariant):
         return result
 
 
+class QALoraLinearVariant(LoraVariant):
+    @staticmethod
+    def init(module: Linear, adapter_name: str, **kwargs: Any) -> None:
+        """
+        Initializes QALoRA specific parameters for a given adapter.
+
+        Args:
+            module (Linear): The linear module to be adapted.
+            adapter_name (str): The name of the adapter.
+            **kwargs: Additional keyword arguments.
+                qalora_group_size (int): The size of groups for pooling. This is expected to be passed.
+        """
+        if "qalora_group_size" not in kwargs:
+            raise ValueError(
+                "QALoraLinearVariant.init expects 'qalora_group_size' to be provided in kwargs."
+                " Please ensure it is passed from the LoraConfig."
+            )
+        qalora_group_size = kwargs["qalora_group_size"]
+
+        if "qalora_group_size" not in module.other_param_names:
+            module.other_param_names = module.other_param_names + ("qalora_group_size",)
+        if "orig_in_features" not in module.other_param_names:
+            module.other_param_names = module.other_param_names + ("orig_in_features",)
+
+        if not hasattr(module, "qalora_group_size"):
+            module.qalora_group_size = {}
+        module.qalora_group_size[adapter_name] = qalora_group_size
+
+        if not hasattr(module, "orig_in_features"):
+            module.orig_in_features = {}
+        module.orig_in_features[adapter_name] = module.in_features
+
+    @staticmethod
+    def get_delta_weight(module: Linear, active_adapter: str) -> torch.Tensor:
+        raise NotImplementedError("QALoRA for GPTQ layers does not support 'get_delta_weight'.")
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError("QALoRA for GPTQ layers does not support 'safe_merge'.")
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        raise NotImplementedError("QALoRA for GPTQ layers does not support 'merge_unsafe'.")
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError("QALoRA for GPTQ layers does not support 'unmerge'.")
+
+    @staticmethod
+    def forward(module: Linear, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
+        lora_A_layer = module.lora_A[active_adapter]
+        lora_B_layer = module.lora_B[active_adapter]
+
+        lora_A_weight = lora_A_layer.weight
+        lora_B_weight = lora_B_layer.weight
+
+        dropout = module.lora_dropout[active_adapter]
+        lora_scaling_coefficient = module.scaling[active_adapter]  # This is the LoRA scaling (alpha/r)
+
+        group_size = module.qalora_group_size[active_adapter]
+        # paper_scaling_factor is now calculated on-demand
+
+        x_dropped = dropout(x) if module.training and not isinstance(dropout, nn.Identity) else x
+
+        orig_shape = x_dropped.shape
+        in_features = orig_shape[-1]
+
+        x_2d = x_dropped.reshape(-1, in_features) if len(orig_shape) > 2 else x_dropped
+
+        pooled_dim = module.in_features // group_size
+
+        # 1. Group and pool the input x_2d
+        # Add a channel dimension: (N_samples, 1, module.in_features)
+        x_for_pooling = x_2d.unsqueeze(1)
+
+        # kernel_size is the size of the pooling window (our group_size)
+        # stride is the step size of the window (also group_size for non-overlapping pooling)
+        x_pooled_avgpool = torch.nn.functional.avg_pool1d(x_for_pooling, kernel_size=group_size, stride=group_size)
+
+        # Remove the channel dimension again to obtain (N_samples, pooled_dim)
+        x_pooled = x_pooled_avgpool.squeeze(1)
+
+        # Entferne die Channel-Dimension wieder, um (N_samples, pooled_dim) zu erhalten
+        x_pooled = x_pooled_avgpool.squeeze(1)
+
+        # Calculate paper_scaling_factor on-demand
+        paper_scaling_factor = module.in_features / group_size
+
+        # 2. Apply QALoRA specific scaling
+        x_pooled_scaled = x_pooled * paper_scaling_factor
+
+        lora_A_weight_reshaped = lora_A_weight.reshape(lora_A_weight.shape[0], pooled_dim, group_size)
+        lora_A_pooled_weight = lora_A_weight_reshaped.mean(dim=2)
+
+        intermediate = x_pooled_scaled @ lora_A_pooled_weight.t()
+        delta = intermediate @ lora_B_weight.t()
+        delta = delta * lora_scaling_coefficient  # Apply LoRA scaling (alpha/r)
+
+        if len(orig_shape) > 2:
+            delta = delta.reshape(orig_shape[:-1] + (delta.shape[-1],))
+
+        return result + delta
+
+
 class DoraEmbeddingVariant(DoraLinearVariant):
     @staticmethod
     def init(module: Embedding, adapter_name: str, **kwargs: Any) -> None:
