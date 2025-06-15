@@ -1053,6 +1053,13 @@ class _ConvNd(nn.Module, LoraLayer):
         if base_layer.groups > 1:
             warnings.warn("LoRA adapter added to ConvNd layer with groups > 1. Merging is not supported.")
 
+        if r % base_layer.groups != 0:
+            raise ValueError(
+                f"Targeting a {base_layer.__class__.__name__} with groups={base_layer.groups} and rank {r}. "
+                "Currently, support is limited to conv layers where the rank is divisible by groups. "
+                "Either choose a different rank or do not target this specific layer."
+            )
+
         self._active_adapter = adapter_name
         self._kernel_dim = base_layer.weight.dim()
 

@@ -966,12 +966,12 @@ class ModelConv2D2(nn.Module):
 class ModelConv2DGroups(nn.Module):
     def __init__(self):
         super().__init__()
+        self.lin0 = nn.Linear(90, 288)
         # groups is set as 8 since default r=8
         # hence to make r divisible by groups
         self.conv2d = nn.Conv2d(16, 16, 3, groups=8)
         self.relu = nn.ReLU()
         self.flat = nn.Flatten()
-        self.lin0 = nn.Linear(90, 288)
         self.lin1 = nn.Linear(16, 2)
         self.sm = nn.LogSoftmax(dim=-1)
         self.dtype = torch.float
