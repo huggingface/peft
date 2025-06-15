@@ -795,8 +795,6 @@ class Embedding(nn.Module, LoraLayer):
             lora_bias=lora_bias,
         )
 
-        breakpoint()
-
     def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
         if not use_dora:
             return None
