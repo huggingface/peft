@@ -49,7 +49,7 @@ $ pip install pre-commit
 $ pre-commit install
 ```
 
-Running all the tests can take a many minutes, so during development it can be more efficient to only [run tests specific to your change](https://docs.pytest.org/en/6.2.x/usage.html#specifying-tests-selecting-tests), e.g. via:
+Running all the tests can take a while, so during development it can be more efficient to only [run tests specific to your change](https://docs.pytest.org/en/6.2.x/usage.html#specifying-tests-selecting-tests), e.g. via:
 
 ```sh
 pytest tests/<test-file-name> -k <name-of-test>

@@ -129,7 +129,7 @@ The iterative diffusion process consumes a lot of memory which can make it diffi
 
 ### Transformers
 
-PEFT is directly integrated with [transformers](https://huggingface.co/docs/transformers/main/en/peft). After loading the transformers model, call `add_adapter` to add a new PEFT adapter to the model:
+PEFT is directly integrated with [Transformers](https://huggingface.co/docs/transformers/main/en/peft). After loading a model, call `add_adapter` to add a new PEFT adapter to the model:
 
 ```python
 from peft import LoraConfig
@@ -138,7 +138,7 @@ peft_config = LoraConfig(...)
 model.add_adapter(lora_config, adapter_name="lora_1")
 ```
 
-To load a trainer PEFT adapter, call `load_adapter`:
+To load a trained PEFT adapter, call `load_adapter`:
 
 ```python
 model = ...  # transformers model
@@ -151,7 +151,7 @@ And to switch between different adapters, call `set_adapter`:
 model.set_adapter("lora_2")
 ```
 
-Note that by using the transformers integration instead of PEFT, you lose some functionality, e.g. methods to merge the adapter into the base model.
+The Transformers integration doesn't include all the functionalities offered in PEFT, such as methods for merging the adapter into the base model.
 
 ### Accelerate
 
