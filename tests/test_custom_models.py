@@ -49,6 +49,7 @@ from peft import (
     TrainableTokensConfig,
     VBLoRAConfig,
     VeraConfig,
+    ShiraConfig,
     get_peft_model,
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
@@ -432,6 +433,19 @@ TEST_CASES = [
         {"target_modules": ["conv2d"], "boft_block_size": 2, "boft_block_num": 0, "boft_n_butterfly_factor": 3},
     ),
     ########
+    # SHiRA #
+    ########
+    ("Vanilla MLP 1 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": "lin0"}),
+    ("Vanilla MLP 2 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": ["lin0", "lin1"], "random_seed": 56}),
+    (
+        "Vanilla MLP 5 SHiRA",
+        "MLP",
+        ShiraConfig,
+        {"r": 1, "target_modules": ["lin0"]},
+    ),
+    ########
     # VeRA #
     ########
     ("Vanilla MLP 1 VeRA", "MLP", VeraConfig, {"target_modules": "lin0"}),
@@ -721,6 +735,7 @@ PREFIXES = {
     RandLoraConfig: "randlora_",
     FourierFTConfig: "fourierft_",
     HRAConfig: "hra_",
+    ShiraConfig: "shira_",
     VBLoRAConfig: "vblora_",
     BoneConfig: "bone_",
     TrainableTokensConfig: "trainable_tokens_",
@@ -1138,6 +1153,8 @@ class TestPeftCustomModel(PeftCommonTester):
             pass
         elif issubclass(config_cls, VBLoRAConfig):
             pass
+        elif issubclass(config_cls, ShiraConfig):
+            pass
         elif issubclass(config_cls, TrainableTokensConfig):
             pass
         else:
@@ -1194,6 +1211,9 @@ class TestPeftCustomModel(PeftCommonTester):
             pass
         elif issubclass(config_cls, VBLoRAConfig):
             # VBLoRA do not take init_weights
+            pass
+        elif issubclass(config_cls, ShiraConfig):
+            # SHiRA does not take init_weights
             pass
         else:
             config_kwargs["init_weights"] = False

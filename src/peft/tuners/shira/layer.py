@@ -17,7 +17,7 @@ class ShiraLayer(BaseTunerLayer):
     # List all names of layers that may contain trainable adapter weights
     adapter_layer_names = ("shira_weight", "shira_embedding_weights")
     # All names of other adapter-related parameters
-    other_param_names = ("r", "scaling", "mask")
+    other_param_names = ("r", "scaling")
 
     def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer

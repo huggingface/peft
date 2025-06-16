@@ -50,6 +50,7 @@ from peft import (
     PromptLearningConfig,
     PromptTuningConfig,
     RandLoraConfig,
+    ShiraConfig,
     VBLoRAConfig,
     VeraConfig,
     get_peft_model,
@@ -933,7 +934,8 @@ class PeftCommonTester:
 
             atol, rtol = 1e-6, 1e-6  # default
             # Initializing with LN tuning cannot be configured to change the outputs (unlike init_lora_weights=False)
-            if not issubclass(config_cls, LNTuningConfig):
+            # Initializing with SHiRA also would not change the outputs because SHiRA weights are initialized to zeros
+            if not issubclass(config_cls, (LNTuningConfig, ShiraConfig)):
                 # sanity check that the logits are different
                 assert not torch.allclose(logits_base, logits_peft, atol=atol, rtol=rtol)
 
