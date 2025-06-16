@@ -372,16 +372,12 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_generate(self, model_id, config_cls, config_kwargs):
-        if (config_cls in (PrefixTuningConfig, VBLoRAConfig)) and ("gemma" in model_id.lower()):
-            pytest.skip("Generating with gemma and prefix tuning/VBLoRA currently fails")
         _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_generate(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_generate_pos_args(self, model_id, config_cls, config_kwargs):
-        if (config_cls in (PrefixTuningConfig, VBLoRAConfig)) and ("gemma" in model_id.lower()):
-            pytest.skip("Generating with gemma and prefix tuning/VBLoRA currently fails")
         _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_generate_pos_args(model_id, config_cls, config_kwargs.copy(), raises_err=False)
 
@@ -393,15 +389,11 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_generate_half_prec(self, model_id, config_cls, config_kwargs):
-        if config_cls == PrefixTuningConfig and ("gemma" in model_id.lower()):
-            pytest.skip("Generating with gemma and prefix tuning currently fails")
         self._test_generate_half_prec(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_prefix_tuning_half_prec_conversion(self, model_id, config_cls, config_kwargs):
-        if config_cls == PrefixTuningConfig and ("gemma" in model_id.lower()):
-            pytest.skip("Generating with gemma and prefix tuning currently fails")
         self._test_prefix_tuning_half_prec_conversion(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
@@ -471,8 +463,6 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_disable_adapter(self, model_id, config_cls, config_kwargs):
-        if config_cls == PrefixTuningConfig and ("gemma" in model_id.lower()):
-            pytest.skip("Generating with gemma and prefix tuning currently fails")
         _skip_if_not_conv1d_supported(model_id, config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_disable_adapter(model_id, config_cls, config_kwargs.copy())

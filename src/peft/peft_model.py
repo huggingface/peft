@@ -1962,11 +1962,16 @@ class PeftModelForCausalLM(PeftModel):
                     bs = attention_mask.shape[0]
                     total_seq_len = prefix_attention_mask.shape[1] + attention_mask.shape[2]
                     attention_mask_2d = torch.ones((bs, total_seq_len), dtype=attention_mask.dtype)
-                    if model_kwargs["cache_position"][0] == 0:
-                        # heuristic to determine if we're in prefill stage
+
+                    # heuristic to determine if we're in prefill stage
+                    is_prefill = model_kwargs["cache_position"][0] == 0
+                    if is_prefill and (peft_config.peft_type != PeftType.PREFIX_TUNING):
+                        # if in prefill stage, for prompt learning methods that are not prefix tuning, new tokens
+                        # (embeddings) are inserted
                         cache_position_ = torch.arange(total_seq_len, device=model_kwargs["input_ids"].device)
                     else:
                         cache_position_ = model_kwargs["cache_position"]
+
                     attention_mask_new = create_attention_mask(
                         self.get_base_model(),
                         model_input=None,
@@ -2012,11 +2017,16 @@ class PeftModelForCausalLM(PeftModel):
                 model_kwargs["inputs_embeds"] = torch.cat((prompts, inputs_embeds), dim=1)
                 model_kwargs["input_ids"] = None
 
-        # For transformers>=4.38.0 - for some architectures such as Llama, `cache_position` is
-        # passed in the forward pass to keep track of the position ids of the cache. We have to
-        # pop that from `model_kwargs` as `cache_position` is properly created by the model, using the passed
-        # `inputs_embeds`: https://github.com/huggingface/transformers/blob/593230f0a1150ea9c0477b9d859f25daf73c8c33/src/transformers/models/llama/modeling_llama.py#L956
-        _ = model_kwargs.pop("cache_position", None)
+        # if cache_position exists and if we're in the prefill stage
+        if (model_kwargs.get("cache_position") is not None) and (model_kwargs["cache_position"][0] == 0):
+            if peft_config.peft_type == PeftType.PREFIX_TUNING:
+                # for prefix tuning, the past_key_values have been prefilled
+                model_kwargs["cache_position"] += peft_config.num_virtual_tokens
+            else:
+                # for other prompt learning methods, the inputs_embeds have been extended
+                device = model_kwargs["cache_position"].device
+                new_seq_length = model_kwargs["cache_position"].shape[0] + peft_config.num_virtual_tokens
+                model_kwargs["cache_position"] = torch.arange(new_seq_length).to(device)
 
         return model_kwargs
 

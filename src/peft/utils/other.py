@@ -1282,7 +1282,7 @@ def create_attention_mask(
     try:
         from transformers.masking_utils import create_masks_for_generate
     except ImportError as exc:
-        raise ImportError("Your transformers version is too old, please upgrade it to >= 4.53.3") from exc
+        raise ImportError("Your transformers version is too old, please upgrade it to > 4.52") from exc
 
     # Create the causal mask with fixed shape in advance, to reduce recompilations. If the function to create
     # the 4D causal mask exists, it should be present in the base model (XXXModel class) or in its decoder.
