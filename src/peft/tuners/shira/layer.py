@@ -58,10 +58,6 @@ class ShiraLayer(BaseTunerLayer):
         self.out_features = out_features
         self.kwargs = kwargs
 
-    @property
-    def merged(self) -> bool:
-        return bool(self.merged_adapters)
-
     def update_layer(
         self,
         adapter_name,
