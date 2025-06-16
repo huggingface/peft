@@ -187,7 +187,7 @@ class LoraLayer(BaseTunerLayer):
         use_qalora: bool = False,
         lora_bias: bool = False,
         qalora_group_size: int = 32,
-        **kwargs
+        **kwargs,
     ):
         # collect the kwargs
         kwargs = locals().copy()
@@ -197,7 +197,9 @@ class LoraLayer(BaseTunerLayer):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
-        lora_variant = self.resolve_lora_variant(use_dora=use_dora, use_qalora=use_qalora, qalora_group_size=qalora_group_size)
+        lora_variant = self.resolve_lora_variant(
+            use_dora=use_dora, use_qalora=use_qalora, qalora_group_size=qalora_group_size
+        )
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 

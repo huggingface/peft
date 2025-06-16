@@ -2820,6 +2820,51 @@ class RequiresGradTester(unittest.TestCase):
             "base_model.model.lin1.lora_B.adapter1.weight",
         )
 
+    def test_requires_grad_qalora_same_targets(self):
+        """Test that QALoRA adapter parameters require gradients correctly."""
+        # Configure QALoRA adapter
+        config0 = LoraConfig(target_modules=["lin0"], use_qalora=True, qalora_group_size=2)
+        peft_model = get_peft_model(MLP(), config0)
+
+        # Check that only the QALoRA adapter parameters require gradients
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.lora_A.default.weight",
+            "base_model.model.lin0.lora_B.default.weight",
+        )
+
+        # Add a second QALoRA adapter
+        config1 = LoraConfig(target_modules=["lin0"], use_qalora=True, qalora_group_size=2)
+        peft_model.add_adapter("adapter1", config1)
+
+        # Check that first adapter's parameters still require gradients
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.lora_A.default.weight",
+            "base_model.model.lin0.lora_B.default.weight",
+        )
+
+        # Switch to second adapter
+        peft_model.set_adapter("adapter1")
+
+        # Check that second adapter's parameters now require gradients instead
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.lora_A.adapter1.weight",
+            "base_model.model.lin0.lora_B.adapter1.weight",
+        )
+
+        # Disable adapters and verify no parameters require gradients
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # After context exit, return to previous state with adapter1 active
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.lora_A.adapter1.weight",
+            "base_model.model.lin0.lora_B.adapter1.weight",
+        )
+
     def test_requires_grad_lora_same_targets(self):
         # same as previous test, except that LoRA adapters target the same layer
         config0 = LoraConfig(target_modules=["lin0"])

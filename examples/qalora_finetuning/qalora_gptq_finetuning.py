@@ -21,54 +21,6 @@ from transformers import (
 from peft import LoraConfig, get_peft_model
 
 
-
-def print_parameter_memory(model, optimizer_name: str = "adam") -> None:
-    """
-    Print detailed memory usage information for model parameters.
-
-    Args:
-        model: The model to analyze
-        optimizer_name: The optimizer type to estimate memory for ("adam" or "sgd")
-    """
-    total_param_mem = 0
-    total_grad_mem = 0
-    total_opt_mem = 0
-
-    print(f"{'Name':50} {'Shape':20} {'Dtype':10} {'Param MB':10} {'Grad MB':10} {'Requires Grad'}")
-    print("-" * 110)
-
-    for name, param in model.named_parameters():
-        param_size = param.numel() * param.element_size() / 1024**2  # in MB
-        grad_size = param_size if param.requires_grad else 0
-        opt_size = 0
-
-        if param.requires_grad:
-            if optimizer_name.lower() in ["adam", "adamw"]:
-                opt_size = param_size * 2  # Adam keeps 2 extra states (m, v)
-            elif optimizer_name.lower() == "sgd":
-                opt_size = param_size  # SGD with momentum keeps 1 extra state
-
-        print(
-            f"{name:50} {str(list(param.shape)):20} {str(param.dtype):10} "
-            f"{param_size:10.2f} {grad_size:10.2f} {str(param.requires_grad):>12}"
-        )
-
-        total_param_mem += param_size
-        total_grad_mem += grad_size
-        total_opt_mem += opt_size
-
-    print("-" * 110)
-    print(f"{'TOTAL':50} {'':20} {'':10} {total_param_mem:10.2f} {total_grad_mem:10.2f}")
-    print(
-        f"Parameter dtype is per-column above. "
-        f"\nTotal parameter memory: {total_param_mem:.2f} MB"
-        f"\nTotal gradient memory (training): {total_grad_mem:.2f} MB"
-        f"\nTotal optimizer state memory (training): {total_opt_mem:.2f} MB"
-        f"\nTotal memory for training: {total_param_mem + total_grad_mem + total_opt_mem:.2f} MB"
-        f"\nTotal memory for inference: {total_param_mem:.2f} MB"
-    )
-
-
 def load_or_quantize_model(
     base_model: str, tokenizer, bits: int = 4, cache_dir: str = "./quantized_models"
 ) -> AutoModelForCausalLM:
@@ -316,10 +268,6 @@ def train_model(
         eval_dataset=tokenized_datasets["test"],
         data_collator=data_collator,
     )
-
-    # Print memory usage before training
-    print("\nMemory usage before training:")
-    print_parameter_memory(model)
 
     # Start training
     print("\nStarting training...")

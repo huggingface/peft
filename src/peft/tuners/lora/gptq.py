@@ -19,7 +19,8 @@ from peft.import_utils import is_gptqmodel_available
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import get_auto_gptq_quant_linear
-from .layer import LoraLayer, LoraVariant
+
+from .layer import LoraVariant
 
 
 class GPTQLoraLinear(torch.nn.Module, LoraLayer):
@@ -63,13 +64,17 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
 
     def resolve_lora_variant(self, *, use_dora: bool, use_qalora: bool, **kwargs) -> Optional[LoraVariant]:
         if use_dora and use_qalora:
-            raise NotImplementedError(f"Dora and QA_lora at the same time is not supported for {self.__class__.__name__} (yet).")
+            raise NotImplementedError(
+                f"Dora and QA_lora at the same time is not supported for {self.__class__.__name__} (yet)."
+            )
         elif use_dora:
             from .variants import DoraLinearVariant
+
             variant = DoraLinearVariant()
         elif use_qalora:
             if self.in_features % kwargs["qalora_group_size"] == 0:
                 from .variants import QALoraLinearVariant
+
                 variant = QALoraLinearVariant()
         else:
             variant = None
@@ -88,7 +93,6 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
             if active_adapter not in lora_A_keys:
                 continue
             torch_result_dtype = result.dtype
-
 
             lora_A = self.lora_A[active_adapter]
             lora_B = self.lora_B[active_adapter]
