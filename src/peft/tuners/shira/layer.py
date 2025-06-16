@@ -41,8 +41,6 @@ class ShiraLayer(BaseTunerLayer):
         self.shira_indices = {}
         self.shira_embedding_weights = nn.ParameterDict({})
         self.weight_shape = base_layer.weight.shape #Assumes SHiRA is on some layer with "weight" parameter
-        self.device = base_layer.weight.device
-        self.num_shira_weight = {}
         
         # Mark the weight as unmerged
         self._disable_adapters = False
@@ -69,15 +67,15 @@ class ShiraLayer(BaseTunerLayer):
         self.r[adapter_name] = r
         self.scaling[adapter_name] = 1.0 #Default scale during training. Can be set to any (non-negative) value during inference.
         # The number of shira weights in this layer is determined by r such that the total number of weights is the same as a LoRA Layer (for direct comparisons)
-        self.num_shira_weight[adapter_name] = r * (self.in_features + self.out_features)
-        if self.num_shira_weight[adapter_name] > self.in_features * self.out_features:
+        num_shira_weight = r * (self.in_features + self.out_features)
+        if num_shira_weight > self.in_features * self.out_features:
             raise ValueError(f'The set rank {r} results in more shira params than the total number of params in the base layer {self.in_features * self.out_features} and this is not allowed.')
         
         # Actual trainable parameters
         # We have used a vector parameter with fixed indices that we use inside a torch.sparse_coo_tensor in get_delta_weight function.
         # Directly using a torch.sparse_coo_tensor as a parameter could have been possible but we ran into some issues similar to:
         # https://github.com/pytorch/pytorch/issues/79542.
-        self.shira_weight[adapter_name] = nn.Parameter(torch.zeros(self.num_shira_weight[adapter_name]).to(self.base_layer.weight.dtype).to(self.base_layer.weight.device), requires_grad=True)
+        self.shira_weight[adapter_name] = nn.Parameter(torch.zeros(num_shira_weight).to(self.base_layer.weight.dtype).to(self.base_layer.weight.device), requires_grad=True)
 
         # Compute the shira_indices from the mask. Make sure the mask is formed using r*(self.in_features + self.out_features) and not some other K.
         mask_indices = torch.where(mask==1.)
