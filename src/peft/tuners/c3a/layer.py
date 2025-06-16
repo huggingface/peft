@@ -19,7 +19,7 @@ import math
 import torch
 import torch.nn as nn
 
-from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from .utils import BlockCircularConvolution, get_circulant_fast
 
 class C3ALayer(BaseTunerLayer):
@@ -47,11 +47,11 @@ class C3ALayer(BaseTunerLayer):
         if adapter not in self.c3a_kernel.keys():
             raise ValueError(f"Adapter {adapter} not found.")
         base_layer_weight = self.get_base_layer().weight
+        base_layer_weight_dtype = base_layer_weight.dtype
         c3a_kernel = self.c3a_kernel[adapter]
 
-        previous_dtype = c3a_kernel.dtype
-        delta_weight = get_circulant_fast(c3a_kernel.float())
-        return delta_weight.to(previous_dtype) / base_layer_weight.size(-1)
+        delta_weight = get_circulant_fast(c3a_kernel.float()).to(base_layer_weight_dtype)
+        return delta_weight / base_layer_weight.size(-1)
 
     def update_layer(self, adapter_name, block_size, init_weights):
         if block_size <= 0:
@@ -66,25 +66,19 @@ class C3ALayer(BaseTunerLayer):
             torch.zeros(self.out_features//block_size, self.in_features//block_size, block_size, dtype=weight.dtype, device=weight.device)
         )
 
-        if weight is not None:
-            # the layer is already completely initialized, this is an update
-            if weight.dtype.is_floating_point or weight.dtype.is_complex:
-                self.to(weight.device, dtype=weight.dtype)
-            else:
-                self.to(weight.device)
-
         self.reset_c3a_parameters(adapter_name, init_weights)
+        self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
     @torch.no_grad()
     def reset_c3a_parameters(self, adapter_name, init_weights):
-        if init_weights is False:
+        if init_weights is True:
             return
 
         if adapter_name in self.c3a_kernel.keys():
             if init_weights == "gaussian":
                 nn.init.normal_(self.c3a_kernel[adapter_name])
-            elif init_weights in ["xavier_uniform", True]:
+            elif init_weights in ["xavier_uniform", False]:
                 fan_in, fan_out = self.in_features, self.out_features
                 std = 1.0 * math.sqrt(2.0 / float(fan_in + fan_out))
                 a = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
@@ -130,14 +124,10 @@ class C3ALinear(nn.Module, C3ALayer):
                 The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
                 to `None`.
         """
-        if self.merged:
-            warnings.warn(
-                f"Already following adapters were merged {','.join(self.merged_adapters)}. "
-                f"You are now additionally merging {','.join(self.active_adapters)}."
-            )
-
-        if adapter_names is None:
-            adapter_names = self.active_adapters
+        adapter_names = check_adapters_to_merge(self, adapter_names)
+        if not adapter_names:
+            # no adapter to merge
+            return
 
         for active_adapter in adapter_names:
             if active_adapter in self.c3a_kernel.keys():
@@ -176,7 +166,7 @@ class C3ALinear(nn.Module, C3ALayer):
             
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         previous_dtype = x.dtype
-
+        
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()

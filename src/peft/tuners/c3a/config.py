@@ -46,7 +46,7 @@ class C3AConfig(PeftConfig):
             The mapping from layer names or regexp expression to block_size which are different from the default specified.
             For example, `{model.decoder.layers.0.encoder_attn.k_proj: 1280`}
         init_weights (`bool`):
-            Whether to initialize the C3A weights or not. If set to `False`, the C3A weights will be initialized with 0.
+            The initialization of the C3A weights. Set this to False if the weights should be initialized to a commonly used distribution. Set this to True if the weights should be initialized to zeros.
     """
 
     block_size: int = field(default=768, metadata={"help": "block size for C3A, must be divisible by both the input number and the output number"})
@@ -92,7 +92,7 @@ class C3AConfig(PeftConfig):
     init_weights: Optional[bool] = field(
         default=True,
         metadata={
-            "help": "Whether to initialize the C3A weights or not. If set to False, the C3A weights will be initialized with 0."
+            "help": "The initialization of the C3A weights. Set this to False if the weights should be initialized to a commonly used distribution. Set this to True if the weights should be initialized to zeros."
         },
     )
 
