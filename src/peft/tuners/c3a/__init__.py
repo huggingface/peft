@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,7 +14,7 @@
 from peft.utils import register_peft_method
 
 from .config import C3AConfig
-from .layer import C3ALinear, C3ALayer
+from .layer import C3ALayer, C3ALinear
 from .model import C3AModel
 
 

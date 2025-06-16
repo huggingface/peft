@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,14 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import warnings
-from typing import Any, List, Optional
 import math
+import warnings
+from typing import Any, Optional
+
 import torch
 import torch.nn as nn
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+
 from .utils import BlockCircularConvolution, get_circulant_fast
+
 
 class C3ALayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
@@ -56,14 +58,24 @@ class C3ALayer(BaseTunerLayer):
     def update_layer(self, adapter_name, block_size, init_weights):
         if block_size <= 0:
             raise ValueError(f"`block_size` should be a positive integer value but the value passed is {block_size}")
-        assert self.in_features % block_size == 0, f"The block size should be a factor of the input size. However, the input size is {self.in_features} and the block size is {block_size}"
-        assert self.out_features % block_size == 0, f"The block size should be a factor of the output size. However, the output size is {self.out_features} and the block size is {block_size}"
-        
+        assert self.in_features % block_size == 0, (
+            f"The block size should be a factor of the input size. However, the input size is {self.in_features} and the block size is {block_size}"
+        )
+        assert self.out_features % block_size == 0, (
+            f"The block size should be a factor of the output size. However, the output size is {self.out_features} and the block size is {block_size}"
+        )
+
         self.block_size[adapter_name] = block_size
 
         weight = getattr(self.get_base_layer(), "weight", None)
         self.c3a_kernel[adapter_name] = nn.Parameter(
-            torch.zeros(self.out_features//block_size, self.in_features//block_size, block_size, dtype=weight.dtype, device=weight.device)
+            torch.zeros(
+                self.out_features // block_size,
+                self.in_features // block_size,
+                block_size,
+                dtype=weight.dtype,
+                device=weight.device,
+            )
         )
 
         self.reset_c3a_parameters(adapter_name, init_weights)
@@ -90,6 +102,7 @@ class C3ALayer(BaseTunerLayer):
             else:
                 raise ValueError(f"Unknown init_weights: {init_weights}")
 
+
 #  ------------------------------------------------------------------------------------------
 #  Copyright (c) Microsoft Corporation. All rights reserved.
 #  Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
@@ -111,7 +124,7 @@ class C3ALinear(nn.Module, C3ALayer):
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, block_size, init_weights)
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -120,7 +133,7 @@ class C3ALinear(nn.Module, C3ALayer):
                 If True, the merge operation will be performed in a copy of the original weights and check for NaNs
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
-            adapter_names (`List[str]`, *optional*):
+            adapter_names (`list[str]`, *optional*):
                 The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
                 to `None`.
         """
@@ -149,7 +162,7 @@ class C3ALinear(nn.Module, C3ALayer):
                 else:
                     delta_weight = self.get_delta_weight(active_adapter)
                     base_layer.weight.data = base_layer.weight.data + delta_weight
-                        
+
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -163,10 +176,10 @@ class C3ALinear(nn.Module, C3ALayer):
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.c3a_kernel.keys():
                 self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
-            
+
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         previous_dtype = x.dtype
-        
+
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
@@ -181,7 +194,7 @@ class C3ALinear(nn.Module, C3ALayer):
                 c3a_kernel = self.c3a_kernel[active_adapter]
                 x = BlockCircularConvolution.apply(x.float(), c3a_kernel.float()) / x.size(-1)
                 result += x.to(result.dtype)
-    
+
         result = result.to(previous_dtype)
         return result
 

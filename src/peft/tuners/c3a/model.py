@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,7 +18,7 @@ import warnings
 from dataclasses import asdict
 from enum import Enum
 from itertools import chain
-from typing import List, Optional
+from typing import Optional
 
 import torch
 from tqdm import tqdm
@@ -32,7 +31,7 @@ from peft.utils import (
 )
 
 from .config import C3AConfig
-from .layer import C3ALinear, C3ALayer
+from .layer import C3ALayer, C3ALinear
 
 
 class C3AModel(BaseTuner):
@@ -92,7 +91,7 @@ class C3AModel(BaseTuner):
             raise ValueError("Current Key shouldn't be `None`")
         # Regexp matching - Find key which matches current target_name in patterns provided
         pattern_keys = list(chain(c3a_config.block_size_pattern.keys()))
-        target_name_key = next(filter(lambda key: re.match(f".*\.{key}$", current_key), pattern_keys), current_key)
+        target_name_key = next(filter(lambda key: re.match(rf".*\.{key}$", current_key), pattern_keys), current_key)
 
         block_size = c3a_config.block_size_pattern.get(target_name_key, c3a_config.block_size)
         kwargs = {
@@ -161,7 +160,6 @@ class C3AModel(BaseTuner):
                         m.bias.requires_grad = True
             else:
                 raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
-
 
     @staticmethod
     def _create_new_module(c3a_config, adapter_name, target, **kwargs):
@@ -247,9 +245,8 @@ class C3AModel(BaseTuner):
         merge=True,
         progressbar: bool = False,
         safe_merge: bool = False,
-        adapter_names: Optional[List[str]] = None,
+        adapter_names: Optional[list[str]] = None,
     ):
-        
         key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for key in tqdm(key_list, disable=not progressbar, desc=desc):
@@ -269,11 +266,11 @@ class C3AModel(BaseTuner):
         return self.model
 
     def merge_and_unload(
-        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None
+        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ) -> torch.nn.Module:
         r"""
-        This method merges the C3A layers into the base model. This is needed if someone wants to use the base model
-        as a standalone model.
+        This method merges the C3A layers into the base model. This is needed if someone wants to use the base model as
+        a standalone model.
 
         Args:
             progressbar (`bool`):
@@ -281,7 +278,7 @@ class C3AModel(BaseTuner):
             safe_merge (`bool`):
                 whether to activate the safe merging check to check if there is any potential Nan in the adapter
                 weights
-            adapter_names (`List[str]`, *optional*):
+            adapter_names (`list[str]`, *optional*):
                 The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
                 to `None`.
         """

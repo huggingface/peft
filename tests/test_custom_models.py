@@ -35,6 +35,7 @@ from peft import (
     AdaLoraConfig,
     BOFTConfig,
     BoneConfig,
+    C3AConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -49,7 +50,6 @@ from peft import (
     TrainableTokensConfig,
     VBLoRAConfig,
     VeraConfig,
-    C3AConfig,
     get_peft_model,
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
