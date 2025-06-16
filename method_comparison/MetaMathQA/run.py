@@ -48,6 +48,7 @@ from utils import (
     get_dataset_info,
     get_model,
     get_optimizer_and_scheduler,
+    get_peft_branch,
     get_tokenizer,
     get_train_config,
     init_cuda,
@@ -341,6 +342,14 @@ def train(
 def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
     tic_total = time.perf_counter()
     start_date = dt.datetime.now(tz=dt.timezone.utc).replace(microsecond=0).isoformat()
+
+    peft_branch = get_peft_branch()
+    if peft_branch == "main":
+        print_verbose("===== This experiment is categorized a MAIN run because the PEFT branch is 'main'======")
+    else:
+        print_verbose(
+            f"===== This experiment is categorized a TEST run because the PEFT branch is '{peft_branch}' ======"
+        )
 
     # load configs
     peft_config = PeftConfig.from_pretrained(path_experiment)

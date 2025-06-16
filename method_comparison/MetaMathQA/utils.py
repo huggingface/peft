@@ -21,6 +21,7 @@ import json
 import os
 import platform
 import subprocess
+import tempfile
 import warnings
 from dataclasses import asdict, dataclass
 from decimal import Decimal, DivisionByZero, InvalidOperation
@@ -621,6 +622,9 @@ def log_results(
     elif train_result.status == TrainStatus.SUCCESS:
         save_dir = RESULT_PATH
         print_fn("Experiment run was categorized as successful run")
+    else:
+        save_dir = tempfile.mkdtemp()
+        print_fn(f"Experiment could not be categorized, writing results to {save_dir}. Please open an issue on PEFT.")
 
     peft_config_dict = peft_config.to_dict()
     for key, value in peft_config_dict.items():
