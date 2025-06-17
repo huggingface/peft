@@ -546,6 +546,7 @@ class TrainResult:
     cuda_memory_reserved_log: list[int]
     losses: list[float]
     metrics: list[Any]  # TODO
+    error_msg: str
 
 
 def log_to_console(log_data: dict[str, Any], print_fn: Callable[..., None]) -> None:
@@ -639,6 +640,7 @@ def log_results(
             "peft_branch": peft_branch,
             "train_config": asdict(train_config),
             "peft_config": peft_config_dict,
+            "error_msg": train_result.error_msg,
         },
         "train_info": {
             "cuda_memory_reserved_avg": cuda_memory_avg,
