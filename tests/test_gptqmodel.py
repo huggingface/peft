@@ -411,7 +411,7 @@ class PeftGPTQModelTests(unittest.TestCase):
         Test the CausalLM training on a multi-accelerator device. The test would simply fail if the adapters are not
         set correctly.
         """
-    
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
