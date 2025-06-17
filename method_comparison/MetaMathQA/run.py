@@ -353,10 +353,10 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
 
     peft_branch = get_peft_branch()
     if peft_branch == "main":
-        print_verbose("===== This experiment is categorized a MAIN run because the PEFT branch is 'main'======")
+        print_verbose("===== This experiment is categorized as a MAIN run because the PEFT branch is 'main' ======")
     else:
         print_verbose(
-            f"===== This experiment is categorized a TEST run because the PEFT branch is '{peft_branch}' ======"
+            f"===== This experiment is categorized as a TEST run because the PEFT branch is '{peft_branch}' ======"
         )
 
     # load configs
