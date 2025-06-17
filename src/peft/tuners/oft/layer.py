@@ -310,8 +310,6 @@ class OFTLayer(BaseTunerLayer):
         self.r = {}
         self.oft_block_size = {}
         self.oft_dropout = nn.ModuleDict({})
-        # For Embedding layer
-        self.oft_embedding_R = nn.ParameterDict({})
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
@@ -324,10 +322,6 @@ class OFTLayer(BaseTunerLayer):
             in_features, out_features = base_layer.in_features, base_layer.out_features
         elif isinstance(base_layer, nn.Conv2d):
             in_features, out_features = base_layer.in_channels, base_layer.out_channels
-        elif isinstance(base_layer, nn.MultiheadAttention):
-            if not base_layer._qkv_same_embed_dim:
-                raise ValueError(f"Only same dim for query/key/value is supported as of now for {self.__class__}.")
-            in_features, out_features = base_layer.embed_dim, 3 * base_layer.embed_dim
         elif hasattr(base_layer, "infeatures") and hasattr(base_layer, "outfeatures"):
             # QuantLinear
             in_features, out_features = base_layer.infeatures, base_layer.outfeatures
@@ -386,25 +380,6 @@ class OFTLayer(BaseTunerLayer):
                 continue
 
             warnings.warn("Unscaling operation for OFT not supported! Keeping scale to 1.")
-
-    def _check_forward_args(self, x, *args, **kwargs):
-        """Check if the arguments are compatible with the configs and state of the model"""
-        adapter_names = kwargs.get("adapter_names", None)
-        if adapter_names is None:
-            return
-
-        if len(x) != len(adapter_names):
-            msg = (
-                "Length of `adapter_names` should be the same as the number of inputs, but got "
-                f"{len(adapter_names)} and {len(x)} respectively."
-            )
-            raise ValueError(msg)
-
-        if self.merged:
-            # It is unclear what would be the right thing to do if users pass adapter_names and there are merged
-            # adapters. Therefore, it is better to raise an error in this case.
-            msg = "Cannot pass `adapter_names` when there are merged adapters, please call `unmerge_adapter` first."
-            raise ValueError(msg)
 
     def update_layer(
         self,
@@ -501,7 +476,7 @@ class OFTLayer(BaseTunerLayer):
         Reset the OFT parameters.
         """
         if init_weights is False:
-            nn.init.normal_(self.oft_R[adapter_name], mean=0.0, std=0.1)
+            nn.init.normal_(self.oft_R[adapter_name].weight, mean=0.0, std=0.1)
             return
 
         if adapter_name in self.oft_R.keys():
@@ -653,9 +628,6 @@ class Linear(nn.Module, OFTLayer):
         return self.oft_R[adapter_name].get_weight()
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        self._check_forward_args(x, *args, **kwargs)
-        adapter_names = kwargs.pop("adapter_names", None)
-
         previous_dtype = x.dtype
 
         if self.disable_adapters:
