@@ -21,6 +21,7 @@ import json
 import os
 import platform
 import subprocess
+import tempfile
 import warnings
 from dataclasses import asdict, dataclass
 from decimal import Decimal, DivisionByZero, InvalidOperation
@@ -545,6 +546,7 @@ class TrainResult:
     cuda_memory_reserved_log: list[int]
     losses: list[float]
     metrics: list[Any]  # TODO
+    error_msg: str
 
 
 def log_to_console(log_data: dict[str, Any], print_fn: Callable[..., None]) -> None:
@@ -621,6 +623,9 @@ def log_results(
     elif train_result.status == TrainStatus.SUCCESS:
         save_dir = RESULT_PATH
         print_fn("Experiment run was categorized as successful run")
+    else:
+        save_dir = tempfile.mkdtemp()
+        print_fn(f"Experiment could not be categorized, writing results to {save_dir}. Please open an issue on PEFT.")
 
     peft_config_dict = peft_config.to_dict()
     for key, value in peft_config_dict.items():
@@ -635,6 +640,7 @@ def log_results(
             "peft_branch": peft_branch,
             "train_config": asdict(train_config),
             "peft_config": peft_config_dict,
+            "error_msg": train_result.error_msg,
         },
         "train_info": {
             "cuda_memory_reserved_avg": cuda_memory_avg,

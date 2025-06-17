@@ -48,6 +48,7 @@ from utils import (
     get_dataset_info,
     get_model,
     get_optimizer_and_scheduler,
+    get_peft_branch,
     get_tokenizer,
     get_train_config,
     init_cuda,
@@ -163,6 +164,7 @@ def train(
     status = TrainStatus.FAILED
     tic_train = time.perf_counter()
     eval_time = 0.0
+    error_msg = ""
 
     ds_train, ds_valid, ds_test = get_train_valid_test_datasets(
         tokenizer=tokenizer, query_template=query_template, print_fn=print_verbose
@@ -318,10 +320,16 @@ def train(
     except KeyboardInterrupt:
         print_verbose("canceled training")
         status = TrainStatus.CANCELED
-    except torch.OutOfMemoryError:
+        error_msg = "manually canceled"
+    except torch.OutOfMemoryError as exc:
         # ouch, still let's try to log some results
         print_verbose("out of memory error encountered")
         status = TrainStatus.CANCELED
+        error_msg = str(exc)
+    except Exception as exc:
+        print_verbose(f"encountered an error: {exc}")
+        status = TrainStatus.CANCELED
+        error_msg = str(exc)
 
     toc_train = time.perf_counter()
     train_time = toc_train - tic_train - eval_time
@@ -334,6 +342,7 @@ def train(
         cuda_memory_reserved_log=cuda_memory_reserved_log,
         losses=losses,
         metrics=metrics,
+        error_msg=error_msg,
     )
     return train_result
 
@@ -341,6 +350,14 @@ def train(
 def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
     tic_total = time.perf_counter()
     start_date = dt.datetime.now(tz=dt.timezone.utc).replace(microsecond=0).isoformat()
+
+    peft_branch = get_peft_branch()
+    if peft_branch == "main":
+        print_verbose("===== This experiment is categorized as a MAIN run because the PEFT branch is 'main' ======")
+    else:
+        print_verbose(
+            f"===== This experiment is categorized as a TEST run because the PEFT branch is '{peft_branch}' ======"
+        )
 
     # load configs
     peft_config = PeftConfig.from_pretrained(path_experiment)
@@ -366,39 +383,38 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
     print_verbose(model)
 
     # train model
-    try:
-        train_result = train(
-            model=model,
-            max_steps=train_config.max_steps,
-            batch_size=train_config.batch_size,
-            batch_size_eval=train_config.batch_size_eval,
-            tokenizer=tokenizer,
-            cuda_memory_init=cuda_memory_init,
-            eval_steps=train_config.eval_steps,
-            generation_kwargs=train_config.generation_kwargs,
-            grad_norm_clip=train_config.grad_norm_clip,
-            optimizer_type=train_config.optimizer_type,
-            optimizer_kwargs=train_config.optimizer_kwargs,
-            query_template=train_config.query_template,
-            lr_scheduler_arg=train_config.lr_scheduler,
-            use_amp=train_config.use_amp,
-            is_adalora=isinstance(peft_config, AdaLoraConfig),
-        )
-    except Exception as e:
-        print_verbose(f"Training failed with error: {e}")
-        raise
+    train_result = train(
+        model=model,
+        max_steps=train_config.max_steps,
+        batch_size=train_config.batch_size,
+        batch_size_eval=train_config.batch_size_eval,
+        tokenizer=tokenizer,
+        cuda_memory_init=cuda_memory_init,
+        eval_steps=train_config.eval_steps,
+        generation_kwargs=train_config.generation_kwargs,
+        grad_norm_clip=train_config.grad_norm_clip,
+        optimizer_type=train_config.optimizer_type,
+        optimizer_kwargs=train_config.optimizer_kwargs,
+        query_template=train_config.query_template,
+        lr_scheduler_arg=train_config.lr_scheduler,
+        use_amp=train_config.use_amp,
+        is_adalora=isinstance(peft_config, AdaLoraConfig),
+    )
 
     if train_result.status == TrainStatus.FAILED:
         print_verbose("Training failed, not logging results")
         sys.exit(1)
 
     # save the model in temp dir, get file size, clean it up afterwards if clean is passed
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True, delete=clean) as tmp_dir:
-        model.save_pretrained(tmp_dir)
-        stat = os.stat(os.path.join(tmp_dir, SAFETENSORS_WEIGHTS_NAME))
-        file_size = stat.st_size
-        if not clean:
-            print_verbose(f"Saved PEFT checkpoint to {tmp_dir}")
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True, delete=clean) as tmp_dir:
+            model.save_pretrained(tmp_dir)
+            stat = os.stat(os.path.join(tmp_dir, SAFETENSORS_WEIGHTS_NAME))
+            file_size = stat.st_size
+            if not clean:
+                print_verbose(f"Saved PEFT checkpoint to {tmp_dir}")
+    except Exception as exc:
+        print(f"Failed to save PEFT checkpoint due to the following error: {exc}")
 
     time_total = time.perf_counter() - tic_total
     # log results: print and save to file
