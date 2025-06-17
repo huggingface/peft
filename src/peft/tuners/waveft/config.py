@@ -43,7 +43,7 @@ class WaveFTConfig(PeftConfig):
             The wavelet family (e.g., 'db1', 'sym2', 'coif1') to use for the DWT and Inverse DWT (IDWT).
             Defaults to 'db1' (Haar wavelet). Different wavelet families have varying filter lengths which affect the training time substantially
         use_idwt (`bool`):
-            Set to False for SHiRA.
+            Set to False for efficient adaptation.
             Whether to use the Inverse Discrete Wavelet Transform (IDWT) to reconstruct the delta weights from the learned wavelet coefficients. If `True` (default), the IDWT is applied. If `False`, the learned coefficients are directly used to form a sparse delta weight matrix, which is faster but performs worse for the SDXL personalization task.
         random_loc_seed (`int`):
             Seed for determining the random locations of the `n_frequency` learnable wavelet coefficients
