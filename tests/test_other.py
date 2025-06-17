@@ -17,10 +17,10 @@ import copy
 import pytest
 import torch
 from torch import nn
-from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
+from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification, LlavaForConditionalGeneration
 
 from peft import LoraConfig, PeftModel, VeraConfig, get_peft_model
-from peft.utils.other import ModulesToSaveWrapper
+from peft.utils.other import ModulesToSaveWrapper, _get_no_split_modules
 
 
 class ModelWithModuleDict(nn.Module):
@@ -507,3 +507,26 @@ class TestAdapterTargeting:
         }
 
         assert adapter_invariant_keys1 == adapter_invariant_keys2
+
+
+class TestGetNoSplitModules:
+    # Ensure that children are considered when determining _no_split_modules
+    # see https://github.com/huggingface/transformers/pull/38141
+
+    def test_get_no_split_modules_simple(self):
+        # choose a model where recursively visiting children is *not* required
+        model_id = "facebook/opt-125m"
+        model = AutoModelForCausalLM.from_pretrained(model_id)
+        assert model._no_split_modules == ["OPTDecoderLayer"]
+        no_split_modules = _get_no_split_modules(model)
+        assert no_split_modules == {"OPTDecoderLayer"}
+
+    def test_get_no_split_modules_recursive(self):
+        # choose a model where recursively visiting children is required
+        model_id = "hf-internal-testing/tiny-random-LlavaForConditionalGeneration"
+        model = LlavaForConditionalGeneration.from_pretrained(model_id)
+        # sanity check: just visiting the model itself is not enough:
+        assert model._no_split_modules == []
+
+        no_split_modules = _get_no_split_modules(model)
+        assert no_split_modules == {"CLIPEncoderLayer", "LlamaDecoderLayer"}

@@ -13,3 +13,12 @@ rules:
       - build_docker_images.yml:103:9
       - build_docker_images.yml:136:9
       - build_docker_images.yml:169:9
+  unpinned-images:
+    ignore:
+      # We want to test these images with the latest version and we're not using them
+      # to deploy anything so we deem it safe to use those, even if they are unpinned.
+      - nightly-bnb.yml:30:7
+      - nightly-bnb.yml:155:7
+      - nightly.yml:27:7
+      - nightly.yml:77:7
+      - torch_compile_tests.yml:32:7

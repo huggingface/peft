@@ -109,6 +109,8 @@ def get_peft_model(
         # note: PeftMixedModel does not support autocast_adapter_dtype, so don't pass it
         return PeftMixedModel(model, peft_config, adapter_name=adapter_name)
 
+    # We explicitly exclude prompt learning here since prompt learning is specific to the task and needs special
+    # handling in the PEFT model's forward method.
     if peft_config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys() and not peft_config.is_prompt_learning:
         return PeftModel(
             model,
