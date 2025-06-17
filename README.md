@@ -74,6 +74,8 @@ model = PeftModel.from_pretrained(model, "qwen2.5-3b-lora")
 inputs = tokenizer("Preheat the oven to 350 degrees and place the cookie dough", return_tensors="pt")
 outputs = model.generate(**inputs.to(device), max_new_tokens=50)
 print(tokenizer.decode(outputs[0], skip_special_tokens=True))
+
+# prints something like: Preheat the oven to 350 degrees and place the cookie dough in a baking dish [...]
 ```
 
 ## Why you should use PEFT
