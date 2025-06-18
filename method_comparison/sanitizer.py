@@ -40,6 +40,13 @@ def _evaluate_node(df, node):
             raise ValueError(f"Unsupported operator '{op_type.__name__}'.")
         return operator_map[op_type](col, value)
 
+    # Recursive Step: "Bitwise" operation & and | (the same as boolean operations)
+    elif isinstance(node, ast.BinOp):
+        if isinstance(node.op, ast.BitOr):
+            return _evaluate_node(df, node.left) | _evaluate_node(df, node.right)
+        elif isinstance(node.op, ast.BitAnd):
+            return _evaluate_node(df, node.left) & _evaluate_node(df, node.right)
+
     # Recursive Step: A boolean operation like '... and ...' or '... or ...'
     elif isinstance(node, ast.BoolOp):
         op_type = type(node.op)
@@ -47,11 +54,16 @@ def _evaluate_node(df, node):
         result = _evaluate_node(df, node.values[0])
         # Combine it with the rest of the values based on the operator
         for i in range(1, len(node.values)):
-            if op_type is ast.And:
+            if op_type is ast.And or op_type is ast.BitAnd:
                 result &= _evaluate_node(df, node.values[i])
-            elif op_type is ast.Or:
+            elif op_type is ast.Or or op_type is ast.BitOr:
                 result |= _evaluate_node(df, node.values[i])
         return result
+
+    elif isinstance(node, ast.UnaryOp):
+        if not isinstance(node.op, ast.Not):
+            raise ValueError("Only supported unary op is negation.")
+        return ~_evaluate_node(df, node.operand)
 
     # If the node is not a comparison or boolean op, it's an unsupported expression type
     else:
@@ -86,6 +98,3 @@ def parse_and_filter(df, filter_str):
     # The recursive evaluation starts here
     mask = _evaluate_node(df, expression_node)
     return mask
-
-
-
