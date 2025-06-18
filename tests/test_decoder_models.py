@@ -28,6 +28,7 @@ from peft import (
     AdaLoraConfig,
     BOFTConfig,
     BoneConfig,
+    C3AConfig,
     CPTConfig,
     FourierFTConfig,
     HRAConfig,
@@ -201,12 +202,20 @@ ALL_CONFIGS = [
             "bias": "none",
         },
     ),
+    (
+        C3AConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "block_size": 1,
+            "target_modules": None,
+        },
+    ),
 ]
 
 
 def _skip_if_not_conv1d_supported(model_id, config_cls):
-    if "GPT2LMHeadModel" in model_id and config_cls in [BOFTConfig, BoneConfig, HRAConfig, OFTConfig]:
-        pytest.skip("Skipping BOFT/HRA/OFT/Bone for GPT2LMHeadModel")
+    if "GPT2LMHeadModel" in model_id and config_cls in [BOFTConfig, BoneConfig, HRAConfig, OFTConfig, C3AConfig]:
+        pytest.skip("Skipping BOFT/HRA/OFT/Bone/C3A for GPT2LMHeadModel")
 
 
 def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
@@ -216,6 +225,7 @@ def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
         HRAConfig,
         OFTConfig,
         BoneConfig,
+        C3AConfig,
     ]:
         pytest.skip("Skipping AdaLora/BOFT/HRA/OFT/Bone for GPT2LMHeadModel")
 

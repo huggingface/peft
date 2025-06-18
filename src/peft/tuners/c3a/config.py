@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2025-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
@@ -27,7 +27,10 @@ class C3AConfig(PeftConfig):
     This is the configuration class to store the configuration of a [`C3AModel`].
 
     Args:
-        block_size (`int`): block_size for C3A, must be divisible by both the input number and the output number.
+        block_size (`int`):
+            block size for C3A, must be divisible by both the input size and the output size of the target layer. If
+            you have no idea what block_size you should use, set it to the greatest common divisor of all input &
+            output sizes of your target layers. Increasing this would result in less parameters.
         target_modules (`Union[list[str],str]`): The names of the modules to apply C3A to.
         bias (`str`): Bias type for C3A. Can be 'none', 'all' or 'fourier_only'. If 'all' or 'c3a_only', the
             corresponding biases will be updated during training. Be aware that this means that, even when disabling
@@ -42,15 +45,17 @@ class C3AConfig(PeftConfig):
             pattern is not in the common layers pattern.
         block_size_pattern (`dict`):
             The mapping from layer names or regexp expression to block_size which are different from the default
-            specified. For example, `{model.decoder.layers.0.encoder_attn.k_proj: 1280`}
-        init_weights (`bool`):
+            specified. For example, `{"model.decoder.layers.0.encoder_attn.k_proj": 1280`}
+        init_weights (`Literal[True, "gaussian", "kaiming_uniform", "xavier_uniform"]`):
             The initialization of the C3A weights. Set this to False if the weights should be initialized to a commonly
             used distribution. Set this to True if the weights should be initialized to zeros.
     """
 
     block_size: int = field(
-        default=768,
-        metadata={"help": "block size for C3A, must be divisible by both the input number and the output number"},
+        default=256,
+        metadata={
+            "help": "block size for C3A, must be divisible by both the input size and the output size of the target layer. If you have no idea what block_size you should use, set it to the greatest common divisor of all input & output sizes of your target layers. Increasing this would result in less parameters."
+        },
     )
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,
@@ -91,8 +96,8 @@ class C3AConfig(PeftConfig):
             )
         },
     )
-    init_weights: Optional[bool] = field(
-        default=True,
+    init_weights: Optional[Literal[True, "gaussian", "kaiming_uniform", "xavier_uniform"]] = field(
+        default="xavier_uniform",
         metadata={
             "help": "The initialization of the C3A weights. Set this to False if the weights should be initialized to a commonly used distribution. Set this to True if the weights should be initialized to zeros."
         },

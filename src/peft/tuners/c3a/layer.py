@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2025-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -58,16 +58,18 @@ class C3ALayer(BaseTunerLayer):
     def update_layer(self, adapter_name, block_size, init_weights):
         if block_size <= 0:
             raise ValueError(f"`block_size` should be a positive integer value but the value passed is {block_size}")
-        assert self.in_features % block_size == 0, (
-            f"The block size should be a factor of the input size. However, the input size is {self.in_features} and the block size is {block_size}"
-        )
-        assert self.out_features % block_size == 0, (
-            f"The block size should be a factor of the output size. However, the output size is {self.out_features} and the block size is {block_size}"
-        )
+        if self.in_features % block_size != 0:
+            raise ValueError(
+                f"The block size should be a factor of the input size. However, the input size is {self.in_features} and the block size is {block_size}"
+            )
+        if self.out_features % block_size != 0:
+            raise ValueError(
+                f"The block size should be a factor of the output size. However, the output size is {self.out_features} and the block size is {block_size}"
+            )
 
         self.block_size[adapter_name] = block_size
 
-        weight = getattr(self.get_base_layer(), "weight", None)
+        weight = self.get_base_layer().weight
         self.c3a_kernel[adapter_name] = nn.Parameter(
             torch.zeros(
                 self.out_features // block_size,
@@ -90,7 +92,7 @@ class C3ALayer(BaseTunerLayer):
         if adapter_name in self.c3a_kernel.keys():
             if init_weights == "gaussian":
                 nn.init.normal_(self.c3a_kernel[adapter_name])
-            elif init_weights in ["xavier_uniform", False]:
+            elif init_weights in ["xavier_uniform", False]:  # Support test cases where False presents
                 fan_in, fan_out = self.in_features, self.out_features
                 std = 1.0 * math.sqrt(2.0 / float(fan_in + fan_out))
                 a = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
@@ -103,12 +105,6 @@ class C3ALayer(BaseTunerLayer):
                 raise ValueError(f"Unknown init_weights: {init_weights}")
 
 
-#  ------------------------------------------------------------------------------------------
-#  Copyright (c) Microsoft Corporation. All rights reserved.
-#  Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
-#  ------------------------------------------------------------------------------------------
-
-
 class C3ALinear(nn.Module, C3ALayer):
     # Lora implemented in a dense layer
     def __init__(
@@ -116,7 +112,7 @@ class C3ALinear(nn.Module, C3ALayer):
         base_layer,
         adapter_name: str,
         block_size: int,
-        init_weights: bool = True,
+        init_weights: str,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -149,7 +145,6 @@ class C3ALinear(nn.Module, C3ALayer):
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
                     orig_weights = base_layer.weight.data.clone()
-                    # orig_weights += self.get_delta_weight(active_adapter)
                     delta_weight = self.get_delta_weight(active_adapter)
                     orig_weights = orig_weights + delta_weight
 
