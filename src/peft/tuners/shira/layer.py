@@ -12,19 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import warnings
-from typing import List, Optional
 import copy
+import warnings
+from typing import Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
-from peft.utils.other import transpose
-
-from .._buffer_dict import BufferDict
 
 
 class ShiraLayer(BaseTunerLayer):
@@ -41,16 +37,16 @@ class ShiraLayer(BaseTunerLayer):
         self.shira_indices = {}
         self.shira_embedding_weights = nn.ParameterDict({})
         self.weight_shape = base_layer.weight.shape #Assumes SHiRA is on some layer with "weight" parameter
-        
+
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
-        
+
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
             in_features, out_features = base_layer.in_features, base_layer.out_features
         else:
-            raise NotImplementedError(f'Only nn.Linear layers supported currently')
+            raise NotImplementedError('Only nn.Linear layers supported currently')
 
         self.in_features = in_features
         self.out_features = out_features
@@ -70,7 +66,7 @@ class ShiraLayer(BaseTunerLayer):
         num_shira_weight = r * (self.in_features + self.out_features)
         if num_shira_weight > self.in_features * self.out_features:
             raise ValueError(f'The set rank {r} results in more shira params than the total number of params in the base layer {self.in_features * self.out_features} and this is not allowed.')
-        
+
         # Actual trainable parameters
         # We have used a vector parameter with fixed indices that we use inside a torch.sparse_coo_tensor in get_delta_weight function.
         # Directly using a torch.sparse_coo_tensor as a parameter could have been possible but we ran into some issues similar to:
@@ -81,15 +77,15 @@ class ShiraLayer(BaseTunerLayer):
         mask_indices = torch.where(mask==1.)
         self.shira_indices[adapter_name] = torch.cat([mask_indices[0].unsqueeze(0), mask_indices[1].unsqueeze(0)], 0).to(torch.int)
         self.shira_indices[adapter_name] = self.shira_indices[adapter_name].to(self.base_layer.weight.device)
-        
+
         if self.shira_indices[adapter_name].shape[1] != self.shira_weight[adapter_name].shape[0]:
-            raise ValueError(f'The SHiRA indices and weights are not the same dimensions for adapter {adapter_name} in layer {self.base_layer}') 
+            raise ValueError(f'The SHiRA indices and weights are not the same dimensions for adapter {adapter_name} in layer {self.base_layer}')
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
     def reset_shira_parameters(self, adapter_name, d_initial: float = 0.1):
         nn.init.zeros_(self.shira_weight[adapter_name])
-        
+
     def set_scale(self, adapter, scale):
         if adapter not in self.scaling:
             # Ignore the case where the adapter is not in the layer
@@ -115,7 +111,7 @@ class Linear(nn.Linear, ShiraLayer):
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, mask, r)
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -176,7 +172,7 @@ class Linear(nn.Linear, ShiraLayer):
         # In multi-gpu environment, the indices are at the wrong gpu.  This is needed to correct this.
         self.shira_indices[adapter] = self.shira_indices[adapter].to(self.shira_weight[adapter].device)
         return torch.sparse_coo_tensor(self.shira_indices[adapter], self.shira_weight[adapter] * self.scaling[adapter], self.weight_shape)
-    
+
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         # previous_dtype = x.dtype
 
@@ -192,9 +188,9 @@ class Linear(nn.Linear, ShiraLayer):
                 if active_adapter not in self.shira_weight.keys():
                     continue
                 new_weight += self.get_delta_weight(active_adapter)
-            
+
             result = F.linear(x, new_weight, bias=self.base_layer.bias)
-            
+
         return result
 
     def __repr__(self) -> str:

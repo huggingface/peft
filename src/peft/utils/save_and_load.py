@@ -150,7 +150,7 @@ def get_peft_model_state_dict(
             else:
                 prompt_embeddings = model.get_prompt_embedding_to_save(adapter_name)
         to_return["prompt_embeddings"] = prompt_embeddings
-    
+
     elif config.peft_type == PeftType.SHIRA:
         shira_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
         to_return = {k: state_dict[k] for k in state_dict if shira_prefix in k}

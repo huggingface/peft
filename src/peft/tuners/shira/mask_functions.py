@@ -20,7 +20,7 @@ Required positional arguments:
     base_layer - This is the linear layer where the shira adapter will be attached.
     r          - Adapter rank.  Shira doesn't use the rank concept exactly, but this is used to determine the
                  number of parameters in the shira adapter in a way that is consistent with LoRA sizing.
-Keyword arguments can be provided as needed by the particular mask function implementation.  
+Keyword arguments can be provided as needed by the particular mask function implementation.
 
 Return:
     mask - this is a torch.tensor of the same shape as base_layer.weight that contains 0s and 1s with the same
@@ -36,9 +36,11 @@ than the provided positional arguments, you can create the mask function referen
         return mask_fn
 """
 
+from typing import Optional
+
 import torch
 import torch.nn as nn
-from typing import Optional
+
 
 def random_mask(base_layer: nn.Module, r: int, random_seed: Optional[int] = None, **kwargs) -> torch.tensor:
     shape = base_layer.weight.shape

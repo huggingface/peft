@@ -14,10 +14,11 @@
 
 # This test file is for tests specific to SHiRA.
 
+import copy
 import os
+
 import pytest
 import torch
-import copy
 from accelerate.utils.imports import is_bf16_available
 from torch import nn
 
@@ -52,10 +53,10 @@ class TestShira:
         torch.manual_seed(0)
         model = MLP()
         return model
-    
+
     def test_mlp_single_adapter_shapes(self, mlp):
         # torch.manual_seed(0)
-        
+
         r = 2
         config = ShiraConfig(r=r, target_modules=["lin1", "lin2"])
         # creates a default SHiRA adapter
@@ -74,18 +75,18 @@ class TestShira:
 
         assert shira_weight1_size == r * (base_weight1_size[0] + base_weight1_size[1])
         assert shira_weight2_size == r * (base_weight2_size[0] + base_weight2_size[1])
-        
+
         assert shira_weight1_size == shira_indices1_size
         assert shira_weight2_size == shira_indices2_size
 
         assert delta_weight1_shape == base_weight1_size
         assert delta_weight2_shape == base_weight2_size
-        
+
         return peft_model
-    
+
     def test_mlp_single_adapter_merge_unmerge(self, mlp):
         # torch.manual_seed(0)
-        
+
         r = 2
         config = ShiraConfig(r=r, target_modules=["lin1", "lin2"])
         # creates a default SHiRA adapter
@@ -110,20 +111,20 @@ class TestShira:
 
         manual_unmerge_weight1 = peft_model.base_model.model.lin1.base_layer.weight - peft_model.base_model.model.lin1.get_delta_weight('default')
         manual_unmerge_weight2 = peft_model.base_model.model.lin2.base_layer.weight - peft_model.base_model.model.lin2.get_delta_weight('default')
-        
+
         peft_model.base_model.model.lin1.unmerge()
         peft_model.base_model.model.lin2.unmerge()
 
         assert torch.all(peft_model.base_model.model.lin1.base_layer.weight.data - manual_unmerge_weight1 == 0)
         assert torch.all(peft_model.base_model.model.lin2.base_layer.weight.data - manual_unmerge_weight2 == 0)
-        
+
         peft_model.merge_and_unload()
 
         assert torch.all(peft_model.base_model.model.lin1.weight.data - manual_merge_weight1 == 0)
         assert torch.all(peft_model.base_model.model.lin2.weight.data - manual_merge_weight2 == 0)
 
         return peft_model
-    
+
     def test_mlp_multiple_adapters_same_attachment_points(self, mlp):
         # torch.manual_seed(0)
 
@@ -135,7 +136,7 @@ class TestShira:
 
         assert len(peft_model.base_model.model.lin1.shira_weight.keys()) == 2
         assert len(peft_model.base_model.model.lin2.shira_weight.keys()) == 2
-        
+
         return peft_model
 
     def test_mlp_multiple_adapters_different_attachment_points(self, mlp):
@@ -228,7 +229,7 @@ class TestShira:
         assert torch.all(peft_model4.base_model.model.lin3.weight - manual_merge_weight3 == 0)
 
         return peft_model
-    
+
     def test_multiple_adapters_save_load(self, mlp, tmp_path):
         # check saving and loading works with multiple adapters
         # note, the random seeds in the below two configs are not the default values.
@@ -292,7 +293,7 @@ class TestShira:
 
         assert torch.all(output_first - output_first_loaded == 0)
         assert torch.all(output_second - output_second_loaded == 0)
-        
+
         assert torch.all(shira_assign_val1_f - peft_model.base_model.model.lin1.shira_weight['first'] == 0)
         assert torch.all(shira_assign_val2_f - peft_model.base_model.model.lin2.shira_weight['first'] == 0)
         assert torch.all(shira_indices1_f - peft_model.base_model.model.lin1.shira_indices['first'] == 0)

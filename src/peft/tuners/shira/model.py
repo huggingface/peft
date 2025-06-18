@@ -14,16 +14,14 @@
 
 from __future__ import annotations
 
-import math
 import warnings
 from dataclasses import asdict
 from enum import Enum
-from typing import Optional, Union
+from typing import Optional
 
 import torch
 import torch.nn as nn
 from tqdm import tqdm
-from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
 from peft.utils import (
@@ -32,8 +30,6 @@ from peft.utils import (
     _get_submodules,
 )
 
-from .._buffer_dict import BufferDict
-from ..tuners_utils import _maybe_include_all_linear_layers
 from .config import ShiraConfig
 from .layer import Linear, ShiraLayer
 from .mask_functions import random_mask
@@ -83,11 +79,11 @@ class ShiraModel(BaseTuner):
             if existing_config is config:
                 # skip the current config
                 continue
-        
+
     @staticmethod
     def _check_target_module_exists(shira_config, key):
         return check_target_module_exists(shira_config, key)
-    
+
     def _create_and_replace(
         self,
         shira_config,
@@ -182,9 +178,9 @@ class ShiraModel(BaseTuner):
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
                 "`torch.nn.Linear`."
             )
-        
+
         mask = shira_config.mask_fn(target_base_layer, shira_config.r, **kwargs)
-        
+
         new_module = Linear(
             target,
             mask,

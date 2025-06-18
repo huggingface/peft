@@ -45,11 +45,11 @@ from peft import (
     OFTConfig,
     PeftModel,
     RandLoraConfig,
+    ShiraConfig,
     TaskType,
     TrainableTokensConfig,
     VBLoRAConfig,
     VeraConfig,
-    ShiraConfig,
     get_peft_model,
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
