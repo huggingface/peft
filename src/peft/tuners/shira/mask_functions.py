@@ -38,12 +38,14 @@ than the provided positional arguments, you can create the mask function referen
 
 import torch
 import torch.nn as nn
+from typing import Optional
 
-def random_mask(base_layer: nn.Module, r: int, random_seed: int = 42, **kwargs) -> torch.tensor:
+def random_mask(base_layer: nn.Module, r: int, random_seed: Optional[int] = None, **kwargs) -> torch.tensor:
     shape = base_layer.weight.shape
     num_shira_weights = r * (shape[0] + shape[1])
     random_generator = torch.Generator()
-    random_generator.manual_seed(random_seed)
+    if random_seed is not None:
+        random_generator.manual_seed(random_seed)
 
     idx = (torch.randperm(base_layer.weight.numel(), generator=random_generator)[:num_shira_weights]).to(base_layer.weight.device)
     val = torch.ones_like(idx.type(base_layer.weight.dtype))

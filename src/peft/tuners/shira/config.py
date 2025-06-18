@@ -68,7 +68,7 @@ class ShiraConfig(PeftConfig):
                                                                 "This function can be found inside mask_functions.py. "
                                                         )
                                                     }) 
-    random_seed: int = field(default=42, metadata={"help": "random seed for the torch generator for random_mask"})
+    random_seed: Optional[int] = field(default=None, metadata={"help": "random seed for the torch generator for random_mask"})
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={

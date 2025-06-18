@@ -177,18 +177,10 @@ class ShiraModel(BaseTuner):
                     "Setting fan_in_fan_out to False."
                 )
                 fan_in_fan_out = shira_config.fan_in_fan_out = False
-        elif isinstance(target_base_layer, Conv1D):
-            kwargs["is_target_conv_1d_layer"] = True
-            if not fan_in_fan_out:
-                warnings.warn(
-                    "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
-                )
-                fan_in_fan_out = shira_config.fan_in_fan_out = True
         else:
             raise ValueError(
-                # TODO:Fix this error message by looking into fan_in_fan_out properly. Either support Conv1D or don't 
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
-                "`torch.nn.Linear`, `transformers.pytorch_utils.Conv1D`."
+                "`torch.nn.Linear`."
             )
         
         mask = shira_config.mask_fn(target_base_layer, shira_config.r, **kwargs)
