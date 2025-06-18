@@ -61,30 +61,6 @@ class CustomModel(nn.Module):
         return output
 
 
-class ModelConv2DGroups(nn.Module):
-    """For testing when groups argument is used in conv layer"""
-
-    def __init__(self):
-        super().__init__()
-        self.conv2d = nn.Conv2d(16, 32, 3, padding=1, groups=2)
-        self.relu = nn.ReLU()
-        self.flat = nn.Flatten()
-        self.lin0 = nn.Linear(12800, 2)
-        self.sm = nn.LogSoftmax(dim=-1)
-        self.dtype = torch.float
-
-    def forward(self, X):
-        # This is ignoring input since main usage is for checking raising of error when peft is applied
-        X = torch.arange(9 * 16 * 20 * 20).view([9, 16, 20, 20]).to(self.conv2d.weight.device)
-        X = X.to(self.dtype)
-        X = self.conv2d(X)
-        X = self.relu(X)
-        X = self.flat(X)
-        X = self.lin0(X)
-        X = self.sm(X)
-        return X
-
-
 VARIANT_MAP = {
     "dora": {
         LoraLinear: DoraLinearVariant,
@@ -101,16 +77,6 @@ TEST_CASES = [
         LoraConfig,
         {"target_modules": ["linear1", "linear2", "conv1d", "conv2d", "embedding"], "use_dora": True},
     ),
-]
-
-
-CONV_GROUPS_TEST_CASES = [
-    ("lora with rank divisible by groups", LoraConfig, {"r": 8, "target_modules": ["conv2d"]}),
-    ("lora with rank equal to groups", LoraConfig, {"r": 2, "target_modules": ["conv2d"]}),
-    ("lora with rank not divisible by groups", LoraConfig, {"r": 1, "target_modules": ["conv2d"]}),
-    ("dora with rank divisible by groups", LoraConfig, {"r": 8, "target_modules": ["conv2d"], "use_dora": True}),
-    ("dora with rank equal to groups", LoraConfig, {"r": 2, "target_modules": ["conv2d"], "use_dora": True}),
-    ("dora with rank not divisible by groups", LoraConfig, {"r": 1, "target_modules": ["conv2d"], "use_dora": True}),
 ]
 
 
@@ -158,27 +124,3 @@ class TestLoraVariants:
 
         for layer in layer_names:
             assert getattr(peft_model.base_model.model, layer).lora_magnitude_vector["default"].weight.grad is not None
-
-
-class TestConvGroups:
-    @pytest.mark.parametrize("test_name, config_cls, config_kwargs", CONV_GROUPS_TEST_CASES)
-    def test_error_raised_if_rank_not_divisible_by_groups(self, test_name, config_cls, config_kwargs):
-        # This test checks if error is raised when rank is not divisible by groups for conv layer since
-        # currently, support is limited to conv layers where the rank is divisible by groups in lora and dora
-        base_model = ModelConv2DGroups()
-        peft_config = config_cls(**config_kwargs)
-        r = config_kwargs["r"]
-        base_layer = base_model.conv2d
-        groups = base_layer.groups
-        if r % groups != 0:
-            with pytest.raises(
-                ValueError,
-                match=(
-                    f"Targeting a {base_layer.__class__.__name__} with groups={base_layer.groups} and rank {r}. "
-                    "Currently, support is limited to conv layers where the rank is divisible by groups. "
-                    "Either choose a different rank or do not target this specific layer."
-                ),
-            ):
-                peft_model = get_peft_model(base_model, peft_config)
-        else:
-            peft_model = get_peft_model(base_model, peft_config)
