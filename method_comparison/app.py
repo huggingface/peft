@@ -145,7 +145,7 @@ def generate_pareto_plot(df, metric_x, metric_y):
         title=f"Pareto Frontier for {metric_x} vs {metric_y}",
         template="seaborn",
         height=700,
-        width=900,
+        autosize=True,
         xaxis_title=metric_x,
         yaxis_title=metric_y,
     )
