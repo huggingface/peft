@@ -40,7 +40,6 @@ import torch
 import torch.nn as nn
 
 def random_mask(base_layer: nn.Module, r: int, random_seed: int = 42, **kwargs) -> torch.tensor:
-    _ = kwargs
     shape = base_layer.weight.shape
     num_shira_weights = r * (shape[0] + shape[1])
     random_generator = torch.Generator()
