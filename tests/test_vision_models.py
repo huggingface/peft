@@ -19,7 +19,7 @@ import gc
 import numpy as np
 import pytest
 import torch
-from datasets import load_dataset
+from accelerate.utils.memory import clear_device_cache
 from safetensors.torch import load_file
 from transformers import (
     AutoImageProcessor,
@@ -38,6 +38,8 @@ from peft import (
     PrefixTuningConfig,
     get_peft_model,
 )
+
+from .testing_utils import load_cat_image
 
 
 CONFIGS = {
@@ -66,17 +68,18 @@ class TestPastKV:
         )
         processor = AutoProcessor.from_pretrained(model_id)
         raw_image = np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8)
-        inputs = processor(prompt, raw_image, return_tensors="pt")
+        inputs = processor(text=prompt, images=raw_image, return_tensors="pt")
 
         # get peft model
         peft_config = PrefixTuningConfig(task_type="CAUSAL_LM", num_virtual_tokens=20)
-        model.language_model = get_peft_model(model.language_model, peft_config)
+        model = get_peft_model(model, peft_config)
         # check that this does not raise
         model(**inputs, output_hidden_states=True)
 
 
 class TestResnet:
     model_id = "hf-internal-testing/tiny-random-ResNetForImageClassification"
+    cat_image = load_cat_image()  # for caching
 
     @pytest.fixture(autouse=True)
     def teardown(self):
@@ -84,9 +87,7 @@ class TestResnet:
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
         gc.collect()
 
     @pytest.fixture(scope="class")
@@ -96,9 +97,7 @@ class TestResnet:
 
     @pytest.fixture(scope="class")
     def data(self, image_processor):
-        dataset = load_dataset("huggingface/cats-image", trust_remote_code=True)
-        image = dataset["test"]["image"][0]
-        return image_processor(image, return_tensors="pt")
+        return image_processor(self.cat_image, return_tensors="pt")
 
     @pytest.mark.parametrize("config", CONFIGS.values(), ids=CONFIGS.keys())
     def test_model_with_batchnorm_reproducibility(self, config, tmp_path, data):

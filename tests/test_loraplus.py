@@ -19,7 +19,7 @@ from torch import nn
 from peft.import_utils import is_bnb_available
 from peft.optimizers import create_loraplus_optimizer
 
-from .testing_utils import require_bitsandbytes
+from .testing_utils import require_bitsandbytes, torch_device
 
 
 if is_bnb_available():
@@ -80,7 +80,7 @@ def test_lora_plus_optimizer_sucess():
         "betas": (0.9, 0.999),
         "loraplus_weight_decay": 0.0,
     }
-    model: SimpleNet = SimpleNet().cuda()
+    model: SimpleNet = SimpleNet().to(torch_device)
     optim = create_loraplus_optimizer(
         model=model,
         optimizer_cls=optimizer_cls,
@@ -91,9 +91,9 @@ def test_lora_plus_optimizer_sucess():
     )
     loss = torch.nn.CrossEntropyLoss()
     bnb.optim.GlobalOptimManager.get_instance().register_parameters(model.parameters())
-    x = torch.randint(100, (2, 4, 10)).cuda()
+    x = torch.randint(100, (2, 4, 10)).to(torch_device)
     output = model(x).permute(0, 3, 1, 2)
-    label = torch.randint(16, (2, 4, 10)).cuda()
+    label = torch.randint(16, (2, 4, 10)).to(torch_device)
     loss_value = loss(output, label)
     loss_value.backward()
     optim.step()

@@ -39,7 +39,9 @@ Installing PEFT from source is useful for keeping up with the latest development
 python -m pip install git+https://github.com/huggingface/peft
 ```
 
-## ValueError: Attempting to unscale FP16 gradients
+## Dtype-related issues
+
+### ValueError: Attempting to unscale FP16 gradients
 
 This error probably occurred because the model was loaded with `torch_dtype=torch.float16` and then used in an automatic mixed precision (AMP) context, e.g. by setting `fp16=True` in the [`~transformers.Trainer`] class from 🤗 Transformers. The reason is that when using AMP, trainable weights should never use fp16. To make this work without loading the whole model in fp32, add the following to your code:
 
@@ -71,9 +73,26 @@ trainer.train()
 
 <Tip>
 
-Starting from PEFT verion v0.12.0, PEFT automatically promotes the dtype of adapter weights from `torch.float16` and `torch.bfloat16` to `torch.float32` where appropriate. To _prevent_ this behavior, you can pass `autocast_adapter_dtype=False` to [`~get_peft_model`], to [`~PeftModel.from_pretrained`], and to [`~PeftModel.load_adapter`].
+Starting from PEFT version v0.12.0, PEFT automatically promotes the dtype of adapter weights from `torch.float16` and `torch.bfloat16` to `torch.float32` where appropriate. To _prevent_ this behavior, you can pass `autocast_adapter_dtype=False` to [`~get_peft_model`], to [`~PeftModel.from_pretrained`], and to [`~PeftModel.load_adapter`].
 
 </Tip>
+
+### Selecting the dtype of the adapter
+
+Most PEFT methods, like LoRA, work by adding trainable adapter weights. By default, those weights are stored in float32 dtype (fp32), i.e. at a relatively high precision. Therefore, even if the base model is loaded in float16 (fp16) or bfloat16 (bf16), the adapter weights are float32. When the adapter results are calculated during the forward pass, the input will typically be in the dtype of the base model, thus it will be upcast to float32 if necessary, then cast back to the original dtype.
+
+If you prefer to have the adapter weights in the lower precision of the base model, i.e. in float16 or bfloat16, you can pass `autocast_adapter_dtype=False` when creating the model ([`~get_peft_model`]) or loading the model ([`~PeftModel.from_pretrained`]). There are some advantages and disadvantages to this:
+
+Advantages of half precision adapter:
+- computation slightly faster
+- slightly less memory
+- smaller file size of checkpoint (half the size)
+
+Disadvantages of half precision adapter:
+- slightly worse loss
+- higher risk of overflow or underflow
+
+Note that for most use cases, overall runtime and memory cost will be determined by the size of the base model and by the dataset, while the dtype of the PEFT adapter will only have a small impact.
 
 ## Bad results from a loaded PEFT model
 
@@ -147,6 +166,34 @@ model.save_pretrained("my_adapter", save_embedding_layers=True)
 For inference, load the base model first and resize it the same way you did before you trained the model. After you've resized the base model, you can load the PEFT checkpoint.
 
 For a complete example, please check out [this notebook](https://github.com/huggingface/peft/blob/main/examples/causal_language_modeling/peft_lora_clm_with_additional_tokens.ipynb).
+
+### Getting a warning about "weights not being initialized from the model checkpoint"
+
+When you load your PEFT model which has been trained on a task (for example, classification), you may get a warning like:
+
+> Some weights of LlamaForSequenceClassification were not initialized from the model checkpoint at meta-llama/Llama-3.2-1B and are newly initialized: ['score.weight']. You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+
+Although this looks scary, it is most likely nothing to worry about. This warning comes from Transformers, and it isn't a PEFT specific warning. It lets you know that a randomly initialized classification head (`score`) is attached to the base model, and the head must be trained to produce sensible predictions.
+
+When you get this warning _before_ training the model, PEFT automatically takes care of making the classification head trainable if you correctly passed the `task_type` argument to the PEFT config.
+
+```python
+from peft import LoraConfig, TaskType
+
+lora_config = LoraConfig(..., task_type=TaskType.SEQ_CLS)
+```
+
+If your classification head does not follow the usual naming conventions from Transformers (which is rare), you have to explicitly tell PEFT the name of the head in `modules_to_save`.
+
+```python
+lora_config = LoraConfig(..., modules_to_save=["name-of-classification-head"])
+```
+
+To check the name of the classification head, print the model and it should be the last module.
+
+If you get this warning from your inference code, i.e. _after_ training the model, when you load the PEFT model, you always have to load the Transformers model first. Since Transformers does not know that you will load PEFT weights afterwards, it still gives the warning.
+
+As always, it is best practice to ensure the model works correctly for inference by running some validation on it.
 
 ### Check layer and model status
 
@@ -264,7 +311,7 @@ Loading adapters like LoRA weights should generally be fast compared to loading 
 
 <Tip>
 
-If this option works well across different use casese, it may become the default for adapter loading in the future.
+If this option works well across different use cases, it may become the default for adapter loading in the future.
 
 </Tip>
 

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import math
-from typing import Any, Optional, Set, Tuple, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -49,7 +49,7 @@ class LoKrLayer(nn.Module, LycorisLayer):
         self.lokr_t2 = nn.ParameterDict({})
 
     @property
-    def _available_adapters(self) -> Set[str]:
+    def _available_adapters(self) -> set[str]:
         return {
             *self.lokr_w1,
             *self.lokr_w1_a,
@@ -303,6 +303,7 @@ class Linear(LoKrLayer):
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
         delta_weight = self.get_delta_weight(adapter_name)
+        input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
         return F.linear(input, delta_weight)
 
@@ -340,6 +341,7 @@ class Conv2d(LoKrLayer):
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
         delta_weight = self.get_delta_weight(adapter_name)
+        input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
         base_layer = self.get_base_layer()
         return F.conv2d(
@@ -359,7 +361,7 @@ class Conv2d(LoKrLayer):
 # Below code is a direct copy from https://github.com/KohakuBlueleaf/LyCORIS/blob/eb460098187f752a5d66406d3affade6f0a07ece/lycoris/modules/lokr.py#L11
 
 
-def factorization(dimension: int, factor: int = -1) -> Tuple[int, int]:
+def factorization(dimension: int, factor: int = -1) -> tuple[int, int]:
     """Factorizes the provided number into the product of two numbers
 
     Args:

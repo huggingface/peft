@@ -21,7 +21,7 @@ Quantization represents data with fewer bits, making it a useful technique for r
 * optimizing which model weights are quantized with the [AWQ](https://hf.co/papers/2306.00978) algorithm
 * independently quantizing each row of a weight matrix with the [GPTQ](https://hf.co/papers/2210.17323) algorithm
 * quantizing to 8-bit and 4-bit precision with the [bitsandbytes](https://github.com/TimDettmers/bitsandbytes) library
-* quantizing to as low as 2-bit precision with the [AQLM](https://arxiv.org/abs/2401.06118) algorithm
+* quantizing to as low as 2-bit precision with the [AQLM](https://huggingface.co/papers/2401.06118) algorithm
 
 However, after a model is quantized it isn't typically further trained for downstream tasks because training can be unstable due to the lower precision of the weights and activations. But since PEFT methods only add *extra* trainable parameters, this allows you to train a quantized model with a PEFT adapter on top! Combining quantization with PEFT can be a good strategy for training even the largest models on a single GPU. For example, [QLoRA](https://hf.co/papers/2305.14314) is a method that quantizes a model to 4-bits and then trains it with LoRA. This method allows you to finetune a 65B parameter model on a single 48GB GPU!
 
@@ -135,9 +135,9 @@ Once quantized, you can post-train GPTQ models with PEFT APIs.
 
 ## AQLM quantization
 
-Additive Quantization of Language Models ([AQLM](https://arxiv.org/abs/2401.06118)) is a Large Language Models compression method. It quantizes multiple weights together and takes advantage of interdependencies between them. AQLM represents groups of 8-16 weights as a sum of multiple vector codes. This allows it to compress models down to as low as 2-bit with considerably low accuracy losses.
+Additive Quantization of Language Models ([AQLM](https://huggingface.co/papers/2401.06118)) is a Large Language Models compression method. It quantizes multiple weights together and takes advantage of interdependencies between them. AQLM represents groups of 8-16 weights as a sum of multiple vector codes. This allows it to compress models down to as low as 2-bit with considerably low accuracy losses.
 
-Since the AQLM quantization process is computationally expensive, a use of prequantized models is recommended. A partial list of available models can be found in the official aqlm [repository](https://github.com/Vahe1994/AQLM).
+Since the AQLM quantization process is computationally expensive, the use of prequantized models is recommended. A partial list of available models can be found in the official aqlm [repository](https://github.com/Vahe1994/AQLM).
 
 The models support LoRA adapter tuning. To tune the quantized model you'll need to install the `aqlm` inference library: `pip install aqlm>=1.0.2`. Finetuned LoRA adapters shall be saved separately, as merging them with AQLM quantized weights is not possible.
 
@@ -192,7 +192,7 @@ model = get_peft_model(model, config)
 
 ## HQQ quantization
 
-The models that is quantized using Half-Quadratic Quantization of Large Machine Learning Models ([HQQ](https://mobiusml.github.io/hqq_blog/)) support LoRA adapter tuning. To tune the quantized model, you'll need to install the `hqq` library with: `pip install hqq`.
+The models that are quantized using Half-Quadratic Quantization of Large Machine Learning Models ([HQQ](https://mobiusml.github.io/hqq_blog/)) support LoRA adapter tuning. To tune the quantized model, you'll need to install the `hqq` library with: `pip install hqq`.
 
 ```python
 from hqq.engine.hf import HQQModelForCausalLM
@@ -236,6 +236,44 @@ model = get_peft_model(base_model, peft_config)
 - `NF4` is not implemented in transformers as of yet and is thus also not supported.
 - DoRA only works with `quant_type = "int8_weight_only"` at the moment.
 - There is explicit support for torchao when used with LoRA. However, when torchao quantizes a layer, its class does not change, only the type of the underlying tensor. For this reason, PEFT methods other than LoRA will generally also work with torchao, even if not explicitly supported. Be aware, however, that **merging only works correctly with LoRA and with `quant_type = "int8_weight_only"`**. If you use a different PEFT method or dtype, merging will likely result in an error, and even it doesn't, the results will still be incorrect.
+
+## INC quantization
+
+Intel Neural Compressor ([INC](https://github.com/intel/neural-compressor)) enables model quantization for various devices,
+including Intel Gaudi accelerators (also known as HPU devices). You can perform LoRA fine-tuning on models that have been
+quantized using INC. To use INC with PyTorch models, install the library with: `pip install neural-compressor[pt]`.
+Quantizing a model to FP8 precision for HPU devices can be done with the following single-step quantization workflow:
+
+```python
+import torch
+from neural_compressor.torch.quantization import FP8Config, convert, finalize_calibration, prepare
+quant_configs = {
+    ...
+}
+config = FP8Config(**quant_configs)
+```
+
+Pass the config to the `prepare` method, run inference to gather calibration stats, and call `finalize_calibration`
+and `convert` methods to quantize model to FP8 precision:
+
+```python
+model = prepare(model, config)
+# Run inference to collect calibration statistics
+...
+# Finalize calibration and convert the model to FP8 precision
+finalize_calibration(model)
+model = convert(model)
+# Load PEFT LoRA adapter as usual
+...
+```
+
+An example demonstrating how to load a PEFT LoRA adapter into an INC-quantized FLUX text-to-image model for HPU
+devices is provided [here](https://github.com/huggingface/peft/blob/main/examples/stable_diffusion/inc_flux_lora_hpu.py).
+
+### Caveats:
+
+- `merge()` and `unmerge()` methods are currently not supported for INC-quantized models.
+- Currently, only **Linear** INC-quantized layers are supported when loading PEFT adapters.
 
 ## Optimum-quanto
 

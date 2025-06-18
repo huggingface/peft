@@ -15,7 +15,7 @@
 from setuptools import find_packages, setup
 
 
-VERSION = "0.14.1.dev0"
+VERSION = "0.15.2.dev0"
 
 extras = {}
 extras["quality"] = [
@@ -88,10 +88,10 @@ setup(
 )
 
 # Release checklist
-# 1. Change the version in __init__.py and setup.py to the release version, e.g. from "0.6.0.dev0" to "0.6.0"
+# 1. Change the version in __init__.py and setup.py to the release version, e.g. from "0.6.1.dev0" to "0.7.0"
 # 2. Check if there are any deprecations that need to be addressed for this release by searching for "# TODO" in the code
 # 3. Commit these changes with the message: "Release: VERSION", create a PR and merge it.
-# 4. Add a tag in git to mark the release: "git tag -a VERSION -m 'Adds tag VERSION for pypi' "
+# 4. Add a tag in git to mark the release: "git tag -a v<VERSION> -m 'Adds tag <VERSION> for pypi' "
 #    Push the tag to git:
 #      git push --tags origin main
 #    It is necessary to work on the original repository, not on a fork.
@@ -108,4 +108,4 @@ setup(
 #      twine upload dist/* -r pypi
 # 9. Add release notes to the tag on https://github.com/huggingface/peft/releases once everything is looking hunky-dory.
 #      Check the notes here: https://docs.google.com/document/d/1k-sOIfykuKjWcOIALqjhFKz4amFEp-myeJUJEzNgjoU/edit?usp=sharing
-# 10. Update the version in __init__.py, setup.py to the bumped minor version + ".dev0" (e.g. from "0.6.0" to "0.7.0.dev0")
+# 10. Update the version in __init__.py, setup.py to the bumped patch version + ".dev0" (e.g. from "0.7.0" to "0.7.1.dev0")

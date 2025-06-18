@@ -23,6 +23,8 @@ import torch
 import transformers
 from torch import nn
 
+from peft.import_utils import is_xpu_available
+
 
 @contextmanager
 def gather_params_ctx(param, modifier_rank: int = 0, fwd_module: torch.nn.Module = None):
@@ -90,8 +92,11 @@ def dequantize_bnb_weight(weight: torch.nn.Parameter, state=None):
     # BNB requires CUDA weights
     device = weight.device
     is_cpu = device.type == torch.device("cpu").type
-    if is_cpu and torch.cuda.is_available():
-        weight = weight.to(torch.device("cuda"))
+    if is_cpu:
+        if torch.cuda.is_available():
+            weight = weight.to(torch.device("cuda"))
+        elif is_xpu_available():
+            weight = weight.to(torch.device("xpu"))
 
     cls_name = weight.__class__.__name__
     if cls_name == "Params4bit":

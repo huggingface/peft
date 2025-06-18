@@ -31,7 +31,7 @@ class LNTuningModel(BaseTuner):
     """
     Creates LayerNorm tuning from a pretrained transformer model.
 
-    The method is described in detail in https://arxiv.org/abs/2312.11420.
+    The method is described in detail in https://huggingface.co/papers/2312.11420.
 
     Args:
         model ([`torch.nn.Module`]): The model to be adapted.
@@ -203,3 +203,9 @@ class LNTuningModel(BaseTuner):
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ) -> nn.Module:
         return self._unload_and_optionally_merge(merge=True)
+
+    def _cast_adapter_dtype(self, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
+        # Note: LN Tuning does not add adapter layers, instead it creates copies of the original layer. For this reason,
+        # we need to skip adapter autocasting, otherwise we would change the dtype of copies of the original layer,
+        # resulting in dtype errors down the line.
+        pass

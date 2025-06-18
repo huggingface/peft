@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import warnings
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import packaging
 import torch
@@ -105,7 +105,7 @@ class SVDLinear(nn.Module, AdaLoraLayer):
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -180,7 +180,7 @@ class SVDLinear(nn.Module, AdaLoraLayer):
                 scaling = self.scaling[active_adapter]
                 ranknum = self.ranknum[active_adapter] + 1e-5
 
-                x = x.to(lora_A.dtype)
+                x = self._cast_input_dtype(x, lora_A.dtype)
                 result += (dropout(x) @ (lora_A * lora_E).T @ lora_B.T) * scaling / ranknum
 
         return result

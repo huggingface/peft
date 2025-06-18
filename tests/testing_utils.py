@@ -13,12 +13,21 @@
 # limitations under the License.
 import unittest
 from contextlib import contextmanager
+from functools import lru_cache, wraps
 
 import numpy as np
 import pytest
 import torch
 from accelerate.test_utils.testing import get_backend
+from datasets import load_dataset
 
+from peft import (
+    AdaLoraConfig,
+    IA3Config,
+    LoraConfig,
+    PromptLearningConfig,
+    VBLoRAConfig,
+)
 from peft.import_utils import (
     is_aqlm_available,
     is_auto_awq_available,
@@ -69,7 +78,7 @@ def require_torch_multi_gpu(test_case):
         return test_case
 
 
-def require_multi_accelerator(test_case):
+def require_torch_multi_accelerator(test_case):
     """
     Decorator marking a test that requires multiple hardware accelerators. These tests are skipped on a machine without
     multiple accelerators.
@@ -150,6 +159,22 @@ def require_torchao(test_case):
     return unittest.skipUnless(is_torchao_available(), "test requires torchao")(test_case)
 
 
+def require_deterministic_for_xpu(test_case):
+    @wraps(test_case)
+    def wrapper(*args, **kwargs):
+        if torch_device == "xpu":
+            original_state = torch.are_deterministic_algorithms_enabled()
+            try:
+                torch.use_deterministic_algorithms(True)
+                return test_case(*args, **kwargs)
+            finally:
+                torch.use_deterministic_algorithms(original_state)
+        else:
+            return test_case(*args, **kwargs)
+
+    return wrapper
+
+
 @contextmanager
 def temp_seed(seed: int):
     """Temporarily set the random seed. This works for python numpy, pytorch."""
@@ -181,3 +206,35 @@ def get_state_dict(model, unwrap_compiled=True):
     if unwrap_compiled:
         model = getattr(model, "_orig_mod", model)
     return model.state_dict()
+
+
+@lru_cache
+def load_dataset_english_quotes():
+    # can't use pytest fixtures for now because of unittest style tests
+    data = load_dataset("ybelkada/english_quotes_copy")
+    return data
+
+
+@lru_cache
+def load_cat_image():
+    # can't use pytest fixtures for now because of unittest style tests
+    dataset = load_dataset("huggingface/cats-image", trust_remote_code=True)
+    image = dataset["test"]["image"][0]
+    return image
+
+
+def set_init_weights_false(config_cls, kwargs):
+    kwargs = kwargs.copy()
+
+    if issubclass(config_cls, PromptLearningConfig):
+        return kwargs
+    if config_cls == VBLoRAConfig:
+        return kwargs
+
+    if (config_cls == LoraConfig) or (config_cls == AdaLoraConfig):
+        kwargs["init_lora_weights"] = False
+    elif config_cls == IA3Config:
+        kwargs["init_ia3_weights"] = False
+    else:
+        kwargs["init_weights"] = False
+    return kwargs

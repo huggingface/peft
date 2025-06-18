@@ -57,9 +57,6 @@ class OFTConfig(PeftConfig):
         layers_pattern (`Optional[Union[List[str], str]]`):
             The layer pattern name, used only if `layers_to_transform` is different from `None`. This should target the
             `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
-        rank_pattern (`dict`):
-            The mapping from layer names or regexp expression to ranks which are different from the default rank
-            specified by `r`.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
         coft (`bool`):
@@ -146,26 +143,6 @@ class OFTConfig(PeftConfig):
     block_share: bool = field(
         default=False,
         metadata={"help": "Whether to share the OFT parameters between blocks or not."},
-    )
-    rank_pattern: Optional[dict] = field(
-        default_factory=dict,
-        metadata={
-            "help": (
-                "The mapping from layer names or regexp expression to ranks which are different from the default rank specified by `r`. "
-                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 8`}"
-                "Important: the rank pattern won't be applied to the layers after 0.12.1.dev0!"
-            )
-        },
-    )
-    alpha_pattern: Optional[dict] = field(
-        default_factory=dict,
-        metadata={
-            "help": (
-                "The mapping from layer names or regexp expression to alphas which are different from the default alpha specified by `alpha`. "
-                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 32`}"
-                "Important: the alpha pattern won't be applied to the layers after 0.12.1.dev0!"
-            )
-        },
     )
 
     def __post_init__(self):

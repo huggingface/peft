@@ -39,7 +39,7 @@ from .layer import Conv2d, Conv3d, IA3Layer, Linear
 class IA3Model(BaseTuner):
     """
     Creates a Infused Adapter by Inhibiting and Amplifying Inner Activations ((IA)^3) model from a pretrained
-    transformers model. The method is described in detail in https://arxiv.org/abs/2205.05638
+    transformers model. The method is described in detail in https://huggingface.co/papers/2205.05638
 
     Args:
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
@@ -403,6 +403,7 @@ class IA3Model(BaseTuner):
                     new_adapter = target.active_adapters[:]
 
         self.active_adapter = new_adapter or []
+        self._delete_auxiliary_adapter(adapter_name, new_active_adapters=new_adapter)
 
     def _check_add_weighted_adapter(self, adapters: list[str]) -> tuple[str, str]:
         """

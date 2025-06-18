@@ -46,7 +46,7 @@ from peft import (
 )
 
 
-PEFT_MODELS_TO_TEST = [("lewtun/tiny-random-OPTForCausalLM-delta", "v1")]
+PEFT_MODELS_TO_TEST = [("peft-internal-testing/tiny-opt-lora-revision", "test")]
 
 # Config classes and their mandatory parameters
 ALL_CONFIG_CLASSES = (
@@ -396,6 +396,36 @@ class TestPeftConfig:
 
         msg = f"Unexpected keyword arguments ['foobar', 'spam'] for class {config_class.__name__}, these are ignored."
         config_from_pretrained = config_class.from_pretrained(tmp_path)
+
+        assert len(recwarn) == 1
+        assert recwarn.list[0].message.args[0].startswith(msg)
+        assert "foo" not in config_from_pretrained.to_dict()
+        assert "spam" not in config_from_pretrained.to_dict()
+        assert config.to_dict() == config_from_pretrained.to_dict()
+        assert isinstance(config_from_pretrained, config_class)
+
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
+    def test_from_pretrained_forward_compatible_load_from_peft_config(
+        self, config_class, mandatory_kwargs, tmp_path, recwarn
+    ):
+        """Exact same test as before, but instead of using LoraConfig.from_pretrained, AdaLoraconfig.from_pretrained,
+        etc. use PeftConfig.from_pretrained. This covers a previously existing bug where only the known arguments from
+        PeftConfig would be used instead of the more specific config (which is known thanks to the peft_type
+        attribute).
+
+        """
+        config = config_class(**mandatory_kwargs)
+        config.save_pretrained(tmp_path)
+        # add a spurious key to the config
+        with open(tmp_path / "adapter_config.json") as f:
+            config_dict = json.load(f)
+        config_dict["foobar"] = "baz"
+        config_dict["spam"] = 123
+        with open(tmp_path / "adapter_config.json", "w") as f:
+            json.dump(config_dict, f)
+
+        msg = f"Unexpected keyword arguments ['foobar', 'spam'] for class {config_class.__name__}, these are ignored."
+        config_from_pretrained = PeftConfig.from_pretrained(tmp_path)  # <== use PeftConfig here
 
         assert len(recwarn) == 1
         assert recwarn.list[0].message.args[0].startswith(msg)

@@ -14,7 +14,7 @@
 # limitations under the License.
 
 # The implementation is based on "Bridging The Gap between Low-rank and Orthogonal
-# Adaptation via Householder Reflection Adaptation" (https://arxiv.org/abs/2405.17484).
+# Adaptation via Householder Reflection Adaptation" (https://huggingface.co/papers/2405.17484).
 
 import hashlib
 import itertools

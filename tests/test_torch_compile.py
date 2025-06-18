@@ -24,7 +24,7 @@ import os
 
 import pytest
 import torch
-from datasets import load_dataset
+from accelerate.utils.memory import clear_device_cache
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -53,7 +53,7 @@ from peft import (
     get_peft_model,
 )
 
-from .testing_utils import require_bitsandbytes
+from .testing_utils import load_dataset_english_quotes, require_bitsandbytes
 
 
 # only run (very slow) torch.compile tests when explicitly asked to
@@ -114,9 +114,7 @@ class TestTorchCompileCausalLM:
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
         gc.collect()
 
     @pytest.fixture(scope="class")
@@ -135,7 +133,7 @@ class TestTorchCompileCausalLM:
             ]
             return tokenized
 
-        data = load_dataset("ybelkada/english_quotes_copy")
+        data = load_dataset_english_quotes()
         data = data.map(tokenize, batched=True)
         # We need to manually remove unused columns. This is because we cannot use remove_unused_columns=True in the
         # Trainer, as this leads to errors with torch.compile. We also cannot just leave them in, as they contain

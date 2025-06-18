@@ -48,7 +48,7 @@ class DoraLinearLayer(nn.Module):
                 base_layer = deepcopy(base_layer)
 
             weight = dequantize_module_weight(base_layer)
-            if weight.data.ndim >= 4:  # For handling LoRAs applied to Conv layers.
+            if weight.data.ndim >= 3:  # For handling LoRAs applied to Conv layers.
                 lora_weight = torch.mm(lora_B.flatten(start_dim=1), lora_A.flatten(start_dim=1))
                 lora_weight = lora_weight.reshape(weight.shape)
             else:
@@ -76,7 +76,7 @@ class DoraLinearLayer(nn.Module):
         weight = dequantize_module_weight(base_layer)
         weight = weight.to(x.dtype)
         weight_norm = self.get_weight_norm(weight, lora_weight.detach(), scaling)
-        # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
+        # see section 4.3 of DoRA (https://huggingface.co/papers/2402.09353)
         # "[...] we suggest treating ||V +∆V ||_c in
         # Eq. (5) as a constant, thereby detaching it from the gradient
         # graph. This means that while ||V + ∆V ||_c dynamically
@@ -114,7 +114,7 @@ class DoraEmbeddingLayer(DoraLinearLayer):
         magnitude = self.weight
         weight = base_layer.weight
         weight_norm = self.get_weight_norm(weight, lora_weight.detach(), scaling)
-        # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
+        # see section 4.3 of DoRA (https://huggingface.co/papers/2402.09353)
         # "[...] we suggest treating ||V +∆V ||_c in
         # Eq. (5) as a constant, thereby detaching it from the gradient
         # graph. This means that while ||V + ∆V ||_c dynamically
@@ -139,7 +139,7 @@ class _DoraConvNdLayer(DoraLinearLayer):
         weight_norm = weight.norm(p=2, dim=dim, keepdim=True).transpose(1, 0)
         return weight_norm
 
-    def forward(self, x, *, lora_A, lora_B, scaling, base_layer):
+    def forward(self, x, *, lora_A, lora_B, scaling, base_layer, base_result=None):
         """
         For DoRA, calculate the extra output from LoRA with DoRA applied. This should be added on top of the base layer
         output.
@@ -149,7 +149,7 @@ class _DoraConvNdLayer(DoraLinearLayer):
         lora_weight = lora_weight.reshape(weight.shape)
         magnitude = self.weight
         weight_norm = self.get_weight_norm(weight, lora_weight.detach(), scaling)
-        # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
+        # see section 4.3 of DoRA (https://huggingface.co/papers/2402.09353)
         # "[...] we suggest treating ||V +∆V ||_c in
         # Eq. (5) as a constant, thereby detaching it from the gradient
         # graph. This means that while ||V + ∆V ||_c dynamically
@@ -157,8 +157,9 @@ class _DoraConvNdLayer(DoraLinearLayer):
         # during backpropagation"
         weight_norm = weight_norm.detach()
         mag_norm_scale = magnitude / weight_norm
-        result_dora = (mag_norm_scale - 1) * (
-            self.conv_fn(
+
+        if base_result is None:
+            base_result = self.conv_fn(
                 x,
                 weight,
                 bias=None,
@@ -167,13 +168,25 @@ class _DoraConvNdLayer(DoraLinearLayer):
                 dilation=base_layer.dilation,
                 groups=base_layer.groups,
             )
-        ) + mag_norm_scale * lora_B(lora_A(x)) * scaling
+        else:
+            bias = base_layer.bias
+            if bias is not None:
+                # reshape bias to (1, -1, 1, ...)
+                bias_shape = (1, -1) + (1,) * (base_result.dim() - 2)
+                base_result = base_result - bias.view(*bias_shape)
 
+        result_dora = (mag_norm_scale - 1) * base_result + mag_norm_scale * lora_B(lora_A(x)) * scaling
         return result_dora
 
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "lora.dora." + rep
+
+
+class DoraConv1dLayer(_DoraConvNdLayer):
+    def __init__(self, fan_in_fan_out):
+        super().__init__(fan_in_fan_out)
+        self.conv_fn = F.conv1d
 
 
 class DoraConv2dLayer(_DoraConvNdLayer):

@@ -20,7 +20,7 @@ import unittest
 
 import pytest
 import torch
-from datasets import load_dataset
+from accelerate.utils.memory import clear_device_cache
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -36,12 +36,15 @@ from peft import (
     get_peft_model,
     prepare_model_for_kbit_training,
 )
+from peft.tuners.lora import GPTQLoraLinear
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
 
 from .testing_utils import (
+    device_count,
+    load_dataset_english_quotes,
     require_gptqmodel,
     require_optimum,
-    require_torch_multi_gpu,
+    require_torch_multi_accelerator,
 )
 
 
@@ -60,10 +63,8 @@ class PeftGPTQModelCommonTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
+        clear_device_cache(garbage_collection=True)
         gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            gc.collect()
 
     def test_lora_gptq_quantization_from_pretrained_safetensors(self):
         r"""
@@ -122,8 +123,7 @@ class PeftGPTQModelTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
     def _check_inference_finite(self, model, batch):
         # try inference without Trainer class
@@ -157,7 +157,7 @@ class PeftGPTQModelTests(unittest.TestCase):
             )
             model = get_peft_model(model, config)
 
-            data = load_dataset("ybelkada/english_quotes_copy")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -186,6 +186,7 @@ class PeftGPTQModelTests(unittest.TestCase):
             # assert loss is not None
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
+    @pytest.mark.single_gpu_tests
     def test_adalora_causalLM(self):
         r"""
         Tests the gptq training with adalora
@@ -202,10 +203,11 @@ class PeftGPTQModelTests(unittest.TestCase):
         model = prepare_model_for_kbit_training(model)
 
         peft_config = AdaLoraConfig(
+            total_step=40,
             init_r=6,
             target_r=4,
-            tinit=50,
-            tfinal=100,
+            tinit=10,
+            tfinal=20,
             deltaT=5,
             beta1=0.3,
             beta2=0.3,
@@ -218,7 +220,7 @@ class PeftGPTQModelTests(unittest.TestCase):
 
         model = get_peft_model(model, peft_config)
 
-        data = load_dataset("ybelkada/english_quotes_copy")
+        data = load_dataset_english_quotes()
         data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
         batch = tokenizer(data["train"][:3]["quote"], return_tensors="pt", padding=True)
         self._check_inference_finite(model, batch)
@@ -251,11 +253,11 @@ class PeftGPTQModelTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
-    @require_torch_multi_gpu
-    def test_causal_lm_training_multi_gpu(self):
+    @require_torch_multi_accelerator
+    def test_causal_lm_training_multi_accelerator(self):
         r"""
-        Test the CausalLM training on a multi-GPU device. The test would simply fail if the adapters are not set
-        correctly.
+        Test the CausalLM training on a multi-accelerator device. The test would simply fail if the adapters are not
+        set correctly.
         """
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -266,7 +268,7 @@ class PeftGPTQModelTests(unittest.TestCase):
                 quantization_config=self.quantization_config,
             )
 
-            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+            assert set(model.hf_device_map.values()) == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -284,7 +286,7 @@ class PeftGPTQModelTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("Abirate/english_quotes")
+            data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -347,3 +349,27 @@ class PeftGPTQModelTests(unittest.TestCase):
         # sanity check
         assert n_trainable_default == n_trainable_other
         assert n_total_default == n_total_other
+
+    def test_load_lora(self):
+        model_id = "ModelCloud/Llama-3.2-1B-gptqmodel-ci-4bit"
+        adapter_id = "ModelCloud/Llama-3.2-1B-gptqmodel-ci-4bit-lora"
+
+        model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto")
+        model.load_adapter(adapter_id)
+
+        # assert dynamic rank
+        v_proj_module = model.model.layers[5].self_attn.v_proj
+        assert isinstance(v_proj_module, GPTQLoraLinear)
+        assert v_proj_module.lora_A["default"].weight.data.shape[0] == 128
+        assert v_proj_module.lora_B["default"].weight.data.shape[1] == 128
+        gate_proj_module = model.model.layers[5].mlp.gate_proj
+        assert isinstance(gate_proj_module, GPTQLoraLinear)
+        assert gate_proj_module.lora_A["default"].weight.data.shape[0] == 256
+        assert gate_proj_module.lora_B["default"].weight.data.shape[1] == 256
+
+        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        inp = tokenizer("Capital of France is", return_tensors="pt").to(model.device)
+        tokens = model.generate(**inp)[0]
+        result = tokenizer.decode(tokens)
+
+        assert "paris" in result.lower()

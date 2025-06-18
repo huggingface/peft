@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import math
-from typing import Any, Set, Tuple
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -40,10 +40,10 @@ class LoHaLayer(nn.Module, LycorisLayer):
         self.hada_t2 = nn.ParameterDict({})
 
     @property
-    def _available_adapters(self) -> Set[str]:
+    def _available_adapters(self) -> set[str]:
         return {*self.hada_w1_a, *self.hada_w1_b, *self.hada_w2_a, *self.hada_w2_b, *self.hada_t1, *self.hada_t2}
 
-    def create_adapter_parameters(self, adapter_name: str, r: int, shape: Tuple[int, ...]):
+    def create_adapter_parameters(self, adapter_name: str, r: int, shape: tuple[int, ...]):
         # https://github.com/KohakuBlueleaf/LyCORIS/blob/eb460098187f752a5d66406d3affade6f0a07ece/lycoris/modules/loha.py#L130C9-L143C75
         if len(shape) == 4:
             self.hada_t1[adapter_name] = nn.Parameter(torch.empty(r, r, shape[2], shape[3]))
@@ -239,6 +239,7 @@ class Linear(LoHaLayer):
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
         delta_weight = self.get_delta_weight(adapter_name)
+        input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
         return F.linear(input, delta_weight)
 
@@ -274,6 +275,7 @@ class Conv2d(LoHaLayer):
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
         delta_weight = self.get_delta_weight(adapter_name)
+        input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
         base_layer = self.get_base_layer()
         return F.conv2d(

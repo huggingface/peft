@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # IA3 
 
-This conceptual guide gives a brief overview of [IA3](https://arxiv.org/abs/2205.05638), a parameter-efficient fine tuning technique that is 
+This conceptual guide gives a brief overview of [IA3](https://huggingface.co/papers/2205.05638), a parameter-efficient fine tuning technique that is 
 intended to improve over [LoRA](./lora).
 
 To make fine-tuning more efficient, IA3 (Infused Adapter by Inhibiting and Amplifying Inner Activations) 

@@ -1,0 +1,26 @@
+{
+  "model_id": "meta-llama/Llama-3.2-3B",
+  "dtype": "bfloat16",
+  "max_seq_length": 768,
+  "batch_size": 4,
+  "batch_size_eval": 50,
+  "max_steps": 5000,
+  "eval_steps": 250,
+  "compile": false,
+  "seed": 0,
+  "grad_norm_clip": 1.0,
+  "optimizer_type": "AdamW",
+  "optimizer_kwargs": {
+    "lr": 1e-4,
+    "weight_decay": 0.1
+  },
+  "lr_scheduler": "cosine",
+  "use_amp": false,
+  "autocast_adapter_dtype": true,
+  "attn_implementation": null,
+  "generation_kwargs": {
+    "max_length": 800,
+    "max_new_tokens": 300
+  },
+  "query_template": "Question: {query} Think step by step.\nAnswer:"
+}

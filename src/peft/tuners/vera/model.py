@@ -392,7 +392,7 @@ class VeraModel(BaseTuner):
             if val != "none":
                 msg = (
                     f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
-                    "output as the the base model would without adaption."
+                    "output as the base model would without adaption."
                 )
                 warnings.warn(msg)
         self._set_adapter_layers(enabled=False)
@@ -465,6 +465,7 @@ class VeraModel(BaseTuner):
                     new_adapter = target.active_adapter[:]
 
         self.active_adapter = new_adapter or []
+        self._delete_auxiliary_adapter(adapter_name, new_active_adapters=new_adapter)
 
     def merge_and_unload(
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None

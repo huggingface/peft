@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.14.1.dev0"
+__version__ = "0.15.2.dev0"
 
 from .auto import (
     MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
@@ -87,6 +87,10 @@ from .tuners import (
     PromptEncoderReparameterizationType,
     PromptTuningConfig,
     PromptTuningInit,
+    RandLoraConfig,
+    RandLoraModel,
+    TrainableTokensConfig,
+    TrainableTokensModel,
     VBLoRAConfig,
     VBLoRAModel,
     VeraConfig,
@@ -176,7 +180,11 @@ __all__ = [
     "PromptLearningConfig",
     "PromptTuningConfig",
     "PromptTuningInit",
+    "RandLoraConfig",
+    "RandLoraModel",
     "TaskType",
+    "TrainableTokensConfig",
+    "TrainableTokensModel",
     "VBLoRAConfig",
     "VBLoRAConfig",
     "VBLoRAModel",

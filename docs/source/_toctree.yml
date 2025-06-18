@@ -122,6 +122,10 @@
       title: CPT
     - local: package_reference/bone
       title: Bone
+    - local: package_reference/trainable_tokens
+      title: Trainable Tokens
+    - local: package_reference/randlora
+      title: RandLora
 
     title: Adapters
   - sections:
