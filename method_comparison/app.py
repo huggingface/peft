@@ -348,7 +348,6 @@ def build_app(df):
     return demo
 
 
-# TODO only 1 task, using temporary results for now
 path = os.path.join(os.path.dirname(__file__), "MetaMathQA", "results")
 df = load_df(path, task_name="MetaMathQA")
 demo = build_app(df)
