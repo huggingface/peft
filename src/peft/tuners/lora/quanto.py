@@ -157,7 +157,8 @@ class QuantoLoraLinear(torch.nn.Module, LoraLayer):
             base_layer = self.get_base_layer()
             orig_weight = base_layer.qweight
             new_module.weight.data += orig_weight
-            new_module.bias.data += base_layer.bias
+            if getattr(base_layer, "bias", None) is not None:
+                new_module.bias.data += base_layer.bias
 
             for active_adapter in adapter_names:
                 new_module.weight.data += self.get_delta_weight(active_adapter)
@@ -186,7 +187,8 @@ class QuantoLoraLinear(torch.nn.Module, LoraLayer):
             base_layer = self.get_base_layer()
             orig_weight = base_layer.qweight
             new_module.weight.data += orig_weight
-            new_module.bias.data += base_layer.bias
+            if getattr(base_layer, "bias", None) is not None:
+                new_module.bias.data += base_layer.bias
 
             while len(self.merged_adapters) > 0:
                 active_adapter = self.merged_adapters.pop()

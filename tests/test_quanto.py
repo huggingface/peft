@@ -20,7 +20,6 @@ from unittest.mock import Mock, call, patch
 
 import pytest
 import torch
-from parameterized import parameterized
 from torch import nn
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -29,29 +28,50 @@ from peft import (
     PrefixTuningConfig,
     PromptTuningConfig,
     PromptTuningInit,
+    TaskType,
     get_peft_model,
 )
 
-from .testing_common import PeftCommonTester, PeftTestConfigManager
+from .testing_common import PeftCommonTester
 
 
-# only the PEFT methods that are explicitly supported will be tested for merging
-PEFT_METHODS_SUPPORTING_MERGING = [LoraConfig]
-
-
-def filter_supported_methods_supporting_merging(test_list):
-    return [test for test in test_list if any(test[2] is cls for cls in PEFT_METHODS_SUPPORTING_MERGING)]
-
-
-# only test a single model, it's already slow as is
-PEFT_DECODER_MODELS_TO_TEST = [
-    "hf-internal-testing/tiny-random-OPTForCausalLM",
+MODELS_TO_TEST = [
+    "trl-internal-testing/tiny-random-LlamaForCausalLM",
 ]
 
-FULL_GRID = {
-    "model_ids": PEFT_DECODER_MODELS_TO_TEST,
-    "task_type": "CAUSAL_LM",
-}
+
+ALL_CONFIGS = [
+    (
+        LoraConfig,
+        {
+            "r": 8,
+            "lora_alpha": 32,
+            "target_modules": None,
+            "lora_dropout": 0.05,
+            "bias": "none",
+            "task_type": TaskType.CAUSAL_LM,
+        },
+    ),
+    (
+        PrefixTuningConfig,
+        {
+            "num_virtual_tokens": 10,
+            "task_type": TaskType.CAUSAL_LM,
+        },
+    ),
+    (
+        PromptTuningConfig,
+        {
+            "num_virtual_tokens": 10,
+            "task_type": TaskType.CAUSAL_LM,
+        },
+    ),
+]
+
+
+def _skip_if_merging_not_supported(model_id, config_cls):
+    if config_cls in (PrefixTuningConfig, PromptTuningConfig):
+        pytest.skip("This PEFT method does not support merging")
 
 
 def make_automodel_proxy(weights: str):
@@ -88,6 +108,10 @@ class BasePeftQuantoModelTester:
     # the allowed tolerance for comparing the output tensors
     tol = "MISSING"
 
+    def skipTest(self, reason=""):
+        # for backwards compatibility with unittest style test classes
+        pytest.skip(reason)
+
     def _get_correlation_matrix(self, *tensors):
         return torch.corrcoef(torch.stack([t.flatten() for t in tensors]))
 
@@ -118,20 +142,24 @@ class BasePeftQuantoModelTester:
 
         return input_dict
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_attributes_parametrized(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_attributes_parametrized(self, model_id, config_cls, config_kwargs):
         self._test_model_attr(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_adapter_name(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_adapter_name(self, model_id, config_cls, config_kwargs):
         self._test_adapter_name(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_prepare_for_training_parametrized(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_prepare_for_training_parametrized(self, model_id, config_cls, config_kwargs):
         self._test_prepare_for_training(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_prompt_tuning_text_prepare_for_training(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_prompt_tuning_text_prepare_for_training(self, model_id, config_cls, config_kwargs):
         # Test that prompt tuning works with text init
         if config_cls != PromptTuningConfig:
             return pytest.skip(f"This test does not apply to {config_cls}")
@@ -184,45 +212,37 @@ class BasePeftQuantoModelTester:
                 tokenizer_kwargs={"trust_remote_code": True, "foo": "bar"},
             )
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_save_pretrained(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_save_pretrained(self, model_id, config_cls, config_kwargs):
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_save_pretrained_pickle(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_save_pretrained_pickle(self, model_id, config_cls, config_kwargs):
         self._test_save_pretrained(model_id, config_cls, config_kwargs, safe_serialization=False)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_save_pretrained_selected_adapters(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs):
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_save_pretrained_selected_adapters_pickle(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_save_pretrained_selected_adapters_pickle(self, model_id, config_cls, config_kwargs):
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs, safe_serialization=False)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_from_pretrained_config_construction(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_from_pretrained_config_construction(self, model_id, config_cls, config_kwargs):
         self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(
-            {
-                "model_ids": PEFT_DECODER_MODELS_TO_TEST,
-                "lora_kwargs": {"init_lora_weights": [False]},
-                "adalora_kwargs": {"init_lora_weights": [False]},
-                "ia3_kwargs": {"init_ia3_weights": [False]},
-                "boft_kwargs": {"init_weights": [False]},
-                "vera_kwargs": {"init_weights": [False]},
-                "fourierft_kwargs": {"init_weights": [False]},
-                "hra_kwargs": {"init_weights": [False]},
-                "task_type": "CAUSAL_LM",
-            },
-            filter_params_func=filter_supported_methods_supporting_merging,
-        )
-    )
-    def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_merge_layers(self, model_id, config_cls, config_kwargs):
         # Not using PeftCommonTester for merging tests as merging is too imprecise. So instead of checking we use a
         # custom check that relies on correlation and outlier removal
+        _skip_if_merging_not_supported(model_id, config_cls)
         torch.manual_seed(0)
 
         config = config_cls(
@@ -250,27 +270,15 @@ class BasePeftQuantoModelTester:
 
         self.check_tensors_approximately_equal(logits, logits_merged, logits_unmerged, logits_merged_unloaded)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(
-            {
-                "model_ids": PEFT_DECODER_MODELS_TO_TEST,
-                "lora_kwargs": {"init_lora_weights": [False]},
-                "ia3_kwargs": {"init_ia3_weights": [False]},
-                "boft_kwargs": {"init_weights": [False]},
-                "vera_kwargs": {"init_weights": [False]},
-                "fourierft_kwargs": {"init_weights": [False]},
-                "hra_kwargs": {"init_weights": [False]},
-                "task_type": "CAUSAL_LM",
-            },
-            filter_params_func=filter_supported_methods_supporting_merging,
-        )
-    )
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     # TODO: enable if/when deepcopy-ing is supported
     @pytest.mark.skip("Quanto does not work (yet) with deepcopy-ing")
-    def test_merge_layers_multi(self, test_name, model_id, config_cls, config_kwargs):
+    def test_merge_layers_multi(self, model_id, config_cls, config_kwargs):
         # Not using PeftCommonTester for merging tests as merging is too imprecise. So instead of checking we use a
         # custom check that relies on correlation and outlier removal
         # NOTE: don't use with `torch.inference_mode()`, see: https://github.com/huggingface/optimum-quanto/issues/304
+        _skip_if_merging_not_supported(model_id, config_cls)
         torch.manual_seed(0)
 
         config = config_cls(
@@ -324,21 +332,12 @@ class BasePeftQuantoModelTester:
 
         self.check_tensors_approximately_equal(logits_adapter_1, logits_merged_adapter_default)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(
-            {
-                "model_ids": PEFT_DECODER_MODELS_TO_TEST,
-                "lora_kwargs": {"init_lora_weights": [False]},
-                "ia3_kwargs": {"init_ia3_weights": [False]},
-                "boft_kwargs": {"init_weights": [False]},
-                "task_type": "CAUSAL_LM",
-            },
-            filter_params_func=filter_supported_methods_supporting_merging,
-        )
-    )
-    def test_merge_layers_nan(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_merge_layers_nan(self, model_id, config_cls, config_kwargs):
         # Not using PeftCommonTester for merging tests as merging is too imprecise. So instead of checking we use a
         # custom check that relies on correlation and outlier removal
+        _skip_if_merging_not_supported(model_id, config_cls)
         torch.manual_seed(0)
 
         config = config_cls(
@@ -393,24 +392,10 @@ class BasePeftQuantoModelTester:
         ):
             model = model.merge_and_unload(safe_merge=True)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(
-            {
-                "model_ids": PEFT_DECODER_MODELS_TO_TEST,
-                "lora_kwargs": {"init_lora_weights": [False]},
-                "adalora_kwargs": {"init_lora_weights": [False]},
-                "ia3_kwargs": {"init_ia3_weights": [False]},
-                "boft_kwargs": {"init_weights": [False]},
-                "vera_kwargs": {"init_weights": [False]},
-                "fourierft_kwargs": {"init_weights": [False]},
-                "hra_kwargs": {"init_weights": [False]},
-                "task_type": "CAUSAL_LM",
-            },
-            filter_params_func=filter_supported_methods_supporting_merging,
-        )
-    )
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     @pytest.mark.xfail(strict=True)
-    def test_load_merge_and_unloaded_model(self, test_name, model_id, config_cls, config_kwargs):
+    def test_load_merge_and_unloaded_model(self, model_id, config_cls, config_kwargs):
         # Saving and loading a quanto model that has been merged and unloaded does not work correctly. Here is the
         # reason: Quanto requires its own save_pretrained method, which, among others, saves the quantization map.
         # Without it, the model cannot be correctly loaded. To make use of this, we should thus use a quanto
@@ -420,6 +405,7 @@ class BasePeftQuantoModelTester:
         # save_pretrained, thus loading the merged and unloaded model does not work.
         from optimum.quanto import QuantizedModelForCausalLM
 
+        _skip_if_merging_not_supported(model_id, config_cls)
         torch.manual_seed(0)
 
         model = self.transformers_class.from_pretrained(model_id)
@@ -452,136 +438,108 @@ class BasePeftQuantoModelTester:
         logits_merged_from_pretrained = model_from_pretrained(**dummy_input)[0]
         self.check_tensors_approximately_equal(logits, logits_merged_from_pretrained)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(
-            {
-                "model_ids": PEFT_DECODER_MODELS_TO_TEST,
-                "lora_kwargs": {"init_lora_weights": [False]},
-                "task_type": "CAUSAL_LM",
-            },
-            filter_params_func=filter_supported_methods_supporting_merging,
-        )
-    )
-    def test_mixed_adapter_batches(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_mixed_adapter_batches(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
         self._test_mixed_adapter_batches(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_generate(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_generate(self, model_id, config_cls, config_kwargs):
         self._test_generate(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_generate_pos_args(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_generate_pos_args(self, model_id, config_cls, config_kwargs):
         # positional args are supported for PeftModelForCausalLM
         self._test_generate_pos_args(model_id, config_cls, config_kwargs, raises_err=False)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID),
-        filter_params_func=filter_supported_methods_supporting_merging,
-    )
-    def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
         self._test_merge_layers_fp16(model_id, config_cls, config_kwargs)
 
     # this fails for a couple of methods (IA³, LoRA, prefix tuning) with segfault on GH CI
-    # @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    # def test_generate_half_prec(self, test_name, model_id, config_cls, config_kwargs):
-    #     self._test_generate_half_prec(model_id, config_cls, config_kwargs)
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_generate_half_prec(self, model_id, config_cls, config_kwargs):
+        self._test_generate_half_prec(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     @pytest.mark.skip("Quanto raises an error when trying to convert the dtype, skipping test.")
-    def test_prefix_tuning_half_prec_conversion(self, test_name, model_id, config_cls, config_kwargs):
+    def test_prefix_tuning_half_prec_conversion(self, model_id, config_cls, config_kwargs):
         self._test_prefix_tuning_half_prec_conversion(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_training_decoders(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_training_decoders(self, model_id, config_cls, config_kwargs):
         self._test_training(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_training_decoders_layer_indexing(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_training_decoders_layer_indexing(self, model_id, config_cls, config_kwargs):
         self._test_training_layer_indexing(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_training_decoders_gradient_checkpointing(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_training_decoders_gradient_checkpointing(self, model_id, config_cls, config_kwargs):
         self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_inference_safetensors(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_inference_safetensors(self, model_id, config_cls, config_kwargs):
         self._test_inference_safetensors(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_peft_model_device_map(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_peft_model_device_map(self, model_id, config_cls, config_kwargs):
         self._test_peft_model_device_map(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_delete_adapter(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_delete_adapter(self, model_id, config_cls, config_kwargs):
         self._test_delete_adapter(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_delete_inactive_adapter(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_delete_inactive_adapter(self, model_id, config_cls, config_kwargs):
         self._test_delete_inactive_adapter(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_adding_multiple_adapters_with_bias_raises(self, model_id, config_cls, config_kwargs):
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(
-            {
-                "model_ids": PEFT_DECODER_MODELS_TO_TEST,
-                "lora_kwargs": {"init_lora_weights": [False]},
-                "adalora_kwargs": {"init_lora_weights": [False]},
-                "ia3_kwargs": {"init_ia3_weights": [False]},
-                "boft_kwargs": {"init_weights": [False]},
-                "vera_kwargs": {"init_weights": [False]},
-                "fourierft_kwargs": {"init_weights": [False]},
-                "hra_kwargs": {"init_weights": [False]},
-                "task_type": "CAUSAL_LM",
-            },
-            filter_params_func=filter_supported_methods_supporting_merging,
-        )
-    )
-    def test_unload_adapter(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_unload_adapter(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
         self._test_unload_adapter(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(
-            {
-                "model_ids": PEFT_DECODER_MODELS_TO_TEST,
-                "lora_kwargs": {"init_lora_weights": [False]},
-                "ia3_kwargs": {"init_ia3_weights": [False]},
-                "boft_kwargs": {"init_weights": [False]},
-                "task_type": "CAUSAL_LM",
-            },
-        )
-    )
-    def test_weighted_combination_of_adapters(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_weighted_combination_of_adapters(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
         self._test_weighted_combination_of_adapters(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_training_prompt_learning_tasks(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_training_prompt_learning_tasks(self, model_id, config_cls, config_kwargs):
         self._test_training_prompt_learning_tasks(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(
-            {
-                "model_ids": PEFT_DECODER_MODELS_TO_TEST,
-                "lora_kwargs": {"init_lora_weights": [False]},
-                "ia3_kwargs": {"init_ia3_weights": [False]},
-                "adalora_kwargs": {"init_lora_weights": [False]},
-                "boft_kwargs": {"init_weights": [False]},
-                "vera_kwargs": {"init_weights": [False]},
-                "fourierft_kwargs": {"init_weights": [False]},
-                "hra_kwargs": {"init_weights": [False]},
-                "task_type": "CAUSAL_LM",
-            },
-            filter_params_func=filter_supported_methods_supporting_merging,
-        )
-    )
-    def test_disable_adapter(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_disable_adapter(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
         self._test_disable_adapter(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_passing_input_embeds_works(self, test_name, model_id, config_cls, config_kwargs):
-        self._test_passing_input_embeds_works(test_name, model_id, config_cls, config_kwargs)
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_passing_input_embeds_works(self, model_id, config_cls, config_kwargs):
+        self._test_passing_input_embeds_works(self, model_id, config_cls, config_kwargs)
 
     # TODO: enable if/when deepcopy-ing is supported
     @pytest.mark.skip("Quanto does not work (yet) with deepcopy-ing")
@@ -634,31 +592,16 @@ class BasePeftQuantoModelTester:
         # does not raise
         model(x)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(
-            {
-                "model_ids": PEFT_DECODER_MODELS_TO_TEST,
-                "lora_kwargs": {"init_lora_weights": [False]},
-                "adalora_kwargs": {"init_lora_weights": [False]},
-                "ia3_kwargs": {"init_ia3_weights": [False]},
-                "boft_kwargs": {"init_weights": [False]},
-                "vera_kwargs": {"init_weights": [False]},
-                "fourierft_kwargs": {"init_weights": [False]},
-                "hra_kwargs": {"init_weights": [False]},
-                "task_type": "CAUSAL_LM",
-            },
-            filter_params_func=filter_supported_methods_supporting_merging,
-        )
-    )
-    def test_quanto_merge_conv2d(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_quanto_merge_conv2d(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
         torch.manual_seed(0)
 
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
-        if config.is_prompt_learning:
-            pytest.skip("Prompt learning models do not support merging.")
 
         config.target_modules = {"seq.0", "seq.2", "seq.4"}
         config.task_type = None
@@ -699,21 +642,21 @@ class BasePeftQuantoModelTester:
         self.check_tensors_approximately_equal(logits, logits_merged, logits_unmerged, logits_merged_unloaded)
 
 
-class PeftQuanto2bitModelTester(unittest.TestCase, PeftCommonTester, BasePeftQuantoModelTester):
+class TestPeftQuanto2bitModel(PeftCommonTester, BasePeftQuantoModelTester):
     weights = "int2"
     transformers_class = make_automodel_proxy(weights=weights)
     min_correlation = 0.9
     tol = 0.3
 
 
-class PeftQuanto4bitModelTester(unittest.TestCase, PeftCommonTester, BasePeftQuantoModelTester):
+class TestPeftQuanto4bitModel(PeftCommonTester, BasePeftQuantoModelTester):
     weights = "int4"
     transformers_class = make_automodel_proxy(weights=weights)
     min_correlation = 0.95
     tol = 1e-2
 
 
-class PeftQuanto8bitModelTester(unittest.TestCase, PeftCommonTester, BasePeftQuantoModelTester):
+class TestPeftQuanto8bitModel(PeftCommonTester, BasePeftQuantoModelTester):
     weights = "int8"
     transformers_class = make_automodel_proxy(weights=weights)
     min_correlation = 0.95
