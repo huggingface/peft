@@ -1280,6 +1280,7 @@ class TestLoraInitialization:
     def get_model_conv2d_groups(self):
         class ModelConv2DGroups(nn.Module):
             """For testing when groups argument is used in conv layer"""
+
             def __init__(self):
                 super().__init__()
                 self.conv2d = nn.Conv2d(16, 32, 3, padding=1, groups=2)
@@ -1303,25 +1304,31 @@ class TestLoraInitialization:
         return ModelConv2DGroups().eval().to(self.torch_device)
 
     @pytest.mark.parametrize(
-        "test_name, config_cls, config_kwargs",
+        "config_cls, config_kwargs",
         [
-            ("lora with rank divisible by groups", LoraConfig, {"r": 8, "target_modules": ["conv2d"]}),
-            ("lora with rank equal to groups", LoraConfig, {"r": 2, "target_modules": ["conv2d"]}),
-            ("lora with rank not divisible by groups", LoraConfig, {"r": 1, "target_modules": ["conv2d"]}),
-            (
-                "dora with rank divisible by groups",
+            pytest.param(LoraConfig, {"r": 8, "target_modules": ["conv2d"]}, id="lora with rank divisible by groups"),
+            pytest.param(LoraConfig, {"r": 2, "target_modules": ["conv2d"]}, id="lora with rank equal to groups"),
+            pytest.param(
+                LoraConfig, {"r": 1, "target_modules": ["conv2d"]}, id="lora with rank not divisible by groups"
+            ),
+            pytest.param(
                 LoraConfig,
                 {"r": 8, "target_modules": ["conv2d"], "use_dora": True},
+                id="dora with rank divisible by groups",
             ),
-            ("dora with rank equal to groups", LoraConfig, {"r": 2, "target_modules": ["conv2d"], "use_dora": True}),
-            (
-                "dora with rank not divisible by groups",
+            pytest.param(
+                LoraConfig,
+                {"r": 2, "target_modules": ["conv2d"], "use_dora": True},
+                id="dora with rank equal to groups",
+            ),
+            pytest.param(
                 LoraConfig,
                 {"r": 1, "target_modules": ["conv2d"], "use_dora": True},
+                id="dora with rank not divisible by groups",
             ),
         ],
     )
-    def test_error_raised_if_rank_not_divisible_by_groups(self, test_name, config_cls, config_kwargs):
+    def test_error_raised_if_rank_not_divisible_by_groups(self, config_cls, config_kwargs):
         # This test checks if error is raised when rank is not divisible by groups for conv layer since
         # currently, support is limited to conv layers where the rank is divisible by groups in lora and dora
         base_model = self.get_model_conv2d_groups()
