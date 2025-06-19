@@ -66,6 +66,9 @@ class QuantoLoraLinear(torch.nn.Module, LoraLayer):
         # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
         # extra argument that allows mixing different adapters in the same batch at inference time.
         result = self.base_layer(x, *args, **kwargs)
+        # some quanto quantizations may require cloning or else will fail later when assigning the lora output in-place
+        result = result.clone()
+        torch_result_dtype = result.dtype
 
         unique_adapters = set(adapter_names)
         sub_batch_indices_list = []
@@ -82,21 +85,13 @@ class QuantoLoraLinear(torch.nn.Module, LoraLayer):
             lora_B = self.lora_B[active_adapter]
             dropout = self.lora_dropout[active_adapter]
             scaling = self.scaling[active_adapter]
-
-            requires_conversion = not torch.is_autocast_enabled()
-            if requires_conversion:
-                expected_dtype = result.dtype
-                compute_dtype = lora_A.weight.dtype
-                if x.dtype != compute_dtype:
-                    x = x.to(compute_dtype)
+            x = self._cast_input_dtype(x, lora_A.weight.dtype)
 
             # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
             # layer output
             sub_batch = x[sub_batch_indices_list[i]]
-            output = lora_B(lora_A(dropout(sub_batch))) * scaling
-            if requires_conversion:
-                output = output.to(expected_dtype)
-            result[sub_batch_indices_list[i]] += output
+            lora_output = lora_B(lora_A(dropout(sub_batch))) * scaling
+            result[sub_batch_indices_list[i]] += lora_output.to(torch_result_dtype)
 
         return result
 

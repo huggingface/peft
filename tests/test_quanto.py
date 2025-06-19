@@ -33,8 +33,10 @@ from peft import (
 )
 
 from .testing_common import PeftCommonTester
+from .testing_utils import set_init_weights_false
 
 
+# only test a small subset of models and PEFT methods, testing exhaustively would be slow for little benefit
 MODELS_TO_TEST = [
     "trl-internal-testing/tiny-random-LlamaForCausalLM",
 ]
@@ -88,7 +90,8 @@ def make_automodel_proxy(weights: str):
     return QuantoModelProxy
 
 
-@unittest.skipIf(platform.system() == "Darwin", "Tests are skipped on macOS")
+# Seeing issues on CI with MacOS and Windows, so skipping them for now
+@unittest.skipIf(platform.system() != "Linux", "Tests are skipped on macOS and Windows")
 class BasePeftQuantoModelTester:
     r"""Base class implementing tests for quanto-quantized models.
 
@@ -285,8 +288,6 @@ class BasePeftQuantoModelTester:
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
-        if config.is_prompt_learning:
-            pytest.skip("Prompt learning models do not support merging.")
 
         model = self.transformers_class.from_pretrained(model_id)
         model = get_peft_model(model, config)
@@ -344,8 +345,6 @@ class BasePeftQuantoModelTester:
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
-        if config.is_prompt_learning:
-            pytest.skip("Prompt learning models do not support merging.")
 
         model = self.transformers_class.from_pretrained(model_id)
         model = get_peft_model(model, config)
@@ -442,6 +441,7 @@ class BasePeftQuantoModelTester:
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_mixed_adapter_batches(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls)
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_mixed_adapter_batches(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
@@ -517,6 +517,7 @@ class BasePeftQuantoModelTester:
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_unload_adapter(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls)
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_unload_adapter(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
