@@ -6,7 +6,7 @@ from typing import Literal, Optional, Union
 
 from torch import nn
 from peft.utils import PeftType
-from peft import LoraConfig  
+from peft.tuners.lora import LoraConfig
 
 
 def _check_and_remove_unused_kwargs(cls, kwargs):
