@@ -35,7 +35,7 @@ def preprocess(rows, task_name: str, print_fn=print):
             skipped += 1
             continue
 
-        test_metrics = train_info["metrics"][-1]
+        train_metrics = train_info["metrics"][-1]
 
         # extract the fields that make most sense
         dct = {
@@ -51,10 +51,10 @@ def preprocess(rows, task_name: str, print_fn=print):
             "total_time": run_info["total_time"],
             "train_time": train_info["train_time"],
             "file_size": train_info["file_size"],
-            "test_accuracy": test_metrics["test accuracy"],
-            "test_loss": test_metrics["train loss"],
-            "train_samples": test_metrics["train samples"],
-            "train_total_tokens": test_metrics["train total tokens"],
+            "test_accuracy": train_metrics["test accuracy"],
+            "train_loss": train_metrics["train loss"],
+            "train_samples": train_metrics["train samples"],
+            "train_total_tokens": train_metrics["train total tokens"],
             "peft_version": meta_info["package_info"]["peft-version"],
             "peft_branch": run_info["peft_branch"],
             "transformers_version": meta_info["package_info"]["transformers-version"],
@@ -100,7 +100,7 @@ def load_df(path, task_name, print_fn=print):
         "train_time": float,
         "file_size": int,
         "test_accuracy": float,
-        "test_loss": float,
+        "train_loss": float,
         "train_samples": int,
         "train_total_tokens": int,
         "peft_version": "string",
@@ -127,7 +127,7 @@ def load_df(path, task_name, print_fn=print):
         "total_time",
         "train_time",
         "test_accuracy",
-        "test_loss",
+        "train_loss",
         "cuda_memory_max",
         "cuda_memory_reserved_99th",
         "cuda_memory_reserved_avg",
