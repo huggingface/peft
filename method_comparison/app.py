@@ -21,6 +21,7 @@ import gradio as gr
 import plotly.express as px
 import plotly.graph_objects as go
 from processing import load_df
+from sanitizer import parse_and_filter
 
 
 metric_preferences = {
@@ -246,7 +247,8 @@ def build_app(df):
             filtered = filter_data(task_name, new_models[0] if new_models else "", df)
             if current_filter.strip():
                 try:
-                    df_queried = filtered.query(current_filter)
+                    mask = parse_and_filter(filtered, current_filter)
+                    df_queried = filtered[mask]
                     if not df_queried.empty:
                         filtered = df_queried
                 except Exception:
@@ -262,7 +264,8 @@ def build_app(df):
             filtered = filter_data(task_name, model_id, df)
             if current_filter.strip():
                 try:
-                    filtered = filtered.query(current_filter)
+                    mask = parse_and_filter(filtered, current_filter)
+                    filtered = filtered[mask]
                 except Exception:
                     pass
             return filtered
@@ -275,7 +278,8 @@ def build_app(df):
             filtered = filter_data(task_name, model_id, df)
             if current_filter.strip():
                 try:
-                    filtered = filtered.query(current_filter)
+                    mask = parse_and_filter(filtered, current_filter)
+                    filtered = filtered[mask]
                 except Exception as e:
                     return generate_pareto_plot(filtered, metric_x, metric_y), f"Filter error: {e}"
 
@@ -295,7 +299,8 @@ def build_app(df):
             filtered = filter_data(task_name, model_id, df)
             if filter_query.strip():
                 try:
-                    filtered = filtered.query(filter_query)
+                    mask = parse_and_filter(filtered, filter_query)
+                    filtered = filtered[mask]
                 except Exception as e:
                     # Update the table, plot, and summary even if there is a filter error.
                     return (
