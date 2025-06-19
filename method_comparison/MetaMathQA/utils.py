@@ -566,7 +566,7 @@ def log_to_console(log_data: dict[str, Any], print_fn: Callable[..., None]) -> N
 def log_to_file(
     *, log_data: dict, save_dir: str, experiment_name: str, timestamp: str, print_fn: Callable[..., None]
 ) -> None:
-    file_name = f"{experiment_name.replace(os.path.sep, '--')}--{timestamp.replace(':', '-')}.json"
+    file_name = f"{experiment_name.replace(os.path.sep, '--')}.json"
     file_name = os.path.join(save_dir, file_name)
     with open(file_name, "w") as f:
         json.dump(log_data, f, indent=2)

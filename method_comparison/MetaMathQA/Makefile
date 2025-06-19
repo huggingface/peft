@@ -19,7 +19,7 @@ replace-all = $(if $(findstring $(2),$(1)),$(call replace-all,$(subst $(2),$(3),
 
 # 3. Define a function to convert an experiment path to its flat result file path.
 #    e.g., "experiments/lora/llama-3.2-3B-rank32" -> "results/lora-llama-3.2-3B-rank32.json"
-exp_to_res = $(RESULTS_DIR)/$(call replace-all,$(patsubst $(EXPERIMENTS_DIR)/%,%,$(1)),/,-).json
+exp_to_res = $(RESULTS_DIR)/$(call replace-all,$(patsubst $(EXPERIMENTS_DIR)/%,%,$(1)),/,--).json
 
 # 4. Generate the list of all target result files we want to build.
 RESULT_FILES := $(foreach exp,$(EXPERIMENT_PATHS),$(call exp_to_res,$(exp)))
