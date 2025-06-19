@@ -29,6 +29,7 @@ from peft.utils.save_and_load import get_peft_model_state_dict
 
 from .testing_utils import require_deterministic_for_xpu
 
+
 MODELS_TO_TEST = [
     "trl-internal-testing/tiny-random-LlamaForCausalLM",
     "hf-internal-testing/tiny-random-MistralForCausalLM",
