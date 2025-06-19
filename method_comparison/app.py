@@ -146,7 +146,7 @@ def generate_pareto_plot(df, metric_x, metric_y):
         title=f"Pareto Frontier for {metric_x} vs {metric_y}",
         template="seaborn",
         height=700,
-        width=900,
+        autosize=True,
         xaxis_title=metric_x,
         yaxis_title=metric_y,
     )
@@ -353,8 +353,7 @@ def build_app(df):
     return demo
 
 
-# TODO only 1 task, using temporary results for now
-path = os.path.join(os.path.dirname(__file__), "MetaMathQA", "temporary_results")
+path = os.path.join(os.path.dirname(__file__), "MetaMathQA", "results")
 df = load_df(path, task_name="MetaMathQA")
 demo = build_app(df)
 demo.launch()
