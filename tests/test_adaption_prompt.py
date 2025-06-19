@@ -27,6 +27,7 @@ from peft.utils import infer_device
 from peft.utils.other import prepare_model_for_kbit_training
 from peft.utils.save_and_load import get_peft_model_state_dict
 
+from .testing_utils import require_deterministic_for_xpu
 
 MODELS_TO_TEST = [
     "trl-internal-testing/tiny-random-LlamaForCausalLM",
@@ -248,6 +249,7 @@ class TestAdaptionPrompt:
         _ = model.generate(input_ids, attention_mask=attention_mask)
 
     @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @require_deterministic_for_xpu
     def test_sequence_adapter_ops(self, model_id):
         """Test sequence of adapter operations."""
         # Test input data.
