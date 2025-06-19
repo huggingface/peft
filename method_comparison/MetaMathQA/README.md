@@ -39,6 +39,14 @@ Target result files:
   - results/vblora-llama-3.2-3B-default.json
 ```
 
+In case you want to force the execution of an experiment, you can simply `touch` the respective adapter config
+without modifying it. For example:
+
+    touch experiments/vblora/llama-3.2-3B-default/adapter_config.json
+    make
+
+to run the VBLoRA default experiment again.
+
 ### `adapter_config.json`
 
 This must be a valid PEFT configuration. It is easiest to create it programmatically, e.g.:
