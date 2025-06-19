@@ -14,7 +14,7 @@
 
 import math
 import warnings
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 import torch
 import torch.nn as nn
@@ -52,7 +52,7 @@ class C3ALayer(BaseTunerLayer):
         base_layer_weight_dtype = base_layer_weight.dtype
         c3a_kernel = self.c3a_kernel[adapter]
 
-        delta_weight = get_circulant_fast(c3a_kernel.float()).to(base_layer_weight_dtype)
+        delta_weight = get_circulant_fast(c3a_kernel.to(torch.float32)).to(base_layer_weight_dtype)
         return delta_weight / base_layer_weight.size(-1)
 
     def update_layer(self, adapter_name, block_size, init_weights):
@@ -75,7 +75,7 @@ class C3ALayer(BaseTunerLayer):
                 self.out_features // block_size,
                 self.in_features // block_size,
                 block_size,
-                dtype=weight.dtype,
+                dtype=torch.float32,  # Currently, only fp32 is widely supported for FFT (fp16 is only supported on GPU with shapes of powers of 2, bf16 lacks FFT support)
                 device=weight.device,
             )
         )
@@ -112,7 +112,7 @@ class C3ALinear(nn.Module, C3ALayer):
         base_layer,
         adapter_name: str,
         block_size: int,
-        init_weights: str,
+        init_weights: bool | Literal["gaussian", "kaiming_uniform", "xavier_uniform"],
         **kwargs,
     ) -> None:
         super().__init__()
@@ -183,11 +183,12 @@ class C3ALinear(nn.Module, C3ALayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             result = self.base_layer(x, *args, **kwargs)
+            x = x.to(torch.float32)
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.c3a_kernel.keys():
                     continue
-                c3a_kernel = self.c3a_kernel[active_adapter]
-                x = BlockCircularConvolution.apply(x.float(), c3a_kernel.float()) / x.size(-1)
+                c3a_kernel = self.c3a_kernel[active_adapter].to(torch.float32)
+                x = BlockCircularConvolution.apply(x, c3a_kernel) / x.size(-1)
                 result += x.to(result.dtype)
 
         result = result.to(previous_dtype)
