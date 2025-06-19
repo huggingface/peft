@@ -15,7 +15,6 @@ import copy
 import platform
 import shutil
 import tempfile
-import unittest
 from unittest.mock import Mock, call, patch
 
 import pytest
@@ -91,7 +90,7 @@ def make_automodel_proxy(weights: str):
 
 
 # Seeing issues on CI with MacOS and Windows, so skipping them for now
-@unittest.skipIf(platform.system() != "Linux", "Tests are skipped on macOS and Windows")
+@pytest.mark.skipif(platform.system() != "Linux", "Tests are skipped on macOS and Windows")
 class BasePeftQuantoModelTester:
     r"""Base class implementing tests for quanto-quantized models.
 
