@@ -23,7 +23,6 @@ import json
 import os
 import random
 import sys
-import tempfile
 import textwrap
 import time
 from contextlib import nullcontext
@@ -46,6 +45,7 @@ from utils import (
     get_accuracy,
     get_base_model_info,
     get_dataset_info,
+    get_file_size,
     get_model,
     get_optimizer_and_scheduler,
     get_peft_branch,
@@ -57,7 +57,7 @@ from utils import (
 )
 
 from peft import AdaLoraConfig, PeftConfig
-from peft.utils import SAFETENSORS_WEIGHTS_NAME
+from peft.utils import CONFIG_NAME
 
 
 # # suppress all warnings
@@ -155,7 +155,11 @@ def train(
         **optimizer_kwargs,
     )
     # print this after getting the optimizer, in case it modifies requires_gard
-    num_trainable_params, num_params = model.get_nb_trainable_parameters()
+    if hasattr(model, "get_nb_trainable_parameters"):
+        num_trainable_params, num_params = model.get_nb_trainable_parameters()
+    else:
+        num_params = model.num_parameters()
+        num_trainable_params = num_params
     print_verbose(
         f"trainable params: {num_trainable_params:,d} || all params: {num_params:,d} || "
         f"trainable: {100 * num_trainable_params / num_params:.4f}%"
@@ -264,7 +268,6 @@ def train(
                         "valid accuracy": accuracy,
                         "train loss": loss_avg,
                         "train samples": total_samples,
-                        "loss avg": loss_avg,
                         "train time": dur_train,
                         "eval time": dur_eval,
                         "tokens / sec": tokens_per_sec,
@@ -362,7 +365,11 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         )
 
     # load configs
-    peft_config = PeftConfig.from_pretrained(path_experiment)
+    peft_config: Optional[PeftConfig] = None
+    if os.path.exists(os.path.join(path_experiment, CONFIG_NAME)):
+        peft_config = PeftConfig.from_pretrained(path_experiment)
+    else:
+        print_verbose(f"Could not find PEFT config at {path_experiment}, performing FULL FINETUNING")
     path_train_config = os.path.join(path_experiment, FILE_NAME_TRAIN_PARAMS)
     train_config = get_train_config(path_train_config)
     set_seed(train_config.seed)
@@ -407,16 +414,12 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         print_verbose("Training failed, not logging results")
         sys.exit(1)
 
-    # save the model in temp dir, get file size, clean it up afterwards if clean is passed
-    try:
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True, delete=clean) as tmp_dir:
-            model.save_pretrained(tmp_dir)
-            stat = os.stat(os.path.join(tmp_dir, SAFETENSORS_WEIGHTS_NAME))
-            file_size = stat.st_size
-            if not clean:
-                print_verbose(f"Saved PEFT checkpoint to {tmp_dir}")
-    except Exception as exc:
-        print(f"Failed to save PEFT checkpoint due to the following error: {exc}")
+    file_size = get_file_size(
+        model,
+        peft_config=peft_config,
+        clean=clean,
+        print_fn=print_verbose,
+    )
 
     time_total = time.perf_counter() - tic_total
     # log results: print and save to file
