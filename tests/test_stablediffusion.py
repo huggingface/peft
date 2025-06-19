@@ -261,7 +261,7 @@ class TestStableDiffusionModel(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DIFFUSERS_SD_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", DIFFUSERS_CONFIGS)
     def test_merge_layers(self, model_id, config_cls, config_kwargs):
-        if (config_cls == LoKrConfig) and (self.torch_device != "cuda"):
+        if (config_cls == LoKrConfig) and (self.torch_device not in ["cuda", "xpu"]):
             pytest.skip("Merging test with LoKr fails without GPU")
 
         # Instantiate model & adapters
@@ -289,7 +289,7 @@ class TestStableDiffusionModel(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DIFFUSERS_SD_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", DIFFUSERS_CONFIGS)
     def test_merge_layers_safe_merge(self, model_id, config_cls, config_kwargs):
-        if (config_cls == LoKrConfig) and (self.torch_device != "cuda"):
+        if (config_cls == LoKrConfig) and (self.torch_device not in ["cuda", "xpu"]):
             pytest.skip("Merging test with LoKr fails without GPU")
 
         # Instantiate model & adapters

@@ -1113,6 +1113,7 @@ class TestLoraInitialization:
         assert torch.allclose(output_base, output_disabled)
         assert torch.allclose(output_base, output_dora)
 
+    @require_deterministic_for_xpu
     def test_lora_use_dora_linear_init_false(self, data):
         # with init_lora_weights=False, dora should not be a no-op
         torch.manual_seed(0)
@@ -1365,6 +1366,7 @@ class TestLokrInitialization:
 
         assert not torch.allclose(output_before, output_after)
 
+    @require_deterministic_for_xpu
     def test_lokr_linear_init_lycoris(self, data):
         torch.manual_seed(0)
 
