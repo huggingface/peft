@@ -268,7 +268,6 @@ def train(
                         "valid accuracy": accuracy,
                         "train loss": loss_avg,
                         "train samples": total_samples,
-                        "loss avg": loss_avg,
                         "train time": dur_train,
                         "eval time": dur_eval,
                         "tokens / sec": tokens_per_sec,
