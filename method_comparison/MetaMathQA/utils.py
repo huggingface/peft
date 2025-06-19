@@ -654,5 +654,5 @@ def log_results(
 
     log_to_console(log_data, print_fn=print)  # use normal print to be able to redirect if so desired
     log_to_file(
-        log_data=log_data, save_dir=save_dir, experiment_name=experiment_name, timestamp=start_date, print_fn=print_fn
+        log_data=log_data, save_dir=save_dir, experiment_name=experiment_name, print_fn=print_fn
     )
