@@ -158,7 +158,7 @@ def train(
     if hasattr(model, "get_nb_trainable_parameters"):
         num_trainable_params, num_params = model.get_nb_trainable_parameters()
     else:
-        num_params = sum(p.numel() for p in model.parameters())
+        num_params = model.num_parameters()
         num_trainable_params = num_params
     print_verbose(
         f"trainable params: {num_trainable_params:,d} || all params: {num_params:,d} || "
@@ -413,15 +413,25 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         sys.exit(1)
 
     # save the model in temp dir, get file size, clean it up afterwards if clean is passed
-    try:
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True, delete=clean) as tmp_dir:
-            model.save_pretrained(tmp_dir)
-            stat = os.stat(os.path.join(tmp_dir, SAFETENSORS_WEIGHTS_NAME))
-            file_size = stat.st_size
-            if not clean:
-                print_verbose(f"Saved PEFT checkpoint to {tmp_dir}")
-    except Exception as exc:
-        print(f"Failed to save PEFT checkpoint due to the following error: {exc}")
+    file_size = 99999999  # set a default dummy value
+    if peft_config is not None:
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True, delete=clean) as tmp_dir:
+                model.save_pretrained(tmp_dir)
+                stat = os.stat(os.path.join(tmp_dir, SAFETENSORS_WEIGHTS_NAME))
+                file_size = stat.st_size
+                if not clean:
+                    print_verbose(f"Saved PEFT checkpoint to {tmp_dir}")
+        except Exception as exc:
+            print(f"Failed to save PEFT checkpoint due to the following error: {exc}")
+    else:
+        print("Not saving the fully fine-tuned model because it's too big")
+        try:
+            num_params = model.num_parameters()
+            dsize = {torch.float16: 2, torch.bfloat: 2, torch.float32: 4}.get(model.dtype)
+            file_size = num_params * dsize
+        except Exception as exc:
+            print(f"Failed to determine file size for fully finetuned model because of: {exc}")
 
     time_total = time.perf_counter() - tic_total
     # log results: print and save to file
