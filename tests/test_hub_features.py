@@ -15,9 +15,10 @@ import copy
 
 import pytest
 import torch
+from huggingface_hub import ModelCard
 from transformers import AutoModelForCausalLM
 
-from peft import AutoPeftModelForCausalLM, LoraConfig, PeftConfig, PeftModel, get_peft_model
+from peft import AutoPeftModelForCausalLM, BoneConfig, LoraConfig, PeftConfig, PeftModel, get_peft_model
 
 
 PEFT_MODELS_TO_TEST = [("peft-internal-testing/test-lora-subfolder", "test")]
@@ -112,3 +113,49 @@ class TestBaseModelRevision:
 
         assert peft_model.peft_config["default"].base_model_name_or_path == base_model_id
         assert peft_model.peft_config["default"].revision == base_model_revision
+
+
+class TestModelCard:
+    @pytest.mark.parametrize(
+        "model_id, peft_config, tags, excluded_tags",
+        [
+            (
+                "hf-internal-testing/tiny-random-Gemma3ForCausalLM",
+                LoraConfig(),
+                ["peft:method:lora", "base_model:adapter:hf-internal-testing/tiny-random-Gemma3ForCausalLM", "lora"],
+                [],
+            ),
+            (
+                "hf-internal-testing/tiny-random-Gemma3ForCausalLM",
+                BoneConfig(),
+                ["peft:method:bone", "base_model:adapter:hf-internal-testing/tiny-random-Gemma3ForCausalLM"],
+                ["lora"],
+            ),
+            (
+                "hf-internal-testing/tiny-random-BartForConditionalGeneration",
+                LoraConfig(),
+                [
+                    "peft:method:lora",
+                    "base_model:adapter:hf-internal-testing/tiny-random-BartForConditionalGeneration",
+                    "lora",
+                ],
+                [],
+            ),
+        ],
+    )
+    def test_model_card_has_expected_tags(self, model_id, peft_config, tags, excluded_tags, tmp_path):
+        """Make sure that PEFT sets the tags in the model card automatically and correctly.
+        This is important so that a) the models are searchable on the Hub and also 2) some features depend on it to
+        decide how to deal with them (e.g., inference).
+        """
+        base_model = AutoModelForCausalLM.from_pretrained(model_id)
+        peft_model = get_peft_model(base_model, peft_config)
+        save_path = tmp_path / "adapter"
+
+        peft_model.save_pretrained(save_path)
+
+        model_card = ModelCard.load(save_path / "README.md")
+        assert set(tags).issubset(set(model_card.data.tags))
+
+        if excluded_tags:
+            assert not set(excluded_tags).issubset(set(model_card.data.tags))

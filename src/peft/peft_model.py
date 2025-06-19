@@ -1408,6 +1408,25 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     def active_peft_config(self):
         return self.peft_config[self.active_adapter]
 
+    def _get_peft_specific_model_tags(self):
+        """Derive tags for the model card from the adapter's config. For example, setting the
+        base model is important for enabling support for inference providers but it also makes models more searchable
+        on the hub.
+        """
+        peft_method = self.active_peft_config.peft_type.value
+
+        tags = [
+            f"peft:method:{peft_method.lower()}",
+        ]
+
+        if peft_method == "LORA":
+            tags.append("lora")
+
+        if hasattr(self.base_model, "name_or_path"):
+            tags.append(f"base_model:adapter:{self.base_model.name_or_path}")
+
+        return tags
+
     def create_or_update_model_card(self, output_dir: str):
         """
         Updates or create model card to include information about peft:
@@ -1422,6 +1441,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         card = ModelCard.load(filename) if os.path.exists(filename) else ModelCard.from_template(ModelCardData())
 
         card.data["library_name"] = "peft"
+
+        tags = self._get_peft_specific_model_tags()
+        if not card.data["tags"]:
+            card.data["tags"] = tags
+        else:
+            card.data["tags"] = list(set(card.data["tags"]).add(tags))
 
         model_config = BaseTuner.get_model_config(self)
         model_config = None if model_config == DUMMY_MODEL_CONFIG else model_config
