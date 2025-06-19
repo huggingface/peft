@@ -44,7 +44,7 @@ from transformers import (
 import peft
 from peft import PeftConfig, get_peft_model, prepare_model_for_kbit_training
 from peft.optimizers import create_lorafa_optimizer, create_loraplus_optimizer
-from peft.utils import CONFIG_NAME
+from peft.utils import SAFETENSORS_WEIGHTS_NAME
 
 
 if not torch.cuda.is_available():
@@ -335,6 +335,31 @@ class BucketIterator:
         if len(self.ds) % bucket_size != 0:
             bucket = self.ds[-(len(self.ds) % bucket_size) :]
             yield from self._batch_iterator(bucket)
+
+
+def get_file_size(
+    model: nn.Module, *, peft_config: Optional[PeftConfig], clean: bool, print_fn: Callable[..., None]
+) -> int:
+    file_size = 99999999  # set a default dummy value
+    if peft_config is not None:
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True, delete=clean) as tmp_dir:
+                model.save_pretrained(tmp_dir)
+                stat = os.stat(os.path.join(tmp_dir, SAFETENSORS_WEIGHTS_NAME))
+                file_size = stat.st_size
+                if not clean:
+                    print_fn(f"Saved PEFT checkpoint to {tmp_dir}")
+        except Exception as exc:
+            print(f"Failed to save PEFT checkpoint due to the following error: {exc}")
+    else:
+        print_fn("Not saving the fully fine-tuned model because it's too big, estimating the size instead")
+        try:
+            num_params = model.num_parameters()
+            dtype_size = next(model.parameters()).element_size()
+            file_size = num_params * dtype_size
+        except Exception as exc:
+            print(f"Failed to determine file size for fully finetuned model because of: {exc}")
+    return file_size
 
 
 ##################

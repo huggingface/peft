@@ -23,7 +23,6 @@ import json
 import os
 import random
 import sys
-import tempfile
 import textwrap
 import time
 from contextlib import nullcontext
@@ -46,6 +45,7 @@ from utils import (
     get_accuracy,
     get_base_model_info,
     get_dataset_info,
+    get_file_size,
     get_model,
     get_optimizer_and_scheduler,
     get_peft_branch,
@@ -57,7 +57,7 @@ from utils import (
 )
 
 from peft import AdaLoraConfig, PeftConfig
-from peft.utils import CONFIG_NAME, SAFETENSORS_WEIGHTS_NAME
+from peft.utils import CONFIG_NAME
 
 
 # # suppress all warnings
@@ -412,26 +412,12 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         print_verbose("Training failed, not logging results")
         sys.exit(1)
 
-    # save the model in temp dir, get file size, clean it up afterwards if clean is passed
-    file_size = 99999999  # set a default dummy value
-    if peft_config is not None:
-        try:
-            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True, delete=clean) as tmp_dir:
-                model.save_pretrained(tmp_dir)
-                stat = os.stat(os.path.join(tmp_dir, SAFETENSORS_WEIGHTS_NAME))
-                file_size = stat.st_size
-                if not clean:
-                    print_verbose(f"Saved PEFT checkpoint to {tmp_dir}")
-        except Exception as exc:
-            print(f"Failed to save PEFT checkpoint due to the following error: {exc}")
-    else:
-        print("Not saving the fully fine-tuned model because it's too big")
-        try:
-            num_params = model.num_parameters()
-            dsize = {torch.float16: 2, torch.bfloat: 2, torch.float32: 4}.get(model.dtype)
-            file_size = num_params * dsize
-        except Exception as exc:
-            print(f"Failed to determine file size for fully finetuned model because of: {exc}")
+    file_size = get_file_size(
+        model,
+        peft_config=peft_config,
+        clean=clean,
+        print_fn=print_verbose,
+    )
 
     time_total = time.perf_counter() - tic_total
     # log results: print and save to file
