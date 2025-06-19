@@ -147,8 +147,6 @@ def validate_experiment_path(path: str) -> str:
         )
     if not os.path.exists(path):
         raise FileNotFoundError(f"Path {path} does not exist")
-    if not os.path.exists(os.path.join(path, CONFIG_NAME)):
-        raise FileNotFoundError(os.path.join(path, CONFIG_NAME))
 
     # check path structure
     path_parts = path.rstrip(os.path.sep).split(os.path.sep)
@@ -244,13 +242,16 @@ def get_model(
     dtype: Literal["float32", "float16", "bfloat16", "int8", "int4"],
     compile: bool,
     attn_implementation: Optional[str],
-    peft_config: PeftConfig,
+    peft_config: Optional[PeftConfig],
     autocast_adapter_dtype: bool,
 ) -> nn.Module:
     base_model = get_base_model(
         model_id=model_id, dtype=dtype, compile=compile, attn_implementation=attn_implementation
     )
-    model = get_peft_model(base_model, peft_config, autocast_adapter_dtype=autocast_adapter_dtype)
+    if peft_config is None:
+        model = base_model
+    else:
+        model = get_peft_model(base_model, peft_config, autocast_adapter_dtype=autocast_adapter_dtype)
     return model
 
 
@@ -586,7 +587,7 @@ def log_results(
     datasets_info: dict[str, Optional[huggingface_hub.DatasetInfo]],
     start_date: str,
     train_config: TrainConfig,
-    peft_config: PeftConfig,
+    peft_config: Optional[PeftConfig],
     print_fn: Callable[..., None],
 ) -> None:
     # collect results
@@ -627,10 +628,13 @@ def log_results(
         save_dir = tempfile.mkdtemp()
         print_fn(f"Experiment could not be categorized, writing results to {save_dir}. Please open an issue on PEFT.")
 
-    peft_config_dict = peft_config.to_dict()
-    for key, value in peft_config_dict.items():
-        if isinstance(value, set):
-            peft_config_dict[key] = list(value)
+    if peft_config is None:
+        peft_config_dict: Optional[dict[str, Any]] = None
+    else:
+        peft_config_dict = peft_config.to_dict()
+        for key, value in peft_config_dict.items():
+            if isinstance(value, set):
+                peft_config_dict[key] = list(value)
 
     log_data = {
         "run_info": {

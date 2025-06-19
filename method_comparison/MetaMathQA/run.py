@@ -57,7 +57,7 @@ from utils import (
 )
 
 from peft import AdaLoraConfig, PeftConfig
-from peft.utils import SAFETENSORS_WEIGHTS_NAME
+from peft.utils import CONFIG_NAME, SAFETENSORS_WEIGHTS_NAME
 
 
 # # suppress all warnings
@@ -155,7 +155,11 @@ def train(
         **optimizer_kwargs,
     )
     # print this after getting the optimizer, in case it modifies requires_gard
-    num_trainable_params, num_params = model.get_nb_trainable_parameters()
+    if hasattr(model, "get_nb_trainable_parameters"):
+        num_trainable_params, num_params = model.get_nb_trainable_parameters()
+    else:
+        num_params = sum(p.numel() for p in model.parameters())
+        num_trainable_params = num_params
     print_verbose(
         f"trainable params: {num_trainable_params:,d} || all params: {num_params:,d} || "
         f"trainable: {100 * num_trainable_params / num_params:.4f}%"
@@ -360,7 +364,11 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         )
 
     # load configs
-    peft_config = PeftConfig.from_pretrained(path_experiment)
+    peft_config: Optional[PeftConfig] = None
+    if os.path.exists(os.path.join(path_experiment, CONFIG_NAME)):
+        peft_config = PeftConfig.from_pretrained(path_experiment)
+    else:
+        print_verbose(f"Could not find PEFT config at {path_experiment}, performing FULL FINETUNING")
     path_train_config = os.path.join(path_experiment, FILE_NAME_TRAIN_PARAMS)
     train_config = get_train_config(path_train_config)
     set_seed(train_config.seed)

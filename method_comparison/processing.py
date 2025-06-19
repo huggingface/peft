@@ -27,6 +27,10 @@ def preprocess(rows, task_name: str, print_fn=print):
         run_info = row["run_info"]
         train_info = row["train_info"]
         meta_info = row["meta_info"]
+        if run_info["peft_config"]:
+            peft_type = run_info["peft_config"]["peft_type"]
+        else:
+            peft_type = "full-finetuning"
         if train_info["status"] != "success":
             skipped += 1
             continue
@@ -39,7 +43,7 @@ def preprocess(rows, task_name: str, print_fn=print):
             "experiment_name": run_info["experiment_name"],
             "model_id": run_info["train_config"]["model_id"],
             "train_config": run_info["train_config"],
-            "peft_type": run_info["peft_config"]["peft_type"],
+            "peft_type": peft_type,
             "peft_config": run_info["peft_config"],
             "cuda_memory_reserved_avg": train_info["cuda_memory_reserved_avg"],
             "cuda_memory_max": train_info["cuda_memory_max"],
