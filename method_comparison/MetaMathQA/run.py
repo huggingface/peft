@@ -343,6 +343,8 @@ def train(
         losses=losses,
         metrics=metrics,
         error_msg=error_msg,
+        num_trainable_params=num_trainable_params,
+        num_total_params=num_params,
     )
     return train_result
 

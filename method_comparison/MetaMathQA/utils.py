@@ -547,6 +547,8 @@ class TrainResult:
     losses: list[float]
     metrics: list[Any]  # TODO
     error_msg: str
+    num_trainable_params: int
+    num_total_params: int
 
 
 def log_to_console(log_data: dict[str, Any], print_fn: Callable[..., None]) -> None:
@@ -648,6 +650,8 @@ def log_results(
             "cuda_memory_reserved_99th": cuda_memory_reserved_99th,
             "train_time": train_result.train_time,
             "file_size": file_size,
+            "num_trainable_params": train_result.num_trainable_params,
+            "num_total_params": train_result.num_total_params,
             "status": train_result.status.value,
             "metrics": train_result.metrics,
         },
