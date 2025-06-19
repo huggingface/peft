@@ -3394,24 +3394,21 @@ class TestRequiresGrad:
         # active adapter is still "default"
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin0.oft_r.default",
-            "base_model.model.lin0.oft_s.default",
+            "base_model.model.lin0.oft_R.default.weight",
         )
 
         # set config0 as active, should not change anything
         peft_model.set_adapter("default")
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin0.oft_r.default",
-            "base_model.model.lin0.oft_s.default",
+            "base_model.model.lin0.oft_R.default.weight",
         )
 
         # change activate pter to pter1
         peft_model.set_adapter("adapter1")
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin1.oft_r.adapter1",
-            "base_model.model.lin1.oft_s.adapter1",
+            "base_model.model.lin1.oft_R.adapter1.weight",
         )
 
         # disable all pters
@@ -3421,8 +3418,7 @@ class TestRequiresGrad:
         # after context is exited, return to the previous state
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin1.oft_r.adapter1",
-            "base_model.model.lin1.oft_s.adapter1",
+            "base_model.model.lin1.oft_R.adapter1.weight",
         )
 
     def test_requires_grad_oft_same_targets(self):
@@ -3436,24 +3432,21 @@ class TestRequiresGrad:
         # active adapter is still "default"
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin0.oft_r.default",
-            "base_model.model.lin0.oft_s.default",
+            "base_model.model.lin0.oft_R.default.weight",
         )
 
         # set config0 as active, should not change anything
         peft_model.set_adapter("default")
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin0.oft_r.default",
-            "base_model.model.lin0.oft_s.default",
+            "base_model.model.lin0.oft_R.default.weight",
         )
 
         # change activate adapter to adapter1
         peft_model.set_adapter("adapter1")
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin0.oft_r.adapter1",
-            "base_model.model.lin0.oft_s.adapter1",
+            "base_model.model.lin0.oft_R.adapter1.weight",
         )
 
         # disable all adapters
@@ -3464,8 +3457,7 @@ class TestRequiresGrad:
         peft_model.set_adapter("adapter1")
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin0.oft_r.adapter1",
-            "base_model.model.lin0.oft_s.adapter1",
+            "base_model.model.lin0.oft_R.adapter1.weight",
         )
 
     def test_requires_grad_hra_different_targets(self):
