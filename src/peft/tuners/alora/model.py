@@ -57,78 +57,27 @@ def _alora_offsets_pre_forward_hook(target, args, kwargs, alora_offsets):
 
 class aLoraModel(BaseTuner):
     """
-    Creates Low Rank Adapter (LoRA) model from a pretrained transformers model.
+    Creates Activated Low Rank Adapter (aLoRA) model from a pretrained transformers model.
 
-    The method is described in detail in https://arxiv.org/abs/2106.09685.
+    The method is described in detail in https://arxiv.org/abs/2504.12397.
 
     Args:
         model ([`torch.nn.Module`]): The model to be adapted.
-        config ([`LoraConfig`]): The configuration of the Lora model.
+        config ([`aLoraConfig`]): The configuration of the aLora model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
             Create empty adapter weights on meta device. Useful to speed up the loading process.
 
     Returns:
-        `torch.nn.Module`: The Lora model.
+        `torch.nn.Module`: The aLora model.
 
-    Example:
-
-        ```py
-        >>> from transformers import AutoModelForSeq2SeqLM
-        >>> from peft import LoraModel, LoraConfig
-
-        >>> config = LoraConfig(
-        ...     task_type="SEQ_2_SEQ_LM",
-        ...     r=8,
-        ...     lora_alpha=32,
-        ...     target_modules=["q", "v"],
-        ...     lora_dropout=0.01,
-        ... )
-
-        >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
-        >>> lora_model = LoraModel(model, config, "default")
-        ```
-
-        ```py
-        >>> import torch
-        >>> import transformers
-        >>> from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
-
-        >>> rank = ...
-        >>> target_modules = ["q_proj", "k_proj", "v_proj", "out_proj", "fc_in", "fc_out", "wte"]
-        >>> config = LoraConfig(
-        ...     r=4, lora_alpha=16, target_modules=target_modules, lora_dropout=0.1, bias="none", task_type="CAUSAL_LM"
-        ... )
-        >>> quantization_config = transformers.BitsAndBytesConfig(load_in_8bit=True)
-
-        >>> tokenizer = transformers.AutoTokenizer.from_pretrained(
-        ...     "kakaobrain/kogpt",
-        ...     revision="KoGPT6B-ryan1.5b-float16",  # or float32 version: revision=KoGPT6B-ryan1.5b
-        ...     bos_token="[BOS]",
-        ...     eos_token="[EOS]",
-        ...     unk_token="[UNK]",
-        ...     pad_token="[PAD]",
-        ...     mask_token="[MASK]",
-        ... )
-        >>> model = transformers.GPTJForCausalLM.from_pretrained(
-        ...     "kakaobrain/kogpt",
-        ...     revision="KoGPT6B-ryan1.5b-float16",  # or float32 version: revision=KoGPT6B-ryan1.5b
-        ...     pad_token_id=tokenizer.eos_token_id,
-        ...     use_cache=False,
-        ...     device_map={"": rank},
-        ...     torch_dtype=torch.float16,
-        ...     quantization_config=quantization_config,
-        ... )
-        >>> model = prepare_model_for_kbit_training(model)
-        >>> lora_model = get_peft_model(model, config)
-        ```
-
+    
     **Attributes**:
         - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
-        - **peft_config** ([`LoraConfig`]): The configuration of the Lora model.
+        - **peft_config** ([`aLoraConfig`]): The configuration of the aLora model.
     """
 
-    prefix: str = "lora_"
+    prefix: str = "alora_"
 
     def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
         super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
@@ -454,8 +403,7 @@ class aLoraModel(BaseTuner):
 
 
             ################################
-        #if ks is not None:
-        #    raise ValueError("Multiple adapters not supported with alora yet")
+        
         if self.training:
             raise ValueError("Cannot pass `adapter_names` when the model is in training mode.")
 
@@ -485,16 +433,11 @@ class aLoraModel(BaseTuner):
             handle.remove()
 
     def _check_merge_allowed(self):
-        """Verify that the configuration supports merging.
-
-        Currently gptq quantization and replicated layers do not support merging.
+        """Merging is not allowed for activated LoRA models
         """
-        super()._check_merge_allowed()
-        if getattr(self.model, "quantization_method", None) == "gptq":
-            raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
-        if self.peft_config.get("layer_replication"):
-            raise ValueError("Cannot merge LORA layers when base model layers are replicated")
 
+        raise ValueError("Merging of aLoRA layers is not possible by definition.")
+        
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
         if peft_config.target_modules is None:
@@ -951,4 +894,3 @@ class aLoraModel(BaseTuner):
                 )
 
         return tensors_lora
-

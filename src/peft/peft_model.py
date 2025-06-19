@@ -47,6 +47,7 @@ from . import __version__
 from .config import PeftConfig
 from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING, PEFT_TYPE_TO_PREFIX_MAPPING, PEFT_TYPE_TO_TUNER_MAPPING
 from .utils import (
+    PeftType,
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     WEIGHTS_NAME,
@@ -64,6 +65,7 @@ from .utils import (
     set_peft_model_state_dict,
     shift_tokens_right,
 )
+from .tuners.alora.config import aLoraConfig
 
 
 class PeftModel(PushToHubMixin, torch.nn.Module):
@@ -109,13 +111,15 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         adapter_name: str = "default",
         autocast_adapter_dtype: bool = True,
         low_cpu_mem_usage: bool = False,
+        tokenizer: Optional[Any] = None, 
     ) -> None:
         super().__init__()
         self.active_adapter = adapter_name
         self.peft_type = peft_config.peft_type
         # These args are special PEFT arguments that users can pass. They need to be removed before passing them to
         # forward.
-        self.special_peft_forward_args = {"adapter_names"}
+        self.special_peft_forward_args = {"adapter_names", "alora_offsets"}
+        self.tokenizer = tokenizer # Added for ALORA
 
         self._is_prompt_learning = peft_config.is_prompt_learning
         if self._is_prompt_learning:
@@ -385,6 +389,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         ephemeral_gpu_offload: bool = False,
         low_cpu_mem_usage: bool = False,
         key_mapping: Optional[dict[str, str]] = None,
+        tokenizer: Optional[Any] = None, # Added for ALORA
         **kwargs: Any,
     ) -> PeftModel:
         r"""
@@ -542,6 +547,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 adapter_name,
                 autocast_adapter_dtype=autocast_adapter_dtype,
                 low_cpu_mem_usage=low_cpu_mem_usage,
+                tokenizer=tokenizer,
             )
         else:
             model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](
@@ -550,6 +556,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 adapter_name,
                 autocast_adapter_dtype=autocast_adapter_dtype,
                 low_cpu_mem_usage=low_cpu_mem_usage,
+                tokenizer=tokenizer,
             )
 
         load_result = model.load_adapter(
@@ -1771,10 +1778,81 @@ class PeftModelForCausalLM(PeftModel):
     """
 
     def __init__(
-        self, model: torch.nn.Module, peft_config: PeftConfig, adapter_name: str = "default", **kwargs
+        self, model: torch.nn.Module, peft_config: PeftConfig, adapter_name: str = "default", tokenizer: Optional[Any] = None, **kwargs
     ) -> None:
-        super().__init__(model, peft_config, adapter_name, **kwargs)
+        super().__init__(model, peft_config, adapter_name, tokenizer=tokenizer, **kwargs)
         self.base_model_prepare_inputs_for_generation = self.base_model.prepare_inputs_for_generation
+
+        
+    def _calculate_alora_offsets(self, input_ids: torch.Tensor, adapter_names: Optional[list[str]] = None) -> list[int]:
+        if input_ids is None:
+            return []
+
+        batch_size = input_ids.shape[0]
+        alora_offsets = [-1] * batch_size
+
+        cached_invocation_tensors = {}
+        adapters_to_process_indices = collections.defaultdict(list)
+
+        for i in range(batch_size):
+            current_adapter_name = adapter_names[i] if adapter_names and i < len(adapter_names) else self.active_adapter
+
+            if current_adapter_name == "__base__":
+                alora_offsets[i] = -1
+                continue
+
+            if current_adapter_name not in self.peft_config:
+                warnings.warn(f"Adapter '{current_adapter_name}' not found in peft_config. Using offset -1 for row {i}.")
+                alora_offsets[i] = -1
+                continue
+            
+            current_peft_config = self.peft_config[current_adapter_name]
+
+            if not isinstance(current_peft_config, aLoraConfig):
+                alora_offsets[i] = -1 # Not an aLoRA adapter or wrong type
+                continue
+            
+            invocation_string = getattr(current_peft_config, 'invocation_string', None)
+            if not self.tokenizer or not invocation_string:
+                alora_offsets[i] = -1 # No way to calculate offset
+                continue
+
+            if current_adapter_name not in cached_invocation_tensors:
+                tokenized_ids_list = self.tokenizer.encode(invocation_string, add_special_tokens=False)
+                cached_invocation_tensors[current_adapter_name] = torch.tensor(tokenized_ids_list, dtype=torch.long, device=input_ids.device)
+            
+            adapters_to_process_indices[current_adapter_name].append(i)
+
+        for adapter_name_to_process, indices in adapters_to_process_indices.items():
+            current_invocation_ids_tensor = cached_invocation_tensors[adapter_name_to_process]
+            invocation_len = len(current_invocation_ids_tensor)
+
+            for i in indices:
+                sequence = input_ids[i]
+                seq_len = len(sequence)
+                best_match_start_idx = -1
+                
+                possible_starts = (sequence == current_invocation_ids_tensor[0]).nonzero(as_tuple=True)[0]
+
+                for start_idx_tensor in possible_starts:
+                    idx = start_idx_tensor.item()
+                    if idx + invocation_len <= seq_len:
+                        if torch.equal(sequence[idx : idx + invocation_len], current_invocation_ids_tensor):
+                            if idx > best_match_start_idx:
+                                best_match_start_idx = idx
+                
+                if best_match_start_idx != -1:
+                    offset_val = seq_len - best_match_start_idx
+                    alora_offsets[i] = offset_val if offset_val > 0 else -1
+                else:
+                    warnings.warn(
+                        f"Invocation string for adapter '{adapter_name_to_process}' not found in input row {i}. "
+                        f"Input: {self.tokenizer.decode(input_ids[i]) if self.tokenizer else input_ids[i]}. "
+                        f"Invocation: {self.peft_config[adapter_name_to_process].invocation_string}. "
+                        "Adapter will be disabled for this row."
+                    )
+                    alora_offsets[i] = -1
+        return alora_offsets
 
     def forward(
         self,
@@ -1789,7 +1867,33 @@ class PeftModelForCausalLM(PeftModel):
         **kwargs,
     ):
         peft_config = self.active_peft_config
+
         if not peft_config.is_prompt_learning:
+            adapter_names_for_offset_calc = kwargs.get("adapter_names")
+
+            is_alora_relevant = False
+            if self.active_peft_config.peft_type == PeftType.ALORA:
+                is_alora_relevant = True
+            elif adapter_names_for_offset_calc:
+                for name in adapter_names_for_offset_calc:
+                    if name == "__base__":
+                        continue
+                    config_ = self.peft_config.get(name)
+                    if config_ and config_.peft_type == PeftType.ALORA:
+                        is_alora_relevant = True
+                        break
+            
+            if is_alora_relevant:
+                alora_offsets = kwargs.get("alora_offsets") 
+                if alora_offsets is None:
+                    if input_ids is None and inputs_embeds is not None:
+                        warnings.warn("Cannot calculate aLoRA offsets when only inputs_embeds are provided. Disabling aLoRA for this forward pass.")
+                        alora_offsets = [-1] * inputs_embeds.shape[0]
+                    elif input_ids is not None:
+                         alora_offsets = self._calculate_alora_offsets(input_ids, adapter_names=adapter_names_for_offset_calc)
+                    else: 
+                        alora_offsets = [] # Should not happen if _get_batch_size logic is sound
+                    kwargs['alora_offsets'] = alora_offsets
             if self.base_model.config.model_type == "mpt":
                 if inputs_embeds is not None:
                     raise AssertionError("forward in MPTForCausalLM does not support inputs_embeds")
@@ -1929,6 +2033,49 @@ class PeftModelForCausalLM(PeftModel):
             self.base_model.generation_config = self.generation_config
         try:
             if not peft_config.is_prompt_learning:
+                adapter_names_for_offset_calc = kwargs.get("adapter_names")
+                is_alora_relevant_in_generate = False
+
+                if self.active_peft_config.peft_type == PeftType.ALORA:
+                    is_alora_relevant_in_generate = True
+                elif adapter_names_for_offset_calc:
+                    for name in adapter_names_for_offset_calc:
+                        if name == "__base__":
+                            continue
+                        config_ = self.peft_config.get(name)
+                        if config_ and config_.peft_type == PeftType.ALORA:
+                            is_alora_relevant_in_generate = True
+                            break
+                
+                if is_alora_relevant_in_generate:
+                    alora_offsets_from_kwargs = kwargs.get("alora_offsets")
+                    if alora_offsets_from_kwargs is None:
+                        current_input_ids = kwargs.get("input_ids")
+                        if not args and not current_input_ids : # args[0] is usually input_ids
+                            if args and isinstance(args[0], torch.Tensor) and args[0].dim() >=1 :
+                                current_input_ids = args[0]
+                            else:
+                                current_input_ids = None
+                        
+                        if current_input_ids is not None:
+                            if current_input_ids.ndim == 1: 
+                                current_input_ids = current_input_ids.unsqueeze(0)
+                            calculated_offsets = self._calculate_alora_offsets(current_input_ids, adapter_names=adapter_names_for_offset_calc)
+                            kwargs['alora_offsets'] = calculated_offsets
+                        else:
+                            warnings.warn("Cannot calculate aLoRA offsets during generate as input_ids are not available. Disabling aLoRA.")
+                            bs = 1 
+                            if "attention_mask" in kwargs and kwargs["attention_mask"] is not None:
+                                bs = kwargs["attention_mask"].shape[0]
+                            elif "inputs_embeds" in kwargs and kwargs["inputs_embeds"] is not None:
+                                bs = kwargs["inputs_embeds"].shape[0]
+                            elif args and isinstance(args[0], torch.Tensor) and args[0].dim() > 0: # input_ids might be in args[0]
+                                bs = args[0].shape[0]
+                            elif "input_ids" in kwargs and kwargs["input_ids"] is not None: # Should have been caught by current_input_ids
+                                bs = kwargs["input_ids"].shape[0]
+
+                            kwargs['alora_offsets'] = [-1] * bs
+                
                 with self._enable_peft_forward_hooks(*args, **kwargs):
                     kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
                     outputs = self.base_model.generate(*args, **kwargs)
