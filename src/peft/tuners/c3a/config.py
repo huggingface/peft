@@ -99,7 +99,7 @@ class C3AConfig(PeftConfig):
     init_weights: Optional[Union[bool, Literal["gaussian", "kaiming_uniform", "xavier_uniform"]]] = field(
         default="xavier_uniform",
         metadata={
-            "help": "The initialization of the C3A weights. Set this to False if the weights should be initialized to a commonly used distribution. Set this to True if the weights should be initialized to zeros."
+            "help": "The initialization of the C3A weights. Leave it as default or set it to False if the weights should be initialized with Xavier uniform, which is experimentally suitable for C3A. Set this to True if the weights should be initialized to zeros."
         },
     )
 

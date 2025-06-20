@@ -206,7 +206,7 @@ ALL_CONFIGS = [
         C3AConfig,
         {
             "task_type": "CAUSAL_LM",
-            "block_size": 1,
+            "block_size": 1, # Some test cases contain shapes of prime numbers where `block_size` must be 1 
             "target_modules": None,
         },
     ),

@@ -95,7 +95,7 @@ class C3ALayer(BaseTunerLayer):
             elif init_weights in ["xavier_uniform", False]:  # Support test cases where False presents
                 fan_in, fan_out = self.in_features, self.out_features
                 std = 1.0 * math.sqrt(2.0 / float(fan_in + fan_out))
-                a = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
+                a = math.sqrt(3.0) * std
                 nn.init.uniform_(self.c3a_kernel[adapter_name], -a, a)
             elif init_weights == "kaiming_uniform":
                 fan_in = self.in_features
