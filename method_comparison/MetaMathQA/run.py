@@ -57,7 +57,7 @@ from utils import (
 )
 
 from peft import AdaLoraConfig, PeftConfig
-from peft.utils import CONFIG_NAME
+from peft.utils import infer_device, CONFIG_NAME
 
 
 # # suppress all warnings
