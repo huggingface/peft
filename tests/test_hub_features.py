@@ -154,6 +154,8 @@ class TestModelCard:
         """Make sure that PEFT sets the tags in the model card automatically and correctly.
         This is important so that a) the models are searchable on the Hub and also 2) some features depend on it to
         decide how to deal with them (e.g., inference).
+
+        Makes sure that the base model tags are still present (if there are any).
         """
         base_model = AutoModelForCausalLM.from_pretrained(model_id)
 
