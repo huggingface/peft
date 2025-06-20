@@ -553,7 +553,6 @@ class TestOpt(RegressionTester):
 
 @require_non_cpu
 @require_bitsandbytes
-@require_deterministic_for_xpu
 class TestOpt8bitBnb(RegressionTester):
     def get_output(self, model):
         input = torch.LongTensor([[1, 0, 1, 0, 1, 2]]).to(self.torch_device)
@@ -569,6 +568,7 @@ class TestOpt8bitBnb(RegressionTester):
         )
         return model
 
+    @require_deterministic_for_xpu
     def test_lora_8bit(self):
         # Warning: bnb results can vary significantly depending on the GPU. Therefore, if there is a change in GPU used
         # in the CI, the test can fail without any code change. In that case, delete the regression artifact and create
@@ -611,7 +611,6 @@ class TestOpt8bitBnb(RegressionTester):
 
 @require_non_cpu
 @require_bitsandbytes
-@require_deterministic_for_xpu
 class TestOpt4bitBnb(RegressionTester):
     def get_output(self, model):
         input = torch.LongTensor([[1, 0, 1, 0, 1, 2]]).to(self.torch_device)
@@ -633,6 +632,7 @@ class TestOpt4bitBnb(RegressionTester):
         )
         return model
 
+    @require_deterministic_for_xpu
     def test_lora_4bit(self):
         # Warning: bnb results can vary significantly depending on the GPU. Therefore, if there is a change in GPU used
         # in the CI, the test can fail without any code change. In that case, delete the regression artifact and create
