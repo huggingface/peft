@@ -143,12 +143,23 @@ class TestModelCard:
             ),
         ],
     )
-    def test_model_card_has_expected_tags(self, model_id, peft_config, tags, excluded_tags, tmp_path):
+    @pytest.mark.parametrize(
+        "pre_tags",
+        [
+            ["tag1", "tag2"],
+            [],
+        ],
+    )
+    def test_model_card_has_expected_tags(self, model_id, peft_config, tags, excluded_tags, pre_tags, tmp_path):
         """Make sure that PEFT sets the tags in the model card automatically and correctly.
         This is important so that a) the models are searchable on the Hub and also 2) some features depend on it to
         decide how to deal with them (e.g., inference).
         """
         base_model = AutoModelForCausalLM.from_pretrained(model_id)
+
+        if pre_tags:
+            base_model.add_model_tags(pre_tags)
+
         peft_model = get_peft_model(base_model, peft_config)
         save_path = tmp_path / "adapter"
 
@@ -159,3 +170,6 @@ class TestModelCard:
 
         if excluded_tags:
             assert not set(excluded_tags).issubset(set(model_card.data.tags))
+
+        if pre_tags:
+            assert set(pre_tags).issubset(set(model_card.data.tags))

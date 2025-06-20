@@ -1442,11 +1442,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         card.data["library_name"] = "peft"
 
-        tags = self._get_peft_specific_model_tags()
-        if not card.data["tags"]:
-            card.data["tags"] = tags
-        else:
-            card.data["tags"] = list(set(card.data["tags"]).add(tags))
+        tags = set()
+        if hasattr(self.base_model, "model_tags"):
+            tags = tags.union(self.base_model.model_tags or [])
+
+        tags = tags.union(self._get_peft_specific_model_tags())
+        if tags:
+            card.data["tags"] = list(tags)
 
         model_config = BaseTuner.get_model_config(self)
         model_config = None if model_config == DUMMY_MODEL_CONFIG else model_config
