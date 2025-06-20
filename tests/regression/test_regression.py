@@ -207,6 +207,7 @@ class RegressionTester(unittest.TestCase):
             else:
                 raise RuntimeError("Git commit is not tagged") from exc
 
+    @require_deterministic_for_xpu
     def assert_results_equal_or_store(self, model, name):
         """Check if the outputs are the same or save the outputs if in creation mode."""
         if not self.creation_mode:  # normal regression testing mode
@@ -568,7 +569,6 @@ class TestOpt8bitBnb(RegressionTester):
         )
         return model
 
-    @require_deterministic_for_xpu
     def test_lora_8bit(self):
         # Warning: bnb results can vary significantly depending on the GPU. Therefore, if there is a change in GPU used
         # in the CI, the test can fail without any code change. In that case, delete the regression artifact and create
@@ -632,7 +632,6 @@ class TestOpt4bitBnb(RegressionTester):
         )
         return model
 
-    @require_deterministic_for_xpu
     def test_lora_4bit(self):
         # Warning: bnb results can vary significantly depending on the GPU. Therefore, if there is a change in GPU used
         # in the CI, the test can fail without any code change. In that case, delete the regression artifact and create
