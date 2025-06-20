@@ -51,7 +51,7 @@ from utils import (
     get_peft_branch,
     get_tokenizer,
     get_train_config,
-    init_cuda,
+    init_accelerator,
     log_results,
     validate_experiment_path,
 )
@@ -121,7 +121,7 @@ def train(
     batch_size: int,
     batch_size_eval: int,
     tokenizer: Any,
-    cuda_memory_init: int,
+    accelerator_memory_init: int,
     eval_steps: int,
     generation_kwargs: dict[str, Any],
     grad_norm_clip: float,
@@ -132,17 +132,19 @@ def train(
     use_amp: bool,
     is_adalora: bool,
 ) -> TrainResult:
-    cuda_memory_allocated_log = []
-    cuda_memory_reserved_log = []
+    accelerator_memory_allocated_log = []
+    accelerator_memory_reserved_log = []
     losses = []
     durations = []
     metrics = []
     sample = 0  # keep count of the current sample
     total_samples = 0  # total number of samples over all epochs
     total_tokens = []  # total number of tokens over all epochs
+    device_type = infer_device()
+    torch_accelerator_module = getattr(torch, device_type, torch.cuda)
     if use_amp:
-        grad_scaler: GradScaler | DummyGradScaler = GradScaler(device="cuda")
-        autocast_ctx: Callable[[], ContextManager[Any]] = partial(autocast, device_type="cuda")
+        grad_scaler: GradScaler | DummyGradScaler = GradScaler(device=device_type)
+        autocast_ctx: Callable[[], ContextManager[Any]] = partial(autocast, device_type=device_type)
     else:
         grad_scaler = DummyGradScaler()
         autocast_ctx = nullcontext
@@ -225,8 +227,8 @@ def train(
 
             losses.append(loss.item())
             pbar.set_postfix({"loss": loss.item()})
-            cuda_memory_allocated_log.append(torch.cuda.memory_allocated() - cuda_memory_init)
-            cuda_memory_reserved_log.append(torch.cuda.memory_reserved() - cuda_memory_init)
+            accelerator_memory_allocated_log.append(torch_accelerator_module.memory_allocated() - accelerator_memory_init)
+            accelerator_memory_reserved_log.append(torch_accelerator_module.memory_reserved() - accelerator_memory_init)
             toc = time.perf_counter()
             durations.append(toc - tic)
 
@@ -234,8 +236,8 @@ def train(
             if step % eval_steps == 0:
                 tic_eval = time.perf_counter()
                 loss_avg = sum(losses[-eval_steps:]) / eval_steps
-                memory_allocated_avg = sum(cuda_memory_allocated_log[-eval_steps:]) / eval_steps
-                memory_reserved_avg = sum(cuda_memory_reserved_log[-eval_steps:]) / eval_steps
+                memory_allocated_avg = sum(accelerator_memory_allocated_log[-eval_steps:]) / eval_steps
+                memory_reserved_avg = sum(accelerator_memory_reserved_log[-eval_steps:]) / eval_steps
                 token_sum = sum(total_tokens[-eval_steps:])
                 dur_train = sum(durations[-eval_steps:])
                 tokens_per_sec = token_sum / dur_train
@@ -294,7 +296,7 @@ def train(
                 print_verbose(json.dumps(log_dict))
 
             # # TODO is this needed?
-            torch.cuda.empty_cache()
+            torch_accelerator_module.empty_cache()
             gc.collect()
 
         print_verbose(f"Training finished after {max_steps} steps, evaluation on test set follows.")
@@ -342,7 +344,7 @@ def train(
     train_result = TrainResult(
         status=status,
         train_time=train_time,
-        cuda_memory_reserved_log=cuda_memory_reserved_log,
+        accelerator_memory_reserved_log=accelerator_memory_reserved_log,
         losses=losses,
         metrics=metrics,
         error_msg=error_msg,
@@ -375,7 +377,7 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
     set_seed(train_config.seed)
 
     # initialize objects
-    cuda_memory_init = init_cuda()
+    accelerator_memory_init = init_accelerator()
     tokenizer = get_tokenizer(model_id=train_config.model_id, max_seq_length=train_config.max_seq_length)
 
     model_info = get_base_model_info(train_config.model_id)
@@ -398,7 +400,7 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         batch_size=train_config.batch_size,
         batch_size_eval=train_config.batch_size_eval,
         tokenizer=tokenizer,
-        cuda_memory_init=cuda_memory_init,
+        accelerator_memory_init=accelerator_memory_init,
         eval_steps=train_config.eval_steps,
         generation_kwargs=train_config.generation_kwargs,
         grad_norm_clip=train_config.grad_norm_clip,
@@ -426,7 +428,7 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
     log_results(
         experiment_name=experiment_name,
         train_result=train_result,
-        cuda_memory_init=cuda_memory_init,
+        accelerator_memory_init=accelerator_memory_init,
         time_total=time_total,
         file_size=file_size,
         model_info=model_info,
