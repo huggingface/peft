@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import os
+import re
 import warnings
 from typing import Optional
 
@@ -482,7 +483,9 @@ def torch_load(*args, weights_only=True, **kwargs):
     return torch.load(*args, weights_only=weights_only, **kwargs)
 
 
-def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_download_kwargs) -> dict:
+def load_peft_weights(
+    model_id: str, device: Optional[str] = None, key_mapping: Optional[dict[str, str]] = None, **hf_hub_download_kwargs
+) -> dict:
     r"""
     A helper method to load the PEFT weights from the HuggingFace Hub or locally
 
@@ -491,6 +494,10 @@ def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_down
             The local path to the adapter weights or the name of the adapter to load from the HuggingFace Hub.
         device (`str`):
             The device to load the weights onto.
+        key_mapping (dict, *optional*, defaults to None)
+            Extra mapping of PEFT `state_dict` keys applied before loading the `state_dict`. When this mapping is
+            applied, the PEFT-specific `"base_model.model"` prefix is removed beforehand and the adapter name (e.g.
+            `"default"`) is not inserted yet. Only pass this argument if you know what you're doing.
         hf_hub_download_kwargs (`dict`):
             Additional arguments to pass to the `hf_hub_download` method when loading from the HuggingFace Hub.
     """
@@ -572,4 +579,31 @@ def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_down
     else:
         adapters_weights = torch_load(filename, map_location=torch.device(device))
 
-    return adapters_weights
+    if not key_mapping:
+        remapped_adapters_weights = adapters_weights
+    else:
+        # See discussion in https://github.com/huggingface/transformers/pull/38627
+        # Remap adapter weight names according to the provided key_mapping.
+        remapped_adapters_weights = {}
+        for key, val in adapters_weights.items():
+            if key.startswith("base_model.model."):
+                prefix = "base_model.model."
+            elif key.startswith("base_model."):
+                prefix = "base_model."
+            else:
+                raise ValueError(
+                    "An error occurred while trying to load a PEFT state_dict with key_mapping. This should not "
+                    "happen. Please open an issue on https://github.com/huggingface/peft/issues and report the error."
+                )
+
+            key = key.removeprefix(prefix)  # the key map assumes that there is no prefix
+            for pattern, replacement in key_mapping.items():
+                key_new, n_replace = re.subn(pattern, replacement, key)
+                # Early exit of the loop
+                if n_replace > 0:
+                    key = key_new
+                    break
+            key_with_prefix = f"{prefix}{key}"
+            remapped_adapters_weights[key_with_prefix] = val
+
+    return remapped_adapters_weights
