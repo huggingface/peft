@@ -28,6 +28,7 @@ from transformers import (
 
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from peft.optimizers import create_lorafa_optimizer
+from peft.utils import infer_device
 
 
 def train_model(
@@ -49,8 +50,10 @@ def train_model(
 ):
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-    compute_dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
-    device_map = "cuda" if torch.cuda.is_available() else None
+    device_type = infer_device()
+    torch_accelerator_module = getattr(torch, device_type, torch.cuda)
+    compute_dtype = torch.bfloat16 if torch_accelerator_module.is_available() and torch_accelerator_module.is_bf16_supported() else torch.float16
+    device_map = device_type if device_type != "cpu" else None
 
     # load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(base_model_name_or_path)
