@@ -498,6 +498,29 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    use_qalora: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "It is only implemented in GPTQ for now. Enable <a href='https://huggingface.co/papers/2309.14717'>Quantization-Aware Low-Rank Adaptation (QALoRA)</a>."
+                "This technique combines quantization-aware training "
+                "with LoRA to improve performance for quantized models. This can improve the performance of LoRA, "
+                "especially at low ranks. Right now, QALoRA only supports linear layers."
+            )
+        },
+    )
+    qalora_group_size: int = field(
+        default=16,
+        metadata={
+            "help": (
+                "Group size parameter for QALoRA pooling, controlling the dimension reduction factor. "
+                "Input dimensions are pooled into groups of this size, reducing the computational cost. "
+                "Higher values provide more compression but may reduce model quality. "
+                "This parameter determines how many original features are averaged together to create "
+                "one pooled feature. Only used when `use_qalora=True`."
+            )
+        },
+    )
     # Enables replicating layers in a model to expand it to a larger model.
     layer_replication: Optional[list[tuple[int, int]]] = field(
         default=None,
