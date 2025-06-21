@@ -1,7 +1,7 @@
 # QALoRA: Quantization-Aware Low-Rank Adaptation
 
 ## Introduction
-[QALoRA](https://huggingface.co/papers/2309.14717) is a quantization-aware version of Low-Rank Adaptation that enables efficient fine-tuning of quantized large language models. QALoRA uses input feature pooling and a specialized grouping technique to work with quantized weights, significantly reducing memory requirements while preserving performance. QALoRA enables fine-tuning of models that would otherwise be too large for consumer GPUs.
+[QALoRA](https://huggingface.co/papers/2309.14717) is a quantization-aware version of Low-Rank Adaptation that enables efficient fine-tuning of quantized large language models. QALoRA uses input feature pooling and a specialized grouping technique to work with quantized weights, significantly reducing memory requirements while preserving performance. QALoRA enables fine-tuning of models that would otherwise be too large for consumer GPUs. In PEFT it only works for GPTQ.
 
 ## Quick start
 ```python
@@ -70,7 +70,7 @@ python examples/qalora_finetuning/qalora_gptq_finetuning.py \
     --qalora_group_size 8
 ```
 
-QALoRA also works with different quantization methods (GPTQ, EETQ, AWQ, etc.):
+QALoRA works with GPTQ:
 ```bash
 python examples/qalora_finetuning/qalora_gptq_finetuning.py \
     --base_model TheBloke/Llama-2-13b-GPTQ \
@@ -146,7 +146,6 @@ While the QA-LoRA paper describes a direct weight modification technique using "
 2. The QALoRA adapter weights are then merged with the dequantized model
 3. The merged model must be re-quantized if quantization is still desired
 
-This implementation choice was made because **it yielded better performance in practice**, despite being less memory-efficient than the direct modification approach described in the paper.
 
 ### Memory Considerations
 
