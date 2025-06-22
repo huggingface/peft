@@ -129,15 +129,13 @@ def tokenize_and_preprocess(examples, tokenizer, max_length: int = 128):
 def train_model(
     base_model: str,
     data_path: str,
+    data_split: str,
     output_dir: str,
     batch_size: int,
     num_epochs: int,
     learning_rate: float,
     cutoff_len: int,
-    val_set_size: int,
-    use_dora: bool,
     use_qalora: bool,
-    quantize: bool,
     eval_step: int,
     save_step: int,
     device: str,
@@ -145,7 +143,6 @@ def train_model(
     lora_alpha: int,
     lora_dropout: float,
     lora_target_modules: str,
-    hub_model_id: str,
     push_to_hub: bool,
     qalora_group_size: int,
     bits: int,
@@ -198,9 +195,8 @@ def train_model(
     print("use_qalora", use_qalora)
     lora_config = LoraConfig(
         task_type="CAUSAL_LM",
-        use_dora=use_dora,
         use_qalora=use_qalora,
-        qalora_group_size=qalora_group_size,  # Explicitly set group size for QALoRA
+        qalora_group_size=qalora_group_size,
         r=lora_r,
         lora_alpha=lora_alpha,
         target_modules=target_modules,
@@ -218,7 +214,7 @@ def train_model(
         model = model.to(device)
 
     # Load and prepare dataset
-    dataset = load_dataset(data_path)
+    dataset = load_dataset(data_path, data_split)
 
     tokenized_datasets = {
         "train": dataset["train"].map(
@@ -287,7 +283,9 @@ if __name__ == "__main__":
 
     # Model and dataset parameters
     parser.add_argument("--base_model", type=str, default="TheBloke/Llama-2-7b-GPTQ", help="Base model path or name")
-    parser.add_argument("--data_path", type=str, default="wikitext", help="Dataset path or name")
+    parser.add_argument("--data_path", type=str, default="timdettmers/openassistant-guanaco", help="Dataset path or name")
+    parser.add_argument("--data_split", type=str, default="", help="Dataset path or name")
+
     parser.add_argument(
         "--output_dir", type=str, default="./qalora_output", help="Output directory for the fine-tuned model"
     )
@@ -315,7 +313,6 @@ if __name__ == "__main__":
     parser.add_argument("--device", type=str, default="cuda", help="Device to use for training")
 
     # Hugging Face Hub options
-    parser.add_argument("--hub_model_id", type=str, default=None, help="Repository name to push the model on the Hub")
     parser.add_argument("--push_to_hub", action="store_true", help="Whether to push the model to Hugging Face Hub")
 
     args = parser.parse_args()
@@ -327,6 +324,7 @@ if __name__ == "__main__":
     train_model(
         base_model=args.base_model,
         data_path=args.data_path,
+        data_split=args.data_split,
         output_dir=args.output_dir,
         batch_size=args.batch_size,
         num_epochs=args.num_epochs,
@@ -340,7 +338,6 @@ if __name__ == "__main__":
         lora_alpha=args.lora_alpha,
         lora_dropout=args.lora_dropout,
         lora_target_modules=args.lora_target_modules,
-        hub_model_id=args.hub_model_id,
         push_to_hub=args.push_to_hub,
         qalora_group_size=args.qalora_group_size,
         bits=args.bits,
