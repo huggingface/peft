@@ -65,13 +65,6 @@ python examples/qalora_finetuning/qalora_gptq_finetuning.py \
     --qalora_group_size 8
 ```
 
-QALoRA works with GPTQ:
-```bash
-python examples/qalora_finetuning/qalora_gptq_finetuning.py \
-    --base_model TheBloke/Llama-2-13b-GPTQ \
-    --use_qalora
-```
-
 ### Full example of the script 
 ```bash
 python qalora_gptq_finetuning.py \
@@ -81,7 +74,6 @@ python qalora_gptq_finetuning.py \
     --num_epochs 3 \
     --learning_rate 3e-4 \
     --cutoff_len 512 \
-    --val_set_size 500 \
     --use_qalora \
     --qalora_group_size 8 \
     --eval_step 10 \
@@ -91,7 +83,6 @@ python qalora_gptq_finetuning.py \
     --lora_alpha 32 \
     --lora_dropout 0.05 \
     --lora_target_modules "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj" \
-    --hub_model_id "YOUR_HF_REPO" \
     --push_to_hub
 ```
 
