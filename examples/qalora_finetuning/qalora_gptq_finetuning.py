@@ -218,7 +218,7 @@ def train_model(
         model = model.to(device)
 
     # Load and prepare dataset
-    dataset = load_dataset("wikitext", "wikitext-2-raw-v1")
+    dataset = load_dataset(data_path)
 
     tokenized_datasets = {
         "train": dataset["train"].map(
@@ -249,7 +249,6 @@ def train_model(
         save_steps=save_step,
         save_total_limit=2,
         push_to_hub=push_to_hub,
-        hub_model_id=hub_model_id,
         gradient_accumulation_steps=16,
         fp16=True,
         learning_rate=learning_rate,
@@ -299,13 +298,10 @@ if __name__ == "__main__":
     parser.add_argument("--num_epochs", type=int, default=1, help="Number of training epochs")
     parser.add_argument("--learning_rate", type=float, default=3e-4, help="Learning rate")
     parser.add_argument("--cutoff_len", type=int, default=128, help="Max sequence length")
-    parser.add_argument("--val_set_size", type=int, default=500, help="Validation set size")
 
     # Adapter configuration
-    parser.add_argument("--use_dora", action="store_true", help="Apply DoRA")
     parser.add_argument("--use_qalora", action="store_true", help="Apply QALoRA")
     parser.add_argument("--qalora_group_size", type=int, default=32, help="LoRA rank")
-    parser.add_argument("--quantize", action="store_true", help="Use GPTQ quantization")
     parser.add_argument("--lora_r", type=int, default=8, help="LoRA rank")
     parser.add_argument("--lora_alpha", type=int, default=16, help="LoRA alpha")
     parser.add_argument("--lora_dropout", type=float, default=0.05, help="LoRA dropout rate")
@@ -336,10 +332,7 @@ if __name__ == "__main__":
         num_epochs=args.num_epochs,
         learning_rate=args.learning_rate,
         cutoff_len=args.cutoff_len,
-        val_set_size=args.val_set_size,
-        use_dora=args.use_dora,
         use_qalora=args.use_qalora,
-        quantize=args.quantize,
         eval_step=args.eval_step,
         save_step=args.save_step,
         device=args.device,

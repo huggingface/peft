@@ -1,7 +1,9 @@
 # QALoRA: Quantization-Aware Low-Rank Adaptation
 
 ## Introduction
-[QALoRA](https://huggingface.co/papers/2309.14717) is a quantization-aware version of Low-Rank Adaptation that enables efficient fine-tuning of quantized large language models. QALoRA uses input feature pooling and a specialized grouping technique to work with quantized weights, significantly reducing memory requirements while preserving performance. QALoRA enables fine-tuning of models that would otherwise be too large for consumer GPUs. In PEFT it only works for GPTQ.
+[QALoRA](https://huggingface.co/papers/2309.14717) is a quantization-aware version of Low-Rank Adaptation that enables efficient fine-tuning of quantized large language models. 
+QALoRA uses input feature pooling and a specialized grouping technique to work with quantized weights, significantly reducing memory requirements while preserving performance. 
+QALoRA enables fine-tuning of models that would otherwise be too large for consumer GPUs. In PEFT it only works for GPTQ.
 
 ## Quick start
 ```python
@@ -54,13 +56,6 @@ To use QALoRA, simply set `use_qalora = True` and specify a `qalora_group_size` 
 ## Command Line Examples
 
 Run the finetuning script with a GPTQ quantized model:
-```bash
-python examples/qalora_finetuning/qalora_gptq_finetuning.py \
-    --base_model TheBloke/Llama-2-7b-GPTQ \
-    --data_path timdettmers/openassistant-guanaco \
-    --use_qalora \
-    --quantize
-```
 
 You can customize the pooling group size (default is 16):
 ```bash
@@ -81,7 +76,6 @@ python examples/qalora_finetuning/qalora_gptq_finetuning.py \
 ```bash
 python qalora_gptq_finetuning.py \
     --base_model "TheBloke/Llama-2-13b-GPTQ" \
-    --data_path "PATH_TO_DATASET" \
     --output_dir "PATH_TO_OUTPUT_DIR" \
     --batch_size 1 \
     --num_epochs 3 \
