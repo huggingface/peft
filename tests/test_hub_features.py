@@ -171,7 +171,7 @@ class TestModelCard:
         assert set(tags).issubset(set(model_card.data.tags))
 
         if excluded_tags:
-            assert not set(excluded_tags).issubset(set(model_card.data.tags))
+            assert set(excluded_tags).isdisjoint(set(model_card.data.tags))
 
         if pre_tags:
             assert set(pre_tags).issubset(set(model_card.data.tags))
