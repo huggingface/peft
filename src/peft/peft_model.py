@@ -1410,8 +1410,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
     def _get_peft_specific_model_tags(self):
         """Derive tags for the model card from the adapter's config. For example, setting the
-        base model is important for enabling support for inference providers but it also makes models more searchable
-        on the hub.
+        base model is important for enabling support for HF inference providers but it also makes models more
+        searchable on the HF hub.
         """
         peft_method = self.active_peft_config.peft_type.value
 
