@@ -9,6 +9,7 @@
   "compile": false,
   "seed": 0,
   "grad_norm_clip": 1.0,
+  "optimizer_type": "AdamW",
   "optimizer_kwargs": {
     "lr": 1e-4,
     "weight_decay": 0.1

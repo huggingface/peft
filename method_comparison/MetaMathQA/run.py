@@ -23,7 +23,6 @@ import json
 import os
 import random
 import sys
-import tempfile
 import textwrap
 import time
 from contextlib import nullcontext
@@ -31,10 +30,13 @@ from functools import partial
 from typing import Any, Callable, ContextManager, Literal, Optional
 
 import torch
+from data import (
+    get_train_valid_test_datasets,
+)
 from torch import nn
 from torch.amp import GradScaler, autocast
 from tqdm import tqdm
-from transformers import GenerationConfig, get_cosine_schedule_with_warmup, set_seed
+from transformers import GenerationConfig, set_seed
 from utils import (
     FILE_NAME_TRAIN_PARAMS,
     BucketIterator,
@@ -43,7 +45,10 @@ from utils import (
     get_accuracy,
     get_base_model_info,
     get_dataset_info,
+    get_file_size,
     get_model,
+    get_optimizer_and_scheduler,
+    get_peft_branch,
     get_tokenizer,
     get_train_config,
     init_cuda,
@@ -51,11 +56,8 @@ from utils import (
     validate_experiment_path,
 )
 
-from data import (
-    get_train_valid_test_datasets,
-)
 from peft import AdaLoraConfig, PeftConfig
-from peft.utils import SAFETENSORS_WEIGHTS_NAME
+from peft.utils import CONFIG_NAME
 
 
 # # suppress all warnings
@@ -63,7 +65,6 @@ from peft.utils import SAFETENSORS_WEIGHTS_NAME
 
 dtype_to_bytes_linear = {"float32": 4, "float16": 2, "bfloat16": 2, "int8": 1, "int4": 0.5}
 # if lr scheduler with warmup is used, the ratio of warmup steps to total steps
-WARMUP_STEP_RATIO = 0.1
 BUCKET_FACTOR = 20  # number of batches per bucket, increasing this further has diminishing returns
 
 
@@ -98,18 +99,6 @@ def evaluate(model, tokenizer, ds, batch_size, generate_kwargs, use_tqdm: bool =
     return predictions, responses
 
 
-class DummyScheduler:
-    # if no lr scheduler is being used
-    def __init__(self, lr):
-        self.lr = lr
-
-    def get_last_lr(self):
-        return [self.lr]
-
-    def step(self):
-        pass
-
-
 class DummyGradScaler:
     # if no mixed precision is being used
     def scale(self, loss):
@@ -136,6 +125,7 @@ def train(
     eval_steps: int,
     generation_kwargs: dict[str, Any],
     grad_norm_clip: float,
+    optimizer_type: str,
     optimizer_kwargs: dict[str, Any],
     query_template: str,
     lr_scheduler_arg: Optional[Literal["cosine"]],
@@ -156,20 +146,29 @@ def train(
     else:
         grad_scaler = DummyGradScaler()
         autocast_ctx = nullcontext
-    optimizer = torch.optim.AdamW(model.parameters(), **optimizer_kwargs)
-    if lr_scheduler_arg == "cosine":
-        warmup_steps = int(WARMUP_STEP_RATIO * max_steps)
-        lr_scheduler = get_cosine_schedule_with_warmup(
-            optimizer, num_warmup_steps=warmup_steps, num_training_steps=max_steps
-        )
-    elif lr_scheduler_arg is None:
-        lr_scheduler = DummyScheduler(optimizer_kwargs["lr"])
+
+    optimizer, lr_scheduler = get_optimizer_and_scheduler(
+        model,
+        optimizer_type=optimizer_type,
+        max_steps=max_steps,
+        lr_scheduler_arg=lr_scheduler_arg,
+        **optimizer_kwargs,
+    )
+    # print this after getting the optimizer, in case it modifies requires_gard
+    if hasattr(model, "get_nb_trainable_parameters"):
+        num_trainable_params, num_params = model.get_nb_trainable_parameters()
     else:
-        raise ValueError(f"Invalid lr_scheduler argument: {lr_scheduler_arg}")
+        num_params = model.num_parameters()
+        num_trainable_params = num_params
+    print_verbose(
+        f"trainable params: {num_trainable_params:,d} || all params: {num_params:,d} || "
+        f"trainable: {100 * num_trainable_params / num_params:.4f}%"
+    )
 
     status = TrainStatus.FAILED
     tic_train = time.perf_counter()
     eval_time = 0.0
+    error_msg = ""
 
     ds_train, ds_valid, ds_test = get_train_valid_test_datasets(
         tokenizer=tokenizer, query_template=query_template, print_fn=print_verbose
@@ -269,7 +268,6 @@ def train(
                         "valid accuracy": accuracy,
                         "train loss": loss_avg,
                         "train samples": total_samples,
-                        "loss avg": loss_avg,
                         "train time": dur_train,
                         "eval time": dur_eval,
                         "tokens / sec": tokens_per_sec,
@@ -325,10 +323,16 @@ def train(
     except KeyboardInterrupt:
         print_verbose("canceled training")
         status = TrainStatus.CANCELED
-    except torch.OutOfMemoryError:
+        error_msg = "manually canceled"
+    except torch.OutOfMemoryError as exc:
         # ouch, still let's try to log some results
         print_verbose("out of memory error encountered")
         status = TrainStatus.CANCELED
+        error_msg = str(exc)
+    except Exception as exc:
+        print_verbose(f"encountered an error: {exc}")
+        status = TrainStatus.CANCELED
+        error_msg = str(exc)
 
     toc_train = time.perf_counter()
     train_time = toc_train - tic_train - eval_time
@@ -341,6 +345,9 @@ def train(
         cuda_memory_reserved_log=cuda_memory_reserved_log,
         losses=losses,
         metrics=metrics,
+        error_msg=error_msg,
+        num_trainable_params=num_trainable_params,
+        num_total_params=num_params,
     )
     return train_result
 
@@ -349,8 +356,20 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
     tic_total = time.perf_counter()
     start_date = dt.datetime.now(tz=dt.timezone.utc).replace(microsecond=0).isoformat()
 
+    peft_branch = get_peft_branch()
+    if peft_branch == "main":
+        print_verbose("===== This experiment is categorized as a MAIN run because the PEFT branch is 'main' ======")
+    else:
+        print_verbose(
+            f"===== This experiment is categorized as a TEST run because the PEFT branch is '{peft_branch}' ======"
+        )
+
     # load configs
-    peft_config = PeftConfig.from_pretrained(path_experiment)
+    peft_config: Optional[PeftConfig] = None
+    if os.path.exists(os.path.join(path_experiment, CONFIG_NAME)):
+        peft_config = PeftConfig.from_pretrained(path_experiment)
+    else:
+        print_verbose(f"Could not find PEFT config at {path_experiment}, performing FULL FINETUNING")
     path_train_config = os.path.join(path_experiment, FILE_NAME_TRAIN_PARAMS)
     train_config = get_train_config(path_train_config)
     set_seed(train_config.seed)
@@ -371,45 +390,36 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         autocast_adapter_dtype=train_config.autocast_adapter_dtype,
     )
     print_verbose(model)
-    num_trainable_params, num_params = model.get_nb_trainable_parameters()
-    print_verbose(
-        f"trainable params: {num_trainable_params:,d} || all params: {num_params:,d} || "
-        f"trainable: {100 * num_trainable_params / num_params:.4f}%"
-    )
 
     # train model
-    try:
-        train_result = train(
-            model=model,
-            max_steps=train_config.max_steps,
-            batch_size=train_config.batch_size,
-            batch_size_eval=train_config.batch_size_eval,
-            tokenizer=tokenizer,
-            cuda_memory_init=cuda_memory_init,
-            eval_steps=train_config.eval_steps,
-            generation_kwargs=train_config.generation_kwargs,
-            grad_norm_clip=train_config.grad_norm_clip,
-            optimizer_kwargs=train_config.optimizer_kwargs,
-            query_template=train_config.query_template,
-            lr_scheduler_arg=train_config.lr_scheduler,
-            use_amp=train_config.use_amp,
-            is_adalora=isinstance(peft_config, AdaLoraConfig),
-        )
-    except Exception as e:
-        print_verbose(f"Training failed with error: {e}")
-        raise
+    train_result = train(
+        model=model,
+        max_steps=train_config.max_steps,
+        batch_size=train_config.batch_size,
+        batch_size_eval=train_config.batch_size_eval,
+        tokenizer=tokenizer,
+        cuda_memory_init=cuda_memory_init,
+        eval_steps=train_config.eval_steps,
+        generation_kwargs=train_config.generation_kwargs,
+        grad_norm_clip=train_config.grad_norm_clip,
+        optimizer_type=train_config.optimizer_type,
+        optimizer_kwargs=train_config.optimizer_kwargs,
+        query_template=train_config.query_template,
+        lr_scheduler_arg=train_config.lr_scheduler,
+        use_amp=train_config.use_amp,
+        is_adalora=isinstance(peft_config, AdaLoraConfig),
+    )
 
     if train_result.status == TrainStatus.FAILED:
         print_verbose("Training failed, not logging results")
         sys.exit(1)
 
-    # save the model in temp dir, get file size, clean it up afterwards if clean is passed
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True, delete=clean) as tmp_dir:
-        model.save_pretrained(tmp_dir)
-        stat = os.stat(os.path.join(tmp_dir, SAFETENSORS_WEIGHTS_NAME))
-        file_size = stat.st_size
-        if not clean:
-            print_verbose(f"Saved PEFT checkpoint to {tmp_dir}")
+    file_size = get_file_size(
+        model,
+        peft_config=peft_config,
+        clean=clean,
+        print_fn=print_verbose,
+    )
 
     time_total = time.perf_counter() - tic_total
     # log results: print and save to file

@@ -24,6 +24,7 @@ import os
 
 import pytest
 import torch
+from accelerate.utils.memory import clear_device_cache
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -113,9 +114,7 @@ class TestTorchCompileCausalLM:
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
         gc.collect()
 
     @pytest.fixture(scope="class")

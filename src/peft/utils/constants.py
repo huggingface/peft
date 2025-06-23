@@ -79,6 +79,13 @@ TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING = {
         "post_feedforward_layernorm",
         "norm",
     ],
+    "gemma3_text": [
+        "input_layernorm",
+        "post_attention_layernorm",
+        "pre_feedforward_layernorm",
+        "post_feedforward_layernorm",
+        "norm",
+    ],
     "qwen2": ["post_attention_layernorm"],
     "qwen3": ["post_attention_layernorm"],
 }
@@ -117,6 +124,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "phi": ["q_proj", "v_proj", "fc1", "fc2"],
     "gemma": ["q_proj", "v_proj"],
     "gemma2": ["q_proj", "v_proj"],
+    "gemma3_text": ["q_proj", "v_proj"],
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
 }
@@ -146,6 +154,7 @@ TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
     "phi": ["q_proj", "v_proj", "fc2"],
     "gemma": ["q_proj", "v_proj", "down_proj"],
     "gemma2": ["q_proj", "v_proj", "down_proj"],
+    "gemma3_text": ["q_proj", "v_proj", "down_proj"],
     "qwen2": ["q_proj", "v_proj", "down_proj"],
     "qwen3": ["q_proj", "v_proj", "down_proj"],
 }
@@ -175,6 +184,7 @@ TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
     "phi": ["fc2"],
     "gemma": ["down_proj"],
     "gemma2": ["down_proj"],
+    "gemma3_text": ["down_proj"],
     "qwen2": ["down_proj"],
     "qwen3": ["down_proj"],
 }
@@ -199,6 +209,9 @@ TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
     "gpt_bigcode": ["c_attn"],
     "deberta": ["in_proj"],
     # "layoutlm": ["query", "value"],
+    "gemma": ["q_proj", "v_proj"],
+    "gemma2": ["q_proj", "v_proj"],
+    "gemma3_text": ["q_proj", "v_proj"],
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
 }
@@ -237,6 +250,7 @@ TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING = {
     "phi": ["q_proj", "v_proj"],
     "gemma": ["q_proj", "v_proj"],
     "gemma2": ["q_proj", "v_proj"],
+    "gemma3_text": ["q_proj", "v_proj"],
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
 }
@@ -274,6 +288,7 @@ TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING = {
     "phi": ["q_proj", "v_proj", "fc1", "fc2"],
     "gemma": ["q_proj", "v_proj"],
     "gemma2": ["q_proj", "v_proj"],
+    "gemma3_text": ["q_proj", "v_proj"],
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
 }
@@ -295,6 +310,9 @@ TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING = {
     "deberta-v2": ["query_proj", "key_proj", "value_proj", "dense"],
     "gpt_bigcode": ["c_attn"],
     "deberta": ["in_proj"],
+    "gemma": ["q_proj", "v_proj"],
+    "gemma2": ["q_proj", "v_proj"],
+    "gemma3_text": ["q_proj", "v_proj"],
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
 }

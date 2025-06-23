@@ -287,7 +287,7 @@ class Linear(nn.Linear, RandLoraLayer):
             randlora_lambda = randlora_lambda.float()
             randlora_gamma = randlora_gamma.float()
 
-        # The trainable paramters are always applied to randlora_A, the smallest basis.
+        # The trainable parameters are always applied to randlora_A, the smallest basis.
         min_dim, max_dim = min(self.out_features, self.in_features), max(self.out_features, self.in_features)
 
         # As adapted layers may have different shapes and RandLora contains a single shared pair of A and B matrices,
@@ -324,7 +324,6 @@ class Linear(nn.Linear, RandLoraLayer):
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
-
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()

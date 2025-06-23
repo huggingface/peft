@@ -16,11 +16,11 @@ import os
 
 import pytest
 import torch
+from accelerate.utils.imports import is_bf16_available
 from safetensors import safe_open
 from torch import nn
 
 from peft import PeftModel, VBLoRAConfig, get_peft_model
-from peft.import_utils import is_xpu_available
 
 
 class MLP(nn.Module):
@@ -191,7 +191,7 @@ class TestVBLoRA:
     def test_vblora_dtypes(self, dtype):
         mlp = self.get_mlp()
         if dtype == torch.bfloat16:
-            if not is_xpu_available() and not (torch.cuda.is_available() and torch.cuda.is_bf16_supported()):
+            if not is_bf16_available():
                 pytest.skip("bfloat16 not supported on this system, skipping the test")
 
         config = VBLoRAConfig(

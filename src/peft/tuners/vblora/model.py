@@ -34,7 +34,7 @@ class VBLoRAModel(BaseTuner):
     """
     Creates VBLoRA model from a pretrained transformers model.
 
-    The method is described in detail in https://arxiv.org/abs/2405.15179.
+    The method is described in detail in https://huggingface.co/papers/2405.15179.
 
     Args:
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
@@ -276,7 +276,7 @@ class VBLoRAModel(BaseTuner):
             if val != "none":
                 msg = (
                     f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
-                    "output as the the base model would without adaption."
+                    "output as the base model would without adaption."
                 )
                 warnings.warn(msg)
         self._set_adapter_layers(enabled=False)

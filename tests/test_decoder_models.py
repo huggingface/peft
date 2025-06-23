@@ -44,12 +44,11 @@ from peft import (
 )
 
 from .testing_common import PeftCommonTester
-from .testing_utils import load_dataset_english_quotes, set_init_weights_false
+from .testing_utils import device_count, load_dataset_english_quotes, set_init_weights_false
 
 
 PEFT_DECODER_MODELS_TO_TEST = [
     "hf-internal-testing/tiny-random-OPTForCausalLM",
-    "hf-internal-testing/tiny-random-GPTNeoXForCausalLM",
     "hf-internal-testing/tiny-random-GPT2LMHeadModel",
     "hf-internal-testing/tiny-random-BloomForCausalLM",
     "hf-internal-testing/tiny-random-gpt_neo",
@@ -57,6 +56,7 @@ PEFT_DECODER_MODELS_TO_TEST = [
     "hf-internal-testing/tiny-random-GPTBigCodeForCausalLM",
     "trl-internal-testing/tiny-random-LlamaForCausalLM",
     "peft-internal-testing/tiny-dummy-qwen2",
+    "hf-internal-testing/tiny-random-Gemma3ForCausalLM",
 ]
 
 SMALL_GRID_MODELS = [
@@ -606,7 +606,7 @@ class TestDecoderModels(PeftCommonTester):
 
         # skip if multi GPU, since this results in DataParallel usage by Trainer, which fails with "CUDA device
         # assertion", breaking subsequent tests
-        if torch.cuda.device_count() > 1:
+        if device_count > 1:
             pytest.skip("Skip on multi-GPU setups")
         peft_config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
         base_model = self.transformers_class.from_pretrained(model_id)

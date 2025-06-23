@@ -233,6 +233,9 @@ class LoraLayer(BaseTunerLayer):
                 self.loftq_init(adapter_name)
         elif init_lora_weights == "eva":
             nn.init.zeros_(self.lora_B[adapter_name].weight)
+        elif init_lora_weights == "orthogonal":
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.orthogonal_init(adapter_name)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
         # call this before init of the lora variants
@@ -443,6 +446,23 @@ class LoraLayer(BaseTunerLayer):
             self.lora_embedding_B[adapter_name].weight.data = lora_B
         self.get_base_layer().weight.data = qweight
 
+    @torch.no_grad()
+    def orthogonal_init(self, adapter_name):
+        # https://datta0.github.io/posts/rethink-lora-init/#orthogonal-initialisation
+        rank = self.r[adapter_name]
+        if rank % 2 != 0:
+            raise ValueError(f"Orthogonal initialization requires the LoRA rank to be even, got {rank} instead.")
+
+        X = torch.randn(rank, rank)
+        Q, _ = torch.linalg.qr(X)
+        q_odd = Q[0::2, :]  # Odd rows
+        q_even = Q[1::2, :]  # Even rows
+        dtype = self.get_base_layer().weight.dtype
+        lora_A = torch.randn(self.in_features, rank // 2).mm(q_odd).T / 10.0
+        lora_B = torch.randn(rank // 2, self.out_features).T.mm(q_even) / 10.0
+        self.lora_A[adapter_name].weight = nn.Parameter(lora_A.contiguous().to(dtype))
+        self.lora_B[adapter_name].weight = nn.Parameter(lora_B.contiguous().to(dtype))
+
     def _cache_store(self, key: str, value: Any) -> None:
         self._caches[key] = value
 
@@ -450,13 +470,18 @@ class LoraLayer(BaseTunerLayer):
         value = self._caches.pop(key)
         return value
 
-    def set_scale(self, adapter, scale):
+    def set_scale(self, adapter: str, scale: float | int) -> None:
+        """Set the scale of the given adapter to the initial scale multiplied by the provided factor
+
+        The initial scale is determined by the configured `r` (rank) and `lora_alpha`.
+        """
         if adapter not in self.scaling:
             # Ignore the case where the adapter is not in the layer
             return
         self.scaling[adapter] = scale * self.lora_alpha[adapter] / self.r[adapter]
 
-    def scale_layer(self, scale: float) -> None:
+    def scale_layer(self, scale: float | int) -> None:
+        """Multiply the current scale of all active adapters by the provided factor"""
         if scale == 1:
             return
 
@@ -466,7 +491,13 @@ class LoraLayer(BaseTunerLayer):
 
             self.scaling[active_adapter] *= scale
 
-    def unscale_layer(self, scale=None) -> None:
+    def unscale_layer(self, scale: Optional[float | int] = None) -> None:
+        """Divide the current scale of all active adapters by the provided factor. If `scale=None` is passed, reset to
+        initial scale
+
+        The initial scale is determined by the configured `r` (rank) and `lora_alpha`.
+
+        """
         for active_adapter in self.active_adapters:
             if active_adapter not in self.lora_A.keys():
                 continue
@@ -1637,16 +1668,16 @@ class MultiheadAttention(nn.Module, LoraLayer):
             raise TypeError(f"lora.{self.__class__.__name__} does not support mixed adapter batches.")
         super()._check_forward_args(x, *args, **kwargs)
 
-    def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
-        previous_dtype = x.dtype
-        self._check_forward_args(x, *args, **kwargs)
+    def forward(self, query: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        previous_dtype = query.dtype
+        self._check_forward_args(query, *args, **kwargs)
 
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
-            result = self.base_layer(x, *args, **kwargs)
+            result = self.base_layer(query, *args, **kwargs)
         elif self.merged:
-            result = self.base_layer(x, *args, **kwargs)
+            result = self.base_layer(query, *args, **kwargs)
         else:
             out_proj = self.get_base_layer().out_proj
             if out_proj.active_adapters != self.active_adapters:
@@ -1669,7 +1700,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
             active_adapters = [a for a in self.active_adapters if a in self.lora_A]
             try:
                 self.merge(adapter_names=active_adapters)
-                result = self.base_layer(x, *args, **kwargs)
+                result = self.base_layer(query, *args, **kwargs)
             finally:
                 # it's safe to call unmerge(), which unmerges all adapters, because we checked that not self.merged,
                 # i.e. there is was no merged layer before
