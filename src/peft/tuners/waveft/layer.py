@@ -25,13 +25,8 @@ from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 import sys
 import os
 
-# Get the directory containing the current file
-current_dir = os.path.dirname(os.path.abspath(__file__))
-# Construct path to the target directory relative to current file
-target_path = os.path.normpath(os.path.join(current_dir, "../../PyTorch-Wavelet-Toolbox-Custom/src"))
-sys.path.insert(0, target_path)
 
-import ptwt
+from .waverec2 import waverec2
 
 
 class WaveFTLayer(BaseTunerLayer):
@@ -189,7 +184,7 @@ class WaveFTLayer(BaseTunerLayer):
             coeffs = (cA, (cH, cV, cD))
             
             # Reconstruct with the specified wavelet family
-            delta_weight = ptwt.waverec2(coeffs, wavelet_family) * self.waveft_scaling[adapter]
+            delta_weight = waverec2(coeffs, wavelet_family) * self.waveft_scaling[adapter]
             
             # Ensure the delta weight has exactly the correct dimensions
             if delta_weight.shape[0] != self.out_features or delta_weight.shape[1] != self.in_features:
