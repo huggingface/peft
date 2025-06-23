@@ -12,9 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from peft.utils import register_peft_method
+
 from .config import WaveFTConfig
 from .layer import WaveFTLayer, WaveFTLinear
 from .model import WaveFTModel
 
 
 __all__ = ["WaveFTConfig", "WaveFTLayer", "WaveFTLinear", "WaveFTModel"]
+
+register_peft_method(name="waveft", model_cls=WaveFTModel, config_cls=WaveFTConfig)
