@@ -29,6 +29,7 @@ from accelerate.test_utils.testing import run_command
 from accelerate.utils import patch_environment
 from accelerate.utils.imports import is_bf16_available
 from accelerate.utils.memory import clear_device_cache
+from accelerate.utils.versions import is_torch_version
 from datasets import Audio, Dataset, DatasetDict, load_dataset
 from packaging import version
 from parameterized import parameterized
@@ -3333,7 +3334,7 @@ class PeftHqqGPUTests(unittest.TestCase):
         assert cc_matrix.min() > 0.97
 
 
-@require_torch_gpu
+@require_non_cpu
 @require_auto_awq
 class PeftAwqGPUTests(unittest.TestCase):
     r"""
@@ -3346,7 +3347,7 @@ class PeftAwqGPUTests(unittest.TestCase):
 
     def tearDown(self):
         r"""
-        Efficient mechanism to free GPU memory after each test. Based on
+        Efficient mechanism to free accelerator memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
         clear_device_cache(garbage_collection=True)
@@ -3362,7 +3363,7 @@ class PeftAwqGPUTests(unittest.TestCase):
     @pytest.mark.single_gpu_tests
     def test_causal_lm_training_awq(self):
         r"""
-        Test the CausalLM training on a single GPU device. The test would simply fail if the adapters are not set
+        Test the CausalLM training on a single accelerator. The test would simply fail if the adapters are not set
         correctly.
         """
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -3418,14 +3419,15 @@ class PeftAwqGPUTests(unittest.TestCase):
     # TODO remove marker if/once issue is resolved, most likely requiring a fix in AutoAWQ:
     # https://github.com/casper-hansen/AutoAWQ/issues/754
     @pytest.mark.xfail(
+        condition=is_torch_version("==", "2.7"),
         reason="Multi-GPU test currently not working with AutoAWQ and PyTorch 2.7",
         strict=True,
     )
-    @require_torch_multi_gpu
-    def test_causal_lm_training_multi_gpu(self):
+    @require_torch_multi_accelerator
+    def test_causal_lm_training_multi_accelerator(self):
         r"""
-        Test the CausalLM training on a multi-GPU device. The test would simply fail if the adapters are not set
-        correctly.
+        Test the CausalLM training on a multi-accelerator device. The test would simply fail if the adapters are not
+        set correctly.
         """
         device_map = {
             "model.decoder.embed_tokens": 0,
