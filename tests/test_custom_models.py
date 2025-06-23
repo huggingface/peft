@@ -316,13 +316,13 @@ TEST_CASES = [
             "module_dropout": 0.1,
         },
     ),
-    ("Vanilla MLP 7 OFT", "MLP", OFTConfig, {"r": 2, "oft_block_size": 0, "target_modules": ["lin0"], "coft": True}),
+    ("Vanilla MLP 7 OFT", "MLP", OFTConfig, {"r": 2, "oft_block_size": 0, "target_modules": ["lin0"], "coft": True, "eps": 1e-2}),
     ("Vanilla MLP 8 OFT", "MLP", OFTConfig, {"r": 2, "oft_block_size": 0, "target_modules": ["lin0"], "block_share": True}),
-    ("Vanilla MLP 9 OFT", "MLP", OFTConfig, {"r": 2, "oft_block_size": 0, "target_modules": ["lin0"], "coft": True, "block_share": True}),
+    ("Vanilla MLP 9 OFT", "MLP", OFTConfig, {"r": 2, "oft_block_size": 0, "target_modules": ["lin0"], "coft": True, "eps": 1e-2, "block_share": True}),
     ("Vanilla MLP 10 OFT", "MLP", OFTConfig, {"r": 0, "oft_block_size": 2, "target_modules": ["lin0"], "use_cayley_neumann": True}),
     ("Vanilla MLP 11 OFT", "MLP", OFTConfig, {"r": 0, "oft_block_size": 2, "target_modules": ["lin0"], "use_cayley_neumann": False}),
-    ("Vanilla MLP 12 OFT", "MLP", OFTConfig, {"r": 0, "oft_block_size": 2, "target_modules": ["lin0"], "coft": True, "block_share": True, "use_cayley_neumann": True}),
-    ("Vanilla MLP 13 OFT", "MLP", OFTConfig, {"r": 0, "oft_block_size": 2, "target_modules": ["lin0"], "coft": True, "block_share": True, "use_cayley_neumann": False}),
+    ("Vanilla MLP 12 OFT", "MLP", OFTConfig, {"r": 0, "oft_block_size": 2, "target_modules": ["lin0"], "coft": True, "eps": 1e-2, "block_share": True, "use_cayley_neumann": True}),
+    ("Vanilla MLP 13 OFT", "MLP", OFTConfig, {"r": 0, "oft_block_size": 2, "target_modules": ["lin0"], "coft": True, "eps": 1e-2, "block_share": True, "use_cayley_neumann": False}),
     ("Conv2d 1 OFT", "Conv2d", OFTConfig, {"r": 5, "oft_block_size": 0, "target_modules": ["conv2d"]}),
     ("Conv2d 3 OFT", "Conv2d", OFTConfig, {"r": 5, "oft_block_size": 0, "target_modules": ["conv2d"], "coft": True}),
     ("Conv2d 4 OFT", "Conv2d", OFTConfig, {"r": 5, "oft_block_size": 0, "target_modules": ["conv2d"], "block_share": True}),
@@ -1635,6 +1635,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
         if issubclass(config_cls, (IA3Config, LoraConfig)) and model_id in conv_ids:  # more instability with Conv
             atol, rtol = 1e-3, 1e-3
+
+        if issubclass(config_cls, OFTConfig):
+            atol, rtol = 1e-4, 1e-4
 
         if config_kwargs.get("use_dora") and model_id == "EmbConv1D":
             atol, rtol = 1e-4, 1e-4

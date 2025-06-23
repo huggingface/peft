@@ -75,8 +75,10 @@ class OFTRotationModule(nn.Module):
         r,
         n_elements,
         block_size,
+        in_features,
         coft=False,
         eps=6e-5,
+        block_share=False,
         kernel_size=(0, 0),
         use_cayley_neumann=True,
         num_cayley_neumann_terms=5,
@@ -85,16 +87,17 @@ class OFTRotationModule(nn.Module):
         self.r = r
         self.n_elements = n_elements
         self.block_size = block_size
+        self.in_features = in_features
         self.weight = nn.Parameter(torch.empty(r, n_elements))
-        self.in_features = r * block_size
         self.coft = coft
         self.eps = eps
+        self.block_share = block_share
         # Conv2d specific parameters
         self.kernel_size = kernel_size
         self.use_cayley_neumann = use_cayley_neumann
         self.num_cayley_neumann_terms = num_cayley_neumann_terms
 
-    def pytorch_skew_symmetric(self, vec, block_size):
+    def _pytorch_skew_symmetric(self, vec, block_size):
         batch_size = vec.shape[0]
         matrix = torch.zeros(batch_size, block_size, block_size, device=vec.device, dtype=vec.dtype)
 
@@ -103,6 +106,16 @@ class OFTRotationModule(nn.Module):
         matrix[:, rows, cols] = vec
         matrix = matrix - matrix.transpose(-2, -1)
         return matrix
+    
+    def _pytorch_skew_symmetric_inv(self, matrix, block_size):
+        batch_size = matrix.shape[0]
+        
+        # Create indices for upper triangle (excluding diagonal)
+        rows, cols = torch.triu_indices(block_size, block_size, 1, device=matrix.device)
+        
+        # Extract the upper triangular elements
+        vec = matrix[:, rows, cols]
+        return vec 
 
     def _cayley_batch(
         self, Q: torch.Tensor, block_size: int, use_cayley_neumann: bool = True, num_neumann_terms: int = 5
@@ -115,9 +128,10 @@ class OFTRotationModule(nn.Module):
         """
 
         b, _ = Q.shape
+        previous_dtype = Q.dtype
 
         # Q_skew = SkewSymmetric.apply(Q, block_size)
-        Q_skew = self.pytorch_skew_symmetric(Q, block_size)
+        Q_skew = self._pytorch_skew_symmetric(Q, block_size)
 
         if use_cayley_neumann:
             R = torch.eye(block_size, device=Q.device, dtype=Q.dtype).repeat(b, 1, 1)
@@ -139,10 +153,11 @@ class OFTRotationModule(nn.Module):
             )
             R = torch.linalg.solve(id_mat + Q_skew, id_mat - Q_skew, left=False)
 
-        return R
+        return R.to(previous_dtype)
 
     # Copied from https://github.com/Zeju1997/oft/blob/84cebb965df69781e3d9c3c875f5980b421eaf24/oft-control/oft.py#L52
-    def _project_batch(self, oft_R, eps=1e-5):
+    def _project_batch(self, Q, eps=1e-5):
+        oft_R = self._pytorch_skew_symmetric(Q, self.block_size)
         # scaling factor for each of the smaller block matrix
         eps = eps * 1 / torch.sqrt(torch.tensor(oft_R.shape[0]))
         I = (  # noqa: E741
@@ -154,7 +169,8 @@ class OFTRotationModule(nn.Module):
         norm_diff = torch.norm(oft_R - I, dim=(1, 2), keepdim=True)
         mask = (norm_diff <= eps).bool()
         out = torch.where(mask, oft_R, I + eps * (diff / norm_diff))
-        return out
+
+        return self._pytorch_skew_symmetric_inv(out, self.block_size)
 
     # Copied from https://github.com/Zeju1997/oft/blob/84cebb965df69781e3d9c3c875f5980b421eaf24/oft-control/oft.py#L155
     def _block_diagonal(self, oft_R: torch.Tensor, rank: int) -> torch.Tensor:
@@ -246,20 +262,22 @@ class OFTRotationModule(nn.Module):
         )
 
         # Unfold the input for Conv2d layer
-        if x.ndim == 4:
+        if len(orig_shape) == 4:
             x = self._unfold(x)
 
-        if x.ndim == 2:
-            folded_shape = x.shape
-            x_reshaped = x.reshape(x.shape[0], self.r, self.block_size)
-            x_rotated_reshaped = torch.einsum("...rk,rkc->...rc", x_reshaped, orth_rotate)
-            x_rotated = x_rotated_reshaped.reshape(*folded_shape)
-        else:
-            x_reshaped = x.reshape(orig_shape[0], orig_shape[1], self.r, self.block_size)
-            x_rotated_reshaped = torch.einsum("...rk,rkc->...rc", x_reshaped, orth_rotate)
-            x_rotated = x_rotated_reshaped.reshape(*orig_shape)
+        folded_shape = x.shape
+        rank = self.in_features // self.block_size if self.block_share else self.r
+        x_reshaped = x.reshape(x.shape[0], rank, self.block_size)
 
-        if x.ndim == 2:
+        if self.block_share:
+            orth_rotate = orth_rotate.repeat(rank, 1, 1)
+            x_rotated_reshaped = torch.einsum("...rk,rkc->...rc", x_reshaped, orth_rotate)
+        else:
+            x_rotated_reshaped = torch.einsum("...rk,rkc->...rc", x_reshaped, orth_rotate)
+
+        x_rotated = x_rotated_reshaped.reshape(*folded_shape)
+
+        if len(orig_shape) == 4:
             x_rotated = self._fold(x_rotated, orig_shape)
 
         return x_rotated.to(required_dtype)
@@ -279,9 +297,12 @@ class OFTRotationModule(nn.Module):
                 weight = self._project_batch(weight, eps=self.eps)
                 self.weight.copy_(weight)
 
-        orth_rotate = self._cayley_batch(weight, self.block_size)
-
-        return self._block_diagonal(orth_rotate, self.r)
+        orth_rotate = self._cayley_batch(
+            weight, self.block_size, self.use_cayley_neumann, self.num_cayley_neumann_terms
+        )
+        
+        rank = self.r if not self.block_share else self.in_features // self.block_size
+        return self._block_diagonal(orth_rotate, rank)
 
 
 class OFTLayer(BaseTunerLayer):
@@ -305,7 +326,7 @@ class OFTLayer(BaseTunerLayer):
         base_layer: the pretrained model layer
         """
         self.base_layer = base_layer
-        self.oft_R = nn.ParameterDict({})
+        self.oft_R = nn.ModuleDict({})
         self.oft_block_size = {}
         self.r = {}
         self.oft_block_size = {}
@@ -439,23 +460,14 @@ class OFTLayer(BaseTunerLayer):
 
         # Create weights with provided shape
         n_elements = oft_block_size * (oft_block_size - 1) // 2
-        if block_share:
-            self.oft_R[adapter_name] = OFTRotationModule(
-                1,
+        self.oft_R[adapter_name] = OFTRotationModule(
+            r if not block_share else 1,
                 n_elements,
                 oft_block_size,
-                coft,
-                eps,
-                use_cayley_neumann=use_cayley_neumann,
-                num_cayley_neumann_terms=num_cayley_neumann_terms,
-            )
-        else:
-            self.oft_R[adapter_name] = OFTRotationModule(
-                r,
-                n_elements,
-                oft_block_size,
-                coft,
-                eps,
+                self.in_features,
+                coft=coft,
+                eps=eps,
+                block_share=block_share,
                 use_cayley_neumann=use_cayley_neumann,
                 num_cayley_neumann_terms=num_cayley_neumann_terms,
             )
@@ -584,8 +596,8 @@ class Linear(nn.Module, OFTLayer):
 
                     base_layer.weight.data = orig_weights.contiguous().to(orig_dtype)
                 else:
-                    oft_mat = self.get_delta_weight(active_adapter)
                     orig_weights = base_layer.weight.data
+                    oft_mat = self.get_delta_weight(active_adapter)
                     orig_weights = torch.transpose(orig_weights, 0, 1)
                     orig_weights = torch.mm(oft_mat, orig_weights.to(oft_mat.dtype))
                     orig_weights = torch.transpose(orig_weights, 0, 1)
@@ -745,29 +757,18 @@ class Conv2d(nn.Module, OFTLayer):
 
         # Create weights with provided shape
         n_elements = oft_block_size * (oft_block_size - 1) // 2
-        if block_share:
-            self.oft_R[adapter_name] = OFTRotationModule(
-                1,
-                n_elements,
-                oft_block_size,
-                coft,
-                eps,
-                kernel_size=base_layer.kernel_size,
-                use_cayley_neumann=use_cayley_neumann,
-                num_cayley_neumann_terms=num_cayley_neumann_terms,
-            )
-
-        else:
-            self.oft_R[adapter_name] = OFTRotationModule(
-                r,
-                n_elements,
-                oft_block_size,
-                coft,
-                eps,
-                kernel_size=base_layer.kernel_size,
-                use_cayley_neumann=use_cayley_neumann,
-                num_cayley_neumann_terms=num_cayley_neumann_terms,
-            )
+        self.oft_R[adapter_name] = OFTRotationModule(
+            r if not block_share else 1,
+            n_elements,
+            oft_block_size,
+            conv_filter_dim,
+            coft=coft,
+            eps=eps,
+            block_share=block_share,
+            kernel_size=base_layer.kernel_size,
+            use_cayley_neumann=use_cayley_neumann,
+            num_cayley_neumann_terms=num_cayley_neumann_terms,
+        )
 
         # Initialize weights
         self.reset_oft_parameters(adapter_name, init_weights)
@@ -895,6 +896,7 @@ class Conv2d(nn.Module, OFTLayer):
                     continue
 
                 oft_R = self.oft_R[active_adapter]
+                x = self._cast_input_dtype(x, oft_R.weight.dtype)
                 x = oft_R(x)
 
             result = self.base_layer(x.to(previous_dtype), *args, **kwargs)
