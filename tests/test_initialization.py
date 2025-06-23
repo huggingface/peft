@@ -12,10 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
+import copy
 import itertools
 import platform
 import re
+import warnings
 from collections import defaultdict
 from contextlib import contextmanager
 from copy import deepcopy
@@ -48,6 +49,7 @@ from peft import (
     PeftModelForSeq2SeqLM,
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
+    PrefixTuningConfig,
     PromptTuningConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -3815,3 +3817,355 @@ class TestScaling:
         expected_other = [3 * lora_alpha1 / rank1] * n_layers
         assert scalings_default == expected_default
         assert scalings_other == expected_other
+
+
+class TestLoadPeftKeyMapping:
+    # See discussion in https://github.com/huggingface/transformers/pull/38627
+
+    # transformers PR #37033 re-arranges the way visual language models are built by moving the LM head from the
+    # language model to the top-level VLM (among other things). A consequence of this is that the keys in the PEFT
+    # state_dict now also follow the new architecture. This test class serves to ensure that old checkpoints can be
+    # loaded with the changed architecture. Unfortunately, new checkpoints cannot be loaded with the old architecture,
+    # the corresponding test is marked as xfail.
+
+    # Note: We only test prefix tuning (prompt learning method), LoRA (non-prompt learning method), and VBLoRA (shared
+    # parameters) as the other PEFT methods should work the same way. It would be excessive to test all of them here.
+
+    @pytest.fixture
+    def fake_model_config(self):
+        # mimics a transformers model config
+        class FakeConfig(dict):
+            def __init__(self):
+                self.vocab_size = 10
+
+            def __getattr__(self, item):
+                if item in self:
+                    return self[item]
+                raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'")
+
+        return FakeConfig()
+
+    @pytest.fixture
+    def old_model(self, fake_model_config):
+        # create a small model that mimics the old architecture of, for instance, Qwen/Qwen2-VL-2B-Instruct
+        # Qwen2VLForConditionalGeneration(
+        #   (visual): Qwen2VisionTransformerPretrainedModel(
+        #     (patch_embed): PatchEmbed(
+        #       (proj): Conv3d(3, 1280, kernel_size=(2, 14, 14), stride=(2, 14, 14), bias=False)
+        #     )
+        #     (rotary_pos_emb): VisionRotaryEmbedding()
+        #     (blocks): ModuleList(
+        #       (0-31): 32 x Qwen2VLVisionBlock(
+        #         (norm1): LayerNorm((1280,), eps=1e-06, elementwise_affine=True)
+        #         (norm2): LayerNorm((1280,), eps=1e-06, elementwise_affine=True)
+        #         (attn): VisionSdpaAttention(
+        #           (qkv): Linear(in_features=1280, out_features=3840, bias=True)
+        #           (proj): Linear(in_features=1280, out_features=1280, bias=True)
+        #         )
+        #         (mlp): VisionMlp(
+        #           (fc1): Linear(in_features=1280, out_features=5120, bias=True)
+        #           (act): QuickGELUActivation()
+        #           (fc2): Linear(in_features=5120, out_features=1280, bias=True)
+        #         )
+        #       )
+        #     )
+        #     (merger): PatchMerger(
+        #       (ln_q): LayerNorm((1280,), eps=1e-06, elementwise_affine=True)
+        #       (mlp): Sequential(
+        #         (0): Linear(in_features=5120, out_features=5120, bias=True)
+        #         (1): GELU(approximate='none')
+        #         (2): Linear(in_features=5120, out_features=1536, bias=True)
+        #       )
+        #     )
+        #   )
+        #   (model): Qwen2VLModel(
+        #     (embed_tokens): Embedding(151936, 1536)
+        #     (layers): ModuleList(
+        #       (0-27): 28 x Qwen2VLDecoderLayer(
+        #         (self_attn): Qwen2VLSdpaAttention(
+        #           (q_proj): Linear(in_features=1536, out_features=1536, bias=True)
+        #           (k_proj): Linear(in_features=1536, out_features=256, bias=True)
+        #           (v_proj): Linear(in_features=1536, out_features=256, bias=True)
+        #           (o_proj): Linear(in_features=1536, out_features=1536, bias=False)
+        #           (rotary_emb): Qwen2VLRotaryEmbedding()
+        #         )
+        #         (mlp): Qwen2MLP(
+        #           (gate_proj): Linear(in_features=1536, out_features=8960, bias=False)
+        #           (up_proj): Linear(in_features=1536, out_features=8960, bias=False)
+        #           (down_proj): Linear(in_features=8960, out_features=1536, bias=False)
+        #           (act_fn): SiLU()
+        #         )
+        #         (input_layernorm): Qwen2RMSNorm((1536,), eps=1e-06)
+        #         (post_attention_layernorm): Qwen2RMSNorm((1536,), eps=1e-06)
+        #       )
+        #     )
+        #     (norm): Qwen2RMSNorm((1536,), eps=1e-06)
+        #     (rotary_emb): Qwen2VLRotaryEmbedding()
+        #   )
+        #   (lm_head): Linear(in_features=1536, out_features=151936, bias=False)
+        # )
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attn = nn.Linear(10, 10)
+
+        class OldModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.config = fake_model_config
+                self.device = "cpu"
+                self.proj = nn.Conv3d(3, 10, 3)
+                self.visual = nn.ModuleDict(
+                    {
+                        "blocks": nn.ModuleList([Block() for _ in range(2)]),
+                    }
+                )
+                self.model = nn.ModuleDict(
+                    {
+                        "layers": nn.ModuleList([Block() for _ in range(2)]),
+                    }
+                )
+                self.lm_head = nn.Linear(10, 10)
+
+            def prepare_inputs_for_generation(self):
+                return
+
+        model = OldModel()
+        return model
+
+    @pytest.fixture
+    def new_model(self, fake_model_config):
+        # create a small model that mimics the new architecture of, for instance, Qwen/Qwen2-VL-2B-Instruct
+        # Qwen2VLForConditionalGeneration(
+        #   (model): Qwen2VLModel(
+        #     (visual): Qwen2VisionTransformerPretrainedModel(
+        #       (patch_embed): PatchEmbed(
+        #         (proj): Conv3d(3, 1280, kernel_size=(2, 14, 14), stride=(2, 14, 14), bias=False)
+        #       )
+        #       (rotary_pos_emb): VisionRotaryEmbedding()
+        #       (blocks): ModuleList(
+        #         (0-31): 32 x Qwen2VLVisionBlock(
+        #           (norm1): LayerNorm((1280,), eps=1e-06, elementwise_affine=True)
+        #           (norm2): LayerNorm((1280,), eps=1e-06, elementwise_affine=True)
+        #           (attn): VisionSdpaAttention(
+        #             (qkv): Linear(in_features=1280, out_features=3840, bias=True)
+        #             (proj): Linear(in_features=1280, out_features=1280, bias=True)
+        #           )
+        #           (mlp): VisionMlp(
+        #             (fc1): Linear(in_features=1280, out_features=5120, bias=True)
+        #             (act): QuickGELUActivation()
+        #             (fc2): Linear(in_features=5120, out_features=1280, bias=True)
+        #           )
+        #         )
+        #       )
+        #       (merger): PatchMerger(
+        #         (ln_q): LayerNorm((1280,), eps=1e-06, elementwise_affine=True)
+        #         (mlp): Sequential(
+        #           (0): Linear(in_features=5120, out_features=5120, bias=True)
+        #           (1): GELU(approximate='none')
+        #           (2): Linear(in_features=5120, out_features=1536, bias=True)
+        #         )
+        #       )
+        #     )
+        #     (language_model): Qwen2VLTextModel(
+        #       (embed_tokens): Embedding(151936, 1536)
+        #       (layers): ModuleList(
+        #         (0-27): 28 x Qwen2VLDecoderLayer(
+        #           (self_attn): Qwen2VLAttention(
+        #             (q_proj): Linear(in_features=1536, out_features=1536, bias=True)
+        #             (k_proj): Linear(in_features=1536, out_features=256, bias=True)
+        #             (v_proj): Linear(in_features=1536, out_features=256, bias=True)
+        #             (o_proj): Linear(in_features=1536, out_features=1536, bias=False)
+        #             (rotary_emb): Qwen2VLRotaryEmbedding()
+        #           )
+        #           (mlp): Qwen2MLP(
+        #             (gate_proj): Linear(in_features=1536, out_features=8960, bias=False)
+        #             (up_proj): Linear(in_features=1536, out_features=8960, bias=False)
+        #             (down_proj): Linear(in_features=8960, out_features=1536, bias=False)
+        #             (act_fn): SiLU()
+        #           )
+        #           (input_layernorm): Qwen2RMSNorm((1536,), eps=1e-06)
+        #           (post_attention_layernorm): Qwen2RMSNorm((1536,), eps=1e-06)
+        #         )
+        #       )
+        #       (norm): Qwen2RMSNorm((1536,), eps=1e-06)
+        #       (rotary_emb): Qwen2VLRotaryEmbedding()
+        #     )
+        #   )
+        #   (lm_head): Linear(in_features=1536, out_features=151936, bias=False)
+        # )
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attn = nn.Linear(10, 10)
+
+        class InnerModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.visual = nn.ModuleDict(
+                    {
+                        "blocks": nn.ModuleList([Block() for _ in range(2)]),
+                    }
+                )
+                self.language_model = nn.ModuleDict(
+                    {
+                        "layers": nn.ModuleList([Block() for _ in range(2)]),
+                    }
+                )
+
+        class NewModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.config = fake_model_config
+                self.device = "cpu"
+                self.model = InnerModel()
+                self.lm_head = nn.Linear(10, 10)
+                # new transformers models have this attribute to map old checkpoints to new ones:
+                self._checkpoint_conversion_mapping = {
+                    "^visual": "model.visual",
+                    "^model(?!\\.(language_model|visual))": "model.language_model",
+                }
+
+            def prepare_inputs_for_generation(self):
+                return
+
+        model = NewModel()
+        return model
+
+    def check_lora_load_no_warning(self, model1, model2, path):
+        # helper method: save with model1, load with model2, ensure that there is no warning about missing keys and that
+        # the parameters are loaded correctly
+        model1 = copy.deepcopy(model1)
+        model2 = copy.deepcopy(model2)
+        config = LoraConfig(target_modules=["attn"])
+        peft_model = get_peft_model(copy.deepcopy(model1), config)
+
+        # set all values to 1.0 or 2.0 so we can check that they are loaded correctly
+        for name, param in peft_model.named_parameters():
+            if name.endswith("lora_A.default.weight"):
+                param.data.fill_(1.0)
+            elif name.endswith("lora_B.default.weight"):
+                param.data.fill_(2.0)
+
+        peft_model.save_pretrained(path)
+        del peft_model
+
+        # ensure that there is no warning: UserWarning: Found missing adapter keys while loading the checkpoint
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            loaded = PeftModel.from_pretrained(copy.deepcopy(model2), path)
+            assert not any("Found missing adapter keys" in str(warning.message) for warning in w)
+
+        # sanity check on parameter values to not only rely on the absence of warnings
+        for name, param in loaded.named_parameters():
+            if name.endswith("lora_A.default.weight"):
+                assert torch.allclose(param, torch.full_like(param, 1.0))
+            elif name.endswith("lora_B.default.weight"):
+                assert torch.allclose(param, torch.full_like(param, 2.0))
+
+    def check_prefix_tuning_load_no_warning(self, model1, model2, path):
+        # helper method: save with model1, load with model2, ensure that there is no warning about missing keys and that
+        # the parameters are loaded correctly.
+        model1 = copy.deepcopy(model1)
+        model2 = copy.deepcopy(model2)
+        config = PrefixTuningConfig(
+            task_type="CAUSAL_LM", num_virtual_tokens=5, num_layers=2, token_dim=10, num_attention_heads=2
+        )
+        peft_model = get_peft_model(copy.deepcopy(model1), config)
+
+        # set all values to 1.0 so we can check that they are loaded correctly
+        peft_model.prompt_encoder.default.embedding.weight.data.fill_(1.0)
+
+        peft_model.save_pretrained(path)
+        del peft_model
+
+        # ensure that there is no warning: UserWarning: Found missing adapter keys while loading the checkpoint
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            loaded = PeftModel.from_pretrained(copy.deepcopy(model2), path)
+            assert not any("Found missing adapter keys" in str(warning.message) for warning in w)
+
+        # sanity check on parameter values to not only rely on the absence of warnings
+        weight = loaded.prompt_encoder.default.embedding.weight
+        assert torch.allclose(weight, torch.full_like(weight, 1.0))
+
+    def check_vblora_load_no_warning(self, model1, model2, path):
+        # helper method: save with model1, load with model2, ensure that there is no warning about missing keys and that
+        # the parameters are loaded correctly
+        model1 = copy.deepcopy(model1)
+        model2 = copy.deepcopy(model2)
+
+        config = VBLoRAConfig(target_modules=["attn"], vector_length=2, num_vectors=4)
+        peft_model = get_peft_model(copy.deepcopy(model1), config)
+
+        # set all values to 1.0 or 2.0 so we can check that they are loaded correctly
+        peft_model.base_model.vblora_vector_bank["default"].data.fill_(1.0)
+        for name, param in peft_model.named_parameters():
+            if "logits" in name:
+                param.data.fill_(2.0)
+
+        peft_model.save_pretrained(path)
+        del peft_model
+
+        # ensure that there is no warning: UserWarning: Found missing adapter keys while loading the checkpoint
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            loaded = PeftModel.from_pretrained(copy.deepcopy(model2), path)
+            assert not any("Found missing adapter keys" in str(warning.message) for warning in w)
+
+        # sanity check on parameter values to not only rely on the absence of warnings
+        param = loaded.base_model.vblora_vector_bank["default"]
+        assert torch.allclose(param, torch.full_like(param, 1.0))
+        for name, param in loaded.named_parameters():
+            if "logits" in name:
+                assert torch.allclose(param, torch.full_like(param, 2.0))
+
+    def test_key_mapping_save_new_load_new_lora(self, new_model, tmp_path):
+        # save and load the new model, should work without issues
+        self.check_lora_load_no_warning(new_model, new_model, tmp_path)
+
+    def test_key_mapping_save_old_load_old_lora(self, old_model, tmp_path):
+        # save and load the old model, should work without issues
+        self.check_lora_load_no_warning(old_model, old_model, tmp_path)
+
+    def test_key_mapping_save_old_load_new_lora(self, old_model, new_model, tmp_path):
+        # save the old model, load it into the new model, should work without issues (backwards compatibility)
+        self.check_lora_load_no_warning(old_model, new_model, tmp_path)
+
+    @pytest.mark.xfail(reason="Loading new checkpoints with old transformers is not supported.", strict=True)
+    def test_key_mapping_save_new_load_old_lora(self, old_model, new_model, tmp_path):
+        # save the new model, load it into the old model, should work without issues (forwards compatibility)
+        self.check_lora_load_no_warning(new_model, old_model, tmp_path)
+
+    def test_key_mapping_save_new_load_new_prefix_tuning(self, new_model, tmp_path):
+        # save and load the new model, should work without issues
+        self.check_prefix_tuning_load_no_warning(new_model, new_model, tmp_path)
+
+    def test_key_mapping_save_old_load_old_prefix_tuning(self, old_model, tmp_path):
+        # save and load the old model, should work without issues
+        self.check_prefix_tuning_load_no_warning(old_model, old_model, tmp_path)
+
+    def test_key_mapping_save_old_load_new_prefix_tuning(self, old_model, new_model, tmp_path):
+        # save the old model, load it into the new model, should work without issues (backwards compatibility)
+        self.check_prefix_tuning_load_no_warning(old_model, new_model, tmp_path)
+
+    def test_key_mapping_save_new_load_old_prefix_tuning(self, old_model, new_model, tmp_path):
+        # save the new model, load it into the old model, should work without issues (forwards compatibility)
+        self.check_prefix_tuning_load_no_warning(new_model, old_model, tmp_path)
+
+    def test_key_mapping_save_new_load_new_vblora(self, new_model, tmp_path):
+        # save and load the new model, should work without issues
+        self.check_vblora_load_no_warning(new_model, new_model, tmp_path)
+
+    def test_key_mapping_save_old_load_old_vblora(self, old_model, tmp_path):
+        # save and load the old model, should work without issues
+        self.check_vblora_load_no_warning(old_model, old_model, tmp_path)
+
+    def test_key_mapping_save_old_load_new_vblora(self, old_model, new_model, tmp_path):
+        # save the old model, load it into the new model, should work without issues (backwards compatibility)
+        self.check_vblora_load_no_warning(old_model, new_model, tmp_path)
+
+    @pytest.mark.xfail(reason="Loading new checkpoints with old transformers is not supported.", strict=True)
+    def test_key_mapping_save_new_load_old_vblora(self, old_model, new_model, tmp_path):
+        # save the new model, load it into the old model, should work without issues (forwards compatibility)
+        self.check_vblora_load_no_warning(new_model, old_model, tmp_path)
