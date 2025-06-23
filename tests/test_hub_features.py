@@ -20,6 +20,8 @@ from transformers import AutoModelForCausalLM
 
 from peft import AutoPeftModelForCausalLM, BoneConfig, LoraConfig, PeftConfig, PeftModel, get_peft_model
 
+from .testing_common import hub_online_once
+
 
 PEFT_MODELS_TO_TEST = [("peft-internal-testing/test-lora-subfolder", "test")]
 
@@ -157,21 +159,22 @@ class TestModelCard:
 
         Makes sure that the base model tags are still present (if there are any).
         """
-        base_model = AutoModelForCausalLM.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            base_model = AutoModelForCausalLM.from_pretrained(model_id)
 
-        if pre_tags:
-            base_model.add_model_tags(pre_tags)
+            if pre_tags:
+                base_model.add_model_tags(pre_tags)
 
-        peft_model = get_peft_model(base_model, peft_config)
-        save_path = tmp_path / "adapter"
+            peft_model = get_peft_model(base_model, peft_config)
+            save_path = tmp_path / "adapter"
 
-        peft_model.save_pretrained(save_path)
+            peft_model.save_pretrained(save_path)
 
-        model_card = ModelCard.load(save_path / "README.md")
-        assert set(tags).issubset(set(model_card.data.tags))
+            model_card = ModelCard.load(save_path / "README.md")
+            assert set(tags).issubset(set(model_card.data.tags))
 
-        if excluded_tags:
-            assert set(excluded_tags).isdisjoint(set(model_card.data.tags))
+            if excluded_tags:
+                assert set(excluded_tags).isdisjoint(set(model_card.data.tags))
 
-        if pre_tags:
-            assert set(pre_tags).issubset(set(model_card.data.tags))
+            if pre_tags:
+                assert set(pre_tags).issubset(set(model_card.data.tags))
