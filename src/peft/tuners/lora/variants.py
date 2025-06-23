@@ -144,13 +144,13 @@ class QALoraLinearVariant(LoraVariant):
         """
         if "qalora_group_size" not in kwargs:
             raise ValueError(
-                "QALoraLinearVariant.init expects 'qalora_group_size' to be provided in kwargs."
+                "`use_qalora=True` requires 'qalora_group_size' to be provided in kwargs."
                 " Please ensure it is passed from the LoraConfig."
             )
 
         if module.in_features is not None and module.in_features % kwargs["qalora_group_size"] != 0:
             raise ValueError(
-                f"QALoraLinearVariant.init expects module.in_features ({module.in_features}) to be divisible by 'qalora_group_size' ({kwargs['qalora_group_size']})"
+                f"`use_qalora=True` requires `module.in_features` ({module.in_features}) to be divisible by 'qalora_group_size' ({kwargs['qalora_group_size']})"
             )
         qalora_group_size = kwargs["qalora_group_size"]
 

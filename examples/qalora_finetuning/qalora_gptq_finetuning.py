@@ -169,7 +169,6 @@ def train_model(
         lora_alpha: LoRA alpha
         lora_dropout: LoRA dropout rate
         lora_target_modules: Target modules for LoRA
-        hub_model_id: Hugging Face Hub model ID
         push_to_hub: Whether to push to Hugging Face Hub
     """
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -285,7 +284,9 @@ if __name__ == "__main__":
 
     # Model and dataset parameters
     parser.add_argument("--base_model", type=str, default="TheBloke/Llama-2-7b-GPTQ", help="Base model path or name")
-    parser.add_argument("--data_path", type=str, default="timdettmers/openassistant-guanaco", help="Dataset path or name")
+    parser.add_argument(
+        "--data_path", type=str, default="timdettmers/openassistant-guanaco", help="Dataset path or name"
+    )
     parser.add_argument("--data_split", type=str, default="", help="Dataset path or name")
 
     parser.add_argument(

@@ -72,10 +72,9 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
 
             variant = DoraLinearVariant()
         elif use_qalora:
-            if self.in_features % kwargs["qalora_group_size"] == 0:
-                from .variants import QALoraLinearVariant
+            from .variants import QALoraLinearVariant
 
-                variant = QALoraLinearVariant()
+            variant = QALoraLinearVariant()
         else:
             variant = None
         return variant
