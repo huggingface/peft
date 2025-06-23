@@ -147,6 +147,11 @@ class QALoraLinearVariant(LoraVariant):
                 "QALoraLinearVariant.init expects 'qalora_group_size' to be provided in kwargs."
                 " Please ensure it is passed from the LoraConfig."
             )
+
+        if module.in_features is not None and module.in_features % kwargs["qalora_group_size"] != 0:
+            raise ValueError(
+                f"QALoraLinearVariant.init expects module.in_features ({module.in_features}) to be divisible by 'qalora_group_size' ({kwargs['qalora_group_size']})"
+            )
         qalora_group_size = kwargs["qalora_group_size"]
 
         if "qalora_group_size" not in module.other_param_names:

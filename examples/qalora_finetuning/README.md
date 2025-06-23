@@ -62,7 +62,7 @@ You can customize the pooling group size (default is 16):
 python examples/qalora_finetuning/qalora_gptq_finetuning.py \
     --base_model TheBloke/Llama-2-7b-GPTQ \
     --use_qalora \
-    --qalora_group_size 8
+    --qalora_group_size 32
 ```
 
 ### Full example of the script 
@@ -75,7 +75,7 @@ python qalora_gptq_finetuning.py \
     --learning_rate 3e-4 \
     --cutoff_len 512 \
     --use_qalora \
-    --qalora_group_size 8 \
+    --qalora_group_size 32 \
     --eval_step 10 \
     --save_step 100 \
     --device "cuda:0" \

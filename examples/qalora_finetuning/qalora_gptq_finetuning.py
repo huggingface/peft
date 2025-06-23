@@ -221,11 +221,13 @@ def train_model(
             lambda x: tokenize_and_preprocess(x, tokenizer, max_length=cutoff_len),
             batched=True,
             remove_columns=["text"],
+            load_from_cache_file=True,
         ),
         "test": dataset["test"].map(
             lambda x: tokenize_and_preprocess(x, tokenizer, max_length=cutoff_len),
             batched=True,
             remove_columns=["text"],
+            load_from_cache_file=True,
         ),
     }
 
