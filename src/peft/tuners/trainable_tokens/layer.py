@@ -18,11 +18,13 @@ import warnings
 from typing import Optional
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.utils.integrations import check_deepspeed_zero3_enabled, gather_params_ctx
 
 
 class TrainableTokensLayer(nn.Module, BaseTunerLayer):
@@ -73,6 +75,44 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             return self._tied_adapter[0]
         return None
 
+    def _collect_token_weights(self, *, adapter_name: str, init_weights: bool, src_rank: int = 0) -> torch.Tensor:
+        """DeepSpeed zero3 specific code to initialize trainable tokens.
+
+        Ensures that only the necessary weights are collected to a single rank, initialized, and then shared with all
+        ranks.
+        """
+        weight = self.get_base_layer().weight
+        token_idx = self.token_indices[adapter_name]
+        backend = dist.get_backend()
+        device = torch.device("cuda", torch.cuda.current_device())
+
+        # only on a single rank
+        if dist.get_rank() == src_rank:
+            with gather_params_ctx([weight], modifier_rank=src_rank):
+                # actual logic to initialize the weights
+                hidden_size = weight.size(1)
+                if init_weights:
+                    tmp_weights = weight[token_idx]
+                else:
+                    tmp_weights = torch.rand((len(token_idx), hidden_size), dtype=weight.dtype, device=device)
+        else:
+            hidden_size = 0
+            tmp_weights = torch.empty(0, device=device)
+
+        # broadcast the hidden size
+        hidden_size_t = torch.tensor(hidden_size, dtype=torch.long, device=device)
+        dist.broadcast(hidden_size_t, src=src_rank)
+        hidden_size = hidden_size_t.item()
+
+        # initialize empty weights of correct shape
+        token_weights = torch.empty((len(token_idx), hidden_size), dtype=weight.dtype, device=device)
+        if dist.get_rank() == src_rank:
+            token_weights.copy_(tmp_weights)
+
+        # share the weights with all ranks
+        dist.broadcast(token_weights, src=src_rank)
+        return token_weights
+
     def update_layer(self, adapter_name, **kwargs):
         if kwargs.get("tied_adapter", None):
             # as a tied adapter, we're just following whatever the adpater we're tied to does, we don't update anything.
@@ -88,11 +128,13 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         # thus re-initializing the new embeddings again with new random variables. If we would add/subtract deltas
         # onto the new values, we would get undefined behavior. By replacing the specific token values we always
         # get defined behavior.
-        #
-        if init_weights:
-            values = self.get_base_layer().weight[self.token_indices[adapter_name]]
+        if not check_deepspeed_zero3_enabled():
+            if init_weights:
+                values = self.get_base_layer().weight[self.token_indices[adapter_name]]
+            else:
+                values = torch.rand_like(self.get_base_layer().weight[self.token_indices[adapter_name]])
         else:
-            values = torch.rand_like(self.get_base_layer().weight[self.token_indices[adapter_name]])
+            values = self._collect_token_weights(adapter_name=adapter_name, init_weights=init_weights)
 
         self.trainable_tokens_delta[adapter_name] = nn.Parameter(values.clone(), requires_grad=True)
         self.trainable_tokens_original[adapter_name] = values.clone()
