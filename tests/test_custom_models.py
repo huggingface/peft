@@ -302,9 +302,9 @@ TEST_CASES = [
     ########
     # OFT #
     ########
-    ("Vanilla MLP 1 OFT", "MLP", OFTConfig, {"r": 2, "oft_block_size": 0, "target_modules": "lin0"}),
-    ("Vanilla MLP 2 OFT", "MLP", OFTConfig, {"r": 2, "oft_block_size": 0, "target_modules": ["lin0"]}),
-    ("Vanilla MLP 5 OFT", "MLP", OFTConfig, {"r": 2, "oft_block_size": 0, "target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    ("Vanilla MLP 1 OFT", "MLP", OFTConfig, {"r": 2, "oft_block_size": 0, "target_modules": "lin0", "use_cayley_neumann": False}),
+    ("Vanilla MLP 2 OFT", "MLP", OFTConfig, {"r": 2, "oft_block_size": 0, "target_modules": ["lin0"], "use_cayley_neumann": False}),
+    ("Vanilla MLP 5 OFT", "MLP", OFTConfig, {"r": 2, "oft_block_size": 0, "target_modules": ["lin0"], "modules_to_save": ["lin1"], "use_cayley_neumann": False}),
     (
         "Vanilla MLP 6 OFT",
         "MLP",
@@ -314,10 +314,11 @@ TEST_CASES = [
             "oft_block_size": 0,
             "target_modules": ["lin0"],
             "module_dropout": 0.1,
+            "use_cayley_neumann": False,
         },
     ),
     ("Vanilla MLP 7 OFT", "MLP", OFTConfig, {"r": 2, "oft_block_size": 0, "target_modules": ["lin0"], "coft": True, "eps": 1e-2}),
-    ("Vanilla MLP 8 OFT", "MLP", OFTConfig, {"r": 2, "oft_block_size": 0, "target_modules": ["lin0"], "block_share": True}),
+    ("Vanilla MLP 8 OFT", "MLP", OFTConfig, {"r": 2, "oft_block_size": 0, "target_modules": ["lin0"], "block_share": True, "use_cayley_neumann": False}),
     ("Vanilla MLP 9 OFT", "MLP", OFTConfig, {"r": 2, "oft_block_size": 0, "target_modules": ["lin0"], "coft": True, "eps": 1e-2, "block_share": True}),
     ("Vanilla MLP 10 OFT", "MLP", OFTConfig, {"r": 0, "oft_block_size": 2, "target_modules": ["lin0"], "use_cayley_neumann": True}),
     ("Vanilla MLP 11 OFT", "MLP", OFTConfig, {"r": 0, "oft_block_size": 2, "target_modules": ["lin0"], "use_cayley_neumann": False}),

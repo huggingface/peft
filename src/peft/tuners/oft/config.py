@@ -145,7 +145,7 @@ class OFTConfig(PeftConfig):
         metadata={"help": "Whether to share the OFT parameters between blocks or not."},
     )
     use_cayley_neumann: bool = field(
-        default=False,
+        default=True,
         metadata={
             "help": "Whether to use the Cayley-Neumann Formulation of OFT or not. Set to True to improve computational efficiency."
         },
