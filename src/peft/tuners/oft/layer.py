@@ -106,16 +106,16 @@ class OFTRotationModule(nn.Module):
         matrix[:, rows, cols] = vec
         matrix = matrix - matrix.transpose(-2, -1)
         return matrix
-    
+
     def _pytorch_skew_symmetric_inv(self, matrix, block_size):
         batch_size = matrix.shape[0]
-        
+
         # Create indices for upper triangle (excluding diagonal)
         rows, cols = torch.triu_indices(block_size, block_size, 1, device=matrix.device)
-        
+
         # Extract the upper triangular elements
         vec = matrix[:, rows, cols]
-        return vec 
+        return vec
 
     def _cayley_batch(
         self, Q: torch.Tensor, block_size: int, use_cayley_neumann: bool = True, num_neumann_terms: int = 5
@@ -300,7 +300,7 @@ class OFTRotationModule(nn.Module):
         orth_rotate = self._cayley_batch(
             weight, self.block_size, self.use_cayley_neumann, self.num_cayley_neumann_terms
         )
-        
+
         rank = self.r if not self.block_share else self.in_features // self.block_size
         return self._block_diagonal(orth_rotate, rank)
 
