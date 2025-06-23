@@ -645,7 +645,7 @@ class Linear(nn.Module, OFTLayer):
                 x = self._cast_input_dtype(x, oft_R.weight.dtype)
                 x = oft_R(x)
 
-            result = self.base_layer(x, *args, **kwargs)
+            result = self.base_layer(x.to(previous_dtype), *args, **kwargs)
 
         result = result.to(previous_dtype)
         return result
@@ -897,7 +897,7 @@ class Conv2d(nn.Module, OFTLayer):
                 oft_R = self.oft_R[active_adapter]
                 x = oft_R(x)
 
-            result = self.base_layer(x, *args, **kwargs)
+            result = self.base_layer(x.to(previous_dtype), *args, **kwargs)
 
         result = result.to(previous_dtype)
         return result
