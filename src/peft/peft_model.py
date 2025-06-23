@@ -1448,7 +1448,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         tags = tags.union(self._get_peft_specific_model_tags())
         if tags:
-            card.data["tags"] = list(tags)
+            card.data["tags"] = sorted(tags)
 
         model_config = BaseTuner.get_model_config(self)
         model_config = None if model_config == DUMMY_MODEL_CONFIG else model_config
