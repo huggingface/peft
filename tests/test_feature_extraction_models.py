@@ -23,6 +23,7 @@ from peft import (
     HRAConfig,
     IA3Config,
     LoraConfig,
+    MiSSConfig,
     OFTConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
@@ -62,6 +63,14 @@ ALL_CONFIGS = [
     ),
     (
         BoneConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+            "r": 2,
+        },
+    ),
+    (
+        MiSSConfig,
         {
             "task_type": "FEATURE_EXTRACTION",
             "target_modules": None,

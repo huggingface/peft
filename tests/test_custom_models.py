@@ -42,6 +42,7 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
+    MiSSConfig,
     OFTConfig,
     PeftModel,
     RandLoraConfig,
@@ -342,6 +343,22 @@ TEST_CASES = [
         "Vanilla MLP 5 Bone",
         "MLP",
         BoneConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "r": 2, "init_weights": "bat"},
+    ),
+    ########
+    # MiSS #
+    ########
+    ("Vanilla MLP 1 MiSS", "MLP", MiSSConfig, {"target_modules": "lin0", "r": 2}),
+    ("Vanilla MLP 2 MiSS", "MLP", MiSSConfig, {"target_modules": ["lin0"], "r": 2}),
+    ("Vanilla MLP 3 MiSS", "MLP", MiSSConfig, {"target_modules": ["lin0", "lin1"], "r": 2}),
+    ("Vanilla MLP 5 MiSS", "MLP", MiSSConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "r": 2}),
+    ("Vanilla MLP 1 MiSS", "MLP", MiSSConfig, {"target_modules": "lin0", "r": 2, "init_weights": "bat"}),
+    ("Vanilla MLP 2 MiSS", "MLP", MiSSConfig, {"target_modules": ["lin0"], "r": 2, "init_weights": "bat"}),
+    ("Vanilla MLP 3 MiSS", "MLP", MiSSConfig, {"target_modules": ["lin0", "lin1"], "r": 2, "init_weights": "bat"}),
+    (
+        "Vanilla MLP 5 MiSS",
+        "MLP",
+        MiSSConfig,
         {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "r": 2, "init_weights": "bat"},
     ),
     #############
@@ -679,6 +696,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_weights": False, "r": 2},
         {"target_modules": ["lin1"], "init_weights": False, "r": 2},
     ),
+        (
+        "MiSS Same",
+        "miss",
+        MiSSConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "r": 2},
+        {"target_modules": ["lin0"], "init_weights": False, "r": 2},
+    ),
+    (
+        "MiSS Different",
+        "miss",
+        MiSSConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "r": 2},
+        {"target_modules": ["lin1"], "init_weights": False, "r": 2},
+    ),
     (
         "VBLoRA Same",
         "vblora",
@@ -723,6 +754,7 @@ PREFIXES = {
     HRAConfig: "hra_",
     VBLoRAConfig: "vblora_",
     BoneConfig: "bone_",
+    MiSSConfig: "miss_",
     TrainableTokensConfig: "trainable_tokens_",
 }
 
@@ -1947,7 +1979,7 @@ class TestPeftCustomModel(PeftCommonTester):
         assert "default" in model.base_model.classifier.modules_to_save
         assert "other" in model.base_model.classifier.modules_to_save
 
-    @pytest.mark.parametrize("config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig])
+    @pytest.mark.parametrize("config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig, MiSSConfig])
     def test_multiple_adapters_mixed_modules_to_save(self, config_cls):
         # See issue 1574
         # Check that we can have a model where one adapter has modules_to_save and the other doesn't. It should be
@@ -1955,7 +1987,7 @@ class TestPeftCustomModel(PeftCommonTester):
         if hasattr(config_cls, "feedforward_modules"):  # IA³
             config_cls = partial(config_cls, feedforward_modules=["lin0"])
 
-        if config_cls == BoneConfig:
+        if config_cls == BoneConfig or config_cls == MiSSConfig:
             config_cls = partial(config_cls, r=2)
 
         config0 = config_cls(target_modules=["lin0"], modules_to_save=["lin1"])
@@ -1975,14 +2007,14 @@ class TestPeftCustomModel(PeftCommonTester):
         model.set_adapter("other")
         model(**inputs)
 
-    @pytest.mark.parametrize("config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig])
+    @pytest.mark.parametrize("config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig, MiSSConfig])
     def test_multiple_adapters_mixed_modules_to_save_order_switched(self, config_cls):
         # See issue 1574
         # Same test as test_multiple_adapters_mixed_modules_to_save, but this time the 2nd adapter has modules_to_save.
         if hasattr(config_cls, "feedforward_modules"):  # IA³
             config_cls = partial(config_cls, feedforward_modules=["lin0"])
 
-        if config_cls == BoneConfig:
+        if config_cls == BoneConfig or config_cls == MiSSConfig:
             config_cls = partial(config_cls, r=2)
 
         config0 = config_cls(target_modules=["lin0"])
@@ -2062,7 +2094,7 @@ class TestPeftCustomModel(PeftCommonTester):
         with pytest.raises(ValueError, match=msg):
             model.add_weighted_adapter(["default", "other"], weights=[1.0, 1.0], adapter_name="merged")
 
-    @pytest.mark.parametrize("config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig])
+    @pytest.mark.parametrize("config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig, MiSSConfig])
     def test_add_weighted_adapter_cat_with_rank_pattern(self, config_cls):
         # Fixes a bug described in #2512, which resulted from the rank_pattern not being taken into account
         config0 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 2})
@@ -2218,6 +2250,7 @@ class TestPeftCustomModel(PeftCommonTester):
             BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
             HRAConfig(target_modules=["lin0"], init_weights=False),
             BoneConfig(target_modules=["lin0"], init_weights=False, r=2),
+            MiSSConfig(target_modules=["lin0"], init_weights=False, r=2),
         ],
     )
     def test_adapter_name_makes_no_difference(self, config0):
@@ -3589,6 +3622,83 @@ class TestRequiresGrad:
         peft_model = get_peft_model(MLP(), config0)
 
         config1 = BoneConfig(target_modules=["lin0"], r=2, inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.bone_block.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.bone_block.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.bone_block.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.bone_block.adapter1",
+        )
+
+    def test_requires_grad_miss_different_targets(self):
+        # test two different HRA adapters that target different modules
+        config0 = MiSSConfig(target_modules=["lin0"], r=2)
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = MiSSConfig(target_modules=["lin1"], r=2, inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.bone_block.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.bone_block.default",
+        )
+
+        # change activate pter to pter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.bone_block.adapter1",
+        )
+
+        # disable all pters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.bone_block.adapter1",
+        )
+
+    def test_requires_grad_miss_same_targets(self):
+        # same as previous test, except that HRA adapters target the same layer
+        config0 = MiSSConfig(target_modules=["lin0"], r=2)
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = MiSSConfig(target_modules=["lin0"], r=2, inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"

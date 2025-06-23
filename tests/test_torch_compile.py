@@ -45,6 +45,7 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
+    MiSSConfig,
     OFTConfig,
     PeftModel,
     TaskType,
@@ -84,6 +85,11 @@ SETTINGS = {
     "bone": (BoneConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], r=2), {}),
     "bone-bat": (
         BoneConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], r=2, init_weights="bat"),
+        {},
+    ),
+    "miss": (MiSSConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], r=2), {}),
+    "miss-bat": (
+        MiSSConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], r=2, init_weights="bat"),
         {},
     ),
 }
