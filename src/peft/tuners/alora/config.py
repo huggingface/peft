@@ -9,21 +9,6 @@ from peft.utils import PeftType
 from peft.tuners.lora import LoraConfig
 
 
-def _check_and_remove_unused_kwargs(cls, kwargs):
-    """Make PEFT configs forward-compatible by removing unused kwargs that were added in later PEFT versions.
-
-    This assumes that removing the unused kwargs will not affect the default behavior.
-
-    Returns the filtered kwargs and the set of removed keys.
-    """
-    # it's not pretty but eh
-    signature_parameters = inspect.signature(cls.__init__).parameters
-    unexpected_kwargs = set(kwargs.keys()) - set(signature_parameters.keys())
-    for key in unexpected_kwargs:
-        del kwargs[key]
-    return kwargs, unexpected_kwargs
-
-
 @dataclass
 class aLoraConfig(LoraConfig):
     """

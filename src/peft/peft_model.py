@@ -1845,12 +1845,12 @@ class PeftModelForCausalLM(PeftModel):
                     offset_val = seq_len - best_match_start_idx
                     alora_offsets[i] = offset_val if offset_val > 0 else -1
                 else:
-                    warnings.warn(
-                        f"Invocation string for adapter '{adapter_name_to_process}' not found in input row {i}. "
-                        f"Input: {self.tokenizer.decode(input_ids[i]) if self.tokenizer else input_ids[i]}. "
-                        f"Invocation: {self.peft_config[adapter_name_to_process].invocation_string}. "
-                        "Adapter will be disabled for this row."
-                    )
+                    #warnings.warn(
+                    #    f"Invocation string for adapter '{adapter_name_to_process}' not found in input row {i}. "
+                    #    f"Input: {self.tokenizer.decode(input_ids[i]) if self.tokenizer else input_ids[i]}. "
+                    #    f"Invocation: {self.peft_config[adapter_name_to_process].invocation_string}. "
+                    #    "Adapter will be disabled for this row."
+                    #)
                     alora_offsets[i] = -1
         return alora_offsets
 
@@ -2051,8 +2051,8 @@ class PeftModelForCausalLM(PeftModel):
                     alora_offsets_from_kwargs = kwargs.get("alora_offsets")
                     if alora_offsets_from_kwargs is None:
                         current_input_ids = kwargs.get("input_ids")
-                        if not args and not current_input_ids : # args[0] is usually input_ids
-                            if args and isinstance(args[0], torch.Tensor) and args[0].dim() >=1 :
+                        if not current_input_ids: # args[0] is usually input_ids
+                            if args and isinstance(args[0], torch.Tensor): # and args[0].dim() >=1 :
                                 current_input_ids = args[0]
                             else:
                                 current_input_ids = None
@@ -2061,7 +2061,10 @@ class PeftModelForCausalLM(PeftModel):
                             if current_input_ids.ndim == 1: 
                                 current_input_ids = current_input_ids.unsqueeze(0)
                             calculated_offsets = self._calculate_alora_offsets(current_input_ids, adapter_names=adapter_names_for_offset_calc)
+                            for i in range(len(calculated_offsets)):
+                                calculated_offsets[i] -= 1
                             kwargs['alora_offsets'] = calculated_offsets
+                            
                         else:
                             warnings.warn("Cannot calculate aLoRA offsets during generate as input_ids are not available. Disabling aLoRA.")
                             bs = 1 
