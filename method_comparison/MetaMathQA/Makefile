@@ -10,7 +10,9 @@ RESULTS_DIR := results
 
 # 1. Find all experiment directories by looking for adapter_config.json files.
 #    This gives us a list like: experiments/lora/llama-3.2-3B-rank32 ...
-EXPERIMENT_PATHS := $(patsubst %/adapter_config.json,%,$(shell find $(EXPERIMENTS_DIR) -name "adapter_config.json"))
+EXPERIMENT_PATHS := $(shell find $(EXPERIMENTS_DIR) \
+		    -name "adapter_config.json" -or \
+		    -name "training_params.json" | xargs dirname | sort -u)
 
 # 2. Define a function to replace all occurrences of a character in a string.
 #    This is needed to replicate the result naming logic from run.py (e.g., "lora/foo" -> "lora-foo").
@@ -44,7 +46,7 @@ define EXPERIMENT_template
 # The dependencies are its config files, code changes need to be audited manually since they can
 # vary in degree of importance. Note that we explicitly ignore when the script fails to run
 # so that the other experiments still have a chance to run.
-$(call exp_to_res,$(1)): $(1)/adapter_config.json $(wildcard $(1)/training_params.json)
+$(call exp_to_res,$(1)): $(wildcard $(1)/adapter_config.json) $(wildcard $(1)/training_params.json)
 	@echo "---"
 	@echo "Running experiment: $(1)"
 	-$(PYTHON) $(RUN_SCRIPT) -v $(1)
