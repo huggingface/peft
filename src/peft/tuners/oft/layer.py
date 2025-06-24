@@ -462,15 +462,15 @@ class OFTLayer(BaseTunerLayer):
         n_elements = oft_block_size * (oft_block_size - 1) // 2
         self.oft_R[adapter_name] = OFTRotationModule(
             r if not block_share else 1,
-                n_elements,
-                oft_block_size,
-                self.in_features,
-                coft=coft,
-                eps=eps,
-                block_share=block_share,
-                use_cayley_neumann=use_cayley_neumann,
-                num_cayley_neumann_terms=num_cayley_neumann_terms,
-            )
+            n_elements,
+            oft_block_size,
+            self.in_features,
+            coft=coft,
+            eps=eps,
+            block_share=block_share,
+            use_cayley_neumann=use_cayley_neumann,
+            num_cayley_neumann_terms=num_cayley_neumann_terms,
+        )
 
         # Initialize weights
         self.reset_oft_parameters(adapter_name, init_weights)

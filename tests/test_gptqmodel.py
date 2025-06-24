@@ -32,6 +32,7 @@ from transformers import (
 from peft import (
     AdaLoraConfig,
     LoraConfig,
+    OFTConfig,
     PeftModel,
     get_peft_model,
     prepare_model_for_kbit_training,
@@ -223,7 +224,7 @@ class PeftGPTQModelTests(unittest.TestCase):
             # assert loss is not None
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
-    def test_causal_lm_training(self):
+    def test_oft_causal_lm_training(self):
         r"""
         Test the CausalLM training on a single GPU device. The test would simply fail if the adapters are not set
         correctly.
