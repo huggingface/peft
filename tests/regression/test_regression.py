@@ -78,7 +78,8 @@ from peft import (
     get_peft_model,
 )
 from peft.utils import infer_device
-from ..testing_utils import require_bitsandbytes, require_non_cpu, require_deterministic_for_xpu
+
+from ..testing_utils import require_bitsandbytes, require_deterministic_for_xpu, require_non_cpu
 
 
 PEFT_VERSION = peft.__version__
