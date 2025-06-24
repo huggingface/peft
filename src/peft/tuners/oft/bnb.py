@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import Any, Optional
+from typing import Optional
 
 import bitsandbytes as bnb
 import torch
@@ -81,9 +81,7 @@ if is_bnb_available():
                 if active_adapter not in self.oft_R.keys():
                     continue
 
-                warnings.warn(
-                    "Merge oft module to 8-bit linear may get different generations due to rounding errors."
-                )
+                warnings.warn("Merge oft module to 8-bit linear may get different generations due to rounding errors.")
 
                 weight = self.get_base_layer().weight
                 state = self.get_base_layer().state
