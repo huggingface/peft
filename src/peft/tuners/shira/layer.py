@@ -25,7 +25,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
 class ShiraLayer(BaseTunerLayer):
     # List all names of layers that may contain trainable adapter weights
-    adapter_layer_names = ("shira_weight", "shira_embedding_weights")
+    adapter_layer_names = ("shira_weight")
     # All names of other adapter-related parameters
     other_param_names = ("r", "scaling")
 
@@ -35,7 +35,6 @@ class ShiraLayer(BaseTunerLayer):
         self.scaling = {}
         self.shira_weight = nn.ParameterDict({})
         self.shira_indices = {}
-        self.shira_embedding_weights = nn.ParameterDict({})
         self.weight_shape = base_layer.weight.shape #Assumes SHiRA is on some layer with "weight" parameter
 
         # Mark the weight as unmerged
@@ -171,36 +170,6 @@ class Linear(nn.Module, ShiraLayer):
         # In multi-gpu environment, the indices are at the wrong gpu.  This is needed to correct this.
         self.shira_indices[adapter] = self.shira_indices[adapter].to(self.shira_weight[adapter].device)
         return torch.sparse_coo_tensor(self.shira_indices[adapter], self.shira_weight[adapter] * self.scaling[adapter], self.weight_shape)
-
-    """
-    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        if self.disable_adapters:
-            if self.merged:
-                self.unmerge()
-            result = self.base_layer(x, *args, **kwargs)
-        elif self.merged:
-            result = self.base_layer(x, *args, **kwargs)
-        else:
-            result = self.base_layer(x, *args, **kwargs)
-            torch_result_dtype = result.dtype
-            delta_weight = None
-            for active_adapter in self.active_adapters:
-                if active_adapter not in self.shira_weight.keys():
-                    continue
-
-                if delta_weight is None:
-                    delta_weight = self.get_delta_weight(active_adapter)
-                else:
-                    delta_weight = delta_weight + self.get_delta_weight(active_adapter)
-
-            if delta_weight is not None:
-                # x = self._cast_input_dtype(x, delta_weight.dtype)
-                x = self._cast_input_dtype(x, torch.float32)
-                delta_weight = delta_weight.type(torch.float32)
-                result = result + F.linear(x, delta_weight).to(torch_result_dtype)
-
-        return result
-    """
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         # previous_dtype = x.dtype

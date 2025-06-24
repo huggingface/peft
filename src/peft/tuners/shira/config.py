@@ -93,14 +93,6 @@ class ShiraConfig(PeftConfig):
         },
     )
 
-    # def to_dict(self):
-    #     """
-    #     Returns the config for your adapter model as a dictionary. Removes mask function callable.
-    #     """
-    #     rv = super().to_dict()
-    #     rv.pop("mask_fn")
-    #     return rv
-
     def __post_init__(self):
         super().__post_init__()
         self.peft_type = PeftType.SHIRA
