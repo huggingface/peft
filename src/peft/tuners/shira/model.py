@@ -32,7 +32,6 @@ from peft.utils import (
 
 from .config import ShiraConfig
 from .layer import Linear, ShiraLayer
-from .mask_functions import random_mask
 
 
 class ShiraModel(BaseTuner):
@@ -100,8 +99,7 @@ class ShiraModel(BaseTuner):
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {}
         kwargs["bias"] = bias
-        if shira_config.mask_fn is None:
-            shira_config.mask_fn = random_mask
+        if shira_config.mask_type == "random":
             kwargs["random_seed"] = shira_config.random_seed
 
         for k, v in optional_kwargs.items():
