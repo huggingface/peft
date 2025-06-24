@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import functools
 from contextlib import contextmanager
-from typing import Literal
+from typing import Literal, Optional
 
 import packaging.version
 import torch
@@ -35,7 +35,7 @@ def check_deepspeed_zero3_enabled() -> bool:
 
 
 @contextmanager
-def gather_params_ctx(param, modifier_rank: int = 0, fwd_module: torch.nn.Module = None):
+def gather_params_ctx(param, modifier_rank: Optional[int] = 0, fwd_module: torch.nn.Module = None):
     """Call DeepSpeed GatheredParameters context manager if DeepSpeed is enabled, otherwise do nothing."""
 
     if not check_deepspeed_zero3_enabled():
