@@ -82,7 +82,7 @@ if is_bnb_available():
                     continue
 
                 warnings.warn(
-                    "Merge lora module to 8-bit linear may get different generations due to rounding errors."
+                    "Merge oft module to 8-bit linear may get different generations due to rounding errors."
                 )
 
                 weight = self.get_base_layer().weight
@@ -122,10 +122,10 @@ if is_bnb_available():
 
             while len(self.merged_adapters) > 0:
                 active_adapter = self.merged_adapters.pop()
-                if active_adapter not in self.lora_A.keys():
+                if active_adapter not in self.oft_R.keys():
                     continue
                 warnings.warn(
-                    "Unmerge lora module to 8-bit linear may get different generations due to rounding errors."
+                    "Unmerge oft module to 8-bit linear may get different generations due to rounding errors."
                 )
 
                 weight = self.get_base_layer().weight
@@ -151,9 +151,6 @@ if is_bnb_available():
             return self.oft_R[adapter].get_weight()
 
         def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-            self._check_forward_args(x, *args, **kwargs)
-            adapter_names = kwargs.pop("adapter_names", None)
-
             if self.disable_adapters:
                 if self.merged:
                     self.unmerge()
@@ -207,7 +204,7 @@ if is_bnb_available():
 if is_bnb_4bit_available():
 
     class Linear4bit(torch.nn.Module, OFTLayer):
-        # Lora implemented in a dense layer
+        # OFT implemented in a dense layer
         def __init__(
             self,
             base_layer: torch.nn.Module,
@@ -297,10 +294,10 @@ if is_bnb_4bit_available():
 
             while len(self.merged_adapters) > 0:
                 active_adapter = self.merged_adapters.pop()
-                if active_adapter not in self.lora_A.keys():
+                if active_adapter not in self.oft_R.keys():
                     continue
                 warnings.warn(
-                    "Unmerge lora module to 4-bit linear may get different generations due to rounding errors."
+                    "Unmerge oft module to 4-bit linear may get different generations due to rounding errors."
                 )
 
                 weight = self.get_base_layer().weight
@@ -323,54 +320,11 @@ if is_bnb_4bit_available():
         def get_delta_weight(self, adapter):
             return self.oft_R[adapter].get_weight()
 
-        def _mixed_batch_forward(
-            self, x: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
-        ) -> torch.Tensor:
-            # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
-            # extra argument that allows mixing different adapters in the same batch at inference time.
-            result = self.base_layer(x, *args, **kwargs)
-
-            unique_adapters = set(adapter_names)
-            sub_batch_indices_list = []
-            for adapter in unique_adapters:
-                sub_batch_indices_list.append([index for index, item in enumerate(adapter_names) if item == adapter])
-
-            for i, active_adapter in enumerate(unique_adapters):
-                if active_adapter == "__base__":
-                    continue
-                if active_adapter not in self.lora_A.keys():
-                    continue
-
-                lora_A = self.lora_A[active_adapter]
-                lora_B = self.lora_B[active_adapter]
-                dropout = self.lora_dropout[active_adapter]
-                scaling = self.scaling[active_adapter]
-
-                requires_conversion = not torch.is_autocast_enabled()
-                if requires_conversion:
-                    expected_dtype = result.dtype
-                    x = self._cast_input_dtype(x, lora_A.weight.dtype)
-
-                # getting the sub-batch, passing it to OFT layers and updating the corresponding indices of the linear
-                # layer output
-                sub_batch = x[sub_batch_indices_list[i]]
-                output = lora_B(lora_A(dropout(sub_batch))) * scaling
-                if requires_conversion:
-                    output = output.to(expected_dtype)
-                result[sub_batch_indices_list[i]] += output
-
-            return result
-
         def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-            self._check_forward_args(x, *args, **kwargs)
-            adapter_names = kwargs.pop("adapter_names", None)
-
             if self.disable_adapters:
                 if self.merged:
                     self.unmerge()
                 result = self.base_layer(x, *args, **kwargs)
-            elif adapter_names is not None:
-                result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
             elif self.merged:
                 result = self.base_layer(x, *args, **kwargs)
             else:
@@ -399,7 +353,7 @@ if is_bnb_4bit_available():
 
         def __repr__(self) -> str:
             rep = super().__repr__()
-            return "lora." + rep
+            return "oft." + rep
 
     def dispatch_bnb_4bit(target: torch.nn.Module, adapter_name: str, **kwargs):
         new_module = None
