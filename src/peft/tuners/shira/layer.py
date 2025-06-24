@@ -25,7 +25,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
 class ShiraLayer(BaseTunerLayer):
     # List all names of layers that may contain trainable adapter weights
-    adapter_layer_names = ("shira_weight")
+    adapter_layer_names = ("shira_weight", )
     # All names of other adapter-related parameters
     other_param_names = ("r", "scaling")
 
