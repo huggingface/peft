@@ -111,5 +111,5 @@ class ShiraConfig(PeftConfig):
             warnings.warn(f"Argument mask_type is set to {self.mask_type}. Creating a random sparse mask...")
             self.mask_fn = random_mask
         else:
-            warnings.warn(f"Argument {self.mask_type=} not recognized, please supply your own masking function by calling `config.mask_fn = my_mask_fn`.")
+            warnings.warn(f"Argument {self.mask_type=} is not recognized, please supply your own masking function by calling `config.mask_fn = my_mask_fn`.")
             self.mask_fn = None

@@ -92,7 +92,7 @@ class ShiraLayer(BaseTunerLayer):
             return
         self.scaling[adapter] = scale
 
-class Linear(nn.Linear, ShiraLayer):
+class Linear(nn.Module, ShiraLayer):
     # SHiRA implemented in a dense layer
     def __init__(
         self,
@@ -103,8 +103,7 @@ class Linear(nn.Linear, ShiraLayer):
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stored weight like (fan_in, fan_out)
         **kwargs,
     ) -> None:
-        # this gets the init from nn.Linear's super perspective, i.e. nn.Module.__init__, which should always be called
-        super(nn.Linear, self).__init__()
+        super().__init__()
         ShiraLayer.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = fan_in_fan_out
 
