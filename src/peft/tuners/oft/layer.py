@@ -187,8 +187,8 @@ class OFTRotationModule(nn.Module):
 
     def _unfold(self, x):
         """
-        Unfold with stride=1, padding=0 to preserve spatial dimensions.
-        Only use kernel_size from base layer to define patch size.
+        Unfold with stride=1, padding=0 to preserve spatial dimensions. Only use kernel_size from base layer to define
+        patch size.
         """
         batch_size, in_channels, in_height, in_width = x.shape
 

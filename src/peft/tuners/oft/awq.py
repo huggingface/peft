@@ -77,31 +77,25 @@ class AwqOFTLinear(torch.nn.Module, OFTLayer):
             eps = self.eps[active_adapter]
 
             """
-            requires_conversion = not torch.is_autocast_enabled()
-            if requires_conversion:
-                expected_dtype = x.dtype
-                x = self._cast_input_dtype(x, oft_r.dtype)
+            requires_conversion = not torch.is_autocast_enabled() if requires_conversion:
+                expected_dtype = x.dtype x = self._cast_input_dtype(x, oft_r.dtype)
 
             if coft:
                 with torch.no_grad():
                     oft_r.copy_(self._project_batch(oft_r, eps=eps))
-            orth_rotate = self._cayley_batch(oft_r, oft_block_size)
-            # orth_rotate = dropout(orth_rotate)
+            orth_rotate = self._cayley_batch(oft_r, oft_block_size) # orth_rotate = dropout(orth_rotate)
 
-            current_oft_rot_dtype = oft_rotation.dtype
-            if orth_rotate.dtype != current_oft_rot_dtype:
+            current_oft_rot_dtype = oft_rotation.dtype if orth_rotate.dtype != current_oft_rot_dtype:
                 orth_rotate = orth_rotate.to(current_oft_rot_dtype)
-            # oft_rotation = self.oft_matmul(orth_rotate, oft_rotation.unsqueeze(0)).squeeze(0)
-            oft_rotation = torch.bmm(orth_rotate, oft_rotation)
-            oft_rotation = oft_rotation.to(current_oft_rot_dtype)
+            # oft_rotation = self.oft_matmul(orth_rotate, oft_rotation.unsqueeze(0)).squeeze(0) oft_rotation =
+            torch.bmm(orth_rotate, oft_rotation) oft_rotation = oft_rotation.to(current_oft_rot_dtype)
 
 
 
-        batch_dims = x.shape[:-1]
-        x_reshaped = x.view(*batch_dims, rank, -1)
-        x_rotated_reshaped = torch.einsum('...rk,rkc->...rc', x_reshaped, oft_rotation)
-        # x_rotated_reshaped = torch.einsum('rkc,...rk->...rc', oft_rotation.transpose(-1, -2), x_reshaped)
-        x_rotated = x_rotated_reshaped.reshape(*batch_dims, self.in_features)
+        batch_dims = x.shape[:-1] x_reshaped = x.view(*batch_dims, rank, -1) x_rotated_reshaped =
+        torch.einsum('...rk,rkc->...rc', x_reshaped, oft_rotation) # x_rotated_reshaped =
+        torch.einsum('rkc,...rk->...rc', oft_rotation.transpose(-1, -2), x_reshaped) x_rotated =
+        x_rotated_reshaped.reshape(*batch_dims, self.in_features)
         """
         x_rotated = oft_r(x)
 
