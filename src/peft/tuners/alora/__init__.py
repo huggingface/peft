@@ -20,4 +20,4 @@ from .model import aLoraModel
 
 __all__ = ["Linear", "aLoraConfig", "aLoraLayer", "aLoraModel"]
 
-register_peft_method(name="alora", config_cls=aLoraConfig, model_cls=aLoraModel, prefix="alora_", is_mixed_compatible=True)
+register_peft_method(name="alora", config_cls=aLoraConfig, model_cls=aLoraModel, prefix="lora_", is_mixed_compatible=True)
