@@ -18,8 +18,6 @@ from peft.utils.other import transpose
 
 from .config import aLoraConfig
 
-#Remove
-#from peft import DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer, _DoraConvNdLayer
 
 
 class aLoraLayer(BaseTunerLayer):
