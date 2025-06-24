@@ -193,31 +193,34 @@ class QALoraLinearVariant(LoraVariant):
 
     @staticmethod
     def forward(module: Linear, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
-        lora_A_layer = module.lora_A[active_adapter]
-        lora_B_layer = module.lora_B[active_adapter]
-        lora_A_weight = lora_A_layer.weight
-        lora_B_weight = lora_B_layer.weight
+        lora_A_weight = module.lora_A[active_adapter].weight
+        lora_B_weight = module.lora_B[active_adapter].weight
         dropout = module.lora_dropout[active_adapter]
-        lora_scaling_coefficient = module.scaling[active_adapter]
+        scaling = module.scaling[active_adapter]
         group_size = module.qalora_group_size[active_adapter]
 
         x_dropped = dropout(x) if module.training and not isinstance(dropout, nn.Identity) else x
         orig_shape = x_dropped.shape
-        x_2d = x_dropped.reshape(-1, module.in_features) if len(orig_shape) > 2 else x_dropped
 
-        x_for_pooling = x_2d.unsqueeze(1)
-        x_for_pooling = torch.nn.functional.avg_pool1d(x_for_pooling, kernel_size=group_size, stride=group_size)
-        x_pooled = x_for_pooling.squeeze(1)
-
-        pooled_dim = module.in_features // group_size
-        x_pooled_scaled = x_pooled * pooled_dim
-
-        intermediate = x_pooled_scaled @ lora_A_weight.t()
-        delta = intermediate @ lora_B_weight.t()
-        delta = delta * lora_scaling_coefficient
-
+        # Reshape to 2D
         if len(orig_shape) > 2:
-            delta = delta.reshape(orig_shape[:-1] + (delta.shape[-1],))
+            x_flat = x_dropped.view(-1, module.in_features)
+        else:
+            x_flat = x_dropped
+
+        batch_size, in_features = x_flat.shape
+        pooled_features = in_features // group_size
+
+        x_pooled = x_flat.view(batch_size, pooled_features, group_size).mean(dim=2)
+
+        x_pooled_scaled = x_pooled * pooled_features
+
+        # LoRA computation
+        delta = x_pooled_scaled @ lora_A_weight.t() @ lora_B_weight.t() * scaling
+
+        # Reshape back
+        if len(orig_shape) > 2:
+            delta = delta.view(orig_shape[:-1] + (delta.size(-1),))
 
         return result + delta
 
