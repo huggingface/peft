@@ -267,7 +267,8 @@ class OFTRotationModule(nn.Module):
 
         folded_shape = x.shape
         rank = self.in_features // self.block_size if self.block_share else self.r
-        x_reshaped = x.reshape(x.shape[0], rank, self.block_size)
+        batch_dims = x.shape[:-1]
+        x_reshaped = x.reshape(*batch_dims, rank, self.block_size)
 
         if self.block_share:
             orth_rotate = orth_rotate.repeat(rank, 1, 1)
