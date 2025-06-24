@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2025-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ class ScriptArguments(SFTConfig):
     init_weights: Literal[True, "bat"] = field(
         default=True,
         metadata={
-            "help": ("True -> MiSS; `bat` -> Bat"),
+            "help": ("True -> MiSS efficiency; `bat` -> Bat"),
         },
     )
     miss_r: int = field(default=16)

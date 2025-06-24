@@ -63,6 +63,13 @@ class MiSSConfig(PeftConfig):
         },
     )
     miss_dropout: float = field(default=0.0, metadata={"help": "MiSS dropout"})
+    mini_r: int = field(
+        default=64,
+        metadata={
+            "help": "The rank of MiSS across different layers.",
+            "note": "when mini_r==out_features, mini==MiSS efficiency",
+        },
+    )
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
@@ -74,10 +81,11 @@ class MiSSConfig(PeftConfig):
         default=None,
         metadata={"help": "List of module names or regex expression of the module names to exclude from MiSS."},
     )
-    init_weights: bool | Literal["bat"] = field(
+    init_weights: bool | Literal["bat", "mini"] = field(
         default=True,
         metadata={
             "help": (
+                "True -> MiSS efficiency; `bat` -> Bat; `mini` -> test"
                 "Whether to initialize the weights of the MiSS layers with their default initialization. Don't change "
                 "this setting, except if you know exactly what you're doing."
             ),
@@ -107,7 +115,7 @@ class MiSSConfig(PeftConfig):
 
     def __post_init__(self):
         super().__post_init__()
-        self.peft_type = PeftType.BONE
+        self.peft_type = PeftType.MISS
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )

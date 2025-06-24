@@ -830,6 +830,7 @@ class PeftCommonTester:
             PeftType.BOFT,
             PeftType.HRA,
             PeftType.BONE,
+            PeftType.MISS,
         ]
 
         if ("gpt2" in model_id.lower()) and (config_cls == IA3Config):
@@ -1445,6 +1446,7 @@ class PeftCommonTester:
             PeftType.HRA,
             PeftType.VBLORA,
             PeftType.BONE,
+            PeftType.MISS,
         ]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
@@ -1518,6 +1520,7 @@ class PeftCommonTester:
             PeftType.HRA,
             PeftType.VBLORA,
             PeftType.BONE,
+            PeftType.MISS,
         ]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
@@ -1614,6 +1617,7 @@ class PeftCommonTester:
             "VBLORA",
             "RANDLORA",
             "BONE",
+            "MISS",
         ):
             with pytest.raises(AttributeError):
                 model = model.unload()
