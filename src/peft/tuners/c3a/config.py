@@ -23,8 +23,7 @@ from peft.utils import PeftType
 
 @dataclass
 class C3AConfig(PeftConfig):
-    """
-    This is the configuration class to store the configuration of a [`C3AModel`].
+    """This is the configuration class to store the configuration of a [`C3AModel`].
 
     Args:
         block_size (`int`):
