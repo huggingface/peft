@@ -77,7 +77,7 @@ class aLoraModel(BaseTuner):
         - **peft_config** ([`aLoraConfig`]): The configuration of the aLora model.
     """
 
-    prefix: str = "alora_"
+    prefix: str = "lora_"
 
     def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
         super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
