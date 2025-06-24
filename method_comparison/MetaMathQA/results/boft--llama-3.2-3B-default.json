@@ -57,7 +57,7 @@
   },
   "train_info": {
     "accelerator_memory_reserved_avg": 14814855089,
-    "acceelrator_memory_max": 24427626496,
+    "accelerator_memory_max": 24427626496,
     "accelerator_memory_reserved_99th": 20103445872,
     "train_time": 8291.859631775995,
     "file_size": 3225360,
