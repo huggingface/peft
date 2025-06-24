@@ -14,7 +14,7 @@
 
 """
 This module is intended to store mask functions for use inside SHiRA construction.
-The mask functions are required to have a specific signature as shown in the type-hint in ShiraConfig.
+The mask functions are required to have a specific signature as shown below.
 
 Required positional arguments:
     base_layer - This is the linear layer where the shira adapter will be attached.
@@ -34,6 +34,16 @@ than the provided positional arguments, you can create the mask function referen
             ... your implementation here that might use my_kwargs ...
             return mask
         return mask_fn
+
+Then, you can create your peft model with custom SHiRA mask as follows:
+
+    model = ...
+    my_kwargs = ...
+    mask_fn = create_mask_function_reference(**my_kwargs)
+    peft_config = ShiraConfig(r=4, mask_type='my_custom_mask')
+    peft_config.mask_fn = mask_fn
+    peft_model = get_peft_model(model, peft_config)
+
 """
 
 from typing import Optional
