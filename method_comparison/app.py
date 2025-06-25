@@ -25,9 +25,9 @@ from sanitizer import parse_and_filter
 
 
 metric_preferences = {
-    "cuda_memory_reserved_avg": "lower",
-    "cuda_memory_max": "lower",
-    "cuda_memory_reserved_99th": "lower",
+    "accelerator_memory_reserved_avg": "lower",
+    "accelerator_memory_max": "lower",
+    "accelerator_memory_reserved_99th": "lower",
     "total_time": "lower",
     "train_time": "lower",
     "file_size": "lower",
@@ -222,7 +222,7 @@ def build_app(df):
 
         with gr.Row():
             x_default = (
-                "cuda_memory_max" if "cuda_memory_max" in metric_preferences else list(metric_preferences.keys())[0]
+                "accelerator_memory_max" if "accelerator_memory_max" in metric_preferences else list(metric_preferences.keys())[0]
             )
             y_default = (
                 "test_accuracy" if "test_accuracy" in metric_preferences else list(metric_preferences.keys())[1]
