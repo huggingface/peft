@@ -4631,7 +4631,9 @@ class TestHotSwapping:
     # it is important to check hotswapping small to large ranks and large to small ranks
     @pytest.mark.parametrize("ranks", [(11, 11), (7, 13), (13, 7)])
     def test_hotswapping_compiled_model_does_not_trigger_recompilation(self, ranks):
-        with torch._dynamo.config.patch(error_on_recompile=True):  # raise an error on recompilation
+        dynamo_config_ctx = torch._dynamo.config.patch(error_on_recompile=True)
+        inductor_config_ctx = torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 0)
+        with dynamo_config_ctx, inductor_config_ctx:
             self.check_hotswap(do_hotswap=True, ranks=ranks, alpha_scalings=ranks)
 
     def test_no_hotswapping_compiled_model_triggers_recompilation(self):
