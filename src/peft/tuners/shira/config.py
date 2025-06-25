@@ -37,9 +37,9 @@ class ShiraConfig(PeftConfig):
             additional parameters is the same as a LoRA adapter.
         mask_type (`str`, defaults to `random`):
             Type of mask function. Defaults to random.
-            An optional user-defined mask_fn to compute the mask value from base_weights. For pretrained weight with shape m, n, return only one mask (shape: m, n)
+            An optional user-defined mask_fn to compute the mask value from base_weights. For a pretrained weight with shape m, n, return only one mask (shape: m, n)
             which must be binary 0 or 1 with num_shira_parameters = r(m+n) for linear layers. Device and dtype of mask must be same as base layer's weight's device and dtype.
-            If mask_fn is None, then it will generate a random sparse mask of size r(m + n). This function can be found inside mask_functions.py."
+            By default, it will generate a random sparse mask of size r(m + n). This function can be found inside mask_functions.py."
         random_seed (`int`, *optional*, defaults to `42`):
             random seed for the torch generator for random_mask.
         target_modules (`Union[List[str], str]`):
@@ -70,10 +70,11 @@ class ShiraConfig(PeftConfig):
             "help": (
                 "Type of mask function. Defaults to random."
                 "An optional user-defined mask_fn to compute the mask value from base_weights. "
-                "For pretrained weight with shape m, n, return only one mask (shape: m, n) which must be binary 0 or 1 with num_shira_parameters = r(m+n) for linear layers. "
+                "For a pretrained weight with shape m, n, return only one mask (shape: m, n) which "
+                "must be binary 0 or 1 with num_shira_parameters = r(m+n) for linear layers. "
                 "Device and dtype of mask must be same as base layer's weight's device and dtype. "
-                "If mask_fn is None, then it will generate a random sparse mask of size r(m + n). "
-                "This function can be found inside mask_functions.py. "
+                "By default, it will generate a random sparse mask of size r(m + n). "
+                "This function can be found inside mask_functions.py."
             )
         },
     )
