@@ -543,8 +543,6 @@ class Linear(nn.Module, OFTLayer):
 
         self._active_adapter = adapter_name
 
-        breakpoint()
-
         self.update_layer(
             adapter_name,
             r,
