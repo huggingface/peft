@@ -413,8 +413,8 @@ class OFTLayer(BaseTunerLayer):
         eps,
         block_share,
         init_weights,
-        use_cayley_neumann=True,
-        num_cayley_neumann_terms=5,
+        use_cayley_neumann,
+        num_cayley_neumann_terms,
     ):
         """
         Update the linear layer with trainable OFT weights. Override for other layer types.
@@ -533,7 +533,7 @@ class Linear(nn.Module, OFTLayer):
         coft: bool = False,
         eps: float = 6e-5,
         block_share: bool = False,
-        use_cayley_neumann: bool = True,
+        use_cayley_neumann: bool = False,
         num_cayley_neumann_terms: int = 5,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         init_weights: Union[bool, str] = True,
@@ -545,6 +545,8 @@ class Linear(nn.Module, OFTLayer):
         self.fan_in_fan_out = fan_in_fan_out
 
         self._active_adapter = adapter_name
+
+        breakpoint()
 
         self.update_layer(
             adapter_name,
@@ -683,7 +685,7 @@ class Conv2d(nn.Module, OFTLayer):
         eps: float = 6e-5,
         block_share: bool = False,
         init_weights: Union[bool, str] = True,
-        use_cayley_neumann: bool = True,
+        use_cayley_neumann: bool = False,
         num_cayley_neumann_terms: int = 5,
         **kwargs,
     ) -> None:
@@ -717,8 +719,8 @@ class Conv2d(nn.Module, OFTLayer):
         eps,
         block_share,
         init_weights,
-        use_cayley_neumann=True,
-        num_cayley_neumann_terms=5,
+        use_cayley_neumann,
+        num_cayley_neumann_terms,
     ):
         """
         Update the conv2d layer with trainable OFT weights.

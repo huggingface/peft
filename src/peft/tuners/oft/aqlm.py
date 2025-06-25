@@ -38,6 +38,8 @@ class AqlmOFTLinear(torch.nn.Module, OFTLayer):
         eps: float = 6e-5,
         block_share: bool = False,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
+        use_cayley_neumann: bool = False,
+        num_cayley_neumann_terms: int = 5,
         **kwargs,
     ):
         super().__init__()
@@ -53,6 +55,8 @@ class AqlmOFTLinear(torch.nn.Module, OFTLayer):
             coft=coft,
             eps=eps,
             block_share=block_share,
+            use_cayley_neumann=use_cayley_neumann,
+            num_cayley_neumann_terms=num_cayley_neumann_terms,
         )
 
     def forward(self, x: torch.Tensor):

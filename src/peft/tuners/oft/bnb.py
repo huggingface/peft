@@ -41,6 +41,8 @@ if is_bnb_available():
             coft: bool = False,
             eps: float = 6e-5,
             block_share: bool = False,
+            use_cayley_neumann: bool = False,
+            num_cayley_neumann_terms: int = 5,
             **kwargs,
         ) -> None:
             super().__init__()
@@ -57,6 +59,8 @@ if is_bnb_available():
                 eps=eps,
                 block_share=block_share,
                 init_weights=init_weights,
+                use_cayley_neumann=use_cayley_neumann,
+                num_cayley_neumann_terms=num_cayley_neumann_terms,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -214,6 +218,8 @@ if is_bnb_4bit_available():
             eps: float = 6e-5,
             block_share: bool = False,
             init_weights: bool = True,
+            use_cayley_neumann: bool = False,
+            num_cayley_neumann_terms: int = 5,
             **kwargs,
         ) -> None:
             super().__init__()
@@ -230,6 +236,8 @@ if is_bnb_4bit_available():
                 eps=eps,
                 block_share=block_share,
                 init_weights=init_weights,
+                use_cayley_neumann=use_cayley_neumann,
+                num_cayley_neumann_terms=num_cayley_neumann_terms,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:

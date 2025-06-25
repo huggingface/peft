@@ -35,6 +35,8 @@ if is_eetq_available():
             coft: bool = False,
             eps: float = 6e-5,
             block_share: bool = False,
+            use_cayley_neumann: bool = False,
+            num_cayley_neumann_terms: int = 5,
             fan_in_fan_out: bool = False,
             **kwargs,
         ):
@@ -56,6 +58,8 @@ if is_eetq_available():
                 eps=eps,
                 block_share=block_share,
                 fan_in_fan_out=fan_in_fan_out,
+                use_cayley_neumann=use_cayley_neumann,
+                num_cayley_neumann_terms=num_cayley_neumann_terms,
             )
 
         def forward(self, x: torch.Tensor):
