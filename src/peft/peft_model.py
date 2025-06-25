@@ -781,9 +781,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 # If we don't apply this, prefix-tuning fails to update cross-attn cache
                 past_key_values = EncoderDecoderCache.from_legacy_cache(past_key_values)
                 past_key_values.cross_attention_cache = DynamicCache()
-                past_key_values.is_updated = {
-                    layer_idx: False for layer_idx in range(len(past_key_values.cross_attention_cache.key_cache))
-                }
+                past_key_values.is_updated = dict.fromkeys(
+                    range(len(past_key_values.cross_attention_cache.key_cache)), False
+                )
             map_cache_to_layer_device_map(self.get_base_model(), past_key_values)  # no-op if not a Cache instance
             return past_key_values
         else:

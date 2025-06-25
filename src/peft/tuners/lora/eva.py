@@ -409,7 +409,7 @@ def _get_eva_state_dict(
     else:
         pbar = iter(cycle(dataloader))
         use_tqdm = False
-    convergence_dict = {k: False for k in hooks.keys()}
+    convergence_dict = dict.fromkeys(hooks.keys(), False)
     rank_dist = max_components.copy()
     for inputs in pbar:
         if device is not None:

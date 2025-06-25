@@ -2724,7 +2724,7 @@ class TestEvaInitialization:
         if prepare_layer_inputs_keys is None:
             prepare_layer_inputs_fn = fn
         else:
-            prepare_layer_inputs_fn = {k: fn for k in prepare_layer_inputs_keys}
+            prepare_layer_inputs_fn = dict.fromkeys(prepare_layer_inputs_keys, fn)
 
         shuffled_dataset = dataset.shuffle(seed=0)
         dataloader = self.get_dataloader(shuffled_dataset)

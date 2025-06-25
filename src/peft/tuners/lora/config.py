@@ -298,8 +298,16 @@ class LoraConfig(PeftConfig):
             into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the magnitude is
             handled by a separate learnable parameter. This can improve the performance of LoRA especially at low
             ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger overhead than pure
-            LoRA, so it is recommended to merge weights for inference. For more information, see
+            LoRA, so it is recommended to merge weights for inference. For more information, see 
             https://huggingface.co/papers/2402.09353.
+        use_sinelora (`bool`):
+            Enable 'Sine Activated Low-Rank Adaptation' (Sine-LoRA). This technique introduce to apply sine activation
+            on the low-rank adaptor. This can be beneficial for rank boosting for low-rank matrices and enhancing its
+            capacity. For more information, see https://arxiv.org/pdf/2403.19243.
+        sinelora_frequency (`float`):
+            The frequency factor for the sine activation. If not specified, it will be set to the default value of 200.
+        sinelora_scaling (`float`):
+            The scaling factor for the sine activation. If not specified, it will be set to the default value of sqrt(in_features).
         layer_replication (`List[Tuple[int, int]]`):
             Build a new stack of layers by stacking the original model layers according to the ranges specified. This
             allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
@@ -495,6 +503,32 @@ class LoraConfig(PeftConfig):
                 "magnitude is handled by a separate learnable parameter. This can improve the performance of LoRA, "
                 "especially at low ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger"
                 "overhead than pure LoRA, so it is recommended to merge weights for inference."
+            )
+        },
+    )
+    use_sinelora: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Enable 'Sine Activated Low-Rank Adaptation' (Sine-LoRA). This technique introduce to apply sine activation "
+                "on the low-rank adaptor. This can be beneficial for rank boosting for low-rank matrices and enhancing its "
+                "capacity. For more information, see https://arxiv.org/pdf/2403.19243. "
+            )
+        },
+    )
+    sinelora_frequency: float = field(
+        default=200.0,
+        metadata={
+            "help": (
+                "The frequency factor for the sine activation. If not specified, it will be set to the default value of 200."
+            )
+        },
+    )
+    sinelora_scaling: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The scaling factor for the sine activation. If not specified, it will be set to the default value of sqrt(in_features)."
             )
         },
     )
