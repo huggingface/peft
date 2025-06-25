@@ -288,6 +288,7 @@ TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING = {
     "phi": ["q_proj", "v_proj"],
     "gemma": ["q_proj", "v_proj"],
     "gemma2": ["q_proj", "v_proj"],
+    "gemma3_text": ["q_proj", "v_proj"],
     "qwen2": ["q_proj", "v_proj"],
 }
 

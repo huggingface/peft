@@ -38,6 +38,7 @@ from peft import (
     PromptEncoderConfig,
     PromptTuningConfig,
     PromptTuningInit,
+    ShiraConfig,
     VBLoRAConfig,
     VeraConfig,
     get_peft_model,
@@ -179,6 +180,14 @@ ALL_CONFIGS = [
         },
     ),
     (
+        ShiraConfig,
+        {
+            "r": 1,
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+        },
+    ),
+    (
         VBLoRAConfig,
         {
             "task_type": "CAUSAL_LM",
@@ -205,8 +214,8 @@ ALL_CONFIGS = [
 
 
 def _skip_if_not_conv1d_supported(model_id, config_cls):
-    if "GPT2LMHeadModel" in model_id and config_cls in [BOFTConfig, BoneConfig, HRAConfig, OFTConfig]:
-        pytest.skip("Skipping BOFT/HRA/OFT/Bone for GPT2LMHeadModel")
+    if "GPT2LMHeadModel" in model_id and config_cls in [BOFTConfig, BoneConfig, HRAConfig, OFTConfig, ShiraConfig]:
+        pytest.skip("Skipping BOFT/HRA/OFT/Bone/SHiRA for GPT2LMHeadModel")
 
 
 def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
@@ -445,6 +454,8 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_unload_adapter(self, model_id, config_cls, config_kwargs):
+        if config_cls in [ShiraConfig, ]:
+            pytest.skip("SHiRA weights are always initialized to zero. So, it does not change the model output. Skipping this test.")
         _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_unload_adapter(model_id, config_cls, config_kwargs.copy())

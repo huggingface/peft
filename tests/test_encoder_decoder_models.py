@@ -29,6 +29,7 @@ from peft import (
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
+    ShiraConfig,
     TaskType,
     VBLoRAConfig,
     VeraConfig,
@@ -142,6 +143,14 @@ ALL_CONFIGS = [
         {
             "num_virtual_tokens": 10,
             "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        ShiraConfig,
+        {
+            "r": 1,
+            "task_type": "SEQ_2_SEQ_LM",
+            "target_modules": None,
         },
     ),
     (
@@ -315,6 +324,8 @@ class TestEncoderDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_unload_adapter(self, model_id, config_cls, config_kwargs):
+        if config_cls in [ShiraConfig, ]:
+            pytest.skip("SHiRA weights are always initialized to zero. So, it does not change the model output. Skipping this test.")
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_unload_adapter(model_id, config_cls, config_kwargs)
 
