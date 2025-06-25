@@ -30,6 +30,7 @@ from peft import (
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
+    RoadConfig,
     ShiraConfig,
     TaskType,
     VBLoRAConfig,
@@ -144,6 +145,14 @@ ALL_CONFIGS = [
         {
             "num_virtual_tokens": 10,
             "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        RoadConfig,
+        {
+            "task_type": "SEQ_2_SEQ_LM",
+            "variant": "1",
+            "group_size": 2,
         },
     ),
     (

@@ -40,6 +40,7 @@ from peft import (
     PromptEncoderConfig,
     PromptTuningConfig,
     PromptTuningInit,
+    RoadConfig,
     ShiraConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -182,6 +183,14 @@ ALL_CONFIGS = [
         },
     ),
     (
+        RoadConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "variant": "1",
+            "group_size": 2,
+        },
+    ),
+    (
         ShiraConfig,
         {
             "r": 1,
@@ -230,10 +239,11 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         BoneConfig,
         HRAConfig,
         OFTConfig,
+        RoadConfig,
         ShiraConfig,
         C3AConfig,
     ]:
-        pytest.skip("Skipping BOFT/HRA/OFT/Bone/SHiRA/C3A for GPT2LMHeadModel")
+        pytest.skip("Skipping BOFT/HRA/OFT/Bone/Road/SHiRA/C3A for GPT2LMHeadModel")
 
 
 def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
@@ -244,6 +254,7 @@ def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
         OFTConfig,
         BoneConfig,
         C3AConfig,
+        RoadConfig,
     ]:
         pytest.skip("Skipping AdaLora/BOFT/HRA/OFT/Bone for GPT2LMHeadModel")
 

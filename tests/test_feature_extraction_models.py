@@ -29,6 +29,7 @@ from peft import (
     PromptEncoderConfig,
     PromptLearningConfig,
     PromptTuningConfig,
+    RoadConfig,
     ShiraConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -144,6 +145,14 @@ ALL_CONFIGS = [
         {
             "task_type": "FEATURE_EXTRACTION",
             "num_virtual_tokens": 10,
+        },
+    ),
+    (
+        RoadConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "variant": "1",
+            "group_size": 2,
         },
     ),
     (

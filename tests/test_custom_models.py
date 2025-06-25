@@ -46,6 +46,7 @@ from peft import (
     OFTConfig,
     PeftModel,
     RandLoraConfig,
+    RoadConfig,
     ShiraConfig,
     TaskType,
     TrainableTokensConfig,
@@ -683,6 +684,15 @@ TEST_CASES = [
             "modules_to_save": ["lin1"],
         },
     ),
+    ########
+    # RoAd #
+    ########
+    ("Vanilla MLP 1 RoAd", "MLP", RoadConfig, {"target_modules": "lin0", "group_size": 2}),
+    ("Vanilla MLP 2 RoAd", "MLP", RoadConfig, {"target_modules": ["lin0"], "group_size": 2}),
+    ("Vanilla MLP 3 RoAd", "MLP", RoadConfig, {"target_modules": ["lin1"], "group_size": 2}),
+    ("Vanilla MLP 4 RoAd", "MLP", RoadConfig, {"target_modules": ["lin0", "lin1"], "group_size": 2}),
+    ("Vanilla MLP 5 RoAd", "MLP", RoadConfig, {"target_modules": ["lin0"], "variant": "2", "group_size": 2}),
+    ("Vanilla MLP 6 RoAd", "MLP", RoadConfig, {"target_modules": ["lin0"], "variant": "4", "group_size": 2}),
 ]
 
 # For this test matrix, each tuple consists of:
@@ -881,6 +891,34 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_weights": False, "boft_block_size": 2},
         {"target_modules": ["lin1"], "init_weights": False, "boft_block_size": 2},
     ),
+    (
+        "RoAd Same",
+        "road",
+        RoadConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "group_size": 2},
+        {"target_modules": ["lin0"], "init_weights": False, "group_size": 2},
+    ),
+    (
+        "RoAd Different",
+        "road",
+        RoadConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "group_size": 2},
+        {"target_modules": ["lin1"], "init_weights": False, "group_size": 2},
+    ),
+    (
+        "RoAd 2 Different",
+        "road",
+        RoadConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "variant": "1", "group_size": 2},
+        {"target_modules": ["lin1"], "init_weights": False, "variant": "2", "group_size": 2},
+    ),
+    (
+        "RoAd 4 Different",
+        "road",
+        RoadConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "variant": "1", "group_size": 2},
+        {"target_modules": ["lin1"], "init_weights": False, "variant": "4", "group_size": 2},
+    ),
 ]
 
 PREFIXES = {
@@ -899,6 +937,7 @@ PREFIXES = {
     ShiraConfig: "shira_",
     VBLoRAConfig: "vblora_",
     BoneConfig: "bone_",
+    RoadConfig: "road_",
     TrainableTokensConfig: "trainable_tokens_",
 }
 
