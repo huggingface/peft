@@ -14,13 +14,15 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
-from .mask_functions import random_mask
 from typing import Literal, Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
-import warnings
+
+from .mask_functions import random_mask
+
 
 @dataclass
 class ShiraConfig(PeftConfig):
@@ -49,25 +51,35 @@ class ShiraConfig(PeftConfig):
             List of modules apart from SHiRA layers to be set as trainable and saved in the final checkpoint.
     """
 
-    r: int = field(default=32, metadata={"help": (
-        "As SHiRA is high rank, it does not really make sense to choose a 'rank'."
-        "However, we would like a way to be consistent with LoRA adapter types in "
-        "terms of parameter count for direct comparison.  Thus, for a given target "
-        "module, the number of SHiRA parameters will be set to r(m+d) where the original "
-        "tensor dimensions are m x d.  This means the number of additional parameters "
-        "is the same as a LoRA adapter."
-        )
-    })
-    mask_type: Literal['random'] = field(default='random', metadata={"help": (
-        "Type of mask function. Defaults to random."
-        "An optional user-defined mask_fn to compute the mask value from base_weights. "
-        "For pretrained weight with shape m, n, return only one mask (shape: m, n) which must be binary 0 or 1 with num_shira_parameters = r(m+n) for linear layers. "
-        "Device and dtype of mask must be same as base layer's weight's device and dtype. "
-        "If mask_fn is None, then it will generate a random sparse mask of size r(m + n). "
-        "This function can be found inside mask_functions.py. "
-        )
-    })
-    random_seed: Optional[int] = field(default=None, metadata={"help": "random seed for the torch generator for random_mask"})
+    r: int = field(
+        default=32,
+        metadata={
+            "help": (
+                "As SHiRA is high rank, it does not really make sense to choose a 'rank'."
+                "However, we would like a way to be consistent with LoRA adapter types in "
+                "terms of parameter count for direct comparison.  Thus, for a given target "
+                "module, the number of SHiRA parameters will be set to r(m+d) where the original "
+                "tensor dimensions are m x d.  This means the number of additional parameters "
+                "is the same as a LoRA adapter."
+            )
+        },
+    )
+    mask_type: Literal["random"] = field(
+        default="random",
+        metadata={
+            "help": (
+                "Type of mask function. Defaults to random."
+                "An optional user-defined mask_fn to compute the mask value from base_weights. "
+                "For pretrained weight with shape m, n, return only one mask (shape: m, n) which must be binary 0 or 1 with num_shira_parameters = r(m+n) for linear layers. "
+                "Device and dtype of mask must be same as base layer's weight's device and dtype. "
+                "If mask_fn is None, then it will generate a random sparse mask of size r(m + n). "
+                "This function can be found inside mask_functions.py. "
+            )
+        },
+    )
+    random_seed: Optional[int] = field(
+        default=None, metadata={"help": "random seed for the torch generator for random_mask"}
+    )
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
@@ -102,5 +114,7 @@ class ShiraConfig(PeftConfig):
         if self.mask_type == "random":
             self.mask_fn = random_mask
         else:
-            warnings.warn(f"Argument {self.mask_type=} is not recognized, please supply your own masking function by calling `config.mask_fn = my_mask_fn`.")
+            warnings.warn(
+                f"Argument {self.mask_type=} is not recognized, please supply your own masking function by calling `config.mask_fn = my_mask_fn`."
+            )
             self.mask_fn = None

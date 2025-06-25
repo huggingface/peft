@@ -51,7 +51,6 @@ from peft import (
     PromptTuningConfig,
     RandLoraConfig,
     ShiraConfig,
-    ShiraModel,
     VBLoRAConfig,
     VeraConfig,
     get_peft_model,
@@ -739,10 +738,12 @@ class PeftCommonTester:
 
         if issubclass(config_cls, (OFTConfig, BOFTConfig)):
             return pytest.skip(f"Test not applicable for {config_cls}")
-        
-        if issubclass(config_cls, ShiraConfig): #SHiRA is always initialized to all zeros, so it will not change the logits values. 
+
+        if issubclass(
+            config_cls, ShiraConfig
+        ):  # SHiRA is always initialized to all zeros, so it will not change the logits values.
             return pytest.skip(f"Test not applicable for {config_cls}")
-        
+
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
 
@@ -1885,7 +1886,7 @@ class PeftCommonTester:
         task_type = config_kwargs.get("task_type")
         if (task_type == "SEQ_2_SEQ_LM") and (config_cls in (PromptTuningConfig, PromptEncoderConfig)):
             self.skipTest("Seq2Seq + prompt tuning/prompt encoder does not work with disabling adapters")
-        if config_cls in (ShiraConfig, ):
+        if config_cls in (ShiraConfig,):
             self.skipTest("SHiRA will not change base model output since it initializes to zero.")
 
         def get_output(model):

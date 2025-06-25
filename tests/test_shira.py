@@ -14,7 +14,6 @@
 
 # This test file is for tests specific to SHiRA.
 
-import copy
 import os
 
 import pytest
@@ -62,16 +61,16 @@ class TestShira:
         # creates a default SHiRA adapter
         peft_model = get_peft_model(mlp, config)
 
-        shira_weight1_size = peft_model.base_model.model.lin1.shira_weight['default'].shape[0]
-        shira_weight2_size = peft_model.base_model.model.lin2.shira_weight['default'].shape[0]
-        shira_indices1_size = peft_model.base_model.model.lin1.shira_indices['default'].shape[1]
-        shira_indices2_size = peft_model.base_model.model.lin2.shira_indices['default'].shape[1]
+        shira_weight1_size = peft_model.base_model.model.lin1.shira_weight["default"].shape[0]
+        shira_weight2_size = peft_model.base_model.model.lin2.shira_weight["default"].shape[0]
+        shira_indices1_size = peft_model.base_model.model.lin1.shira_indices["default"].shape[1]
+        shira_indices2_size = peft_model.base_model.model.lin2.shira_indices["default"].shape[1]
 
         base_weight1_size = peft_model.base_model.model.lin1.base_layer.weight.shape
         base_weight2_size = peft_model.base_model.model.lin2.base_layer.weight.shape
 
-        delta_weight1_shape = peft_model.base_model.model.lin1.get_delta_weight('default').shape
-        delta_weight2_shape = peft_model.base_model.model.lin2.get_delta_weight('default').shape
+        delta_weight1_shape = peft_model.base_model.model.lin1.get_delta_weight("default").shape
+        delta_weight2_shape = peft_model.base_model.model.lin2.get_delta_weight("default").shape
 
         assert shira_weight1_size == r * (base_weight1_size[0] + base_weight1_size[1])
         assert shira_weight2_size == r * (base_weight2_size[0] + base_weight2_size[1])
@@ -97,28 +96,28 @@ class TestShira:
         config2 = ShiraConfig(r=3, target_modules=["lin1", "lin2", "lin3"], random_seed=67)
         peft_model.add_adapter("second", config2)
 
-        assert torch.all(peft_model.base_model.model.lin1.shira_weight['first'] == 0)
-        assert torch.all(peft_model.base_model.model.lin2.shira_weight['first'] == 0)
-        assert torch.all(peft_model.base_model.model.lin1.shira_weight['second'] == 0)
-        assert torch.all(peft_model.base_model.model.lin2.shira_weight['second'] == 0)
-        assert torch.all(peft_model.base_model.model.lin3.shira_weight['second'] == 0)
+        assert torch.all(peft_model.base_model.model.lin1.shira_weight["first"] == 0)
+        assert torch.all(peft_model.base_model.model.lin2.shira_weight["first"] == 0)
+        assert torch.all(peft_model.base_model.model.lin1.shira_weight["second"] == 0)
+        assert torch.all(peft_model.base_model.model.lin2.shira_weight["second"] == 0)
+        assert torch.all(peft_model.base_model.model.lin3.shira_weight["second"] == 0)
 
-        shira_assign_val1_f = torch.randn_like(peft_model.base_model.model.lin1.shira_weight['first'])
-        peft_model.base_model.model.lin1.shira_weight['first'] = shira_assign_val1_f
-        shira_indices1_f = peft_model.base_model.model.lin1.shira_indices['first']
-        shira_assign_val2_f = torch.randn_like(peft_model.base_model.model.lin2.shira_weight['first'])
-        peft_model.base_model.model.lin2.shira_weight['first'] = shira_assign_val2_f
-        shira_indices2_f = peft_model.base_model.model.lin2.shira_indices['first']
+        shira_assign_val1_f = torch.randn_like(peft_model.base_model.model.lin1.shira_weight["first"])
+        peft_model.base_model.model.lin1.shira_weight["first"] = shira_assign_val1_f
+        shira_indices1_f = peft_model.base_model.model.lin1.shira_indices["first"]
+        shira_assign_val2_f = torch.randn_like(peft_model.base_model.model.lin2.shira_weight["first"])
+        peft_model.base_model.model.lin2.shira_weight["first"] = shira_assign_val2_f
+        shira_indices2_f = peft_model.base_model.model.lin2.shira_indices["first"]
 
-        shira_assign_val1_s = torch.randn_like(peft_model.base_model.model.lin1.shira_weight['second'])
-        peft_model.base_model.model.lin1.shira_weight['second'] = shira_assign_val1_s
-        shira_indices1_s = peft_model.base_model.model.lin1.shira_indices['second']
-        shira_assign_val2_s = torch.randn_like(peft_model.base_model.model.lin2.shira_weight['second'])
-        peft_model.base_model.model.lin2.shira_weight['second'] = shira_assign_val2_s
-        shira_indices2_s = peft_model.base_model.model.lin2.shira_indices['second']
-        shira_assign_val3_s = torch.randn_like(peft_model.base_model.model.lin3.shira_weight['second'])
-        peft_model.base_model.model.lin3.shira_weight['second'] = shira_assign_val3_s
-        shira_indices3_s = peft_model.base_model.model.lin3.shira_indices['second']
+        shira_assign_val1_s = torch.randn_like(peft_model.base_model.model.lin1.shira_weight["second"])
+        peft_model.base_model.model.lin1.shira_weight["second"] = shira_assign_val1_s
+        shira_indices1_s = peft_model.base_model.model.lin1.shira_indices["second"]
+        shira_assign_val2_s = torch.randn_like(peft_model.base_model.model.lin2.shira_weight["second"])
+        peft_model.base_model.model.lin2.shira_weight["second"] = shira_assign_val2_s
+        shira_indices2_s = peft_model.base_model.model.lin2.shira_indices["second"]
+        shira_assign_val3_s = torch.randn_like(peft_model.base_model.model.lin3.shira_weight["second"])
+        peft_model.base_model.model.lin3.shira_weight["second"] = shira_assign_val3_s
+        shira_indices3_s = peft_model.base_model.model.lin3.shira_indices["second"]
 
         input = torch.randn(5, 10)
         peft_model.set_adapter("first")
@@ -133,7 +132,7 @@ class TestShira:
         peft_model.save_pretrained(save_path)
         assert os.path.exists(os.path.join(save_path, "first", "adapter_config.json"))
         assert os.path.exists(os.path.join(save_path, "second", "adapter_config.json"))
-        del(peft_model)
+        del peft_model
 
         torch.manual_seed(0)
         mlp = MLP()
@@ -148,16 +147,16 @@ class TestShira:
         assert torch.all(output_first - output_first_loaded == 0)
         assert torch.all(output_second - output_second_loaded == 0)
 
-        assert torch.all(shira_assign_val1_f - peft_model.base_model.model.lin1.shira_weight['first'] == 0)
-        assert torch.all(shira_assign_val2_f - peft_model.base_model.model.lin2.shira_weight['first'] == 0)
-        assert torch.all(shira_indices1_f - peft_model.base_model.model.lin1.shira_indices['first'] == 0)
-        assert torch.all(shira_indices2_f - peft_model.base_model.model.lin2.shira_indices['first'] == 0)
-        assert torch.all(shira_assign_val1_s - peft_model.base_model.model.lin1.shira_weight['second'] == 0)
-        assert torch.all(shira_assign_val2_s - peft_model.base_model.model.lin2.shira_weight['second'] == 0)
-        assert torch.all(shira_assign_val3_s - peft_model.base_model.model.lin3.shira_weight['second'] == 0)
-        assert torch.all(shira_indices1_s - peft_model.base_model.model.lin1.shira_indices['second'] == 0)
-        assert torch.all(shira_indices2_s - peft_model.base_model.model.lin2.shira_indices['second'] == 0)
-        assert torch.all(shira_indices3_s - peft_model.base_model.model.lin3.shira_indices['second'] == 0)
+        assert torch.all(shira_assign_val1_f - peft_model.base_model.model.lin1.shira_weight["first"] == 0)
+        assert torch.all(shira_assign_val2_f - peft_model.base_model.model.lin2.shira_weight["first"] == 0)
+        assert torch.all(shira_indices1_f - peft_model.base_model.model.lin1.shira_indices["first"] == 0)
+        assert torch.all(shira_indices2_f - peft_model.base_model.model.lin2.shira_indices["first"] == 0)
+        assert torch.all(shira_assign_val1_s - peft_model.base_model.model.lin1.shira_weight["second"] == 0)
+        assert torch.all(shira_assign_val2_s - peft_model.base_model.model.lin2.shira_weight["second"] == 0)
+        assert torch.all(shira_assign_val3_s - peft_model.base_model.model.lin3.shira_weight["second"] == 0)
+        assert torch.all(shira_indices1_s - peft_model.base_model.model.lin1.shira_indices["second"] == 0)
+        assert torch.all(shira_indices2_s - peft_model.base_model.model.lin2.shira_indices["second"] == 0)
+        assert torch.all(shira_indices3_s - peft_model.base_model.model.lin3.shira_indices["second"] == 0)
 
         return peft_model
 

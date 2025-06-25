@@ -22,4 +22,6 @@ from .model import ShiraModel
 __all__ = ["Linear", "ShiraConfig", "ShiraLayer", "ShiraModel"]
 
 
-register_peft_method(name="shira", config_cls=ShiraConfig, model_cls=ShiraModel, prefix="shira_", is_mixed_compatible=True)
+register_peft_method(
+    name="shira", config_cls=ShiraConfig, model_cls=ShiraModel, prefix="shira_", is_mixed_compatible=True
+)

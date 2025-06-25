@@ -25,7 +25,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
 class ShiraLayer(BaseTunerLayer):
     # List all names of layers that may contain trainable adapter weights
-    adapter_layer_names = ("shira_weight", )
+    adapter_layer_names = ("shira_weight",)
     # All names of other adapter-related parameters
     other_param_names = ("r", "scaling")
 
@@ -35,7 +35,7 @@ class ShiraLayer(BaseTunerLayer):
         self.scaling = {}
         self.shira_weight = nn.ParameterDict({})
         self.shira_indices = {}
-        self.weight_shape = base_layer.weight.shape #Assumes SHiRA is on some layer with "weight" parameter
+        self.weight_shape = base_layer.weight.shape  # Assumes SHiRA is on some layer with "weight" parameter
 
         # Mark the weight as unmerged
         self._disable_adapters = False
@@ -45,7 +45,7 @@ class ShiraLayer(BaseTunerLayer):
         if isinstance(base_layer, nn.Linear):
             in_features, out_features = base_layer.in_features, base_layer.out_features
         else:
-            raise NotImplementedError('Only nn.Linear layers supported currently')
+            raise NotImplementedError("Only nn.Linear layers supported currently")
 
         self.in_features = in_features
         self.out_features = out_features
@@ -60,25 +60,36 @@ class ShiraLayer(BaseTunerLayer):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         self.r[adapter_name] = r
-        self.scaling[adapter_name] = 1.0 #Default scale during training. Can be set to any (non-negative) value during inference.
+        self.scaling[adapter_name] = (
+            1.0  # Default scale during training. Can be set to any (non-negative) value during inference.
+        )
         # The number of shira weights in this layer is determined by r such that the total number of weights is the same as a LoRA Layer (for direct comparisons)
         num_shira_weight = r * (self.in_features + self.out_features)
         if num_shira_weight > self.in_features * self.out_features:
-            raise ValueError(f'The set rank {r} results in more shira params than the total number of params in the base layer {self.in_features * self.out_features} and this is not allowed.')
+            raise ValueError(
+                f"The set rank {r} results in more shira params than the total number of params in the base layer {self.in_features * self.out_features} and this is not allowed."
+            )
 
         # Actual trainable parameters
         # We have used a vector parameter with fixed indices that we use inside a torch.sparse_coo_tensor in get_delta_weight function.
         # Directly using a torch.sparse_coo_tensor as a parameter could have been possible but we ran into some issues similar to:
         # https://github.com/pytorch/pytorch/issues/79542.
-        self.shira_weight[adapter_name] = nn.Parameter(torch.zeros(num_shira_weight).to(self.base_layer.weight.dtype).to(self.base_layer.weight.device), requires_grad=True)
+        self.shira_weight[adapter_name] = nn.Parameter(
+            torch.zeros(num_shira_weight).to(self.base_layer.weight.dtype).to(self.base_layer.weight.device),
+            requires_grad=True,
+        )
 
         # Compute the shira_indices from the mask. Make sure the mask is formed using r*(self.in_features + self.out_features) and not some other K.
-        mask_indices = torch.where(mask==1.)
-        self.shira_indices[adapter_name] = torch.cat([mask_indices[0].unsqueeze(0), mask_indices[1].unsqueeze(0)], 0).to(torch.int)
+        mask_indices = torch.where(mask == 1.0)
+        self.shira_indices[adapter_name] = torch.cat(
+            [mask_indices[0].unsqueeze(0), mask_indices[1].unsqueeze(0)], 0
+        ).to(torch.int)
         self.shira_indices[adapter_name] = self.shira_indices[adapter_name].to(self.base_layer.weight.device)
 
         if self.shira_indices[adapter_name].shape[1] != self.shira_weight[adapter_name].shape[0]:
-            raise ValueError(f'The SHiRA indices and weights are not the same dimensions for adapter {adapter_name} in layer {self.base_layer}')
+            raise ValueError(
+                f"The SHiRA indices and weights are not the same dimensions for adapter {adapter_name} in layer {self.base_layer}"
+            )
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
@@ -90,6 +101,7 @@ class ShiraLayer(BaseTunerLayer):
             # Ignore the case where the adapter is not in the layer
             return
         self.scaling[adapter] = scale
+
 
 class Linear(nn.Module, ShiraLayer):
     # SHiRA implemented in a dense layer
@@ -169,7 +181,9 @@ class Linear(nn.Module, ShiraLayer):
 
         # In multi-gpu environment, the indices are at the wrong gpu.  This is needed to correct this.
         self.shira_indices[adapter] = self.shira_indices[adapter].to(self.shira_weight[adapter].device)
-        return torch.sparse_coo_tensor(self.shira_indices[adapter], self.shira_weight[adapter] * self.scaling[adapter], self.weight_shape)
+        return torch.sparse_coo_tensor(
+            self.shira_indices[adapter], self.shira_weight[adapter] * self.scaling[adapter], self.weight_shape
+        )
 
     """
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:

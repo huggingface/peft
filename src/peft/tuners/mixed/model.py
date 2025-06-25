@@ -32,9 +32,24 @@ from peft.utils import (
 
 # Collection of constants used for all tuners
 COMPATIBLE_TUNER_TYPES = (PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.ADALORA, PeftType.OFT, PeftType.SHIRA)
-PREFIXES = [lora.LoraModel.prefix, lokr.LoKrModel.prefix, loha.LoHaModel.prefix, oft.OFTModel.prefix, shira.ShiraModel.prefix]
-Configs = Union[lora.LoraConfig, loha.LoHaConfig, lokr.LoKrConfig, adalora.AdaLoraConfig, oft.OFTConfig, shira.ShiraConfig]
-Layers = (lora.layer.LoraLayer, loha.layer.LoHaLayer, lokr.layer.LoKrLayer, adalora.layer.AdaLoraLayer, oft.OFTLayer, shira.ShiraLayer)
+PREFIXES = [
+    lora.LoraModel.prefix,
+    lokr.LoKrModel.prefix,
+    loha.LoHaModel.prefix,
+    oft.OFTModel.prefix,
+    shira.ShiraModel.prefix,
+]
+Configs = Union[
+    lora.LoraConfig, loha.LoHaConfig, lokr.LoKrConfig, adalora.AdaLoraConfig, oft.OFTConfig, shira.ShiraConfig
+]
+Layers = (
+    lora.layer.LoraLayer,
+    loha.layer.LoHaLayer,
+    lokr.layer.LoKrLayer,
+    adalora.layer.AdaLoraLayer,
+    oft.OFTLayer,
+    shira.ShiraLayer,
+)
 
 
 class MixedModel(BaseTuner):
