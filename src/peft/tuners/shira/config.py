@@ -100,7 +100,6 @@ class ShiraConfig(PeftConfig):
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
         if self.mask_type == "random":
-            warnings.warn(f"Argument mask_type is set to {self.mask_type}. Creating a random sparse mask...")
             self.mask_fn = random_mask
         else:
             warnings.warn(f"Argument {self.mask_type=} is not recognized, please supply your own masking function by calling `config.mask_fn = my_mask_fn`.")
