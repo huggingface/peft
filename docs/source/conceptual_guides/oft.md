@@ -86,6 +86,52 @@ specify either `boft_block_size` or `boft_block_num`, but not both simultaneousl
 
 
 
+## OFT Example Usage
+
+For using OFT for quantized finetuning with [TRL](https://github.com/huggingface/trl) for `SFT`, `PPO`, or `DPO` fine-tuning, follow the following outline:
+
+```py
+from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+from trl import SFTTrainer
+from peft import OFTConfig
+
+if use_quantization:
+  bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_compute_dtype=torch.bfloat16,
+    bnb_4bit_use_double_quant=True,
+    bnb_4bit_quant_storage=torch.bfloat16,
+  )
+
+model = AutoModelForCausalLM.from_pretrained(
+  "model_name", 
+  quantization_config=bnb_config
+)
+tokenizer = AutoTokenizer.from_pretrained("model_name")
+
+# Configure OFT
+peft_config = OFTConfig(
+    oft_block_size=32,
+    use_cayley_neumann=True,
+    target_modules="all-linear",
+    bias="none",
+    task_type="CAUSAL_LM"
+)
+
+trainer = SFTTrainer(
+    model=model,
+    train_dataset=ds['train'],
+    peft_config=peft_config,
+    tokenizer=tokenizer,
+    args=training_arguments,
+    data_collator=collator,
+)
+
+trainer.train()
+```
+
+
 ## BOFT Example Usage
 
 For an example of the BOFT method application to various downstream tasks, please refer to the following guides:
