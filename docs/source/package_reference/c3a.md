@@ -18,6 +18,9 @@ rendered properly in your Markdown viewer.
 
 [C3A](https://huggingface.co/papers/2407.19342) is a parameter-efficient fine-tuning technique that leverages Circular Convolution to achieve high rank adaptation within reasonable resource limits.
 
+Note that you should use a much larger learning rate (LR) for C3A than for other methods.
+For example, a LR of 1e-1 for C3A is a good starting point.
+
 C3A currently has the following constraints:
 
 - Only `nn.Linear` layers are supported.
