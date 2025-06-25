@@ -96,25 +96,22 @@ class OFTRotationModule(nn.Module):
         self.kernel_size = kernel_size
         self.use_cayley_neumann = use_cayley_neumann
         self.num_cayley_neumann_terms = num_cayley_neumann_terms
+        # Create indices for upper triangle (excluding diagonal)
+        self.rows, self.cols = torch.triu_indices(block_size, block_size, 1)
 
     def _pytorch_skew_symmetric(self, vec, block_size):
         batch_size = vec.shape[0]
         matrix = torch.zeros(batch_size, block_size, block_size, device=vec.device, dtype=vec.dtype)
 
-        # Create indices for upper triangle (excluding diagonal)
-        rows, cols = torch.triu_indices(block_size, block_size, 1, device=vec.device)
-        matrix[:, rows, cols] = vec
+        matrix[:, self.rows, self.cols] = vec
         matrix = matrix - matrix.transpose(-2, -1)
         return matrix
 
     def _pytorch_skew_symmetric_inv(self, matrix, block_size):
         batch_size = matrix.shape[0]
 
-        # Create indices for upper triangle (excluding diagonal)
-        rows, cols = torch.triu_indices(block_size, block_size, 1, device=matrix.device)
-
         # Extract the upper triangular elements
-        vec = matrix[:, rows, cols]
+        vec = matrix[:, self.rows, self.cols]
         return vec
 
     def _cayley_batch(

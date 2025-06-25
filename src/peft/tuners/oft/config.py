@@ -147,7 +147,7 @@ class OFTConfig(PeftConfig):
     use_cayley_neumann: bool = field(
         default=False,
         metadata={
-            "help": "Whether to use the Cayley-Neumann Formulation of OFT or not. Set to True to improve computational efficiency if oft_block_size is large."
+            "help": "Whether to use the Cayley-Neumann Formulation of OFT or not. Set to True to improve computational efficiency but comes at costs of bigger approximation error for orthogonality."
         },
     )
     num_cayley_neumann_terms: int = field(
