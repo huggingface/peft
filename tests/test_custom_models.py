@@ -435,15 +435,15 @@ TEST_CASES = [
     ########
     # SHiRA #
     ########
-    ("Vanilla MLP 1 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": "lin0"}),
-    ("Vanilla MLP 2 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": ["lin0"]}),
-    ("Vanilla MLP 3 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": ["lin1"]}),
-    ("Vanilla MLP 4 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": ["lin0", "lin1"], "random_seed": 56}),
+    ("Vanilla MLP 1 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": "lin0", "init_randn_shira_weight": True}),
+    ("Vanilla MLP 2 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": ["lin0"], "init_randn_shira_weight": True}),
+    ("Vanilla MLP 3 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": ["lin1"], "init_randn_shira_weight": True}),
+    ("Vanilla MLP 4 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": ["lin0", "lin1"], "random_seed": 56, "init_randn_shira_weight": True}),
     (
         "Vanilla MLP 5 SHiRA",
         "MLP",
         ShiraConfig,
-        {"r": 1, "target_modules": ["lin0"]},
+        {"r": 1, "target_modules": ["lin0"], "init_randn_shira_weight": True},
     ),
     ########
     # VeRA #
@@ -646,6 +646,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         FourierFTConfig,
         {"n_frequency": 10, "target_modules": ["lin0"]},
         {"n_frequency": 10, "target_modules": ["lin1"]},
+    ),
+    (
+        "SHiRA Same",
+        "shira",
+        ShiraConfig,
+        {"r": 1, "target_modules": ["lin0"], "init_randn_shira_weight": True},
+        {"r": 1, "target_modules": ["lin0"], "init_randn_shira_weight": True},
+    ),
+    (
+        "SHiRA Different",
+        "shira",
+        ShiraConfig,
+        {"r": 1, "target_modules": ["lin0"], "init_randn_shira_weight": True},
+        {"r": 1, "target_modules": ["lin1"], "init_randn_shira_weight": True},
     ),
     # Note: Currently, we cannot target lin0 and lin1 with different adapters when using VeRA. The reason is that the
     # first adapter being created will result in a vera_A or vera_B shape that is too small for the next adapter
@@ -1533,6 +1547,8 @@ class TestPeftCustomModel(PeftCommonTester):
             config_kwargs = config_kwargs.copy()
             # override the default value and make PEFT operation a no-op
             config_kwargs["init_weights"] = True
+        if issubclass(config_cls, (ShiraConfig,)):
+            config_kwargs["init_randn_shira_weight"] = False
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,

@@ -47,6 +47,8 @@ class ShiraConfig(PeftConfig):
         fan_in_fan_out (`bool`):
             Set this to True if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 uses
             `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
+        init_randn_shira_weight (`bool`):
+            Initialize SHiRA weight to have randn values instead of zeros. This is used only for testing.
         modules_to_save (`List[str]`):
             List of modules apart from SHiRA layers to be set as trainable and saved in the final checkpoint.
     """
@@ -94,6 +96,10 @@ class ShiraConfig(PeftConfig):
     fan_in_fan_out: bool = field(
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
+    )
+    init_randn_shira_weight: bool = field(
+        default=False,
+        metadata={"help": "Initialize SHiRA weight to have randn values instead of zeros. This is used only for testing."},
     )
     modules_to_save: Optional[list[str]] = field(
         default=None,
