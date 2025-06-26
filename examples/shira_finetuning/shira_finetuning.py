@@ -88,13 +88,13 @@ def train(
         return tokenized_full_prompt
 
     def custom_random_mask_function_with_custom_kwargs(custom_arg_1, custom_arg_2):
-        print(f"Generating a custom random mask function with custom kwargs...")
+        print("Generating a custom random mask function with custom kwargs...")
 
         def mask_fn(base_layer, r):
             """
             This mask function is similar to the random_mask provided in src/peft/tuners/shira/mask_functions.py except the seed is derived from custom_kwargs.
-            Please use this as an example to create your own custom sparse masks that may use custom_kwargs. Remember, for a pretrained weight with shape m, n, 
-            mask_fn must return only one mask (shape: m, n) which must be binary 0 or 1 with num_shira_parameters = r(m+n) for linear layers. Device and dtype 
+            Please use this as an example to create your own custom sparse masks that may use custom_kwargs. Remember, for a pretrained weight with shape m, n,
+            mask_fn must return only one mask (shape: m, n) which must be binary 0 or 1 with num_shira_parameters = r(m+n) for linear layers. Device and dtype
             of mask must be same as base layer's weight's device and dtype.
             """
             new_seed = custom_arg_1 + custom_arg_2
