@@ -7,11 +7,11 @@ from tqdm import tqdm
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, default_data_collator, get_linear_schedule_with_warmup
 
 from peft import AdaLoraConfig, PeftConfig, PeftModel, TaskType, get_peft_model
-
+from peft.utils import infer_device
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-device = "cuda"
+device = infer_device()
 model_name_or_path = "facebook/bart-base"
 tokenizer_name_or_path = "facebook/bart-base"
 

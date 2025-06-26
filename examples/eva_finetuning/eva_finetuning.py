@@ -19,9 +19,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingA
 from utils import DataCollator, TokenizerMetaMath
 
 from peft import EvaConfig, LoraConfig, get_peft_model, initialize_lora_eva_weights
+from peft.utils import infer_device
 
-
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE = infere_device()
 
 
 # config
