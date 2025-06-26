@@ -215,7 +215,7 @@ class BenchmarkResult:
                 base_path = RESULT_PATH_TEMP
 
             # Create the filename
-            filename = f"{self.experiment_name}_{self.experiment_id}.json"
+            filename = f"{self.peft_method}--{self.experiment_name}.json"
             path = os.path.join(base_path, filename)
 
         # Ensure the directory exists
