@@ -233,6 +233,9 @@ class LoraLayer(BaseTunerLayer):
                 self.loftq_init(adapter_name)
         elif init_lora_weights == "eva":
             nn.init.zeros_(self.lora_B[adapter_name].weight)
+        elif init_lora_weights == "orthogonal":
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.orthogonal_init(adapter_name)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
         # call this before init of the lora variants
@@ -442,6 +445,23 @@ class LoraLayer(BaseTunerLayer):
             self.lora_embedding_A[adapter_name].weight.data = lora_A
             self.lora_embedding_B[adapter_name].weight.data = lora_B
         self.get_base_layer().weight.data = qweight
+
+    @torch.no_grad()
+    def orthogonal_init(self, adapter_name):
+        # https://datta0.github.io/posts/rethink-lora-init/#orthogonal-initialisation
+        rank = self.r[adapter_name]
+        if rank % 2 != 0:
+            raise ValueError(f"Orthogonal initialization requires the LoRA rank to be even, got {rank} instead.")
+
+        X = torch.randn(rank, rank)
+        Q, _ = torch.linalg.qr(X)
+        q_odd = Q[0::2, :]  # Odd rows
+        q_even = Q[1::2, :]  # Even rows
+        dtype = self.get_base_layer().weight.dtype
+        lora_A = torch.randn(self.in_features, rank // 2).mm(q_odd).T / 10.0
+        lora_B = torch.randn(rank // 2, self.out_features).T.mm(q_even) / 10.0
+        self.lora_A[adapter_name].weight = nn.Parameter(lora_A.contiguous().to(dtype))
+        self.lora_B[adapter_name].weight = nn.Parameter(lora_B.contiguous().to(dtype))
 
     def _cache_store(self, key: str, value: Any) -> None:
         self._caches[key] = value
