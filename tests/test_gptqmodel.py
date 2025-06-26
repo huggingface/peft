@@ -405,7 +405,7 @@ class PeftGPTQModelTests(unittest.TestCase):
             # assert loss is not None
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
-    @pytest.mark.single_gpu_tests
+    @pytest.mark.multi_gpu_tests
     @require_torch_multi_accelerator
     def test_oft_causal_lm_training_multi_accelerator(self):
         r"""

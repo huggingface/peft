@@ -69,7 +69,15 @@ class AwqOFTLinear(torch.nn.Module, OFTLayer):
             if active_adapter not in self.oft_R.keys():
                 continue
             oft_R = self.oft_R[active_adapter]
+
+            requires_conversion = not torch.is_autocast_enabled()
+            if requires_conversion:
+                expected_dtype = x.dtype
+                x = self._cast_input_dtype(x, oft_R.weight.dtype)
+
             x = oft_R(x)
+            if requires_conversion:
+                x = x.to(expected_dtype)
 
         result = self.quant_linear_module(x)
         return result
