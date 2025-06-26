@@ -438,7 +438,12 @@ TEST_CASES = [
     ("Vanilla MLP 1 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": "lin0", "init_randn_shira_weight": True}),
     ("Vanilla MLP 2 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": ["lin0"], "init_randn_shira_weight": True}),
     ("Vanilla MLP 3 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": ["lin1"], "init_randn_shira_weight": True}),
-    ("Vanilla MLP 4 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": ["lin0", "lin1"], "random_seed": 56, "init_randn_shira_weight": True}),
+    (
+        "Vanilla MLP 4 SHiRA",
+        "MLP",
+        ShiraConfig,
+        {"r": 1, "target_modules": ["lin0", "lin1"], "random_seed": 56, "init_randn_shira_weight": True},
+    ),
     (
         "Vanilla MLP 5 SHiRA",
         "MLP",

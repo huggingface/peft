@@ -99,7 +99,9 @@ class ShiraConfig(PeftConfig):
     )
     init_randn_shira_weight: bool = field(
         default=False,
-        metadata={"help": "Initialize SHiRA weight to have randn values instead of zeros. This is used only for testing."},
+        metadata={
+            "help": "Initialize SHiRA weight to have randn values instead of zeros. This is used only for testing."
+        },
     )
     modules_to_save: Optional[list[str]] = field(
         default=None,
