@@ -61,49 +61,17 @@ class AwqOFTLinear(torch.nn.Module, OFTLayer):
         )
 
     def forward(self, x: torch.Tensor):
-        # oft_rotation = torch.eye(self.bs, device=x.device, dtype=x.dtype).repeat(self.rank, 1, 1)
-
         if self.disable_adapters:
             result = self.quant_linear_module(x)
             return result
 
         for active_adapter in self.active_adapters:
-            if active_adapter not in self.oft_r.keys():
+            if active_adapter not in self.oft_R.keys():
                 continue
+            oft_R = self.oft_R[active_adapter]
+            x = oft_R(x)
 
-            oft_r = self.oft_r[active_adapter]
-            oft_block_size = self.oft_block_size[active_adapter]
-            # oft_s = self.oft_s[active_adapter]
-            # dropout = self.oft_dropout[active_adapter]
-
-            rank = self.r[active_adapter]
-            coft = self.coft[active_adapter]
-            eps = self.eps[active_adapter]
-
-            """
-            requires_conversion = not torch.is_autocast_enabled() if requires_conversion:
-                expected_dtype = x.dtype x = self._cast_input_dtype(x, oft_r.dtype)
-
-            if coft:
-                with torch.no_grad():
-                    oft_r.copy_(self._project_batch(oft_r, eps=eps))
-            orth_rotate = self._cayley_batch(oft_r, oft_block_size) # orth_rotate = dropout(orth_rotate)
-
-            current_oft_rot_dtype = oft_rotation.dtype if orth_rotate.dtype != current_oft_rot_dtype:
-                orth_rotate = orth_rotate.to(current_oft_rot_dtype)
-            # oft_rotation = self.oft_matmul(orth_rotate, oft_rotation.unsqueeze(0)).squeeze(0) oft_rotation =
-            torch.bmm(orth_rotate, oft_rotation) oft_rotation = oft_rotation.to(current_oft_rot_dtype)
-
-
-
-        batch_dims = x.shape[:-1] x_reshaped = x.view(*batch_dims, rank, -1) x_rotated_reshaped =
-        torch.einsum('...rk,rkc->...rc', x_reshaped, oft_rotation) # x_rotated_reshaped =
-        torch.einsum('rkc,...rk->...rc', oft_rotation.transpose(-1, -2), x_reshaped) x_rotated =
-        x_rotated_reshaped.reshape(*batch_dims, self.in_features)
-        """
-        x_rotated = oft_r(x)
-
-        result = self.quant_linear_module(x_rotated)
+        result = self.quant_linear_module(x)
         return result
 
     def __repr__(self) -> str:
