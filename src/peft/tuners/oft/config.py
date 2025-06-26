@@ -69,7 +69,7 @@ class OFTConfig(PeftConfig):
 
     r: int = field(default=0, metadata={"help": "OFT rank, number of OFT blocks per injected layer."})
     oft_block_size: int = field(
-        default=32,
+        default=64,
         metadata={
             "help": "OFT block size across different layers.",
             "note": "You can only specify either r or oft_block_size, but not both simultaneously, because r x oft_block_size = layer dimension.",

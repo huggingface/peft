@@ -434,7 +434,7 @@ def set_peft_model_state_dict(
 
             peft_model_state_dict = {renamed_dora_weights(k): v for k, v in peft_model_state_dict.items()}
         elif config.peft_type == PeftType.OFT:
-            if any(".oft_s." in key for key in peft_model_state_dict):
+            if any(".oft_r." in key for key in peft_model_state_dict):
                 raise ValueError(
                     "Trying to load old OFT checkpoint, which is no longer supported. Please install PEFT <= v0.15.2 to load it or train a new OFT adapter."
                 )
