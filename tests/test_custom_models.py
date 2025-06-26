@@ -300,26 +300,114 @@ TEST_CASES = [
     ########
     # OFT #
     ########
-    ("Vanilla MLP 1 OFT", "MLP", OFTConfig, {"r": 2, "target_modules": "lin0"}),
-    ("Vanilla MLP 2 OFT", "MLP", OFTConfig, {"r": 2, "target_modules": ["lin0"]}),
-    ("Vanilla MLP 5 OFT", "MLP", OFTConfig, {"r": 2, "target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    (
+        "Vanilla MLP 1 OFT",
+        "MLP",
+        OFTConfig,
+        {"r": 2, "oft_block_size": 0, "target_modules": "lin0", "use_cayley_neumann": False},
+    ),
+    (
+        "Vanilla MLP 2 OFT",
+        "MLP",
+        OFTConfig,
+        {"r": 2, "oft_block_size": 0, "target_modules": ["lin0"], "use_cayley_neumann": False},
+    ),
+    (
+        "Vanilla MLP 5 OFT",
+        "MLP",
+        OFTConfig,
+        {
+            "r": 2,
+            "oft_block_size": 0,
+            "target_modules": ["lin0"],
+            "modules_to_save": ["lin1"],
+            "use_cayley_neumann": False,
+        },
+    ),
     (
         "Vanilla MLP 6 OFT",
         "MLP",
         OFTConfig,
         {
             "r": 2,
+            "oft_block_size": 0,
             "target_modules": ["lin0"],
             "module_dropout": 0.1,
+            "use_cayley_neumann": False,
         },
     ),
-    ("Vanilla MLP 7 OFT", "MLP", OFTConfig, {"r": 2, "target_modules": ["lin0"], "coft": True}),
-    ("Vanilla MLP 8 OFT", "MLP", OFTConfig, {"r": 2, "target_modules": ["lin0"], "block_share": True}),
-    ("Vanilla MLP 9 OFT", "MLP", OFTConfig, {"r": 2, "target_modules": ["lin0"], "coft": True, "block_share": True}),
-    ("Conv2d 1 OFT", "Conv2d", OFTConfig, {"r": 5, "target_modules": ["conv2d"]}),
-    ("Conv2d 3 OFT", "Conv2d", OFTConfig, {"r": 5, "target_modules": ["conv2d"], "coft": True}),
-    ("Conv2d 4 OFT", "Conv2d", OFTConfig, {"r": 5, "target_modules": ["conv2d"], "block_share": True}),
-    ("Conv2d 5 OFT", "Conv2d", OFTConfig, {"r": 5, "target_modules": ["conv2d"], "coft": True, "block_share": True}),
+    (
+        "Vanilla MLP 7 OFT",
+        "MLP",
+        OFTConfig,
+        {"r": 2, "oft_block_size": 0, "target_modules": ["lin0"], "coft": True, "eps": 1e-2},
+    ),
+    (
+        "Vanilla MLP 8 OFT",
+        "MLP",
+        OFTConfig,
+        {"r": 2, "oft_block_size": 0, "target_modules": ["lin0"], "block_share": True, "use_cayley_neumann": False},
+    ),
+    (
+        "Vanilla MLP 9 OFT",
+        "MLP",
+        OFTConfig,
+        {"r": 2, "oft_block_size": 0, "target_modules": ["lin0"], "coft": True, "eps": 1e-2, "block_share": True},
+    ),
+    (
+        "Vanilla MLP 10 OFT",
+        "MLP",
+        OFTConfig,
+        {"r": 0, "oft_block_size": 2, "target_modules": ["lin0"], "use_cayley_neumann": True},
+    ),
+    (
+        "Vanilla MLP 11 OFT",
+        "MLP",
+        OFTConfig,
+        {"r": 0, "oft_block_size": 2, "target_modules": ["lin0"], "use_cayley_neumann": False},
+    ),
+    (
+        "Vanilla MLP 12 OFT",
+        "MLP",
+        OFTConfig,
+        {
+            "r": 0,
+            "oft_block_size": 2,
+            "target_modules": ["lin0"],
+            "coft": True,
+            "eps": 1e-2,
+            "block_share": True,
+            "use_cayley_neumann": True,
+        },
+    ),
+    (
+        "Vanilla MLP 13 OFT",
+        "MLP",
+        OFTConfig,
+        {
+            "r": 0,
+            "oft_block_size": 2,
+            "target_modules": ["lin0"],
+            "coft": True,
+            "eps": 1e-2,
+            "block_share": True,
+            "use_cayley_neumann": False,
+        },
+    ),
+    ("Conv2d 1 OFT", "Conv2d", OFTConfig, {"r": 5, "oft_block_size": 0, "target_modules": ["conv2d"]}),
+    ("Conv2d 3 OFT", "Conv2d", OFTConfig, {"r": 5, "oft_block_size": 0, "target_modules": ["conv2d"], "coft": True}),
+    (
+        "Conv2d 4 OFT",
+        "Conv2d",
+        OFTConfig,
+        {"r": 5, "oft_block_size": 0, "target_modules": ["conv2d"], "block_share": True},
+    ),
+    (
+        "Conv2d 5 OFT",
+        "Conv2d",
+        OFTConfig,
+        {"r": 5, "oft_block_size": 0, "target_modules": ["conv2d"], "coft": True, "block_share": True},
+    ),
     ########
     # HRA #
     ########
@@ -1629,6 +1717,9 @@ class TestPeftCustomModel(PeftCommonTester):
         if issubclass(config_cls, (IA3Config, LoraConfig)) and model_id in conv_ids:  # more instability with Conv
             atol, rtol = 1e-3, 1e-3
 
+        if issubclass(config_cls, OFTConfig):
+            atol, rtol = 1e-4, 1e-4
+
         if config_kwargs.get("use_dora") and model_id == "EmbConv1D":
             atol, rtol = 1e-4, 1e-4
 
@@ -2214,7 +2305,7 @@ class TestPeftCustomModel(PeftCommonTester):
             LoHaConfig(target_modules=["lin0"], init_weights=False),
             AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False, total_step=1),
             IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
-            OFTConfig(target_modules=["lin0"], init_weights=False, r=2),
+            OFTConfig(target_modules=["lin0"], init_weights=False, r=2, oft_block_size=0),
             BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
             HRAConfig(target_modules=["lin0"], init_weights=False),
             BoneConfig(target_modules=["lin0"], init_weights=False, r=2),
@@ -3385,33 +3476,30 @@ class TestRequiresGrad:
 
     def test_requires_grad_oft_different_targets(self):
         # test two different OFT adapters that target different modules
-        config0 = OFTConfig(target_modules=["lin0"], r=2)
+        config0 = OFTConfig(target_modules=["lin0"], r=2, oft_block_size=0)
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = OFTConfig(target_modules=["lin1"], r=2, inference_mode=True)
+        config1 = OFTConfig(target_modules=["lin1"], r=2, oft_block_size=0, inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin0.oft_r.default",
-            "base_model.model.lin0.oft_s.default",
+            "base_model.model.lin0.oft_R.default.weight",
         )
 
         # set config0 as active, should not change anything
         peft_model.set_adapter("default")
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin0.oft_r.default",
-            "base_model.model.lin0.oft_s.default",
+            "base_model.model.lin0.oft_R.default.weight",
         )
 
         # change activate pter to pter1
         peft_model.set_adapter("adapter1")
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin1.oft_r.adapter1",
-            "base_model.model.lin1.oft_s.adapter1",
+            "base_model.model.lin1.oft_R.adapter1.weight",
         )
 
         # disable all pters
@@ -3421,39 +3509,35 @@ class TestRequiresGrad:
         # after context is exited, return to the previous state
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin1.oft_r.adapter1",
-            "base_model.model.lin1.oft_s.adapter1",
+            "base_model.model.lin1.oft_R.adapter1.weight",
         )
 
     def test_requires_grad_oft_same_targets(self):
         # same as previous test, except that OFT adapters target the same layer
-        config0 = OFTConfig(target_modules=["lin0"], r=2)
+        config0 = OFTConfig(target_modules=["lin0"], r=2, oft_block_size=0)
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = OFTConfig(target_modules=["lin0"], r=2, inference_mode=True)
+        config1 = OFTConfig(target_modules=["lin0"], r=2, oft_block_size=0, inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin0.oft_r.default",
-            "base_model.model.lin0.oft_s.default",
+            "base_model.model.lin0.oft_R.default.weight",
         )
 
         # set config0 as active, should not change anything
         peft_model.set_adapter("default")
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin0.oft_r.default",
-            "base_model.model.lin0.oft_s.default",
+            "base_model.model.lin0.oft_R.default.weight",
         )
 
         # change activate adapter to adapter1
         peft_model.set_adapter("adapter1")
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin0.oft_r.adapter1",
-            "base_model.model.lin0.oft_s.adapter1",
+            "base_model.model.lin0.oft_R.adapter1.weight",
         )
 
         # disable all adapters
@@ -3464,8 +3548,7 @@ class TestRequiresGrad:
         peft_model.set_adapter("adapter1")
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin0.oft_r.adapter1",
-            "base_model.model.lin0.oft_s.adapter1",
+            "base_model.model.lin0.oft_R.adapter1.weight",
         )
 
     def test_requires_grad_hra_different_targets(self):
