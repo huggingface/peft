@@ -245,7 +245,6 @@ class BenchmarkConfig:
     dtype: str = "float16"
     use_4bit: bool = False
     use_8bit: bool = False
-    reserve_output_tokens: int = 50
 
     def __post_init__(self) -> None:
         """Validate configuration."""

@@ -40,7 +40,6 @@ from utils import (
 from peft import PeftConfig, get_peft_model
 import transformers
 import peft
-import datasets
 import bitsandbytes
 
 
@@ -262,12 +261,6 @@ def run_benchmark(
                 "base_model_size_mb": base_model_size_mb,
                 "adapter_size_mb": adapter_size_mb
             },
-            package_info={
-                "transformers-version": transformers.__version__,
-                "peft-version": peft.__version__,
-                "datasets-version": datasets.__version__ if hasattr(datasets, "__version__") else None,
-                "bitsandbytes-version": bitsandbytes.__version__ if hasattr(bitsandbytes, "__version__") else None,
-            }
         )
 
         # Measure PEFT model inference
@@ -388,8 +381,6 @@ def main()-> None:
 
     # Log and save results
     log_results(experiment_name, result, print_fn=print)
-
-    return
 
 
 if __name__ == "__main__":
