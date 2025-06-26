@@ -596,9 +596,7 @@ def log_to_console(log_data: dict[str, Any], print_fn: Callable[..., None]) -> N
     print_fn(f"file size of checkpoint: {file_size / 2**20:.1f}MB")
 
 
-def log_to_file(
-    *, log_data: dict, save_dir: str, experiment_name: str, print_fn: Callable[..., None]
-) -> None:
+def log_to_file(*, log_data: dict, save_dir: str, experiment_name: str, print_fn: Callable[..., None]) -> None:
     file_name = f"{experiment_name.replace(os.path.sep, '--')}.json"
     file_name = os.path.join(save_dir, file_name)
     with open(file_name, "w") as f:
@@ -624,7 +622,9 @@ def log_results(
     device = infer_device()
     torch_accelerator_module = getattr(torch, device, torch.cuda)
     accelerator_memory_final = torch_accelerator_module.max_memory_reserved()
-    accelerator_memory_avg = int(sum(train_result.accelerator_memory_reserved_log) / len(train_result.accelerator_memory_reserved_log))
+    accelerator_memory_avg = int(
+        sum(train_result.accelerator_memory_reserved_log) / len(train_result.accelerator_memory_reserved_log)
+    )
     accelerator_memory_reserved_99th = int(np.percentile(train_result.accelerator_memory_reserved_log, 99))
 
     meta_info = get_meta_info()
@@ -697,6 +697,4 @@ def log_results(
     }
 
     log_to_console(log_data, print_fn=print)  # use normal print to be able to redirect if so desired
-    log_to_file(
-        log_data=log_data, save_dir=save_dir, experiment_name=experiment_name, print_fn=print_fn
-    )
+    log_to_file(log_data=log_data, save_dir=save_dir, experiment_name=experiment_name, print_fn=print_fn)

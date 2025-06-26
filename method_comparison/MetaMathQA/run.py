@@ -228,8 +228,12 @@ def train(
 
             losses.append(loss.item())
             pbar.set_postfix({"loss": loss.item()})
-            accelerator_memory_allocated_log.append(torch_accelerator_module.memory_allocated() - accelerator_memory_init)
-            accelerator_memory_reserved_log.append(torch_accelerator_module.memory_reserved() - accelerator_memory_init)
+            accelerator_memory_allocated_log.append(
+                torch_accelerator_module.memory_allocated() - accelerator_memory_init
+            )
+            accelerator_memory_reserved_log.append(
+                torch_accelerator_module.memory_reserved() - accelerator_memory_init
+            )
             toc = time.perf_counter()
             durations.append(toc - tic)
 

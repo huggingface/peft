@@ -222,7 +222,9 @@ def build_app(df):
 
         with gr.Row():
             x_default = (
-                "accelerator_memory_max" if "accelerator_memory_max" in metric_preferences else list(metric_preferences.keys())[0]
+                "accelerator_memory_max"
+                if "accelerator_memory_max" in metric_preferences
+                else list(metric_preferences.keys())[0]
             )
             y_default = (
                 "test_accuracy" if "test_accuracy" in metric_preferences else list(metric_preferences.keys())[1]
