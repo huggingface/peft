@@ -1,5 +1,6 @@
 {
     "model_id": "meta-llama/Llama-3.2-3B",
+    "peft_method": "lora",
     "dtype": "float16",
     "seed": 42,
     "num_inference_runs": 10,
