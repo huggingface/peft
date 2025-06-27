@@ -1294,3 +1294,52 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
                 token_indices=token_adapter.token_indices[adapter_name],
                 tied_adapter=model.get_input_embeddings().token_adapter,
             )
+
+
+def create_attention_mask(
+    model, *, model_input, attention_mask, past_key_values, cache_position, batch_size, sequence_length
+):
+    # adapted from:
+    # https://github.com/huggingface/transformers/blob/cb4c56ce0dfa1350267ed28e57760986a58a9ba4/src/transformers/generation/utils.py#L644-L680
+    # In PEFT, we sometimes need to re-create the attention mask. This is because some prompt learning methods insert
+    # new items into the sequence, which results in the attention mask needing an update. We re-use transformers code
+    # for this as much as possible.
+    try:
+        from transformers.masking_utils import create_masks_for_generate
+    except ImportError as exc:
+        raise ImportError("Your transformers version is too old, please upgrade it to > 4.52") from exc
+
+    # Create the causal mask with fixed shape in advance, to reduce recompilations. If the function to create
+    # the 4D causal mask exists, it should be present in the base model (XXXModel class) or in its decoder.
+    base_model = getattr(model, model.base_model_prefix, model)
+    decoder = base_model.get_decoder() if hasattr(base_model, "get_decoder") else None
+    causal_mask_creation_function = getattr(base_model, "_prepare_4d_causal_attention_mask_with_cache_position", None)
+    if causal_mask_creation_function is None and decoder is not None:  # it may be in the decoder
+        causal_mask_creation_function = getattr(decoder, "_prepare_4d_causal_attention_mask_with_cache_position", None)
+
+    # If it's not defined, it means the model uses the new general mask API
+    if causal_mask_creation_function is None:  # can't be found
+        token_type_ids = getattr(model_input, "token_type_ids", None)
+        # Some models may overwrite the general one
+        causal_mask_creation_function = getattr(model, "create_masks_for_generate", create_masks_for_generate)
+        attention_mask = causal_mask_creation_function(
+            config=model.config,
+            # we only need batch size, seq_length and dtype here - we don't care about the values of the embeddings
+            input_embeds=torch.empty((batch_size, sequence_length), dtype=model.dtype),
+            attention_mask=attention_mask,
+            cache_position=cache_position,
+            past_key_values=past_key_values,
+            token_type_ids=token_type_ids,
+        )
+    else:
+        attention_mask = causal_mask_creation_function(
+            attention_mask,
+            sequence_length=sequence_length,
+            target_length=past_key_values.get_max_cache_shape(),
+            dtype=model.dtype,
+            cache_position=cache_position,
+            batch_size=batch_size,
+            config=model.config,
+            past_key_values=past_key_values,
+        )
+    return attention_mask
