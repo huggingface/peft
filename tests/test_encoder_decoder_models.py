@@ -29,6 +29,7 @@ from peft import (
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
+    ShiraConfig,
     TaskType,
     VBLoRAConfig,
     VeraConfig,
@@ -142,6 +143,15 @@ ALL_CONFIGS = [
         {
             "num_virtual_tokens": 10,
             "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        ShiraConfig,
+        {
+            "r": 1,
+            "task_type": "SEQ_2_SEQ_LM",
+            "target_modules": None,
+            "init_randn_shira_weight": True,
         },
     ),
     (

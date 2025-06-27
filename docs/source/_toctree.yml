@@ -126,6 +126,8 @@
       title: Trainable Tokens
     - local: package_reference/randlora
       title: RandLora
+    - local: package_reference/shira
+      title: SHiRA
 
     title: Adapters
   - sections:

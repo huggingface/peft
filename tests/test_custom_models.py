@@ -45,6 +45,7 @@ from peft import (
     OFTConfig,
     PeftModel,
     RandLoraConfig,
+    ShiraConfig,
     TaskType,
     TrainableTokensConfig,
     VBLoRAConfig,
@@ -520,6 +521,24 @@ TEST_CASES = [
         {"target_modules": ["conv2d"], "boft_block_size": 2, "boft_block_num": 0, "boft_n_butterfly_factor": 3},
     ),
     ########
+    # SHiRA #
+    ########
+    ("Vanilla MLP 1 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": "lin0", "init_randn_shira_weight": True}),
+    ("Vanilla MLP 2 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": ["lin0"], "init_randn_shira_weight": True}),
+    ("Vanilla MLP 3 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": ["lin1"], "init_randn_shira_weight": True}),
+    (
+        "Vanilla MLP 4 SHiRA",
+        "MLP",
+        ShiraConfig,
+        {"r": 1, "target_modules": ["lin0", "lin1"], "random_seed": 56, "init_randn_shira_weight": True},
+    ),
+    (
+        "Vanilla MLP 5 SHiRA",
+        "MLP",
+        ShiraConfig,
+        {"r": 1, "target_modules": ["lin0"], "init_randn_shira_weight": True},
+    ),
+    ########
     # VeRA #
     ########
     ("Vanilla MLP 1 VeRA", "MLP", VeraConfig, {"target_modules": "lin0"}),
@@ -721,6 +740,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"n_frequency": 10, "target_modules": ["lin0"]},
         {"n_frequency": 10, "target_modules": ["lin1"]},
     ),
+    (
+        "SHiRA Same",
+        "shira",
+        ShiraConfig,
+        {"r": 1, "target_modules": ["lin0"], "init_randn_shira_weight": True},
+        {"r": 1, "target_modules": ["lin0"], "init_randn_shira_weight": True},
+    ),
+    (
+        "SHiRA Different",
+        "shira",
+        ShiraConfig,
+        {"r": 1, "target_modules": ["lin0"], "init_randn_shira_weight": True},
+        {"r": 1, "target_modules": ["lin1"], "init_randn_shira_weight": True},
+    ),
     # Note: Currently, we cannot target lin0 and lin1 with different adapters when using VeRA. The reason is that the
     # first adapter being created will result in a vera_A or vera_B shape that is too small for the next adapter
     # (remember that VeRA shares these parameters across all layers), which results in an error.
@@ -809,6 +842,7 @@ PREFIXES = {
     RandLoraConfig: "randlora_",
     FourierFTConfig: "fourierft_",
     HRAConfig: "hra_",
+    ShiraConfig: "shira_",
     VBLoRAConfig: "vblora_",
     BoneConfig: "bone_",
     TrainableTokensConfig: "trainable_tokens_",
@@ -1226,6 +1260,8 @@ class TestPeftCustomModel(PeftCommonTester):
             pass
         elif issubclass(config_cls, VBLoRAConfig):
             pass
+        elif issubclass(config_cls, ShiraConfig):
+            pass
         elif issubclass(config_cls, TrainableTokensConfig):
             pass
         else:
@@ -1282,6 +1318,9 @@ class TestPeftCustomModel(PeftCommonTester):
             pass
         elif issubclass(config_cls, VBLoRAConfig):
             # VBLoRA do not take init_weights
+            pass
+        elif issubclass(config_cls, ShiraConfig):
+            # SHiRA does not take init_weights
             pass
         else:
             config_kwargs["init_weights"] = False
@@ -1601,6 +1640,8 @@ class TestPeftCustomModel(PeftCommonTester):
             config_kwargs = config_kwargs.copy()
             # override the default value and make PEFT operation a no-op
             config_kwargs["init_weights"] = True
+        if issubclass(config_cls, (ShiraConfig,)):
+            config_kwargs["init_randn_shira_weight"] = False
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
