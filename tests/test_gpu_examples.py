@@ -4683,10 +4683,22 @@ class TestHotSwapping:
             output_after1 = model(inputs).logits
             assert torch.allclose(output1, output_after1, atol=tol, rtol=tol)
 
+            # we need to call forward third time since cudagraphs are not recorded in first call.
+            if do_hotswap:
+                hotswap_adapter(model, os.path.join(tmp_dirname, "adapter0"), adapter_name="default")
+                output_after2 = model(inputs).logits
+                assert torch.allclose(output0, output_after2, atol=tol, rtol=tol)
+
     # it is important to check hotswapping small to large ranks and large to small ranks
     @pytest.mark.parametrize("ranks", [(11, 11), (7, 13), (13, 7)])
     def test_hotswapping_compiled_model_does_not_trigger_recompilation(self, ranks):
-        with torch._dynamo.config.patch(error_on_recompile=True):  # raise an error on recompilation
+        # here we set three configs to ensure no recompilation or cudagraph re-record occurs:
+        # 1. error_on_recompile: raise an error on recompilation
+        # 2. inline_inbuilt_nn_modules: needed to raise an error on static input address changes instead of re-recording
+        # 3. triton.cudagraph_support_input_mutation: same as above
+        dynamo_config_ctx = torch._dynamo.config.patch(error_on_recompile=True, inline_inbuilt_nn_modules=False)
+        inductor_config_ctx = torch._inductor.config.patch("triton.cudagraph_support_input_mutation", False)
+        with dynamo_config_ctx, inductor_config_ctx:
             self.check_hotswap(do_hotswap=True, ranks=ranks, alpha_scalings=ranks)
 
     def test_no_hotswapping_compiled_model_triggers_recompilation(self):
