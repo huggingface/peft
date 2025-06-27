@@ -252,6 +252,8 @@ TEST_CASES = [
     ("Conv2d 2 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d", "lin0"]}),
     ("Conv2d 3 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d"], "use_effective_conv2d": True}),
     ("Conv2d 4 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True}),
+    ("Conv1d LOHA", "Conv1d", LoHaConfig, {"target_modules": ["conv1d"]}),
+    ("Conv2d 1x1 LOHA", "Conv2d1x1", LoHaConfig, {"target_modules": ["conv2d"]}),
     # LoKr
     ("Vanilla MLP 1 LOKR", "MLP", LoKrConfig, {"target_modules": "lin0"}),
     ("Vanilla MLP 2 LOKR", "MLP", LoKrConfig, {"target_modules": ["lin0"]}),
@@ -274,6 +276,8 @@ TEST_CASES = [
     ("Conv2d 2 LOKR", "Conv2d", LoKrConfig, {"target_modules": ["conv2d", "lin0"]}),
     ("Conv2d 3 LOKR", "Conv2d", LoKrConfig, {"target_modules": ["conv2d"], "use_effective_conv2d": True}),
     ("Conv2d 4 LOKR", "Conv2d", LoKrConfig, {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True}),
+    ("Conv1d LOKR", "Conv1d", LoKrConfig, {"target_modules": ["conv1d"]}),
+    ("Conv2d 1x1 LOKR", "Conv2d1x1", LoKrConfig, {"target_modules": ["conv2d"]}),
     (
         "Conv2d 5 LOKR",
         "Conv2d",
@@ -1049,6 +1053,27 @@ class ModelConv2D2(nn.Module):
         return X
 
 
+class ModelConv2D1x1(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv2d = nn.Conv2d(1, 10, kernel_size=(1, 1), padding=0)
+        self.relu = nn.ReLU()
+        self.flat = nn.Flatten()
+        self.lin0 = nn.Linear(10 * 5 * 5, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
+
+    def forward(self, X):
+        X = X.to(self.dtype)
+        X = X.reshape(-1, 1, 5, 5)
+        X = self.conv2d(X)
+        X = self.relu(X)
+        X = self.flat(X)
+        X = self.lin0(X)
+        X = self.sm(X)
+        return X
+
+
 class ModelConv2DGroups(nn.Module):
     def __init__(self):
         super().__init__()
@@ -1068,6 +1093,25 @@ class ModelConv2DGroups(nn.Module):
         X = self.lin0(X)
         X = self.sm(X)
         return X
+
+
+class ModelConv1DKernel1(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1d = nn.Conv1d(in_channels=3, out_channels=10, kernel_size=1)
+        self.relu = nn.ReLU()
+        self.flat = nn.Flatten()
+        self.lin0 = nn.Linear(10 * 10, 2)
+        self.dtype = torch.float
+
+    def forward(self, x):
+        x = x.to(self.dtype)
+        x = x.reshape(-1, 3, 10)  # batch, channels, seq_len
+        x = self.conv1d(x)
+        x = self.relu(x)
+        x = self.flat(x)
+        x = self.lin0(x)
+        return x
 
 
 class ModelConv3D(nn.Module):
@@ -1136,6 +1180,12 @@ class MockTransformerWrapper:
 
         if model_id == "Conv2d":
             return ModelConv2D().to(torch_dtype)
+
+        if model_id == "Conv2d1x1":
+            return ModelConv2D1x1().to(torch_dtype)
+
+        if model_id == "Conv1dKernel1":
+            return ModelConv1DKernel1().to(torch_dtype)
 
         if model_id == "Conv2dGroups":
             return ModelConv2DGroups().to(torch_dtype)
