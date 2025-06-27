@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import platform
 import tempfile
 from unittest.mock import Mock, call, patch
 
@@ -482,6 +483,14 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_passing_input_embeds_works(self, model_id, config_cls, config_kwargs):
         _skip_if_not_conv1d_supported(model_id, config_cls)
+        if (platform.system() == "Darwin") and (config_cls == PrefixTuningConfig):
+            # the error is:
+            # > RuntimeError: unsupported operation: more than one element of the written-to tensor refers to a single
+            # > memory location. Please clone() the tensor before performing the operation.
+            # in transformers sdpa_mask_older_torch. As we (currently) cannot upgrade PyTorch on MacOS GH runners, we're
+            # stuck with this error.
+            # TODO: remove if torch can be upgraded on MacOS or if MacOS CI is removed
+            pytest.skip("Prefix tuning fails on MacOS in this case, not worth fixing")
         self._test_passing_input_embeds_works("", model_id, config_cls, config_kwargs.copy())
 
     def test_lora_layer_replication(self):
