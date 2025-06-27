@@ -19,16 +19,16 @@ from typing import Literal, Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
-import warnings
+
 
 @dataclass
-class BoneConfig(PeftConfig):
+class MiSSConfig(PeftConfig):
     """
-    This is the configuration class to store the configuration of a [`BoneModel`].
+    This is the configuration class to store the configuration of a [`MiSSModel`].
 
     Args:
         r (`int`):
-            The rank of Bone across different layers. It is best to set 'r' to an even number; otherwise, the default
+            The rank of MiSS across different layers. It is best to set 'r' to an even number; otherwise, the default
             initialization method will not work.
         target_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
@@ -43,7 +43,7 @@ class BoneConfig(PeftConfig):
             When passing a list of strings, either an exact match will be performed or it is checked if the name of the
             module ends with any of the passed strings.
         init_weights (bool | Literal["bat"]):
-            Different initializations correspond to different Bone variants. By default, setting True uses the Bone
+            Different initializations correspond to different MiSS variants. By default, setting True uses the MiSS
             structure, while "bat" selects the Bat structure.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
@@ -58,27 +58,35 @@ class BoneConfig(PeftConfig):
     r: int = field(
         default=64,
         metadata={
-            "help": "The rank of Bone across different layers.",
+            "help": "The rank of MiSS across different layers.",
             "note": "It is best to set 'r' to an even number; otherwise, the default initialization method will not work.",
         },
     )
-
+    miss_dropout: float = field(default=0.0, metadata={"help": "MiSS dropout"})
+    mini_r: int = field(
+        default=64,
+        metadata={
+            "help": "The rank of MiSS across different layers.",
+            "note": "when mini_r==out_features, mini==MiSS efficiency",
+        },
+    )
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
-            "help": "List of module names or regex expression of the module names to replace with Bone.",
+            "help": "List of module names or regex expression of the module names to replace with MiSS.",
             "example": "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' ",
         },
     )
     exclude_modules: Optional[Union[list[str], str]] = field(
         default=None,
-        metadata={"help": "List of module names or regex expression of the module names to exclude from Bone."},
+        metadata={"help": "List of module names or regex expression of the module names to exclude from MiSS."},
     )
-    init_weights: bool | Literal["bat"] = field(
+    init_weights: bool | Literal["bat", "mini"] = field(
         default=True,
         metadata={
             "help": (
-                "Whether to initialize the weights of the Bone layers with their default initialization. Don't change "
+                "True -> MiSS efficiency; `bat` -> Bat; `mini` -> test"
+                "Whether to initialize the weights of the MiSS layers with their default initialization. Don't change "
                 "this setting, except if you know exactly what you're doing."
             ),
         },
@@ -95,11 +103,11 @@ class BoneConfig(PeftConfig):
             "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
         },
     )
-    bias: str = field(default="none", metadata={"help": "Bias type for Bone. Can be 'none', 'all' or 'Bone_only'"})
+    bias: str = field(default="none", metadata={"help": "Bias type for MiSS. Can be 'none', 'all' or 'MiSS_only'"})
     modules_to_save: Optional[list[str]] = field(
         default=None,
         metadata={
-            "help": "List of modules apart from Bone layers to be set as trainable and saved in the final checkpoint. "
+            "help": "List of modules apart from MiSS layers to be set as trainable and saved in the final checkpoint. "
             "For example, in Sequence Classification or Token Classification tasks, "
             "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
         },
@@ -107,7 +115,7 @@ class BoneConfig(PeftConfig):
 
     def __post_init__(self):
         super().__post_init__()
-        self.peft_type = PeftType.BONE
+        self.peft_type = PeftType.MISS
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
@@ -121,7 +129,3 @@ class BoneConfig(PeftConfig):
         # if target_modules is a regex expression, then layers_pattern should be None
         if isinstance(self.target_modules, str) and self.layers_pattern is not None:
             raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
-        
-        warnings.warn(
-            "Bone will be removed in v0.xxx.0, you need to use MiSS"
-        )

@@ -34,6 +34,7 @@ from peft import (
     HRAConfig,
     IA3Config,
     LoraConfig,
+    MiSSConfig,
     OFTConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
@@ -88,6 +89,14 @@ ALL_CONFIGS = [
     ),
     (
         BoneConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "r": 2,
+        },
+    ),
+    (
+        MiSSConfig,
         {
             "task_type": "CAUSAL_LM",
             "target_modules": None,
@@ -206,8 +215,8 @@ ALL_CONFIGS = [
 
 
 def _skip_if_not_conv1d_supported(model_id, config_cls):
-    if "GPT2LMHeadModel" in model_id and config_cls in [BOFTConfig, BoneConfig, HRAConfig, OFTConfig]:
-        pytest.skip("Skipping BOFT/HRA/OFT/Bone for GPT2LMHeadModel")
+    if "GPT2LMHeadModel" in model_id and config_cls in [BOFTConfig, BoneConfig, HRAConfig, OFTConfig, MiSSConfig]:
+        pytest.skip("Skipping BOFT/HRA/OFT/Bone(MiSS) for GPT2LMHeadModel")
 
 
 def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
@@ -217,8 +226,9 @@ def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
         HRAConfig,
         OFTConfig,
         BoneConfig,
+        MiSSConfig,
     ]:
-        pytest.skip("Skipping AdaLora/BOFT/HRA/OFT/Bone for GPT2LMHeadModel")
+        pytest.skip("Skipping AdaLora/BOFT/HRA/OFT/Bone(MiSS) for GPT2LMHeadModel")
 
 
 class TestDecoderModels(PeftCommonTester):
