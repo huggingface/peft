@@ -1279,6 +1279,9 @@ def create_attention_mask(
 ):
     # adapted from:
     # https://github.com/huggingface/transformers/blob/cb4c56ce0dfa1350267ed28e57760986a58a9ba4/src/transformers/generation/utils.py#L644-L680
+    # In PEFT, we sometimes need to re-create the attention mask. This is because some prompt learning methods insert
+    # new items into the sequence, which results in the attention mask needing an update. We re-use transformers code
+    # for this as much as possible.
     try:
         from transformers.masking_utils import create_masks_for_generate
     except ImportError as exc:
