@@ -1381,6 +1381,8 @@ class TestPeftCustomModel(PeftCommonTester):
         if platform.system() == "Darwin":
             pytest.skip(reason="MacOS does not support multiple ops in float16")
 
+        if config_cls in [ShiraConfig, ]:
+            pytest.skip("SHiRA requires autocast_adapter_dtype to be True because otherwise it throws the following error: 'addmm_sparse_cuda' not implemented for 'BFloat16' or 'Half'. Hence, skipping this test")
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16).to(self.torch_device)
         model.dtype = torch.float16
@@ -1421,7 +1423,9 @@ class TestPeftCustomModel(PeftCommonTester):
         # skip on MacOS
         if platform.system() == "Darwin":
             pytest.skip(reason="MacOS does not support multiple ops in bfloat16")
-
+        
+        if config_cls in [ShiraConfig, ]:
+            pytest.skip("SHiRA requires autocast_adapter_dtype to be True because otherwise it throws the following error: 'addmm_sparse_cuda' not implemented for 'BFloat16' or 'Half'. Hence, skipping this test")
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16).to(self.torch_device)
         model.dtype = torch.bfloat16
@@ -1988,7 +1992,7 @@ class TestPeftCustomModel(PeftCommonTester):
         assert "default" in model.base_model.classifier.modules_to_save
         assert "other" in model.base_model.classifier.modules_to_save
 
-    @pytest.mark.parametrize("config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig])
+    @pytest.mark.parametrize("config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig, ShiraConfig])
     def test_multiple_adapters_mixed_modules_to_save(self, config_cls):
         # See issue 1574
         # Check that we can have a model where one adapter has modules_to_save and the other doesn't. It should be
@@ -1998,6 +2002,8 @@ class TestPeftCustomModel(PeftCommonTester):
 
         if config_cls == BoneConfig:
             config_cls = partial(config_cls, r=2)
+        if config_cls == ShiraConfig:
+            config_cls = partial(config_cls, r=1)
 
         config0 = config_cls(target_modules=["lin0"], modules_to_save=["lin1"])
         config1 = config_cls(target_modules=["lin0"])
@@ -2016,7 +2022,7 @@ class TestPeftCustomModel(PeftCommonTester):
         model.set_adapter("other")
         model(**inputs)
 
-    @pytest.mark.parametrize("config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig])
+    @pytest.mark.parametrize("config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig, ShiraConfig])
     def test_multiple_adapters_mixed_modules_to_save_order_switched(self, config_cls):
         # See issue 1574
         # Same test as test_multiple_adapters_mixed_modules_to_save, but this time the 2nd adapter has modules_to_save.
@@ -2025,6 +2031,8 @@ class TestPeftCustomModel(PeftCommonTester):
 
         if config_cls == BoneConfig:
             config_cls = partial(config_cls, r=2)
+        if config_cls == ShiraConfig:
+            config_cls = partial(config_cls, r=1)
 
         config0 = config_cls(target_modules=["lin0"])
         config1 = config_cls(target_modules=["lin0"], modules_to_save=["lin1"])

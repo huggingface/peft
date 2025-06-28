@@ -188,7 +188,6 @@ class Linear(nn.Module, ShiraLayer):
             self.shira_indices[adapter], self.shira_weight[adapter] * self.scaling[adapter], self.weight_shape
         )
 
-    """
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         if self.disable_adapters:
             if self.merged:
@@ -208,13 +207,13 @@ class Linear(nn.Module, ShiraLayer):
                 else:
                     delta_weight = delta_weight + self.get_delta_weight(active_adapter)
             if delta_weight is not None:
-                # x = self._cast_input_dtype(x, delta_weight.dtype)
-                x = self._cast_input_dtype(x, torch.float32)
-                delta_weight = delta_weight.type(torch.float32)
+                x = self._cast_input_dtype(x, delta_weight.dtype)
+                # x = self._cast_input_dtype(x, torch.float32)
+                # delta_weight = delta_weight.type(torch.float32)
                 result = result + F.linear(x, delta_weight).to(torch_result_dtype)
         return result
-    """
 
+    """
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         # previous_dtype = x.dtype
 
@@ -234,6 +233,7 @@ class Linear(nn.Module, ShiraLayer):
             result = F.linear(x, new_weight, bias=self.base_layer.bias)
 
         return result
+    """
 
     def __repr__(self) -> str:
         rep = super().__repr__()
