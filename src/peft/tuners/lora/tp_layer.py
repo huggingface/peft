@@ -120,6 +120,7 @@ class LoraParallelLinear(nn.Module, LoraLayer):
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         self.r[adapter_name] = r
         self.lora_alpha[adapter_name] = lora_alpha
+        self.lora_bias[adapter_name] = False
         if lora_dropout > 0.0:
             lora_dropout_layer = nn.Dropout(p=lora_dropout)
         else:
