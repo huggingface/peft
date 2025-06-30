@@ -184,7 +184,10 @@ class LoraLayer(BaseTunerLayer):
         init_lora_weights,
         use_rslora,
         use_dora: bool = False,
+        use_qalora: bool = False,
         lora_bias: bool = False,
+        qalora_group_size: int = 32,
+        **kwargs,
     ):
         # collect the kwargs
         kwargs = locals().copy()
@@ -194,7 +197,9 @@ class LoraLayer(BaseTunerLayer):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
-        lora_variant = self.resolve_lora_variant(use_dora=use_dora)
+        lora_variant = self.resolve_lora_variant(
+            use_dora=use_dora, use_qalora=use_qalora, qalora_group_size=qalora_group_size
+        )
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 
@@ -1073,6 +1078,13 @@ class _ConvNd(nn.Module, LoraLayer):
         if base_layer.groups > 1:
             warnings.warn("LoRA adapter added to ConvNd layer with groups > 1. Merging is not supported.")
 
+        if r % base_layer.groups != 0:
+            raise ValueError(
+                f"Targeting a {base_layer.__class__.__name__} with groups={base_layer.groups} and rank {r}. "
+                "Currently, support is limited to conv layers where the rank is divisible by groups. "
+                "Either choose a different rank or do not target this specific layer."
+            )
+
         self._active_adapter = adapter_name
         self._kernel_dim = base_layer.weight.dim()
 
@@ -1118,7 +1130,7 @@ class _ConvNd(nn.Module, LoraLayer):
         out_kernel = out_stride = (1,) * (self._kernel_dim - 2)
         self.lora_A[adapter_name] = conv_layer(self.in_features, r, kernel_size, stride, padding, bias=False)
         self.lora_B[adapter_name] = conv_layer(
-            r, self.out_features // base_layer.groups, out_kernel, out_stride, bias=lora_bias
+            r, self.out_features, out_kernel, out_stride, groups=base_layer.groups, bias=lora_bias
         )
         self.lora_bias[adapter_name] = lora_bias
 
