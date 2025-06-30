@@ -29,6 +29,7 @@ from accelerate.test_utils.testing import run_command
 from accelerate.utils import patch_environment
 from accelerate.utils.imports import is_bf16_available
 from accelerate.utils.memory import clear_device_cache
+from accelerate.utils.versions import is_torch_version
 from datasets import Audio, Dataset, DatasetDict, load_dataset
 from packaging import version
 from parameterized import parameterized
@@ -1871,6 +1872,61 @@ class PeftGPTQGPUTests(unittest.TestCase):
             # assert loss is not None
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_gptq_qalora(self):
+        """
+        Test QALoRA with GPTQ quantization. The test would simply fail if the adapters are not set correctly.
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                torch_dtype=torch.float16,
+                device_map="auto",
+                quantization_config=self.quantization_config,
+            )
+
+            model = prepare_model_for_kbit_training(model)
+            config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                target_modules=["q_proj", "v_proj"],
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+                use_qalora=True,
+                qalora_group_size=32,
+            )
+            model = get_peft_model(model, config)
+
+            data = load_dataset_english_quotes()
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_gpu
     def test_causal_lm_training_multi_gpu(self):
@@ -3333,7 +3389,7 @@ class PeftHqqGPUTests(unittest.TestCase):
         assert cc_matrix.min() > 0.97
 
 
-@require_torch_gpu
+@require_non_cpu
 @require_auto_awq
 class PeftAwqGPUTests(unittest.TestCase):
     r"""
@@ -3346,7 +3402,7 @@ class PeftAwqGPUTests(unittest.TestCase):
 
     def tearDown(self):
         r"""
-        Efficient mechanism to free GPU memory after each test. Based on
+        Efficient mechanism to free accelerator memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
         clear_device_cache(garbage_collection=True)
@@ -3362,7 +3418,7 @@ class PeftAwqGPUTests(unittest.TestCase):
     @pytest.mark.single_gpu_tests
     def test_causal_lm_training_awq(self):
         r"""
-        Test the CausalLM training on a single GPU device. The test would simply fail if the adapters are not set
+        Test the CausalLM training on a single accelerator. The test would simply fail if the adapters are not set
         correctly.
         """
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -3418,14 +3474,15 @@ class PeftAwqGPUTests(unittest.TestCase):
     # TODO remove marker if/once issue is resolved, most likely requiring a fix in AutoAWQ:
     # https://github.com/casper-hansen/AutoAWQ/issues/754
     @pytest.mark.xfail(
+        condition=is_torch_version("==", "2.7"),
         reason="Multi-GPU test currently not working with AutoAWQ and PyTorch 2.7",
         strict=True,
     )
-    @require_torch_multi_gpu
-    def test_causal_lm_training_multi_gpu(self):
+    @require_torch_multi_accelerator
+    def test_causal_lm_training_multi_accelerator(self):
         r"""
-        Test the CausalLM training on a multi-GPU device. The test would simply fail if the adapters are not set
-        correctly.
+        Test the CausalLM training on a multi-accelerator device. The test would simply fail if the adapters are not
+        set correctly.
         """
         device_map = {
             "model.decoder.embed_tokens": 0,
@@ -4626,10 +4683,22 @@ class TestHotSwapping:
             output_after1 = model(inputs).logits
             assert torch.allclose(output1, output_after1, atol=tol, rtol=tol)
 
+            # we need to call forward third time since cudagraphs are not recorded in first call.
+            if do_hotswap:
+                hotswap_adapter(model, os.path.join(tmp_dirname, "adapter0"), adapter_name="default")
+                output_after2 = model(inputs).logits
+                assert torch.allclose(output0, output_after2, atol=tol, rtol=tol)
+
     # it is important to check hotswapping small to large ranks and large to small ranks
     @pytest.mark.parametrize("ranks", [(11, 11), (7, 13), (13, 7)])
     def test_hotswapping_compiled_model_does_not_trigger_recompilation(self, ranks):
-        with torch._dynamo.config.patch(error_on_recompile=True):  # raise an error on recompilation
+        # here we set three configs to ensure no recompilation or cudagraph re-record occurs:
+        # 1. error_on_recompile: raise an error on recompilation
+        # 2. inline_inbuilt_nn_modules: needed to raise an error on static input address changes instead of re-recording
+        # 3. triton.cudagraph_support_input_mutation: same as above
+        dynamo_config_ctx = torch._dynamo.config.patch(error_on_recompile=True, inline_inbuilt_nn_modules=False)
+        inductor_config_ctx = torch._inductor.config.patch("triton.cudagraph_support_input_mutation", False)
+        with dynamo_config_ctx, inductor_config_ctx:
             self.check_hotswap(do_hotswap=True, ranks=ranks, alpha_scalings=ranks)
 
     def test_no_hotswapping_compiled_model_triggers_recompilation(self):
