@@ -19,6 +19,7 @@ from peft import (
     AdaLoraConfig,
     BOFTConfig,
     BoneConfig,
+    C3AConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -163,6 +164,14 @@ ALL_CONFIGS = [
             "d_initial": 0.1,
             "save_projection": True,
             "bias": "none",
+        },
+    ),
+    (
+        C3AConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "block_size": 1,
+            "target_modules": None,
         },
     ),
 ]

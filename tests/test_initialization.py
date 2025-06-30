@@ -36,6 +36,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import (
     AdaLoraConfig,
+    C3AConfig,
     EvaConfig,
     IA3Config,
     LoftQConfig,
@@ -1573,6 +1574,40 @@ class TestVBLoraInitialization:
         model = self.get_model()
         config = VBLoRAConfig(target_modules=["lin1"], vector_length=vector_length)
         msg = f"`out_features` {model.lin1.out_features} must be divisible by `vector_length` {vector_length}"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+
+class TestC3AInitialization:
+    torch_device = infer_device()
+
+    def get_model(self):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 30, bias=bias)
+                self.lin1 = nn.Linear(30, 2, bias=bias)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                return X
+
+        return MLP().to(self.torch_device)
+
+    def test_c3a_with_incompatible_block_size_with_in_features(self):
+        block_size = 3
+        model = self.get_model()
+        config = C3AConfig(target_modules=["lin0"], block_size=block_size)
+        msg = f"The block size should be a factor of the input size. However, the input size is {model.lin0.in_features} and the block size is {block_size}"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+    def test_c3a_with_incompatible_block_size_with_out_features(self):
+        block_size = 3
+        model = self.get_model()
+        config = C3AConfig(target_modules=["lin1"], block_size=block_size)
+        msg = f"The block size should be a factor of the output size. However, the output size is {model.lin1.out_features} and the block size is {block_size}"
         with pytest.raises(ValueError, match=msg):
             get_peft_model(model, config)
 

@@ -16,6 +16,7 @@ from .adalora import AdaLoraConfig, AdaLoraModel
 from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
 from .boft import BOFTConfig, BOFTModel
 from .bone import BoneConfig, BoneModel
+from .c3a import C3AConfig, C3AModel
 from .cpt import CPTConfig, CPTEmbedding
 from .fourierft import FourierFTConfig, FourierFTModel
 from .hra import HRAConfig, HRAModel
@@ -55,6 +56,8 @@ __all__ = [
     "BOFTModel",
     "BoneConfig",
     "BoneModel",
+    "C3AConfig",
+    "C3AModel",
     "CPTConfig",
     "CPTEmbedding",
     "EvaConfig",
