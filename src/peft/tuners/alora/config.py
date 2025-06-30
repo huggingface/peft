@@ -31,7 +31,7 @@ class aLoraConfig(LoraConfig):
     )
     invocation_tokens: List[int] = field(
         default=None,
-        metadata={"help": "Tokenized version of `invocation_string` (as a list of token IDs). Use the model's default tokenizer."}
+        metadata={"help": "Tokenized version of `invocation_string` (as a list of token IDs). Use the model's default tokenizer. E.g. invocation_tokens = tokenizer.encode(invocation_string, add_special_tokens=False)"}
     )
 
     def __post_init__(self):
