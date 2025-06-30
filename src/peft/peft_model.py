@@ -111,7 +111,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         adapter_name: str = "default",
         autocast_adapter_dtype: bool = True,
         low_cpu_mem_usage: bool = False,
-        tokenizer: Optional[Any] = None, 
     ) -> None:
         super().__init__()
         self.active_adapter = adapter_name
@@ -119,8 +118,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # These args are special PEFT arguments that users can pass. They need to be removed before passing them to
         # forward.
         self.special_peft_forward_args = {"adapter_names", "alora_offsets"}
-        self.tokenizer = tokenizer # Added for ALORA
-
+        
         self._is_prompt_learning = peft_config.is_prompt_learning
         if self._is_prompt_learning:
             self._peft_config = {adapter_name: peft_config}
@@ -389,7 +387,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         ephemeral_gpu_offload: bool = False,
         low_cpu_mem_usage: bool = False,
         key_mapping: Optional[dict[str, str]] = None,
-        tokenizer: Optional[Any] = None, # Added for ALORA
         **kwargs: Any,
     ) -> PeftModel:
         r"""
@@ -547,7 +544,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 adapter_name,
                 autocast_adapter_dtype=autocast_adapter_dtype,
                 low_cpu_mem_usage=low_cpu_mem_usage,
-                tokenizer=tokenizer,
             )
         else:
             model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](
@@ -556,7 +552,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 adapter_name,
                 autocast_adapter_dtype=autocast_adapter_dtype,
                 low_cpu_mem_usage=low_cpu_mem_usage,
-                tokenizer=tokenizer,
             )
 
         load_result = model.load_adapter(
@@ -1778,9 +1773,9 @@ class PeftModelForCausalLM(PeftModel):
     """
 
     def __init__(
-        self, model: torch.nn.Module, peft_config: PeftConfig, adapter_name: str = "default", tokenizer: Optional[Any] = None, **kwargs
+        self, model: torch.nn.Module, peft_config: PeftConfig, adapter_name: str = "default", **kwargs
     ) -> None:
-        super().__init__(model, peft_config, adapter_name, tokenizer=tokenizer, **kwargs)
+        super().__init__(model, peft_config, adapter_name, **kwargs)
         self.base_model_prepare_inputs_for_generation = self.base_model.prepare_inputs_for_generation
 
         
@@ -1812,14 +1807,13 @@ class PeftModelForCausalLM(PeftModel):
                 alora_offsets[i] = -1 # Not an aLoRA adapter or wrong type
                 continue
             
-            invocation_string = getattr(current_peft_config, 'invocation_string', None)
-            if not self.tokenizer or not invocation_string:
+            invocation_tokens = getattr(current_peft_config, 'invocation_tokens', None)
+            if not invocation_tokens:
                 alora_offsets[i] = -1 # No way to calculate offset
                 continue
 
             if current_adapter_name not in cached_invocation_tensors:
-                tokenized_ids_list = self.tokenizer.encode(invocation_string, add_special_tokens=False)
-                cached_invocation_tensors[current_adapter_name] = torch.tensor(tokenized_ids_list, dtype=torch.long, device=input_ids.device)
+                cached_invocation_tensors[current_adapter_name] = torch.tensor(invocation_tokens, dtype=torch.long, device=input_ids.device)
             
             adapters_to_process_indices[current_adapter_name].append(i)
 
@@ -1845,12 +1839,6 @@ class PeftModelForCausalLM(PeftModel):
                     offset_val = seq_len - best_match_start_idx
                     alora_offsets[i] = offset_val if offset_val > 0 else -1
                 else:
-                    #warnings.warn(
-                    #    f"Invocation string for adapter '{adapter_name_to_process}' not found in input row {i}. "
-                    #    f"Input: {self.tokenizer.decode(input_ids[i]) if self.tokenizer else input_ids[i]}. "
-                    #    f"Invocation: {self.peft_config[adapter_name_to_process].invocation_string}. "
-                    #    "Adapter will be disabled for this row."
-                    #)
                     alora_offsets[i] = -1
         return alora_offsets
 
