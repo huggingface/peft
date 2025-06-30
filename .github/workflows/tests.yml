@@ -12,6 +12,7 @@ on:
 env:
   HF_HOME: .cache/huggingface
   TRANSFORMERS_IS_CI: 1
+  PYTEST_PROGRESS_PERCENTAGE_THRESHOLD: 10  # report pytest progress every 10%
 
 permissions: {}
 
@@ -42,7 +43,7 @@ jobs:
       # TODO: remove 'fail-fast' line once timeout issue from the Hub is solved
       fail-fast: false
       matrix:
-        python-version: ["3.12"]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
         os: ["ubuntu-latest"]
     runs-on: ${{ matrix.os }}
     steps:
@@ -77,7 +78,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install setuptools
+          pip install setuptools pytest-random-order
           # cpu version of pytorch
           pip install -e .[test]
       - name: Downgrade numpy on MacOS and Windows
@@ -86,15 +87,6 @@ jobs:
         if: matrix.os == 'windows-latest' || matrix.os == 'macos-13'
         run: |
           pip install --force-reinstall -U "numpy<2.0.0"
-      - name: Prepare in-memory temp
-        # force bash on all runners so our shell logic works uniformly
-        shell: bash
-        run: |
-          if [[ "${RUNNER_OS}" == "Linux" ]]; then
-            echo "TMPDIR=/dev/shm" >> $GITHUB_ENV
-          else
-            echo "Windows and MacOS runners: skipping RAM-disk setup"
-          fi
       - name: Test with pytest
         run: |
           make test
