@@ -32,6 +32,7 @@ from transformers import AutoModelForCausalLM, AutoModelForSequenceClassificatio
 from transformers.pytorch_utils import Conv1D
 
 from peft import (
+    aLoraConfig,
     AdaLoraConfig,
     BOFTConfig,
     BoneConfig,
@@ -830,6 +831,7 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
 
 PREFIXES = {
     IA3Config: "ia3_",
+    aLoraConfig: "lora_",
     LoraConfig: "lora_",
     LoHaConfig: "hada_",
     LoKrConfig: "lokr_",
