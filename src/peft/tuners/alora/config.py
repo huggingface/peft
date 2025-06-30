@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Union
+from typing import Literal, Optional, Union, List
 
 from torch import nn
 from peft.utils import PeftType
@@ -29,12 +29,17 @@ class aLoraConfig(LoraConfig):
             )
         }
     )
+    invocation_tokens: List[int] = field(
+        default=None,
+        metadata={"help": "Tokenized version of `invocation_string` (as a list of token IDs). Use the model's default tokenizer."}
+    )
 
     def __post_init__(self):
         super().__post_init__()
         self.peft_type = PeftType.ALORA
         if self.invocation_string is None:
             warnings.warn("invocation_string cannot be None for aLoRA.", UserWarning)
-        # The r field with default=32 is handled by the dataclass field definition.
-        # LoraConfig's __post_init__ does not modify self.r.
+        if self.invocation_tokens is None:
+            warnings.warn("invocation_tokens cannot be None for aLoRA.", UserWarning)
+        
 
