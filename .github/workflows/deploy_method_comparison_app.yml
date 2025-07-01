@@ -1,8 +1,10 @@
 name: Deploy "method_comparison" Gradio to Spaces
 
 on:
-  pull_request:
-    branches: [ main ]  # TODO remove
+  push:
+    branches: [ main ]
+    paths:
+      - "method_comparison/**"
   workflow_dispatch:
 
 jobs:
