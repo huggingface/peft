@@ -463,22 +463,16 @@ class Linear(nn.Module, aLoraLayer):
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         self._check_forward_args(x, *args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
-        ks = kwargs.pop("alora_offsets", [1]) #added
-#        ks = [100000]
-#        print("layer forward")
-#        print(ks)
-        if self.disable_adapters or ks[0] <= 0:
+        alora_offsets = kwargs.pop("alora_offsets", [1]) #Where to activate adapter weights
+        if self.disable_adapters or alora_offsets[0] <= 0:
             if self.merged:
                 self.unmerge()
             result = self.base_layer(x, *args, **kwargs)
         elif adapter_names is not None:
-            result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, alora_offsets = ks, **kwargs)
+            result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, alora_offsets = alora_offsets, **kwargs)
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            #if len(ks) == 1:
-
-            #k = ks # Maybe change
             result = self.base_layer(x, *args, **kwargs)
             torch_result_dtype = result.dtype
             for active_adapter in self.active_adapters:
@@ -489,37 +483,22 @@ class Linear(nn.Module, aLoraLayer):
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
                 x = x.to(lora_A.weight.dtype)
-                
+                 
                 if not self.use_dora[active_adapter]:
+                    if x.dim() == 2: #only one token, so apply adapter on everything (comes up in some tests)
+                        result = result + lora_B(lora_A(dropout(x))) * scaling
                     # Only do the last k tokens
-                    if len(ks) == 1:
-                        k = min(result.shape[1],ks[0])
+                    elif len(alora_offsets) == 1:
+                        k = min(result.shape[1],alora_offsets[0])
 
                         if k > 0:
-                            result[:,-k:,:] = result[:,-k:,:] + lora_B(lora_A(dropout(x[:,-k:,:]))) * scaling#dropout
+                            result[:,-k:,:] = result[:,-k:,:] + lora_B(lora_A(dropout(x[:,-k:,:]))) * scaling
                     else:
                         
                         for i in range(result.shape[0]):
-                            ks[i] = min(ks[i], result.shape[1])
+                            alora_offsets[i] = min(alora_offsets[i], result.shape[1])
                             if ks[i] > 0:
-                                result[i,-ks[i]:,:] = result[i,-ks[i]:,:] + lora_B(lora_A(dropout(x[i,-ks[i]:,:])))
-                else:
-                    warnings.warn("NOT SUPPORTED")
-                    if isinstance(dropout, nn.Identity) or not self.training:
-                        base_result = result
-                    else:
-                        x = dropout(x)
-                        base_result = None
-
-                    result = result + self.lora_magnitude_vector[active_adapter](
-                        x,
-                        lora_A=lora_A,
-                        lora_B=lora_B,
-                        scaling=scaling,
-                        base_layer=self.get_base_layer(),
-                        base_result=base_result,
-                    )
-
+                                result[i,-alora_offsets[i]:,:] = result[i,-alora_offsets[i]:,:] + lora_B(lora_A(dropout(x[i,-alora_offsets[i]:,:])))
             result = result.to(torch_result_dtype)
 
         return result

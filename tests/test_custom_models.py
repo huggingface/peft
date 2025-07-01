@@ -1399,7 +1399,8 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(
                 f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
             )
-
+        if issubclass(config_cls, aLoraConfig):
+            pytest.skip(f"Skipping test as merging is not supported for aLora.")
         # calling merge twice with the same arguments should not change the output
         config_kwargs = config_kwargs.copy()
         if issubclass(config_cls, LoraConfig):
