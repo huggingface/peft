@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
 import warnings
 from typing import Optional
 
@@ -119,6 +120,8 @@ class Linear(nn.Module, ShiraLayer):
         super().__init__()
         ShiraLayer.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = fan_in_fan_out
+        if self.base_layer is not self.get_base_layer():
+            raise ValueError("SHiRA does not support nested base layers")
 
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, mask, r, init_weights=init_weights)
@@ -195,19 +198,14 @@ class Linear(nn.Module, ShiraLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            result = self.base_layer(x, *args, **kwargs)
-            torch_result_dtype = result.dtype
-            delta_weight = None
+            new_weight = copy.deepcopy(self.base_layer.weight.data)
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.shira_weight.keys():
                     continue
-                if delta_weight is None:
-                    delta_weight = self.get_delta_weight(active_adapter)
-                else:
-                    delta_weight = delta_weight + self.get_delta_weight(active_adapter)
-            if delta_weight is not None:
-                x = self._cast_input_dtype(x, delta_weight.dtype)
-                result = result + F.linear(x, delta_weight).to(torch_result_dtype)
+                new_weight += self.get_delta_weight(active_adapter)
+
+            result = F.linear(x, new_weight, bias=self.base_layer.bias)
+
         return result
 
     def __repr__(self) -> str:
