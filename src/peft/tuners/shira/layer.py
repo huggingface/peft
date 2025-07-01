@@ -95,7 +95,7 @@ class ShiraLayer(BaseTunerLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
-    def reset_shira_parameters(self, adapter_name, d_initial: float = 0.1):
+    def reset_shira_parameters(self, adapter_name):
         nn.init.zeros_(self.shira_weight[adapter_name])
 
     def set_scale(self, adapter, scale):
@@ -208,8 +208,6 @@ class Linear(nn.Module, ShiraLayer):
                     delta_weight = delta_weight + self.get_delta_weight(active_adapter)
             if delta_weight is not None:
                 x = self._cast_input_dtype(x, delta_weight.dtype)
-                # x = self._cast_input_dtype(x, torch.float32)
-                # delta_weight = delta_weight.type(torch.float32)
                 result = result + F.linear(x, delta_weight).to(torch_result_dtype)
         return result
 

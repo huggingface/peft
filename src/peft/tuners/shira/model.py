@@ -40,11 +40,11 @@ class ShiraModel(BaseTuner):
 
     Args:
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
-        config ([`ShiraConfig`]): The configuration of the Shira model.
+        config ([`ShiraConfig`]): The configuration of the SHiRA model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
 
     Returns:
-        `torch.nn.Module`: The Shira model.
+        `torch.nn.Module`: The SHiRA model.
 
     Example:
 
@@ -59,7 +59,7 @@ class ShiraModel(BaseTuner):
 
     **Attributes**:
         - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
-        - **peft_config** ([`ShiraConfig`]): The configuration of the Shira model.
+        - **peft_config** ([`ShiraConfig`]): The configuration of the SHiRA model.
     """
 
     prefix: str = "shira_"
