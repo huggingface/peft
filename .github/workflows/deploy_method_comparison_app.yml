@@ -1,0 +1,26 @@
+name: Deploy "method_comparison" Gradio to Spaces
+
+on:
+  pull_request:
+    branches: [ main ]  # TODO remove
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history needed for subtree
+
+      - name: Deploy method_comparison app to HF Spaces
+        env:
+          HF_TOKEN: ${{ secrets.PEFT_INTERNAL_REPO_READ_WRITE }}
+        run: |
+          cd method_comparison
+          git init
+          git remote add gradio-app https://huggingface.co/spaces/peft-internal-testing/PEFT-method-comparison
+          git add .
+          git commit -m "🚀 Deploy method comparison app from GH action"
+          git push -f gradio-app HEAD:main
