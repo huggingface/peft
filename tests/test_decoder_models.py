@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import platform
 import tempfile
 from unittest.mock import Mock, call, patch
 
@@ -28,6 +29,7 @@ from peft import (
     AdaLoraConfig,
     BOFTConfig,
     BoneConfig,
+    C3AConfig,
     CPTConfig,
     FourierFTConfig,
     HRAConfig,
@@ -210,12 +212,20 @@ ALL_CONFIGS = [
             "bias": "none",
         },
     ),
+    (
+        C3AConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "block_size": 1,  # Some test cases contain shapes of prime numbers where `block_size` must be 1
+            "target_modules": None,
+        },
+    ),
 ]
 
 
 def _skip_if_not_conv1d_supported(model_id, config_cls):
-    if "GPT2LMHeadModel" in model_id and config_cls in [BOFTConfig, BoneConfig, HRAConfig, OFTConfig]:
-        pytest.skip("Skipping BOFT/HRA/OFT/Bone for GPT2LMHeadModel")
+    if "GPT2LMHeadModel" in model_id and config_cls in [BOFTConfig, BoneConfig, HRAConfig, OFTConfig, C3AConfig]:
+        pytest.skip("Skipping BOFT/HRA/OFT/Bone/C3A for GPT2LMHeadModel")
 
 
 def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
@@ -225,6 +235,7 @@ def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
         HRAConfig,
         OFTConfig,
         BoneConfig,
+        C3AConfig,
     ]:
         pytest.skip("Skipping AdaLora/BOFT/HRA/OFT/Bone(MiSS) for GPT2LMHeadModel")
 
@@ -491,6 +502,14 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_passing_input_embeds_works(self, model_id, config_cls, config_kwargs):
         _skip_if_not_conv1d_supported(model_id, config_cls)
+        if (platform.system() == "Darwin") and (config_cls == PrefixTuningConfig):
+            # the error is:
+            # > RuntimeError: unsupported operation: more than one element of the written-to tensor refers to a single
+            # > memory location. Please clone() the tensor before performing the operation.
+            # in transformers sdpa_mask_older_torch. As we (currently) cannot upgrade PyTorch on MacOS GH runners, we're
+            # stuck with this error.
+            # TODO: remove if torch can be upgraded on MacOS or if MacOS CI is removed
+            pytest.skip("Prefix tuning fails on MacOS in this case, not worth fixing")
         self._test_passing_input_embeds_works("", model_id, config_cls, config_kwargs.copy())
 
     def test_lora_layer_replication(self):
