@@ -1,3 +1,11 @@
+---
+title: PEFT Method Comparison
+sdk: gradio
+app_file: app.py
+pinned: false
+emoji: ⚖️
+---
+
 # Comparison of PEFT Methods
 
 The goal of this project is to provide replicable experiments that produce outcomes allowing us to compare different PEFT methods with one another. This gives you more information to make an informed decision about which methods best fit your use case and what trade-offs to expect.
