@@ -18,6 +18,10 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.PEFT_INTERNAL_REPO_READ_WRITE }}
         run: |
+          # write credentials to ~/.netrc (git will use this automatically)
+          printf "machine huggingface.co\nlogin ${HF_TOKEN}\n" >> ~/.netrc
+          chmod 600 ~/.netrc
+
           cd method_comparison
           git init
           git config user.name "github-actions[bot]"
