@@ -435,20 +435,20 @@ TEST_CASES = [
     ########
     # SHiRA #
     ########
-    ("Vanilla MLP 1 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": "lin0", "init_randn_shira_weight": True}),
-    ("Vanilla MLP 2 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": ["lin0"], "init_randn_shira_weight": True}),
-    ("Vanilla MLP 3 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": ["lin1"], "init_randn_shira_weight": True}),
+    ("Vanilla MLP 1 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": "lin0", "init_weights": False}),
+    ("Vanilla MLP 2 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": ["lin0"], "init_weights": False}),
+    ("Vanilla MLP 3 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": ["lin1"], "init_weights": False}),
     (
         "Vanilla MLP 4 SHiRA",
         "MLP",
         ShiraConfig,
-        {"r": 1, "target_modules": ["lin0", "lin1"], "random_seed": 56, "init_randn_shira_weight": True},
+        {"r": 1, "target_modules": ["lin0", "lin1"], "random_seed": 56, "init_weights": False},
     ),
     (
         "Vanilla MLP 5 SHiRA",
         "MLP",
         ShiraConfig,
-        {"r": 1, "target_modules": ["lin0"], "init_randn_shira_weight": True},
+        {"r": 1, "target_modules": ["lin0"], "init_weights": False},
     ),
     ########
     # VeRA #
@@ -656,15 +656,15 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         "SHiRA Same",
         "shira",
         ShiraConfig,
-        {"r": 1, "target_modules": ["lin0"], "init_randn_shira_weight": True},
-        {"r": 1, "target_modules": ["lin0"], "init_randn_shira_weight": True},
+        {"r": 1, "target_modules": ["lin0"], "init_weights": False},
+        {"r": 1, "target_modules": ["lin0"], "init_weights": False},
     ),
     (
         "SHiRA Different",
         "shira",
         ShiraConfig,
-        {"r": 1, "target_modules": ["lin0"], "init_randn_shira_weight": True},
-        {"r": 1, "target_modules": ["lin1"], "init_randn_shira_weight": True},
+        {"r": 1, "target_modules": ["lin0"], "init_weights": False},
+        {"r": 1, "target_modules": ["lin1"], "init_weights": False},
     ),
     # Note: Currently, we cannot target lin0 and lin1 with different adapters when using VeRA. The reason is that the
     # first adapter being created will result in a vera_A or vera_B shape that is too small for the next adapter
@@ -1172,8 +1172,6 @@ class TestPeftCustomModel(PeftCommonTester):
             pass
         elif issubclass(config_cls, VBLoRAConfig):
             pass
-        elif issubclass(config_cls, ShiraConfig):
-            pass
         elif issubclass(config_cls, TrainableTokensConfig):
             pass
         else:
@@ -1230,9 +1228,6 @@ class TestPeftCustomModel(PeftCommonTester):
             pass
         elif issubclass(config_cls, VBLoRAConfig):
             # VBLoRA do not take init_weights
-            pass
-        elif issubclass(config_cls, ShiraConfig):
-            # SHiRA does not take init_weights
             pass
         else:
             config_kwargs["init_weights"] = False
@@ -1557,7 +1552,11 @@ class TestPeftCustomModel(PeftCommonTester):
             # override the default value and make PEFT operation a no-op
             config_kwargs["init_weights"] = True
         if issubclass(config_cls, (ShiraConfig,)):
-            config_kwargs["init_randn_shira_weight"] = False
+            # for SHiRA, setting this to default value of True will turn the PEFT operation into a no-op
+            # because SHiRA is always initialized to zeros. Configs declared in the test file had set init_weights
+            # to False (to make sure all other tests have a randn SHiRA initialization). Setting it back to True here
+            # as required by this test.
+            config_kwargs["init_weights"] = True
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,

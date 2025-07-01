@@ -739,11 +739,6 @@ class PeftCommonTester:
         if issubclass(config_cls, (OFTConfig, BOFTConfig)):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
-        if issubclass(
-            config_cls, ShiraConfig
-        ):  # SHiRA is always initialized to all zeros, so it will not change the logits values.
-            return pytest.skip(f"Test not applicable for {config_cls}")
-
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
 
@@ -939,8 +934,7 @@ class PeftCommonTester:
 
             atol, rtol = 1e-6, 1e-6  # default
             # Initializing with LN tuning cannot be configured to change the outputs (unlike init_lora_weights=False)
-            # Initializing with SHiRA also would not change the outputs because SHiRA weights are initialized to zeros
-            if not issubclass(config_cls, (LNTuningConfig, ShiraConfig)):
+            if not issubclass(config_cls, LNTuningConfig):
                 # sanity check that the logits are different
                 assert not torch.allclose(logits_base, logits_peft, atol=atol, rtol=rtol)
 

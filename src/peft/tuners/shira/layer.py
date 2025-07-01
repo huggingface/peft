@@ -56,7 +56,7 @@ class ShiraLayer(BaseTunerLayer):
         adapter_name,
         mask,
         r,
-        init_randn_shira_weight: bool = False,
+        init_weights: bool = True,
     ):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -75,7 +75,7 @@ class ShiraLayer(BaseTunerLayer):
         # We have used a vector parameter with fixed indices that we use inside a torch.sparse_coo_tensor in get_delta_weight function.
         # Directly using a torch.sparse_coo_tensor as a parameter could have been possible but we ran into some issues similar to:
         # https://github.com/pytorch/pytorch/issues/79542.
-        shira_init_weight = torch.randn(num_shira_weight) if init_randn_shira_weight else torch.zeros(num_shira_weight)
+        shira_init_weight = torch.zeros(num_shira_weight) if init_weights else torch.randn(num_shira_weight)
         self.shira_weight[adapter_name] = nn.Parameter(
             shira_init_weight.to(self.base_layer.weight.dtype).to(self.base_layer.weight.device),
             requires_grad=True,
@@ -114,7 +114,7 @@ class Linear(nn.Module, ShiraLayer):
         adapter_name: str,
         r: int = 0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stored weight like (fan_in, fan_out)
-        init_randn_shira_weight: bool = False,
+        init_weights: bool = True,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -122,7 +122,7 @@ class Linear(nn.Module, ShiraLayer):
         self.fan_in_fan_out = fan_in_fan_out
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, mask, r, init_randn_shira_weight=init_randn_shira_weight)
+        self.update_layer(adapter_name, mask, r, init_weights=init_weights)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """

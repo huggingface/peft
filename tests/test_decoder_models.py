@@ -185,7 +185,7 @@ ALL_CONFIGS = [
             "r": 1,
             "task_type": "CAUSAL_LM",
             "target_modules": None,
-            "init_randn_shira_weight": True,
+            "init_weights": False,
         },
     ),
     (

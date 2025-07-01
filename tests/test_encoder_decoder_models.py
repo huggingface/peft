@@ -151,7 +151,7 @@ ALL_CONFIGS = [
             "r": 1,
             "task_type": "SEQ_2_SEQ_LM",
             "target_modules": None,
-            "init_randn_shira_weight": True,
+            "init_weights": False,
         },
     ),
     (

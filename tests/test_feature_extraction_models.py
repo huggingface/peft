@@ -151,7 +151,7 @@ ALL_CONFIGS = [
             "r": 1,
             "task_type": "FEATURE_EXTRACTION",
             "target_modules": None,
-            "init_randn_shira_weight": True,
+            "init_weights": False,
         },
     ),
     (
