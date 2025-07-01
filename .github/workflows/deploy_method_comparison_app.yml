@@ -18,7 +18,7 @@ jobs:
           HF_TOKEN: ${{ secrets.PEFT_INTERNAL_REPO_READ_WRITE }}
         run: |
           pip install huggingface_hub
-          huggingface-cli login --token "${HF_TOKEN}"
+          huggingface-cli login --token "${HF_TOKEN}" --add-to-git-credential
 
       - name: Deploy method_comparison app to HF Spaces
         run: |
