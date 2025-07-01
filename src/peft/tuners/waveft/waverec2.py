@@ -10,7 +10,6 @@ import pywt
 import torch
 from typing_extensions import ParamSpec, TypeVar, TypeAlias, Unpack
 
-# --- From constants.py ---
 
 class WaveletDetailTuple2d(NamedTuple):
     horizontal: torch.Tensor
@@ -23,8 +22,6 @@ WaveletCoeff2d: TypeAlias = tuple[
 WaveletDetailDict: TypeAlias = dict[str, torch.Tensor]
 WaveletCoeffNd: TypeAlias = tuple[torch.Tensor, Unpack[tuple[WaveletDetailDict, ...]]]
 
-
-# --- From _util.py ---
 
 class Wavelet(Protocol):
     name: str
@@ -198,7 +195,6 @@ def _postprocess_coeffs(coeffs, ndim: int, ds: list[int], axes):
 def _postprocess_tensor(data: torch.Tensor, ndim: int, ds: list[int], axes: Union[tuple[int, ...], int]) -> torch.Tensor:
     return _postprocess_coeffs(coeffs=[data], ndim=ndim, ds=ds, axes=axes)[0]
 
-# --- From conv_transform.py ---
 
 def _get_filter_tensors(
     wavelet: Union[Wavelet, str], flip: bool, device: torch.device, dtype: torch.dtype

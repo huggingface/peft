@@ -44,7 +44,7 @@ from .trainable_tokens import TrainableTokensConfig, TrainableTokensModel
 from .vblora import VBLoRAConfig, VBLoRAModel
 from .vera import VeraConfig, VeraModel
 from .xlora import XLoraConfig, XLoraModel
-
+from .waveft import WaveFTConfig, WaveFTModel
 
 __all__ = [
     "AdaLoraConfig",
@@ -60,6 +60,8 @@ __all__ = [
     "EvaConfig",
     "FourierFTConfig",
     "FourierFTModel",
+    "WaveFTConfig",
+    "WaveFTModel",
     "HRAConfig",
     "HRAModel",
     "IA3Config",
