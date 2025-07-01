@@ -20,6 +20,8 @@ jobs:
         run: |
           cd method_comparison
           git init
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote add gradio-app https://huggingface.co/spaces/peft-internal-testing/PEFT-method-comparison
           git add .
           git commit -m "🚀 Deploy method comparison app from GH action"
