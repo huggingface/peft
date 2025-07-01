@@ -1415,9 +1415,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         peft_method = self.active_peft_config.peft_type.value
 
-        tags = [
-            f"peft:method:{peft_method.lower()}",
-        ]
+        tags = []
+
+        if hasattr(self.base_model, "model") and isinstance(self.base_model.model, transformers.PreTrainedModel):
+            tags.append("transformers")
 
         if peft_method == "LORA":
             tags.append("lora")
@@ -1450,6 +1451,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         tags = tags.union(self._get_peft_specific_model_tags())
         if tags:
             card.data["tags"] = sorted(tags)
+
+        # One of the rare moments where we can select the pipeline tag with certainty, so let's do that.
+        # Makes it easier to deploy an adapter with auto inference since the user doesn't have to add any tags.
+        if not card.data.pipeline_tag and isinstance(self, PeftModelForCausalLM):
+            card.data.pipeline_tag = "text-generation"
 
         model_config = BaseTuner.get_model_config(self)
         model_config = None if model_config == DUMMY_MODEL_CONFIG else model_config

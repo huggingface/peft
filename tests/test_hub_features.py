@@ -18,7 +18,7 @@ import torch
 from huggingface_hub import ModelCard
 from transformers import AutoModelForCausalLM
 
-from peft import AutoPeftModelForCausalLM, BoneConfig, LoraConfig, PeftConfig, PeftModel, get_peft_model
+from peft import AutoPeftModelForCausalLM, BoneConfig, LoraConfig, PeftConfig, PeftModel, TaskType, get_peft_model
 
 from .testing_common import hub_online_once
 
@@ -119,29 +119,39 @@ class TestBaseModelRevision:
 
 class TestModelCard:
     @pytest.mark.parametrize(
-        "model_id, peft_config, tags, excluded_tags",
+        "model_id, peft_config, tags, excluded_tags, pipeline_tag",
         [
             (
                 "hf-internal-testing/tiny-random-Gemma3ForCausalLM",
                 LoraConfig(),
-                ["peft:method:lora", "base_model:adapter:hf-internal-testing/tiny-random-Gemma3ForCausalLM", "lora"],
+                ["transformers", "base_model:adapter:hf-internal-testing/tiny-random-Gemma3ForCausalLM", "lora"],
                 [],
+                None,
             ),
             (
                 "hf-internal-testing/tiny-random-Gemma3ForCausalLM",
                 BoneConfig(),
-                ["peft:method:bone", "base_model:adapter:hf-internal-testing/tiny-random-Gemma3ForCausalLM"],
+                ["transformers", "base_model:adapter:hf-internal-testing/tiny-random-Gemma3ForCausalLM"],
                 ["lora"],
+                None,
             ),
             (
                 "hf-internal-testing/tiny-random-BartForConditionalGeneration",
                 LoraConfig(),
                 [
-                    "peft:method:lora",
+                    "transformers",
                     "base_model:adapter:hf-internal-testing/tiny-random-BartForConditionalGeneration",
                     "lora",
                 ],
                 [],
+                None,
+            ),
+            (
+                "hf-internal-testing/tiny-random-Gemma3ForCausalLM",
+                LoraConfig(task_type=TaskType.CAUSAL_LM),
+                ["transformers", "base_model:adapter:hf-internal-testing/tiny-random-Gemma3ForCausalLM", "lora"],
+                [],
+                "text-generation",
             ),
         ],
     )
@@ -152,7 +162,9 @@ class TestModelCard:
             [],
         ],
     )
-    def test_model_card_has_expected_tags(self, model_id, peft_config, tags, excluded_tags, pre_tags, tmp_path):
+    def test_model_card_has_expected_tags(
+        self, model_id, peft_config, tags, excluded_tags, pipeline_tag, pre_tags, tmp_path
+    ):
         """Make sure that PEFT sets the tags in the model card automatically and correctly.
         This is important so that a) the models are searchable on the Hub and also 2) some features depend on it to
         decide how to deal with them (e.g., inference).
@@ -178,3 +190,31 @@ class TestModelCard:
 
             if pre_tags:
                 assert set(pre_tags).issubset(set(model_card.data.tags))
+
+            if pipeline_tag:
+                assert model_card.data.pipeline_tag == pipeline_tag
+
+    @pytest.fixture
+    def custom_model_cls(self):
+        class MyNet(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(10, 20)
+                self.l2 = torch.nn.Linear(20, 1)
+
+            def forward(self, X):
+                return self.l2(self.l1(X))
+
+        return MyNet
+
+    def test_custom_models_dont_have_transformers_tag(self, custom_model_cls, tmp_path):
+        base_model = custom_model_cls()
+        peft_config = LoraConfig(target_modules="all-linear")
+        peft_model = get_peft_model(base_model, peft_config)
+
+        peft_model.save_pretrained(tmp_path)
+
+        model_card = ModelCard.load(tmp_path / "README.md")
+
+        assert model_card.data.tags is not None
+        assert "transformers" not in model_card.data.tags
