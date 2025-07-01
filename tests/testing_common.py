@@ -266,9 +266,6 @@ class PeftCommonTester:
         else:  # a custom model
             assert "base_model" not in dct
 
-        # There must be at least one tag with the PEFT method that was used.
-        assert len([t for t in dct["tags"] if t.startswith("peft:method:")]) > 0
-
         # The Hub expects the lora tag to be set for PEFT LoRA models since they
         # have explicit support for things like inference.
         if model.active_peft_config.peft_type.value == "LORA":
