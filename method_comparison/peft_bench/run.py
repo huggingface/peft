@@ -138,7 +138,6 @@ def run_benchmark(
         experiment_name=experiment_name,
         status=BenchmarkStatus.RUNNING,
         model_id=benchmark_config.model_id,
-        peft_method=benchmark_config.peft_method,
     )
 
     # Save initial result to show running status
@@ -214,8 +213,6 @@ def run_benchmark(
             print_fn=print_fn,
         )
 
-        # Apply PEFT method
-        print_fn(f"Applying PEFT method: {benchmark_config.peft_method}")
 
         # Load PEFT configuration from path or create dynamically
         try:
@@ -329,9 +326,10 @@ def run_benchmark(
 
     # Convert PEFT config to dict for storage
     peft_config_dict = peft_config.to_dict() if 'peft_config' in locals() else None
-    for key, value in peft_config_dict.items() if peft_config_dict else {}:
-        if isinstance(value, set):
-            peft_config_dict[key] = list(value)
+    if peft_config_dict:
+        for key, value in peft_config_dict.items():
+            if isinstance(value, set):
+                peft_config_dict[key] = list(value)
 
     result.update_run_info(
         duration=end_time - start_time,

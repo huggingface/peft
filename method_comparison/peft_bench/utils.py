@@ -58,7 +58,6 @@ class BenchmarkResult:
 
     # Model info
     model_id: str
-    peft_method: str
 
     # Structure for organized results
     run_info: dict = field(default_factory=dict)
@@ -83,7 +82,6 @@ class BenchmarkResult:
         # Default meta_info with enhanced system information
         self.meta_info = {
             "model_id": self.model_id,
-            "peft_method": self.peft_method,
             "parameters": {
                 "base_params": 0,
                 "trainable_params": 0,
@@ -175,18 +173,18 @@ class BenchmarkResult:
         if not self.generation_info["by_category"]:
             return
 
-        all_metrics = self.generation_info["by_category"].values()
-        metric_keys = set().union(*(d.keys() for d in all_metrics))
 
-        for key in metric_keys:
-            values = [d.get(key) for d in all_metrics if key in d]
-            values = [v for v in values if v is not None]
-
+        categories = self.generation_info["by_category"]
+        key_metrics = ["inference_time", "base_inference_time", "inference_overhead_pct", "time_per_token", "generated_tokens"]
+        
+        for metric in key_metrics:
+            values = []
+            for category_data in categories.values():
+                if "metrics" in category_data and metric in category_data["metrics"]:
+                    values.append(category_data["metrics"][metric])
+            
             if values:
-                if all(isinstance(v, (int, float)) for v in values):
-                    self.generation_info["overall"][key] = sum(values) / len(values)
-                else:
-                    self.generation_info["overall"][key] = values[0]
+                self.generation_info["overall"][metric] = sum(values) / len(values)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert result to dictionary."""
@@ -215,7 +213,7 @@ class BenchmarkResult:
                 base_path = RESULT_PATH_TEMP
 
             # Create the filename
-            filename = f"{self.peft_method}--{self.experiment_name}.json"
+            filename = f"{self.experiment_name}.json"
             path = os.path.join(base_path, filename)
 
         # Ensure the directory exists
@@ -234,7 +232,6 @@ class BenchmarkConfig:
 
     # Model configuration
     model_id: str
-    peft_method: str  # Using str instead of Literal to be more flexible
 
     # Benchmark settings
     seed: int
@@ -387,7 +384,6 @@ def log_results(
 
     print_fn("\nModel Information:")
     print_fn(f"  Base Model: {benchmark_result.meta_info.get('model_id', 'N/A')}")
-    print_fn(f"  PEFT Method: {benchmark_result.meta_info.get('peft_method', 'N/A')}")
 
     print_fn("\nParameter Counts:")
     params = benchmark_result.meta_info.get("parameters", {})
