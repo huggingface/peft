@@ -13,12 +13,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # full history needed for subtree
-      - name: Install HF Hub CLI and authenticate
+
+      - name: Authenticate via ~/.netrc
         env:
           HF_TOKEN: ${{ secrets.PEFT_INTERNAL_REPO_READ_WRITE }}
         run: |
-          pip install huggingface_hub
-          huggingface-cli login --token "${HF_TOKEN}" --add-to-git-credential
+          # netrc needs BOTH login and password entries
+          printf "machine huggingface.co\nlogin hf\npassword ${HF_TOKEN}\n" >> ~/.netrc
+          chmod 600 ~/.netrc
 
       - name: Deploy method_comparison app to HF Spaces
         run: |
