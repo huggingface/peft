@@ -31,20 +31,20 @@ class ShiraConfig(PeftConfig):
 
     Args:
         r (`int`, *optional*, defaults to `32`):
-            For a given target module, the number of SHiRA parameters is computed as r(m+n), where the original 
-            tensor dimensions are m x n. This means the number of SHiRA parameters is the same as that for a LoRA adapter. 
+            For a given target module, the number of SHiRA parameters is computed as r(m+n), where the original
+            tensor dimensions are m x n. This means the number of SHiRA parameters is the same as that for a LoRA adapter.
             SHiRA is a high rank adapter. Setting this r parameter does not restrict the rank to this value.
         mask_type (`str`, defaults to `random`):
             Type of mask function. Defaults to a random sparse mask.
-            An optional user-defined mask_fn to compute the mask value can also be supplied by instantiating `config = ShiraConfig(...)` and then setting  
+            An optional user-defined mask_fn to compute the mask value can also be supplied by instantiating `config = ShiraConfig(...)` and then setting
             `config.mask_fn = <your custom mask function>`. For a pretrained weight with shape m x n, the custom mask function must return only one mask (shape: m x n)
-            which must be binary 0 or 1 with num_shira_parameters = r(m + n) for linear layers. Device and dtype of mask must be same as base layer's weight's device and dtype. 
+            which must be binary 0 or 1 with num_shira_parameters = r(m + n) for linear layers. Device and dtype of mask must be same as base layer's weight's device and dtype.
             Please see mask_functions.py for more details and to see the default random sparse mask implementation.
         random_seed (`int`, *optional*, defaults to `42`):
             random seed for the torch generator for random_mask.
         target_modules (`Union[List[str], str]`):
             List of module names or regex expression of the module names to replace with SHiRA.
-            For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. 
+            For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'.
             Only linear layers are supported.
         fan_in_fan_out (`bool`):
             Set this to True if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 uses
@@ -70,7 +70,7 @@ class ShiraConfig(PeftConfig):
         metadata={
             "help": (
                 "Type of mask function. Defaults to a random sparse mask. "
-                "An optional user-defined mask_fn to compute the mask value can also be supplied by instantiating `config = ShiraConfig(...)` and then setting " 
+                "An optional user-defined mask_fn to compute the mask value can also be supplied by instantiating `config = ShiraConfig(...)` and then setting "
                 "`config.mask_fn = <your custom mask function>`. For a pretrained weight with shape m x n, the custom mask function must return only one mask (shape: m x n) "
                 "which must be binary 0 or 1 with num_shira_parameters = r(m + n) for linear layers. Device and dtype of mask must be same as base layer's weight's device and dtype. "
                 "Please see mask_functions.py for more details and to see the default random sparse mask implementation."

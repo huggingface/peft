@@ -50,7 +50,6 @@ from peft import (
     PromptLearningConfig,
     PromptTuningConfig,
     RandLoraConfig,
-    ShiraConfig,
     VBLoRAConfig,
     VeraConfig,
     get_peft_model,

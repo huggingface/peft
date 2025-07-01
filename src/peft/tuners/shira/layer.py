@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import copy
 import warnings
 from typing import Optional
 
@@ -210,28 +209,6 @@ class Linear(nn.Module, ShiraLayer):
                 x = self._cast_input_dtype(x, delta_weight.dtype)
                 result = result + F.linear(x, delta_weight).to(torch_result_dtype)
         return result
-
-    """
-    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        # previous_dtype = x.dtype
-
-        if self.disable_adapters:
-            if self.merged:
-                self.unmerge()
-            result = self.base_layer(x, *args, **kwargs)
-        elif self.merged:
-            result = self.base_layer(x, *args, **kwargs)
-        else:
-            new_weight = copy.deepcopy(self.base_layer.weight.data)
-            for active_adapter in self.active_adapters:
-                if active_adapter not in self.shira_weight.keys():
-                    continue
-                new_weight += self.get_delta_weight(active_adapter)
-
-            result = F.linear(x, new_weight, bias=self.base_layer.bias)
-
-        return result
-    """
 
     def __repr__(self) -> str:
         rep = super().__repr__()

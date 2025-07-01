@@ -1,8 +1,10 @@
 import torch
-from peft import ShiraConfig, get_peft_model
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from trl import SFTConfig, SFTTrainer
 from datasets import load_dataset
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from trl import SFTConfig, SFTTrainer
+
+from peft import ShiraConfig, get_peft_model
+
 
 model = AutoModelForCausalLM.from_pretrained("facebook/opt-350m", torch_dtype=torch.bfloat16, device_map="auto")
 tokenizer = AutoTokenizer.from_pretrained("facebook/opt-350m")
