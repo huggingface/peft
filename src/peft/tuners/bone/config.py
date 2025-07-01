@@ -123,5 +123,5 @@ class BoneConfig(PeftConfig):
             raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
         
         warnings.warn(
-            "Bone will be removed in v0.xxx.0, you need to use MiSS"
+            "Bone will be removed in v0.18.0, you need to use MiSS"
         )

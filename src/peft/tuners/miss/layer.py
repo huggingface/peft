@@ -26,12 +26,13 @@ class MiSSLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names = ("miss_block",)
     # All names of other parameters that may contain adapter-related parameters
-    other_param_names = ("miss_r", "miss_dropout")
+    other_param_names = ("miss_r", "miss_dropout", "miss_mini_r")
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         self.base_layer = base_layer
         self.miss_r = {}
         self.miss_dropout = nn.ModuleDict({})
+        self.miss_mini_r = {}
         self.miss_block = nn.ParameterDict({})
         # Mark the weight as unmerged
         self._disable_adapters = False
@@ -50,6 +51,7 @@ class MiSSLayer(BaseTunerLayer):
         self,
         adapter_name: str,
         r: int,
+        mini_r: int,
         miss_dropout,
         init_weights: bool,
         **kwargs,
@@ -65,6 +67,7 @@ class MiSSLayer(BaseTunerLayer):
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
         self.miss_r[adapter_name] = r
+        self.miss_mini_r[adapter_name] = mini_r
         if miss_dropout > 0.0:
             miss_dropout_layer = nn.Dropout(p=miss_dropout)
         else:
@@ -76,7 +79,6 @@ class MiSSLayer(BaseTunerLayer):
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
             self.miss_block[adapter_name] = nn.Parameter(torch.zeros(r, self.out_features), requires_grad=True)
-
         else:
             raise TypeError(f"MiSS is not implemented for base layers of type {type(base_layer).__name__}")
 
@@ -85,6 +87,10 @@ class MiSSLayer(BaseTunerLayer):
             if self.in_features % r != 0 or self.out_features % r != 0:
                 raise ValueError("The weight matrix must be fully divisible into [r, r] blocks.")
             self.reset_bat_parameters(adapter_name, r)
+        elif init_weights == "mini":
+            if self.out_features % mini_r != 0:
+                raise ValueError("mini_r is divided along the out_features dimension. For optimal performance and implementation simplicity, it is recommended that out_features be divisible by mini_r.")
+            self.reset_mini_parameters(adapter_name, r, mini_r)
         elif init_weights:
             self.reset_miss_parameters(adapter_name, r)
         else:
@@ -98,6 +104,9 @@ class MiSSLayer(BaseTunerLayer):
 
     def reset_bat_parameters(self, adapter_name: str, r):
         self.miss_block[adapter_name] = nn.Parameter(torch.zeros(self.out_features // r, r, r), requires_grad=True)
+
+    def reset_mini_parameters(self, adapter_name: str, r, mini_r):
+        self.miss_block[adapter_name] = nn.Parameter(torch.zeros(r, mini_r), requires_grad=True)
 
     def reset_miss_parameters_random(self, adapter_name: str):
         nn.init.kaiming_uniform_(self.miss_block[adapter_name], a=math.sqrt(5))
@@ -130,14 +139,15 @@ class MiSSLinear(nn.Module, MiSSLayer):
         base_layer,
         adapter_name: str,
         r: int = 0,
-        lora_dropout: float = 0.0,
+        mini_r: int = 0,
+        miss_dropout: float = 0.0,
         init_weights: Union[bool, str] = True,
         **kwargs,
     ) -> None:
         super().__init__()
         MiSSLayer.__init__(self, base_layer, **kwargs)
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, lora_dropout, init_weights, **kwargs)
+        self.update_layer(adapter_name, r, mini_r, miss_dropout, init_weights, **kwargs)
         self.miss_fn = init_weights
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -167,8 +177,11 @@ class MiSSLinear(nn.Module, MiSSLayer):
                     # because of the copy operation.
                     orig_weight = base_layer.weight.data.clone()
                     if self.miss_fn == "bat":
-                        delta_weight = self.get_delta_weight(active_adapter, orig_weight)
+                        delta_weight = self.get_delta_weight_bat(active_adapter, orig_weight)
                         orig_weight += delta_weight
+                    elif self.miss_fn == "mini":
+                        delta_weight = self.get_delta_weight_miss(active_adapter, self.base_layer.weight.data)
+                        orig_weight = delta_weight
                     else:
                         delta_weight = self.get_delta_weight_miss(active_adapter, self.base_layer.weight.data)
                         orig_weight = delta_weight
@@ -181,8 +194,11 @@ class MiSSLinear(nn.Module, MiSSLayer):
                     base_layer.weight.data = orig_weight.to(orig_dtype)
                 else:
                     if self.miss_fn == "bat":
-                        delta_weight = self.get_delta_weight(active_adapter, self.base_layer.weight.data)
+                        delta_weight = self.get_delta_weight_bat(active_adapter, self.base_layer.weight.data)
                         base_layer.weight.data += delta_weight.to(orig_dtype)
+                    elif self.miss_fn == "mini":
+                        delta_weight = self.get_delta_weight_miss(active_adapter, self.base_layer.weight.data)
+                        base_layer.weight.data = delta_weight.to(orig_dtype)
                     else:
                         delta_weight = self.get_delta_weight_miss(active_adapter, self.base_layer.weight.data)
                         base_layer.weight.data = delta_weight.to(orig_dtype)
@@ -203,13 +219,15 @@ class MiSSLinear(nn.Module, MiSSLayer):
             if active_adapter in self.miss_block.keys():
                 orig_weight = self.get_base_layer().weight.data.clone()
                 if self.miss_fn == "bat":
-                    delta_weight = self.get_delta_weight(active_adapter, orig_weight, re=True)
+                    delta_weight = self.get_delta_weight_bat(active_adapter, orig_weight, re=True)
+                elif self.miss_fn == "mini":
+                    delta_weight = self.get_delta_weight_miss(active_adapter, orig_weight, re=True)
                 else:
                     delta_weight = self.get_delta_weight_miss(active_adapter, orig_weight, re=True)
 
                 base_layer.weight.data = delta_weight.to(orig_dtype)
 
-    def get_delta_weight(self, adapter, orig_weight, re: bool = False) -> torch.Tensor:
+    def get_delta_weight_bat(self, adapter, orig_weight, re: bool = False) -> torch.Tensor:
         """
         Compute the delta weight for the given adapter.
 
@@ -276,7 +294,11 @@ class MiSSLinear(nn.Module, MiSSLayer):
             weight_miss = weight_miss.float()
 
         in_features = orig_weight.size(-1)
+        out_features = orig_weight.size(0)
         r = weight_miss.size(0)
+        if self.miss_fn=='mini':
+            weight_miss = weight_miss.repeat(1, out_features//self.mini_r)
+
         if in_features % r != 0:
             last_size = in_features % r
             n_block = in_features // r
@@ -345,6 +367,8 @@ class MiSSLinear(nn.Module, MiSSLayer):
                     if active_adapter not in self.miss_block.keys():
                         continue
                     miss = self.miss_block[active_adapter]
+                    if self.miss_fn == 'mini':
+                        miss = miss.repeat(1, self.base_layer.out_features//self.mini_r)
                     dropout = self.miss_dropout[active_adapter]
                     r = miss.size(0)
                     if x.size(-1) % r != 0:
