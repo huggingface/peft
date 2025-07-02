@@ -36,7 +36,7 @@ python train.py \
 --lora_alpha 16 \
 --lora_dropout 0.1 \
 --lora_target_modules "q_proj,k_proj,v_proj,o_proj,down_proj,up_proj,gate_proj" \
---use_4bit_quantization True \
+--use_bnb_4bit_quantization True \
 --use_nested_quant True \
 --bnb_4bit_compute_dtype "bfloat16" \
 --use_flash_attn True

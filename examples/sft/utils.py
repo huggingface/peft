@@ -97,19 +97,19 @@ def create_and_prepare_model(args, data_args, training_args):
     ):
         raise NotImplementedError("Unsloth is not supported in distributed training")
 
-    if args.use_4bit_quantization:
+    if args.use_bnb_4bit_quantization:
         compute_dtype = getattr(torch, args.bnb_4bit_compute_dtype)
         quant_storage_dtype = getattr(torch, args.bnb_4bit_quant_storage_dtype)
 
         bnb_config = BitsAndBytesConfig(
-            load_in_4bit=args.use_4bit_quantization,
+            load_in_4bit=args.use_bnb_4bit_quantization,
             bnb_4bit_quant_type=args.bnb_4bit_quant_type,
             bnb_4bit_compute_dtype=compute_dtype,
             bnb_4bit_use_double_quant=args.use_nested_quant,
             bnb_4bit_quant_storage=quant_storage_dtype,
         )
 
-        if compute_dtype == torch.float16 and args.use_4bit_quantization:
+        if compute_dtype == torch.float16 and args.use_bnb_4bit_quantization:
             major, _ = torch.cuda.get_device_capability()
             if major >= 8:
                 print("=" * 80)
@@ -124,19 +124,25 @@ def create_and_prepare_model(args, data_args, training_args):
             model_name=args.model_name_or_path,
             max_seq_length=training_args.max_seq_length,
             dtype=None,
-            load_in_4bit=args.use_4bit_quantization,
+            load_in_4bit=args.use_bnb_4bit_quantization,
         )
     else:
         torch_dtype = (
             quant_storage_dtype if quant_storage_dtype and quant_storage_dtype.is_floating_point else torch.float32
         )
-        model = AutoModelForCausalLM.from_pretrained(
-            args.model_name_or_path,
-            quantization_config=bnb_config,
-            trust_remote_code=True,
-            attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
-            torch_dtype=torch_dtype,
-        )
+
+        # Prepare model loading arguments
+        model_kwargs = {
+            "trust_remote_code": True,
+            "attn_implementation": "flash_attention_2" if args.use_flash_attn else "eager",
+            "torch_dtype": torch_dtype,
+        }
+
+        # Only add quantization_config if bnb_config is not None
+        if bnb_config is not None:
+            model_kwargs["quantization_config"] = bnb_config
+
+        model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path, **model_kwargs)
 
     peft_config = None
     chat_template = None
@@ -178,7 +184,11 @@ def create_and_prepare_model(args, data_args, training_args):
         # ante). See https://github.com/huggingface/accelerate/issues/1620.
         uses_transformers_4_46 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.46.0")
         uses_fsdp = os.environ.get("ACCELERATE_USE_FSDP", "false").lower() == "true"
-        if (bnb_config is not None) and uses_fsdp and uses_transformers_4_46:
+        if (
+            (bnb_config is not None or (hasattr(model, "hf_quantizer") and model.hf_quantizer is not None))
+            and uses_fsdp
+            and uses_transformers_4_46
+        ):
             model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8, mean_resizing=False)
         else:
             model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
