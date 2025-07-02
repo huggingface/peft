@@ -225,7 +225,14 @@ ALL_CONFIGS = [
 
 
 def _skip_if_not_conv1d_supported(model_id, config_cls):
-    if "GPT2LMHeadModel" in model_id and config_cls in [BOFTConfig, BoneConfig, HRAConfig, OFTConfig, ShiraConfig, C3AConfig]:
+    if "GPT2LMHeadModel" in model_id and config_cls in [
+        BOFTConfig,
+        BoneConfig,
+        HRAConfig,
+        OFTConfig,
+        ShiraConfig,
+        C3AConfig,
+    ]:
         pytest.skip("Skipping BOFT/HRA/OFT/Bone/SHiRA/C3A for GPT2LMHeadModel")
 
 
