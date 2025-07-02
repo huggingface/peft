@@ -36,6 +36,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import (
     AdaLoraConfig,
+    C3AConfig,
     EvaConfig,
     IA3Config,
     LoftQConfig,
@@ -1323,6 +1324,79 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match=msg):
             get_peft_model(model, config)
 
+    def get_model_conv2d_groups(self):
+        class ModelConv2DGroups(nn.Module):
+            """For testing when groups argument is used in conv layer"""
+
+            def __init__(self):
+                super().__init__()
+                self.conv2d = nn.Conv2d(16, 32, 3, padding=1, groups=2)
+                self.relu = nn.ReLU()
+                self.flat = nn.Flatten()
+                self.lin0 = nn.Linear(12800, 2)
+                self.sm = nn.LogSoftmax(dim=-1)
+                self.dtype = torch.float
+
+            def forward(self, X):
+                # This is ignoring input since main usage is for checking raising of error when peft is applied
+                X = torch.arange(9 * 16 * 20 * 20).view([9, 16, 20, 20]).to(self.conv2d.weight.device)
+                X = X.to(self.dtype)
+                X = self.conv2d(X)
+                X = self.relu(X)
+                X = self.flat(X)
+                X = self.lin0(X)
+                X = self.sm(X)
+                return X
+
+        return ModelConv2DGroups().eval().to(self.torch_device)
+
+    @pytest.mark.parametrize(
+        "config_cls, config_kwargs",
+        [
+            pytest.param(LoraConfig, {"r": 8, "target_modules": ["conv2d"]}, id="lora with rank divisible by groups"),
+            pytest.param(LoraConfig, {"r": 2, "target_modules": ["conv2d"]}, id="lora with rank equal to groups"),
+            pytest.param(
+                LoraConfig, {"r": 1, "target_modules": ["conv2d"]}, id="lora with rank not divisible by groups"
+            ),
+            pytest.param(
+                LoraConfig,
+                {"r": 8, "target_modules": ["conv2d"], "use_dora": True},
+                id="dora with rank divisible by groups",
+            ),
+            pytest.param(
+                LoraConfig,
+                {"r": 2, "target_modules": ["conv2d"], "use_dora": True},
+                id="dora with rank equal to groups",
+            ),
+            pytest.param(
+                LoraConfig,
+                {"r": 1, "target_modules": ["conv2d"], "use_dora": True},
+                id="dora with rank not divisible by groups",
+            ),
+        ],
+    )
+    def test_error_raised_if_rank_not_divisible_by_groups(self, config_cls, config_kwargs):
+        # This test checks if error is raised when rank is not divisible by groups for conv layer since
+        # currently, support is limited to conv layers where the rank is divisible by groups in lora and dora
+        base_model = self.get_model_conv2d_groups()
+        peft_config = config_cls(**config_kwargs)
+        r = config_kwargs["r"]
+        base_layer = base_model.conv2d
+        groups = base_layer.groups
+        if r % groups != 0:
+            with pytest.raises(
+                ValueError,
+                match=(
+                    f"Targeting a {base_layer.__class__.__name__} with groups={base_layer.groups} and rank {r}. "
+                    "Currently, support is limited to conv layers where the rank is divisible by groups. "
+                    "Either choose a different rank or do not target this specific layer."
+                ),
+            ):
+                peft_model = get_peft_model(base_model, peft_config)
+        else:
+            # No error should be raised
+            peft_model = get_peft_model(base_model, peft_config)
+
 
 class TestLokrInitialization:
     torch_device = infer_device()
@@ -1573,6 +1647,40 @@ class TestVBLoraInitialization:
         model = self.get_model()
         config = VBLoRAConfig(target_modules=["lin1"], vector_length=vector_length)
         msg = f"`out_features` {model.lin1.out_features} must be divisible by `vector_length` {vector_length}"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+
+class TestC3AInitialization:
+    torch_device = infer_device()
+
+    def get_model(self):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 30, bias=bias)
+                self.lin1 = nn.Linear(30, 2, bias=bias)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                return X
+
+        return MLP().to(self.torch_device)
+
+    def test_c3a_with_incompatible_block_size_with_in_features(self):
+        block_size = 3
+        model = self.get_model()
+        config = C3AConfig(target_modules=["lin0"], block_size=block_size)
+        msg = f"The block size should be a factor of the input size. However, the input size is {model.lin0.in_features} and the block size is {block_size}"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+    def test_c3a_with_incompatible_block_size_with_out_features(self):
+        block_size = 3
+        model = self.get_model()
+        config = C3AConfig(target_modules=["lin1"], block_size=block_size)
+        msg = f"The block size should be a factor of the output size. However, the output size is {model.lin1.out_features} and the block size is {block_size}"
         with pytest.raises(ValueError, match=msg):
             get_peft_model(model, config)
 

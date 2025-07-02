@@ -1872,6 +1872,61 @@ class PeftGPTQGPUTests(unittest.TestCase):
             # assert loss is not None
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_gptq_qalora(self):
+        """
+        Test QALoRA with GPTQ quantization. The test would simply fail if the adapters are not set correctly.
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                torch_dtype=torch.float16,
+                device_map="auto",
+                quantization_config=self.quantization_config,
+            )
+
+            model = prepare_model_for_kbit_training(model)
+            config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                target_modules=["q_proj", "v_proj"],
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+                use_qalora=True,
+                qalora_group_size=32,
+            )
+            model = get_peft_model(model, config)
+
+            data = load_dataset_english_quotes()
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_gpu
     def test_causal_lm_training_multi_gpu(self):
@@ -4628,10 +4683,22 @@ class TestHotSwapping:
             output_after1 = model(inputs).logits
             assert torch.allclose(output1, output_after1, atol=tol, rtol=tol)
 
+            # we need to call forward third time since cudagraphs are not recorded in first call.
+            if do_hotswap:
+                hotswap_adapter(model, os.path.join(tmp_dirname, "adapter0"), adapter_name="default")
+                output_after2 = model(inputs).logits
+                assert torch.allclose(output0, output_after2, atol=tol, rtol=tol)
+
     # it is important to check hotswapping small to large ranks and large to small ranks
     @pytest.mark.parametrize("ranks", [(11, 11), (7, 13), (13, 7)])
     def test_hotswapping_compiled_model_does_not_trigger_recompilation(self, ranks):
-        with torch._dynamo.config.patch(error_on_recompile=True):  # raise an error on recompilation
+        # here we set three configs to ensure no recompilation or cudagraph re-record occurs:
+        # 1. error_on_recompile: raise an error on recompilation
+        # 2. inline_inbuilt_nn_modules: needed to raise an error on static input address changes instead of re-recording
+        # 3. triton.cudagraph_support_input_mutation: same as above
+        dynamo_config_ctx = torch._dynamo.config.patch(error_on_recompile=True, inline_inbuilt_nn_modules=False)
+        inductor_config_ctx = torch._inductor.config.patch("triton.cudagraph_support_input_mutation", False)
+        with dynamo_config_ctx, inductor_config_ctx:
             self.check_hotswap(do_hotswap=True, ranks=ranks, alpha_scalings=ranks)
 
     def test_no_hotswapping_compiled_model_triggers_recompilation(self):

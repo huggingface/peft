@@ -128,6 +128,8 @@
       title: RandLora
     - local: package_reference/shira
       title: SHiRA
+    - local: package_reference/c3a
+      title: C3A
 
     title: Adapters
   - sections:

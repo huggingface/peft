@@ -1884,18 +1884,18 @@ class TestSameAdapterDifferentDevices:
         config = OFTConfig(target_modules=["lin0"])
         model = get_peft_model(mlp, config)
         model = model.to(self.device)
-        model.lin0.oft_r.cpu()
+        model.lin0.oft_R.default.weight.cpu()
 
         # check that the adapter is indeed on CPU and the base model on GPU
-        assert model.lin0.oft_r.default.device.type == "cpu"
+        assert model.lin0.oft_R.default.weight.device.type == "cpu"
         assert model.lin0.base_layer.weight.device.type == self.device
 
         model.add_adapter("other", config)
         # check that after adding a new adapter, the old adapter is still on CPU
-        assert model.lin0.oft_r.default.device.type == "cpu"
+        assert model.lin0.oft_R.default.weight.device.type == "cpu"
         # the rest should be on GPU
         assert model.lin0.base_layer.weight.device.type == self.device
-        assert model.lin0.oft_r.other.device.type == self.device
+        assert model.lin0.oft_R.other.weight.device.type == self.device
 
     def test_vera_add_new_adapter_does_not_change_device(self, mlp):
         # same as first test, but using VERA

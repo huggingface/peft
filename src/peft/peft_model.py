@@ -41,7 +41,7 @@ from transformers.utils import PushToHubMixin
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils.constants import DUMMY_MODEL_CONFIG
 from peft.utils.integrations import init_empty_weights
-from peft.utils.other import set_additional_trainable_modules
+from peft.utils.other import create_attention_mask, set_additional_trainable_modules
 
 from . import __version__
 from .config import PeftConfig
@@ -765,7 +765,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     dtype=past_key_values[0].dtype,
                     device=past_key_values[0].device,
                 )
-                cache_position = torch.arange(peft_config.num_virtual_tokens)
+                cache_position = torch.arange(peft_config.num_virtual_tokens, device=past_key_values[0].device)
                 for layer_idx in range(peft_config.num_layers):
                     key_states, value_states = past_key_values[0][layer_idx], past_key_values[1][layer_idx]
                     new_cache.update(
@@ -1959,6 +1959,10 @@ class PeftModelForCausalLM(PeftModel):
             uses_transformers_4_36 and self.base_model.config.model_type in transformers_new_cache_archs
         )
 
+        # heuristic to determine if we're in 'prefill stage' (when the KV cache is filled with the values from the
+        # initial input)
+        is_prefill = (model_kwargs.get("cache_position") is not None) and (model_kwargs["cache_position"][0] == 0)
+
         if peft_config.peft_type == PeftType.POLY:
             model_kwargs["task_ids"] = task_ids
         if peft_config.is_prompt_learning:
@@ -1975,6 +1979,16 @@ class PeftModelForCausalLM(PeftModel):
                     model_kwargs["input_ids"] = model_kwargs["input_ids"][:, -1:]
 
             if (attention_mask := model_kwargs.get("attention_mask", None)) is not None:
+                if isinstance(attention_mask, dict):
+                    # see: https://github.com/huggingface/transformers/pull/37866
+                    # For now, just deal with the case of a single attention mask
+                    if len(attention_mask) != 1:
+                        raise ValueError(
+                            f"Expected a single attention mask, got {len(attention_mask)} instead, please open an "
+                            "issue (https://github.com/huggingface/peft/issues) and report the error."
+                        )
+                    attention_mask = list(attention_mask.values())[0]
+
                 size = model_kwargs["input_ids"].shape[0], peft_config.num_virtual_tokens
                 prefix_attention_mask = torch.ones(size).to(model_kwargs["input_ids"].device)
                 if attention_mask.dim() == 4:
@@ -1984,7 +1998,26 @@ class PeftModelForCausalLM(PeftModel):
                     # to   [batch_size, total_sequence_length]
                     bs = attention_mask.shape[0]
                     total_seq_len = prefix_attention_mask.shape[1] + attention_mask.shape[2]
-                    model_kwargs["attention_mask"] = torch.ones((bs, total_seq_len), dtype=attention_mask.dtype)
+                    attention_mask_2d = torch.ones((bs, total_seq_len), dtype=attention_mask.dtype)
+
+                    if is_prefill and (peft_config.peft_type != PeftType.PREFIX_TUNING):
+                        # if in prefill stage, for prompt learning methods that are not prefix tuning, new tokens
+                        # (embeddings) are inserted, thus set cache_position to correspond to these tokens
+                        cache_position_ = torch.arange(total_seq_len, device=model_kwargs["input_ids"].device)
+                    else:
+                        # prefix tuning acts directly on the cache, no need to upate cache_position
+                        cache_position_ = model_kwargs["cache_position"]
+
+                    attention_mask_new = create_attention_mask(
+                        self.get_base_model(),
+                        model_input=None,
+                        attention_mask=attention_mask_2d,
+                        past_key_values=model_kwargs.get("past_key_values"),
+                        cache_position=cache_position_,
+                        batch_size=bs,
+                        sequence_length=total_seq_len,
+                    )
+                    model_kwargs["attention_mask"] = attention_mask_new
                 else:
                     # 2d attention mask
                     model_kwargs["attention_mask"] = torch.cat((prefix_attention_mask, attention_mask), dim=1)
@@ -2020,11 +2053,16 @@ class PeftModelForCausalLM(PeftModel):
                 model_kwargs["inputs_embeds"] = torch.cat((prompts, inputs_embeds), dim=1)
                 model_kwargs["input_ids"] = None
 
-        # For transformers>=4.38.0 - for some architectures such as Llama, `cache_position` is
-        # passed in the forward pass to keep track of the position ids of the cache. We have to
-        # pop that from `model_kwargs` as `cache_position` is properly created by the model, using the passed
-        # `inputs_embeds`: https://github.com/huggingface/transformers/blob/593230f0a1150ea9c0477b9d859f25daf73c8c33/src/transformers/models/llama/modeling_llama.py#L956
-        _ = model_kwargs.pop("cache_position", None)
+        # if we're in the prefill stage
+        if is_prefill and (peft_config.peft_type == PeftType.PREFIX_TUNING):
+            # for prefix tuning, the past_key_values have been prefilled
+            model_kwargs["cache_position"] += peft_config.num_virtual_tokens
+        elif peft_config.peft_type != PeftType.PREFIX_TUNING:  # prefix tuning needs cache_position
+            # For transformers>=4.38.0 - for some architectures such as Llama, `cache_position` is passed in the forward
+            # pass to keep track of the position ids of the cache. We have to pop that from `model_kwargs` as
+            # `cache_position` is properly created by the model, using the passed `inputs_embeds`:
+            # https://github.com/huggingface/transformers/blob/593230f0a1150ea9c0477b9d859f25daf73c8c33/src/transformers/models/llama/modeling_llama.py#L956
+            _ = model_kwargs.pop("cache_position", None)
 
         return model_kwargs
 

@@ -134,12 +134,15 @@ DIFFUSERS_CONFIGS = [
         {
             "text_encoder": {
                 "r": 1,
+                "oft_block_size": 0,
                 "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
                 "module_dropout": 0.0,
                 "init_weights": False,
+                "use_cayley_neumann": False,
             },
             "unet": {
                 "r": 1,
+                "oft_block_size": 0,
                 "target_modules": [
                     "proj_in",
                     "proj_out",
@@ -152,6 +155,7 @@ DIFFUSERS_CONFIGS = [
                 ],
                 "module_dropout": 0.0,
                 "init_weights": False,
+                "use_cayley_neumann": False,
             },
         },
     ),
