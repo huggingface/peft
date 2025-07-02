@@ -36,4 +36,4 @@ accelerate launch --config_file "configs/fsdp_config.yaml"  train.py \
 --lora_alpha 16 \
 --lora_dropout 0.1 \
 --lora_target_modules "all-linear" \
---use_bnb_4bit_quantization False
+--use_4bit_quantization False

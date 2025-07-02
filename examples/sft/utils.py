@@ -97,19 +97,19 @@ def create_and_prepare_model(args, data_args, training_args):
     ):
         raise NotImplementedError("Unsloth is not supported in distributed training")
 
-    if args.use_bnb_4bit_quantization:
+    if args.use_4bit_quantization:
         compute_dtype = getattr(torch, args.bnb_4bit_compute_dtype)
         quant_storage_dtype = getattr(torch, args.bnb_4bit_quant_storage_dtype)
 
         bnb_config = BitsAndBytesConfig(
-            load_in_4bit=args.use_bnb_4bit_quantization,
+            load_in_4bit=args.use_4bit_quantization,
             bnb_4bit_quant_type=args.bnb_4bit_quant_type,
             bnb_4bit_compute_dtype=compute_dtype,
             bnb_4bit_use_double_quant=args.use_nested_quant,
             bnb_4bit_quant_storage=quant_storage_dtype,
         )
 
-        if compute_dtype == torch.float16 and args.use_bnb_4bit_quantization:
+        if compute_dtype == torch.float16 and args.use_4bit_quantization:
             major, _ = torch.cuda.get_device_capability()
             if major >= 8:
                 print("=" * 80)
@@ -124,7 +124,7 @@ def create_and_prepare_model(args, data_args, training_args):
             model_name=args.model_name_or_path,
             max_seq_length=training_args.max_seq_length,
             dtype=None,
-            load_in_4bit=args.use_bnb_4bit_quantization,
+            load_in_4bit=args.use_4bit_quantization,
         )
     else:
         torch_dtype = (
