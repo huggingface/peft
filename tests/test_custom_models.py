@@ -35,6 +35,7 @@ from peft import (
     AdaLoraConfig,
     BOFTConfig,
     BoneConfig,
+    C3AConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -117,7 +118,9 @@ TEST_CASES = [
     ("Conv2d 1 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"], "use_dora": True}),
     ("Conv2d 2 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"], "use_dora": True}),
     ("Conv2d Groups LoRA", "Conv2dGroups", LoraConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d Groups2 LoRA", "Conv2dGroups2", LoraConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d Groups LoRA with DoRA", "Conv2dGroups", LoraConfig, {"target_modules": ["conv2d"], "use_dora": True}),
+    ("Conv2d Groups2 LoRA with DoRA", "Conv2dGroups2", LoraConfig, {"target_modules": ["conv2d"], "use_dora": True}),
     ("Conv3d 1 LoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d"]}),
     ("Conv3d 2 LoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d", "lin0"]}),
     ("Conv3d 1 LoRA with DoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d"], "use_dora": True}),
@@ -625,6 +628,34 @@ TEST_CASES = [
         RandLoraConfig,
         {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "randlora_alpha": 1},
     ),
+    ########
+    # C3A #
+    ########
+    ("Vanilla MLP 1 C3A", "MLP", C3AConfig, {"block_size": 2, "target_modules": "lin0"}),
+    ("Vanilla MLP 2 C3A", "MLP", C3AConfig, {"block_size": 2, "target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 C3A", "MLP", C3AConfig, {"block_size": 2, "target_modules": ["lin1"]}),
+    (
+        "Vanilla MLP 5 C3A",
+        "MLP",
+        C3AConfig,
+        {"block_size": 10, "target_modules": ["lin0"], "modules_to_save": ["lin1"]},
+    ),
+    (
+        "Vanilla MLP 6 C3A",
+        "MLP",
+        C3AConfig,
+        {"block_size": 10, "target_modules": ["lin0", "lin1"], "modules_to_save": ["lin1"]},
+    ),
+    (
+        "Vanilla MLP 7 C3A",
+        "MLP",
+        C3AConfig,
+        {
+            "block_size_pattern": {"lin0": 5, "lin1": 10},
+            "target_modules": ["lin0", "lin1"],
+            "modules_to_save": ["lin1"],
+        },
+    ),
 ]
 
 # For this test matrix, each tuple consists of:
@@ -808,6 +839,7 @@ PREFIXES = {
     VeraConfig: "vera_lambda_",
     RandLoraConfig: "randlora_",
     FourierFTConfig: "fourierft_",
+    C3AConfig: "c3a_",
     HRAConfig: "hra_",
     VBLoRAConfig: "vblora_",
     BoneConfig: "bone_",
@@ -1052,16 +1084,43 @@ class ModelConv2D2(nn.Module):
 class ModelConv2DGroups(nn.Module):
     def __init__(self):
         super().__init__()
-        self.conv2d = nn.Conv2d(5, 5, 3, groups=5)
+        self.lin0 = nn.Linear(90, 288)
+        # groups is set as 8 since default r=8
+        # hence to make r divisible by groups
+        self.conv2d = nn.Conv2d(16, 16, 3, groups=8)
         self.relu = nn.ReLU()
         self.flat = nn.Flatten()
-        self.lin0 = nn.Linear(5, 2)
+        self.lin1 = nn.Linear(16, 2)
         self.sm = nn.LogSoftmax(dim=-1)
         self.dtype = torch.float
 
     def forward(self, X):
         X = X.to(self.dtype)
-        X = X.reshape(-1, 5, 3, 3)
+        X = X.flatten()
+        X = self.lin0(X)
+        X = X.reshape(2, 16, 3, 3)
+        X = self.conv2d(X)
+        X = self.relu(X)
+        X = self.flat(X)
+        X = self.lin1(X)
+        X = self.sm(X)
+        return X
+
+
+class ModelConv2DGroups2(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv2d = nn.Conv2d(16, 32, 3, padding=1, groups=2)
+        self.relu = nn.ReLU()
+        self.flat = nn.Flatten()
+        self.lin0 = nn.Linear(12800, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
+
+    def forward(self, X):
+        # Note: needs a different input shape, thus ignore original input
+        X = torch.arange(9 * 16 * 20 * 20).view([9, 16, 20, 20]).to(self.conv2d.weight.device)
+        X = X.to(self.dtype)
         X = self.conv2d(X)
         X = self.relu(X)
         X = self.flat(X)
@@ -1140,6 +1199,9 @@ class MockTransformerWrapper:
         if model_id == "Conv2dGroups":
             return ModelConv2DGroups().to(torch_dtype)
 
+        if model_id == "Conv2dGroups2":
+            return ModelConv2DGroups2().to(torch_dtype)
+
         if model_id == "Conv3d":
             return ModelConv3D().to(torch_dtype)
 
@@ -1212,7 +1274,7 @@ class TestPeftCustomModel(PeftCommonTester):
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
         # https://github.com/huggingface/peft/pull/2403
-        if model_id in ["Conv2dGroups"]:
+        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
             pytest.skip(
                 f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
             )
@@ -1235,7 +1297,7 @@ class TestPeftCustomModel(PeftCommonTester):
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
         # https://github.com/huggingface/peft/pull/2403
-        if model_id in ["Conv2dGroups"]:
+        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
             pytest.skip(
                 f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
             )
@@ -1250,7 +1312,7 @@ class TestPeftCustomModel(PeftCommonTester):
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_is_idempotent(self, test_name, model_id, config_cls, config_kwargs):
         # https://github.com/huggingface/peft/pull/2403
-        if model_id in ["Conv2dGroups"]:
+        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
             pytest.skip(
                 f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
             )
@@ -1266,7 +1328,7 @@ class TestPeftCustomModel(PeftCommonTester):
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_safe_merge(self, test_name, model_id, config_cls, config_kwargs):
         # https://github.com/huggingface/peft/pull/2403
-        if model_id in ["Conv2dGroups"]:
+        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
             pytest.skip(
                 f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
             )
@@ -1360,7 +1422,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        if model_id in ["Conv2dGroups"]:
+        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
             # this model does not support merging
             return
 
@@ -1402,7 +1464,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        if model_id in ["Conv2dGroups"]:
+        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
             # this model does not support merging
             return
 
@@ -1443,7 +1505,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        if model_id in ["Conv2dGroups"]:
+        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
             # this model does not support merging
             return
 
@@ -1484,7 +1546,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        if model_id in ["Conv2dGroups"]:
+        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
             # this model does not support merging
             return
 
@@ -1597,7 +1659,7 @@ class TestPeftCustomModel(PeftCommonTester):
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device).eval()
         outputs_base = model(**X)
-        if issubclass(config_cls, (FourierFTConfig, TrainableTokensConfig)):
+        if issubclass(config_cls, (FourierFTConfig, TrainableTokensConfig, C3AConfig)):
             config_kwargs = config_kwargs.copy()
             # override the default value and make PEFT operation a no-op
             config_kwargs["init_weights"] = True
@@ -1655,7 +1717,7 @@ class TestPeftCustomModel(PeftCommonTester):
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_disable_adapters_with_merging(self, test_name, model_id, config_cls, config_kwargs):
         # https://github.com/huggingface/peft/pull/2403
-        if model_id in ["Conv2dGroups"]:
+        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
             pytest.skip(
                 f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
             )
@@ -1663,7 +1725,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # same as test_disable_adapters, but with merging
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
-        if issubclass(config_cls, FourierFTConfig):
+        if issubclass(config_cls, (FourierFTConfig, C3AConfig)):
             config_kwargs = config_kwargs.copy()
             config_kwargs["init_weights"] = True
         config = config_cls(
