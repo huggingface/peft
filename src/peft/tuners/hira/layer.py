@@ -400,3 +400,237 @@ class Linear(nn.Module, HiRALayer):
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "hira." + rep
+
+
+
+
+class Embedding(nn.Module, HiRALayer):
+    # LoRA implemented in a Embedding layer
+    def __init__(
+        self,
+        base_layer: nn.Module,
+        adapter_name: str,
+        r: int = 0,
+        hira_dropout: float = 0.0,
+        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
+        init_hira_weights: Union[bool, str] = True,
+        **kwargs,
+    ) -> None:
+        super().__init__()
+        HiRALayer.__init__(self, base_layer)
+        self.fan_in_fan_out = fan_in_fan_out
+
+        self._active_adapter = adapter_name
+        self.update_layer(
+            adapter_name,
+            r,
+            hira_dropout=hira_dropout,
+            init_hira_weights=init_hira_weights,
+        )
+
+    def update_layer(
+        self, adapter_name, r, hira_dropout, init_hira_weights
+    ):
+        # collect the kwargs
+        kwargs = locals().copy()
+        del kwargs["self"]
+
+        if r <= 0:
+            raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+
+        self.r[adapter_name] = r
+        if hira_dropout > 0.0:
+            hira_dropout_layer = nn.Dropout(p=hira_dropout)
+        else:
+            hira_dropout_layer = nn.Identity()
+
+        self.hira_dropout[adapter_name] = hira_dropout_layer
+        # Actual trainable parameters
+        weight_A = torch.randn((r, self.in_features))
+        weight_B = torch.randn((self.out_features, r))
+        self.hira_embedding_A[adapter_name] = nn.Parameter(weight_A)
+        self.hira_embedding_B[adapter_name] = nn.Parameter(weight_B)
+        self.reset_hira_parameters(adapter_name, init_hira_weights)
+
+        # call this before init of the lora variants
+        self._move_adapter_to_device_of_base_layer(adapter_name)
+
+        self.set_adapter(self.active_adapters)
+
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+        """
+        Merge the active adapter weights into the base weights
+
+        Args:
+            safe_merge (`bool`, *optional*):
+                If True, the merge operation will be performed in a copy of the original weights and check for NaNs
+                before merging the weights. This is useful if you want to check if the merge operation will produce
+                NaNs. Defaults to `False`.
+            adapter_names (`list[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
+        """
+        adapter_names = check_adapters_to_merge(self, adapter_names)
+        if not adapter_names:
+            # no adapter to merge
+            return
+
+        for active_adapter in adapter_names:
+            if active_adapter in self.lora_embedding_A.keys():
+                base_layer = self.get_base_layer()
+                orig_dtype = base_layer.weight.dtype
+                if safe_merge:
+                    # Note that safe_merge will be slower than the normal merge
+                    # because of the copy operation.
+                    orig_weight = base_layer.weight.data.clone()
+                    delta_weight = self.get_delta_weight(active_adapter).to(orig_dtype)
+                    orig_weight *= (1+delta_weight)
+                    if not torch.isfinite(orig_weight).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                        )
+                    base_layer.weight.data = orig_weight
+                else:
+                    delta_weight = self.get_delta_weight(active_adapter).to(orig_dtype)
+                    base_layer.weight.data *= (1+delta_weight)
+                self.merged_adapters.append(active_adapter)
+
+    def unmerge(self) -> None:
+        """
+        This method unmerges all merged adapter layers from the base weights.
+        """
+        if not self.merged:
+            warnings.warn("Already unmerged. Nothing to do.")
+            return
+        while len(self.merged_adapters) > 0:
+            active_adapter = self.merged_adapters.pop()
+            orig_dtype = self.get_base_layer().weight.dtype
+            if active_adapter in self.lora_embedding_A.keys():
+                weight = self.get_base_layer().weight
+                weight.data /= (1+self.get_delta_weight(active_adapter).to(orig_dtype))
+
+    def get_delta_weight(self, adapter) -> torch.Tensor:
+        """
+        Compute the delta weight for the given adapter.
+
+        Args:
+            adapter (str):
+                The name of the adapter for which the delta weight should be computed.
+        """
+        device = self.hira_embedding_B[adapter].device
+        dtype = self.hira_embedding_A[adapter].dtype
+
+        # In case users wants to merge the adapter weights that are in
+        # (b)float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
+        # (b)float16 because some CPUs have slow bf16/fp16 matmuls.
+        cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
+
+        weight_A = self.hira_embedding_A[adapter]
+        weight_B = self.hira_embedding_B[adapter]
+
+        if cast_to_fp32:
+            weight_A = weight_A.float()
+            weight_B = weight_B.float()
+        output_tensor = transpose(weight_B @ weight_A, True)
+
+        if cast_to_fp32:
+            output_tensor = output_tensor.to(dtype=dtype)
+
+            # cast back the weights
+            self.hira_embedding_A[adapter] = weight_A.to(dtype)
+            self.hira_embedding_B[adapter] = weight_B.to(dtype)
+
+        return output_tensor
+
+
+    def _mixed_batch_forward(
+    self, x: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
+    ) -> torch.Tensor:
+        # Compute base embedding once for efficiency
+        result = self.base_layer(x, *args, **kwargs)
+
+        # Group batch indices by adapter
+        adapter_to_indices = {}
+        for idx, adapter_name in enumerate(adapter_names):
+            adapter_to_indices.setdefault(adapter_name, []).append(idx)
+
+        # Apply HiRA embedding updates
+        for adapter_name, indices in adapter_to_indices.items():
+            if adapter_name == "__base__":
+                continue
+            if adapter_name not in self.hira_embedding_A:
+                continue
+
+            embedding_A = self.hira_embedding_A[adapter_name]  # shape: (r, num_embeddings)
+            embedding_B = self.hira_embedding_B[adapter_name]  # shape: (embedding_dim, r)
+
+            sub_batch = x[indices]  # shape: (sub_batch_size, sequence_length)
+
+            # Compute the low-rank update: (B @ A)[:, sub_batch].T
+            low_rank_update = F.embedding(sub_batch, (embedding_B @ embedding_A).T)
+
+            # Element-wise modulation with base embedding
+            base_sub_embedding = result[indices]
+            hira_update = base_sub_embedding * low_rank_update
+
+            # Update the result tensor
+            result[indices] += hira_update
+
+        return result
+
+    def _embed(self, input: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+        base_layer = self.get_base_layer()
+        return F.embedding(
+            input,
+            weight,
+            padding_idx=base_layer.padding_idx,
+            max_norm=base_layer.max_norm,
+            norm_type=base_layer.norm_type,
+            scale_grad_by_freq=base_layer.scale_grad_by_freq,
+            sparse=base_layer.sparse,
+        )
+
+    def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        """
+        HiRA forward for Embedding layer. Supports mixed adapters per batch or single adapter.
+        """
+        self._check_forward_args(x, *args, **kwargs)
+        adapter_names = kwargs.pop("adapter_names", None)
+
+        # Adapter disabled or after merge: use base embedding
+        if self.disable_adapters:
+            if self.merged:
+                self.unmerge()
+            return self.base_layer(x, *args, **kwargs)
+        if adapter_names is not None:
+            return self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
+        if self.merged:
+            return self.base_layer(x, *args, **kwargs)
+
+        # Single adapter active: compute base embedding + HiRA residual
+        result = self.base_layer(x, *args, **kwargs)
+        torch_result_dtype = result.dtype
+        base_weight = self.get_base_layer().weight  # (num_embeddings, embedding_dim)
+
+        for adapter in self.active_adapters:
+            if adapter not in self.hira_embedding_A:
+                continue
+            # HiRA factors
+            hira_A = self.hira_embedding_A[adapter]   # (r, num_embeddings)
+            hira_B = self.hira_embedding_B[adapter]   # (embedding_dim, r)
+
+            # Compute modulation matrix: B @ A -> (embedding_dim, num_embeddings)
+            mod_matrix = torch.mm(hira_B, hira_A)
+            # Element-wise modulated embedding weight
+            eff_weight = base_weight * mod_matrix.T    # (num_embeddings, embedding_dim)
+
+            # Compute HiRA residual via embedding lookup
+            hira_out = F.embedding(x, eff_weight)
+            result = result + hira_out
+
+        return result.to(torch_result_dtype)
+
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "hira." + rep
