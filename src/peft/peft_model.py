@@ -1446,7 +1446,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         tags = set()
         base_model = self.get_base_model()
         if hasattr(base_model, "model_tags"):
-            tags = tags.union(self.base_model.model_tags or [])
+            tags = tags.union(base_model.model_tags or [])
 
         tags = tags.union(self._get_peft_specific_model_tags())
         if tags:
