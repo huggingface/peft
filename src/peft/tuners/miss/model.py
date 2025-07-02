@@ -119,6 +119,8 @@ class MiSSModel(BaseTuner):
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "r": miss_config.r,
+            "mini_r": miss_config.mini_r,
+            "miss_dropout": miss_config.miss_dropout,
             "init_weights": miss_config.init_weights,
         }
         kwargs["bias"] = bias

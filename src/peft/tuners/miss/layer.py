@@ -149,6 +149,7 @@ class MiSSLinear(nn.Module, MiSSLayer):
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, mini_r, miss_dropout, init_weights, **kwargs)
         self.miss_fn = init_weights
+        self.mini_r = mini_r
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """

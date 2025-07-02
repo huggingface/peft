@@ -64,7 +64,7 @@ class MiSSConfig(PeftConfig):
     )
     miss_dropout: float = field(default=0.0, metadata={"help": "MiSS dropout"})
     mini_r: int = field(
-        default=64,
+        default=2,
         metadata={
             "help": "The rank of MiSS across different layers.",
             "note": "when mini_r==out_features, mini==MiSS efficiency",
