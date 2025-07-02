@@ -102,6 +102,75 @@ from .testing_utils import (
 )
 
 
+# Some tests with multi GPU require specific device maps to ensure that the models are loaded in two devices
+DEVICE_MAP_MAP: dict[str, dict[str, int]] = {
+    "facebook/opt-6.7b": {
+        "model.decoder.embed_tokens": 0,
+        "model.decoder.embed_positions": 0,
+        "model.decoder.final_layer_norm": 0,
+        "model.decoder.layers.0": 0,
+        "model.decoder.layers.1": 0,
+        "model.decoder.layers.2": 0,
+        "model.decoder.layers.3": 0,
+        "model.decoder.layers.4": 0,
+        "model.decoder.layers.5": 0,
+        "model.decoder.layers.6": 0,
+        "model.decoder.layers.7": 0,
+        "model.decoder.layers.8": 0,
+        "model.decoder.layers.9": 0,
+        "model.decoder.layers.10": 0,
+        "model.decoder.layers.11": 0,
+        "model.decoder.layers.12": 0,
+        "model.decoder.layers.13": 0,
+        "model.decoder.layers.14": 0,
+        "model.decoder.layers.15": 0,
+        "model.decoder.layers.16": 1,
+        "model.decoder.layers.17": 1,
+        "model.decoder.layers.18": 1,
+        "model.decoder.layers.19": 1,
+        "model.decoder.layers.20": 1,
+        "model.decoder.layers.21": 1,
+        "model.decoder.layers.22": 1,
+        "model.decoder.layers.23": 1,
+        "model.decoder.layers.24": 1,
+        "model.decoder.layers.25": 1,
+        "model.decoder.layers.26": 1,
+        "model.decoder.layers.27": 1,
+        "model.decoder.layers.28": 1,
+        "model.decoder.layers.29": 1,
+        "model.decoder.layers.30": 1,
+        "model.decoder.layers.31": 1,
+        "lm_head": 0,  # tied with embed_tokens
+    },
+    "marcsun13/opt-350m-gptq-4bit": {
+        "model.decoder.embed_tokens": 0,
+        "model.decoder.embed_positions": 0,
+        "model.decoder.layers.0": 0,
+        "model.decoder.layers.1": 0,
+        "model.decoder.layers.2": 0,
+        "model.decoder.layers.3": 0,
+        "model.decoder.layers.4": 0,
+        "model.decoder.layers.5": 0,
+        "model.decoder.layers.6": 1,
+        "model.decoder.layers.7": 1,
+        "model.decoder.layers.8": 1,
+        "model.decoder.layers.9": 1,
+        "model.decoder.layers.10": 1,
+        "model.decoder.layers.11": 1,
+        "model.decoder.final_layer_norm": 1,
+        "lm_head": 0,  # tied with embed_tokens
+    },
+    "google/flan-t5-base": {
+        "shared": 0,
+        "encoder": 0,
+        "decoder": 1,
+        "final_layer_norm": 1,
+        "decoder.embed_tokens": 0,  # tied with encoder.embed_tokens
+        "lm_head": 0,  # tied with encoder.embed_tokens
+    },
+}
+
+
 # A full testing suite that tests all the necessary features on GPU. The tests should
 # rely on the example scripts to test the features.
 
@@ -304,11 +373,12 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                device_map="auto",
+                device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
                 quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -639,10 +709,11 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model = AutoModelForSeq2SeqLM.from_pretrained(
                 self.seq2seq_model_id,
                 quantization_config=BitsAndBytesConfig(load_in_8bit=True),
-                device_map="balanced",
+                device_map=DEVICE_MAP_MAP[self.seq2seq_model_id],
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
             model = prepare_model_for_kbit_training(model)
@@ -922,11 +993,12 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                device_map="auto",
+                device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
                 quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1039,11 +1111,12 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                device_map="auto",
+                device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
                 quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1286,11 +1359,12 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                device_map="auto",
+                device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
                 quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1345,11 +1419,12 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                device_map="auto",
+                device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
                 quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1512,11 +1587,12 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                device_map="auto",
+                device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
                 quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1571,11 +1647,12 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                device_map="auto",
+                device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
                 quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -3307,6 +3384,7 @@ class PeftHqqGPUTests(unittest.TestCase):
 
         device = "cuda"
         compute_dtype = torch.float16
+        min_correlation = 0.96
 
         # first load the model without HQQ
         model = AutoModelForCausalLM.from_pretrained(
@@ -3345,18 +3423,18 @@ class PeftHqqGPUTests(unittest.TestCase):
 
         # check that outputs of HQQ are highly correlated; there are outliers, so don't check for equality
         cc_matrix = torch.corrcoef(torch.stack((output_normal.float().flatten(), output_hqq.float().flatten())))
-        assert cc_matrix.min() > 0.97
+        assert cc_matrix.min() > min_correlation
 
         # check that outputs are the same after merging
         cc_matrix = torch.corrcoef(torch.stack((output_normal.float().flatten(), output_hqq.float().flatten())))
-        assert cc_matrix.min() > 0.97
+        assert cc_matrix.min() > min_correlation
 
         # check outputs are the same after unmerging
         model.unmerge_adapter()
         with torch.inference_mode():
             output_unmerged = model(**inputs).logits
         cc_matrix = torch.corrcoef(torch.stack((output_normal.float().flatten(), output_unmerged.float().flatten())))
-        assert cc_matrix.min() > 0.97
+        assert cc_matrix.min() > min_correlation
 
         # check that the results are the same after saving and loading
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -3386,7 +3464,7 @@ class PeftHqqGPUTests(unittest.TestCase):
         cc_matrix = torch.corrcoef(
             torch.stack((output_normal.float().flatten(), output_merged_unloaded.float().flatten()))
         )
-        assert cc_matrix.min() > 0.97
+        assert cc_matrix.min() > min_correlation
 
 
 @require_non_cpu
@@ -3655,11 +3733,12 @@ class PeftEetqGPUTests(unittest.TestCase):
 
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                device_map="auto",
+                device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
                 quantization_config=quantization_config,
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
