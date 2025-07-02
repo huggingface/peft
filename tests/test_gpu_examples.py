@@ -22,6 +22,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Union
 
+import numpy as np
 import pytest
 import torch
 from accelerate import infer_auto_device_map
@@ -4824,18 +4825,14 @@ class TestHotSwapping:
         return unet_lora_config
 
     def get_dummy_input(self):
-        # from UNet2DConditionModelTests
-        from diffusers.utils.testing_utils import floats_tensor
-
-        batch_size = 4
-        num_channels = 4
-        sizes = (16, 16)
-
-        noise = floats_tensor((batch_size, num_channels) + sizes).to(self.torch_device)
-        time_step = torch.tensor([10]).to(self.torch_device)
-        encoder_hidden_states = floats_tensor((batch_size, 4, 8)).to(self.torch_device)
-
-        return {"sample": noise, "timestep": time_step, "encoder_hidden_states": encoder_hidden_states}
+        pipeline_inputs = {
+            "prompt": "A painting of a squirrel eating a burger",
+            "num_inference_steps": 5,
+            "guidance_scale": 6.0,
+            "output_type": "np",
+            "return_dict": False,
+        }
+        return pipeline_inputs
 
     def set_lora_device(self, model, adapter_names, device):
         # copied from diffusers LoraBaseMixin.set_lora_device
@@ -4851,48 +4848,91 @@ class TestHotSwapping:
                                 device
                             )
 
-    def check_hotswap_diffusion(self, do_hotswap, ranks, alpha_scalings, target_modules):
+    def check_hotswap_diffusion(self, ranks, alpha_scalings, target_modules):
+        """
+        Check that hotswapping works on a pipeline.
+
+        This is essentially the same test as:
+        https://github.com/huggingface/diffusers/blob/d7dd924ece56cddf261cd8b9dd901cbfa594c62c/tests/pipelines/test_pipelines.py#L2264
+
+        Steps:
+        - create 2 LoRA adapters and save them
+        - load the first adapter
+        - hotswap the second adapter
+        - check that the outputs are correct
+        - optionally compile the model
+
+        Note: We set rank == alpha here because save_lora_adapter does not save the alpha scalings, thus the test would
+        fail if the values are different. Since rank != alpha does not matter for the purpose of this test, this is
+        fine.
+        """
+        from diffusers import StableDiffusionPipeline
+
+        # create 2 adapters with different ranks and alphas
         dummy_input = self.get_dummy_input()
-        unet = self.get_small_unet()
+        pipeline = StableDiffusionPipeline.from_pretrained("hf-internal-testing/tiny-sd-pipe").to(torch_device)
         rank0, rank1 = ranks
         alpha0, alpha1 = alpha_scalings
-        lora_config0 = self.get_unet_lora_config(rank0, alpha0, target_modules=target_modules)
-        lora_config1 = self.get_unet_lora_config(rank1, alpha1, target_modules=target_modules)
-        unet.add_adapter(lora_config0, adapter_name="adapter0")
-        unet.add_adapter(lora_config1, adapter_name="adapter1")
+        max_rank = max([rank0, rank1])
+        lora_config0 = self.get_unet_lora_config(rank0, alpha0, target_modules)
+        lora_config1 = self.get_unet_lora_config(rank1, alpha1, target_modules)
+
+        torch.manual_seed(0)
+        pipeline.unet.add_adapter(lora_config0, adapter_name="adapter0")
+        output0_before = pipeline(**dummy_input, generator=torch.manual_seed(0))[0]
+
+        torch.manual_seed(1)
+        pipeline.unet.add_adapter(lora_config1, adapter_name="adapter1")
+        pipeline.unet.set_adapter("adapter1")
+        output1_before = pipeline(**dummy_input, generator=torch.manual_seed(0))[0]
+
+        # sanity check
+        tol = 1e-3
+        assert not np.allclose(output0_before, output1_before, atol=tol, rtol=tol)
+        assert not (output0_before == 0).all()
+        assert not (output1_before == 0).all()
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
-            unet.save_lora_adapter(os.path.join(tmp_dirname, "0"), safe_serialization=True, adapter_name="adapter0")
-            unet.save_lora_adapter(os.path.join(tmp_dirname, "1"), safe_serialization=True, adapter_name="adapter1")
-            del unet
-
-            unet = self.get_small_unet()
-            file_name0 = os.path.join(os.path.join(tmp_dirname, "0"), "pytorch_lora_weights.safetensors")
-            file_name1 = os.path.join(os.path.join(tmp_dirname, "1"), "pytorch_lora_weights.safetensors")
-            unet.load_lora_adapter(file_name0, safe_serialization=True, adapter_name="adapter0")
-
-            prepare_model_for_compiled_hotswap(
-                unet, config={"adapter0": lora_config0, "adapter1": lora_config1}, target_rank=max(ranks)
+            # save the adapter checkpoints
+            sd0 = get_peft_model_state_dict(pipeline.unet, adapter_name="adapter0")
+            StableDiffusionPipeline.save_lora_weights(
+                save_directory=os.path.join(tmp_dirname, "adapter0"), safe_serialization=True, unet_lora_layers=sd0
             )
-            unet = torch.compile(unet, mode="reduce-overhead")
-            unet(**dummy_input)["sample"]
+            sd1 = get_peft_model_state_dict(pipeline.unet, adapter_name="adapter1")
+            StableDiffusionPipeline.save_lora_weights(
+                save_directory=os.path.join(tmp_dirname, "adapter1"), safe_serialization=True, unet_lora_layers=sd1
+            )
+            del pipeline
 
-            if do_hotswap:
-                unet.load_lora_adapter(file_name1, adapter_name="adapter0", hotswap=True)
-            else:
-                # offloading the old and loading the new adapter will result in recompilation
-                self.set_lora_device(unet, adapter_names=["adapter0"], device="cpu")
-                unet.load_lora_adapter(file_name1, adapter_name="other_name", hotswap=False)
+            # load the first adapter
+            pipeline = StableDiffusionPipeline.from_pretrained("hf-internal-testing/tiny-sd-pipe").to(torch_device)
+            # no need to prepare if the model is not compiled or if the ranks are identical
+            pipeline.enable_lora_hotswap(target_rank=max_rank)
 
-            # we need to call forward to potentially trigger recompilation
-            unet(**dummy_input)["sample"]
+            file_name0 = os.path.join(tmp_dirname, "adapter0", "pytorch_lora_weights.safetensors")
+            file_name1 = os.path.join(tmp_dirname, "adapter1", "pytorch_lora_weights.safetensors")
+
+            pipeline.load_lora_weights(file_name0)
+            pipeline.unet = torch.compile(pipeline.unet, mode="reduce-overhead")
+
+            output0_after = pipeline(**dummy_input, generator=torch.manual_seed(0))[0]
+
+            # sanity check: still same result
+            assert np.allclose(output0_before, output0_after, atol=tol, rtol=tol)
+
+            # hotswap the 2nd adapter
+            pipeline.load_lora_weights(file_name1, hotswap=True, adapter_name="default_0")
+            output1_after = pipeline(**dummy_input, generator=torch.manual_seed(0))[0]
+
+            # sanity check: since it's the same LoRA, the results should be identical
+            assert np.allclose(output1_before, output1_after, atol=tol, rtol=tol)
+
+            # we need to call forward third time since cudagraphs are not recorded in first call.
+            pipeline.load_lora_weights(file_name0, hotswap=True, adapter_name="default_0")
+            output2_after = pipeline(**dummy_input, generator=torch.manual_seed(0))[0]
+            assert np.allclose(output0_before, output2_after, atol=tol, rtol=tol)
 
     @pytest.mark.skipif(not is_diffusers_available(), reason="Test requires diffusers to be installed")
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Requires hotswap to be implemented in diffusers",
-        raises=ValueError,
-    )
     # it is important to check hotswapping small to large ranks and large to small ranks
     @pytest.mark.parametrize("ranks", [(11, 11), (7, 13), (13, 7)])
     @pytest.mark.parametrize(
@@ -4904,7 +4944,11 @@ class TestHotSwapping:
         ],
     )
     def test_hotswapping_compiled_diffusers_model_does_not_trigger_recompilation(self, ranks, target_modules):
-        with torch._dynamo.config.patch(error_on_recompile=True):  # raise an error on recompilation
-            self.check_hotswap_diffusion(
-                do_hotswap=True, ranks=ranks, alpha_scalings=ranks, target_modules=target_modules
-            )
+        # here we set three configs to ensure no recompilation or cudagraph re-record occurs:
+        # 1. error_on_recompile: raise an error on recompilation
+        # 2. inline_inbuilt_nn_modules: needed to raise an error on static input address changes instead of re-recording
+        # 3. triton.cudagraph_support_input_mutation: same as above
+        dynamo_config_ctx = torch._dynamo.config.patch(error_on_recompile=True, inline_inbuilt_nn_modules=False)
+        inductor_config_ctx = torch._inductor.config.patch("triton.cudagraph_support_input_mutation", False)
+        with dynamo_config_ctx, inductor_config_ctx:
+            self.check_hotswap_diffusion(ranks=ranks, alpha_scalings=ranks, target_modules=target_modules)
