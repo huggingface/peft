@@ -65,7 +65,13 @@ class LoraVariant:
         """Remove the adapter weights from the original weights, then return them"""
 
     @staticmethod
-    def forward(module: LoraLayer, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
+    def forward(
+        module: LoraLayer,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
         """
         The forward pass of the LoRA variant, should return the overall result (not just the diff)
 
@@ -74,6 +80,7 @@ class LoraVariant:
             active_adapter (str): The name of the active adapter
             x (torch.Tensor): The input to the forward call
             result (torch.Tensor): The result from the base model
+            **kwargs: Additional arguments passed from [`LoraLayer.forward`].
         """
         raise NotImplementedError
 
@@ -773,6 +780,7 @@ class Linear(nn.Module, LoraLayer):
                         active_adapter=active_adapter,
                         x=x,
                         result=result,
+                        **kwargs,
                     )
 
             result = result.to(torch_result_dtype)
@@ -1047,6 +1055,7 @@ class Embedding(nn.Module, LoraLayer):
                         active_adapter=active_adapter,
                         x=x,
                         result=result,
+                        **kwargs,
                     )
             result = result.to(torch_result_dtype)
 
@@ -1323,6 +1332,7 @@ class _ConvNd(nn.Module, LoraLayer):
                         active_adapter=active_adapter,
                         x=x,
                         result=result,
+                        **kwargs,
                     )
 
             result = result.to(torch_result_dtype)

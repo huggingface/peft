@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Union, List
 
-from torch import nn
-from peft.utils import PeftType
 from peft.tuners.lora import LoraConfig
+from peft.utils import PeftType
 
 
 @dataclass
@@ -19,7 +17,13 @@ class aLoraConfig(LoraConfig):
         invocation_string (str): String intended to activate the aLoRA. The aLoRA adapted weights will activate
                                  1 token after the first token in this string. This string must be present in all input data.
     """
-    r: int = field(default=32, metadata={"help": "aLora attention dimension. Typically needs to be higher than used for standard Lora. Default=32."})
+
+    r: int = field(
+        default=32,
+        metadata={
+            "help": "aLora attention dimension. Typically needs to be higher than used for standard Lora. Default=32."
+        },
+    )
     invocation_string: str = field(
         default=None,
         metadata={
@@ -27,11 +31,13 @@ class aLoraConfig(LoraConfig):
                 "aLoRA invocation string. The aLoRA adapted weights will activate 1 token after the first token in "
                 "this string. This string must be present in all input data."
             )
-        }
+        },
     )
-    invocation_tokens: List[int] = field(
+    invocation_tokens: list[int] = field(
         default=None,
-        metadata={"help": "Tokenized version of `invocation_string` (as a list of token IDs). Use the model's default tokenizer. E.g. invocation_tokens = tokenizer.encode(invocation_string, add_special_tokens=False)"}
+        metadata={
+            "help": "Tokenized version of `invocation_string` (as a list of token IDs). Use the model's default tokenizer. E.g. invocation_tokens = tokenizer.encode(invocation_string, add_special_tokens=False)"
+        },
     )
 
     def __post_init__(self):
@@ -41,5 +47,3 @@ class aLoraConfig(LoraConfig):
             warnings.warn("invocation_string cannot be None for aLoRA.", UserWarning)
         if self.invocation_tokens is None:
             warnings.warn("invocation_tokens cannot be None for aLoRA.", UserWarning)
-        
-
