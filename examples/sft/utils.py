@@ -184,10 +184,8 @@ def create_and_prepare_model(args, data_args, training_args):
         # ante). See https://github.com/huggingface/accelerate/issues/1620.
         uses_transformers_4_46 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.46.0")
         uses_fsdp = os.environ.get("ACCELERATE_USE_FSDP", "false").lower() == "true"
-        is_quantized = bnb_config is not None
-        # Check if the model is already quantized by other approaches
-        if hasattr(model, "hf_quantizer") and model.hf_quantizer is not None:
-            is_quantized = True
+        # Check if the model is quantized
+        is_quantized = (bnb_config is not None) or (getattr(model, "hf_quantizer", None) is not None)
         if is_quantized and uses_fsdp and uses_transformers_4_46:
             model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8, mean_resizing=False)
         else:
