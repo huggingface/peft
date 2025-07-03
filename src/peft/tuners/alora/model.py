@@ -36,10 +36,13 @@ from peft.utils.other import get_pattern_key
 #from peft.aqlm import dispatch_aqlm
 #from peft.awq import dispatch_awq
 from .config import aLoraConfig
+
 #from peft.eetq import dispatch_eetq
 #from peft.gptq import dispatch_gptq
 #from peft.hqq import dispatch_hqq
 from .layer import aLoraLayer, dispatch_default
+
+
 #from peft.torchao import dispatch_torchao
 #from peft.tp_layer import dispatch_megatron
 
@@ -70,13 +73,10 @@ class aLoraModel(BaseTuner):
 
     Returns:
         `torch.nn.Module`: The aLora model.
-
-    
     **Attributes**:
         - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
         - **peft_config** ([`aLoraConfig`]): The configuration of the aLora model.
     """
-
     prefix: str = "lora_"
 
     def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
@@ -403,7 +403,7 @@ class aLoraModel(BaseTuner):
 
 
             ################################
-        
+
         if self.training:
             raise ValueError("Cannot pass `adapter_names` when the model is in training mode.")
 
@@ -437,7 +437,7 @@ class aLoraModel(BaseTuner):
         """
 
         raise ValueError("Merging of aLoRA layers is not possible by definition.")
-        
+
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
         if peft_config.target_modules is None:
