@@ -191,6 +191,7 @@ class LoraLayer(BaseTunerLayer):
         init_lora_weights,
         use_rslora,
         use_dora: bool = False,
+        use_alora: bool = False,
         use_qalora: bool = False,
         lora_bias: bool = False,
         qalora_group_size: int = 32,
@@ -205,7 +206,7 @@ class LoraLayer(BaseTunerLayer):
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
         lora_variant = self.resolve_lora_variant(
-            use_dora=use_dora, use_qalora=use_qalora, qalora_group_size=qalora_group_size
+            use_dora=use_dora, use_alora=use_alora, use_qalora=use_qalora, qalora_group_size=qalora_group_size
         )
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
@@ -573,8 +574,18 @@ class LoraLayer(BaseTunerLayer):
             # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
             # layer output
             sub_batch = x[sub_batch_indices_list[i]].to(lora_A.weight.dtype)
-            lora_output = lora_B(lora_A(dropout(sub_batch))) * scaling
-            result[sub_batch_indices_list[i]] += lora_output.to(torch_result_dtype)
+            if active_adapter not in self.lora_variant:  # vanilla LoRA
+                lora_output = lora_B(lora_A(dropout(sub_batch))) * scaling
+                result[sub_batch_indices_list[i]] += lora_output.to(torch_result_dtype)
+            else:
+                lora_output = self.lora_variant[active_adapter].forward(
+                    self,
+                    active_adapter=active_adapter,
+                    x=x,
+                    result=result,
+                    **kwargs,
+                )
+                result[sub_batch_indices_list[i]] += lora_output.to(torch_result_dtype)
 
         return result
 
@@ -603,6 +614,7 @@ class Linear(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        use_alora: bool = False,
         lora_bias: bool = False,
         **kwargs,
     ) -> None:
@@ -624,12 +636,14 @@ class Linear(nn.Module, LoraLayer):
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
-        if not use_dora:
+        if not use_dora or use_alora:
             return None
 
-        from .variants import DoraLinearVariant
-
-        return DoraLinearVariant()
+        from .variants import DoraLinearVariant, ALoraLinearVariant
+        if use_alora: 
+            return ALoraLinearVariant()
+        else:
+            return DoraLinearVariant()
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -828,7 +842,12 @@ class Embedding(nn.Module, LoraLayer):
             lora_bias=lora_bias,
         )
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+    def resolve_lora_variant(self, *, use_dora: bool, use_alora: bool, **kwargs) -> Optional[LoraVariant]:
+        if use_alora:
+            ValueError(
+                "aLoRA does not support adapting embedding layers."
+            )
+            return None
         if not use_dora:
             return None
 
@@ -1078,6 +1097,7 @@ class _ConvNd(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        use_alora: bool = False,
         lora_bias: bool = False,
         **kwargs,
     ) -> None:
@@ -1105,11 +1125,12 @@ class _ConvNd(nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
+            use_alora=use_alora,
             lora_bias=lora_bias,
         )
 
     def update_layer(
-        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora, lora_bias
+        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora, use_alora, lora_bias
     ):
         # collect the kwargs
         kwargs = locals().copy()
@@ -1118,7 +1139,7 @@ class _ConvNd(nn.Module, LoraLayer):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
-        lora_variant = self.resolve_lora_variant(use_dora=use_dora)
+        lora_variant = self.resolve_lora_variant(use_dora=use_dora, use_alora=use_alora)
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 
