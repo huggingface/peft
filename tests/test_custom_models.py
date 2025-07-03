@@ -1526,12 +1526,6 @@ class TestPeftCustomModel(PeftCommonTester):
         if platform.system() == "Darwin":
             pytest.skip(reason="MacOS does not support multiple ops in float16")
 
-        if config_cls in [
-            ShiraConfig,
-        ]:
-            pytest.skip(
-                "SHiRA requires autocast_adapter_dtype to be True because otherwise it throws the following error: 'addmm_sparse_cuda' not implemented for 'BFloat16' or 'Half'. Hence, skipping this test"
-            )
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16).to(self.torch_device)
         model.dtype = torch.float16
@@ -1573,12 +1567,6 @@ class TestPeftCustomModel(PeftCommonTester):
         if platform.system() == "Darwin":
             pytest.skip(reason="MacOS does not support multiple ops in bfloat16")
 
-        if config_cls in [
-            ShiraConfig,
-        ]:
-            pytest.skip(
-                "SHiRA requires autocast_adapter_dtype to be True because otherwise it throws the following error: 'addmm_sparse_cuda' not implemented for 'BFloat16' or 'Half'. Hence, skipping this test"
-            )
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16).to(self.torch_device)
         model.dtype = torch.bfloat16
