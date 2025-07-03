@@ -234,7 +234,6 @@ class LoraModel(BaseTuner):
                 init_lora_weights=lora_config.init_lora_weights,
                 use_rslora=lora_config.use_rslora,
                 use_dora=lora_config.use_dora,
-                use_alora=lora_config.use_alora,
                 lora_bias=lora_config.lora_bias,
             )
         else:
