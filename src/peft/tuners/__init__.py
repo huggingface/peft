@@ -14,7 +14,6 @@
 
 from .adalora import AdaLoraConfig, AdaLoraModel
 from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
-from .alora import aLoraConfig, aLoraModel
 from .boft import BOFTConfig, BOFTModel
 from .bone import BoneConfig, BoneModel
 from .c3a import C3AConfig, C3AModel
@@ -53,8 +52,6 @@ __all__ = [
     "AdaLoraModel",
     "AdaptionPromptConfig",
     "AdaptionPromptModel",
-    "aLoraConfig",
-    "aLoraModel",
     "BOFTConfig",
     "BOFTModel",
     "BoneConfig",
