@@ -168,11 +168,11 @@ class LoraLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+    def resolve_lora_variant(self, *, use_dora: bool, use_alora: bool, **kwargs) -> Optional[LoraVariant]:
         """Return a matching LoRA variant for this layer type.
 
         Given the init arguments of this layer, return the correct LoRA variant, if any. E.g., if `use_dora=True`, this
-        method should return the DoRA variant for the given layer.
+        method should return the DoRA variant for the given layer. If `use_alora=True`, same for aLoRA.
 
         If there is no fitting variant, return None.
 
@@ -631,11 +631,12 @@ class Linear(nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
+            use_alora=use_alora,
             lora_bias=lora_bias,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+    def resolve_lora_variant(self, *, use_dora: bool, use_alora: bool, **kwargs) -> Optional[LoraVariant]:
         if not use_dora or use_alora:
             return None
 
@@ -842,12 +843,8 @@ class Embedding(nn.Module, LoraLayer):
             lora_bias=lora_bias,
         )
 
-    def resolve_lora_variant(self, *, use_dora: bool, use_alora: bool, **kwargs) -> Optional[LoraVariant]:
-        if use_alora:
-            ValueError(
-                "aLoRA does not support adapting embedding layers."
-            )
-            return None
+    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+
         if not use_dora:
             return None
 
@@ -1097,13 +1094,13 @@ class _ConvNd(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
-        use_alora: bool = False,
         lora_bias: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
         LoraLayer.__init__(self, base_layer)
-
+        if kwargs.get("use_alora", False):
+            raise ValueError("aLoRA does not support adapting conv layers.")
         if base_layer.groups > 1:
             warnings.warn("LoRA adapter added to ConvNd layer with groups > 1. Merging is not supported.")
 
@@ -1125,12 +1122,11 @@ class _ConvNd(nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
-            use_alora=use_alora,
             lora_bias=lora_bias,
         )
 
     def update_layer(
-        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora, use_alora, lora_bias
+        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora, lora_bias
     ):
         # collect the kwargs
         kwargs = locals().copy()
@@ -1139,7 +1135,7 @@ class _ConvNd(nn.Module, LoraLayer):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
-        lora_variant = self.resolve_lora_variant(use_dora=use_dora, use_alora=use_alora)
+        lora_variant = self.resolve_lora_variant(use_dora=use_dora)
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 
@@ -1453,7 +1449,8 @@ class MultiheadAttention(nn.Module, LoraLayer):
         if use_dora:
             # TODO: probably not so hard to implement
             raise ValueError(f"{self.__class__.__name__} does not support DoRA (yet), please set use_dora to False")
-
+        if kwargs.get("use_alora", False):
+            raise ValueError(f"{self.__class__.__name__} does not support aLoRA (yet), please set use_alora to False")
         super().__init__()
         LoraLayer.__init__(self, base_layer, **kwargs)
 
