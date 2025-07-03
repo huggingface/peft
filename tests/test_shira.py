@@ -24,6 +24,37 @@ from torch import nn
 from peft import PeftModel, ShiraConfig, get_peft_model
 
 
+def custom_random_mask_function_with_custom_kwargs(custom_arg_1, custom_arg_2):
+    print(
+        f"Generating a custom random mask function with custom kwargs...new seed for this test example is {custom_arg_1 + custom_arg_2}"
+    )
+
+    def mask_fn(base_layer, r):
+        """
+        This mask function is similar to the random_mask provided in src/peft/tuners/shira/mask_functions.py except the
+        seed is derived from custom_kwargs. Please use this as an example to create your own custom sparse masks that
+        may use custom_kwargs. Remember, for a pretrained weight with shape m, n, mask_fn must return only one mask
+        (shape: m, n) which must be binary 0 or 1 with num_shira_parameters = r(m+n) for linear layers. Device and
+        dtype of mask must be same as base layer's weight's device and dtype.
+        """
+        new_seed = custom_arg_1 + custom_arg_2
+        shape = base_layer.weight.shape
+        num_shira_weights = r * (shape[0] + shape[1])
+        random_generator = torch.Generator()
+        random_generator.manual_seed(new_seed)
+
+        idx = (torch.randperm(base_layer.weight.numel(), generator=random_generator)[:num_shira_weights]).to(
+            base_layer.weight.device
+        )
+        val = torch.ones_like(idx.type(base_layer.weight.dtype))
+        mask = torch.zeros_like(base_layer.weight.view(1, -1))
+        mask = mask.scatter_(1, idx.unsqueeze(0), val.unsqueeze(0)).view(shape)
+
+        return mask
+
+    return mask_fn
+
+
 class MLP(nn.Module):
     def __init__(self, bias=True):
         super().__init__()
@@ -157,6 +188,84 @@ class TestShira:
         assert torch.all(shira_indices1_s - peft_model.base_model.model.lin1.shira_indices["second"] == 0)
         assert torch.all(shira_indices2_s - peft_model.base_model.model.lin2.shira_indices["second"] == 0)
         assert torch.all(shira_indices3_s - peft_model.base_model.model.lin3.shira_indices["second"] == 0)
+
+        return peft_model
+
+    def test_save_load_custom_mask_function(self, mlp, tmp_path):
+        # we want to see if saving and loading works when a custom mask is involved
+        config = ShiraConfig(r=2, mask_type="custom", target_modules=["lin1", "lin2"], init_weights=False)
+        custom_arg_1 = 56
+        custom_arg_2 = 64
+        custom_mask_fn = custom_random_mask_function_with_custom_kwargs(custom_arg_1, custom_arg_2)
+        config.mask_fn = custom_mask_fn
+
+        # create a custom mask SHiRA adapter
+        peft_model = get_peft_model(mlp, config, adapter_name="first")
+
+        shira_assign_val1_f = peft_model.base_model.model.lin1.shira_weight["first"]
+        shira_indices1_f = peft_model.base_model.model.lin1.shira_indices["first"]
+        shira_assign_val2_f = peft_model.base_model.model.lin2.shira_weight["first"]
+        shira_indices2_f = peft_model.base_model.model.lin2.shira_indices["first"]
+
+        input = torch.randn(5, 10)
+        peft_model.set_adapter("first")
+        output_first = peft_model(input)
+
+        save_path = os.path.join(tmp_path, "shira")
+        peft_model.save_pretrained(save_path)
+        assert os.path.exists(os.path.join(save_path, "first", "adapter_config.json"))
+        del peft_model
+
+        torch.manual_seed(0)
+        mlp = MLP()
+        peft_model = PeftModel.from_pretrained(mlp, os.path.join(save_path, "first"), adapter_name="first")
+
+        peft_model.set_adapter("first")
+        output_first_loaded = peft_model(input)
+
+        assert torch.all(output_first - output_first_loaded == 0)
+
+        assert torch.all(shira_assign_val1_f - peft_model.base_model.model.lin1.shira_weight["first"] == 0)
+        assert torch.all(shira_assign_val2_f - peft_model.base_model.model.lin2.shira_weight["first"] == 0)
+        assert torch.all(shira_indices1_f - peft_model.base_model.model.lin1.shira_indices["first"] == 0)
+        assert torch.all(shira_indices2_f - peft_model.base_model.model.lin2.shira_indices["first"] == 0)
+
+        return peft_model
+
+    def test_save_load_default_random_mask_with_seed_function(self, mlp, tmp_path):
+        # we want to see if saving and loading works when a random mask is involved but the random seed is fixed.
+        config = ShiraConfig(r=2, target_modules=["lin1", "lin2"], random_seed=567, init_weights=False)
+
+        # create a custom mask SHiRA adapter
+        peft_model = get_peft_model(mlp, config, adapter_name="first")
+
+        shira_assign_val1_f = peft_model.base_model.model.lin1.shira_weight["first"]
+        shira_indices1_f = peft_model.base_model.model.lin1.shira_indices["first"]
+        shira_assign_val2_f = peft_model.base_model.model.lin2.shira_weight["first"]
+        shira_indices2_f = peft_model.base_model.model.lin2.shira_indices["first"]
+
+        input = torch.randn(5, 10)
+        peft_model.set_adapter("first")
+        output_first = peft_model(input)
+
+        save_path = os.path.join(tmp_path, "shira")
+        peft_model.save_pretrained(save_path)
+        assert os.path.exists(os.path.join(save_path, "first", "adapter_config.json"))
+        del peft_model
+
+        torch.manual_seed(0)
+        mlp = MLP()
+        peft_model = PeftModel.from_pretrained(mlp, os.path.join(save_path, "first"), adapter_name="first")
+
+        peft_model.set_adapter("first")
+        output_first_loaded = peft_model(input)
+
+        assert torch.all(output_first - output_first_loaded == 0)
+
+        assert torch.all(shira_assign_val1_f - peft_model.base_model.model.lin1.shira_weight["first"] == 0)
+        assert torch.all(shira_assign_val2_f - peft_model.base_model.model.lin2.shira_weight["first"] == 0)
+        assert torch.all(shira_indices1_f - peft_model.base_model.model.lin1.shira_indices["first"] == 0)
+        assert torch.all(shira_indices2_f - peft_model.base_model.model.lin2.shira_indices["first"] == 0)
 
         return peft_model
 
