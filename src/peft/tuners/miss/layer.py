@@ -89,7 +89,9 @@ class MiSSLayer(BaseTunerLayer):
             self.reset_bat_parameters(adapter_name, r)
         elif init_weights == "mini":
             if self.out_features % mini_r != 0:
-                raise ValueError("mini_r is divided along the out_features dimension. For optimal performance and implementation simplicity, it is recommended that out_features be divisible by mini_r.")
+                raise ValueError(
+                    "mini_r is divided along the out_features dimension. For optimal performance and implementation simplicity, it is recommended that out_features be divisible by mini_r."
+                )
             self.reset_mini_parameters(adapter_name, r, mini_r)
         elif init_weights:
             self.reset_miss_parameters(adapter_name, r)
@@ -297,8 +299,8 @@ class MiSSLinear(nn.Module, MiSSLayer):
         in_features = orig_weight.size(-1)
         out_features = orig_weight.size(0)
         r = weight_miss.size(0)
-        if self.miss_fn=='mini':
-            weight_miss = weight_miss.repeat(1, out_features//self.mini_r)
+        if self.miss_fn == "mini":
+            weight_miss = weight_miss.repeat(1, out_features // self.mini_r)
 
         if in_features % r != 0:
             last_size = in_features % r
@@ -368,8 +370,8 @@ class MiSSLinear(nn.Module, MiSSLayer):
                     if active_adapter not in self.miss_block.keys():
                         continue
                     miss = self.miss_block[active_adapter]
-                    if self.miss_fn == 'mini':
-                        miss = miss.repeat(1, self.base_layer.out_features//self.mini_r)
+                    if self.miss_fn == "mini":
+                        miss = miss.repeat(1, self.base_layer.out_features // self.mini_r)
                     dropout = self.miss_dropout[active_adapter]
                     r = miss.size(0)
                     if x.size(-1) % r != 0:

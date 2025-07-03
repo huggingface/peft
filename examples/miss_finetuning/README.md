@@ -1,6 +1,6 @@
 # MiSS: Balancing LoRA Performance and Efficiency with Simple Shard Sharing
 ## Introduction ([Paper](https://huggingface.co/papers/2409.15371), [code](https://github.com/JL-er/MiSS))
-MiSS (Matrix Shard Sharing) is a novel Parameter-Efficient Fine-Tuning (PEFT) method designed to address the trade-off between adaptability and efficiency in Large Language Models. The core approach of MiSS involves a simple shard-sharing mechanism. It achieves low-rank adaptation by decomposing a weight matrix into multiple fragments and then utilizing a shared, trainable "common fragment." The final low-rank update matrix is constructed by replicating these shared, partitioned shards.
+MiSS (Matrix Shard Sharing) is a novel PEFT method that adopts a low-rank structure, requires only a single trainable matrix, and introduces a new update mechanism distinct from LoRA, achieving an excellent balance between performance and efficiency.
 
 
 ## Quick Start
@@ -14,13 +14,21 @@ from datasets import load_dataset
 model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf", torch_dtype=torch.bfloat16, device_map="auto")
 tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf")
 tokenizer.pad_token_id = tokenizer.eos_token_id
+
 miss_config = MiSSConfig(
     r = 64
 )
-#Bat performs better than MiSS, but it uses more memory and is twice as slow. If you want to use the Bat method, you only need to add the parameter init_weights="bat".
+#bat: In this mode, you can enable nonlinear updates across different shards.
 # miss_config = MiSSConfig(
 #     r = 64,
 #     init_weights="bat"
+# )
+
+# mini: In this mode, you can set a smaller rank to use fewer trainable parameters, but it is recommended to keep `out_features % mini_r == 0`.
+# miss_config = MiSSConfig(
+#     r = 64,
+#     init_weights="mini",
+#     mini_r = 8
 # )
 peft_model = get_peft_model(model, miss_config)
 
@@ -85,12 +93,12 @@ python miss_finetuning.py \
 
 # Citation
 ```bib
-@misc{kang2025dishadimensionshardingadaptationlarge,
-      title={DiSHA: Dimension-Sharding Adaptation of Large Language Models with Fast Convergence and Fast Computation}, 
-      author={Jiale Kang},
+@misc{kang2025balancingloraperformanceefficiency,
+      title={Balancing LoRA Performance and Efficiency with Simple Shard Sharing}, 
+      author={Jiale Kang and Qingyu Yin},
       year={2025},
       eprint={2409.15371},
       archivePrefix={arXiv},
       primaryClass={cs.CL},
-      url={https://huggingface.co/papers/2409.15371}, 
+      url={https://arxiv.org/abs/2409.15371}, 
 }

@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # MiSS
 
-MiSS: Balancing LoRA Performance and Efficiency with Simple Shard Sharing([MiSS](https://huggingface.co/papers/2409.15371)) is a novel PEFT method that features a low-rank structure but introduces a new update mechanism distinct from LoRA, achieving an excellent balance between performance and efficiency.
+MiSS: Balancing LoRA Performance and Efficiency with Simple Shard Sharing([MiSS](https://huggingface.co/papers/2409.15371)) is a novel PEFT method that adopts a low-rank structure, requires only a single trainable matrix, and introduces a new update mechanism distinct from LoRA, achieving an excellent balance between performance and efficiency.
 
 The abstract from the paper is:
 

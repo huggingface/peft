@@ -29,7 +29,13 @@ class MiSSConfig(PeftConfig):
     Args:
         r (`int`):
             The rank of MiSS across different layers. It is best to set 'r' to an even number; otherwise, the default
-            initialization method will not work.
+            initialization method will not work. The rank of MiSS corresponds to a low-rank decomposition along the
+            in_features dimension.
+        miss_dropout (`float`):
+            The dropout probability for Lora layers.
+        mini_r (`int`):
+            When you set `init_weights=mini`, you need to set `mini_r`. Please make sure that `out_features` is
+            divisible by `mini_r`.
         target_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
             names will be replaced. When passing a string, a regex match will be performed. When passing a list of
@@ -42,9 +48,11 @@ class MiSSConfig(PeftConfig):
             The names of the modules to not apply the adapter. When passing a string, a regex match will be performed.
             When passing a list of strings, either an exact match will be performed or it is checked if the name of the
             module ends with any of the passed strings.
-        init_weights (bool | Literal["bat"]):
-            Different initializations correspond to different MiSS variants. By default, setting True uses the MiSS
-            structure, while "bat" selects the Bat structure.
+        init_weights (bool | Literal["bat", "mini"]):
+            Different initializations correspond to different MiSS variants. By default(balance), the most efficient
+            and general method in MiSS will be used. 'bat': In this mode, you can enable nonlinear updates across
+            different shards. 'mini': In this mode, you can set a smaller rank to use fewer trainable parameters, but
+            it is recommended to keep `out_features % mini_r == 0`.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
@@ -58,16 +66,16 @@ class MiSSConfig(PeftConfig):
     r: int = field(
         default=64,
         metadata={
-            "help": "The rank of MiSS across different layers.",
+            "help": "The rank of MiSS corresponds to a low-rank decomposition along the in_features dimension.",
             "note": "It is best to set 'r' to an even number; otherwise, the default initialization method will not work.",
         },
     )
     miss_dropout: float = field(default=0.0, metadata={"help": "MiSS dropout"})
     mini_r: int = field(
-        default=2,
+        default=1,
         metadata={
-            "help": "The rank of MiSS across different layers.",
-            "note": "when mini_r==out_features, mini==MiSS efficiency",
+            "help": "The rank of MiSS corresponds to a low-rank decomposition along the out_features dimension.",
+            "note": "It is recommended that mini_r be divisible by out_features. When mini_r == out_features, the mini method is equivalent to the default efficient MiSS.",
         },
     )
     target_modules: Optional[Union[list[str], str]] = field(
@@ -85,7 +93,7 @@ class MiSSConfig(PeftConfig):
         default=True,
         metadata={
             "help": (
-                "True -> MiSS efficiency; `bat` -> Bat; `mini` -> test"
+                "True -> MiSS balance; `bat` -> Bat; `mini` -> smaller rank and efficiency"
                 "Whether to initialize the weights of the MiSS layers with their default initialization. Don't change "
                 "this setting, except if you know exactly what you're doing."
             ),
