@@ -1893,14 +1893,14 @@ class PeftModelForCausalLM(PeftModel):
             adapter_names_for_offset_calc = kwargs.get("adapter_names")
 
             is_alora_relevant = False
-            if self.active_peft_config.peft_type == PeftType.ALORA:
+            if getattr(self.active_peft_config, "use_alora", False):
                 is_alora_relevant = True
             elif adapter_names_for_offset_calc:
                 for name in adapter_names_for_offset_calc:
                     if name == "__base__":
                         continue
                     config_ = self.peft_config.get(name)
-                    if config_ and config_.peft_type == PeftType.ALORA:
+                    if config_ and getattr(config_, "use_alora", False):
                         is_alora_relevant = True
                         break
             
@@ -2057,14 +2057,14 @@ class PeftModelForCausalLM(PeftModel):
                 adapter_names_for_offset_calc = kwargs.get("adapter_names")
                 is_alora_relevant_in_generate = False
 
-                if self.active_peft_config.peft_type == PeftType.ALORA:
+                if getattr(self.active_peft_config, "use_alora", False):
                     is_alora_relevant_in_generate = True
                 elif adapter_names_for_offset_calc:
                     for name in adapter_names_for_offset_calc:
                         if name == "__base__":
                             continue
                         config_ = self.peft_config.get(name)
-                        if config_ and config_.peft_type == PeftType.ALORA:
+                        if config_ and getattr(config_, "use_alora", False):
                             is_alora_relevant_in_generate = True
                             break
                 
