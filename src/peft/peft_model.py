@@ -65,7 +65,6 @@ from .utils import (
     set_peft_model_state_dict,
     shift_tokens_right,
 )
-from .tuners.alora.config import aLoraConfig
 
 
 class PeftModel(PushToHubMixin, torch.nn.Module):
@@ -1803,11 +1802,11 @@ class PeftModelForCausalLM(PeftModel):
             
             current_peft_config = self.peft_config[current_adapter_name]
 
-            if not isinstance(current_peft_config, aLoraConfig):
+            if not current_peft_config.use_alora: 
                 alora_offsets[i] = -1 # Not an aLoRA adapter or wrong type
                 continue
             
-            invocation_tokens = getattr(current_peft_config, 'invocation_tokens', None)
+            invocation_tokens = getattr(current_peft_config, 'alora_invocation_tokens', None)
             if not invocation_tokens:
                 alora_offsets[i] = -1 # No way to calculate offset
                 continue
