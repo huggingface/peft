@@ -3553,7 +3553,7 @@ class PeftAwqGPUTests(unittest.TestCase):
     # TODO remove marker if/once issue is resolved, most likely requiring a fix in AutoAWQ:
     # https://github.com/casper-hansen/AutoAWQ/issues/754
     @pytest.mark.xfail(
-        condition=is_torch_version("==", "2.7"),
+        condition=is_torch_version("==", "2.7.0") or is_torch_version("==", "2.7.1"),
         reason="Multi-GPU test currently not working with AutoAWQ and PyTorch 2.7",
         strict=True,
     )
