@@ -266,6 +266,11 @@ class PeftCommonTester:
         else:  # a custom model
             assert "base_model" not in dct
 
+        # The Hub expects the lora tag to be set for PEFT LoRA models since they
+        # have explicit support for things like inference.
+        if model.active_peft_config.peft_type.value == "LORA":
+            assert "lora" in dct["tags"]
+
     def check_config_json(self, tmp_dirname, model):
         # check the generated config.json
         filename = os.path.join(tmp_dirname, "adapter_config.json")
