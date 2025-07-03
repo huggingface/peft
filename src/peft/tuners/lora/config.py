@@ -544,7 +544,9 @@ class LoraConfig(PeftConfig):
         default=None,
         metadata={
             "help": (
-                "Tokenized copy of the Activated LoRA (aLoRA) invocation string alora_invocation_string. "
+                "Tokenized copy of the Activated LoRA (aLoRA) invocation string alora_invocation_string "
+                "(as a list of token IDs). Use the model's default tokenizer. "
+                "E.g. alora_invocation_tokens = tokenizer.encode(alora_invocation_string, add_special_tokens=False)."
                 "The adapter weights will be activated 1 token after the last occurence of this string in the input. "
                 "These tokens must be present in all inputs after tokenization. It is best to have alora_invocation_string begin and end with special tokens "
                 "to avoid tokenizer boundary effects when tokenizing the input. Only used when `use_alora=True`."
