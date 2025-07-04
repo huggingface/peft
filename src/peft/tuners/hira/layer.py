@@ -921,3 +921,61 @@ class Conv3d(_ConvNd):
             raise ValueError(f"Conv3d layer kernel must have 5 dimensions, not {self._kernel_dim}")
         self.conv_fn = F.conv3d
 
+
+def dispatch_default(
+    target: torch.nn.Module,
+    adapter_name: str,
+    hira_config: HiRAConfig,
+    **kwargs,
+) -> Optional[torch.nn.Module]:
+    """
+    Dispatch function for HiRA adapters that avoids LoFT-Q related config.
+    """
+    # Determine the base module (unwrap BaseTunerLayer)
+    if isinstance(target, BaseTunerLayer):
+        base = target.get_base_layer()
+    else:
+        base = target
+
+    # Common HiRA init kwargs
+    module_kwargs = {
+        "r": hira_config.r,
+        "hira_dropout": hira_config.hira_dropout,
+        "init_hira_weights": hira_config.init_hira_weights,
+    }
+    # If fan_in_fan_out present in config, include it
+    if hasattr(hira_config, "fan_in_fan_out"):
+        module_kwargs["fan_in_fan_out"] = hira_config.fan_in_fan_out
+
+    new_module = None
+    # Embedding
+    if isinstance(base, nn.Embedding):
+        new_module = Embedding(target, adapter_name, **module_kwargs)
+    # Conv layers
+    elif isinstance(base, nn.Conv2d):
+        new_module = Conv2d(target, adapter_name, **module_kwargs)
+    elif isinstance(base, nn.Conv3d):
+        new_module = Conv3d(target, adapter_name, **module_kwargs)
+    elif isinstance(base, nn.Conv1d):
+        new_module = Conv1d(target, adapter_name, **module_kwargs)
+    # Linear layers
+    elif isinstance(base, nn.Linear):
+        # Linear always uses fan_in_fan_out=False
+        if module_kwargs.get("fan_in_fan_out", False):
+            warnings.warn(
+                "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
+                "Setting fan_in_fan_out to False."
+            )
+            module_kwargs["fan_in_fan_out"] = False
+        new_module = Linear(target, adapter_name, **module_kwargs)
+    # HuggingFace Conv1D
+    elif isinstance(base, Conv1D):
+        # Conv1D expects fan_in_fan_out=True
+        if not module_kwargs.get("fan_in_fan_out", False):
+            warnings.warn(
+                "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
+            )
+            module_kwargs["fan_in_fan_out"] = True
+        new_module = Linear(target, adapter_name, is_target_conv_1d_layer=True, **module_kwargs)
+
+    return new_module

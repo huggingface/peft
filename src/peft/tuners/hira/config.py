@@ -70,20 +70,14 @@ class HiRAConfig(PeftConfig):
             The names of the modules to not apply the adapter. When passing a string, a regex match will be performed.
             When passing a list of strings, either an exact match will be performed or it is checked if the name of the
             module ends with any of the passed strings.
-        hira_alpha (`int`):
-            The alpha parameter for HiRA scaling. default to 1
         hira_dropout (`float`):
             The dropout probability for HiRA layers.
         fan_in_fan_out (`bool`):
             Set this to True if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 uses
             `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
-        bias (`str`):
-            Bias type for HiRA. Can be 'none', 'all' or 'hira_only'. If 'all' or 'hira_only', the corresponding biases
-            will be updated during training. Be aware that this means that, even when disabling the adapters, the model
-            will not produce the same output as the base model would have without adaptation.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
-        init_hira_weights (`bool` | `Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "corda", "loftq"]`):
+        init_hira_weights (`bool` | `Literal["gaussian"]`):
             How to initialize the weights of the adapter layers. Passing True (default) results in the default
             initialization from the reference implementation from Microsoft, with the HiRA B weight being set to 0.
         layers_to_transform (`Union[List[int], int]`):
@@ -96,36 +90,15 @@ class HiRAConfig(PeftConfig):
         r_pattern (`dict`):
             The mapping from layer names or regexp expression to ranks which are different from the default r
             specified by `r`. For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`.
-        alpha_pattern (`dict`):
-            The mapping from layer names or regexp expression to alphas which are different from the default alpha
-            specified by `hira_alpha`. For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`.
-        megatron_config (`Optional[dict]`):
-            The TransformerConfig arguments for Megatron. It is used to create HiRA's parallel linear layer. You can
-            get it like this, `core_transformer_config_from_args(get_args())`, these two functions being from Megatron.
-            The arguments will be used to initialize the TransformerConfig of Megatron. You need to specify this
-            parameter when you want to apply HiRA to the ColumnParallelLinear and RowParallelLinear layers of megatron.
-        megatron_core (`Optional[str]`):
-            The core module from Megatron to use, defaults to `"megatron.core"`.
-        trainable_token_indices (`Optional[Union[List[int], dict[str, List[int]]]]`)
-            Lets you specify which token indices to selectively fine-tune without requiring to re-train the whole
-            embedding matrix using the `peft.TrainableTokensModel` method. You can specify token indices in two ways.
-            Either you specify a list of indices which will then target the model's input embedding layer (or, if not
-            found, `embed_tokens`). Alternatively, you can specify a dictionary where the key is the name of the
-            embedding module and the values are the list of token indices, e.g. `{'embed_tokens': [0, 1, ...]}`. Note
-            that training with FSDP/DeepSpeed might not yet be fully supported with this option enabled.
         layer_replication (`List[Tuple[int, int]]`):
             Build a new stack of layers by stacking the original model layers according to the ranges specified. This
             allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
             all have separate HiRA adapters attached to them.
         runtime_config (`HiRARuntimeConfig`):
             Runtime configurations (which are not saved or restored).
-        hira_bias (`bool`):
-            Defaults to `False`. Whether to enable the bias term for the HiRA B parameter. Typically, this should be
-            disabled. The main use case for this is when the HiRA weights were extracted from fully fine-tuned
-            parameters so the bias of those parameters can be taken into account.
     """
 
-    r: int = field(default=8, metadata={"help": "HiRA intermediate r configuration"})
+    r: int = field(default=32, metadata={"help": "HiRA intermediate r configuration"})
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
@@ -143,44 +116,32 @@ class HiRAConfig(PeftConfig):
         default=None,
         metadata={"help": "List of module names or regex expression of the module names to exclude from HiRA."},
     )
-    hira_alpha: int = field(default=1, metadata={"help": "HiRA alpha"})
     hira_dropout: float = field(default=0.0, metadata={"help": "HiRA dropout"})
     fan_in_fan_out: bool = field(
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
     )
-    bias: Literal["none", "all", "hira_only"] = field(
-        default="none", metadata={"help": "Bias type for HiRA. Can be 'none', 'all' or 'hira_only'"}
-    ) #TODO: may need to remove later
     modules_to_save: Optional[list[str]] = field(
         default=None,
         metadata={
-            "help": "List of modules apart from LoRA layers to be set as trainable and saved in the final checkpoint. "
+            "help": "List of modules apart from HiRA layers to be set as trainable and saved in the final checkpoint. "
             "For example, in Sequence Classification or Token Classification tasks, "
             "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
         },
     )
-    init_lora_weights: (
-        bool | Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "corda", "loftq"]
+    init_hira_weights: (
+        bool | Literal["gaussian"]
     ) = field(
         default=True,
         metadata={
             "help": (
-                "How to initialize the weights of the LoRA layers. "
-                "Passing True (default) results in the default initialization from the reference implementation from "
-                "Microsoft, with the LoRA B weight being set to 0. This means that without further training, the LoRA "
+                "How to initialize the weights of the HiRA layers. "
+                "Passing True (default) results in the default initialization"
+                ", with the HiRA B weight being set to 0. This means that without further training, the HiRA "
                 "adapter will be a no-op. "
-                "Setting the initialization to False leads to random initialization of LoRA A and B, meaning that LoRA "
+                "Setting the initialization to False leads to random initialization of HiRA A and B, meaning that HiRA "
                 "is not a no-op before training; this setting is intended for debugging purposes. "
-                "Passing `'gaussian'` results in Gaussian initialization scaled by the LoRA rank for linear and layers. "
-                "Passing `'eva'` results in a data-driven initialization of Explained Variance Adaptation. "
-                "Passing `'olora'` results in OLoRA initialization. "
-                "Passing `'pissa'` results in PiSSA initialization. "
-                "Passing `'pissa_niter_[number of iters]'` initiates Fast-SVD-based PiSSA initialization, where "
-                "[number of iters] indicates the number of subspace iterations to perform fsvd, and must be a "
-                "nonnegative integer. "
-                "Passing `'corda'` results in CorDA initialization. "
-                "Pass `'loftq'` to use LoftQ initialization."
+                "Passing `'gaussian'` results in Gaussian initialization scaled by the HiRA rank for linear and layers. "
             ),
         },
     )
@@ -208,67 +169,17 @@ class HiRAConfig(PeftConfig):
             )
         },
     )
-    alpha_pattern: Optional[dict] = field(
-        default_factory=dict,
-        metadata={
-            "help": (
-                "The mapping from layer names or regexp expression to alphas which are different from the default alpha specified by `lora_alpha`. "
-                "For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`."
-            )
-        },
-    )
-    megatron_config: Optional[dict] = field(
-        default=None,
-        metadata={
-            "help": (
-                "The TransformerConfig from Megatron. It is used to create HiRA's parallel linear layer."
-                "You can get it like this, `core_transformer_config_from_args(get_args())`, "
-                "these two functions being from Megatron."
-                "You need to specify this parameter when you want to apply HiRA to the ColumnParallelLinear and "
-                "RowParallelLinear layers of megatron."
-                "It should be noted that we may not be able to use the `save_pretrained` and `from_pretrained` "
-                "functions, because TransformerConfig may not necessarily be serialized."
-                "But when using megatron, we can use `get_peft_model_state_dict` function and "
-                "megatron's framework, they can also save and load models and configurations."
-            )
-        },
-    )
-    megatron_core: Optional[str] = field(
-        default="megatron.core",
-        metadata={
-            "help": (
-                "The core module from Megatron, it is used to create HiRA's parallel linear layer. "
-                "It only needs to be passed in when you need to use your own modified megatron core module. "
-                "Otherwise, it will use the default value `megatron.core`. "
-            )
-        },
-    )
-    trainable_token_indices: Optional[Union[list[int], dict[str, list[int]]]] = field(
-        default=None,
-        metadata={
-            "help": (
-                "Lets you specify which token indices to selectively fine-tune without requiring to re-train the "
-                "whole embedding matrix using the `peft.TrainableTokensModel` method. You can specify token indices "
-                "in two ways. Either you specify a list of indices which will then target the model's input embedding "
-                "layer (or, if not found, `embed_tokens`). Alternatively, you can specify a dictionary where the key "
-                "is the name of the embedding module and the values are the list of token indices, e.g. "
-                "`{'embed_tokens': [0, 1, ...]}`. "
-                "Note that training with FSDP/DeepSpeed might not yet be fully supported with this option enabled. "
-                "Also note that models using weight-tying are currently not supported."
-            )
-        },
-    )# TODO: NOT SURE WHAT TO USE
 
     # Enables replicating layers in a model to expand it to a larger model.
     layer_replication: Optional[list[tuple[int, int]]] = field(
         default=None,
         metadata={
             "help": (
-                "This enables using LoRA to effectively expand a transformer model to a larger size by repeating some layers. "
+                "This enables using HiRA to effectively expand a transformer model to a larger size by repeating some layers. "
                 "The transformation handles models (currently Llama, Bert or Falcon compatible architectures) with "
                 "a module list in the model which it modifies to expand the number of modules. "
                 "Base weights are shared so the memory usage is close to the original model. The intended use is these base weights "
-                "remain fixed during finetuning but each layer has a separate LoRA adapter so the layers can be specialed via "
+                "remain fixed during finetuning but each layer has a separate HiRA adapter so the layers can be specialed via "
                 "the adapter layers fit during fine tuning."
                 "The format is a list of [start, end) pairs which specify the layer ranges to stack. For example:\n"
                 "   Original model has 5 layers labelled by their position in the model: `[0, 1, 2, 3, 4]`\n"
@@ -281,16 +192,6 @@ class HiRAConfig(PeftConfig):
     )
     runtime_config: HiRARuntimeConfig = field(
         default_factory=HiRARuntimeConfig, metadata={"help": "Runtime configurations"}
-    )
-    lora_bias: bool = field(
-        default=False,
-        metadata={
-            "help": (
-                "Whether to enable the bias term for the HiRA B parameter. Typically, this should be disabled. The "
-                "main use case for this is when the HiRA weights were extracted from fully fine-tuned parameters so "
-                "the bias of those parameters can be taken into account."
-            )
-        },
     )
 
     def to_dict(self):
@@ -322,16 +223,6 @@ class HiRAConfig(PeftConfig):
         # check for layers_to_transform and layers_pattern
         if self.layers_pattern and not self.layers_to_transform:
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
-
-        if self.lora_bias:
-            if self.init_lora_weights not in (True, False):
-                raise ValueError(
-                    f"The argument lora_bias=True is only supported with init_lora_weights=True or False, got "
-                    f"init_lora_weights={self.init_lora_weights} instead."
-                )
-            if self.use_dora:
-                raise ValueError("The argument lora_bias=True is not supported for DoRA, please pass use_dora=False")
-
 
         self._custom_modules: Optional[dict[type[nn.Module], type[nn.Module]]] = None
 
