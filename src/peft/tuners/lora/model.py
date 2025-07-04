@@ -63,6 +63,10 @@ def _adapter_names_pre_forward_hook(target, args, kwargs, adapter_names):
     kwargs["adapter_names"] = adapter_names
     return args, kwargs
 
+def _alora_offsets_pre_forward_hook(target, args, kwargs, alora_offsets):
+    kwargs["alora_offsets"] = alora_offsets
+    return args, kwargs
+
 
 class LoraModel(BaseTuner):
     """
@@ -200,6 +204,7 @@ class LoraModel(BaseTuner):
             "init_lora_weights": lora_config.init_lora_weights,
             "use_rslora": lora_config.use_rslora,
             "use_dora": lora_config.use_dora,
+            "use_alora": lora_config.use_alora,
             "use_qalora": lora_config.use_qalora,
             "qalora_group_size": lora_config.qalora_group_size,
             "ephemeral_gpu_offload": lora_config.runtime_config.ephemeral_gpu_offload,
@@ -427,12 +432,21 @@ class LoraModel(BaseTuner):
 
     @contextmanager
     def _enable_peft_forward_hooks(self, *args, **kwargs):
+
         # If adapter_names is passed as an argument, we inject it into the forward arguments.
         adapter_names = kwargs.pop("adapter_names", None)
-        if adapter_names is None:
+        alora_offsets = kwargs.pop("alora_offsets", None)
+        if adapter_names is None and alora_offsets is None:
             # nothing to do
             yield
             return
+        hook_handles = []
+        for layer in self.modules():
+            if isinstance(layer, LoraLayer):
+                pre_forward = partial(_alora_offsets_pre_forward_hook, alora_offsets = alora_offsets)
+                handle = layer.register_forward_pre_hook(pre_forward, with_kwargs=True)
+                hook_handles.append(handle)
+            
 
         if self.training:
             raise ValueError("Cannot pass `adapter_names` when the model is in training mode.")
@@ -462,7 +476,7 @@ class LoraModel(BaseTuner):
             # encoder part. Further below, the original argument is thus restored for the encoder.
             adapter_names = sum(([n] * kwargs["num_beams"] for n in adapter_names), [])
 
-        hook_handles = []
+
         for module in self.modules():
             if isinstance(module, LoraLayer) or isinstance(module, AuxiliaryTrainingWrapper):
                 pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)

@@ -107,7 +107,13 @@ class DoraLinearVariant(LoraVariant):
         return new_weight
 
     @staticmethod
-    def forward(module: Linear, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
+    def forward(
+        module: Linear,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
         lora_A = module.lora_A[active_adapter]
         lora_B = module.lora_B[active_adapter]
         dropout = module.lora_dropout[active_adapter]
@@ -197,7 +203,13 @@ class DoraEmbeddingVariant(DoraLinearVariant):
         return new_weight
 
     @staticmethod
-    def forward(module: Embedding, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
+    def forward(
+        module: Embedding,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
         embedding_A = module.lora_embedding_A[active_adapter].T
         embedding_B = module.lora_embedding_B[active_adapter].T
         scaling = module.scaling[active_adapter]
@@ -273,7 +285,13 @@ class _DoraConvNdVariant(LoraVariant):
         return new_weight
 
     @staticmethod
-    def forward(module: _ConvNd, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
+    def forward(
+        module: _ConvNd,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
         lora_A = module.lora_A[active_adapter]
         lora_B = module.lora_B[active_adapter]
         dropout = module.lora_dropout[active_adapter]
@@ -380,7 +398,13 @@ class QALoraLinearVariant(LoraVariant):
         raise NotImplementedError("QALoRA for GPTQ layers does not support 'unmerge'.")
 
     @staticmethod
-    def forward(module: Linear, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
+    def forward(
+        module: Linear,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
         lora_A_weight = module.lora_A[active_adapter].weight
         lora_B_weight = module.lora_B[active_adapter].weight
         dropout = module.lora_dropout[active_adapter]
@@ -411,3 +435,54 @@ class QALoraLinearVariant(LoraVariant):
             delta = delta.view(orig_shape[:-1] + (delta.size(-1),))
 
         return result + delta
+
+
+class ALoraLinearVariant(LoraVariant):
+    @staticmethod
+    def init(module: Linear, adapter_name: str, **kwargs: Any) -> None:
+        pass
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError("aLoRA does not support safe merging.")
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        raise NotImplementedError("aLoRA does not support merging.")
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError("aLoRA does not support unmerging.")
+
+    @staticmethod
+    def forward(
+        module: Linear,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        alora_offsets = kwargs.get("alora_offsets", [1])
+
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        dropout = module.lora_dropout[active_adapter]
+        scaling = module.scaling[active_adapter]
+
+        x = x.to(lora_A.weight.dtype)
+
+        if x.dim() == 2:
+            result = result + lora_B(lora_A(dropout(x))) * scaling
+        elif len(alora_offsets) == 1:
+            k = min(result.shape[1], alora_offsets[0])
+            if k > 0:
+                result[:, -k:, :] = result[:, -k:, :] + lora_B(lora_A(dropout(x[:, -k:, :]))) * scaling
+        else:
+            for i in range(result.shape[0]):
+                offset = min(alora_offsets[i], result.shape[1])
+                if offset > 0:
+                    result[i, -offset:, :] = (
+                        result[i, -offset:, :] + lora_B(lora_A(dropout(x[i, -offset:, :]))) * scaling
+                    )
+
+        return result

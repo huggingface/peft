@@ -32,6 +32,7 @@ from transformers import AutoModelForCausalLM, AutoModelForSequenceClassificatio
 from transformers.pytorch_utils import Conv1D
 
 from peft import (
+    aLoraConfig,
     AdaLoraConfig,
     BOFTConfig,
     BoneConfig,
@@ -298,6 +299,51 @@ TEST_CASES = [
             "use_effective_conv2d": True,
             "decompose_both": True,
             "decompose_factor": 4,
+        },
+    ),
+    ########
+    # aLoRA #
+    ########
+    (
+        "Vanilla MLP 1 aLoRA",
+        "MLP",
+        aLoraConfig,
+        {"target_modules": "lin0", "invocation_tokens": [1, 2, 3], "invocation_string": '123'},
+    ),
+    (
+        "Vanilla MLP 2 aLoRA",
+        "MLP",
+        aLoraConfig,
+        {"target_modules": ["lin0"], "invocation_tokens": [1, 2, 3], "invocation_string": '123'},
+    ),
+    (
+        "Vanilla MLP 3 aLoRA",
+        "MLP",
+        aLoraConfig,
+        {"target_modules": ["lin1"], "invocation_tokens": [1, 2, 3], "invocation_string": '123'},
+    ),
+    (
+        "Vanilla MLP 4 aLoRA",
+        "MLP",
+        aLoraConfig,
+        {"target_modules": ["lin0", "lin1"], "invocation_tokens": [1, 2, 3], "invocation_string": '123'},
+    ),
+    (
+        "Vanilla MLP 5 aLoRA",
+        "MLP",
+        aLoraConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "invocation_tokens": [1, 2, 3], "invocation_string": '123'},
+    ),
+    (
+        "Vanilla MLP 6 aLoRA",
+        "MLP",
+        aLoraConfig,
+        {
+            "target_modules": ["lin0"],
+            "lora_alpha": 4,
+            "lora_dropout": 0.1,
+            "invocation_tokens": [1, 2, 3],
+            "invocation_string": '123',
         },
     ),
     ########
@@ -739,6 +785,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin1"], "init_lora_weights": False, "inference_mode": True, "total_step": 1},
     ),
     (
+        "aLoRA Same",
+        "alora",
+        aLoraConfig,
+        {"target_modules": ["lin0"], "init_lora_weights": False, "invocation_tokens": [1, 2, 3], "invocation_string": '123'},
+        {"target_modules": ["lin0"], "init_lora_weights": False, "invocation_tokens": [1, 2, 3], "invocation_string": '123'},
+    ),
+    (
+        "aLoRA Different",
+        "alora",
+        aLoraConfig,
+        {"target_modules": ["lin0"], "init_lora_weights": False, "invocation_tokens": [1, 2, 3], "invocation_string": '123'},
+        {"target_modules": ["lin1"], "init_lora_weights": False, "invocation_tokens": [1, 2, 3], "invocation_string": '123'},
+    ),
+    (
         "FourierFT Same",
         "fourierft",
         FourierFTConfig,
@@ -830,6 +890,7 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
 
 PREFIXES = {
     IA3Config: "ia3_",
+    aLoraConfig: "lora_",
     LoraConfig: "lora_",
     LoHaConfig: "hada_",
     LoKrConfig: "lokr_",
@@ -1278,6 +1339,8 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(
                 f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
             )
+        if issubclass(config_cls, aLoraConfig):
+            pytest.skip("aLoRA does not support merging.")
 
         config_kwargs = config_kwargs.copy()
         if issubclass(config_cls, LoraConfig):
@@ -1301,6 +1364,8 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(
                 f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
             )
+        if issubclass(config_cls, aLoraConfig):
+            pytest.skip("aLoRA does not support merging.")
 
         config_kwargs = config_kwargs.copy()
         if issubclass(config_cls, LoraConfig):
@@ -1316,6 +1381,8 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(
                 f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
             )
+        if issubclass(config_cls, aLoraConfig):
+            pytest.skip("aLoRA does not support merging.")
 
         # calling merge twice with the same arguments should not change the output
         config_kwargs = config_kwargs.copy()
@@ -1332,7 +1399,8 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(
                 f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
             )
-
+        if issubclass(config_cls, aLoraConfig):
+            pytest.skip(f"Skipping test as merging is not supported for aLora.")
         # calling merge twice with the same arguments should not change the output
         config_kwargs = config_kwargs.copy()
         if issubclass(config_cls, LoraConfig):
@@ -1425,6 +1493,8 @@ class TestPeftCustomModel(PeftCommonTester):
         if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
             # this model does not support merging
             return
+        if issubclass(config_cls, aLoraConfig):
+            pytest.skip("aLoRA does not support merging.")
 
         model.merge_adapter(safe_merge=False)
         model(**X)
@@ -1467,6 +1537,8 @@ class TestPeftCustomModel(PeftCommonTester):
         if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
             # this model does not support merging
             return
+        if issubclass(config_cls, aLoraConfig):
+            pytest.skip("aLoRA does not support merging.")
 
         model.merge_adapter(safe_merge=False)
         model(**X)
@@ -1508,6 +1580,8 @@ class TestPeftCustomModel(PeftCommonTester):
         if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
             # this model does not support merging
             return
+        if issubclass(config_cls, aLoraConfig):
+            pytest.skip("aLoRA does not support merging.")
 
         model.merge_adapter(safe_merge=False)
         model(**X)
@@ -1549,6 +1623,8 @@ class TestPeftCustomModel(PeftCommonTester):
         if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
             # this model does not support merging
             return
+        if issubclass(config_cls, aLoraConfig):
+            pytest.skip("aLoRA does not support merging.")
 
         model.merge_adapter(safe_merge=False)
         model(**X)
@@ -1721,6 +1797,8 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(
                 f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
             )
+        if issubclass(config_cls, aLoraConfig):
+            pytest.skip("aLoRA does not support merging.")
 
         # same as test_disable_adapters, but with merging
         X = self.prepare_inputs_for_testing()
@@ -1807,13 +1885,9 @@ class TestPeftCustomModel(PeftCommonTester):
 
         # Note: We test only with custom models since they run really fast. There is really no point in testing the same
         # thing with decoder, encoder_decoder, etc.
-        if config_cls != LoraConfig or config_cls != BOFTConfig:
-            # skip this test for other configs as bias is specific to Lora
-            pytest.skip("Testing bias warnings only for LoraConfig or BOFTConfig")
-
         if not issubclass(config_cls, (LoraConfig, BOFTConfig)):
+            # skip this test for other configs as bias is specific to Lora
             pytest.skip("Bias argument is only supported for LoRA or BOFT models")
-
         def run_with_disable(config_kwargs, bias):
             config_kwargs = config_kwargs.copy()
             config_kwargs["bias"] = bias
@@ -1826,14 +1900,13 @@ class TestPeftCustomModel(PeftCommonTester):
             with peft_model.disable_adapter():
                 pass  # there is nothing to be done
 
-        if config_cls == LoraConfig:
+        if issubclass(config_cls, LoraConfig):
             # check that bias=all and bias=lora_only give a warning with the correct message
             msg_start = "Careful, disabling adapter layers with bias configured to be"
             with pytest.warns(UserWarning, match=msg_start):
                 run_with_disable(config_kwargs, bias="lora_only")
             with pytest.warns(UserWarning, match=msg_start):
                 run_with_disable(config_kwargs, bias="all")
-
         if config_cls == BOFTConfig:
             # check that bias=all and bias=boft_only give a warning with the correct message
             msg_start = "Careful, disabling adapter layers with bias configured to be"
@@ -2723,6 +2796,9 @@ class TestMultipleActiveAdapters:
     def test_multiple_active_adapters_merge_and_unmerge(
         self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
     ):
+        if issubclass(config_cls, aLoraConfig):
+            pytest.skip("aLoRA does not support merging.")
+
         torch.manual_seed(0)
 
         model = self.resolve_model_cls(tuner_method)
@@ -2756,6 +2832,9 @@ class TestMultipleActiveAdapters:
         "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES
     )
     def test_merge_layers_multi(self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2):
+        if issubclass(config_cls, aLoraConfig):
+            pytest.skip("aLoRA does not support merging.")
+
         torch.manual_seed(0)
 
         model = self.resolve_model_cls(tuner_method)
