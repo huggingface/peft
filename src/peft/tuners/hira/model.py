@@ -47,7 +47,7 @@ from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task
 from peft.utils.other import get_pattern_key
 
 from .config import HiRAConfig
-from .layer import Conv2d, LoraLayer, dispatch_default
+from .layer import Conv2d, HiRALayer, dispatch_default
 from ...utils.constants import TRANSFORMERS_MODELS_TO_HIRA_TARGET_MODULES_MAPPING
 
 
@@ -82,7 +82,6 @@ class HiRAModel(BaseTuner):
         >>> config = HiRAConfig(
         ...     task_type="SEQ_2_SEQ_LM",
         ...     r=32,
-        ...     hira_alpha=1,
         ...     target_modules=["q", "v"],
         ...     hira_dropout=0.01,
         ... )
@@ -99,7 +98,7 @@ class HiRAModel(BaseTuner):
         >>> rank = ...
         >>> target_modules = ["q_proj", "k_proj", "v_proj", "out_proj", "fc_in", "fc_out", "wte"]
         >>> config = HiRAConfig(
-        ...     r=32, target_modules=target_modules, hira_dropout=0.1, bias="none", task_type="CAUSAL_LM"
+        ...     r=32, target_modules=target_modules, hira_dropout=0.1, task_type="CAUSAL_LM"
         ... )
         >>> quantization_config = transformers.BitsAndBytesConfig(load_in_8bit=True)
 
@@ -142,13 +141,7 @@ class HiRAModel(BaseTuner):
         Raise a ValueError if there is something wrong with the config or if it conflicts with existing adapters.
 
         """
-        # TODO: there should be a check if any of the existing adapters actually has bias != "none", or else the check
-        # does not fully correspond to the error message.
-        if (len(self.peft_config) > 1) and (config.bias != "none"):
-            raise ValueError(
-                f"{self.__class__.__name__} supports only 1 adapter with bias. When using multiple adapters, "
-                "set bias to 'none' for all adapters."
-            )
+        return True
 
     @staticmethod
     def _check_target_module_exists(hira_config, key):
@@ -181,18 +174,14 @@ class HiRAModel(BaseTuner):
 
         # Regexp matching - Find key which matches current target_name in patterns provided
         r_key = get_pattern_key(hira_config.rank_pattern.keys(), current_key)
-        alpha_key = get_pattern_key(hira_config.alpha_pattern.keys(), current_key)
         r = hira_config.rank_pattern.get(r_key, hira_config.r)
-        alpha = hira_config.alpha_pattern.get(alpha_key, hira_config.lora_alpha)
 
         kwargs = {
             "r": r,
-            "hira_alpha": alpha,
             "hira_dropout": hira_config.hira_dropout,
             "fan_in_fan_out": hira_config.fan_in_fan_out,
             "init_hira_weights": hira_config.init_hira_weights,
             "ephemeral_gpu_offload": hira_config.runtime_config.ephemeral_gpu_offload,
-            "hira_bias": hira_config.lora_bias,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
@@ -210,14 +199,12 @@ class HiRAModel(BaseTuner):
             if quantization_config is not None:
                 kwargs[f"{quant_method}_quantization_config"] = quantization_config
 
-        if isinstance(target, LoraLayer):
+        if isinstance(target, HiRALayer):
             target.update_layer(
                 adapter_name,
                 r,
-                hira_alpha=alpha,
                 hira_dropout=hira_config.hira_dropout,
                 init_hira_weights=hira_config.init_hira_weights,
-                hira_bias=hira_config.hira_bias,
             )
         else:
             device_map = self.model.hf_device_map if hasattr(self.model, "hf_device_map") else None
@@ -258,21 +245,8 @@ class HiRAModel(BaseTuner):
             if self.prefix not in n:
                 p.requires_grad = False
 
-        for active_adapter in self.active_adapters:
-            bias = self.peft_config[active_adapter].bias
-            if bias == "none":
-                continue
+        # No bias for HiRA, skipping
 
-            if bias == "all":
-                for n, p in model.named_parameters():
-                    if "bias" in n:
-                        p.requires_grad = True
-            elif bias == "hira_only":
-                for m in model.modules():
-                    if isinstance(m, HiRALayer) and hasattr(m, "bias") and m.bias is not None:
-                        m.bias.requires_grad = True
-            else:
-                raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
 
     @staticmethod
     def _create_new_module(hira_config: HiRAConfig, adapter_name, target, **kwargs):
@@ -283,7 +257,7 @@ class HiRAModel(BaseTuner):
         if hira_config._custom_modules:
             # Experimental custom HiRA module support. Allows users to pass a custom mapping for unsupported layer
             # types by impelementing their own LoRA layers.
-            def dynamic_dispatch_func(target, adapter_name, lora_config, **kwargs):
+            def dynamic_dispatch_func(target, adapter_name, hira_config, **kwargs):
                 new_module = None
 
                 if isinstance(target, BaseTunerLayer):
@@ -313,14 +287,6 @@ class HiRAModel(BaseTuner):
         # TODO: Needs check here
         dispatchers.extend(
             [
-                dispatch_eetq,
-                dispatch_aqlm,
-                dispatch_awq,
-                dispatch_gptq,
-                dispatch_hqq,
-                dispatch_inc,
-                dispatch_torchao,
-                dispatch_megatron,
                 dispatch_default,
             ]
         )
@@ -336,7 +302,7 @@ class HiRAModel(BaseTuner):
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
                 "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv1d`, `torch.nn.Conv2d`, `torch.nn.Conv3d`, "
-                "`transformers.pytorch_utils.Conv1D`, `torch.nn.MultiheadAttention.`."
+                "`transformers.pytorch_utils.Conv1D`."
             )
 
         return new_module
@@ -376,14 +342,6 @@ class HiRAModel(BaseTuner):
 
         When disabling all adapters, the model output corresponds to the output of the base model.
         """
-        for active_adapter in self.active_adapters:
-            val = self.peft_config[active_adapter].bias
-            if val != "none":
-                msg = (
-                    f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
-                    "output as the base model would without adaption."
-                )
-                warnings.warn(msg)
         self._set_adapter_layers(enabled=False)
 
     def set_adapter(self, adapter_name: str | list[str]) -> None:
@@ -659,7 +617,6 @@ class HiRAModel(BaseTuner):
         self.peft_config[adapter_name] = replace(
             self.peft_config[adapters[0]],
             r=new_rank,
-            hira_alpha=new_rank,
             target_modules=new_target_modules,
             alpha_pattern={},
             r_pattern={},
@@ -674,8 +631,8 @@ class HiRAModel(BaseTuner):
             _, target, _ = _get_submodules(self.model, key)
             if isinstance(target, HiRALayer):
                 if adapter_name in target.hira_A:
-                    target_hira_A = target.hira_A[adapter_name].weight
-                    target_hira_B = target.hira_B[adapter_name].weight
+                    target_hira_A = target.hira_A[adapter_name]
+                    target_hira_B = target.hira_B[adapter_name]
                 elif adapter_name in target.hira_embedding_A:
                     target_hira_A = target.hira_embedding_A[adapter_name]
                     target_hira_B = target.hira_embedding_B[adapter_name]
@@ -688,14 +645,14 @@ class HiRAModel(BaseTuner):
                     hiras_A, hiras_B = [], []
                     for adapter, weight in zip(adapters, weights):
                         if adapter in target.hira_A:
-                            current_adapter_hira_A = target.hira_A[adapter].weight
-                            current_adapter_hira_B = target.hira_B[adapter].weight
+                            current_adapter_hira_A = target.hira_A[adapter]
+                            current_adapter_hira_B = target.hira_B[adapter]
                         elif adapter in target.hira_embedding_A:
                             current_adapter_hira_A = target.hira_embedding_A[adapter]
                             current_adapter_hira_B = target.hira_embedding_B[adapter]
                         else:
                             continue
-                        hiras_A.append(current_adapter_hira_A.data * weight * target.scaling[adapter])
+                        hiras_A.append(current_adapter_hira_A.data * weight)
                         hiras_B.append(current_adapter_hira_B.data)
 
                     if len(hiras_A) == 0:
