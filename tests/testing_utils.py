@@ -26,6 +26,7 @@ from peft import (
     IA3Config,
     LoraConfig,
     PromptLearningConfig,
+    ShiraConfig,
     VBLoRAConfig,
 )
 from peft.import_utils import (
@@ -227,6 +228,8 @@ def set_init_weights_false(config_cls, kwargs):
     kwargs = kwargs.copy()
 
     if issubclass(config_cls, PromptLearningConfig):
+        return kwargs
+    if issubclass(config_cls, ShiraConfig):
         return kwargs
     if config_cls == VBLoRAConfig:
         return kwargs
