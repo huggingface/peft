@@ -53,7 +53,7 @@ class ShiraModel(BaseTuner):
         >>> from peft import ShiraConfig, get_peft_model
 
         >>> base_model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
-        >>> config = ShiraConfig(r=128)
+        >>> config = ShiraConfig(r=32)
         >>> model = get_peft_model(base_model, config)
         ```
 
@@ -106,7 +106,11 @@ class ShiraModel(BaseTuner):
             kwargs[k] = v
 
         if isinstance(target, Linear):
-            mask = shira_config.mask_fn(target.base_layer, shira_config.r, **kwargs) if shira_config.mask_fn is not None else None
+            mask = (
+                shira_config.mask_fn(target.base_layer, shira_config.r, **kwargs)
+                if shira_config.mask_fn is not None
+                else None
+            )
             target.update_layer(
                 adapter_name,
                 mask,
@@ -178,7 +182,11 @@ class ShiraModel(BaseTuner):
                 "`torch.nn.Linear`."
             )
 
-        mask = shira_config.mask_fn(target_base_layer, shira_config.r, **kwargs) if shira_config.mask_fn is not None else None
+        mask = (
+            shira_config.mask_fn(target_base_layer, shira_config.r, **kwargs)
+            if shira_config.mask_fn is not None
+            else None
+        )
 
         new_module = Linear(
             target,
@@ -311,11 +319,12 @@ class ShiraModel(BaseTuner):
 
         ```py
         >>> from transformers import AutoModelForCausalLM
-        >>> from peft import PeftModel
+        >>> from peft import ShiraConfig, get_peft_model
 
-        >>> base_model = AutoModelForCausalLM.from_pretrained("tiiuae/falcon-40b")
-        >>> peft_model_id = "smangrul/falcon-40B-int4-peft-lora-sfttrainer-sample"
-        >>> model = PeftModel.from_pretrained(base_model, peft_model_id)
+        >>> base_model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        >>> config = ShiraConfig(r=32)
+        >>> model = get_peft_model(base_model, config)
+        >>> ## [Train the adapter] ##
         >>> merged_model = model.merge_and_unload()
         ```
         """
