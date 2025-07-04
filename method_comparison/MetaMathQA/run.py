@@ -25,7 +25,7 @@ import random
 import sys
 import textwrap
 import time
-from contextlib import ContextManager, nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from functools import partial
 from typing import Any, Callable, Literal, Optional
 
