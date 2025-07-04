@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.15.2.dev0"
+__version__ = "0.16.0"
 
 from .auto import (
     MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
