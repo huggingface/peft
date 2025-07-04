@@ -18,6 +18,11 @@ from .boft import BOFTConfig, BOFTModel
 from .bone import BoneConfig, BoneModel
 from .cpt import CPTConfig, CPTEmbedding
 from .fourierft import FourierFTConfig, FourierFTModel
+from .hira import (
+    HiRAConfig,
+    HiRAModel,
+    HiRARuntimeConfig,
+)
 from .hra import HRAConfig, HRAModel
 from .ia3 import IA3Config, IA3Model
 from .ln_tuning import LNTuningConfig, LNTuningModel
@@ -60,6 +65,9 @@ __all__ = [
     "EvaConfig",
     "FourierFTConfig",
     "FourierFTModel",
+    "HiRAConfig",
+    "HiRAModel",
+    "HiRARuntimeConfig",
     "HRAConfig",
     "HRAModel",
     "IA3Config",
