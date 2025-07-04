@@ -249,7 +249,7 @@ class HiRALayer(BaseTunerLayer):
 
 
 class Linear(nn.Module, HiRALayer):
-    # Lora implemented in a dense layer
+    # HiRA implemented in a dense layer
     def __init__(
         self,
         base_layer,
@@ -404,7 +404,7 @@ class Linear(nn.Module, HiRALayer):
 
 
 class Embedding(nn.Module, HiRALayer):
-    # LoRA implemented in a Embedding layer
+    # HiRA implemented in a Embedding layer
     def __init__(
         self,
         base_layer: nn.Module,
@@ -451,7 +451,7 @@ class Embedding(nn.Module, HiRALayer):
         self.hira_embedding_B[adapter_name] = nn.Parameter(weight_B)
         self.reset_hira_parameters(adapter_name, init_hira_weights)
 
-        # call this before init of the lora variants
+        # call this before init of the hira variants
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
         self.set_adapter(self.active_adapters)
@@ -475,7 +475,7 @@ class Embedding(nn.Module, HiRALayer):
             return
 
         for active_adapter in adapter_names:
-            if active_adapter in self.lora_embedding_A.keys():
+            if active_adapter in self.hira_embedding_A.keys():
                 base_layer = self.get_base_layer()
                 orig_dtype = base_layer.weight.dtype
                 if safe_merge:
@@ -504,7 +504,7 @@ class Embedding(nn.Module, HiRALayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             orig_dtype = self.get_base_layer().weight.dtype
-            if active_adapter in self.lora_embedding_A.keys():
+            if active_adapter in self.hira_embedding_A.keys():
                 weight = self.get_base_layer().weight
                 weight.data /= (1+self.get_delta_weight(active_adapter).to(orig_dtype))
 
@@ -652,7 +652,7 @@ class _ConvNd(nn.Module, HiRALayer):
         HiRALayer.__init__(self, base_layer)
 
         if base_layer.groups > 1:
-            warnings.warn("LoRA adapter added to ConvNd layer with groups > 1. Merging is not supported.")
+            warnings.warn("HiRA adapter added to ConvNd layer with groups > 1. Merging is not supported.")
 
         self._active_adapter = adapter_name
         self._kernel_dim = base_layer.weight.dim()
@@ -863,10 +863,9 @@ class _ConvNd(nn.Module, HiRALayer):
             else:
                 raise TypeError(f"Unsupported conv layer {type(base)} for HiRA.")
             for active_adapter in self.active_adapters:
-                if active_adapter not in self.lora_A.keys():
+                if active_adapter not in self.hira_A.keys():
                     continue
                 hira_A = self.hira_A[active_adapter]
-                hira_B = self.hira_B[active_adapter]
                 dropout = self.hira_dropout[active_adapter]
                 x = self._cast_input_dtype(x, hira_A.weight.dtype)
                 x_in = self._cast_input_dtype(x, hira_A.weight.dtype)
@@ -895,7 +894,7 @@ class _ConvNd(nn.Module, HiRALayer):
         return "hira." + rep
 
 class Conv2d(_ConvNd):
-    # Lora implemented in a conv2d layer
+    # HiRA implemented in a conv2d layer
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if not self._kernel_dim == 4:
@@ -904,7 +903,7 @@ class Conv2d(_ConvNd):
 
 
 class Conv1d(_ConvNd):
-    # Lora implemented in a conv1d layer
+    # HiRA implemented in a conv1d layer
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if not self._kernel_dim == 3:
@@ -913,7 +912,7 @@ class Conv1d(_ConvNd):
 
 
 class Conv3d(_ConvNd):
-    # Lora implemented in a conv3d layer
+    # HiRA implemented in a conv3d layer
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if not self._kernel_dim == 5:
