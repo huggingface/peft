@@ -922,3 +922,377 @@ class Conv3d(_ConvNd):
         self.conv_fn = F.conv3d
 
 
+
+class MultiheadAttention(nn.Module, LoraLayer):
+    """LoRA implemented in a multihead attention layer
+
+    This is currently only implemented for the case of `_qkv_same_embed_dim = True`, i.e. query, key, and value having
+    the same dimension.
+
+    Note: LoRA is applied to both the in_proj (query/key/value) and out_proj. There is currently no way to specify only
+    one of them. Don't try to apply LoRA to the out_proj of MultiheadAttention by targeting that layer specifically,
+    since the forward method of that layer is not being used, hence the LoRA adapter would be ignored.
+
+    This is a little bit hacky because of the way that MultiheadAttention is implemented in PyTorch: There are no
+    `nn.Linear` layers which we can hook onto or, in case of output projection, `.forward` is not used. This
+    implementation works around these problems by merging the weights before the forward call and unmerging them after
+    the forward call.
+    """
+
+    def __init__(
+        self,
+        base_layer,
+        adapter_name: str,
+        r: int = 0,
+        lora_alpha: int = 1,
+        lora_dropout: float = 0.0,
+        init_lora_weights: Union[bool, str] = True,
+        use_rslora: bool = False,
+        use_dora: bool = False,
+        **kwargs,
+    ) -> None:
+        # TODO work with separate weights
+        if not getattr(base_layer, "_qkv_same_embed_dim", True):
+            # default for this value appears to be True:
+            # https://github.com/pytorch/pytorch/blob/701ba5203fe68d55d655bd4d6c008be94cf34ea5/torch/nn/modules/activation.py#L1128-L1130
+            raise ValueError(
+                f"Only same embed for query/key/value is supported as of now for {self.__class__.__name__}."
+            )
+        if use_dora:
+            # TODO: probably not so hard to implement
+            raise ValueError(f"{self.__class__.__name__} does not support DoRA (yet), please set use_dora to False")
+
+        super().__init__()
+        LoraLayer.__init__(self, base_layer, **kwargs)
+
+        # Note: LoRA is applied to both in_proj and out_proj. There is currently no way to only specify one of them.
+        if isinstance(base_layer.out_proj, nn.Linear):
+            self.base_layer.out_proj = Linear(
+                base_layer.out_proj,
+                adapter_name,
+                r=r,
+                lora_alpha=lora_alpha,
+                lora_dropout=lora_dropout,
+                init_lora_weights=init_lora_weights,
+                use_rslora=use_rslora,
+                use_dora=use_dora,
+                **kwargs,
+            )
+        else:
+            raise ValueError(f"out_proj must be an instance of nn.Linear for {self.__class__.__name__}.")
+
+        self._active_adapter = adapter_name
+        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
+
+    @property
+    def embed_dim(self) -> int:
+        return self.get_base_layer().embed_dim
+
+    @property
+    def kdim(self) -> Optional[int]:
+        return self.get_base_layer().kdim
+
+    @property
+    def vdim(self) -> Optional[int]:
+        return self.get_base_layer().vdim
+
+    @property
+    def _qkv_same_embed_dim(self) -> bool:
+        return self.get_base_layer()._qkv_same_embed_dim
+
+    @property
+    def num_heads(self) -> int:
+        return self.get_base_layer().num_heads
+
+    @property
+    def dropout(self) -> float:
+        return self.get_base_layer().dropout
+
+    @property
+    def batch_first(self) -> bool:
+        return self.get_base_layer().batch_first
+
+    @property
+    def head_dim(self) -> int:
+        return self.get_base_layer().head_dim
+
+    @property
+    def in_proj_weight(self) -> nn.Parameter:
+        return self.get_base_layer().in_proj_weight
+
+    @property
+    def in_proj_bias(self) -> nn.Parameter:
+        return self.get_base_layer().in_proj_bias
+
+    @property
+    def out_proj(self) -> nn.Module:
+        return self.get_base_layer().out_proj.get_base_layer()
+
+    @property
+    def bias_k(self) -> Optional[nn.Parameter]:
+        return self.get_base_layer().bias_k
+
+    @property
+    def bias_v(self) -> Optional[nn.Parameter]:
+        return self.get_base_layer().bias_v
+
+    def merge_masks(self, *args, **kwargs) -> tuple[Optional[torch.Tensor], Optional[int]]:
+        return self.get_base_layer().merge_masks(*args, **kwargs)
+
+    @property
+    def add_zero_attn(self) -> bool:
+        return self.get_base_layer().add_zero_attn
+
+    def update_layer(self, *args, **kwargs) -> None:
+        super().update_layer(*args, **kwargs)
+        # Note: LoRA is applied to both in_proj and out_proj. There is currently no way to only specify one of them.
+        self.base_layer.out_proj.update_layer(*args, **kwargs)
+
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+        """
+        Merge the active adapter weights into the base weights
+
+        Args:
+            safe_merge (`bool`, *optional*):
+                If True, the merge operation will be performed in a copy of the original weights and check for NaNs
+                before merging the weights. This is useful if you want to check if the merge operation will produce
+                NaNs. Defaults to `False`.
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
+        """
+        adapter_names = check_adapters_to_merge(self, adapter_names)
+        if not adapter_names:
+            # no adapter to merge
+            return
+
+        # Implementation follows this:
+        # https://github.com/Baijiong-Lin/LoRA-Torch/blob/4bfed6820b64fcf47064c30f30606a190a4f0d2e/loratorch/layers.py#L73-L79
+        # Notably, instead of mutating the weight, we delete the original weight and replace it by the merged weight
+        # TODO: work with separate weights
+        for active_adapter in adapter_names:
+            if active_adapter in self.lora_A.keys():
+                base_layer = self.get_base_layer()
+                orig_dtype = base_layer.out_proj.weight.dtype
+                if safe_merge:
+                    # TODO: work with separate weights
+                    # merging in_proj (nn.Parameter)
+                    orig_weight_in = base_layer.in_proj_weight.data.detach().clone()
+                    orig_weight_in += self.get_delta_weight(active_adapter).to(orig_dtype)
+                    if not torch.isfinite(orig_weight_in).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                        )
+
+                    # merging out_proj (subclass of nn.Linear)
+                    orig_weight_out = base_layer.out_proj.weight.data.detach().clone()
+                    orig_weight_out += base_layer.out_proj.get_delta_weight(active_adapter).to(orig_dtype)
+                    if not torch.isfinite(orig_weight_out).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                        )
+
+                    # unregister parameter implicitly and overwrite using merged weights; gradients are computed after
+                    # forward and, thus, after unmerging (see forward()), therefore this is safe to do.
+                    del base_layer.in_proj_weight
+                    base_layer.in_proj_weight = orig_weight_in
+
+                    del base_layer.out_proj.get_base_layer().weight
+                    base_layer.out_proj.get_base_layer().weight = orig_weight_out
+                    base_layer.out_proj.merge(adapter_names=[active_adapter])
+                else:
+                    # merging in_proj (nn.Parameter)
+                    # TODO: work with separate weights
+                    delta_weight = self.get_delta_weight(active_adapter).to(orig_dtype)
+                    weight_merged = base_layer.in_proj_weight.data.detach() + delta_weight
+
+                    # unregister parameter implicitly and overwrite using merged weights; gradients are computed after
+                    # forward and, thus, after unmerging (see forward()), therefore this is safe to do.
+                    del base_layer.in_proj_weight
+                    base_layer.in_proj_weight = weight_merged
+
+                    # merging out_proj (subclass of nn.Linear)
+                    delta_weight = base_layer.out_proj.get_delta_weight(active_adapter).to(orig_dtype)
+                    weight_merged = base_layer.out_proj.weight.data.detach() + delta_weight
+                    del base_layer.out_proj.get_base_layer().weight
+                    base_layer.out_proj.get_base_layer().weight = weight_merged
+                    base_layer.out_proj.merge(adapter_names=[active_adapter])
+                self.merged_adapters.append(active_adapter)
+
+    def unmerge(self) -> None:
+        """
+        This method unmerges all merged adapter layers from the base weights.
+        """
+        if not self.merged:
+            warnings.warn("Already unmerged. Nothing to do.")
+            return
+
+        # TODO work with separate weights
+        base_layer = self.get_base_layer()
+        orig_dtype = base_layer.out_proj.base_layer.weight.dtype
+        while len(self.merged_adapters) > 0:
+            active_adapter = self.merged_adapters.pop()
+            if active_adapter in self.lora_A.keys():
+                # Ensure that requires_grad=False for the base weights after unmerging. This may not matter since
+                # requires_grad was False when the optimizer was initialized, but still let's try to be correct here.
+
+                # in_proj
+                delta_weight = self.get_delta_weight(active_adapter).to(orig_dtype)
+                old_weight = base_layer.in_proj_weight.data - delta_weight
+                del base_layer.in_proj_weight
+                base_layer.register_parameter("in_proj_weight", nn.Parameter(old_weight, requires_grad=False))
+
+                # out_proj
+                delta_weight = base_layer.out_proj.get_delta_weight(active_adapter).to(orig_dtype)
+                old_weight = base_layer.out_proj.base_layer.weight.data - delta_weight
+                del base_layer.out_proj.base_layer.weight
+                base_layer.out_proj.base_layer.register_parameter(
+                    "weight", nn.Parameter(old_weight, requires_grad=False)
+                )
+
+        self.get_base_layer().out_proj.unmerge()
+
+    def unload_and_optionally_merge_module(
+        self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]
+    ) -> nn.MultiheadAttention:
+        """
+        Merging and unloading of the MultiheadAttention module
+
+        This requires an extra step for MultiheadAttention, which is why there is this special method instead of
+        relying on the normal merge_and_unload code path.
+        """
+        if merge:
+            self.merge(safe_merge=safe_merge, adapter_names=adapter_names)
+        base_layer = self.get_base_layer()
+
+        # extra steps: re-register weights, take care of out_proj layer
+        # in_proj
+        weight = base_layer.in_proj_weight
+        del base_layer.in_proj_weight
+        base_layer.register_parameter("in_proj_weight", nn.Parameter(weight.data, requires_grad=weight.requires_grad))
+
+        # out_proj
+        out_proj_layer = base_layer.out_proj.get_base_layer()
+        weight = out_proj_layer.weight
+        del out_proj_layer.weight
+        out_proj_layer.register_parameter("weight", nn.Parameter(weight.data, requires_grad=weight.requires_grad))
+
+        base_layer.out_proj = out_proj_layer
+        return base_layer
+
+    def get_delta_weight(self, adapter) -> torch.Tensor:
+        """
+        Compute the delta weight for the given adapter.
+
+        Args:
+            adapter (str):
+                The name of the adapter for which the delta weight should be computed.
+        """
+        device = self.lora_B[adapter].weight.device
+        dtype = self.lora_B[adapter].weight.dtype
+
+        # In case users wants to merge the adapter weights that are in
+        # float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
+        # float16 because the `@` and matmul operation in general is not supported in torch + cpu + fp16.
+        cast_to_fp32 = device.type == "cpu" and dtype == torch.float16
+
+        weight_A = self.lora_A[adapter].weight
+        weight_B = self.lora_B[adapter].weight
+
+        if cast_to_fp32:
+            weight_A = weight_A.float()
+            weight_B = weight_B.float()
+
+        output_tensor = (weight_B @ weight_A) * self.scaling[adapter]
+
+        if cast_to_fp32:
+            output_tensor = output_tensor.to(dtype=dtype)
+
+            # cast back the weights
+            self.lora_A[adapter].weight.data = weight_A.to(dtype)
+            self.lora_B[adapter].weight.data = weight_B.to(dtype)
+
+        return output_tensor
+
+    def _check_forward_args(self, x, *args, **kwargs):
+        if "adapter_names" in kwargs:
+            raise TypeError(f"lora.{self.__class__.__name__} does not support mixed adapter batches.")
+        super()._check_forward_args(x, *args, **kwargs)
+
+    def forward(self, query: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        previous_dtype = query.dtype
+        self._check_forward_args(query, *args, **kwargs)
+
+        if self.disable_adapters:
+            if self.merged:
+                self.unmerge()
+            result = self.base_layer(query, *args, **kwargs)
+        elif self.merged:
+            result = self.base_layer(query, *args, **kwargs)
+        else:
+            out_proj = self.get_base_layer().out_proj
+            if out_proj.active_adapters != self.active_adapters:
+                # We have a case that in_proj and out_proj have diverging merged adapters. We cannot
+                # really deal with this correctly, thus it's better to raise than possibly create a hard to debug mess
+                cls_name = self.get_base_layer().__class__.__name__
+                raise ValueError(
+                    f"The out_proj layer of {cls_name} has merged layers but {cls_name} itself doesn't; please ensure "
+                    "that either both or none have merged layers"
+                )
+
+            # Merge all adapters that are active for this module, i.e. the LoRA weights for in_proj and out_proj.
+            # in_proj uses nn.Parameters, therefore, there is no forward method to be used and we have to explicitly
+            # merge for the LoRA weights to have an effect:
+            # https://github.com/pytorch/pytorch/blob/6ebb26d572d5fcdc6ac0d1297bdf8d1eb5d20722/torch/nn/modules/activation.py#L1020
+            # For out_proj, we have an nn.Linear (or rather: NonDynamicallyQuantizableLinear), but its forward method
+            # is not used:
+            # https://github.com/pytorch/pytorch/blob/6ebb26d572d5fcdc6ac0d1297bdf8d1eb5d20722/torch/nn/modules/activation.py#L1267-L1271
+            # Therefore, its LoRA weights also need to be merged to have an effect.
+            active_adapters = [a for a in self.active_adapters if a in self.lora_A]
+            try:
+                self.merge(adapter_names=active_adapters)
+                result = self.base_layer(query, *args, **kwargs)
+            finally:
+                # it's safe to call unmerge(), which unmerges all adapters, because we checked that not self.merged,
+                # i.e. there is was no merged layer before
+                self.unmerge()
+
+        result = (result[0].to(previous_dtype), result[1].to(previous_dtype) if result[1] is not None else result[1])
+        return result
+
+    # The decorator is needed in case low_cpu_mem_usage=True is used, as we don't want the base layer weights to be
+    # moved to meta device. This requires the use of PEFT's implementation of init_empty_weight instead of using the one
+    # from accelerate.
+    @skip_init_on_device
+    def _restore_weights(self):
+        # Restore the weights as registered parameters on the base layer.
+        # This is necessary because the way that weights are merged/unmerged (which is necessary for forward to work
+        # correctly), the Module "forgets" these attributes. Therefore, we need to call register_parameter explicitly.
+        # We cannot call register_parameter for merging/unmerging because that cuts them off from the autograd graph.
+        # Note that this is hacky, since we need to ensure that _restore_weights is called by each method that needs it.
+
+        # in_proj
+        # TODO work with separate weights
+        base_layer = self.get_base_layer()
+        weight = base_layer.in_proj_weight
+        del base_layer.in_proj_weight
+        base_layer.register_parameter("in_proj_weight", nn.Parameter(weight.data, requires_grad=weight.requires_grad))
+
+        # out_proj
+        base_layer = base_layer.out_proj.get_base_layer()
+        weight = base_layer.weight
+        del base_layer.weight
+        base_layer.register_parameter("weight", nn.Parameter(weight.data, requires_grad=weight.requires_grad))
+
+    def state_dict(self, *args, **kwargs):
+        self._restore_weights()
+        return super().state_dict(*args, **kwargs)
+
+    def named_modules(self, *args, **kwargs):
+        # Note: no need to also implement modules(), as modules() calls named_modules() under the hood
+        self._restore_weights()
+        return super().named_modules(*args, **kwargs)
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "lora." + rep
