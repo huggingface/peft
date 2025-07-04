@@ -206,7 +206,7 @@ if is_bnb_available():
                 # 2) now compute the HiRA “delta” in float32 and add it:
                 # dequantize once per forward
                 raw_weight = self.get_base_layer().weight
-                state      = self.get_base_layer().state
+                state = self.get_base_layer().state
                 dequant_w  = dequantize_bnb_weight(raw_weight, state=state)  # float32 tensor [out, in]
                 result = self.base_layer(x, *args, **kwargs)
                 for active_adapter in self.active_adapters:
@@ -263,44 +263,28 @@ if is_bnb_available():
 
 if is_bnb_4bit_available():
 
-    class Linear4bit(torch.nn.Module, LoraLayer):
-        # Lora implemented in a dense layer
+    class Linear4bit(torch.nn.Module, HiRALayer):
+        # HiRA implemented in a dense layer
         def __init__(
             self,
             base_layer: torch.nn.Module,
             adapter_name: str,
             r: int = 0,
-            lora_alpha: int = 1,
-            lora_dropout: float = 0.0,
-            init_lora_weights: bool = True,
-            use_rslora: bool = False,
-            use_dora: bool = False,
-            lora_bias: bool = False,
+            hira_dropout: float = 0.0,
+            init_hira_weights: bool = True,
             **kwargs,
         ) -> None:
             super().__init__()
-            LoraLayer.__init__(self, base_layer)
+            HiRALayer.__init__(self, base_layer)
             self.fan_in_fan_out = False
 
             self._active_adapter = adapter_name
             self.update_layer(
                 adapter_name,
                 r,
-                lora_alpha=lora_alpha,
-                lora_dropout=lora_dropout,
-                init_lora_weights=init_lora_weights,
-                use_rslora=use_rslora,
-                use_dora=use_dora,
-                lora_bias=lora_bias,
+                hira_dropout=hira_dropout,
+                init_hira_weights=init_hira_weights,
             )
-
-        def resolve_lora_variant(self, *, use_dora: bool) -> Optional[LoraVariant]:
-            if not use_dora:
-                return None
-
-            from .variants import DoraLinearVariant
-
-            return DoraLinearVariant()
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
             """
@@ -321,22 +305,19 @@ if is_bnb_4bit_available():
                 return
 
             for active_adapter in adapter_names:
-                if active_adapter not in self.lora_A.keys():
+                if active_adapter not in self.hira_A.keys():
                     continue
 
                 warnings.warn(
-                    "Merge lora module to 4-bit linear may get different generations due to rounding errors."
+                    "Merge hira module to 4-bit linear may get different generations due to rounding errors."
                 )
                 # Refer to https://gist.github.com/ChrisHayduk/1a53463331f52dca205e55982baf9930
                 weight = self.get_base_layer().weight
                 kwargs = weight.__dict__
 
                 output = dequantize_bnb_weight(weight, state=weight.quant_state)
-                if active_adapter not in self.lora_variant:  # vanilla LoRA
-                    lora_data = self.get_delta_weight(active_adapter)
-                    w_data = output + lora_data
-                else:
-                    w_data = self.lora_variant[active_adapter].merge_safe(self, active_adapter, output)
+                hira_data = self.get_delta_weight(active_adapter)
+                w_data = output * (1+hira_data)
 
                 if safe_merge and not torch.isfinite(w_data).all():
                     raise ValueError(
@@ -351,14 +332,6 @@ if is_bnb_4bit_available():
                 kwargs = {k: v for k, v in kwargs.items() if not k.startswith("_")}
                 self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), **kwargs).to(weight.device)
 
-                if self.lora_bias[active_adapter]:
-                    bias_data = self.get_base_layer().bias.data + self.lora_B[active_adapter].bias
-                    if safe_merge and not torch.isfinite(bias_data):
-                        raise ValueError(
-                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                        )
-                    self.get_base_layer().bias.data = bias_data
-
                 self.merged_adapters.append(active_adapter)
 
         def unmerge(self) -> None:
@@ -371,21 +344,18 @@ if is_bnb_4bit_available():
 
             while len(self.merged_adapters) > 0:
                 active_adapter = self.merged_adapters.pop()
-                if active_adapter not in self.lora_A.keys():
+                if active_adapter not in self.hira_A.keys():
                     continue
                 warnings.warn(
-                    "Unmerge lora module to 4-bit linear may get different generations due to rounding errors."
+                    "Unmerge hira module to 4-bit linear may get different generations due to rounding errors."
                 )
 
                 weight = self.get_base_layer().weight
                 kwargs = weight.__dict__
                 output = dequantize_bnb_weight(weight, state=weight.quant_state)
 
-                if active_adapter not in self.lora_variant:  # vanilla LoRA
-                    lora_data = self.get_delta_weight(active_adapter)
-                    w_data = output - lora_data
-                else:
-                    w_data = self.lora_variant[active_adapter].unmerge(self, active_adapter, output)
+                hira_data = self.get_delta_weight(active_adapter)
+                w_data = output / (1+hira_data)
 
                 if "bnb_quantized" in kwargs:
                     kwargs["bnb_quantized"] = False
@@ -393,13 +363,11 @@ if is_bnb_4bit_available():
                 kwargs.pop("data", None)
                 self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), **kwargs).to(weight.device)
 
-                if self.lora_bias[active_adapter]:
-                    self.get_base_layer().bias.data -= self.lora_B[active_adapter].bias
 
         def get_delta_weight(self, adapter):
             return (
                 transpose(
-                    self.lora_B[adapter] @ self.lora_A[adapter],
+                    self.hira_B[adapter] @ self.hira_A[adapter],
                     False,
                 )
             )
@@ -415,30 +383,33 @@ if is_bnb_4bit_available():
             sub_batch_indices_list = []
             for adapter in unique_adapters:
                 sub_batch_indices_list.append([index for index, item in enumerate(adapter_names) if item == adapter])
-
+            weight = self.get_base_layer().weight
+            dequant_w = dequantize_bnb_weight(weight, state=weight.quant_state)
             for i, active_adapter in enumerate(unique_adapters):
                 if active_adapter == "__base__":
                     continue
-                if active_adapter not in self.lora_A.keys():
+                if active_adapter not in self.hira_A.keys():
                     continue
 
-                lora_A = self.lora_A[active_adapter]
-                lora_B = self.lora_B[active_adapter]
-                dropout = self.lora_dropout[active_adapter]
-                scaling = self.scaling[active_adapter]
+                hira_A = self.hira_A[active_adapter]
+                hira_B = self.hira_B[active_adapter]
+                dropout = self.hira_dropout[active_adapter]
 
                 requires_conversion = not torch.is_autocast_enabled()
                 if requires_conversion:
                     expected_dtype = result.dtype
-                    x = self._cast_input_dtype(x, lora_A.weight.dtype)
+                    x = self._cast_input_dtype(x, hira_A.dtype)
 
-                # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
+                # getting the sub-batch, passing it to HiRA layers and updating the corresponding indices of the linear
                 # layer output
                 sub_batch = x[sub_batch_indices_list[i]]
-                output = lora_B(lora_A(dropout(sub_batch))) * scaling
+                prod_AB = torch.mm(hira_A.T, hira_B.T)
+                sub_batch = dropout(sub_batch)
+                eff_weight = transpose(dequant_w.to(prod_AB.dtype).to(prod_AB.device), self.fan_in_fan_out) * prod_AB.T
+                hira_out = F.linear(sub_batch, eff_weight)
                 if requires_conversion:
-                    output = output.to(expected_dtype)
-                result[sub_batch_indices_list[i]] += output
+                    hira_out = hira_out.to(expected_dtype)
+                result[sub_batch_indices_list[i]] += hira_out
 
             return result
 
@@ -462,40 +433,38 @@ if is_bnb_4bit_available():
                 # newer PyTorch versions but this would need extensive testing to be
                 # sure.
                 result = result.clone()
-
+                # dequanted w
+                weight = self.get_base_layer().weight
+                dequant_w = dequantize_bnb_weight(weight, state=weight.quant_state)
                 for active_adapter in self.active_adapters:
-                    if active_adapter not in self.lora_A.keys():
+                    if active_adapter not in self.hira_A.keys():
                         continue
-                    lora_A = self.lora_A[active_adapter]
-                    lora_B = self.lora_B[active_adapter]
-                    dropout = self.lora_dropout[active_adapter]
-                    scaling = self.scaling[active_adapter]
+                    hira_A = self.hira_A[active_adapter]
+                    hira_B = self.hira_B[active_adapter]
+                    dropout = self.hira_dropout[active_adapter]
 
                     requires_conversion = not torch.is_autocast_enabled()
                     if requires_conversion:
                         expected_dtype = result.dtype
-                        x = self._cast_input_dtype(x, lora_A.weight.dtype)
+                        x = self._cast_input_dtype(x, hira_A.dtype)
 
-                    if active_adapter not in self.lora_variant:  # vanilla LoRA
-                        output = lora_B(lora_A(dropout(x))) * scaling
-                        if requires_conversion:
-                            output = output.to(expected_dtype)
-                        result = result + output
-                    else:
-                        result = self.lora_variant[active_adapter].forward(
-                            self,
-                            active_adapter=active_adapter,
-                            x=x,
-                            result=result,
-                        )
-                        if requires_conversion:
-                            result = result.to(expected_dtype)
+                    dropout_sub = dropout(x)
+                   # compute Δ = B @ A  → shape (out, in)
+                    prod_AB = hira_B @ hira_A
+                    # effective weight = W₀ ⊙ Δ
+                    eff_w = dequant_w * prod_AB
+                    hira_out = F.linear(dropout_sub, eff_w)
+                    if requires_conversion:
+                        hira_out = hira_out.to(expected_dtype)
+                    result = result + hira_out
+                    if requires_conversion:
+                        result = result.to(expected_dtype)
 
             return result
 
         def __repr__(self) -> str:
             rep = super().__repr__()
-            return "lora." + rep
+            return "hira." + rep
 
     def dispatch_bnb_4bit(target: torch.nn.Module, adapter_name: str, **kwargs):
         new_module = None
