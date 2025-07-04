@@ -106,7 +106,7 @@ class ShiraModel(BaseTuner):
             kwargs[k] = v
 
         if isinstance(target, Linear):
-            mask = shira_config.mask_fn(target.base_layer, shira_config.r, **kwargs)
+            mask = shira_config.mask_fn(target.base_layer, shira_config.r, **kwargs) if shira_config.mask_fn is not None else None
             target.update_layer(
                 adapter_name,
                 mask,
@@ -178,7 +178,7 @@ class ShiraModel(BaseTuner):
                 "`torch.nn.Linear`."
             )
 
-        mask = shira_config.mask_fn(target_base_layer, shira_config.r, **kwargs)
+        mask = shira_config.mask_fn(target_base_layer, shira_config.r, **kwargs) if shira_config.mask_fn is not None else None
 
         new_module = Linear(
             target,

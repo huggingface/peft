@@ -113,20 +113,6 @@ class ShiraConfig(PeftConfig):
         },
     )
 
-    def to_dict(self):
-        """
-        Returns the config for your adapter model as a dictionary. Removes mask_type before saving it in the
-        adapter_config.json. This is so that when we load the model, any custom mask_type does not get loaded. Since
-        the custom mask_type will result in self.mask_fn becoming None (see __post_init__ below), it would result in an
-        error when the ShiraModel tries to call the self.mask_fn to obtain the mask for SHiRA. For inference, we do not
-        need to provide the custom mask_fn because the model loading will overwrite the random indices (initialized
-        from random_mask when ShiraModel is first created) using the SHiRA indices from the checkpoint (the mask
-        indices are always saved when we save the ShiraModel).
-        """
-        rv = super().to_dict()
-        rv.pop("mask_type")
-        return rv
-
     def __post_init__(self):
         super().__post_init__()
         self.peft_type = PeftType.SHIRA
@@ -137,6 +123,6 @@ class ShiraConfig(PeftConfig):
             self.mask_fn = random_mask
         else:
             warnings.warn(
-                f"Argument {self.mask_type=} is not recognized, please supply your own masking function by calling `config.mask_fn = my_mask_fn`."
+                f"Argument {self.mask_type=} is not recognized, please supply your own masking function by calling `config.mask_fn = my_mask_fn`. Please ignore this warning message if you are loading from a pretrained checkpoint"
             )
             self.mask_fn = None

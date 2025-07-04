@@ -27,7 +27,7 @@ class ShiraLayer(BaseTunerLayer):
     # List all names of layers that may contain trainable adapter weights
     adapter_layer_names = ("shira_weight",)
     # All names of other adapter-related parameters
-    other_param_names = ("r", "scaling")
+    other_param_names = ("r", "scaling", "shira_indices")
 
     def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer
@@ -81,17 +81,19 @@ class ShiraLayer(BaseTunerLayer):
             requires_grad=True,
         )
 
-        # Compute the shira_indices from the mask. Make sure the mask is formed using r*(self.in_features + self.out_features) and not some other K.
-        mask_indices = torch.where(mask == 1.0)
-        self.shira_indices[adapter_name] = torch.cat(
-            [mask_indices[0].unsqueeze(0), mask_indices[1].unsqueeze(0)], 0
-        ).to(torch.int)
-        self.shira_indices[adapter_name] = self.shira_indices[adapter_name].to(self.base_layer.weight.device)
+        if mask is not None:
+            # Compute the shira_indices from the mask. Make sure the mask is formed using r*(self.in_features + self.out_features) and not some other K.
+            mask_indices = torch.where(mask == 1.0)
+            self.shira_indices[adapter_name] = torch.cat(
+                [mask_indices[0].unsqueeze(0), mask_indices[1].unsqueeze(0)], 0
+            ).to(torch.int)
+            self.shira_indices[adapter_name] = self.shira_indices[adapter_name].to(self.base_layer.weight.device)
 
-        if self.shira_indices[adapter_name].shape[1] != self.shira_weight[adapter_name].shape[0]:
-            raise ValueError(
-                f"The SHiRA indices and weights are not the same dimensions for adapter {adapter_name} in layer {self.base_layer}"
-            )
+            if self.shira_indices[adapter_name].shape[1] != self.shira_weight[adapter_name].shape[0]:
+                raise ValueError(
+                    f"The SHiRA indices and weights are not the same dimensions for adapter {adapter_name} in layer {self.base_layer}"
+                )
+
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
