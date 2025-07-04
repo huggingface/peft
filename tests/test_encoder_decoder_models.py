@@ -26,6 +26,7 @@ from peft import (
     HRAConfig,
     IA3Config,
     LoraConfig,
+    MiSSConfig,
     OFTConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
@@ -64,6 +65,14 @@ ALL_CONFIGS = [
     ),
     (
         BoneConfig,
+        {
+            "target_modules": None,
+            "r": 2,
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        MiSSConfig,
         {
             "target_modules": None,
             "r": 2,

@@ -35,6 +35,7 @@ from peft import (
     HRAConfig,
     IA3Config,
     LoraConfig,
+    MiSSConfig,
     OFTConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
@@ -89,6 +90,14 @@ ALL_CONFIGS = [
     ),
     (
         BoneConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "r": 2,
+        },
+    ),
+    (
+        MiSSConfig,
         {
             "task_type": "CAUSAL_LM",
             "target_modules": None,
@@ -228,7 +237,7 @@ def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
         BoneConfig,
         C3AConfig,
     ]:
-        pytest.skip("Skipping AdaLora/BOFT/HRA/OFT/Bone for GPT2LMHeadModel")
+        pytest.skip("Skipping AdaLora/BOFT/HRA/OFT/Bone(MiSS) for GPT2LMHeadModel")
 
 
 class TestDecoderModels(PeftCommonTester):

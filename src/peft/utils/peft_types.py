@@ -40,6 +40,7 @@ class PeftType(str, enum.Enum):
     - FOURIERFT
     - HRA
     - BONE
+    - MiSS
     - RANDLORA
     - C3A
     """
@@ -65,6 +66,7 @@ class PeftType(str, enum.Enum):
     VBLORA = "VBLORA"
     CPT = "CPT"
     BONE = "BONE"
+    MISS = "MISS"
     RANDLORA = "RANDLORA"
     TRAINABLE_TOKENS = "TRAINABLE_TOKENS"
     C3A = "C3A"
