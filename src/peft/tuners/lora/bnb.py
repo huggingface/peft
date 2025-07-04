@@ -315,7 +315,7 @@ if is_bnb_4bit_available():
                 lora_bias=lora_bias,
             )
 
-        def resolve_lora_variant(self, *, use_dora: bool) -> Optional[LoraVariant]:
+        def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
             if not use_dora:
                 return None
 

@@ -15,9 +15,12 @@ import copy
 
 import pytest
 import torch
+from huggingface_hub import ModelCard
 from transformers import AutoModelForCausalLM
 
-from peft import AutoPeftModelForCausalLM, LoraConfig, PeftConfig, PeftModel, get_peft_model
+from peft import AutoPeftModelForCausalLM, BoneConfig, LoraConfig, PeftConfig, PeftModel, TaskType, get_peft_model
+
+from .testing_common import hub_online_once
 
 
 PEFT_MODELS_TO_TEST = [("peft-internal-testing/test-lora-subfolder", "test")]
@@ -112,3 +115,106 @@ class TestBaseModelRevision:
 
         assert peft_model.peft_config["default"].base_model_name_or_path == base_model_id
         assert peft_model.peft_config["default"].revision == base_model_revision
+
+
+class TestModelCard:
+    @pytest.mark.parametrize(
+        "model_id, peft_config, tags, excluded_tags, pipeline_tag",
+        [
+            (
+                "hf-internal-testing/tiny-random-Gemma3ForCausalLM",
+                LoraConfig(),
+                ["transformers", "base_model:adapter:hf-internal-testing/tiny-random-Gemma3ForCausalLM", "lora"],
+                [],
+                None,
+            ),
+            (
+                "hf-internal-testing/tiny-random-Gemma3ForCausalLM",
+                BoneConfig(),
+                ["transformers", "base_model:adapter:hf-internal-testing/tiny-random-Gemma3ForCausalLM"],
+                ["lora"],
+                None,
+            ),
+            (
+                "hf-internal-testing/tiny-random-BartForConditionalGeneration",
+                LoraConfig(),
+                [
+                    "transformers",
+                    "base_model:adapter:hf-internal-testing/tiny-random-BartForConditionalGeneration",
+                    "lora",
+                ],
+                [],
+                None,
+            ),
+            (
+                "hf-internal-testing/tiny-random-Gemma3ForCausalLM",
+                LoraConfig(task_type=TaskType.CAUSAL_LM),
+                ["transformers", "base_model:adapter:hf-internal-testing/tiny-random-Gemma3ForCausalLM", "lora"],
+                [],
+                "text-generation",
+            ),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "pre_tags",
+        [
+            ["tag1", "tag2"],
+            [],
+        ],
+    )
+    def test_model_card_has_expected_tags(
+        self, model_id, peft_config, tags, excluded_tags, pipeline_tag, pre_tags, tmp_path
+    ):
+        """Make sure that PEFT sets the tags in the model card automatically and correctly.
+        This is important so that a) the models are searchable on the Hub and also 2) some features depend on it to
+        decide how to deal with them (e.g., inference).
+
+        Makes sure that the base model tags are still present (if there are any).
+        """
+        with hub_online_once(model_id):
+            base_model = AutoModelForCausalLM.from_pretrained(model_id)
+
+            if pre_tags:
+                base_model.add_model_tags(pre_tags)
+
+            peft_model = get_peft_model(base_model, peft_config)
+            save_path = tmp_path / "adapter"
+
+            peft_model.save_pretrained(save_path)
+
+            model_card = ModelCard.load(save_path / "README.md")
+            assert set(tags).issubset(set(model_card.data.tags))
+
+            if excluded_tags:
+                assert set(excluded_tags).isdisjoint(set(model_card.data.tags))
+
+            if pre_tags:
+                assert set(pre_tags).issubset(set(model_card.data.tags))
+
+            if pipeline_tag:
+                assert model_card.data.pipeline_tag == pipeline_tag
+
+    @pytest.fixture
+    def custom_model_cls(self):
+        class MyNet(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(10, 20)
+                self.l2 = torch.nn.Linear(20, 1)
+
+            def forward(self, X):
+                return self.l2(self.l1(X))
+
+        return MyNet
+
+    def test_custom_models_dont_have_transformers_tag(self, custom_model_cls, tmp_path):
+        base_model = custom_model_cls()
+        peft_config = LoraConfig(target_modules="all-linear")
+        peft_model = get_peft_model(base_model, peft_config)
+
+        peft_model.save_pretrained(tmp_path)
+
+        model_card = ModelCard.load(tmp_path / "README.md")
+
+        assert model_card.data.tags is not None
+        assert "transformers" not in model_card.data.tags

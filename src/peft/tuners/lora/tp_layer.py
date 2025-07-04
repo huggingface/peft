@@ -74,7 +74,7 @@ class LoraParallelLinear(nn.Module, LoraLayer):
             init_method = megatron_config.init_method
         input_is_parallel = True
         gather_output = False
-        if isinstance(base_layer, self.backend.RowParallelLinear):
+        if self.is_parallel_a:
             input_is_parallel = base_layer.input_is_parallel
         else:
             gather_output = base_layer.gather_output

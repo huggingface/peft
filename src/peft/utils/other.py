@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import copy
+import functools
 import inspect
 import os
 import re
@@ -24,12 +25,14 @@ from typing import Any, Optional, Union
 
 import accelerate
 import torch
+from accelerate import FullyShardedDataParallelPlugin
 from accelerate.hooks import add_hook_to_module, remove_hook_from_module
 from accelerate.utils import is_npu_available, is_xpu_available
 from huggingface_hub import file_exists
 from huggingface_hub.errors import EntryNotFoundError, HFValidationError
 from packaging import version
 from safetensors.torch import storage_ptr, storage_size
+from transformers import PreTrainedModel
 
 from ..import_utils import is_auto_gptq_available, is_gptqmodel_available, is_torch_tpu_available
 from .constants import (
@@ -38,6 +41,7 @@ from .constants import (
     INCLUDE_LINEAR_LAYERS_SHORTHAND,
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
@@ -66,6 +70,7 @@ __all__ = [
     "INCLUDE_LINEAR_LAYERS_SHORTHAND",
     "SAFETENSORS_WEIGHTS_NAME",
     "TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING",
@@ -942,12 +947,33 @@ def _prepare_prompt_learning_config(peft_config, model_config):
     return peft_config
 
 
+def _get_no_split_modules(model) -> set[str]:
+    """
+    Get the modules of the model that should not be split when using device_map. We iterate through the modules to get
+    the underlying `_no_split_modules`.
+
+    Returns:
+        `List[str]`: List of modules that should not be split
+    """
+    # After discussion in https://github.com/huggingface/transformers/pull/38141, based on:
+    # https://github.com/huggingface/transformers/blob/1e921a3a9cea92b383ca4b0484ee45596bbdadc3/src/transformers/modeling_utils.py#L2677-L2704
+    _no_split_modules: set[str] = set()
+    if not hasattr(model, "_no_split_modules"):
+        return _no_split_modules
+
+    modules_to_check = [model]
+    while len(modules_to_check) > 0:
+        module = modules_to_check.pop(-1)
+        # if the module does not appear in _no_split_modules, we also check the children
+        if module.__class__.__name__ not in _no_split_modules:
+            if isinstance(module, PreTrainedModel):
+                if module._no_split_modules is not None:
+                    _no_split_modules = _no_split_modules | set(module._no_split_modules)
+            modules_to_check += list(module.children())
+    return _no_split_modules
+
+
 def fsdp_auto_wrap_policy(model):
-    import functools
-    import os
-
-    from accelerate import FullyShardedDataParallelPlugin
-
     if hasattr(FullyShardedDataParallelPlugin, "get_module_class_from_name"):
         get_module_class_from_name = FullyShardedDataParallelPlugin.get_module_class_from_name
     else:
@@ -956,9 +982,7 @@ def fsdp_auto_wrap_policy(model):
 
     from ..tuners import PrefixEncoder, PromptEmbedding, PromptEncoder
 
-    default_transformer_cls_names_to_wrap = (
-        ",".join(model._no_split_modules) if getattr(model, "_no_split_modules", None) is not None else ""
-    )
+    default_transformer_cls_names_to_wrap = ",".join(_get_no_split_modules(model))
     transformer_cls_names_to_wrap = os.environ.get(
         "FSDP_TRANSFORMER_CLS_TO_WRAP", default_transformer_cls_names_to_wrap
     ).split(",")
@@ -1272,3 +1296,52 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
                 token_indices=token_adapter.token_indices[adapter_name],
                 tied_adapter=model.get_input_embeddings().token_adapter,
             )
+
+
+def create_attention_mask(
+    model, *, model_input, attention_mask, past_key_values, cache_position, batch_size, sequence_length
+):
+    # adapted from:
+    # https://github.com/huggingface/transformers/blob/cb4c56ce0dfa1350267ed28e57760986a58a9ba4/src/transformers/generation/utils.py#L644-L680
+    # In PEFT, we sometimes need to re-create the attention mask. This is because some prompt learning methods insert
+    # new items into the sequence, which results in the attention mask needing an update. We re-use transformers code
+    # for this as much as possible.
+    try:
+        from transformers.masking_utils import create_masks_for_generate
+    except ImportError as exc:
+        raise ImportError("Your transformers version is too old, please upgrade it to > 4.52") from exc
+
+    # Create the causal mask with fixed shape in advance, to reduce recompilations. If the function to create
+    # the 4D causal mask exists, it should be present in the base model (XXXModel class) or in its decoder.
+    base_model = getattr(model, model.base_model_prefix, model)
+    decoder = base_model.get_decoder() if hasattr(base_model, "get_decoder") else None
+    causal_mask_creation_function = getattr(base_model, "_prepare_4d_causal_attention_mask_with_cache_position", None)
+    if causal_mask_creation_function is None and decoder is not None:  # it may be in the decoder
+        causal_mask_creation_function = getattr(decoder, "_prepare_4d_causal_attention_mask_with_cache_position", None)
+
+    # If it's not defined, it means the model uses the new general mask API
+    if causal_mask_creation_function is None:  # can't be found
+        token_type_ids = getattr(model_input, "token_type_ids", None)
+        # Some models may overwrite the general one
+        causal_mask_creation_function = getattr(model, "create_masks_for_generate", create_masks_for_generate)
+        attention_mask = causal_mask_creation_function(
+            config=model.config,
+            # we only need batch size, seq_length and dtype here - we don't care about the values of the embeddings
+            input_embeds=torch.empty((batch_size, sequence_length), dtype=model.dtype),
+            attention_mask=attention_mask,
+            cache_position=cache_position,
+            past_key_values=past_key_values,
+            token_type_ids=token_type_ids,
+        )
+    else:
+        attention_mask = causal_mask_creation_function(
+            attention_mask,
+            sequence_length=sequence_length,
+            target_length=past_key_values.get_max_cache_shape(),
+            dtype=model.dtype,
+            cache_position=cache_position,
+            batch_size=batch_size,
+            config=model.config,
+            past_key_values=past_key_values,
+        )
+    return attention_mask
