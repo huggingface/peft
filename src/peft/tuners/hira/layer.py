@@ -895,3 +895,30 @@ class _ConvNd(nn.Module, HiRALayer):
         rep = super().__repr__()
         return "hira." + rep
 
+class Conv2d(_ConvNd):
+    # Lora implemented in a conv2d layer
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self._kernel_dim == 4:
+            raise ValueError(f"Conv2d layer kernel must have 4 dimensions, not {self._kernel_dim}")
+        self.conv_fn = F.conv2d
+
+
+class Conv1d(_ConvNd):
+    # Lora implemented in a conv1d layer
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self._kernel_dim == 3:
+            raise ValueError(f"Conv1d layer kernel must have 3 dimensions, not {self._kernel_dim}")
+        self.conv_fn = F.conv1d
+
+
+class Conv3d(_ConvNd):
+    # Lora implemented in a conv3d layer
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self._kernel_dim == 5:
+            raise ValueError(f"Conv3d layer kernel must have 5 dimensions, not {self._kernel_dim}")
+        self.conv_fn = F.conv3d
+
+
