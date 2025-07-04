@@ -8,7 +8,6 @@ import torch
 import pytest
 import torch.nn as nn
 from peft.tuners.hira.layer import Conv1d as HiraConv1d, Conv2d as HiraConv2d
-# Setup
 
 def test_hira_linear_merge_unmerge_basic():
     """
