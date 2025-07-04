@@ -638,23 +638,19 @@ class Embedding(nn.Module, HiRALayer):
 
 
 
-class _ConvNd(nn.Module, LoraLayer):
-    # Lora implemented in a conv(2,3)d layer
+class _ConvNd(nn.Module, HiRALayer):
+    # HiRA implemented in a conv(2,3)d layer
     def __init__(
         self,
         base_layer: nn.Module,
         adapter_name: str,
         r: int = 0,
-        lora_alpha: int = 1,
-        lora_dropout: float = 0.0,
-        init_lora_weights: Union[bool, str] = True,
-        use_rslora: bool = False,
-        use_dora: bool = False,
-        lora_bias: bool = False,
+        hira_dropout: float = 0.0,
+        init_hira_weights: Union[bool, str] = True,
         **kwargs,
     ) -> None:
         super().__init__()
-        LoraLayer.__init__(self, base_layer)
+        HiRALayer.__init__(self, base_layer)
 
         if base_layer.groups > 1:
             warnings.warn("LoRA adapter added to ConvNd layer with groups > 1. Merging is not supported.")
@@ -665,16 +661,12 @@ class _ConvNd(nn.Module, LoraLayer):
         self.update_layer(
             adapter_name,
             r,
-            lora_alpha=lora_alpha,
-            lora_dropout=lora_dropout,
-            init_lora_weights=init_lora_weights,
-            use_rslora=use_rslora,
-            use_dora=use_dora,
-            lora_bias=lora_bias,
+            hira_dropout=hira_dropout,
+            init_hira_weights=init_hira_weights,
         )
 
     def update_layer(
-        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora, lora_bias
+        self, adapter_name, r, hira_dropout, init_hira_weights
     ):
         # collect the kwargs
         kwargs = locals().copy()
@@ -683,53 +675,60 @@ class _ConvNd(nn.Module, LoraLayer):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
-        lora_variant = self.resolve_lora_variant(use_dora=use_dora)
-        if lora_variant is not None:
-            self.lora_variant[adapter_name] = lora_variant
-
         self.r[adapter_name] = r
-        self.lora_alpha[adapter_name] = lora_alpha
-        if lora_dropout > 0.0:
-            lora_dropout_layer = nn.Dropout(p=lora_dropout)
+        if hira_dropout > 0.0:
+            hira_dropout_layer = nn.Dropout(p=hira_dropout)
         else:
-            lora_dropout_layer = nn.Identity()
+            hira_dropout_layer = nn.Identity()
 
-        self.lora_dropout[adapter_name] = lora_dropout_layer
-        # Actual trainable parameters
-        base_layer = self.get_base_layer()
-        kernel_size = base_layer.kernel_size
-        stride = base_layer.stride
-        padding = base_layer.padding
-        conv_layer = type(base_layer)
-        out_kernel = out_stride = (1,) * (self._kernel_dim - 2)
-        self.lora_A[adapter_name] = conv_layer(self.in_features, r, kernel_size, stride, padding, bias=False)
-        self.lora_B[adapter_name] = conv_layer(
-            r, self.out_features // base_layer.groups, out_kernel, out_stride, bias=lora_bias
+        self.hira_dropout[adapter_name] = hira_dropout_layer
+        # Determine base conv parameters
+        base = self.get_base_layer()
+        conv_cls = type(base)
+        in_channels = base.in_channels
+        out_channels = base.out_channels
+        kernel_size = base.kernel_size
+        stride = base.stride
+        padding = base.padding
+        dilation = getattr(base, 'dilation', (1,) * (base.weight.dim() - 2))
+        groups = getattr(base, 'groups', 1)
+        # Spatial dims for B: 1 in each spatial dimension
+        spatial_ones = (1,) * (base.weight.dim() - 2)
+
+        # HiRA factor A: conv from in_channels to r
+        self.hira_A[adapter_name] = conv_cls(
+            in_channels,
+            r,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            groups=groups,
+            bias=False,
         )
-        self.lora_bias[adapter_name] = lora_bias
+        # HiRA factor B: conv from r back to out_channels
+        self.hira_B[adapter_name] = conv_cls(
+            r,
+            out_channels,
+            kernel_size=spatial_ones,
+            stride=(1,) * len(spatial_ones),
+            padding=(0,) * len(spatial_ones),
+            dilation=(1,) * len(spatial_ones),
+            groups=groups,
+            bias=False,
+        )
 
-        if use_rslora:
-            self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
-        else:
-            self.scaling[adapter_name] = lora_alpha / r
+        # Initialize HiRA parameters (A with Kaiming, B zeros)
+        if init_hira_weights:
+            # A: same init as base conv weight
+            nn.init.kaiming_uniform_(self.hira_A[adapter_name].weight, a=math.sqrt(5))
+            # B: initialize to zero
+            nn.init.zeros_(self.hira_B[adapter_name].weight)
 
-        self.use_dora[adapter_name] = use_dora
-
-        if init_lora_weights == "loftq":
-            self.loftq_init(adapter_name)
-        elif init_lora_weights:
-            self.reset_lora_parameters(adapter_name, init_lora_weights)
-
-        # call this before init of the lora variants
+        # Place adapters on correct device and register
         self._move_adapter_to_device_of_base_layer(adapter_name)
-
-        if adapter_name in self.lora_variant:
-            self.lora_variant[adapter_name].init(self, **kwargs)
-
         self.set_adapter(self.active_adapters)
 
-    def _get_dora_factor_view(self):
-        return (-1,) + (1,) * (self._kernel_dim - 1)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -750,7 +749,7 @@ class _ConvNd(nn.Module, LoraLayer):
             return
 
         for active_adapter in adapter_names:
-            if active_adapter in self.lora_A.keys():
+            if active_adapter in self.hira_A.keys():
                 base_layer = self.get_base_layer()
                 orig_dtype = base_layer.weight.dtype
 
@@ -762,11 +761,8 @@ class _ConvNd(nn.Module, LoraLayer):
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
                     orig_weight = base_layer.weight.data.clone()
-                    if active_adapter not in self.lora_variant:  # vanilla LoRA
-                        delta_weight = self.get_delta_weight(active_adapter)
-                        orig_weight += delta_weight.to(orig_dtype)
-                    else:
-                        orig_weight = self.lora_variant[active_adapter].merge_safe(self, active_adapter, orig_weight)
+                    delta_weight = self.get_delta_weight(active_adapter)
+                    orig_weight *= (1+delta_weight.to(orig_dtype))
 
                     if not torch.isfinite(orig_weight).all():
                         raise ValueError(
@@ -775,23 +771,9 @@ class _ConvNd(nn.Module, LoraLayer):
 
                     base_layer.weight.data = orig_weight
 
-                    if self.lora_bias[active_adapter]:
-                        new_bias = base_layer.bias + self.lora_B[active_adapter].bias * self.scaling[active_adapter]
-                        if not torch.isfinite(new_bias).all():
-                            raise ValueError(
-                                f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                            )
-                        base_layer.bias.data = new_bias.to(orig_dtype)
-
                 else:
-                    if active_adapter not in self.lora_variant:  # vanilla LoRA
-                        delta_weight = self.get_delta_weight(active_adapter)
-                        base_layer.weight.data += delta_weight.to(orig_dtype)
-                    else:
-                        self.lora_variant[active_adapter].merge_unsafe(self, active_adapter, base_layer.weight)
-
-                    if self.lora_bias[active_adapter]:
-                        base_layer.bias.data += self.lora_B[active_adapter].bias * self.scaling[active_adapter]
+                    delta_weight = self.get_delta_weight(active_adapter)
+                    base_layer.weight.data *= (1+delta_weight.to(orig_dtype))
 
                 self.merged_adapters.append(active_adapter)
 
@@ -804,18 +786,11 @@ class _ConvNd(nn.Module, LoraLayer):
             return
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
-            if active_adapter in self.lora_A.keys():
+            if active_adapter in self.hira_A.keys():
                 weight = self.get_base_layer().weight
-                if active_adapter not in self.lora_variant:  # vanilla LoRA
-                    orig_dtype = weight.dtype
-                    delta_weight = self.get_delta_weight(active_adapter)
-                    weight.data -= delta_weight.to(orig_dtype)
-                else:
-                    unmerged = self.lora_variant[active_adapter].unmerge(self, active_adapter, weight)
-                    weight.data = unmerged
-
-                if self.lora_bias[active_adapter]:
-                    self.get_base_layer().bias.data -= self.lora_B[active_adapter].bias * self.scaling[active_adapter]
+                orig_dtype = weight.dtype
+                delta_weight = self.get_delta_weight(active_adapter)
+                weight.data /= (1+delta_weight.to(orig_dtype))
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -825,41 +800,40 @@ class _ConvNd(nn.Module, LoraLayer):
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
-        device = self.lora_B[adapter].weight.device
-        dtype = self.lora_A[adapter].weight.dtype
+        device = self.hira_B[adapter].weight.device
+        dtype = self.hira_A[adapter].weight.dtype
 
         # In case users wants to merge the adapter weights that are in
         # (b)float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
         # (b)float16 because some CPUs have slow bf16/fp16 matmuls.
         cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
 
-        weight_A = self.lora_A[adapter].weight
-        weight_B = self.lora_B[adapter].weight
+        weight_A = self.hira_A[adapter].weight
+        weight_B = self.hira_B[adapter].weight
 
         if cast_to_fp32:
             weight_A = weight_A.float()
             weight_B = weight_B.float()
 
-        # https://github.com/bmaltais/kohya_ss/blob/feb6728762a8f463d15ba936d189d4c3abfaa1ab/networks/lora.py#L117
         if self.get_base_layer().weight.size()[2:4] == (1, 1):
             # conv2d 1x1
             output_tensor = (weight_B.squeeze(3).squeeze(2) @ weight_A.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(
                 3
-            ) * self.scaling[adapter]
+            )
         else:
             output_tensor = self.conv_fn(weight_A.transpose(0, 1), weight_B)
 
             if self.get_base_layer().groups > 1:
-                output_tensor = output_tensor * self.scaling[adapter]
+                output_tensor = output_tensor
             else:
-                output_tensor = output_tensor.transpose(0, 1) * self.scaling[adapter]
+                output_tensor = output_tensor.transpose(0, 1)
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
 
             # cast back the weights
-            self.lora_A[adapter].weight.data = weight_A.to(dtype)
-            self.lora_B[adapter].weight.data = weight_B.to(dtype)
+            self.hira_A[adapter].weight.data = weight_A.to(dtype)
+            self.hira_B[adapter].weight.data = weight_B.to(dtype)
 
         return output_tensor
 
@@ -879,30 +853,45 @@ class _ConvNd(nn.Module, LoraLayer):
         else:
             result = self.base_layer(x, *args, **kwargs)
             torch_result_dtype = result.dtype
-
+            base = self.get_base_layer()
+            # Determine which convolution function to use
+            if isinstance(base, nn.Conv1d):
+                conv_fn = F.conv1d
+            elif isinstance(base, nn.Conv2d):
+                conv_fn = F.conv2d
+            elif isinstance(base, nn.Conv3d):
+                conv_fn = F.conv3d
+            else:
+                raise TypeError(f"Unsupported conv layer {type(base)} for HiRA.")
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.lora_A.keys():
                     continue
-                lora_A = self.lora_A[active_adapter]
-                lora_B = self.lora_B[active_adapter]
-                dropout = self.lora_dropout[active_adapter]
-                scaling = self.scaling[active_adapter]
-                x = self._cast_input_dtype(x, lora_A.weight.dtype)
-
-                if active_adapter not in self.lora_variant:  # vanilla LoRA
-                    result = result + lora_B(lora_A(dropout(x))) * scaling
-                else:
-                    result = self.lora_variant[active_adapter].forward(
-                        self,
-                        active_adapter=active_adapter,
-                        x=x,
-                        result=result,
+                hira_A = self.hira_A[active_adapter]
+                hira_B = self.hira_B[active_adapter]
+                dropout = self.hira_dropout[active_adapter]
+                x = self._cast_input_dtype(x, hira_A.weight.dtype)
+                x_in = self._cast_input_dtype(x, hira_A.weight.dtype)
+                x_drop = dropout(x_in)
+                # low-rank factor B@A
+                bia = self.get_delta_weight(active_adapter)  # now returns (B@A) tensor
+                # element-wise modulate base weight: W0 ⊙ (B@A)
+                base_weight = base.weight
+                eff_weight = base_weight * bia
+                hira_out = conv_fn(
+                    x_drop,
+                        eff_weight,
+                        bias=None,
+                        stride=base.stride,
+                        padding=base.padding,
+                        dilation=getattr(base, 'dilation', 1),
+                        groups=base.groups,
                     )
+                result = result + hira_out
 
             result = result.to(torch_result_dtype)
         return result
 
     def __repr__(self) -> str:
         rep = super().__repr__()
-        return "lora." + rep
+        return "hira." + rep
 
