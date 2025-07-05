@@ -258,6 +258,11 @@ def run_benchmark(
                 "base_model_size_mb": base_model_size_mb,
                 "adapter_size_mb": adapter_size_mb
             },
+            package_info={
+                "transformers-version": transformers.__version__,
+                "peft-version": peft.__version__,
+                "bitsandbytes-version": bitsandbytes.__version__ if hasattr(bitsandbytes, "__version__") else None,
+            }
         )
 
         # Measure PEFT model inference
@@ -325,7 +330,7 @@ def run_benchmark(
     error_message = str(e_main_benchmark) if e_main_benchmark is not None else None
 
     # Convert PEFT config to dict for storage
-    peft_config_dict = peft_config.to_dict() if 'peft_config' in locals() else None
+    peft_config_dict = peft_config.to_dict()
     if peft_config_dict:
         for key, value in peft_config_dict.items():
             if isinstance(value, set):
