@@ -10,10 +10,13 @@
 ```python
 import torch
 from peft import LoraConfig, get_peft_model
+from peft.utils import infer_device
 from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer
 from datasets import load_dataset
 
-model = AutoModelForCausalLM.from_pretrained("huggyllama/llama-7b", device_map="cuda")
+device = infer_device()
+
+model = AutoModelForCausalLM.from_pretrained("huggyllama/llama-7b", device_map=device)
 tokenizer = AutoTokenizer.from_pretrained("huggyllama/llama-7b")
 dataset = load_dataset("timdettmers/openassistant-guanaco", split="train")
 lora_config = LoraConfig(
@@ -78,6 +81,8 @@ python dora_finetuning.py \
     --hub_model_id "YOUR_HF_REPO" \
     --push_to_hub
 ```
+You can specify device as `--device "xpu:0"` if your device is an Intel XPU. 
+
 ## Use the model on 🤗
 You can load and use the model as any other 🤗 models.
 ```python
