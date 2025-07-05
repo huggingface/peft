@@ -208,16 +208,6 @@ class GLoraModel(BaseTuner):
                     module.eval_config = eval_config
                     self.adapters_config_history[adapter_name] = eval_config
 
-    def print_trainable_parameters(self):
-        trainable_params = 0
-        all_param = 0
-        for _, param in self.named_parameters():
-            all_param += param.numel()
-            if param.requires_grad:
-                trainable_params += param.numel()
-        print(
-            f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param:.4f}"
-        )
 
     def get_peft_config_as_dict(self, inference: bool = False) -> dict[str, Any]:
         config_dict = {}
