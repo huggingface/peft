@@ -58,9 +58,9 @@ from transformers.pytorch_utils import Conv1D
 from peft import (
     AdaLoraConfig,
     EvaConfig,
+    HiRAConfig,
     LoftQConfig,
     LoraConfig,
-    HiRAConfig,
     PeftModel,
     PrefixTuningConfig,
     PromptEncoderConfig,

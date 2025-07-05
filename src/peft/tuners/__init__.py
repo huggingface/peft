@@ -68,11 +68,11 @@ __all__ = [
     "EvaConfig",
     "FourierFTConfig",
     "FourierFTModel",
+    "HRAConfig",
+    "HRAModel",
     "HiRAConfig",
     "HiRAModel",
     "HiRARuntimeConfig",
-    "HRAConfig",
-    "HRAModel",
     "IA3Config",
     "IA3Model",
     "LNTuningConfig",
@@ -112,5 +112,5 @@ __all__ = [
     "XLoraConfig",
     "XLoraModel",
     "get_eva_state_dict",
-    "initialize_lora_eva_weights",
+    "initialize_lora_eva_weights"
 ]

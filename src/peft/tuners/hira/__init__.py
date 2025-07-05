@@ -12,13 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_eetq_available
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.utils import register_peft_method
 
 from .config import HiRAConfig, HiRARuntimeConfig
-from .layer import Conv2d, Conv3d, Embedding, Linear, HiRALayer
-from .layer import Linear, HiRALayer
-
+from .layer import Conv2d, Conv3d, Embedding, HiRALayer, Linear
 from .model import HiRAModel
 
 
@@ -26,11 +24,11 @@ __all__ = [
     "Conv2d",
     "Conv3d",
     "Embedding",
-    "Linear",
     "HiRAConfig",
     "HiRALayer",
     "HiRAModel",
     "HiRARuntimeConfig",
+    "Linear",
 ]
 
 register_peft_method(name="hira", config_cls=HiRAConfig, model_cls=HiRAModel, is_mixed_compatible=True)
