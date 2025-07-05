@@ -58,10 +58,7 @@ class GLoraLayer:
         if "LoRA" in config:
             out_feature = shape[0]
             in_feature = shape[1]
-            try:
-                rank = int(config.split("_")[1])
-            except Exception:
-                rank = 4
+            rank = int(config.split("_")[1])
             return nn.Parameter(torch.zeros(out_feature, rank)), nn.Parameter(torch.zeros(rank, in_feature))
         return nn.Parameter(torch.zeros(*shape))
 
