@@ -1,13 +1,11 @@
+import pytest
 import torch
 import torch.nn as nn
 
-from peft.import_utils import is_bnb_available, is_bnb_4bit_available
-from peft.tuners.hira import Linear, bnb  # Assuming your HiRA implementation is under peft.tuners.hira
-from peft.tuners.hira.bnb import dispatch_bnb_8bit, Linear8bitLt, dispatch_bnb_4bit
-import torch
-import pytest
-import torch.nn as nn
-from peft.tuners.hira.layer import Conv1d as HiraConv1d, Conv2d as HiraConv2d
+from peft.tuners.hira import Linear  # Assuming your HiRA implementation is under peft.tuners.hira
+from peft.tuners.hira.layer import Conv1d as HiraConv1d
+from peft.tuners.hira.layer import Conv2d as HiraConv2d
+
 
 def test_hira_linear_merge_unmerge_basic():
     """

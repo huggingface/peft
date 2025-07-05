@@ -13,7 +13,6 @@
 # limitations under the License.
 from __future__ import annotations
 
-import math
 import operator
 import warnings
 from contextlib import contextmanager
@@ -35,20 +34,17 @@ from peft.tuners.tuners_utils import (
     replicate_layers,
 )
 from peft.utils import (
-    TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     AuxiliaryTrainingWrapper,
     ModulesToSaveWrapper,
     _freeze_adapter,
     _get_submodules,
-    get_peft_model_state_dict,
     get_quantization_config,
 )
-from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
 from peft.utils.other import get_pattern_key
 
-from .config import HiRAConfig
-from .layer import Conv2d, HiRALayer, dispatch_default
 from ...utils.constants import TRANSFORMERS_MODELS_TO_HIRA_TARGET_MODULES_MAPPING
+from .config import HiRAConfig
+from .layer import HiRALayer, dispatch_default
 
 
 def _adapter_names_pre_forward_hook(target, args, kwargs, adapter_names):
@@ -173,8 +169,8 @@ class HiRAModel(BaseTuner):
             raise ValueError("Current Key shouldn't be `None`")
 
         # Regexp matching - Find key which matches current target_name in patterns provided
-        r_key = get_pattern_key(hira_config.rank_pattern.keys(), current_key)
-        r = hira_config.rank_pattern.get(r_key, hira_config.r)
+        r_key = get_pattern_key(hira_config.r_pattern.keys(), current_key)
+        r = hira_config.r_pattern.get(r_key, hira_config.r)
 
         kwargs = {
             "r": r,
