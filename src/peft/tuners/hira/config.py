@@ -87,8 +87,8 @@ class HiRAConfig(PeftConfig):
             The layer pattern name, used only if `layers_to_transform` is different from `None`. This should target the
             `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
         r_pattern (`dict`):
-            The mapping from layer names or regexp expression to ranks which are different from the default r
-            specified by `r`. For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`.
+            The mapping from layer names or regexp expression to ranks which are different from the default r specified
+            by `r`. For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`.
         layer_replication (`List[Tuple[int, int]]`):
             Build a new stack of layers by stacking the original model layers according to the ranges specified. This
             allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
@@ -128,9 +128,7 @@ class HiRAConfig(PeftConfig):
             "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
         },
     )
-    init_hira_weights: (
-        bool | Literal["gaussian"]
-    ) = field(
+    init_hira_weights: bool | Literal["gaussian"] = field(
         default=True,
         metadata={
             "help": (

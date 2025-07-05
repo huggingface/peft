@@ -126,7 +126,7 @@ if is_bnb_available():
                 output = dequantize_bnb_weight(weight, state=state)
 
                 hira_data = self.get_delta_weight(active_adapter)
-                w_data = output.to(hira_data.dtype).to(hira_data.device) / (1+hira_data)
+                w_data = output.to(hira_data.dtype).to(hira_data.device) / (1 + hira_data)
                 self.get_base_layer().weight = bnb.nn.Int8Params(
                     w_data.to("cpu"), requires_grad=False, has_fp16_weights=weight.has_fp16_weights
                 ).to(weight.device)
@@ -134,11 +134,9 @@ if is_bnb_available():
                 state.reset_grads()
 
         def get_delta_weight(self, adapter):
-            return (
-                transpose(
-                    self.hira_B[adapter] @ self.hira_A[adapter],
-                    False,
-                )
+            return transpose(
+                self.hira_B[adapter] @ self.hira_A[adapter],
+                False,
             )
 
         def _mixed_batch_forward(
@@ -207,7 +205,7 @@ if is_bnb_available():
                 # dequantize once per forward
                 raw_weight = self.get_base_layer().weight
                 state = self.get_base_layer().state
-                dequant_w  = dequantize_bnb_weight(raw_weight, state=state)  # float32 tensor [out, in]
+                dequant_w = dequantize_bnb_weight(raw_weight, state=state)  # float32 tensor [out, in]
                 result = self.base_layer(x, *args, **kwargs)
                 for active_adapter in self.active_adapters:
                     if active_adapter not in self.hira_A.keys():
@@ -221,7 +219,7 @@ if is_bnb_available():
                         expected_dtype = result.dtype
                         x = self._cast_input_dtype(x, hira_A.dtype)
                     dropout_sub = dropout(x)
-                   # compute Δ = B @ A  → shape (out, in)
+                    # compute Δ = B @ A  → shape (out, in)
                     prod_AB = hira_B @ hira_A
                     # effective weight = W₀ ⊙ Δ
                     eff_w = dequant_w * prod_AB
@@ -317,7 +315,7 @@ if is_bnb_4bit_available():
 
                 output = dequantize_bnb_weight(weight, state=weight.quant_state)
                 hira_data = self.get_delta_weight(active_adapter)
-                w_data = output * (1+hira_data)
+                w_data = output * (1 + hira_data)
 
                 if safe_merge and not torch.isfinite(w_data).all():
                     raise ValueError(
@@ -355,7 +353,7 @@ if is_bnb_4bit_available():
                 output = dequantize_bnb_weight(weight, state=weight.quant_state)
 
                 hira_data = self.get_delta_weight(active_adapter)
-                w_data = output / (1+hira_data)
+                w_data = output / (1 + hira_data)
 
                 if "bnb_quantized" in kwargs:
                     kwargs["bnb_quantized"] = False
@@ -363,13 +361,10 @@ if is_bnb_4bit_available():
                 kwargs.pop("data", None)
                 self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), **kwargs).to(weight.device)
 
-
         def get_delta_weight(self, adapter):
-            return (
-                transpose(
-                    self.hira_B[adapter] @ self.hira_A[adapter],
-                    False,
-                )
+            return transpose(
+                self.hira_B[adapter] @ self.hira_A[adapter],
+                False,
             )
 
         def _mixed_batch_forward(
@@ -449,7 +444,7 @@ if is_bnb_4bit_available():
                         x = self._cast_input_dtype(x, hira_A.dtype)
 
                     dropout_sub = dropout(x)
-                   # compute Δ = B @ A  → shape (out, in)
+                    # compute Δ = B @ A  → shape (out, in)
                     prod_AB = hira_B @ hira_A
                     # effective weight = W₀ ⊙ Δ
                     eff_w = dequant_w * prod_AB

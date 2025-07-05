@@ -93,9 +93,7 @@ class HiRAModel(BaseTuner):
 
         >>> rank = ...
         >>> target_modules = ["q_proj", "k_proj", "v_proj", "out_proj", "fc_in", "fc_out", "wte"]
-        >>> config = HiRAConfig(
-        ...     r=32, target_modules=target_modules, hira_dropout=0.1, task_type="CAUSAL_LM"
-        ... )
+        >>> config = HiRAConfig(r=32, target_modules=target_modules, hira_dropout=0.1, task_type="CAUSAL_LM")
         >>> quantization_config = transformers.BitsAndBytesConfig(load_in_8bit=True)
 
         >>> tokenizer = transformers.AutoTokenizer.from_pretrained(
@@ -242,7 +240,6 @@ class HiRAModel(BaseTuner):
                 p.requires_grad = False
 
         # No bias for HiRA, skipping
-
 
     @staticmethod
     def _create_new_module(hira_config: HiRAConfig, adapter_name, target, **kwargs):
@@ -682,7 +679,6 @@ class HiRAModel(BaseTuner):
                     target_hira_A.data, target_hira_B.data = self._generalized_task_arithmetic_weighted_adapter(
                         combination_type, adapters, weights, target, density, majority_sign_method
                     )
-
 
     def delete_adapter(self, adapter_name: str) -> None:
         """

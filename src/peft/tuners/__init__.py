@@ -134,5 +134,5 @@ __all__ = [
     "XLoraModel",
     "create_arrow_model",
     "get_eva_state_dict",
-    "initialize_lora_eva_weights"
+    "initialize_lora_eva_weights",
 ]

@@ -131,12 +131,10 @@ class HiRALayer(BaseTunerLayer):
         self.hira_A.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(r, self.in_features))}))
         self.hira_B.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(self.out_features, r))}))
 
-
         # for inits that require access to the base weight, use gather_param_ctx so that the weight is gathered when using DeepSpeed
         if init_hira_weights:
             self.reset_hira_parameters(adapter_name, init_hira_weights)
         self._move_adapter_to_device_of_base_layer(adapter_name)
-
 
         self.set_adapter(self.active_adapters)
 
@@ -158,15 +156,12 @@ class HiRALayer(BaseTunerLayer):
             nn.init.zeros_(self.hira_embedding_A[adapter_name])
             nn.init.normal_(self.hira_embedding_B[adapter_name])
 
-
     def _cache_store(self, key: str, value: Any) -> None:
         self._caches[key] = value
 
     def _cache_pop(self, key: str) -> Any:
         value = self._caches.pop(key)
         return value
-
-
 
     def _check_forward_args(self, x, *args, **kwargs):
         """Check if the arguments are compatible with the configs and state of the model"""
@@ -187,7 +182,6 @@ class HiRALayer(BaseTunerLayer):
             msg = "Cannot pass `adapter_names` when there are merged adapters, please call `unmerge_adapter` first."
             raise ValueError(msg)
 
-
     def _mixed_batch_forward(
         self,
         x: torch.Tensor,
@@ -196,11 +190,11 @@ class HiRALayer(BaseTunerLayer):
         **kwargs: Any,
     ) -> torch.Tensor:
         """
-        Forward pass that allows *different* adapters to be used for different
-        examples in the same batch (``adapter_names`` must have length == len(x)).
+        Forward pass that allows *different* adapters to be used for different examples in the same batch
+        (``adapter_names`` must have length == len(x)).
 
-        The base projection is computed once; the HiRA update is then added
-        separately for each sub-batch that shares the same adapter.
+        The base projection is computed once; the HiRA update is then added separately for each sub-batch that shares
+        the same adapter.
         """
         # 0. run the expensive base layer once for the whole batch
         result = self.base_layer(x, *args, **kwargs)
@@ -237,7 +231,6 @@ class HiRALayer(BaseTunerLayer):
             result[idxs] += hira_out.to(torch_result_dtype)
 
         return result
-
 
 
 class Linear(nn.Module, HiRALayer):
@@ -293,7 +286,7 @@ class Linear(nn.Module, HiRALayer):
                     orig_weight = base_layer.weight.data.clone()
                     orig_dtype = orig_weight.dtype
                     delta_weight = self.get_delta_weight(active_adapter)
-                    orig_weight *= (1+delta_weight.to(orig_dtype))
+                    orig_weight *= 1 + delta_weight.to(orig_dtype)
 
                     if not torch.isfinite(orig_weight).all():
                         raise ValueError(
@@ -303,7 +296,7 @@ class Linear(nn.Module, HiRALayer):
                     base_layer.weight.data = orig_weight
                 else:
                     delta_weight = self.get_delta_weight(active_adapter)
-                    base_layer.weight.data *= (1+delta_weight)
+                    base_layer.weight.data *= 1 + delta_weight
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -319,7 +312,7 @@ class Linear(nn.Module, HiRALayer):
                 weight = self.get_base_layer().weight
                 orig_dtype = weight.dtype
                 delta_weight = self.get_delta_weight(active_adapter)
-                weight.data /= (1+delta_weight.to(orig_dtype))
+                weight.data /= 1 + delta_weight.to(orig_dtype)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -330,8 +323,7 @@ class Linear(nn.Module, HiRALayer):
                 The name of the adapter for which the delta weight should be computed.
         """
         device = self.hira_B[adapter].device
-        dtype  = self.hira_B[adapter].dtype
-
+        dtype = self.hira_B[adapter].dtype
 
         # In case users wants to merge the adapter weights that are in
         # (b)float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
@@ -381,7 +373,9 @@ class Linear(nn.Module, HiRALayer):
                 x = self._cast_input_dtype(x, hira_A.dtype)
                 dropout = self.hira_dropout[active_adapter]
                 dropout_sub = dropout(x)
-                hira_result = F.linear(dropout_sub, transpose(self.get_base_layer().weight, self.fan_in_fan_out) * _prod_AB.T)
+                hira_result = F.linear(
+                    dropout_sub, transpose(self.get_base_layer().weight, self.fan_in_fan_out) * _prod_AB.T
+                )
                 result = result + hira_result
 
             result = result.to(torch_result_dtype)
@@ -391,8 +385,6 @@ class Linear(nn.Module, HiRALayer):
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "hira." + rep
-
-
 
 
 class Embedding(nn.Module, HiRALayer):
@@ -419,9 +411,7 @@ class Embedding(nn.Module, HiRALayer):
             init_hira_weights=init_hira_weights,
         )
 
-    def update_layer(
-        self, adapter_name, r, hira_dropout, init_hira_weights
-    ):
+    def update_layer(self, adapter_name, r, hira_dropout, init_hira_weights):
         # collect the kwargs
         kwargs = locals().copy()
         del kwargs["self"]
@@ -475,7 +465,7 @@ class Embedding(nn.Module, HiRALayer):
                     # because of the copy operation.
                     orig_weight = base_layer.weight.data.clone()
                     delta_weight = self.get_delta_weight(active_adapter).to(orig_dtype)
-                    orig_weight *= (1+delta_weight)
+                    orig_weight *= 1 + delta_weight
                     if not torch.isfinite(orig_weight).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
@@ -483,7 +473,7 @@ class Embedding(nn.Module, HiRALayer):
                     base_layer.weight.data = orig_weight
                 else:
                     delta_weight = self.get_delta_weight(active_adapter).to(orig_dtype)
-                    base_layer.weight.data *= (1+delta_weight)
+                    base_layer.weight.data *= 1 + delta_weight
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -498,7 +488,7 @@ class Embedding(nn.Module, HiRALayer):
             orig_dtype = self.get_base_layer().weight.dtype
             if active_adapter in self.hira_embedding_A.keys():
                 weight = self.get_base_layer().weight
-                weight.data /= (1+self.get_delta_weight(active_adapter).to(orig_dtype))
+                weight.data /= 1 + self.get_delta_weight(active_adapter).to(orig_dtype)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -533,9 +523,8 @@ class Embedding(nn.Module, HiRALayer):
 
         return output_tensor
 
-
     def _mixed_batch_forward(
-    self, x: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
+        self, x: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
     ) -> torch.Tensor:
         # Compute base embedding once for efficiency
         result = self.base_layer(x, *args, **kwargs)
@@ -607,13 +596,13 @@ class Embedding(nn.Module, HiRALayer):
             if adapter not in self.hira_embedding_A:
                 continue
             # HiRA factors
-            hira_A = self.hira_embedding_A[adapter]   # (r, num_embeddings)
-            hira_B = self.hira_embedding_B[adapter]   # (embedding_dim, r)
+            hira_A = self.hira_embedding_A[adapter]  # (r, num_embeddings)
+            hira_B = self.hira_embedding_B[adapter]  # (embedding_dim, r)
 
             # Compute modulation matrix: B @ A -> (embedding_dim, num_embeddings)
             mod_matrix = torch.mm(hira_B, hira_A)
             # Element-wise modulated embedding weight
-            eff_weight = base_weight * mod_matrix.T    # (num_embeddings, embedding_dim)
+            eff_weight = base_weight * mod_matrix.T  # (num_embeddings, embedding_dim)
 
             # Compute HiRA residual via embedding lookup
             hira_out = F.embedding(x, eff_weight)
@@ -621,12 +610,9 @@ class Embedding(nn.Module, HiRALayer):
 
         return result.to(torch_result_dtype)
 
-
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "hira." + rep
-
-
 
 
 class _ConvNd(nn.Module, HiRALayer):
@@ -656,9 +642,7 @@ class _ConvNd(nn.Module, HiRALayer):
             init_hira_weights=init_hira_weights,
         )
 
-    def update_layer(
-        self, adapter_name, r, hira_dropout, init_hira_weights
-    ):
+    def update_layer(self, adapter_name, r, hira_dropout, init_hira_weights):
         # collect the kwargs
         kwargs = locals().copy()
         del kwargs["self"]
@@ -681,8 +665,8 @@ class _ConvNd(nn.Module, HiRALayer):
         kernel_size = base.kernel_size
         stride = base.stride
         padding = base.padding
-        dilation = getattr(base, 'dilation', (1,) * (base.weight.dim() - 2))
-        groups = getattr(base, 'groups', 1)
+        dilation = getattr(base, "dilation", (1,) * (base.weight.dim() - 2))
+        groups = getattr(base, "groups", 1)
         # Spatial dims for B: 1 in each spatial dimension
         spatial_ones = (1,) * (base.weight.dim() - 2)
 
@@ -720,7 +704,6 @@ class _ConvNd(nn.Module, HiRALayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
-
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights inside the base weights
@@ -753,7 +736,7 @@ class _ConvNd(nn.Module, HiRALayer):
                     # because of the copy operation.
                     orig_weight = base_layer.weight.data.clone()
                     delta_weight = self.get_delta_weight(active_adapter)
-                    orig_weight *= (1+delta_weight.to(orig_dtype))
+                    orig_weight *= 1 + delta_weight.to(orig_dtype)
 
                     if not torch.isfinite(orig_weight).all():
                         raise ValueError(
@@ -764,7 +747,7 @@ class _ConvNd(nn.Module, HiRALayer):
 
                 else:
                     delta_weight = self.get_delta_weight(active_adapter)
-                    base_layer.weight.data *= (1+delta_weight.to(orig_dtype))
+                    base_layer.weight.data *= 1 + delta_weight.to(orig_dtype)
 
                 self.merged_adapters.append(active_adapter)
 
@@ -781,7 +764,7 @@ class _ConvNd(nn.Module, HiRALayer):
                 weight = self.get_base_layer().weight
                 orig_dtype = weight.dtype
                 delta_weight = self.get_delta_weight(active_adapter)
-                weight.data /= (1+delta_weight.to(orig_dtype))
+                weight.data /= 1 + delta_weight.to(orig_dtype)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -808,9 +791,7 @@ class _ConvNd(nn.Module, HiRALayer):
 
         if self.get_base_layer().weight.size()[2:4] == (1, 1):
             # conv2d 1x1
-            output_tensor = (weight_B.squeeze(3).squeeze(2) @ weight_A.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(
-                3
-            )
+            output_tensor = (weight_B.squeeze(3).squeeze(2) @ weight_A.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(3)
         else:
             output_tensor = self.conv_fn(weight_A.transpose(0, 1), weight_B)
 
@@ -869,13 +850,13 @@ class _ConvNd(nn.Module, HiRALayer):
                 eff_weight = base_weight * bia
                 hira_out = conv_fn(
                     x_drop,
-                        eff_weight,
-                        bias=None,
-                        stride=base.stride,
-                        padding=base.padding,
-                        dilation=getattr(base, 'dilation', 1),
-                        groups=base.groups,
-                    )
+                    eff_weight,
+                    bias=None,
+                    stride=base.stride,
+                    padding=base.padding,
+                    dilation=getattr(base, "dilation", 1),
+                    groups=base.groups,
+                )
                 result = result + hira_out
 
             result = result.to(torch_result_dtype)
@@ -884,6 +865,7 @@ class _ConvNd(nn.Module, HiRALayer):
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "hira." + rep
+
 
 class Conv2d(_ConvNd):
     # HiRA implemented in a conv2d layer

@@ -44,6 +44,8 @@ def __getattr__(name):
         from .bnb import Linear4bit
 
         return Linear4bit
+
+
 #
 #     if (name == "EetqLoraLinear") and is_eetq_available():
 #         from .eetq import EetqLoraLinear
