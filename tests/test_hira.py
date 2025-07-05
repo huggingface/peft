@@ -40,25 +40,27 @@ def test_hira_linear_merge_unmerge_basic():
     output_after_merge = hira_linear(x)
 
     # Assert merge preserves output
-    assert torch.allclose(output_before_merge, output_after_merge, atol=1e-5), \
+    assert torch.allclose(output_before_merge, output_after_merge, atol=1e-5), (
         "Merged HiRA Linear output doesn't match original"
+    )
 
     # Unmerge adapter weights
     hira_linear.unmerge()
     output_after_unmerge = hira_linear(x)
 
     # Assert unmerge restores original output
-    assert torch.allclose(output_before_merge, output_after_unmerge, atol=1e-5), \
+    assert torch.allclose(output_before_merge, output_after_unmerge, atol=1e-5), (
         "Unmerged HiRA Linear output doesn't match original"
+    )
 
 
-
-
-
-@pytest.mark.parametrize("batch_size,in_ch,out_ch,length,rank", [
-    (2, 4, 6, 10, 3),
-    (3, 2, 5,  8, 2),
-])
+@pytest.mark.parametrize(
+    "batch_size,in_ch,out_ch,length,rank",
+    [
+        (2, 4, 6, 10, 3),
+        (3, 2, 5, 8, 2),
+    ],
+)
 def test_hira_conv1d_merge_unmerge(batch_size, in_ch, out_ch, length, rank):
     base_conv = nn.Conv1d(in_ch, out_ch, kernel_size=3, padding=1)
     hira_conv = HiraConv1d(
@@ -84,10 +86,13 @@ def test_hira_conv1d_merge_unmerge(batch_size, in_ch, out_ch, length, rank):
     assert torch.allclose(y0, y2, atol=1e-5), "Unmerged Conv1d HiRA output doesn't match original"
 
 
-@pytest.mark.parametrize("batch_size,in_ch,out_ch,H,W,rank", [
-    (2, 3, 5,  8,  8, 2),
-    (1, 1, 4, 10, 10, 1),
-])
+@pytest.mark.parametrize(
+    "batch_size,in_ch,out_ch,H,W,rank",
+    [
+        (2, 3, 5, 8, 8, 2),
+        (1, 1, 4, 10, 10, 1),
+    ],
+)
 def test_hira_conv2d_merge_unmerge(batch_size, in_ch, out_ch, H, W, rank):
     base_conv = nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1)
     hira_conv = HiraConv2d(
@@ -113,9 +118,9 @@ def test_hira_conv2d_merge_unmerge(batch_size, in_ch, out_ch, H, W, rank):
     assert torch.allclose(y0, y2, atol=1e-5), "Unmerged Conv2d HiRA output doesn't match original"
 
 
-
 def test_manual_hira_linear_equivalence():
     import torch.nn.functional as F
+
     torch.manual_seed(42)
     batch_size, input_dim, output_dim, rank = 3, 8, 6, 2
     adapter_name = "manual_test"
@@ -143,19 +148,17 @@ def test_manual_hira_linear_equivalence():
     y_hira = hira(x)
 
     # manual forward
-    W0 = base.weight.data          # (out, in)
+    W0 = base.weight.data  # (out, in)
     A = hira.hira_A[adapter_name]  # (r, in)
     B = hira.hira_B[adapter_name]  # (out, r)
-    BA = B @ A                      # (out, in)
-    effW = W0 * BA                  # element-wise
+    BA = B @ A  # (out, in)
+    effW = W0 * BA  # element-wise
     # base output
-    y0 = F.linear(x, W0)           # (batch, out)
+    y0 = F.linear(x, W0)  # (batch, out)
     # delta output
     y_delta = F.linear(x, effW)
     y_manual = y0 + y_delta
 
-    assert torch.allclose(y_hira, y_manual, atol=1e-6), \
+    assert torch.allclose(y_hira, y_manual, atol=1e-6), (
         f"HiRA forward mismatch: max diff = {(y_hira - y_manual).abs().max()}"
-
-
-
+    )

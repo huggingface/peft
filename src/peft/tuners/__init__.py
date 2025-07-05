@@ -112,5 +112,5 @@ __all__ = [
     "XLoraConfig",
     "XLoraModel",
     "get_eva_state_dict",
-    "initialize_lora_eva_weights"
+    "initialize_lora_eva_weights",
 ]
