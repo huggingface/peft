@@ -30,7 +30,7 @@ class GLoraConfig(PeftConfig):
         # Add other GLORA specific parameters from your sample if they belong in the config
     """
 
-    r: int = field(default=4, metadata={"help": "Lora attention dimension"})
+    r: int = field(default=4, metadata={"help": "Default rank of the LoRA matrices if the config contains LoRA parametrization."})
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
