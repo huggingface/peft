@@ -40,7 +40,7 @@ from transformers import AutoTokenizer, PretrainedConfig
 
 from peft import get_peft_model
 from peft.tuners.oft.config import OFTConfig
-
+from peft.utils import infer_device
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.10.0.dev0")
@@ -420,10 +420,12 @@ def b2mb(x):
 # This context manager is used to track the peak memory usage of the process
 class TorchTracemalloc:
     def __enter__(self):
+        device_type = infer_device()
+        self.torch_accelerator_module = getattr(torch, device_type, torch.cuda)
         gc.collect()
-        torch.cuda.empty_cache()
-        torch.cuda.reset_max_memory_allocated()  # reset the peak gauge to zero
-        self.begin = torch.cuda.memory_allocated()
+        self.torch_accelerator_module.empty_cache()
+        self.torch_accelerator_module.reset_max_memory_allocated()  # reset the peak gauge to zero
+        self.begin = self.torch_accelerator_module.memory_allocated()
         self.process = psutil.Process()
 
         self.cpu_begin = self.cpu_mem_used()
@@ -453,9 +455,9 @@ class TorchTracemalloc:
         self.peak_monitoring = False
 
         gc.collect()
-        torch.cuda.empty_cache()
-        self.end = torch.cuda.memory_allocated()
-        self.peak = torch.cuda.max_memory_allocated()
+        self.torch_accelerator_module.empty_cache()
+        self.end = self.torch_accelerator_module.memory_allocated()
+        self.peak = self.torch_accelerator_module.max_memory_allocated()
         self.used = b2mb(self.end - self.begin)
         self.peaked = b2mb(self.peak - self.begin)
 
@@ -594,6 +596,7 @@ def main(args):
         log_with=args.report_to,
         project_dir=logging_dir,
     )
+    torch_accelerator_module = getattr(torch, accelerator.device.type, torch.cuda)
     if args.report_to == "wandb":
         import wandb
 
@@ -636,7 +639,7 @@ def main(args):
         cur_class_images = len(list(class_images_dir.iterdir()))
 
         if cur_class_images < args.num_class_images:
-            torch_dtype = torch.float16 if accelerator.device.type == "cuda" else torch.float32
+            torch_dtype = torch.float16 if accelerator.device.type in ["cuda", "xpu"] else torch.float32
             if args.prior_generation_precision == "fp32":
                 torch_dtype = torch.float32
             elif args.prior_generation_precision == "fp16":
@@ -671,8 +674,7 @@ def main(args):
                     image.save(image_filename)
 
             del pipeline
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            torch_accelerator_module.empty_cache()
 
     # Handle the repository creation
     if accelerator.is_main_process:
@@ -1040,7 +1042,7 @@ def main(args):
                             )
 
                     del pipeline
-                    torch.cuda.empty_cache()
+                    torch_accelerator_module.empty_cache()
 
                 if global_step >= args.max_train_steps:
                     break

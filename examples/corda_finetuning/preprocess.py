@@ -21,6 +21,8 @@ from datautils import get_calib_data
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from accelerate.utils import set_seed
+
 from peft import get_peft_model
 from peft.tuners.lora.config import CordaConfig, LoraConfig
 from peft.tuners.lora.corda import preprocess_corda
@@ -36,10 +38,7 @@ def run_model(model, calib_loader):
 
 def main(args):
     # Setting random seed of numpy and torch
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    torch.cuda.manual_seed_all(args.seed)
-    torch.backends.cudnn.deterministic = True
+    set_seed(args.seed, deterministic=True)
 
     # Load model
     model_id = args.model_id
