@@ -71,6 +71,7 @@ def measure_inference_time(model, tokenizer, prompts, max_new_tokens, num_runs, 
                 outputs = model.generate(
                     **inputs,
                     max_new_tokens=max_new_tokens,
+                    min_new_tokens=max_new_tokens,
                     pad_token_id=tokenizer.pad_token_id,
                 )
                 end_time = time.perf_counter()

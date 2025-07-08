@@ -301,8 +301,25 @@ def validate_experiment_path(path: str) -> tuple[str, "BenchmarkConfig"]:
     """Validate experiment path, load and merge configs, and return them."""
     if not os.path.exists(path):
         raise FileNotFoundError(f"Experiment path not found: {path}")
-
-    experiment_name = os.path.basename(path)
+    
+    # For path like "experiments/loha/llama-3.2-3B/rank32/" -> "loha--llama-3.2-3B-rank32"
+    path_parts = os.path.normpath(path).split(os.sep)
+    
+    try:
+        experiments_idx = path_parts.index("experiments")
+    except ValueError:
+        experiment_name = os.path.basename(path.rstrip(os.sep))
+    else:
+        if experiments_idx + 1 < len(path_parts):
+            method_name = path_parts[experiments_idx + 1]
+            remaining_parts = path_parts[experiments_idx + 2:]
+            if remaining_parts:
+                remaining_name = "-".join(remaining_parts)
+                experiment_name = f"{method_name}--{remaining_name}"
+            else:
+                experiment_name = method_name
+        else:
+            experiment_name = os.path.basename(path.rstrip(os.sep))
 
     # Define paths for default and experiment-specific config files
     default_config_path = os.path.join(os.path.dirname(__file__), FILE_NAME_DEFAULT_CONFIG)
