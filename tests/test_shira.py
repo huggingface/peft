@@ -24,10 +24,7 @@ from torch import nn
 from peft import PeftModel, ShiraConfig, get_peft_model
 
 
-def custom_random_mask_function_with_custom_kwargs(custom_arg_1, custom_arg_2):
-    print(
-        f"Generating a custom random mask function with custom kwargs...new seed for this test example is {custom_arg_1 + custom_arg_2}"
-    )
+def custom_random_mask_function_with_custom_kwargs(custom_arg):
 
     def mask_fn(base_layer, r):
         """
@@ -37,7 +34,7 @@ def custom_random_mask_function_with_custom_kwargs(custom_arg_1, custom_arg_2):
         (shape: m, n) which must be binary 0 or 1 with num_shira_parameters = r(m+n) for linear layers. Device and
         dtype of mask must be same as base layer's weight's device and dtype.
         """
-        new_seed = custom_arg_1 + custom_arg_2
+        new_seed = custom_arg
         shape = base_layer.weight.shape
         num_shira_weights = r * (shape[0] + shape[1])
         random_generator = torch.Generator()
@@ -120,7 +117,6 @@ class TestShira:
         # so it will lead to different random sparse masks between saving and loading.
         # our goal is to make sure that loaded indices are exactly the same as the saved indices regardless of what initial random mask gets generated.
         # we will also make sure that parameters are saved and loaded correctly, and the output remains the same.
-        # torch.manual_seed(1)
         config = ShiraConfig(r=2, target_modules=["lin1", "lin2"], random_seed=56)
         # creates a default SHiRA adapter
         peft_model = get_peft_model(mlp, config, adapter_name="first")
@@ -194,9 +190,8 @@ class TestShira:
     def test_save_load_custom_mask_function(self, mlp, tmp_path):
         # we want to see if saving and loading works when a custom mask is involved
         config = ShiraConfig(r=2, mask_type="custom", target_modules=["lin1", "lin2"], init_weights=False)
-        custom_arg_1 = 56
-        custom_arg_2 = 64
-        custom_mask_fn = custom_random_mask_function_with_custom_kwargs(custom_arg_1, custom_arg_2)
+        custom_arg = 120
+        custom_mask_fn = custom_random_mask_function_with_custom_kwargs(custom_arg)
         config.mask_fn = custom_mask_fn
 
         # create a custom mask SHiRA adapter

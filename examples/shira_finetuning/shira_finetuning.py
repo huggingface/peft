@@ -33,7 +33,7 @@ def train(
     data_path: str = "yahma/alpaca-cleaned",
     output_dir: str = "olora",
     batch_size: int = 16,
-    num_epochs: float = 1,
+    num_epochs: int = 1,
     learning_rate: float = 3e-4,
     cutoff_len: int = 256,
     val_set_size: int = 16,
@@ -88,10 +88,7 @@ def train(
         tokenized_full_prompt = tokenize(full_prompt)
         return tokenized_full_prompt
 
-    def custom_random_mask_function_with_custom_kwargs(custom_arg_1, custom_arg_2):
-        print(
-            f"Generating a custom random mask function with custom kwargs...new seed for this test example is {custom_arg_1 + custom_arg_2}"
-        )
+    def custom_random_mask_function_with_custom_kwargs(custom_arg):
 
         def mask_fn(base_layer, r):
             """
@@ -100,7 +97,7 @@ def train(
             mask_fn must return only one mask (shape: m, n) which must be binary 0 or 1 with num_shira_parameters = r(m+n) for linear layers. Device and dtype
             of mask must be same as base layer's weight's device and dtype.
             """
-            new_seed = custom_arg_1 + custom_arg_2
+            new_seed = custom_arg
             shape = base_layer.weight.shape
             num_shira_weights = r * (shape[0] + shape[1])
             random_generator = torch.Generator()
@@ -125,9 +122,8 @@ def train(
         task_type="CAUSAL_LM",
     )
     if use_custom_random_mask_function_with_custom_kwargs:
-        custom_arg_1 = 56
-        custom_arg_2 = 64
-        custom_mask_fn = custom_random_mask_function_with_custom_kwargs(custom_arg_1, custom_arg_2)
+        custom_arg = 120
+        custom_mask_fn = custom_random_mask_function_with_custom_kwargs(custom_arg)
         config.mask_fn = custom_mask_fn
 
     model = get_peft_model(model, config)
@@ -187,7 +183,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_path", type=str, default="yahma/alpaca-cleaned")
     parser.add_argument("--output_dir", type=str, default="shira")
     parser.add_argument("--batch_size", type=int, default=16)
-    parser.add_argument("--num_epochs", type=float, default=1)
+    parser.add_argument("--num_epochs", type=int, default=1)
     parser.add_argument("--learning_rate", type=float, default=3e-4)
     parser.add_argument("--cutoff_len", type=int, default=256)
     parser.add_argument("--val_set_size", type=int, default=16)
