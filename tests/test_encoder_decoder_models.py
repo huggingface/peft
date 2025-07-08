@@ -26,7 +26,7 @@ from peft import (
     HRAConfig,
     IA3Config,
     LoraConfig,
-    MiSSConfig,
+    MissConfig,
     OFTConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
@@ -72,7 +72,7 @@ ALL_CONFIGS = [
         },
     ),
     (
-        MiSSConfig,
+        MissConfig,
         {
             "target_modules": None,
             "r": 2,

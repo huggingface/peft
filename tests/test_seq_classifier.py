@@ -24,7 +24,7 @@ from peft import (
     HRAConfig,
     IA3Config,
     LoraConfig,
-    MiSSConfig,
+    MissConfig,
     OFTConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
@@ -69,7 +69,7 @@ ALL_CONFIGS = [
         },
     ),
     (
-        MiSSConfig,
+        MissConfig,
         {
             "task_type": "SEQ_CLS",
             "target_modules": None,

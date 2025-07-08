@@ -21,7 +21,7 @@ from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, HfArgumentParser
 from trl import SFTConfig, SFTTrainer
 
-from peft import MiSSConfig, get_peft_model
+from peft import MissConfig, get_peft_model
 
 
 @dataclass
@@ -34,7 +34,7 @@ class ScriptArguments(SFTConfig):
     init_weights: Literal[True, "bat"] = field(
         default=True,
         metadata={
-            "help": ("True -> MiSS efficiency; `bat` -> Bat"),
+            "help": ("True -> MiSS efficience and balance; `bat` -> Bat, `mini` -> smaller MiSS efficience and balance"),
         },
     )
     miss_r: int = field(default=16)
@@ -66,7 +66,7 @@ elif script_args.base_model_name_or_path is not None:
     )
     tokenizer = AutoTokenizer.from_pretrained(script_args.base_model_name_or_path)
     tokenizer.pad_token_id = tokenizer.eos_token_id
-    miss_config = MiSSConfig(
+    miss_config = MissConfig(
         r=script_args.miss_r,
         target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
         bias="none",

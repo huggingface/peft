@@ -40,7 +40,7 @@ class PeftType(str, enum.Enum):
     - FOURIERFT
     - HRA
     - BONE
-    - MiSS
+    - MISS
     - RANDLORA
     - C3A
     """

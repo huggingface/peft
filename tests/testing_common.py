@@ -42,7 +42,7 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
-    MiSSConfig,
+    MissConfig,
     OFTConfig,
     PeftModel,
     PeftType,
@@ -180,7 +180,7 @@ CLASSES_MAPPING = {
     "vblora": (VBLoRAConfig, CONFIG_TESTING_KWARGS[10]),
     "oft": (OFTConfig, CONFIG_TESTING_KWARGS[11]),
     "bone": (BoneConfig, CONFIG_TESTING_KWARGS[12]),
-    "miss": (MiSSConfig, CONFIG_TESTING_KWARGS[12]),
+    "miss": (MissConfig, CONFIG_TESTING_KWARGS[12]),
     "lora+trainable_tokens": (LoraConfig, CONFIG_TESTING_KWARGS[13]),
     "randlora": (RandLoraConfig, CONFIG_TESTING_KWARGS[14]),
 }

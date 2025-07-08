@@ -22,7 +22,7 @@ from peft.utils import PeftType
 
 
 @dataclass
-class MiSSConfig(PeftConfig):
+class MissConfig(PeftConfig):
     """
     This is the configuration class to store the configuration of a [`MiSSModel`].
 
@@ -32,8 +32,9 @@ class MiSSConfig(PeftConfig):
             initialization method will not work. The rank of MiSS corresponds to a low-rank decomposition along the
             in_features dimension.
         miss_dropout (`float`):
-            The dropout probability for Lora layers.
+            The dropout probability for MiSS layers.
         mini_r (`int`):
+            The rank of MiSS corresponds to a low-rank decomposition along the out_features dimension.
             When you set `init_weights=mini`, you need to set `mini_r`. Please make sure that `out_features` is
             divisible by `mini_r`.
         target_modules (`Optional[Union[List[str], str]]`):

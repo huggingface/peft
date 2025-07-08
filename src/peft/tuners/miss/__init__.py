@@ -1,4 +1,4 @@
-# Copyright 2024-present the HuggingFace Inc. team.
+# Copyright 2025-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,11 +14,11 @@
 
 from peft.utils import register_peft_method
 
-from .config import MiSSConfig
-from .layer import MiSSLayer, MiSSLinear
-from .model import MiSSModel
+from .config import MissConfig
+from .layer import MissLayer, MissLinear
+from .model import MissModel
 
 
-__all__ = ["MiSSConfig", "MiSSLayer", "MiSSLinear", "MiSSModel"]
+__all__ = ["MissConfig", "MissLayer", "MissLinear", "MissModel"]
 
-register_peft_method(name="miss", config_cls=MiSSConfig, model_cls=MiSSModel)
+register_peft_method(name="miss", config_cls=MissConfig, model_cls=MissModel)

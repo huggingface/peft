@@ -22,7 +22,7 @@ import torch.nn.functional as F
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
 
-class MiSSLayer(BaseTunerLayer):
+class MissLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names = ("miss_block",)
     # All names of other parameters that may contain adapter-related parameters
@@ -73,7 +73,8 @@ class MiSSLayer(BaseTunerLayer):
         else:
             miss_dropout_layer = nn.Identity()
 
-        self.miss_dropout.update(nn.ModuleDict({adapter_name: miss_dropout_layer}))
+        self.miss_dropout[adapter_name] = miss_dropout_layer
+
 
         # Determine shape of MiSS weights
         base_layer = self.get_base_layer()
@@ -90,7 +91,9 @@ class MiSSLayer(BaseTunerLayer):
         elif init_weights == "mini":
             if self.out_features % mini_r != 0:
                 raise ValueError(
-                    "mini_r is divided along the out_features dimension. For optimal performance and implementation simplicity, it is recommended that out_features be divisible by mini_r."
+                    "mini_r is divided along the out_features dimension. For optimal performance and implementation simplicity,"
+                    "it is recommended that out_features be divisible by mini_r."
+                    "Error: {self.out_features} % mini_r != 0"
                 )
             self.reset_mini_parameters(adapter_name, r, mini_r)
         elif init_weights:
@@ -131,7 +134,7 @@ class MiSSLayer(BaseTunerLayer):
             warnings.warn("Unscaling operation for MiSS not supported! Keeping scale at 1.")
 
 
-class MiSSLinear(nn.Module, MiSSLayer):
+class MissLinear(nn.Module, MissLayer):
     """
     MiSS implemented in a dense layer.
     """
@@ -147,11 +150,10 @@ class MiSSLinear(nn.Module, MiSSLayer):
         **kwargs,
     ) -> None:
         super().__init__()
-        MiSSLayer.__init__(self, base_layer, **kwargs)
+        MissLayer.__init__(self, base_layer, **kwargs)
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, mini_r, miss_dropout, init_weights, **kwargs)
         self.miss_fn = init_weights
-        self.mini_r = mini_r
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -371,7 +373,9 @@ class MiSSLinear(nn.Module, MiSSLayer):
                         continue
                     miss = self.miss_block[active_adapter]
                     if self.miss_fn == "mini":
-                        miss = miss.repeat(1, self.base_layer.out_features // self.mini_r)
+                        # miss = miss.repeat(1, self.base_layer.out_features // self.mini_r)
+                        miss = miss.repeat(1, self.base_layer.out_features // self.miss_mini_r[active_adapter])
+
                     dropout = self.miss_dropout[active_adapter]
                     r = miss.size(0)
                     if x.size(-1) % r != 0:

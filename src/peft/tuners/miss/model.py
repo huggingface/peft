@@ -28,18 +28,18 @@ from peft.utils import (
     _get_submodules,
 )
 
-from .config import MiSSConfig
-from .layer import MiSSLayer, MiSSLinear
+from .config import MissConfig
+from .layer import MissLayer, MissLinear
 
 
-class MiSSModel(BaseTuner):
+class MissModel(BaseTuner):
     """
     Creates Householder reflection adaptation (MiSS) model from a pretrained model. The method is described in
     https://huggingface.co/papers/2409.15371
 
     Args:
         model (`torch.nn.Module`): The model to which the adapter tuner layers will be attached.
-        config ([`MiSSConfig`]): The configuration of the MiSS model.
+        config ([`MissConfig`]): The configuration of the MiSS model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
             Create empty adapter weights on meta device. Useful to speed up the loading process.
@@ -50,14 +50,14 @@ class MiSSModel(BaseTuner):
     Example:
         ```py
         >>> from diffusers import StableDiffusionPipeline
-        >>> from peft import MiSSModel, MiSSConfig
+        >>> from peft import MissModel, MissConfig
 
-        >>> config_te = MiSSConfig(
+        >>> config_te = MissConfig(
         ...     r=8,
         ...     target_modules=["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
         ...     init_weights=True,
         ... )
-        >>> config_unet = MiSSConfig(
+        >>> config_unet = MissConfig(
         ...     r=8,
         ...     target_modules=[
         ...         "proj_in",
@@ -73,18 +73,18 @@ class MiSSModel(BaseTuner):
         ... )
 
         >>> model = StableDiffusionPipeline.from_pretrained("runwayml/stable-diffusion-v1-5")
-        >>> model.text_encoder = MiSSModel(model.text_encoder, config_te, "default")
-        >>> model.unet = MiSSModel(model.unet, config_unet, "default")
+        >>> model.text_encoder = MissModel(model.text_encoder, config_te, "default")
+        >>> model.unet = MissModel(model.unet, config_unet, "default")
         ```
 
     **Attributes**:
         - **model** ([`~torch.nn.Module`]) -- The model to be adapted.
-        - **peft_config** ([`MiSSConfig`]): The configuration of the MiSS model.
+        - **peft_config** ([`MissConfig`]): The configuration of the MiSS model.
     """
 
     prefix: str = "miss_"
 
-    def _check_new_adapter_config(self, config: MiSSConfig) -> None:
+    def _check_new_adapter_config(self, config: MissConfig) -> None:
         """
         A helper method to check the config when a new adapter is being added.
 
@@ -125,8 +125,8 @@ class MiSSModel(BaseTuner):
         }
         kwargs["bias"] = bias
 
-        # If it is not a MiSSLayer, create a new module, else update it with new adapters
-        if not isinstance(target, MiSSLayer):
+        # If it is not a MissLayer, create a new module, else update it with new adapters
+        if not isinstance(target, MissLayer):
             new_module = self._create_new_module(miss_config, adapter_name, target, **kwargs)
             if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
@@ -183,7 +183,7 @@ class MiSSModel(BaseTuner):
                         p.requires_grad = True
             elif bias == "miss_only":
                 for name, m in model.named_modules():
-                    if isinstance(m, MiSSLayer) and hasattr(m, "bias") and m.bias is not None:
+                    if isinstance(m, MissLayer) and hasattr(m, "bias") and m.bias is not None:
                         m.bias.requires_grad = True
             else:
                 raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
@@ -196,7 +196,7 @@ class MiSSModel(BaseTuner):
             target_base_layer = target
 
         if isinstance(target_base_layer, torch.nn.Linear):
-            new_module = MiSSLinear(target, adapter_name, **kwargs)
+            new_module = MissLinear(target, adapter_name, **kwargs)
         else:
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only `torch.nn.Linear` is supported."
@@ -243,7 +243,7 @@ class MiSSModel(BaseTuner):
 
     def set_adapter(self, adapter_name):
         for module in self.model.modules():
-            if isinstance(module, MiSSLayer):
+            if isinstance(module, MissLayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
@@ -301,7 +301,7 @@ class MiSSModel(BaseTuner):
         new_adapter = None
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
-            if isinstance(target, MiSSLayer):
+            if isinstance(target, MissLayer):
                 target.delete_adapter(adapter_name)
                 if new_adapter is None:
                     new_adapter = target.active_adapters[:]
