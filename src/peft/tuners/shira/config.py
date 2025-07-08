@@ -122,7 +122,8 @@ class ShiraConfig(PeftConfig):
         if self.mask_type == "random":
             self.mask_fn = random_mask
         else:
-            warnings.warn(
-                f"Argument {self.mask_type=} is not recognized, please supply your own masking function by calling `config.mask_fn = my_mask_fn`. Please ignore this warning message if you are loading from a pretrained checkpoint."
-            )
+            if not self.inference_mode:
+                warnings.warn(
+                    f"Argument {self.mask_type=} is not recognized, please supply your own masking function by calling `config.mask_fn = my_mask_fn`."
+                )
             self.mask_fn = None

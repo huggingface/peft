@@ -31,7 +31,7 @@ from peft import (
 def train(
     base_model: str = "path/to/model",
     data_path: str = "yahma/alpaca-cleaned",
-    output_dir: str = "olora",
+    output_dir: str = "shira",
     batch_size: int = 16,
     num_epochs: int = 1,
     learning_rate: float = 3e-4,
