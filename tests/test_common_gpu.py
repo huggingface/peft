@@ -1884,7 +1884,7 @@ class TestSameAdapterDifferentDevices:
         config = OFTConfig(target_modules=["lin0"])
         model = get_peft_model(mlp, config)
         model = model.to(self.device)
-        model.lin0.oft_R.default.weight.cpu()
+        model.lin0.oft_R.default.cpu()
 
         # check that the adapter is indeed on CPU and the base model on GPU
         assert model.lin0.oft_R.default.weight.device.type == "cpu"

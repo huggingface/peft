@@ -266,6 +266,11 @@ class PeftCommonTester:
         else:  # a custom model
             assert "base_model" not in dct
 
+        # The Hub expects the lora tag to be set for PEFT LoRA models since they
+        # have explicit support for things like inference.
+        if model.active_peft_config.peft_type.value == "LORA":
+            assert "lora" in dct["tags"]
+
     def check_config_json(self, tmp_dirname, model):
         # check the generated config.json
         filename = os.path.join(tmp_dirname, "adapter_config.json")
@@ -1393,9 +1398,6 @@ class PeftCommonTester:
     def _test_training_prompt_learning_tasks(self, model_id, config_cls, config_kwargs):
         if not issubclass(config_cls, PromptLearningConfig):
             return pytest.skip(f"Test not applicable for {config_cls}")
-        if ("gemma" in model_id.lower()) and (config_cls == PrefixTuningConfig):
-            # TODO might be caused by the 4d causal attention mask of gemma
-            return pytest.skip("Prefix tuning + gemma is currently failing")
 
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)

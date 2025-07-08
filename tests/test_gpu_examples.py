@@ -3553,7 +3553,7 @@ class PeftAwqGPUTests(unittest.TestCase):
     # TODO remove marker if/once issue is resolved, most likely requiring a fix in AutoAWQ:
     # https://github.com/casper-hansen/AutoAWQ/issues/754
     @pytest.mark.xfail(
-        condition=is_torch_version("==", "2.7"),
+        condition=is_torch_version("==", "2.7.0") or is_torch_version("==", "2.7.1"),
         reason="Multi-GPU test currently not working with AutoAWQ and PyTorch 2.7",
         strict=True,
     )
@@ -3807,7 +3807,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         # torchao breaks with fp16 and if a previous test uses fp16, transformers will set this env var, which affects
         # subsequent tests, therefore the env var needs to be cleared explicitly
         #
-        # TODO: remove this once https://github.com/huggingface/transformers/pull/34886 is merged
+        # TODO: remove this once https://github.com/huggingface/transformers/pull/37259 is merged
         os.environ.pop("ACCELERATE_MIXED_PRECISION", None)
 
     def tearDown(self):
