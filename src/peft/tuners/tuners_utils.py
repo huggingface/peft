@@ -380,6 +380,10 @@ class BaseTuner(nn.Module, ABC):
                         submodule[adapter_name] = submodule[adapter_name].to(torch.float32)
                     continue
 
+                # SHiRA Indices BufferDict is None when mask_fn is None when loading from a pretrained checkpoint.
+                # Once the checkpoint is loaded, the indices get populated correctly.
+                if submodule[adapter_name] is None:
+                    continue
                 for param in submodule[adapter_name].parameters():
                     if param.dtype in dtypes_to_convert_to_fp32:
                         param.data = param.data.to(torch.float32)

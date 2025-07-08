@@ -22,6 +22,8 @@ import torch.nn.functional as F
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
+from .._buffer_dict import BufferDict
+
 
 class ShiraLayer(BaseTunerLayer):
     # List all names of layers that may contain trainable adapter weights
@@ -34,7 +36,8 @@ class ShiraLayer(BaseTunerLayer):
         self.r = {}
         self.scaling = {}
         self.shira_weight = nn.ParameterDict({})
-        self.shira_indices = {}
+        # self.shira_indices = {}
+        self.shira_indices = BufferDict({}, persistent=True)
         self.weight_shape = base_layer.weight.shape  # Assumes SHiRA is on some layer with "weight" parameter
 
         # Mark the weight as unmerged
@@ -93,8 +96,12 @@ class ShiraLayer(BaseTunerLayer):
                 raise ValueError(
                     f"The SHiRA indices and weights are not the same dimensions for adapter {adapter_name} in layer {self.base_layer}"
                 )
+            self._move_adapter_to_device_of_base_layer(adapter_name)
+        else:
+            # self.shira_indices[adapter_name] = torch.empty((2, self.shira_weight[adapter_name].shape[0]), dtype=torch.int, device=self.base_layer.weight.device)
+            self.shira_indices[adapter_name] = None
 
-        self._move_adapter_to_device_of_base_layer(adapter_name)
+        
         self.set_adapter(self.active_adapters)
 
     def reset_shira_parameters(self, adapter_name):
