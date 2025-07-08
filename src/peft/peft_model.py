@@ -2050,6 +2050,7 @@ class PeftModelForCausalLM(PeftModel):
                         cache_position=cache_position_,
                         batch_size=bs,
                         sequence_length=total_seq_len,
+                        position_ids=model_kwargs.get("position_ids", None),
                     )
                     model_kwargs["attention_mask"] = attention_mask_new
                 else:
