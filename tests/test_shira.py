@@ -25,7 +25,6 @@ from peft import PeftModel, ShiraConfig, get_peft_model
 
 
 def custom_random_mask_function_with_custom_kwargs(custom_arg):
-
     def mask_fn(base_layer, r):
         """
         This mask function is similar to the random_mask provided in src/peft/tuners/shira/mask_functions.py except the

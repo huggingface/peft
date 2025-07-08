@@ -22,6 +22,7 @@ import torch.nn.functional as F
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
+
 class ShiraLayer(BaseTunerLayer):
     # List all names of layers that may contain trainable adapter weights
     adapter_layer_names = ("shira_weight",)
@@ -92,7 +93,7 @@ class ShiraLayer(BaseTunerLayer):
                 raise ValueError(
                     f"The SHiRA indices and weights are not the same dimensions for adapter {adapter_name} in layer {self.base_layer}"
                 )
-        
+
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
