@@ -65,7 +65,13 @@ class LoraVariant:
         """Remove the adapter weights from the original weights, then return them"""
 
     @staticmethod
-    def forward(module: LoraLayer, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
+    def forward(
+        module: LoraLayer,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
         """
         The forward pass of the LoRA variant, should return the overall result (not just the diff)
 
@@ -74,6 +80,7 @@ class LoraVariant:
             active_adapter (str): The name of the active adapter
             x (torch.Tensor): The input to the forward call
             result (torch.Tensor): The result from the base model
+            **kwargs: Additional arguments passed from [`LoraLayer.forward`].
         """
         raise NotImplementedError
 
@@ -161,11 +168,11 @@ class LoraLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+    def resolve_lora_variant(self, *, use_dora: bool, use_alora: bool, **kwargs) -> Optional[LoraVariant]:
         """Return a matching LoRA variant for this layer type.
 
         Given the init arguments of this layer, return the correct LoRA variant, if any. E.g., if `use_dora=True`, this
-        method should return the DoRA variant for the given layer.
+        method should return the DoRA variant for the given layer. If `use_alora=True`, same for aLoRA.
 
         If there is no fitting variant, return None.
 
@@ -184,6 +191,7 @@ class LoraLayer(BaseTunerLayer):
         init_lora_weights,
         use_rslora,
         use_dora: bool = False,
+        use_alora: bool = False,
         use_qalora: bool = False,
         lora_bias: bool = False,
         qalora_group_size: int = 32,
@@ -198,7 +206,7 @@ class LoraLayer(BaseTunerLayer):
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
         lora_variant = self.resolve_lora_variant(
-            use_dora=use_dora, use_qalora=use_qalora, qalora_group_size=qalora_group_size
+            use_dora=use_dora, use_alora=use_alora, use_qalora=use_qalora, qalora_group_size=qalora_group_size
         )
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
@@ -566,8 +574,18 @@ class LoraLayer(BaseTunerLayer):
             # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
             # layer output
             sub_batch = x[sub_batch_indices_list[i]].to(lora_A.weight.dtype)
-            lora_output = lora_B(lora_A(dropout(sub_batch))) * scaling
-            result[sub_batch_indices_list[i]] += lora_output.to(torch_result_dtype)
+            if active_adapter not in self.lora_variant:  # vanilla LoRA
+                lora_output = lora_B(lora_A(dropout(sub_batch))) * scaling
+                result[sub_batch_indices_list[i]] += lora_output.to(torch_result_dtype)
+            else:
+                lora_output = self.lora_variant[active_adapter].forward(
+                    self,
+                    active_adapter=active_adapter,
+                    x=x,
+                    result=result,
+                    **kwargs,
+                )
+                result[sub_batch_indices_list[i]] += lora_output.to(torch_result_dtype)
 
         return result
 
@@ -596,6 +614,7 @@ class Linear(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        use_alora: bool = False,
         lora_bias: bool = False,
         **kwargs,
     ) -> None:
@@ -612,17 +631,20 @@ class Linear(nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
+            use_alora=use_alora,
             lora_bias=lora_bias,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
-        if not use_dora:
+    def resolve_lora_variant(self, *, use_dora: bool, use_alora: bool, **kwargs) -> Optional[LoraVariant]:
+        if not use_dora or use_alora:
             return None
 
-        from .variants import DoraLinearVariant
-
-        return DoraLinearVariant()
+        from .variants import DoraLinearVariant, ALoraLinearVariant
+        if use_alora: 
+            return ALoraLinearVariant()
+        else:
+            return DoraLinearVariant()
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -773,6 +795,7 @@ class Linear(nn.Module, LoraLayer):
                         active_adapter=active_adapter,
                         x=x,
                         result=result,
+                        **kwargs,
                     )
 
             result = result.to(torch_result_dtype)
@@ -821,6 +844,7 @@ class Embedding(nn.Module, LoraLayer):
         )
 
     def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+
         if not use_dora:
             return None
 
@@ -1047,6 +1071,7 @@ class Embedding(nn.Module, LoraLayer):
                         active_adapter=active_adapter,
                         x=x,
                         result=result,
+                        **kwargs,
                     )
             result = result.to(torch_result_dtype)
 
@@ -1074,7 +1099,8 @@ class _ConvNd(nn.Module, LoraLayer):
     ) -> None:
         super().__init__()
         LoraLayer.__init__(self, base_layer)
-
+        if kwargs.get("use_alora", False):
+            raise ValueError("aLoRA does not support adapting conv layers.")
         if base_layer.groups > 1:
             warnings.warn("LoRA adapter added to ConvNd layer with groups > 1. Merging is not supported.")
 
@@ -1323,6 +1349,7 @@ class _ConvNd(nn.Module, LoraLayer):
                         active_adapter=active_adapter,
                         x=x,
                         result=result,
+                        **kwargs,
                     )
 
             result = result.to(torch_result_dtype)
@@ -1422,7 +1449,8 @@ class MultiheadAttention(nn.Module, LoraLayer):
         if use_dora:
             # TODO: probably not so hard to implement
             raise ValueError(f"{self.__class__.__name__} does not support DoRA (yet), please set use_dora to False")
-
+        if kwargs.get("use_alora", False):
+            raise ValueError(f"{self.__class__.__name__} does not support aLoRA (yet), please set use_alora to False")
         super().__init__()
         LoraLayer.__init__(self, base_layer, **kwargs)
 
