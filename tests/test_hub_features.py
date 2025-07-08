@@ -218,3 +218,19 @@ class TestModelCard:
 
         assert model_card.data.tags is not None
         assert "transformers" not in model_card.data.tags
+
+    def test_custom_peft_type_does_not_raise(self, tmp_path):
+        # Passing a string value as peft_type value in the config is valid, so it should work.
+        # See https://github.com/huggingface/peft/issues/2634
+        model_id = "hf-internal-testing/tiny-random-Gemma3ForCausalLM"
+        with hub_online_once(model_id):
+            base_model = AutoModelForCausalLM.from_pretrained(model_id)
+            peft_config = LoraConfig()
+
+            # We simulate a custom PEFT type by using a string value of an existing method.  This skips the need for
+            # registering a new method but tests the case where we pass a string value instead of an enum.
+            peft_type = "LORA"
+            peft_config.peft_type = peft_type
+
+            peft_model = get_peft_model(base_model, peft_config)
+            peft_model.save_pretrained(tmp_path)

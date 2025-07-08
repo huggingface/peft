@@ -1443,7 +1443,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         base model is important for enabling support for HF inference providers but it also makes models more
         searchable on the HF hub.
         """
-        peft_method = self.active_peft_config.peft_type.value
+        peft_method = self.active_peft_config.peft_type
+        if not isinstance(peft_method, str):
+            peft_method = peft_method.value
 
         tags = []
 
