@@ -573,7 +573,6 @@ class BaseTuner(nn.Module, ABC):
                 # still record what would have been matched via the config so that the two results can be compared
                 if self._check_target_module_exists(peft_config, key):
                     targeted_modules_from_peft_config.append(key)
-                    self.targeted_module_names.append(key)
 
         ####################
         # CHECK FOR ERRORS #
