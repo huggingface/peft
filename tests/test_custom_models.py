@@ -63,7 +63,7 @@ from .testing_utils import get_state_dict, require_non_cpu
 # EmbConv1D has an embedding and a Conv1D layer
 # Conv2D has a Conv2D layer
 TEST_CASES = [
-    ("MLP using nn.Parameter 1 LoRA", "MlpUsingParameters", LoraConfig, {"target_modules": "lin0"}),
+    ("MLP using nn.Parameter 1 LoRA", "MlpUsingParameters", LoraConfig, {"target_parameters": ["lin0.weight"]}),
     ########
     # LoRA #
     ########
@@ -1174,7 +1174,7 @@ class _LinearUsingParameter(nn.Module):
     # TODO
     def __init__(self, in_features, out_features, bias=None):
         super().__init__()
-        self.in_features  = in_features
+        self.in_features = in_features
         self.out_features = out_features
         self.weight = nn.Parameter(torch.randn(in_features, out_features))
         if bias:
@@ -1182,16 +1182,6 @@ class _LinearUsingParameter(nn.Module):
 
     def forward(self, x):
         return x @ self.weight + self.bias
-
-
-# TODO
-from peft.tuners.lora.layer import ParamWrapper
-
-
-if not hasattr(LoraConfig, "_custom_modules") or (LoraConfig._custm_modules is None):
-    LoraConfig._custom_modules = {_LinearUsingParameter: ParamWrapper}
-else:
-    LoraConfig._custom_modules.update({_LinearUsingParameter: ParamWrapper})
 
 
 class MlpUsingParameters(nn.Module):

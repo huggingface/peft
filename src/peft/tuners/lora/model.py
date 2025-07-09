@@ -182,7 +182,9 @@ class LoraModel(BaseTuner):
         target_name,
         parent,
         current_key,
-    ):
+        *,
+        is_nn_parameter: bool = False,
+    ) -> None:
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
 
@@ -206,6 +208,7 @@ class LoraModel(BaseTuner):
             "lora_bias": lora_config.lora_bias,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
+            "is_nn_parameter": is_nn_parameter,
         }
         # for torchao merging, we need the get_apply_tensor_subclass from the quantization config
         try:
@@ -291,7 +294,7 @@ class LoraModel(BaseTuner):
                 raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
 
     @staticmethod
-    def _create_new_module(lora_config, adapter_name, target, **kwargs):
+    def _create_new_module(lora_config, adapter_name, target, *, is_nn_parameter: bool = False, **kwargs):
         # Collect dispatcher functions to decide what backend to use for the replaced LoRA layer. The order matters,
         # because the first match is always used. Therefore, the default layers should be checked last.
         dispatchers = []
@@ -343,7 +346,9 @@ class LoraModel(BaseTuner):
 
         new_module = None
         for dispatcher in dispatchers:
-            new_module = dispatcher(target, adapter_name, lora_config=lora_config, **kwargs)
+            new_module = dispatcher(
+                target, adapter_name, lora_config=lora_config, is_nn_parameter=is_nn_parameter, **kwargs
+            )
             if new_module is not None:  # first match wins
                 break
 
@@ -499,11 +504,12 @@ class LoraModel(BaseTuner):
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
         if peft_config.target_modules is None:
-            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
-                raise ValueError("Please specify `target_modules` in `peft_config`")
-            peft_config.target_modules = set(
-                TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
-            )
+            if model_config["model_type"] in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
+                peft_config.target_modules = set(
+                    TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
+                )
+            elif not peft_config.target_parameters:
+                raise ValueError("Please specify `target_modules` or `target_parameters`in `peft_config`")
         return peft_config
 
     def _unload_and_optionally_merge(

@@ -554,6 +554,12 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    target_parameters: Optional[list[str]] = field(
+        default=None,
+        metadata={
+            "help": "FIXME",
+        },
+    )
 
     def to_dict(self):
         """
@@ -572,6 +578,9 @@ class LoraConfig(PeftConfig):
         self.exclude_modules = (
             set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
+
+        if isinstance(self.target_parameters, str):
+            raise TypeError("`target_parameters` must be a list of strings or None.")
 
         # if target_modules is a regex expression, then layers_to_transform should be None
         if isinstance(self.target_modules, str) and self.layers_to_transform is not None:
