@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import math
 import warnings
+from contextlib import contextmanager
 from typing import Any, Optional, Union
 
 import torch
@@ -1759,6 +1760,69 @@ class MultiheadAttention(nn.Module, LoraLayer):
         return "lora." + rep
 
 
+class _LoraProxy(nn.Module):
+    def __init__(self, delta_weight):
+        super().__init__()
+        self.delta_weight
+
+    def forward(self, W):
+        with nn.parametrize.cached():
+            return W + self.delta_weight
+
+
+class ParamWrapper(Linear):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if kwargs.get("lora_dropout", 0):
+            raise ValueError("lora.ParamWrapper does not work with lora_dropout != 0.")
+
+    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+        if use_dora:
+            raise ValueError("lora.ParamWrapper does not support use_dora=True")
+
+    @contextmanager
+    def _activate_lora(self, active_adapters: list[str]):
+        if not active_adapters:
+            yield
+            return
+
+        delta_weight = None
+        for active_adapter in active_adapters:
+            if delta_weight is None:
+                delta_weight = self.get_delta_weight(active_adapter)
+            else:
+                delta_weight = delta_weight + self.get_delta_weight(active_adapter)
+
+        requires_grad_before = self.base_layer.weight.requires_grad
+        nn.parametrize.register_parametrization(
+            self.base_layer,
+            'weight',
+            _LoraProxy(delta_weight)
+        )
+        self.base_layer.parametrizations.weight.original.requires_grad_(requires_grad_before)
+        try:
+            yield
+        finally:
+            nn.parametrize.remove_parametrizations(self.base_layer, "weight", leave_parametrized=False)
+
+    def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        self._check_forward_args(x, *args, **kwargs)
+        adapter_names = kwargs.pop("adapter_names", None)
+
+        if self.disable_adapters:
+            if self.merged:
+                self.unmerge()
+            result = self.base_layer(x, *args, **kwargs)
+        elif adapter_names is not None:
+            raise ValueError("lora.ParamWrapper does not support mixed batch inference")
+        elif self.merged:
+            result = self.base_layer(x, *args, **kwargs)
+        else:
+            with self._activate_lora(self.active_adapters):
+                result = self.base_layer(x, *args, **kwargs)
+        return result
+
+
 def dispatch_default(
     target: torch.nn.Module,
     adapter_name: str,
@@ -1806,5 +1870,8 @@ def dispatch_default(
             kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = True
         kwargs.update(lora_config.loftq_config)
         new_module = Linear(target, adapter_name, is_target_conv_1d_layer=True, **kwargs)
+
+    if new_module is None:
+        breakpoint()
 
     return new_module
