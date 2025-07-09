@@ -214,11 +214,12 @@ def get_peft_model_state_dict(
     # check the common embedding layers in `target_modules` to reset `save_embedding_layers` if necessary
     is_embedding_in_target_modules = False
     embedding_is_targeted = False
-    if isinstance(config.target_modules, str):
-        # TODO: implement this; note: this change is not directly related to the PR, the bug already existed b4
-        pass
-    elif config.target_modules:
-        embedding_is_targeted = any(k in config.target_modules for k in EMBEDDING_LAYER_NAMES)
+    if hasattr(config, "target_modules"):
+        if isinstance(config.target_modules, str):
+            # TODO: implement this; note: this change is not directly related to the PR, the bug already existed b4
+            pass
+        elif config.target_modules:
+            embedding_is_targeted = any(k in config.target_modules for k in EMBEDDING_LAYER_NAMES)
     if (
         save_embedding_layers == "auto"
         and hasattr(config, "target_modules")
