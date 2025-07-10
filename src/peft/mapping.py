@@ -65,8 +65,11 @@ def inject_adapter_in_model(
             The name of the adapter to be injected, if not provided, the default adapter name is used ("default").
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
             Create empty adapter weights on meta device. Useful to speed up the loading process.
-
-        FIXME
+        state_dict (`dict`, *optional*, defaults to `None`)
+            If a state_dict is passed here, the adapters will be injected based on the entries of the state_dict. This
+            can be useful when the exact `target_modules` of the PEFT method is unknown, for instance because the
+            checkpoint was created without meta data. Note that the values from the state_dict are not used, only the
+            keys are used to determine the correct layers that should be adapted.
     """
     if peft_config.is_prompt_learning or peft_config.is_adaption_prompt:
         raise ValueError("`create_and_replace` does not support prompt learning and adaption prompt yet.")

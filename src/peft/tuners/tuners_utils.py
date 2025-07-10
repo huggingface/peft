@@ -155,8 +155,6 @@ class BaseTuner(nn.Module, ABC):
 
     The easiest is to check what is done in the `peft.tuners.lora.LoraModel` class.
 
-    FIXME
-
     Attributes:
         model (`torch.nn.Module`):
             The model to which the adapter tuner layers will be attached.
@@ -444,8 +442,6 @@ class BaseTuner(nn.Module, ABC):
 
         The corresponding PEFT config is directly retrieved from the `peft_config` attribute of the BaseTuner class.
 
-        FIXME
-
         Args:
             model (`nn.Module`):
                 The model to be tuned.
@@ -455,7 +451,11 @@ class BaseTuner(nn.Module, ABC):
                 Whether to autocast the adapter dtype. Defaults to `True`.
             low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
                 Create empty adapter weights on meta device. Useful to speed up the loading process.
-            FIXME
+            state_dict (`dict`, *optional*, defaults to `None`)
+                If a state_dict is passed here, the adapters will be injected based on the entries of the state_dict.
+                This can be useful when the exact `target_modules` of the PEFT method is unknown, for instance because
+                the checkpoint was created without meta data. Note that the values from the state_dict are not used,
+                only the keys are used to determine the correct layers that should be adapted.
 
         """
         ###################################
