@@ -96,3 +96,11 @@ class TestLowLevelFunctional:
 
         assert hasattr(model.linear2, "weight")
         assert hasattr(model.linear2, "bias")
+
+    def test_inject_adapter_vera(self):
+        model = DummyModel()
+        config = VeraConfig(target_modules=["linear"])
+        msg = "It is not possible to directly inject VeRA"
+        with pytest.raises(ValueError, match=msg):
+            inject_adapter_in_model(config, model)
+
