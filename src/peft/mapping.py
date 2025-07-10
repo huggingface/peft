@@ -76,13 +76,6 @@ def inject_adapter_in_model(
             f"`inject_adapter_in_model` does not support {peft_config.peft_type} yet. Please use `get_peft_model`."
         )
 
-    if (peft_config.peft_type == PeftType.VERA) and peft_config.save_projection:
-        # does not work because vera_A and vera_B are saved on VeraModel
-        raise ValueError(
-            "It is not possible to directly inject VeRA into a model when save_projection=True. Either use "
-            "get_peft_model or set save_projection=False"
-        )
-
     tuner_cls = PEFT_TYPE_TO_TUNER_MAPPING[peft_config.peft_type]
 
     # By instantiating a peft model we are injecting randomly initialized LoRA layers into the model's modules.
