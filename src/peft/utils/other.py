@@ -25,6 +25,7 @@ from typing import Any, Optional, Union
 
 import accelerate
 import torch
+import transformers
 from accelerate import FullyShardedDataParallelPlugin
 from accelerate.hooks import add_hook_to_module, remove_hook_from_module
 from accelerate.utils import is_npu_available, is_xpu_available
@@ -1299,17 +1300,19 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
 
 
 def create_attention_mask(
-    model, *, model_input, attention_mask, past_key_values, cache_position, batch_size, sequence_length
+    model, *, model_input, attention_mask, past_key_values, cache_position, batch_size, sequence_length, position_ids
 ):
     # adapted from:
     # https://github.com/huggingface/transformers/blob/cb4c56ce0dfa1350267ed28e57760986a58a9ba4/src/transformers/generation/utils.py#L644-L680
     # In PEFT, we sometimes need to re-create the attention mask. This is because some prompt learning methods insert
     # new items into the sequence, which results in the attention mask needing an update. We re-use transformers code
     # for this as much as possible.
-    try:
+    transformers_ge_4_53_1 = version.parse(transformers.__version__) >= version.parse("4.53.1")
+    if transformers_ge_4_53_1:
+        # the function already exists in v4.53.0 but has a different signature, so we check for 4.53.1
         from transformers.masking_utils import create_masks_for_generate
-    except ImportError as exc:
-        raise ImportError("Your transformers version is too old, please upgrade it to > 4.52") from exc
+    else:
+        raise ImportError("Your transformers version is too old, please upgrade it to >= 4.53.1")
 
     # Create the causal mask with fixed shape in advance, to reduce recompilations. If the function to create
     # the 4D causal mask exists, it should be present in the base model (XXXModel class) or in its decoder.
@@ -1332,6 +1335,7 @@ def create_attention_mask(
             cache_position=cache_position,
             past_key_values=past_key_values,
             token_type_ids=token_type_ids,
+            position_ids=position_ids,
         )
     else:
         attention_mask = causal_mask_creation_function(
@@ -1343,5 +1347,6 @@ def create_attention_mask(
             batch_size=batch_size,
             config=model.config,
             past_key_values=past_key_values,
+            position_ids=position_ids,
         )
     return attention_mask
