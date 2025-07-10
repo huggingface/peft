@@ -75,8 +75,8 @@ class IA3Model(BaseTuner):
 
     prefix: str = "ia3_"
 
-    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False):
-        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
+    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False, **kwargs):
+        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage, **kwargs)
 
     @staticmethod
     def _create_new_module(ia3_config, adapter_name, target, **kwargs):
