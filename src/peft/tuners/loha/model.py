@@ -20,7 +20,7 @@ from torch import nn
 from peft.tuners.lycoris_utils import LycorisConfig, LycorisTuner
 from peft.utils.other import get_pattern_key
 
-from .layer import Conv2d, Linear, LoHaLayer
+from .layer import Conv1d, Conv2d, Linear, LoHaLayer
 
 
 class LoHaModel(LycorisTuner):
@@ -84,6 +84,7 @@ class LoHaModel(LycorisTuner):
     prefix: str = "hada_"
     layers_mapping: dict[type[torch.nn.Module], type[LoHaLayer]] = {
         torch.nn.Conv2d: Conv2d,
+        torch.nn.Conv1d: Conv1d,
         torch.nn.Linear: Linear,
     }
 
