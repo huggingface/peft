@@ -29,6 +29,7 @@ from torch import nn
 from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
 
+from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
 from peft.utils.constants import (
     DUMMY_MODEL_CONFIG,
@@ -524,7 +525,10 @@ class BaseTuner(nn.Module, ABC):
                 existing_adapter_map[key] = module
 
         # TODO: check if this the most robust way
-        state_dict_keys = {k.rsplit(".", 2)[0] for k in state_dict} if state_dict is not None else set()
+        module_names: set[str] = set()
+        if state_dict is not None:
+            prefix = PEFT_TYPE_TO_PREFIX_MAPPING[peft_config.peft_type]
+            module_names = {k.rsplit("." + prefix, 1)[0] for k in state_dict}
 
         for key, module in named_modules:
             if not key:
@@ -558,7 +562,7 @@ class BaseTuner(nn.Module, ABC):
                         )
             else:
                 # use the state_dict to match modules instead
-                if key not in state_dict_keys:
+                if key not in module_names:
                     unmatched_modules.append(key)
                 else:
                     self.targeted_module_names.append(key)
@@ -585,21 +589,21 @@ class BaseTuner(nn.Module, ABC):
             targeted_set_from_state_dict = set(self.targeted_module_names)
             diff_peft_config = targeted_set_from_peft_config - targeted_set_from_state_dict
             diff_state_dict = targeted_set_from_state_dict - targeted_set_from_peft_config
-            error_msg = ""
+            warning_msg = ""
             if diff_peft_config or diff_state_dict:
-                error_msg = (
+                warning_msg = (
                     "While injecting the PEFT adapters, an inconsistency was discovered between the PEFT config and "
                     "the provided state_dict. This is not necessarily an issue and can be ignored if this was the "
                     "intent. "
                 )
             if diff_peft_config:
-                error_msg += f"The PEFT config contained these additional target modules: {sorted(diff_peft_config)}. "
+                warning_msg += (
+                    f"The PEFT config contained these additional target modules: {sorted(diff_peft_config)}. "
+                )
             if diff_state_dict:
-                error_msg += f"The state_dict contained these additional target modules: {sorted(diff_state_dict)}. "
-            if error_msg:
-                # FIXME for debugging purposes, raise here
-                1/0
-                warnings.warn(error_msg)
+                warning_msg += f"The state_dict contained these additional target modules: {sorted(diff_state_dict)}. "
+            if warning_msg:
+                warnings.warn(warning_msg, RuntimeWarning)
 
         if not self.targeted_module_names and not uses_dummy_target_modules:
             if excluded_modules and not unmatched_modules:

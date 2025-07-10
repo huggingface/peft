@@ -14,11 +14,27 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import copy
+import re
+
 import pytest
 import torch
+from diffusers import StableDiffusionPipeline
+from transformers import AutoModel, AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoModelForSequenceClassification
 
-from peft import LoraConfig, get_peft_model_state_dict, inject_adapter_in_model
+from peft import (
+    AdaLoraConfig,
+    IA3Config,
+    LoKrConfig,
+    LoraConfig,
+    RandLoraConfig,
+    VeraConfig,
+    get_peft_model_state_dict,
+    inject_adapter_in_model,
+)
 from peft.utils import ModulesToSaveWrapper
+
+from .testing_common import hub_online_once
 
 
 class DummyModel(torch.nn.Module):
@@ -104,3 +120,200 @@ class TestLowLevelFunctional:
         with pytest.raises(ValueError, match=msg):
             inject_adapter_in_model(config, model)
 
+
+class TestInjectAdapterFromStateDict:
+    # The inject_adapter_in_model function can determine the target modules based on the LoraConfig (default) or based
+    # on a state_dict (or rather, the state_dict keys). Here we test that the latter works as expected.
+
+    # We test a subset of model classes and PEFT configs, testing everything would be excessive
+    @pytest.mark.parametrize(
+        "model_cls_and_id",
+        [
+            (AutoModelForCausalLM, "trl-internal-testing/tiny-random-LlamaForCausalLM"),
+            (AutoModel, "hf-internal-testing/tiny-random-BertModel"),
+            (AutoModelForSeq2SeqLM, "hf-internal-testing/tiny-random-BartForConditionalGeneration"),
+            (AutoModelForSequenceClassification, "hf-internal-testing/tiny-random-RobertaForSequenceClassification"),
+        ],
+        ids=["Llama", "Bert", "Bart", "Roberta"],
+    )
+    @pytest.mark.parametrize(
+        "config",
+        [
+            AdaLoraConfig(total_step=5),
+            IA3Config(),
+            LoKrConfig(),
+            LoraConfig(),
+            RandLoraConfig(),
+        ],
+        ids=["AdaLoRA", "IA3", "LoKr", "LoRA", "RandLoRA"],
+    )
+    def test_inject_from_state_dict_and_from_config_target_same_layers(self, model_cls_and_id, config):
+        model_cls, model_id = model_cls_and_id
+        config = copy.deepcopy(config)  # since PEFT may mutate it
+
+        with hub_online_once(model_id):
+            # use config for injection
+            model = model_cls.from_pretrained(model_id)
+            model = inject_adapter_in_model(config, model)
+            sd_before = get_peft_model_state_dict(model)
+            del model
+
+            model = model_cls.from_pretrained(model_id)
+            # TODO check no warnings
+            model = inject_adapter_in_model(config, model, state_dict=sd_before)
+            sd_after = get_peft_model_state_dict(model)
+
+            # We exepct the same keys and the same shapes of the weights. Don't check the values: injection is only
+            # about creating the PEFT adapter, not about loading the actual weights
+            assert len(sd_before) > 0
+            assert sd_before.keys() == sd_after.keys()
+            for key in sd_before.keys():
+                assert sd_before[key].shape == sd_after[key].shape
+
+    def test_inject_from_state_dict_transformers(self):
+        model_id = "facebook/opt-125m"
+        config = LoraConfig()
+
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            model.add_adapter(config)
+            sd_before = get_peft_model_state_dict(model)
+            del model
+
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            model = inject_adapter_in_model(config, model, state_dict=sd_before)
+            sd_after = get_peft_model_state_dict(model)
+
+            # We exepct the same keys and the same shapes of the weights. Don't check the values: injection is only
+            # about creating the PEFT adapter, not about loading the actual weights
+            assert len(sd_before) > 0
+            assert sd_before.keys() == sd_after.keys()
+            for key in sd_before.keys():
+                assert sd_before[key].shape == sd_after[key].shape
+
+    def test_inject_from_state_dict_stable_diffusion(self):
+        # same test as above, but with stable diffusion model and only testing LoRA
+        model_id = "hf-internal-testing/tiny-sd-pipe"
+        config_text_encoder = LoraConfig(target_modules=["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"])
+        config_unet = LoraConfig(
+            target_modules=[
+                "proj_in",
+                "proj_out",
+                "to_k",
+                "to_q",
+                "to_v",
+                "to_out.0",
+                "ff.net.0.proj",
+                "ff.net.2",
+            ]
+        )
+        with hub_online_once(model_id):
+            pipe = StableDiffusionPipeline.from_pretrained(model_id)
+            pipe.text_encoder.add_adapter(config_text_encoder)
+            pipe.unet.add_adapter(config_unet)
+
+            sd_te_before = get_peft_model_state_dict(pipe.text_encoder)
+            sd_unet_before = get_peft_model_state_dict(pipe.unet)
+            del pipe
+
+            pipe = StableDiffusionPipeline.from_pretrained(model_id)
+            inject_adapter_in_model(config_text_encoder, pipe.text_encoder, state_dict=sd_te_before)
+            inject_adapter_in_model(config_unet, pipe.unet, state_dict=sd_unet_before)
+
+            sd_te_after = get_peft_model_state_dict(pipe.text_encoder)
+            sd_unet_after = get_peft_model_state_dict(pipe.unet)
+
+            # We exepct the same keys and the same shapes of the weights. Don't check the values: injection is only
+            # about creating the PEFT adapter, not about loading the actual weights
+            assert len(sd_te_before) > 0
+            assert sd_te_before.keys() == sd_te_after.keys()
+            for key in sd_te_before.keys():
+                assert sd_te_before[key].shape == sd_te_after[key].shape
+
+            assert len(sd_unet_before) > 0
+            assert sd_unet_before.keys() == sd_unet_after.keys()
+            for key in sd_unet_before.keys():
+                assert sd_unet_before[key].shape == sd_unet_after[key].shape
+
+    def test_inject_from_state_dict_low_cpu_mem_usage(self):
+        model_id = "facebook/opt-125m"
+        config = LoraConfig()
+
+        with hub_online_once(model_id):
+            # use config for injection
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            model = inject_adapter_in_model(config, model)
+            sd_before = get_peft_model_state_dict(model)
+            del model
+
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            model = inject_adapter_in_model(config, model, state_dict=sd_before, low_cpu_mem_usage=True)
+            # all PEFT parameters should be on meta device
+            assert {p.device.type for p in get_peft_model_state_dict(model).values()} == {"meta"}
+
+    def test_inject_from_state_dict_missing_keys_warning(self):
+        # check that if the PEFT config specifies **more** taget modules than the state_dict, we get a warning for that
+        model_id = "facebook/opt-125m"
+        config = LoraConfig()
+
+        with hub_online_once(model_id):
+            # use config for injection
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            model = inject_adapter_in_model(config, model)
+            sd_before = get_peft_model_state_dict(model)
+            del model
+
+            # delete a keys for one module from state_dict
+            del sd_before["model.decoder.layers.5.self_attn.q_proj.lora_A.weight"]
+            del sd_before["model.decoder.layers.5.self_attn.q_proj.lora_B.weight"]
+
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            msg = re.escape(
+                "While injecting the PEFT adapters, an inconsistency was discovered between the PEFT config and "
+                "the provided state_dict. This is not necessarily an issue and can be ignored if this was the "
+                "intent. The PEFT config contained these additional target modules: "
+                "['model.decoder.layers.5.self_attn.q_proj']. "
+            )
+
+            with pytest.warns(RuntimeWarning, match=msg):  # as rec:#(UserWarning, match=msg) as rec:
+                model = inject_adapter_in_model(config, model, state_dict=sd_before, low_cpu_mem_usage=True)
+
+            # besides the warning, the rest of the injection should work
+            sd_after = get_peft_model_state_dict(model)
+            assert len(sd_before) > 0
+            assert sd_before.keys() == sd_after.keys()
+            for key in sd_before.keys():
+                assert sd_before[key].shape == sd_after[key].shape
+
+    def test_inject_from_state_dict_extra_keys_warning(self):
+        # check that if the PEFT config specifies **fewer** taget modules than the state_dict, we get a warning for that
+        model_id = "facebook/opt-125m"
+        config = LoraConfig()
+
+        with hub_online_once(model_id):
+            # use config for injection
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            model = inject_adapter_in_model(config, model)
+            sd_before = get_peft_model_state_dict(model)
+            del model
+
+            # remove q_proj of layer 5 from the PEFT config
+            config.exclude_modules = ["model.decoder.layers.5.self_attn.q_proj"]
+
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            msg = re.escape(
+                "While injecting the PEFT adapters, an inconsistency was discovered between the PEFT config and "
+                "the provided state_dict. This is not necessarily an issue and can be ignored if this was the "
+                "intent. The state_dict contained these additional target modules: "
+                "['model.decoder.layers.5.self_attn.q_proj']. "
+            )
+
+            with pytest.warns(RuntimeWarning, match=msg):
+                model = inject_adapter_in_model(config, model, state_dict=sd_before, low_cpu_mem_usage=True)
+
+            # besides the warning, the rest of the injection should work
+            sd_after = get_peft_model_state_dict(model)
+            assert len(sd_before) > 0
+            assert sd_before.keys() == sd_after.keys()
+            for key in sd_before.keys():
+                assert sd_before[key].shape == sd_after[key].shape
