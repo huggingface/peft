@@ -14,8 +14,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import unittest
-
+import pytest
 import torch
 
 from peft import LoraConfig, get_peft_model_state_dict, inject_adapter_in_model
@@ -37,9 +36,11 @@ class DummyModel(torch.nn.Module):
         return x
 
 
-class TestPeft(unittest.TestCase):
-    def setUp(self):
-        self.model = DummyModel()
+class TestLowLevelFunctional:
+    # Some simple tests for the low level API
+    @pytest.fixture
+    def model(self):
+        model = DummyModel()
 
         lora_config = LoraConfig(
             lora_alpha=16,
@@ -49,25 +50,25 @@ class TestPeft(unittest.TestCase):
             target_modules=["linear"],
         )
 
-        self.model = inject_adapter_in_model(lora_config, self.model)
+        return inject_adapter_in_model(lora_config, model)
 
-    def test_inject_adapter_in_model(self):
+    def test_inject_adapter_in_model(self, model):
         dummy_inputs = torch.LongTensor([[0, 1, 2, 3, 4, 5, 6, 7]])
-        _ = self.model(dummy_inputs)
+        _ = model(dummy_inputs)
 
-        for name, module in self.model.named_modules():
+        for name, module in model.named_modules():
             if name == "linear":
                 assert hasattr(module, "lora_A")
                 assert hasattr(module, "lora_B")
 
-    def test_get_peft_model_state_dict(self):
-        peft_state_dict = get_peft_model_state_dict(self.model)
+    def test_get_peft_model_state_dict(self, model):
+        peft_state_dict = get_peft_model_state_dict(model)
 
         for key in peft_state_dict.keys():
             assert "lora" in key
 
-    def test_modules_to_save(self):
-        self.model = DummyModel()
+    def test_modules_to_save(selfv):
+        model = DummyModel()
 
         lora_config = LoraConfig(
             lora_alpha=16,
@@ -78,20 +79,20 @@ class TestPeft(unittest.TestCase):
             modules_to_save=["embedding", "linear2"],
         )
 
-        self.model = inject_adapter_in_model(lora_config, self.model)
+        model = inject_adapter_in_model(lora_config, model)
 
-        for name, module in self.model.named_modules():
+        for name, module in model.named_modules():
             if name == "linear":
                 assert hasattr(module, "lora_A")
                 assert hasattr(module, "lora_B")
             elif name in ["embedding", "linear2"]:
                 assert isinstance(module, ModulesToSaveWrapper)
 
-        state_dict = get_peft_model_state_dict(self.model)
+        state_dict = get_peft_model_state_dict(model)
 
         assert "embedding.weight" in state_dict.keys()
 
-        assert hasattr(self.model.embedding, "weight")
+        assert hasattr(model.embedding, "weight")
 
-        assert hasattr(self.model.linear2, "weight")
-        assert hasattr(self.model.linear2, "bias")
+        assert hasattr(model.linear2, "weight")
+        assert hasattr(model.linear2, "bias")
