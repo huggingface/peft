@@ -158,7 +158,7 @@ def get_peft_model_state_dict(
         to_return = {k: state_dict[k] for k in state_dict if shira_prefix in k}
         if platform.system() == "Windows":
             warnings.warn(
-                "Windows has issues saving integers into safetensors. Hence, we convert shira_indices to float32"
+                "Windows has issues saving integers into safetensors. Hence, we convert shira_indices to float32 "
                 "before saving on Windows OS. The shira_indices will always be converted to integers when loading."
             )
         for name, module in model.named_modules():
@@ -429,8 +429,8 @@ def set_peft_model_state_dict(
         elif config.peft_type == PeftType.SHIRA:
             if platform.system() == "Windows":
                 warnings.warn(
-                    "Windows has issues saving integers into safetensors. Hence, we had converted shira_indices"
-                    "to float32 before saving on Windows OS. The shira_indices will always be converted to integers"
+                    "Windows has issues saving integers into safetensors. Hence, we had converted shira_indices "
+                    "to float32 before saving on Windows OS. The shira_indices will always be converted to integers "
                     "when loading."
                 )
             for name, module in model.named_modules():
