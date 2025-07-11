@@ -21,6 +21,7 @@ import warnings
 from abc import ABC, abstractmethod
 from contextlib import contextmanager, nullcontext
 from typing import Any, Optional, Union, overload
+from dataclasses import asdict, is_dataclass
 
 import torch
 from accelerate.hooks import AlignDevicesHook
@@ -662,6 +663,8 @@ class BaseTuner(nn.Module, ABC):
         model_config = getattr(model, "config", DUMMY_MODEL_CONFIG)
         if hasattr(model_config, "to_dict"):
             model_config = model_config.to_dict()
+        elif is_dataclass(model_config):
+            model_config = asdict(model_config)
         return model_config
 
     def _get_tied_target_modules(self, model: nn.Module) -> list[str]:
