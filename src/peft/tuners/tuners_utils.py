@@ -286,6 +286,7 @@ class BaseTuner(nn.Module, ABC):
         target_name: str,
         parent: nn.Module,
         current_key: str,
+        parameter_name: Optional[str] = None,
     ) -> None:
         r"""
         Inplace replacement of the target module with the adapter layer. This method needs to be overridden by all the
@@ -306,6 +307,8 @@ class BaseTuner(nn.Module, ABC):
                 The parent module.
             current_key (`str`):
                 The key of the current target being adapted.
+            parameter_name (`str`, *optional*)
+                If, and only if, an `nn.Parameter` is being targeted, this is the name of the parameter.
         """
         ...
 
@@ -618,14 +621,16 @@ class BaseTuner(nn.Module, ABC):
         # TODO very simple matching, might not cover all use cases
         target_names = set(peft_config.target_parameters)
         for module_name, module in model.named_modules():
-            for param_name, param in module.named_parameters(prefix=module_name, recurse=False):
+            for param_name, param in module.named_parameters(recurse=False):
+                # It is possible that the layer is already a PEFT layer and needs updating with a new adapter. In this
+                # case, the name of parameter would be something like `model.layers.0.experts.base_layer.weight`, i.e.
+                # there is a "base_layer" inserted in the name. We need to remove that, otherwise we won't be able to
+                # match correctly (in this case, "experts.weight" would not match).
+                prefix, _, suffix = module_name.rpartition(".base_layer")
+                module_name = prefix + suffix
                 key = f"{module_name}.{param_name}"
                 # we're interested in finding the "lowest" module that contains the parameter, hence recurse=False
                 if (key in target_names) or any(key.endswith(f".{target_key}") for target_key in target_names):
-                    if not param_name.endswith(".weight"):
-                        # FIXME
-                        raise ValueError("Need to implement possibility for different names")
-
                     self.targeted_parameter_names.append(key)
 
                     parent, target, target_name = _get_submodules(model, module_name)
@@ -639,7 +644,7 @@ class BaseTuner(nn.Module, ABC):
                             target_name,
                             parent,
                             current_key=key,
-                            is_nn_parameter=True,
+                            parameter_name=param_name.rpartition(".")[-1],
                         )
 
     def merge_adapter(self, adapter_names: Optional[list[str]] = None, safe_merge: bool = False) -> None:
@@ -948,6 +953,7 @@ class BaseTunerLayer(ABC):
             if any(p.device == meta for p in adapter_layer.parameters()):
                 continue
 
+            # TODO: weight is not necessarily defined here, leading to a NameError, fix that
             if weight.dtype.is_floating_point or weight.dtype.is_complex:
                 adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device, dtype=dtype)
             else:

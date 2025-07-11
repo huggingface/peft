@@ -24,6 +24,7 @@ import torch.nn.functional as F
 from torch import svd_lowrank
 from transformers.pytorch_utils import Conv1D
 
+from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.integrations import (
     dequantize_module_weight,
@@ -1761,9 +1762,15 @@ class MultiheadAttention(nn.Module, LoraLayer):
 
 
 class _LoraProxy(nn.Module):
-    def __init__(self, delta_weight):
+    """This proxies an nn.Parameter that is targeted with LoRA.
+
+    Intended to be used in conjunction with `nn.utils.parametrize`, see `ParamWrapper`.
+    """
+
+    def __init__(self, delta_weight, num_experts):
         super().__init__()
         self.delta_weight = delta_weight
+        self.num_experts = num_experts
 
     def forward(self, W):
         with nn.utils.parametrize.cached():
@@ -1771,10 +1778,15 @@ class _LoraProxy(nn.Module):
 
 
 class ParamWrapper(nn.Module, LoraLayer):
+    """A LoRA wrapper for `nn.Parameter`. This layer is dispatched if users target a parameter directly with
+    `lora_config.target_parameters`
+    """
+
     def __init__(
         self,
         base_layer,
         adapter_name: str,
+        parameter_name: str,
         r: int = 0,
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
@@ -1788,11 +1800,29 @@ class ParamWrapper(nn.Module, LoraLayer):
     ) -> None:
         super().__init__()
         LoraLayer.__init__(self, base_layer, **kwargs)
+        param = getattr(base_layer, parameter_name)
+        self.parameter_name = parameter_name
+        self.in_features, self.out_features = param.shape[-2:]
+        if param.ndim == 3:
+            self.num_experts = param.shape[0]
+        else:
+            self.num_experts = 1
 
+        if param.ndim not in (2, 3):
+            raise ValueError(
+                f"lora.{self.__class__.__name__} was initialized with {param.ndim} dimensional Parameter, but only 2d "
+                "and 3d are supported."
+            )
         if lora_dropout:
-            raise ValueError(f"{self.__class__.__name__} does not work with lora_dropout != 0.")
+            raise ValueError(f"lora.{self.__class__.__name__} does not work with lora_dropout != 0.")
         if fan_in_fan_out:
-            raise ValueError(f"{self.__class__.__name__} does not work with fan_in_fan_out.")
+            raise ValueError(f"lora.{self.__class__.__name__} does not work with fan_in_fan_out.")
+        if lora_bias:
+            raise ValueError(f"lora.{self.__class__.__name__} does not work with lora_bias=True.")
+        if use_dora:
+            raise ValueError(f"lora.{self.__class__.__name__} does not work with use_dora=True.")
+        if is_target_conv_1d_layer:
+            raise ValueError(f"lora.{self.__class__.__name__} does not work with is_target_conv_1d_layer=True.")
 
         self.fan_in_fan_out = fan_in_fan_out
         self._active_adapter = adapter_name
@@ -1807,14 +1837,125 @@ class ParamWrapper(nn.Module, LoraLayer):
             lora_bias=lora_bias,
         )
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
-        if use_dora:
-            raise ValueError("lora.ParamWrapper does not support use_dora=True")
+    def update_layer(
+        self,
+        adapter_name,
+        r,
+        lora_alpha,
+        lora_dropout,
+        init_lora_weights,
+        use_rslora,
+        use_dora: bool = False,
+        use_qalora: bool = False,
+        lora_bias: bool = False,
+        qalora_group_size: int = 32,
+        **kwargs,
+    ):
+        # same method as in lora.Linear but taking into account that there can be multiple experts (3d parameter)
+        # collect the kwargs
+        kwargs = locals().copy()
+        del kwargs["self"]
 
-    def get_delta_weight(self, *args, **kwargs):
-        delta_weight = Linear.get_delta_weight(self, *args, **kwargs).T
+        # This code works for linear layers, override for other layer types
+        if r <= 0:
+            raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+
+        lora_variant = self.resolve_lora_variant(
+            use_dora=use_dora, use_qalora=use_qalora, qalora_group_size=qalora_group_size
+        )
+        if lora_variant is not None:
+            raise ValueError(f"lora.{self.__class__.__name__} does not work with LoRA variants like DoRA.")
+
+        self.r[adapter_name] = r
+        self.lora_alpha[adapter_name] = lora_alpha
+        if lora_dropout > 0.0:
+            # It's not possible to factor out x from lora_B(lora_A(dropout(x))), so dropout can't be correctly implemented
+            lora_dropout_layer = nn.Dropout(p=lora_dropout)
+        else:
+            lora_dropout_layer = nn.Identity()
+
+        self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
+        # Actual trainable parameters
+        # Difference to normal update_layer: consider experts. LoRA layers still use nn.Linear for consistency with
+        # lora.Linear.
+        self.lora_A[adapter_name] = nn.Linear(self.in_features, r * self.num_experts, bias=False)
+        self.lora_B[adapter_name] = nn.Linear(r * self.num_experts, self.out_features, bias=lora_bias)
+        self.lora_bias[adapter_name] = lora_bias
+
+        if use_rslora:
+            self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
+        else:
+            self.scaling[adapter_name] = lora_alpha / r
+
+        self.use_dora[adapter_name] = use_dora
+
+        # for inits that require access to the base weight, use gather_param_ctx so that the weight is gathered when using DeepSpeed
+        if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.pissa_init(adapter_name, init_lora_weights)
+        elif isinstance(init_lora_weights, str) and init_lora_weights.startswith("corda"):
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.corda_init(adapter_name, init_lora_weights)
+        elif isinstance(init_lora_weights, str) and init_lora_weights.lower() == "olora":
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.olora_init(adapter_name)
+        elif init_lora_weights == "loftq":
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.loftq_init(adapter_name)
+        elif init_lora_weights == "eva":
+            nn.init.zeros_(self.lora_B[adapter_name].weight)
+        elif init_lora_weights == "orthogonal":
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.orthogonal_init(adapter_name)
+        elif init_lora_weights:
+            self.reset_lora_parameters(adapter_name, init_lora_weights)
+        # call this before init of the lora variants
+        self._move_adapter_to_device_of_base_layer(adapter_name)
+
+        if adapter_name in self.lora_variant:
+            self.lora_variant[adapter_name].init(self, **kwargs)
+
+        self.set_adapter(self.active_adapters)
+
+    def _move_adapter_to_device_of_base_layer(self, adapter_name: str, device: Optional[torch.device] = None) -> None:
+        """
+        Move the adapter of the given name to the device of the base layer. Needs special handling for nn.Parameter
+        """
+        device = self.get_param().device
+        meta = torch.device("meta")
+        param = self.get_param()
+
+        for adapter_layer_name in self.adapter_layer_names + self.other_param_names:
+            adapter_layer = getattr(self, adapter_layer_name, None)
+            if not isinstance(adapter_layer, (nn.ModuleDict, nn.ParameterDict, BufferDict)):
+                continue
+            if adapter_name not in adapter_layer:
+                continue
+            if any(p.device == meta for p in adapter_layer.parameters()):
+                continue
+
+            if param.dtype.is_floating_point or param.dtype.is_complex:
+                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device, dtype=param.dtype)
+            else:
+                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device)
+
+    def get_param(self):
+        return getattr(self.base_layer, self.parameter_name)
+
+    def get_delta_weight(self, adapter_name, *args, **kwargs):
+        if self.num_experts == 1:
+            delta_weight = Linear.get_delta_weight(self, adapter_name, *args, **kwargs).T
+        else:
+            weight_A = self.lora_A[adapter_name].weight
+            weight_B = self.lora_B[adapter_name].weight
+            weight_A = weight_A.reshape(self.num_experts, -1, weight_A.shape[-1])
+            weight_B = weight_B.reshape(weight_B.shape[0], -1, self.num_experts)
+            # fan_in_fan_out must be False, so no transpose call here
+            delta_weight = torch.einsum("m n e, e n d -> e d m", weight_B, weight_A)
+
         base_layer = self.get_base_layer()
-        delta_weight = delta_weight.to(base_layer.weight.device, base_layer.weight.dtype)
+        param = self.get_param()
+        delta_weight = delta_weight.to(param.device, param.dtype)
         return delta_weight
 
     @contextmanager
@@ -1831,21 +1972,68 @@ class ParamWrapper(nn.Module, LoraLayer):
                 delta_weight = delta_weight + self.get_delta_weight(active_adapter)
 
         base_layer = self.get_base_layer()
-        requires_grad_before = base_layer.weight.requires_grad
-        nn.utils.parametrize.register_parametrization(base_layer, "weight", _LoraProxy(delta_weight))
-        base_layer.parametrizations.weight.original.requires_grad_(requires_grad_before)
+        requires_grad_before = self.get_param().requires_grad
+        nn.utils.parametrize.register_parametrization(
+            base_layer, self.parameter_name, _LoraProxy(delta_weight, num_experts=self.num_experts)
+        )
+        base_layer.parametrizations[self.parameter_name].original.requires_grad_(requires_grad_before)
         try:
             yield
         finally:
-            nn.utils.parametrize.remove_parametrizations(self.base_layer, "weight", leave_parametrized=False)
+            nn.utils.parametrize.remove_parametrizations(
+                self.base_layer, self.parameter_name, leave_parametrized=False
+            )
 
-    def merge(self, *args, **kwargs) -> None:
-        with self._activate_lora(self.active_adapters):
-            Linear.merge(self, *args, **kwargs)
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+        # same as lora.Linear.merge but not hard-coding base_layer.weight and with special cases like variants removed
+        adapter_names = check_adapters_to_merge(self, adapter_names)
+        if not adapter_names:
+            # no adapter to merge
+            return
 
-    def unmerge(self, *args, **kwargs) -> None:
-        with self._activate_lora(self.active_adapters):
-            Linear.unmerge(self, *args, **kwargs)
+        for active_adapter in adapter_names:
+            if active_adapter in self.lora_A.keys():
+                base_layer = self.get_base_layer()
+                param = getattr(base_layer, self.parameter_name)
+                if safe_merge:
+                    # Note that safe_merge will be slower than the normal merge
+                    # because of the copy operation.
+                    orig_weight = param.data.clone()
+                    orig_dtype = orig_weight.dtype
+                    delta_weight = self.get_delta_weight(active_adapter)
+                    orig_weight += delta_weight.to(orig_dtype)
+
+                    if not torch.isfinite(orig_weight).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                        )
+
+                    param.data = orig_weight
+
+                else:
+                    delta_weight = self.get_delta_weight(active_adapter)
+                    param.data += delta_weight
+
+                self.merged_adapters.append(active_adapter)
+
+    def unmerge(self) -> None:
+        # same as lora.Linear.unmerge but not hard-coding base_layer.weight and with special cases like variants removed
+        if not self.merged:
+            warnings.warn("Already unmerged. Nothing to do.")
+            return
+        while len(self.merged_adapters) > 0:
+            active_adapter = self.merged_adapters.pop()
+            if active_adapter in self.lora_A.keys():
+                param = getattr(self.get_base_layer(), self.parameter_name)
+                orig_dtype = param.dtype
+                delta_weight = self.get_delta_weight(active_adapter)
+                param.data -= delta_weight.to(orig_dtype)
+
+    def _check_forward_args(self, x, *args, **kwargs):
+        """Check if the arguments are compatible with the configs and state of the model"""
+        if kwargs.get("adapter_names", None):
+            raise ValueError(f"lora.{self.__class__.__name__} does not support mixed adapter batches yet.")
+        super()._check_forward_args(x, *args, **kwargs)
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         self._check_forward_args(x, *args, **kwargs)
@@ -1856,7 +2044,7 @@ class ParamWrapper(nn.Module, LoraLayer):
                 self.unmerge()
             result = self.base_layer(x, *args, **kwargs)
         elif adapter_names is not None:
-            raise ValueError("lora.ParamWrapper does not support mixed batch inference")
+            raise ValueError(f"lora.{self.__class__.__name__} does not support mixed batch inference")
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
@@ -1873,7 +2061,7 @@ def dispatch_default(
     target: torch.nn.Module,
     adapter_name: str,
     lora_config: LoraConfig,
-    is_nn_parameter: bool = False,
+    parameter_name: Optional[str] = None,
     **kwargs,
 ) -> Optional[torch.nn.Module]:
     new_module = None
@@ -1918,7 +2106,7 @@ def dispatch_default(
         kwargs.update(lora_config.loftq_config)
         new_module = Linear(target, adapter_name, is_target_conv_1d_layer=True, **kwargs)
 
-    if new_module is None and is_nn_parameter:
-        new_module = ParamWrapper(target, adapter_name, **kwargs)
+    if (new_module is None) and (parameter_name is not None):
+        new_module = ParamWrapper(target, adapter_name, parameter_name=parameter_name, **kwargs)
 
     return new_module

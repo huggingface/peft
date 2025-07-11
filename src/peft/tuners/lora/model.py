@@ -183,7 +183,7 @@ class LoraModel(BaseTuner):
         parent,
         current_key,
         *,
-        is_nn_parameter: bool = False,
+        parameter_name: Optional[str] = None,
     ) -> None:
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
@@ -208,7 +208,7 @@ class LoraModel(BaseTuner):
             "lora_bias": lora_config.lora_bias,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
-            "is_nn_parameter": is_nn_parameter,
+            "parameter_name": parameter_name,
         }
         # for torchao merging, we need the get_apply_tensor_subclass from the quantization config
         try:
@@ -294,7 +294,7 @@ class LoraModel(BaseTuner):
                 raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
 
     @staticmethod
-    def _create_new_module(lora_config, adapter_name, target, *, is_nn_parameter: bool = False, **kwargs):
+    def _create_new_module(lora_config, adapter_name, target, **kwargs):
         # Collect dispatcher functions to decide what backend to use for the replaced LoRA layer. The order matters,
         # because the first match is always used. Therefore, the default layers should be checked last.
         dispatchers = []
@@ -346,9 +346,7 @@ class LoraModel(BaseTuner):
 
         new_module = None
         for dispatcher in dispatchers:
-            new_module = dispatcher(
-                target, adapter_name, lora_config=lora_config, is_nn_parameter=is_nn_parameter, **kwargs
-            )
+            new_module = dispatcher(target, adapter_name, lora_config=lora_config, **kwargs)
             if new_module is not None:  # first match wins
                 break
 
@@ -553,6 +551,12 @@ class LoraModel(BaseTuner):
         for adapter in adapters:
             if adapter not in list(self.peft_config.keys()):
                 raise ValueError(f"Adapter {adapter} does not exist")
+
+        for adapter in adapters:
+            if self.peft_config[adapter].target_parameters:
+                raise ValueError(
+                    f"add_weighted_adapter does not support targeting nn.Parameter (problematic adapter '{adapter}')"
+                )
 
         # If more than one of the adapters targets the same module with modules_to_save, raise an error, as these
         # modules cannot be merged. First, find the ModulesToSaveWrapper instances in the model, then check if they

@@ -310,6 +310,16 @@ class LoraConfig(PeftConfig):
             Defaults to `False`. Whether to enable the bias term for the LoRA B parameter. Typically, this should be
             disabled. The main use case for this is when the LoRA weights were extracted from fully fine-tuned
             parameters so the bias of those parameters can be taken into account.
+        target_parameters (`List[str]`, *optional*)
+            List of parameter names or regex expression of the parameter names to replace with LoRA. This argument
+            behaves similarly to `target_modules`, except that the parameter name should be passed. Generally, you
+            should use `target_modules` to target the module (e.g. `nn.Linear`). However, in some circumstances, this
+            is not possible. E.g., in many mixture of expert (MoE) layers in HF Transformers, instead of using
+            `nn.Linear`, an `nn.Parameter` is used. PEFT normally overwrites the `forward` method for LoRA, but for
+            `nn.Parameter`, there is none. Therefore, to apply LoRA to that parameter, it needs to be targeted with
+            `target_parameters`. As an example, for Llama4, you can pass:
+            `target_parameters=['feed_forward.experts.gate_up_proj', 'feed_forward.experts.down_proj]`. Passing a
+            string for regex matching is not implemented yet.
     """
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})
@@ -317,10 +327,10 @@ class LoraConfig(PeftConfig):
         default=None,
         metadata={
             "help": (
-                "List of module names or regex expression of the module names to replace with LoRA."
-                "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'."
+                "List of module names or regex expression of the module names to replace with LoRA. "
+                "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. "
                 "This can also be a wildcard 'all-linear' which matches all linear/Conv1D "
-                "(if the model is a PreTrainedModel, the output layer excluded)."
+                "(if the model is a PreTrainedModel, the output layer excluded). "
                 "If not specified, modules will be chosen according to the model architecture, If the architecture is "
                 "not known, an error will be raised -- in this case, you should specify the target modules manually."
             ),
@@ -557,7 +567,17 @@ class LoraConfig(PeftConfig):
     target_parameters: Optional[list[str]] = field(
         default=None,
         metadata={
-            "help": "FIXME",
+            "help": (
+                "List of parameter names or regex expression of the parameter names to replace with LoRA. "
+                "This argument behaves similarly to `target_modules`, except that the parameter name should be passed. "
+                "Generally, you should use `target_modules` to target the module (e.g. `nn.Linear`). However, in some "
+                "circumstances, this is not possible. E.g., in many mixture of expert (MoE) layers in HF Transformers, "
+                "instead of using `nn.Linear`, an `nn.Parameter` is used. PEFT normally overwrites the `forward` "
+                "method for LoRA, but for `nn.Parameter`, there is none. Therefore, to apply LoRA to that parameter, "
+                "it needs to be targeted with `target_parameters`. As an example, for Llama4, you can pass: "
+                "`target_parameters=['feed_forward.experts.gate_up_proj', 'feed_forward.experts.down_proj]`. Passing a "
+                "string for regex matching is not implemented yet."
+            )
         },
     )
 
