@@ -1960,12 +1960,15 @@ class ParamWrapper(nn.Module, LoraLayer):
 
     @contextmanager
     def _activate_lora(self, active_adapters: list[str]):
-        if not active_adapters:
+        if not active_adapters or not any(adapter in self.lora_A for adapter in active_adapters):
+            # no active adapters for this layer
             yield
             return
 
         delta_weight = None
         for active_adapter in active_adapters:
+            if active_adapter not in self.lora_A:
+                continue
             if delta_weight is None:
                 delta_weight = self.get_delta_weight(active_adapter)
             else:
