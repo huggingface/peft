@@ -1762,7 +1762,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
 
 
 class _LoraProxy(nn.Module):
-    """This proxies an nn.Parameter that is targeted with LoRA.
+    """This proxies an `nn.Parameter` that is targeted with LoRA.
 
     Intended to be used in conjunction with `nn.utils.parametrize`, see `ParamWrapper`.
     """
