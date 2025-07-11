@@ -59,6 +59,22 @@ ALL_CONFIGS = [
             ],
         },
     ),
+    # target two layers and also linear layers
+    (
+        LoraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "r": 8,
+            "lora_alpha": 32,
+            "target_modules": ["q_proj", "v_proj"],
+            "lora_dropout": 0.0,
+            "bias": "none",
+            "target_parameters": [
+                "feed_forward.experts.gate_up_proj",
+                "feed_forward.experts.down_proj",
+            ],
+        },
+    ),
 ]
 
 

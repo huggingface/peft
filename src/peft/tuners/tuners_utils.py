@@ -168,6 +168,9 @@ class BaseTuner(nn.Module, ABC):
         targeted_module_names (`list[str]`):
             The list of module names that were actually adapted. Can be useful to inspect if you want to quickly
             double-check that the `config.target_modules` were specified correctly.
+        targeted_parameter_names (`list[str]`):
+            The list of parameter names that were actually adapted. Can be useful to inspect if you want to quickly
+            double-check that the `config.target_parameters` were specified correctly.
     """
 
     def __init__(
@@ -634,6 +637,13 @@ class BaseTuner(nn.Module, ABC):
                     self.targeted_parameter_names.append(key)
 
                     parent, target, target_name = _get_submodules(model, module_name)
+                    # use the class name for checking to avoid circular import
+                    if isinstance(target, BaseTunerLayer) and target.__class__.__name__ != "ParamWrapper":
+                        raise ValueError(
+                            f"Trying to wrap an `nn.Parameter` of layer '{target_name}' of type "
+                            f"{type(target).__name__}, which is not a valid target."
+                        )
+
                     self._check_target_module_compatiblity(peft_config, model, target_name)
                     ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
                     with ctx():
@@ -1101,7 +1111,7 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
         if any(re.match(rf"(^|.*\.){m}($|\..*)", key) for m in modules_to_save):
             return _ExcludedModule()
 
-    if config.target_modules is None:
+    if (config.target_modules is None) and (config.target_parameters is not None):
         # this is allowed if config.target_parameters are specified
         return False
 

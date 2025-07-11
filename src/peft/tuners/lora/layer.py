@@ -1761,7 +1761,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
         return "lora." + rep
 
 
-class _LoraProxy(nn.Module):
+class _LoraParameterProxy(nn.Module):
     """This proxies an `nn.Parameter` that is targeted with LoRA.
 
     Intended to be used in conjunction with `nn.utils.parametrize`, see `ParamWrapper`.
@@ -1814,6 +1814,8 @@ class ParamWrapper(nn.Module, LoraLayer):
                 "and 3d are supported."
             )
         if lora_dropout:
+            # It's not possible to factor out x from lora_B(lora_A(dropout(x))), so dropout can't be correctly
+            # implemented
             raise ValueError(f"lora.{self.__class__.__name__} does not work with lora_dropout != 0.")
         if fan_in_fan_out:
             raise ValueError(f"lora.{self.__class__.__name__} does not work with fan_in_fan_out.")
@@ -1869,8 +1871,9 @@ class ParamWrapper(nn.Module, LoraLayer):
         self.r[adapter_name] = r
         self.lora_alpha[adapter_name] = lora_alpha
         if lora_dropout > 0.0:
-            # It's not possible to factor out x from lora_B(lora_A(dropout(x))), so dropout can't be correctly implemented
-            lora_dropout_layer = nn.Dropout(p=lora_dropout)
+            # It's not possible to factor out x from lora_B(lora_A(dropout(x))), so dropout can't be correctly
+            # implemented
+            raise ValueError(f"lora.{self.__class__.__name__} does not work with lora_dropout != 0.")
         else:
             lora_dropout_layer = nn.Identity()
 
@@ -1948,10 +1951,12 @@ class ParamWrapper(nn.Module, LoraLayer):
         else:
             weight_A = self.lora_A[adapter_name].weight
             weight_B = self.lora_B[adapter_name].weight
+            # shape: experts x rank x in_features
             weight_A = weight_A.reshape(self.num_experts, -1, weight_A.shape[-1])
+            # shape: out_features x rank x experts
             weight_B = weight_B.reshape(weight_B.shape[0], -1, self.num_experts)
             # fan_in_fan_out must be False, so no transpose call here
-            delta_weight = torch.einsum("m n e, e n d -> e d m", weight_B, weight_A)
+            delta_weight = torch.einsum("o r e, e r i -> e i o", weight_B, weight_A)
 
         base_layer = self.get_base_layer()
         param = self.get_param()
@@ -1977,8 +1982,9 @@ class ParamWrapper(nn.Module, LoraLayer):
         base_layer = self.get_base_layer()
         requires_grad_before = self.get_param().requires_grad
         nn.utils.parametrize.register_parametrization(
-            base_layer, self.parameter_name, _LoraProxy(delta_weight, num_experts=self.num_experts)
+            base_layer, self.parameter_name, _LoraParameterProxy(delta_weight, num_experts=self.num_experts)
         )
+        # set requires_grad, as it defaults to False
         base_layer.parametrizations[self.parameter_name].original.requires_grad_(requires_grad_before)
         try:
             yield
@@ -2074,7 +2080,9 @@ def dispatch_default(
     else:
         target_base_layer = target
 
-    if isinstance(target_base_layer, torch.nn.Embedding):
+    if parameter_name is not None:
+        new_module = ParamWrapper(target, adapter_name, parameter_name=parameter_name, **kwargs)
+    elif isinstance(target_base_layer, torch.nn.Embedding):
         embedding_kwargs = kwargs.copy()
         embedding_kwargs.pop("fan_in_fan_out", None)
         embedding_kwargs.update(lora_config.loftq_config)
@@ -2108,8 +2116,5 @@ def dispatch_default(
             kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = True
         kwargs.update(lora_config.loftq_config)
         new_module = Linear(target, adapter_name, is_target_conv_1d_layer=True, **kwargs)
-
-    if (new_module is None) and (parameter_name is not None):
-        new_module = ParamWrapper(target, adapter_name, parameter_name=parameter_name, **kwargs)
 
     return new_module
