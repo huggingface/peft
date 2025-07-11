@@ -155,10 +155,10 @@ def get_peft_model_state_dict(
     elif config.peft_type == PeftType.SHIRA:
         shira_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
         to_return = {k: state_dict[k] for k in state_dict if shira_prefix in k}
-        # for name, module in model.named_modules():
-        #     if hasattr(module, "shira_indices"):
-        #         for k, v in module.shira_indices.items():
-        #             to_return[f"{name}.shira_indices.{k}"] = v
+        for name, module in model.named_modules():
+            if hasattr(module, "shira_indices"):
+                for k, v in module.shira_indices.items():
+                    to_return[f"{name}.shira_indices.{k}"] = v.to(torch.float32)
 
     elif config.peft_type == PeftType.VERA:
         vera_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
@@ -414,14 +414,14 @@ def set_peft_model_state_dict(
             rank_pattern = config.rank_pattern
             if rank_pattern is not None:
                 model.resize_modules_by_rank_pattern(rank_pattern, adapter_name)
-        # elif config.peft_type == PeftType.SHIRA:
-        #     for name, module in model.named_modules():
-        #         if hasattr(module, "shira_indices"):
-        #             # for k, v in module.shira_indices.items():
-        #             if f"{name}.shira_indices.{adapter_name}" in peft_model_state_dict:
-        #                 module.shira_indices[adapter_name] = peft_model_state_dict.pop(
-        #                     f"{name}.shira_indices.{adapter_name}"
-        #                 )
+        elif config.peft_type == PeftType.SHIRA:
+            for name, module in model.named_modules():
+                if hasattr(module, "shira_indices"):
+                    # for k, v in module.shira_indices.items():
+                    if f"{name}.shira_indices.{adapter_name}" in peft_model_state_dict:
+                        module.shira_indices[adapter_name] = peft_model_state_dict.pop(
+                            f"{name}.shira_indices.{adapter_name}"
+                        ).to(torch.int)
         elif config.peft_type == PeftType.VERA:
             if config.save_projection and "base_model.vera_A" not in peft_model_state_dict:
                 raise ValueError(
