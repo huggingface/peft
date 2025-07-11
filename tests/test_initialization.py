@@ -1397,6 +1397,20 @@ class TestLoraInitialization:
             # No error should be raised
             peft_model = get_peft_model(base_model, peft_config)
 
+    def test_target_module_and_target_parameter_on_same_layer(self):
+        # When targeting an nn.Parameter with LoRA using target_parameters, ensure that this is not already another LoRA
+        # layer (i.e. avoid double wrapping).
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(10, 10)
+
+        base_model = MyModule()
+        config = LoraConfig(target_modules=["linear"], target_parameters=["weight"])
+        msg = "Trying to wrap an `nn.Parameter` of layer 'linear' of type Linear, which is not a valid target."
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(base_model, config)
+
 
 class TestLokrInitialization:
     torch_device = infer_device()
