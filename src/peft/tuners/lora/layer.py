@@ -34,6 +34,7 @@ from peft.utils.other import transpose
 
 from .config import LoraConfig
 
+VARIANT_KWARG_KEYS = ["alora_offsets"]
 
 class LoraVariant:
     """
@@ -552,6 +553,7 @@ class LoraLayer(BaseTunerLayer):
     ) -> torch.Tensor:
         # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
         # extra argument that allows mixing different adapters in the same batch at inference time.
+        variant_kwargs = {k: kwargs.pop(k, None) for k in VARIANT_KWARG_KEYS} # don't pass these to base_layer
         result = self.base_layer(x, *args, **kwargs)
         torch_result_dtype = result.dtype
 
@@ -583,6 +585,7 @@ class LoraLayer(BaseTunerLayer):
                     active_adapter=active_adapter,
                     x=x,
                     result=result,
+                    **variant_kwargs,
                     **kwargs,
                 )
                 result[sub_batch_indices_list[i]] += lora_output.to(torch_result_dtype)
@@ -637,7 +640,7 @@ class Linear(nn.Module, LoraLayer):
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def resolve_lora_variant(self, *, use_dora: bool, use_alora: bool, **kwargs) -> Optional[LoraVariant]:
-        if not use_dora or use_alora:
+        if not use_dora and not use_alora:
             return None
 
         from .variants import DoraLinearVariant, ALoraLinearVariant
@@ -764,13 +767,14 @@ class Linear(nn.Module, LoraLayer):
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         self._check_forward_args(x, *args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
-
+        variant_kwargs = {k: kwargs.pop(k, None) for k in VARIANT_KWARG_KEYS} # don't pass these to base_layer
+        
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
             result = self.base_layer(x, *args, **kwargs)
         elif adapter_names is not None:
-            result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
+            result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names,**variant_kwargs, **kwargs)
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
@@ -795,6 +799,7 @@ class Linear(nn.Module, LoraLayer):
                         active_adapter=active_adapter,
                         x=x,
                         result=result,
+                        **variant_kwargs,
                         **kwargs,
                     )
 
@@ -1043,7 +1048,7 @@ class Embedding(nn.Module, LoraLayer):
         # TODO: no dtype conversion here, unlike in Linear, is that correct?
         self._check_forward_args(x, *args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
-
+        variant_kwargs = {k: kwargs.pop(k, None) for k in VARIANT_KWARG_KEYS} # don't pass these to base_layer
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
@@ -1071,6 +1076,7 @@ class Embedding(nn.Module, LoraLayer):
                         active_adapter=active_adapter,
                         x=x,
                         result=result,
+                        **variant_kwargs,
                         **kwargs,
                     )
             result = result.to(torch_result_dtype)
@@ -1318,7 +1324,7 @@ class _ConvNd(nn.Module, LoraLayer):
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         self._check_forward_args(x, *args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
-
+        variant_kwargs = {k: kwargs.pop(k, None) for k in VARIANT_KWARG_KEYS} # don't pass these to base_layer
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
@@ -1349,6 +1355,7 @@ class _ConvNd(nn.Module, LoraLayer):
                         active_adapter=active_adapter,
                         x=x,
                         result=result,
+                        **variant_kwargs,
                         **kwargs,
                     )
 

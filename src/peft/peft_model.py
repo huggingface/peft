@@ -1832,19 +1832,19 @@ class PeftModelForCausalLM(PeftModel):
                 continue
 
             if current_adapter_name not in self.peft_config:
-                warnings.warn(f"Adapter '{current_adapter_name}' not found in peft_config. Using offset -1 for row {i}.")
+                warnings.warn(f"Adapter '{current_adapter_name}' not found in peft_config. Using base model for row {i}.")
                 alora_offsets[i] = -1
                 continue
             
             current_peft_config = self.peft_config[current_adapter_name]
 
             if not current_peft_config.use_alora: 
-                alora_offsets[i] = -1 # Not an aLoRA adapter or wrong type
+                alora_offsets[i] = None # Not an aLoRA adapter or wrong type
                 continue
             
             invocation_tokens = getattr(current_peft_config, 'alora_invocation_tokens', None)
             if not invocation_tokens:
-                alora_offsets[i] = -1 # No way to calculate offset
+                alora_offsets[i] = None # No way to calculate offset
                 continue
 
             if current_adapter_name not in cached_invocation_tensors:
@@ -1873,7 +1873,14 @@ class PeftModelForCausalLM(PeftModel):
                 if best_match_start_idx != -1:
                     offset_val = seq_len - best_match_start_idx
                     alora_offsets[i] = offset_val if offset_val > 0 else -1
-                else:
+                else: # Invocation sequence not found in input
+                    warnings.warn(
+                            f"Could not find alora_invocation_tokens for specified aLoRA adapter in the "
+                            f'following instance'
+                            f'{sequence}'
+                            f'Invocation tokens: {current_invocation_ids_tensor} \n'
+                        f"Defaulting to base model. "
+                    )
                     alora_offsets[i] = -1
         return alora_offsets
 
