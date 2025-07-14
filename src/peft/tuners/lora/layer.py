@@ -1780,6 +1780,13 @@ class _LoraParameterProxy(nn.Module):
 class ParamWrapper(nn.Module, LoraLayer):
     """A LoRA wrapper for `nn.Parameter`. This layer is dispatched if users target a parameter directly with
     `lora_config.target_parameters`
+
+    Note:
+
+    - When accessing the wrapped nn.Parameter directly, e.g. via `module.weight`, the LoRA weights are *not* applied.
+    - It is currently not implemented to target multiple parameters on the same module. To achieve this, it is
+      currently required to create a separate LoRA adapter (with another adapter name) and activate both at the same
+      time.
     """
 
     def __init__(
@@ -1802,11 +1809,10 @@ class ParamWrapper(nn.Module, LoraLayer):
         LoraLayer.__init__(self, base_layer, **kwargs)
         param = getattr(base_layer, parameter_name)
         self.parameter_name = parameter_name
-        self.in_features, self.out_features = param.shape[-2:]
         if param.ndim == 3:
-            self.num_experts = param.shape[0]
+            self.num_experts, self.in_features, self.out_features = param.shape
         else:
-            self.num_experts = 1
+            self.num_experts, self.in_features, self.out_features = 1, param.shape[1], param.shape[0]
 
         if param.ndim not in (2, 3):
             raise ValueError(
@@ -1861,6 +1867,15 @@ class ParamWrapper(nn.Module, LoraLayer):
         # This code works for linear layers, override for other layer types
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+        if adapter_name in self.lora_A:
+            # It is not allowed to target multiple parameters on the same module. Supporting this would complicate
+            # things quite a lot, since we would require multiple self.lora_A, self.lora_B, etc., one for each targeted
+            # parameter.
+            raise ValueError(
+                f"lora.{self.__class__.__name__} already has an adapter for parameter '{self.parameter_name}'. "
+                "It is currently not possible to apply the same adapter to multiple parameters, please add a "
+                "different adapter to target another parameter of the same module."
+            )
 
         lora_variant = self.resolve_lora_variant(
             use_dora=use_dora, use_qalora=use_qalora, qalora_group_size=qalora_group_size
@@ -1947,7 +1962,7 @@ class ParamWrapper(nn.Module, LoraLayer):
 
     def get_delta_weight(self, adapter_name, *args, **kwargs):
         if self.num_experts == 1:
-            delta_weight = Linear.get_delta_weight(self, adapter_name, *args, **kwargs).T
+            delta_weight = Linear.get_delta_weight(self, adapter_name, *args, **kwargs)
         else:
             weight_A = self.lora_A[adapter_name].weight
             weight_B = self.lora_B[adapter_name].weight
@@ -1956,7 +1971,7 @@ class ParamWrapper(nn.Module, LoraLayer):
             # shape: out_features x rank x experts
             weight_B = weight_B.reshape(weight_B.shape[0], -1, self.num_experts)
             # fan_in_fan_out must be False, so no transpose call here
-            delta_weight = torch.einsum("o r e, e r i -> e i o", weight_B, weight_A)
+            delta_weight = torch.einsum("o r e, e r i -> e i o", weight_B, weight_A) * self.scaling[adapter_name]
 
         base_layer = self.get_base_layer()
         param = self.get_param()
@@ -1994,7 +2009,7 @@ class ParamWrapper(nn.Module, LoraLayer):
             )
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
-        # same as lora.Linear.merge but not hard-coding base_layer.weight and with special cases like variants removed
+        # same as lora.Linear.merge but not hard-coding base_layer.weight and without special cases like variants removed
         adapter_names = check_adapters_to_merge(self, adapter_names)
         if not adapter_names:
             # no adapter to merge
@@ -2026,7 +2041,7 @@ class ParamWrapper(nn.Module, LoraLayer):
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
-        # same as lora.Linear.unmerge but not hard-coding base_layer.weight and with special cases like variants removed
+        # same as lora.Linear.unmerge but not hard-coding base_layer.weight and without special cases like variants removed
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
