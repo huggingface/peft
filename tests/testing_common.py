@@ -1611,6 +1611,7 @@ class PeftCommonTester:
             "HRA",
             "VBLORA",
             "RANDLORA",
+            "SHIRA",
             "BONE",
             "C3A",
         ):
