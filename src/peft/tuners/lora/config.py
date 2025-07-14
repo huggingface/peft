@@ -300,20 +300,20 @@ class LoraConfig(PeftConfig):
             LoRA, so it is recommended to merge weights for inference. For more information, see
             https://huggingface.co/papers/2402.09353.
         use_alora (`bool`):
-            Enable <a href='https://huggingface.co/papers/2504.12397'>'Activated LoRA' (aLoRA)</a>. This technique 
-            selectively activates the adapter weights only on tokens during and after the alora_invocation_tokens. 
-            When used in a CausalLM, this means that the KV cache prior to invocation is interchangeable with that of 
-            the base model (and other aLoRA adapters operating this way). As a result, in inference pipelines involving 
-            switching between base model inference and adapter inference (e.g. agentic pipelines, see paper for many 
-            examples), significant savings are realized (relative to LoRA) by saving prefill operations. Overall adapter 
-            inference speedups of an order of magnitude or more can occur on vLLM, depending on the length of the shared 
-            context. REQUIRED ARGUMENTS: alora_invocation_string, alora_invocation_tokens. These are necessary to know 
+            Enable <a href='https://huggingface.co/papers/2504.12397'>'Activated LoRA' (aLoRA)</a>. This technique
+            selectively activates the adapter weights only on tokens during and after the alora_invocation_tokens.
+            When used in a CausalLM, this means that the KV cache prior to invocation is interchangeable with that of
+            the base model (and other aLoRA adapters operating this way). As a result, in inference pipelines involving
+            switching between base model inference and adapter inference (e.g. agentic pipelines, see paper for many
+            examples), significant savings are realized (relative to LoRA) by saving prefill operations. Overall adapter
+            inference speedups of an order of magnitude or more can occur on vLLM, depending on the length of the shared
+            context. REQUIRED ARGUMENTS: alora_invocation_string, alora_invocation_tokens. These are necessary to know
             when to turn on adapter weights. The invocation string therein must be present in all inputs. Note also that
             merging is not possible due to the selective application of the weights.
         alora_invocation_string (`str`):
             Invocation string for aLoRA (must be present in model inputs). Defaults to None.
         alora_invocation_tokens (`List[int]`):
-            Tokenized copy of alora_invocation_string for use when tokenizer is not available. 
+            Tokenized copy of alora_invocation_string for use when tokenizer is not available.
         layer_replication (`List[Tuple[int, int]]`):
             Build a new stack of layers by stacking the original model layers according to the ranges specified. This
             allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
@@ -680,7 +680,7 @@ class LoraConfig(PeftConfig):
                 )
             if self.use_dora:
                 raise ValueError("The argument lora_bias=True is not supported for DoRA, please pass use_dora=False")
-        
+
         #If activated LoRA (aLoRA) is enabled, check for required invocation arguments.
         if self.use_alora:
             if self.alora_invocation_string is None or self.alora_invocation_tokens is None:

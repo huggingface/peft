@@ -470,7 +470,7 @@ class ALoraLinearVariant(LoraVariant):
         scaling = module.scaling[active_adapter]
 
         x = x.to(lora_A.weight.dtype)
-        
+
         if x.dim() == 2:
             result = result + lora_B(lora_A(dropout(x))) * scaling
         elif len(alora_offsets) == 1:

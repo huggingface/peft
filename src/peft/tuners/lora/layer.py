@@ -34,6 +34,7 @@ from peft.utils.other import transpose
 
 from .config import LoraConfig
 
+
 VARIANT_KWARG_KEYS = ["alora_offsets"]
 
 class LoraVariant:
@@ -643,8 +644,8 @@ class Linear(nn.Module, LoraLayer):
         if not use_dora and not use_alora:
             return None
 
-        from .variants import DoraLinearVariant, ALoraLinearVariant
-        if use_alora: 
+        from .variants import ALoraLinearVariant, DoraLinearVariant
+        if use_alora:
             return ALoraLinearVariant()
         else:
             return DoraLinearVariant()
@@ -768,7 +769,7 @@ class Linear(nn.Module, LoraLayer):
         self._check_forward_args(x, *args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
         variant_kwargs = {k: kwargs.pop(k, None) for k in VARIANT_KWARG_KEYS} # don't pass these to base_layer
-        
+
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
