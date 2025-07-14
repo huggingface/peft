@@ -446,7 +446,7 @@ class LoraModel(BaseTuner):
                 pre_forward = partial(_alora_offsets_pre_forward_hook, alora_offsets = alora_offsets)
                 handle = layer.register_forward_pre_hook(pre_forward, with_kwargs=True)
                 hook_handles.append(handle)
- 
+
         if adapter_names is not None:
             if self.training:
                 raise ValueError("Cannot pass `adapter_names` when the model is in training mode.")
