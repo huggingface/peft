@@ -90,13 +90,39 @@ TEST_CASES = [
         {"target_modules": "lin1", "use_dora": True, "lora_alpha": 32},
     ),
     # Activated LoRA (aLoRA)
-    ("Vanilla MLP 9 Activated LoRA (aLoRA)", "MLP", LoraConfig, {"target_modules": ["lin0"], "use_alora": True, "alora_invocation_tokens": [1, 2, 3], "alora_invocation_string": '123'}),
-    ("Vanilla MLP 10 Activated LoRA (aLoRA)", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"], "use_alora": True, "alora_invocation_tokens": [1, 2, 3], "alora_invocation_string": '123'}),
+    (
+        "Vanilla MLP 9 Activated LoRA (aLoRA)",
+        "MLP",
+        LoraConfig,
+        {
+            "target_modules": ["lin0"],
+            "use_alora": True,
+            "alora_invocation_tokens": [1, 2, 3],
+            "alora_invocation_string": "123",
+        },
+    ),
+    (
+        "Vanilla MLP 10 Activated LoRA (aLoRA)",
+        "MLP",
+        LoraConfig,
+        {
+            "target_modules": ["lin0", "lin1"],
+            "use_alora": True,
+            "alora_invocation_tokens": [1, 2, 3],
+            "alora_invocation_string": "123",
+        },
+    ),
     (
         "Vanilla MLP 11 Activated LoRA (aLoRA)",
         "MLP",
         LoraConfig,
-        {"target_modules": "lin1", "use_alora": True, "alora_invocation_tokens": [1, 2, 3], "alora_invocation_string": '123', "lora_alpha": 32},
+        {
+            "target_modules": "lin1",
+            "use_alora": True,
+            "alora_invocation_tokens": [1, 2, 3],
+            "alora_invocation_string": "123",
+            "lora_alpha": 32,
+        },
     ),
     ("Embedding + transformers Conv1D 1 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["conv1d"]}),
     ("Embedding + transformers Conv1D 2 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb"]}),
@@ -1836,6 +1862,7 @@ class TestPeftCustomModel(PeftCommonTester):
         if not issubclass(config_cls, (LoraConfig, BOFTConfig)):
             # skip this test for other configs as bias is specific to Lora
             pytest.skip("Bias argument is only supported for LoRA or BOFT models")
+
         def run_with_disable(config_kwargs, bias):
             config_kwargs = config_kwargs.copy()
             config_kwargs["bias"] = bias

@@ -63,6 +63,7 @@ def _adapter_names_pre_forward_hook(target, args, kwargs, adapter_names):
     kwargs["adapter_names"] = adapter_names
     return args, kwargs
 
+
 def _alora_offsets_pre_forward_hook(target, args, kwargs, alora_offsets):
     kwargs["alora_offsets"] = alora_offsets
     return args, kwargs
@@ -432,7 +433,6 @@ class LoraModel(BaseTuner):
 
     @contextmanager
     def _enable_peft_forward_hooks(self, *args, **kwargs):
-
         # If adapter_names is passed as an argument, we inject it into the forward arguments.
         adapter_names = kwargs.pop("adapter_names", None)
         alora_offsets = kwargs.pop("alora_offsets", None)
@@ -443,7 +443,7 @@ class LoraModel(BaseTuner):
         hook_handles = []
         for layer in self.modules():
             if isinstance(layer, LoraLayer):
-                pre_forward = partial(_alora_offsets_pre_forward_hook, alora_offsets = alora_offsets)
+                pre_forward = partial(_alora_offsets_pre_forward_hook, alora_offsets=alora_offsets)
                 handle = layer.register_forward_pre_hook(pre_forward, with_kwargs=True)
                 hook_handles.append(handle)
 
@@ -462,7 +462,9 @@ class LoraModel(BaseTuner):
             unique_adapters = {name for name in adapter_names if name != "__base__"}
             unexpected_adapters = unique_adapters - expected_adapters
             if unexpected_adapters:
-                raise ValueError(f"Trying to infer with non-existing adapter(s): {', '.join(sorted(unexpected_adapters))}")
+                raise ValueError(
+                    f"Trying to infer with non-existing adapter(s): {', '.join(sorted(unexpected_adapters))}"
+                )
 
             # deal with beam search
             num_beams = kwargs.get("num_beams", None)
@@ -475,7 +477,6 @@ class LoraModel(BaseTuner):
                 # then flatten the nested list. For encoder-decoder models, this extended list should not be applied to the
                 # encoder part. Further below, the original argument is thus restored for the encoder.
                 adapter_names = sum(([n] * kwargs["num_beams"] for n in adapter_names), [])
-
 
             for module in self.modules():
                 if isinstance(module, LoraLayer) or isinstance(module, AuxiliaryTrainingWrapper):

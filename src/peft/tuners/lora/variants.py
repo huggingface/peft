@@ -480,10 +480,12 @@ class ALoraLinearVariant(LoraVariant):
             else:
                 offset = min(result.shape[1], alora_offsets[0])
                 if offset > 0:
-                    result[:, -offset:, :] = result[:, -offset:, :] + lora_B(lora_A(dropout(x[:, -offset:, :]))) * scaling
+                    result[:, -offset:, :] = (
+                        result[:, -offset:, :] + lora_B(lora_A(dropout(x[:, -offset:, :]))) * scaling
+                    )
         else:
             for i in range(result.shape[0]):
-                if alora_offsets[i] is None: # run as lora
+                if alora_offsets[i] is None:  # run as lora
                     result[:, :, :] = result[:, :, :] + lora_B(lora_A(dropout(x[:, :, :]))) * scaling
                 else:
                     offset = min(alora_offsets[i], result.shape[1])

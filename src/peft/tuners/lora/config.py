@@ -68,6 +68,7 @@ class LoftQConfig:
     loftq_bits: str = field(default=4, metadata={"help": "Quantization bits for LoftQ"})
     loftq_iter: str = field(default=1, metadata={"help": "Alternating iterations for LoftQ"})
 
+
 @dataclass
 class EvaConfig:
     """
@@ -681,7 +682,7 @@ class LoraConfig(PeftConfig):
             if self.use_dora:
                 raise ValueError("The argument lora_bias=True is not supported for DoRA, please pass use_dora=False")
 
-        #If activated LoRA (aLoRA) is enabled, check for required invocation arguments.
+        # If activated LoRA (aLoRA) is enabled, check for required invocation arguments.
         if self.use_alora:
             if self.alora_invocation_string is None or self.alora_invocation_tokens is None:
                 raise ValueError(
