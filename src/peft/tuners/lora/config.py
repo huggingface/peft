@@ -211,7 +211,8 @@ class LoraConfig(PeftConfig):
             of the passed strings. If this is specified as 'all-linear', then all linear/Conv1D modules are chosen (if
             the model is a PreTrainedModel, the output layer excluded). If this is not specified, modules will be
             chosen according to the model architecture. If the architecture is not known, an error will be raised -- in
-            this case, you should specify the target modules manually.
+            this case, you should specify the target modules manually. To avoid targeting any modules (because you want
+            to apply `target_parameters`), set `target_modules=[]`.
         exclude_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to not apply the adapter. When passing a string, a regex match will be performed.
             When passing a list of strings, either an exact match will be performed or it is checked if the name of the
@@ -332,7 +333,9 @@ class LoraConfig(PeftConfig):
                 "This can also be a wildcard 'all-linear' which matches all linear/Conv1D "
                 "(if the model is a PreTrainedModel, the output layer excluded). "
                 "If not specified, modules will be chosen according to the model architecture, If the architecture is "
-                "not known, an error will be raised -- in this case, you should specify the target modules manually."
+                "not known, an error will be raised -- in this case, you should specify the target modules manually. "
+                "To avoid targeting any modules (because you want to apply `target_parameters`), set "
+                "`target_modules=[]`."
             ),
         },
     )

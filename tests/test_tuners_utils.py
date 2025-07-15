@@ -476,6 +476,32 @@ class TestTargetedModuleNames(unittest.TestCase):
         assert model.targeted_module_names == expected
 
 
+class TestTargetedParameterNames(unittest.TestCase):
+    """Check that the attribute targeted_parameter_names (via target_parameters) is correctly set.
+
+    This is only implemented for LoRA. Regex matching is currently not implemented.
+    """
+
+    def test_one_targeted_parameters_list(self):
+        model = MLP()
+        model = get_peft_model(model, LoraConfig(target_parameters=["lin0.weight"]))
+        assert model.targeted_parameter_names == ["lin0.weight"]
+
+    def test_two_targeted_parameters_list(self):
+        model = MLP()
+        model = get_peft_model(model, LoraConfig(target_parameters=["lin0.weight", "lin1.weight"]))
+        assert model.targeted_parameter_names == ["lin0.weight", "lin1.weight"]
+
+    def test_realistic_example(self):
+        model = AutoModelForCausalLM.from_pretrained("trl-internal-testing/tiny-random-LlamaForCausalLM")
+        config = LoraConfig(target_modules=[], task_type="CAUSAL_LM", target_parameters=["v_proj.weight"])
+        model = get_peft_model(model, config)
+        expected = [
+            f"model.layers.{i}.self_attn.v_proj.weight" for i in range(len(model.base_model.model.model.layers))
+        ]
+        assert model.targeted_parameter_names == expected
+
+
 class TestExcludedModuleNames(unittest.TestCase):
     """Check that the attribute exclude_module is correctly set.
 
