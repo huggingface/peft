@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from peft.config import PeftConfig
 from peft.utils import PeftType
 
-from .utils import llama_compute_query_states
+from .utils import gpt2_compute_query_states, llama_compute_query_states
 
 
 @dataclass
@@ -62,6 +62,13 @@ TRANSFORMERS_MODEL_CONFIG = {
         v_proj_layer="v_proj",
         o_proj_layer="o_proj",
     ),
+    "gpt2": ModelTypeConfig(  # piggybacking of off the prior definitions, GPTs attention calculation is different
+        compute_query_states=gpt2_compute_query_states,
+        target_modules="attn",
+        k_proj_layer="c_attn",
+        v_proj_layer=None,
+        o_proj_layer=None,
+    ),
 }
 
 
@@ -71,7 +78,7 @@ def prepare_config(
 ) -> AdaptionPromptConfig:
     """Prepare the config based on the llama model type."""
     if model.config.model_type not in TRANSFORMERS_MODEL_CONFIG:
-        raise ValueError("Unsupported model type for adaption prompt: '{model.config.model_type}'.")
+        raise ValueError(f"Unsupported model type for adaption prompt: '{model.config.model_type}'.")
 
     model_config = TRANSFORMERS_MODEL_CONFIG[model.config.model_type]
 
