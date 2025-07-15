@@ -55,6 +55,14 @@ from .other import (
 )
 from .peft_types import PeftType, TaskType, register_peft_method
 from .save_and_load import get_peft_model_state_dict, load_peft_weights, set_peft_model_state_dict
+from .svd_utils import (
+    auto_generate_target_svd_config,
+    create_svd_model_class,
+    decompose_weight_matrix,
+    optim_wrapper,
+    project_gradient_to_orthogonal_space,
+    reconstruct_weight_matrix,
+)
 
 
 __all__ = [
@@ -86,8 +94,11 @@ __all__ = [
     "_prepare_prompt_learning_config",
     "_set_adapter",
     "_set_trainable",
+    "auto_generate_target_svd_config",
     "bloom_model_postprocess_past_key_value",
     "cast_mixed_precision_params",
+    "create_svd_model_class",
+    "decompose_weight_matrix",
     "get_auto_gptq_quant_linear",
     "get_gptqmodel_quant_linear",
     "get_peft_model_state_dict",
@@ -96,7 +107,10 @@ __all__ = [
     "infer_device",
     "load_peft_weights",
     "map_cache_to_layer_device_map",
+    "optim_wrapper",
     "prepare_model_for_kbit_training",
+    "project_gradient_to_orthogonal_space",
+    "reconstruct_weight_matrix",
     "register_peft_method",
     "replace_lora_weights_loftq",
     "set_additional_trainable_modules",
