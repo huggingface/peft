@@ -63,7 +63,7 @@ class PeftConfigMixin(PushToHubMixin):
 
     def __post_init__(self):
         # check for invalid task type
-        if (self.task_type is not None) and (self.task_type not in list(TaskType)):
+        if (self.task_type is not None) and (self.task_type.upper() not in list(TaskType)):
             raise ValueError(
                 f"Invalid task type: '{self.task_type}'. Must be one of the following task types: {', '.join(TaskType)}."
             )
