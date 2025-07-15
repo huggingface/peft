@@ -179,7 +179,9 @@ class LoraModel(BaseTuner):
         target_name,
         parent,
         current_key,
-    ):
+        *,
+        parameter_name: Optional[str] = None,
+    ) -> None:
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
 
@@ -203,6 +205,7 @@ class LoraModel(BaseTuner):
             "lora_bias": lora_config.lora_bias,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
+            "parameter_name": parameter_name,
         }
         # for torchao merging, we need the get_apply_tensor_subclass from the quantization config
         try:
@@ -496,11 +499,12 @@ class LoraModel(BaseTuner):
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
         if peft_config.target_modules is None:
-            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
-                raise ValueError("Please specify `target_modules` in `peft_config`")
-            peft_config.target_modules = set(
-                TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
-            )
+            if model_config["model_type"] in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
+                peft_config.target_modules = set(
+                    TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
+                )
+            elif not peft_config.target_parameters:
+                raise ValueError("Please specify `target_modules` or `target_parameters`in `peft_config`")
         return peft_config
 
     def _unload_and_optionally_merge(
@@ -544,6 +548,12 @@ class LoraModel(BaseTuner):
         for adapter in adapters:
             if adapter not in list(self.peft_config.keys()):
                 raise ValueError(f"Adapter {adapter} does not exist")
+
+        for adapter in adapters:
+            if self.peft_config[adapter].target_parameters:
+                raise ValueError(
+                    f"add_weighted_adapter does not support targeting nn.Parameter (problematic adapter '{adapter}')"
+                )
 
         # If more than one of the adapters targets the same module with modules_to_save, raise an error, as these
         # modules cannot be merged. First, find the ModulesToSaveWrapper instances in the model, then check if they
