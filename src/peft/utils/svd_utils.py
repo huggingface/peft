@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch import nn
@@ -30,6 +30,7 @@ __all__ = [
     "optim_wrapper",
     "project_gradient_to_orthogonal_space",
     "reconstruct_weight_matrix",
+    "wrap_model_with_svd",
 ]
 
 
@@ -142,7 +143,7 @@ def create_svd_model_class(base_cls: type) -> type:
     """Create a subclass of ``base_cls`` where selected linear weights are replaced by SVD decompositions."""
 
     class ModelWithSVD(base_cls):
-        def __init__(self, config, svd_config: Optional[dict[str, int]] = None, initialize_svd: bool = True, **kwargs):
+        def __init__(self, config, svd_config: dict[str, int] | None = None, initialize_svd: bool = True, **kwargs):
             super().__init__(config, **kwargs)
             self.svd_config = svd_config or {}
             self.name_mapping: dict[str, str] = {}
@@ -152,7 +153,7 @@ def create_svd_model_class(base_cls: type) -> type:
 
         @classmethod
         def from_pretrained(
-            cls, pretrained_model_name_or_path, *model_args, svd_config: Optional[dict[str, int]] = None, **kwargs
+            cls, pretrained_model_name_or_path, *model_args, svd_config: dict[str, int] | None = None, **kwargs
         ):
             model = super().from_pretrained(
                 pretrained_model_name_or_path,
@@ -206,7 +207,7 @@ def create_svd_model_class(base_cls: type) -> type:
                     mod, attr = self._get_module_by_name(name)
                     bias = mod.bias if hasattr(mod, "bias") else None
 
-                    def make_forward(sn: str, bias: Optional[torch.Tensor]):
+                    def make_forward(sn: str, bias: torch.Tensor | None):
                         def forward(x):
                             W = self._reconstruct_weight_by_safe_name(sn)
                             if W.dtype != x.dtype:
@@ -288,3 +289,25 @@ def optim_wrapper(optimizer: torch.optim.Optimizer, model: nn.Module) -> torch.o
 
     optimizer.step = types.MethodType(step, optimizer)
     return optimizer
+
+
+def wrap_model_with_svd(model: nn.Module, svd_config: dict[str, int] | None = None) -> nn.Module:
+    """Return a version of ``model`` where selected weights are decomposed using SVD.
+
+    Parameters ---------- model:
+        The model to wrap. It must expose a ``config`` attribute that will be passed to the wrapped class' constructor.
+    svd_config:
+        A mapping from parameter names to ``top_k`` ranks. If not provided, it is automatically generated based on the
+        layer shapes using :func:`auto_generate_target_svd_config`.
+
+    Returns ------- ``nn.Module``
+        A new model instance with the same weights as ``model`` but with trainable low-rank parameters and frozen
+        high-rank components.
+    """
+
+    svd_config = svd_config or auto_generate_target_svd_config(model)
+    SVDCls = create_svd_model_class(model.__class__)
+    wrapped = SVDCls(model.config, svd_config=svd_config, initialize_svd=False)
+    wrapped.load_state_dict(model.state_dict())
+    wrapped.reinitialize_svd()
+    return wrapped

@@ -122,6 +122,7 @@ from .utils import (
     replace_lora_weights_loftq,
     set_peft_model_state_dict,
     shift_tokens_right,
+    wrap_model_with_svd,
 )
 
 
@@ -227,4 +228,5 @@ __all__ = [
     "replace_lora_weights_loftq",
     "set_peft_model_state_dict",
     "shift_tokens_right",
+    "wrap_model_with_svd",
 ]

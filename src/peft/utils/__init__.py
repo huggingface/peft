@@ -62,6 +62,7 @@ from .svd_utils import (
     optim_wrapper,
     project_gradient_to_orthogonal_space,
     reconstruct_weight_matrix,
+    wrap_model_with_svd,
 )
 
 
@@ -117,4 +118,5 @@ __all__ = [
     "set_peft_model_state_dict",
     "shift_tokens_right",
     "transpose",
+    "wrap_model_with_svd",
 ]
