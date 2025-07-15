@@ -44,14 +44,14 @@ from transformers import (
 import peft
 from peft import PeftConfig, get_peft_model, prepare_model_for_kbit_training
 from peft.optimizers import create_lorafa_optimizer, create_loraplus_optimizer
-from peft.utils import SAFETENSORS_WEIGHTS_NAME
+from peft.utils import infer_device, SAFETENSORS_WEIGHTS_NAME
 
+device = infer_device()
 
-if not torch.cuda.is_available():
-    raise RuntimeError("CUDA is not available, currently only CUDA is supported")
+if device not in ["cuda", "xpu"]:
+    raise RuntimeError("CUDA or XPU is not available, currently only CUDA or XPU is supported")
 
-device = "cuda"
-CUDA_MEMORY_INIT_THRESHOLD = 500 * 2**20  # 500MB
+ACCELERATOR_MEMORY_INIT_THRESHOLD = 500 * 2**20  # 500MB
 FILE_NAME_DEFAULT_TRAIN_PARAMS = os.path.join(os.path.dirname(__file__), "default_training_params.json")
 FILE_NAME_TRAIN_PARAMS = "training_params.json"  # specific params for this experiment
 # main results
@@ -173,23 +173,24 @@ def get_train_config(path: str) -> TrainConfig:
     return TrainConfig(**config_kwargs)
 
 
-def init_cuda() -> int:
+def init_accelerator() -> int:
+    torch_accelerator_module = getattr(torch, device, torch.cuda)
     torch.manual_seed(0)
-    torch.cuda.reset_peak_memory_stats()
-    torch.cuda.manual_seed_all(0)
+    torch_accelerator_module.reset_peak_memory_stats()
+    torch_accelerator_module.manual_seed_all(0)
     # might not be necessary, but just to be sure
     nn.Linear(1, 1).to(device)
 
-    cuda_memory_init = torch.cuda.max_memory_reserved()
-    if cuda_memory_init > CUDA_MEMORY_INIT_THRESHOLD:
+    accelerator_memory_init = torch_accelerator_module.max_memory_reserved()
+    if accelerator_memory_init > ACCELERATOR_MEMORY_INIT_THRESHOLD:
         raise RuntimeError(
-            f"CUDA memory usage at start is too high: {cuda_memory_init // 2**20}MB, please ensure that no other "
+            f"{device} memory usage at start is too high: {accelerator_memory_init // 2**20}MB, please ensure that no other "
             f"processes are running on {device}."
         )
 
-    torch.cuda.reset_peak_memory_stats()
-    cuda_memory_init = torch.cuda.max_memory_reserved()
-    return cuda_memory_init
+    torch_accelerator_module.reset_peak_memory_stats()
+    accelerator_memory_init = torch_accelerator_module.max_memory_reserved()
+    return accelerator_memory_init
 
 
 def get_tokenizer(*, model_id: str, max_seq_length: int):
@@ -524,13 +525,15 @@ def get_package_info() -> dict[str, Optional[str]]:
 
 
 def get_system_info() -> dict[str, str]:
+    device = infer_device()
+    torch_accelerator_module = getattr(torch, device, torch.cuda)
     system_info = {
         "system": platform.system(),
         "release": platform.release(),
         "version": platform.version(),
         "machine": platform.machine(),
         "processor": platform.processor(),
-        "gpu": torch.cuda.get_device_name(0),
+        "accelerator": torch_accelerator_module.get_device_name(0),
     }
     return system_info
 
@@ -569,7 +572,7 @@ class TrainStatus(enum.Enum):
 class TrainResult:
     status: TrainStatus
     train_time: float
-    cuda_memory_reserved_log: list[int]
+    accelerator_memory_reserved_log: list[int]
     losses: list[float]
     metrics: list[Any]  # TODO
     error_msg: str
@@ -578,16 +581,16 @@ class TrainResult:
 
 
 def log_to_console(log_data: dict[str, Any], print_fn: Callable[..., None]) -> None:
-    cuda_memory_max = log_data["train_info"]["cuda_memory_max"]
-    cuda_memory_avg = log_data["train_info"]["cuda_memory_reserved_avg"]
-    cuda_memory_reserved_99th = log_data["train_info"]["cuda_memory_reserved_99th"]
+    accelerator_memory_max = log_data["train_info"]["accelerator_memory_max"]
+    accelerator_memory_avg = log_data["train_info"]["accelerator_memory_reserved_avg"]
+    accelerator_memory_reserved_99th = log_data["train_info"]["accelerator_memory_reserved_99th"]
     time_train = log_data["train_info"]["train_time"]
     time_total = log_data["run_info"]["total_time"]
     file_size = log_data["train_info"]["file_size"]
 
-    print_fn(f"cuda memory max: {cuda_memory_max // 2**20}MB")
-    print_fn(f"cuda memory reserved avg: {cuda_memory_avg // 2**20}MB")
-    print_fn(f"cuda memory reserved 99th percentile: {cuda_memory_reserved_99th // 2**20}MB")
+    print_fn(f"accelerator memory max: {accelerator_memory_max // 2**20}MB")
+    print_fn(f"accelerator memory reserved avg: {accelerator_memory_avg // 2**20}MB")
+    print_fn(f"accelerator memory reserved 99th percentile: {accelerator_memory_reserved_99th // 2**20}MB")
     print_fn(f"train time: {time_train}s")
     print_fn(f"total time: {time_total:.2f}s")
     print_fn(f"file size of checkpoint: {file_size / 2**20:.1f}MB")
@@ -612,7 +615,7 @@ def log_results(
     *,
     experiment_name: str,
     train_result: TrainResult,
-    cuda_memory_init: int,
+    accelerator_memory_init: int,
     time_total: float,
     file_size: int,
     model_info: Optional[huggingface_hub.ModelInfo],
@@ -623,9 +626,13 @@ def log_results(
     print_fn: Callable[..., None],
 ) -> None:
     # collect results
-    cuda_memory_final = torch.cuda.max_memory_reserved()
-    cuda_memory_avg = int(sum(train_result.cuda_memory_reserved_log) / len(train_result.cuda_memory_reserved_log))
-    cuda_memory_reserved_99th = int(np.percentile(train_result.cuda_memory_reserved_log, 99))
+    device = infer_device()
+    torch_accelerator_module = getattr(torch, device, torch.cuda)
+    accelerator_memory_final = torch_accelerator_module.max_memory_reserved()
+    accelerator_memory_avg = int(
+        sum(train_result.accelerator_memory_reserved_log) / len(train_result.accelerator_memory_reserved_log)
+    )
+    accelerator_memory_reserved_99th = int(np.percentile(train_result.accelerator_memory_reserved_log, 99))
 
     meta_info = get_meta_info()
     if model_info is not None:
@@ -679,9 +686,9 @@ def log_results(
             "error_msg": train_result.error_msg,
         },
         "train_info": {
-            "cuda_memory_reserved_avg": cuda_memory_avg,
-            "cuda_memory_max": (cuda_memory_final - cuda_memory_init),
-            "cuda_memory_reserved_99th": cuda_memory_reserved_99th,
+            "accelerator_memory_reserved_avg": accelerator_memory_avg,
+            "accelerator_memory_max": (accelerator_memory_final - accelerator_memory_init),
+            "accelerator_memory_reserved_99th": accelerator_memory_reserved_99th,
             "train_time": train_result.train_time,
             "file_size": file_size,
             "num_trainable_params": train_result.num_trainable_params,
