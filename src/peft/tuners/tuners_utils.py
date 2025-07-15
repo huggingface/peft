@@ -591,6 +591,21 @@ class BaseTuner(nn.Module, ABC):
                 "Please check that exclude_modules was set correctly."
             )
 
+        elif not uses_dummy_target_modules:
+            # If we landed here, it means that at least one module or parameter was adapted, so let's not raise an
+            # error. However, let's warn the user if it seems like
+            # - they wanted to match a module but there was no match
+            # - they wanted to match a parameter but there was no match
+            if peft_config.target_modules and not self.targeted_module_names:
+                warnings.warn(
+                    f"target_modules={peft_config.target_modules} were set but no module was matched.", RuntimeWarning
+                )
+            elif getattr(peft_config, "target_parameters", []) and not self.targeted_parameter_names:
+                warnings.warn(
+                    f"target_parameters={peft_config.target_parameters} were set but no parameter was matched.",
+                    RuntimeWarning,
+                )
+
         tied_target_modules = self._get_tied_target_modules(model=model)
         if tied_target_modules:
             warnings.warn(
