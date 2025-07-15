@@ -101,7 +101,7 @@ def test_modules_to_save():
 
 
 class TestGetStateDict:
-    def test_get_peft_model_state_dict(dummy_peft_model):
+    def test_get_peft_model_state_dict(self, dummy_peft_model):
         peft_state_dict = get_peft_model_state_dict(dummy_peft_model)
 
         # Ensure all keys in the state dict are for LoRA parameters
