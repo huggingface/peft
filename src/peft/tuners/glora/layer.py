@@ -23,8 +23,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-
-
 class GLoraLayer:
     def __init__(self, adapter_name: str, in_features: int, out_features: int, r: int = 0, **kwargs):
         self.r = {}
