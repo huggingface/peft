@@ -28,6 +28,7 @@ from transformers.utils import http_user_agent
 
 from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
 
+from .constants import INCLUDE_LINEAR_LAYERS_SHORTHAND
 from .other import (
     EMBEDDING_LAYER_NAMES,
     SAFETENSORS_WEIGHTS_NAME,
@@ -35,6 +36,7 @@ from .other import (
     AuxiliaryTrainingWrapper,
     check_file_exists_on_hf_hub,
     infer_device,
+    match_target_against_key,
 )
 from .peft_types import PeftType
 
@@ -232,15 +234,24 @@ def get_peft_model_state_dict(
 
     # DEAL WITH EMBEDDINGS
     # check the common embedding layers in `target_modules` to reset `save_embedding_layers` if necessary
-    is_embedding_in_target_modules = False
-    if (
-        save_embedding_layers == "auto"
-        and hasattr(config, "target_modules")
-        and any(k in config.target_modules for k in EMBEDDING_LAYER_NAMES)
-        and config.peft_type != PeftType.TRAINABLE_TOKENS
-    ):
+    embedding_is_targeted = False
+    if hasattr(config, "target_modules"):
+        if isinstance(config.target_modules, str) and config.target_modules != INCLUDE_LINEAR_LAYERS_SHORTHAND:
+            embedding_is_targeted = any(
+                match_target_against_key(config.target_modules, k)
+                for k, _ in model.named_modules()
+                if any(e in k for e in EMBEDDING_LAYER_NAMES)
+            )
+        elif config.target_modules:
+            embedding_is_targeted = any(k in config.target_modules for k in EMBEDDING_LAYER_NAMES)
+
+    using_trainable_tokens = (
+        config.peft_type == PeftType.TRAINABLE_TOKENS or getattr(config, "trainable_token_indices", None) is not None
+    )
+
+    if save_embedding_layers == "auto" and embedding_is_targeted and not using_trainable_tokens:
         warnings.warn("Setting `save_embedding_layers` to `True` as embedding layers found in `target_modules`.")
-        save_embedding_layers = is_embedding_in_target_modules = True
+        save_embedding_layers = True
     elif save_embedding_layers == "auto":
         vocab_size = getattr(getattr(model, "config", None), "vocab_size", None)
         model_id = getattr(config, "base_model_name_or_path", None)
@@ -278,9 +289,10 @@ def get_peft_model_state_dict(
 
     if save_embedding_layers and hasattr(model, "get_input_embeddings"):
         for layer in [model.get_input_embeddings(), model.get_output_embeddings()]:
-            if not is_embedding_in_target_modules or has_valid_embedding_base_layer(layer):
-                # support from version >= 0.6.2
-                embedding_module_name = get_embedding_layer_name(model, layer, is_embedding_in_target_modules)
+            # Either the layer is not targeted, then it must have been resized and needs saving. Or it is targeted and
+            # therefore has a valid base layer, then we'll save it as well.
+            if not embedding_is_targeted or has_valid_embedding_base_layer(layer):
+                embedding_module_name = get_embedding_layer_name(model, layer, embedding_is_targeted)
                 if embedding_module_name:
                     to_return.update({k: v for k, v in state_dict.items() if embedding_module_name in k})
     elif save_embedding_layers:
