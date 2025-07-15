@@ -808,6 +808,26 @@ class TestModelAndLayerStatus:
         ]
         assert result == expected
 
+    def test_target_parameters(self, large_model):
+        # don't check each attribute, just the relevant ones
+        # first remove the normal LoRA layers
+        large_model = large_model.merge_and_unload()
+        config = LoraConfig(target_parameters=["lin0.weight", "lin1.weight"])
+        large_model = get_peft_model(large_model, config)
+        layer_status = large_model.get_layer_status()
+        assert [status.name for status in layer_status] == ["model.lin0", "model.lin1"]
+        assert [status.module_type for status in layer_status] == ["lora.ParamWrapper"] * 2
+
+    def test_target_parameters_and_target_modules(self, large_model):
+        # don't check each attribute, just the relevant ones
+        # first remove the normal LoRA layers
+        large_model = large_model.merge_and_unload()
+        config = LoraConfig(target_parameters=["lin0.weight"], target_modules=["lin1"])
+        large_model = get_peft_model(large_model, config)
+        layer_status = large_model.get_layer_status()
+        assert [status.name for status in layer_status] == ["model.lin0", "model.lin1"]
+        assert [status.module_type for status in layer_status] == ["lora.ParamWrapper", "lora.Linear"]
+
     ################
     # model status #
     ################
@@ -1008,6 +1028,31 @@ class TestModelAndLayerStatus:
         large_model.model.lin0.lora_A["default"] = large_model.model.lin0.lora_A["default"].to(self.torch_device)
         model_status = large_model.get_model_status()
         assert model_status.devices == {"default": ["cpu", self.torch_device], "other": ["cpu"]}
+
+    def test_model_target_parameters(self, large_model):
+        # don't check each attribute, just the relevant ones
+        # first remove the normal LoRA layers
+        large_model = large_model.merge_and_unload()
+        config = LoraConfig(target_parameters=["lin0.weight", "lin1.weight"])
+        large_model = get_peft_model(large_model, config)
+        model_status = large_model.get_model_status()
+        model_status = large_model.get_model_status()
+        assert model_status.adapter_model_type == "LoraModel"
+        assert model_status.peft_types == {"default": "LORA", "other": "LORA"}
+        assert model_status.num_adapter_layers == 2
+        assert model_status.trainable_params == 2 * (8 * 10 + 10 * 8)
+
+    def test_model_target_parameters_and_target_modules(self, large_model):
+        # don't check each attribute, just the relevant ones
+        # first remove the normal LoRA layers
+        large_model = large_model.merge_and_unload()
+        config = LoraConfig(target_parameters=["lin0.weight"], target_modules=["lin1"])
+        large_model = get_peft_model(large_model, config)
+        model_status = large_model.get_model_status()
+        assert model_status.adapter_model_type == "LoraModel"
+        assert model_status.peft_types == {"default": "LORA", "other": "LORA"}
+        assert model_status.num_adapter_layers == 2
+        assert model_status.trainable_params == 2 * (8 * 10 + 10 * 8)
 
     def test_loha_model(self):
         # ensure that this also works with non-LoRA, it's not necessary to test all tuners
