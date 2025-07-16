@@ -26,7 +26,7 @@ import sys
 import os
 
 
-from .waverec2 import waverec2
+from .waverec2d import waverec2d
 
 
 class WaveFTLayer(BaseTunerLayer):
@@ -184,7 +184,7 @@ class WaveFTLayer(BaseTunerLayer):
             coeffs = (cA, (cH, cV, cD))
             
             # Reconstruct with the specified wavelet family
-            delta_weight = waverec2(coeffs, wavelet_family) * self.waveft_scaling[adapter]
+            delta_weight = waverec2d(coeffs, wavelet_family) * self.waveft_scaling[adapter]
             
             # Ensure the delta weight has exactly the correct dimensions
             if delta_weight.shape[0] != self.out_features or delta_weight.shape[1] != self.in_features:

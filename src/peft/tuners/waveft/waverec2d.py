@@ -232,7 +232,7 @@ def _construct_2d_filt(lo: torch.Tensor, hi: torch.Tensor) -> torch.Tensor:
     filt = filt.unsqueeze(1)
     return filt
 
-def waverec2(
+def waverec2d(
     coeffs: WaveletCoeff2d,
     wavelet: Union[Wavelet, str],
     axes: tuple[int, int] = (-2, -1),
