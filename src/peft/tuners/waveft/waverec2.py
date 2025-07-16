@@ -1,14 +1,11 @@
-import functools
-import typing
-import warnings
 from collections.abc import Callable, Sequence
 from functools import partial
-from typing import Any, List, Literal, NamedTuple, Optional, Protocol, Union, cast, overload
+from typing import Any, NamedTuple, Protocol, Union, cast, overload
 
 import numpy as np
-import pywt
+from .wavelet import Wavelet as minimal_wavelet
 import torch
-from typing_extensions import ParamSpec, TypeVar, TypeAlias, Unpack
+from typing_extensions import TypeAlias, Unpack
 
 
 class WaveletDetailTuple2d(NamedTuple):
@@ -56,7 +53,7 @@ class WaveletTensorTuple(NamedTuple):
 
 def _as_wavelet(wavelet: Union[Wavelet, str]) -> Wavelet:
     if isinstance(wavelet, str):
-        return pywt.Wavelet(wavelet)
+        return minimal_wavelet(wavelet)
     else:
         return wavelet
 
@@ -225,8 +222,6 @@ def _adjust_padding_at_reconstruction(
     elif 2 * coeff_len - tensor_len != 0:
         raise ValueError("incorrect padding")
     return padr, padl
-
-# --- From conv_transform_2.py ---
 
 def _construct_2d_filt(lo: torch.Tensor, hi: torch.Tensor) -> torch.Tensor:
     ll = _outer(lo, lo)
