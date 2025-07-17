@@ -138,6 +138,19 @@ ALL_CONFIGS = [
             "bias": "none",
         },
     ),
+    # Activated LoRA (aLoRA)
+    (
+        LoraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "r": 8,
+            "lora_alpha": 32,
+            "target_modules": None,
+            "lora_dropout": 0.05,
+            "bias": "none",
+            "alora_invocation_tokens": [1],
+        },
+    ),
     # LoRA + trainable tokens
     (
         LoraConfig,

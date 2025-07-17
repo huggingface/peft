@@ -629,10 +629,9 @@ class PeftCommonTester:
                     assert load_result2.missing_keys == []
 
     def _test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig, VBLoRAConfig):
-            # Merge layers only supported for LoRA and IA³
+        if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig, VBLoRAConfig) or config_kwargs.get("alora_invocation_tokens") is not None:
+            # Merge layers only supported for LoRA and IA³, and not for Activated LoRA (aLoRA)
             return pytest.skip(f"Test not applicable for {config_cls}")
-
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
 
@@ -662,8 +661,8 @@ class PeftCommonTester:
             LoKrConfig,
             VeraConfig,
             FourierFTConfig,
-        ):
-            # Merge layers only supported for LoRA and IA³
+        ) or config_kwargs.get("alora_invocation_tokens") is not None:
+            # Merge layers only supported for LoRA and IA³, and not for Activated LoRA (aLoRA)
             return
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
@@ -742,6 +741,9 @@ class PeftCommonTester:
 
         if issubclass(config_cls, (OFTConfig, BOFTConfig)):
             return pytest.skip(f"Test not applicable for {config_cls}")
+        
+        if config_kwargs.get("alora_invocation_tokens") is not None:
+            return pytest.skip ("Merging not applicable to aLoRA")
 
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
@@ -844,7 +846,7 @@ class PeftCommonTester:
             **config_kwargs,
         )
 
-        if config.peft_type not in supported_peft_types:
+        if config.peft_type not in supported_peft_types or config_kwargs.get("alora_invocation_tokens") is not None:
             return
 
         with hub_online_once(model_id):

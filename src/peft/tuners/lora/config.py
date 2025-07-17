@@ -65,8 +65,8 @@ class LoftQConfig:
             bits.
     """
 
-    loftq_bits: str = field(default=4, metadata={"help": "Quantization bits for LoftQ"})
-    loftq_iter: str = field(default=1, metadata={"help": "Alternating iterations for LoftQ"})
+    loftq_bits: int = field(default=4, metadata={"help": "Quantization bits for LoftQ"})
+    loftq_iter: int = field(default=1, metadata={"help": "Alternating iterations for LoftQ"})
 
 
 @dataclass
@@ -300,21 +300,17 @@ class LoraConfig(PeftConfig):
             ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger overhead than pure
             LoRA, so it is recommended to merge weights for inference. For more information, see
             https://huggingface.co/papers/2402.09353.
-        use_alora (`bool`):
-            Enable <a href='https://huggingface.co/papers/2504.12397'>'Activated LoRA' (aLoRA)</a>. This technique
-            selectively activates the adapter weights only on tokens during and after the alora_invocation_tokens. When
-            used in a CausalLM, this means that the KV cache prior to invocation is interchangeable with that of the
-            base model (and other aLoRA adapters operating this way). As a result, in inference pipelines involving
-            switching between base model inference and adapter inference (e.g. agentic pipelines, see paper for many
-            examples), significant savings are realized (relative to LoRA) by saving prefill operations. Overall
-            adapter inference speedups of an order of magnitude or more can occur on vLLM, depending on the length of
-            the shared context. REQUIRED ARGUMENTS: alora_invocation_string, alora_invocation_tokens. These are
-            necessary to know when to turn on adapter weights. The invocation string therein must be present in all
-            inputs. Note also that merging is not possible due to the selective application of the weights.
-        alora_invocation_string (`str`):
-            Invocation string for aLoRA (must be present in model inputs). Defaults to None.
         alora_invocation_tokens (`List[int]`):
-            Tokenized copy of alora_invocation_string for use when tokenizer is not available.
+            If not None, enable <a href='https://huggingface.co/papers/2504.12397'>'Activated LoRA' (aLoRA)</a>,
+            with alora_invocation_tokens being the tokenized invocation string for the adapter (must be present in all 
+            model input strings). This technique selectively activates the adapter weights only on tokens during and
+            after the alora_invocation_tokens. When used in a CausalLM, this means that the KV cache prior to invocation
+            is interchangeable with that of the base model (and other aLoRA adapters operating this way). As a result,
+            in inference pipelines involving switching between base model inference and adapter inference (e.g. agentic
+            pipelines, see paper for examples), significant savings are realized (relative to LoRA) by saving prefill
+            operations. Overall adapter inference speedups of an order of magnitude or more can occur on vLLM, depending
+            on the length of the shared context. Note that merging is not possible due to the selective application of
+            the weights.
         layer_replication (`List[Tuple[int, int]]`):
             Build a new stack of layers by stacking the original model layers according to the ranges specified. This
             allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
@@ -513,11 +509,12 @@ class LoraConfig(PeftConfig):
             )
         },
     )
-    use_alora: bool = field(
-        default=False,
+    alora_invocation_tokens: Optional[list[int]] = field(
+        default=None,
         metadata={
             "help": (
-                "Enable <a href='https://huggingface.co/papers/2504.12397'>'Activated LoRA' (aLoRA)</a>. This technique selectively activates the adapter "
+                "Tokenized copy of the Activated LoRA (aLoRA) invocation string (as a list of token IDs). Use the model's default tokenizer. If not None, "
+                "enable <a href='https://huggingface.co/papers/2504.12397'>'Activated LoRA' (aLoRA)</a>. This technique selectively activates the adapter "
                 "weights only on tokens during and after the alora_invocation_tokens. When used in a CausalLM, this means that the KV cache prior to invocation "
                 "is interchangeable with that of the base model (and other aLoRA adapters operating this way). As a result, in inference pipelines involving switching "
                 "between base model inference and adapter inference (e.g. agentic pipelines, see paper for many examples), significant savings are realized (relative to LoRA) "
@@ -525,32 +522,10 @@ class LoraConfig(PeftConfig):
                 "context. "
                 "NOTE 1: aLoRA often requires higher rank r than LoRA. r=32 often works well."
                 "NOTE 2: Merging is NOT supported due to the selective application of the adapter weights."
-                "REQUIRED ARGUMENTS: alora_invocation_string, alora_invocation_tokens. These are necessary to know when to turn on adapter weights. The invocation string therein "
-                "must be present in all inputs."
-            )
-        },
-    )
-    alora_invocation_string: Optional[str] = field(
-        default=None,
-        metadata={
-            "help": (
-                "Activated LoRA (aLoRA) invocation string. "
-                "The adapter weights will be activated 1 token after the last occurence of this string in the input. "
-                "This string must be present in all inputs. It is best to have this string begin and end with special tokens to avoid tokenizer boundary effects when "
-                "tokenizing the input. Only used when `use_alora=True`."
-            )
-        },
-    )
-    alora_invocation_tokens: Optional[list[int]] = field(
-        default=None,
-        metadata={
-            "help": (
-                "Tokenized copy of the Activated LoRA (aLoRA) invocation string alora_invocation_string "
-                "(as a list of token IDs). Use the model's default tokenizer. "
-                "E.g. alora_invocation_tokens = tokenizer.encode(alora_invocation_string, add_special_tokens=False)."
+                "Example: alora_invocation_tokens = tokenizer.encode(alora_invocation_string, add_special_tokens=False)."
                 "The adapter weights will be activated 1 token after the last occurence of this string in the input. "
                 "These tokens must be present in all inputs after tokenization. It is best to have alora_invocation_string begin and end with special tokens "
-                "to avoid tokenizer boundary effects when tokenizing the input. Only used when `use_alora=True`."
+                "to avoid tokenizer boundary effects when tokenizing the input."
             )
         },
     )

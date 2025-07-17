@@ -13,7 +13,9 @@
 # limitations under the License.
 from __future__ import annotations
 
-from typing import Any
+import collections
+from typing import Any, Optional
+import warnings
 
 import torch
 from accelerate.utils.imports import is_xpu_available
@@ -21,6 +23,7 @@ from torch import nn
 
 from peft.utils.other import transpose
 
+from .config import PeftConfig
 from .dora import DoraConv1dLayer, DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer
 from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd
 
@@ -471,27 +474,88 @@ class ALoraLinearVariant(LoraVariant):
 
         x = x.to(lora_A.weight.dtype)
 
-        if x.dim() == 2:
+        if x.dim() == 2: # comes up in some single-token tests
             result = result + lora_B(lora_A(dropout(x))) * scaling
-        elif len(alora_offsets) == 1:
-            if alora_offsets[0] is None:
-                # run as lora
-                result[:, :, :] = result[:, :, :] + lora_B(lora_A(dropout(x[:, :, :]))) * scaling
-            else:
-                offset = min(result.shape[1], alora_offsets[0])
-                if offset > 0:
-                    result[:, -offset:, :] = (
-                        result[:, -offset:, :] + lora_B(lora_A(dropout(x[:, -offset:, :]))) * scaling
-                    )
-        else:
+        else: # typical LLM regime
             for i in range(result.shape[0]):
-                if alora_offsets[i] is None:  # run as lora
-                    result[:, :, :] = result[:, :, :] + lora_B(lora_A(dropout(x[:, :, :]))) * scaling
-                else:
+                if alora_offsets[i] is not None and alora_offsets[i] > 0:  # otherwise use base model
                     offset = min(alora_offsets[i], result.shape[1])
-                    if offset > 0:
-                        result[i, -offset:, :] = (
-                            result[i, -offset:, :] + lora_B(lora_A(dropout(x[i, -offset:, :]))) * scaling
-                        )
+                    result[i, -offset:, :] = (
+                        result[i, -offset:, :] + lora_B(lora_A(dropout(x[i, -offset:, :]))) * scaling
+                    )
 
         return result
+
+def calculate_alora_offsets(
+    peft_config: PeftConfig, active_adapter: str, input_ids: torch.Tensor, adapter_names: Optional[list[str]] = None
+) -> list[int]:
+    if input_ids is None:
+        return []
+
+    batch_size = input_ids.shape[0]
+    alora_offsets = [None] * batch_size
+
+    cached_invocation_tensors = {}
+    adapters_to_process_indices = collections.defaultdict(list)
+
+    for i in range(batch_size):
+        current_adapter_name = (
+            adapter_names[i] if adapter_names and i < len(adapter_names) else active_adapter
+        )
+
+        if current_adapter_name == "__base__":
+            alora_offsets[i] = None
+            continue
+
+        if current_adapter_name not in peft_config:
+            warnings.warn(
+                f"Adapter '{current_adapter_name}' not found in peft_config. Using base model for row {i}."
+            )
+            alora_offsets[i] = None
+            continue
+
+        current_peft_config = peft_config[current_adapter_name]
+
+        invocation_tokens = getattr(current_peft_config, "alora_invocation_tokens", None)
+        if invocation_tokens is None:
+            alora_offsets[i] = None  # Not an aLoRA adapter or wrong type
+            continue
+
+        if current_adapter_name not in cached_invocation_tensors:
+            cached_invocation_tensors[current_adapter_name] = torch.tensor(
+                invocation_tokens, dtype=torch.long, device=input_ids.device
+            )
+
+        adapters_to_process_indices[current_adapter_name].append(i)
+
+    for adapter_name_to_process, indices in adapters_to_process_indices.items():
+        current_invocation_ids_tensor = cached_invocation_tensors[adapter_name_to_process]
+        invocation_len = len(current_invocation_ids_tensor)
+
+        for i in indices:
+            sequence = input_ids[i]
+            seq_len = len(sequence)
+            best_match_start_idx = -1
+
+            possible_starts = (sequence == current_invocation_ids_tensor[0]).nonzero(as_tuple=True)[0]
+
+            for start_idx_tensor in possible_starts:
+                idx = start_idx_tensor.item()
+                if idx + invocation_len <= seq_len:
+                    if torch.equal(sequence[idx : idx + invocation_len], current_invocation_ids_tensor):
+                        if idx > best_match_start_idx:
+                            best_match_start_idx = idx
+
+            if best_match_start_idx != -1:
+                offset_val = seq_len - best_match_start_idx
+                alora_offsets[i] = offset_val if offset_val > 0 else None
+            else:  # Invocation sequence not found in input
+                warnings.warn(
+                    f"Could not find alora_invocation_tokens for specified aLoRA adapter in the "
+                    f"following instance"
+                    f"{sequence}"
+                    f"Invocation tokens: {current_invocation_ids_tensor} \n"
+                    f"Defaulting to base model. "
+                )
+                alora_offsets[i] = None
+    return alora_offsets

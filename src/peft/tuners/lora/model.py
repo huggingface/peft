@@ -205,7 +205,7 @@ class LoraModel(BaseTuner):
             "init_lora_weights": lora_config.init_lora_weights,
             "use_rslora": lora_config.use_rslora,
             "use_dora": lora_config.use_dora,
-            "use_alora": lora_config.use_alora,
+            "use_alora": lora_config.alora_invocation_tokens is not None,
             "use_qalora": lora_config.use_qalora,
             "qalora_group_size": lora_config.qalora_group_size,
             "ephemeral_gpu_offload": lora_config.runtime_config.ephemeral_gpu_offload,
@@ -239,6 +239,7 @@ class LoraModel(BaseTuner):
                 init_lora_weights=lora_config.init_lora_weights,
                 use_rslora=lora_config.use_rslora,
                 use_dora=lora_config.use_dora,
+                use_alora=lora_config.alora_invocation_tokens is not None,
                 lora_bias=lora_config.lora_bias,
             )
         else:
