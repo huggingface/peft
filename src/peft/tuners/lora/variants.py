@@ -22,7 +22,7 @@ from accelerate.utils.imports import is_xpu_available
 from torch import nn
 
 from peft.utils.other import transpose
-from peft import PeftModel
+
 from .config import PeftConfig
 from .dora import DoraConv1dLayer, DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer
 from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd
@@ -555,7 +555,8 @@ def calculate_alora_offsets(
                 alora_offsets[i] = None
     return alora_offsets
 
-def is_alora_relevant_in_batch(model: PeftModel, adapter_names: Optional[list[str]] = None):
+
+def is_alora_relevant_in_batch(model: nn.module, adapter_names: Optional[list[str]] = None):
     is_alora_relevant = False
     if getattr(model.active_peft_config, "alora_invocation_tokens", None):
         is_alora_relevant = True
@@ -570,7 +571,8 @@ def is_alora_relevant_in_batch(model: PeftModel, adapter_names: Optional[list[st
 
     return is_alora_relevant
 
-def get_alora_offsets_for_forward(model: PeftModel, input_ids: torch.Tensor, inputs_embeds: torch.Tensor, **kwargs):
+
+def get_alora_offsets_for_forward(model: nn.module, input_ids: torch.Tensor, inputs_embeds: torch.Tensor, **kwargs):
     adapter_names_for_offset_calc = kwargs.get("adapter_names", None)
     if is_alora_relevant_in_batch(model, adapter_names_for_offset_calc):
         alora_offsets = kwargs.get("alora_offsets")
@@ -579,22 +581,20 @@ def get_alora_offsets_for_forward(model: PeftModel, input_ids: torch.Tensor, inp
                 warnings.warn(
                     "Cannot calculate aLoRA offsets when only inputs_embeds are provided. Disabling aLoRA for this forward pass."
                 )
-                alora_offsets = [None] * inputs_embeds.shape[0]
+                kwargs["alora_offsets"] = [None] * inputs_embeds.shape[0]
             elif input_ids is not None:
-                alora_offsets = calculate_alora_offsets(
+                kwargs["alora_offsets"] = calculate_alora_offsets(
                     model.peft_config,
                     model.active_adapter,
                     input_ids,
                     adapter_names=adapter_names_for_offset_calc,
                 )
             else:
-                alora_offsets = None
-    kwargs["alora_offsets"] = alora_offsets
+                kwargs["alora_offsets"] = None
     return kwargs
 
 
-
-def get_alora_offsets_for_generate(model: PeftModel, *args, **kwargs):
+def get_alora_offsets_for_generate(model: nn.module, *args, **kwargs):
     adapter_names_for_offset_calc = kwargs.get("adapter_names")
     if is_alora_relevant_in_batch(model, adapter_names_for_offset_calc):
         alora_offsets_from_kwargs = kwargs.get("alora_offsets")
@@ -618,7 +618,7 @@ def get_alora_offsets_for_generate(model: PeftModel, *args, **kwargs):
                 for i in range(len(calculated_offsets)):
                     if calculated_offsets[i] is not None:
                         calculated_offsets[i] -= 1
-                alora_offsets = calculated_offsets
+                kwargs["alora_offsets"] = calculated_offsets
 
             else:
                 warnings.warn(
@@ -629,15 +629,12 @@ def get_alora_offsets_for_generate(model: PeftModel, *args, **kwargs):
                     bs = kwargs["attention_mask"].shape[0]
                 elif "inputs_embeds" in kwargs and kwargs["inputs_embeds"] is not None:
                     bs = kwargs["inputs_embeds"].shape[0]
-                elif (
-                    args and isinstance(args[0], torch.Tensor) and args[0].dim() > 0
-                ):  # input_ids might be in args[0]
+                elif args and isinstance(args[0], torch.Tensor) and args[0].dim() > 0:  # input_ids might be in args[0]
                     bs = args[0].shape[0]
                 elif (
                     "input_ids" in kwargs and kwargs["input_ids"] is not None
                 ):  # Should have been caught by current_input_ids
                     bs = kwargs["input_ids"].shape[0]
 
-                alora_offsets = [None] * bs
-    kwargs["alora_offsets"] = alora_offsets
+                kwargs["alora_offsets"] = [None] * bs
     return kwargs

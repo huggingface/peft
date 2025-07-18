@@ -38,7 +38,7 @@ from transformers import Cache, DynamicCache, EncoderDecoderCache, HybridCache, 
 from transformers.modeling_outputs import QuestionAnsweringModelOutput, SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
 
-from peft.tuners.lora.variants import get_alora_offsets_for_generate, get_alora_offsets_for_forward
+from peft.tuners.lora.variants import get_alora_offsets_for_forward, get_alora_offsets_for_generate
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils.constants import DUMMY_MODEL_CONFIG
 from peft.utils.integrations import init_empty_weights
@@ -1829,7 +1829,7 @@ class PeftModelForCausalLM(PeftModel):
 
         if not peft_config.is_prompt_learning:
             # For aLoRA
-            kwargs = get_alora_offsets_for_forward(self, input_ids, inputs_embeds,**kwargs)
+            kwargs = get_alora_offsets_for_forward(self, input_ids, inputs_embeds, **kwargs)
             if self.base_model.config.model_type == "mpt":
                 if inputs_embeds is not None:
                     raise AssertionError("forward in MPTForCausalLM does not support inputs_embeds")
@@ -1970,7 +1970,7 @@ class PeftModelForCausalLM(PeftModel):
         try:
             if not peft_config.is_prompt_learning:
                 # for aLoRA, None otherwise.
-                kwargs["alora_offsets"] = get_alora_offsets_for_generate(self, *args, **kwargs)
+                kwargs = get_alora_offsets_for_generate(self, *args, **kwargs)
                 with self._enable_peft_forward_hooks(*args, **kwargs):
                     kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
                     outputs = self.base_model.generate(*args, **kwargs)
