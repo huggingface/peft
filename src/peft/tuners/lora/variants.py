@@ -22,7 +22,7 @@ from accelerate.utils.imports import is_xpu_available
 from torch import nn
 
 from peft.utils.other import transpose
-
+from peft import PeftModel
 from .config import PeftConfig
 from .dora import DoraConv1dLayer, DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer
 from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd
@@ -554,3 +554,90 @@ def calculate_alora_offsets(
                 )
                 alora_offsets[i] = None
     return alora_offsets
+
+def is_alora_relevant_in_batch(model: PeftModel, adapter_names: Optional[list[str]] = None):
+    is_alora_relevant = False
+    if getattr(model.active_peft_config, "alora_invocation_tokens", None):
+        is_alora_relevant = True
+    elif adapter_names:
+        for name in adapter_names:
+            if name == "__base__":
+                continue
+            config_ = model.peft_config.get(name)
+            if config_ and getattr(config_, "alora_invocation_tokens", None):
+                is_alora_relevant = True
+                break
+
+    return is_alora_relevant
+
+def get_alora_offsets_for_forward(model: PeftModel, input_ids: torch.Tensor, inputs_embeds: torch.Tensor, **kwargs):
+    adapter_names_for_offset_calc = kwargs.get("adapter_names", None)
+    if is_alora_relevant_in_batch(model, adapter_names_for_offset_calc):
+        alora_offsets = kwargs.get("alora_offsets")
+        if alora_offsets is None:
+            if input_ids is None and inputs_embeds is not None:
+                warnings.warn(
+                    "Cannot calculate aLoRA offsets when only inputs_embeds are provided. Disabling aLoRA for this forward pass."
+                )
+                alora_offsets = [None] * inputs_embeds.shape[0]
+            elif input_ids is not None:
+                alora_offsets = calculate_alora_offsets(
+                    model.peft_config,
+                    model.active_adapter,
+                    input_ids,
+                    adapter_names=adapter_names_for_offset_calc,
+                )
+            else:
+                alora_offsets = None
+    kwargs["alora_offsets"] = alora_offsets
+    return kwargs
+
+
+
+def get_alora_offsets_for_generate(model: PeftModel, *args, **kwargs):
+    adapter_names_for_offset_calc = kwargs.get("adapter_names")
+    if is_alora_relevant_in_batch(model, adapter_names_for_offset_calc):
+        alora_offsets_from_kwargs = kwargs.get("alora_offsets")
+        if alora_offsets_from_kwargs is None:
+            current_input_ids = kwargs.get("input_ids")
+            if current_input_ids is None:  # args[0] is usually input_ids
+                if args and isinstance(args[0], torch.Tensor):
+                    current_input_ids = args[0]
+                else:
+                    current_input_ids = None
+
+            if current_input_ids is not None:
+                if current_input_ids.ndim == 1:
+                    current_input_ids = current_input_ids.unsqueeze(0)
+                calculated_offsets = calculate_alora_offsets(
+                    model.peft_config,
+                    model.active_adapter,
+                    current_input_ids,
+                    adapter_names=adapter_names_for_offset_calc,
+                )
+                for i in range(len(calculated_offsets)):
+                    if calculated_offsets[i] is not None:
+                        calculated_offsets[i] -= 1
+                alora_offsets = calculated_offsets
+
+            else:
+                warnings.warn(
+                    "Cannot calculate aLoRA offsets during generate as input_ids are not available. Disabling aLoRA."
+                )
+                bs = 1
+                if "attention_mask" in kwargs and kwargs["attention_mask"] is not None:
+                    bs = kwargs["attention_mask"].shape[0]
+                elif "inputs_embeds" in kwargs and kwargs["inputs_embeds"] is not None:
+                    bs = kwargs["inputs_embeds"].shape[0]
+                elif (
+                    args and isinstance(args[0], torch.Tensor) and args[0].dim() > 0
+                ):  # input_ids might be in args[0]
+                    bs = args[0].shape[0]
+                elif (
+                    "input_ids" in kwargs and kwargs["input_ids"] is not None
+                ):  # Should have been caught by current_input_ids
+                    bs = kwargs["input_ids"].shape[0]
+
+                alora_offsets = [None] * bs
+    kwargs["alora_offsets"] = alora_offsets
+    return kwargs

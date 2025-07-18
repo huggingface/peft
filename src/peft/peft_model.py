@@ -38,7 +38,7 @@ from transformers import Cache, DynamicCache, EncoderDecoderCache, HybridCache, 
 from transformers.modeling_outputs import QuestionAnsweringModelOutput, SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
 
-from peft.tuners.lora.variants import calculate_alora_offsets
+from peft.tuners.lora.variants import get_alora_offsets_for_generate, get_alora_offsets_for_forward
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils.constants import DUMMY_MODEL_CONFIG
 from peft.utils.integrations import init_empty_weights
@@ -1828,38 +1828,8 @@ class PeftModelForCausalLM(PeftModel):
         peft_config = self.active_peft_config
 
         if not peft_config.is_prompt_learning:
-            adapter_names_for_offset_calc = kwargs.get("adapter_names")
-
-            is_alora_relevant = False
-            if getattr(self.active_peft_config, "alora_invocation_tokens", None):
-                is_alora_relevant = True
-            elif adapter_names_for_offset_calc:
-                for name in adapter_names_for_offset_calc:
-                    if name == "__base__":
-                        continue
-                    config_ = self.peft_config.get(name)
-                    if config_ and getattr(config_, "alora_invocation_tokens", None):
-                        is_alora_relevant = True
-                        break
-
-            if is_alora_relevant:
-                alora_offsets = kwargs.get("alora_offsets")
-                if alora_offsets is None:
-                    if input_ids is None and inputs_embeds is not None:
-                        warnings.warn(
-                            "Cannot calculate aLoRA offsets when only inputs_embeds are provided. Disabling aLoRA for this forward pass."
-                        )
-                        alora_offsets = [None] * inputs_embeds.shape[0]
-                    elif input_ids is not None:
-                        alora_offsets = calculate_alora_offsets(
-                            self.peft_config,
-                            self.active_adapter,
-                            input_ids,
-                            adapter_names=adapter_names_for_offset_calc,
-                        )
-                    else:
-                        alora_offsets = []  # Should not happen if _get_batch_size logic is sound
-                    kwargs["alora_offsets"] = alora_offsets
+            # For aLoRA
+            kwargs = get_alora_offsets_for_forward(self, input_ids, inputs_embeds,**kwargs)
             if self.base_model.config.model_type == "mpt":
                 if inputs_embeds is not None:
                     raise AssertionError("forward in MPTForCausalLM does not support inputs_embeds")
@@ -1999,63 +1969,8 @@ class PeftModelForCausalLM(PeftModel):
             self.base_model.generation_config = self.generation_config
         try:
             if not peft_config.is_prompt_learning:
-                adapter_names_for_offset_calc = kwargs.get("adapter_names")
-                is_alora_relevant_in_generate = False
-
-                if getattr(self.active_peft_config, "alora_invocation_tokens", None):
-                    is_alora_relevant_in_generate = True
-                elif adapter_names_for_offset_calc:
-                    for name in adapter_names_for_offset_calc:
-                        if name == "__base__":
-                            continue
-                        config_ = self.peft_config.get(name)
-                        if config_ and getattr(config_, "alora_invocation_tokens", None):
-                            is_alora_relevant_in_generate = True
-                            break
-
-                if is_alora_relevant_in_generate:
-                    alora_offsets_from_kwargs = kwargs.get("alora_offsets")
-                    if alora_offsets_from_kwargs is None:
-                        current_input_ids = kwargs.get("input_ids")
-                        if current_input_ids is None:  # args[0] is usually input_ids
-                            if args and isinstance(args[0], torch.Tensor):
-                                current_input_ids = args[0]
-                            else:
-                                current_input_ids = None
-
-                        if current_input_ids is not None:
-                            if current_input_ids.ndim == 1:
-                                current_input_ids = current_input_ids.unsqueeze(0)
-                            calculated_offsets = calculate_alora_offsets(
-                                self.peft_config,
-                                self.active_adapter,
-                                current_input_ids,
-                                adapter_names=adapter_names_for_offset_calc,
-                            )
-                            for i in range(len(calculated_offsets)):
-                                if calculated_offsets[i] is not None:
-                                    calculated_offsets[i] -= 1
-                            kwargs["alora_offsets"] = calculated_offsets
-
-                        else:
-                            warnings.warn(
-                                "Cannot calculate aLoRA offsets during generate as input_ids are not available. Disabling aLoRA."
-                            )
-                            bs = 1
-                            if "attention_mask" in kwargs and kwargs["attention_mask"] is not None:
-                                bs = kwargs["attention_mask"].shape[0]
-                            elif "inputs_embeds" in kwargs and kwargs["inputs_embeds"] is not None:
-                                bs = kwargs["inputs_embeds"].shape[0]
-                            elif (
-                                args and isinstance(args[0], torch.Tensor) and args[0].dim() > 0
-                            ):  # input_ids might be in args[0]
-                                bs = args[0].shape[0]
-                            elif (
-                                "input_ids" in kwargs and kwargs["input_ids"] is not None
-                            ):  # Should have been caught by current_input_ids
-                                bs = kwargs["input_ids"].shape[0]
-
-                            kwargs["alora_offsets"] = [None] * bs
+                # for aLoRA, None otherwise.
+                kwargs["alora_offsets"] = get_alora_offsets_for_generate(self, *args, **kwargs)
                 with self._enable_peft_forward_hooks(*args, **kwargs):
                     kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
                     outputs = self.base_model.generate(*args, **kwargs)
