@@ -301,6 +301,17 @@ class LoraConfig(PeftConfig):
             ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger overhead than pure
             LoRA, so it is recommended to merge weights for inference. For more information, see
             https://huggingface.co/papers/2402.09353.
+        alora_invocation_tokens (`List[int]`):
+            If not None, enable <a href='https://huggingface.co/papers/2504.12397'>'Activated LoRA' (aLoRA)</a>, with
+            alora_invocation_tokens being the tokenized invocation string for the adapter (must be present in all model
+            input strings). This technique selectively activates the adapter weights only on tokens during and after
+            the alora_invocation_tokens. When used in a CausalLM, this means that the KV cache prior to invocation is
+            interchangeable with that of the base model (and other aLoRA adapters operating this way). As a result, in
+            inference pipelines involving switching between base model inference and adapter inference (e.g. agentic
+            pipelines, see paper for examples), significant savings are realized (relative to LoRA) by saving prefill
+            operations. Overall adapter inference speedups of an order of magnitude or more can occur on vLLM,
+            depending on the length of the shared context. Note that merging is not possible due to the selective
+            application of the weights.
         layer_replication (`List[Tuple[int, int]]`):
             Build a new stack of layers by stacking the original model layers according to the ranges specified. This
             allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
@@ -508,6 +519,26 @@ class LoraConfig(PeftConfig):
                 "magnitude is handled by a separate learnable parameter. This can improve the performance of LoRA, "
                 "especially at low ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger"
                 "overhead than pure LoRA, so it is recommended to merge weights for inference."
+            )
+        },
+    )
+    alora_invocation_tokens: Optional[list[int]] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Tokenized copy of the Activated LoRA (aLoRA) invocation string (as a list of token IDs). Use the model's default tokenizer. If not None, "
+                "enable <a href='https://huggingface.co/papers/2504.12397'>'Activated LoRA' (aLoRA)</a>. This technique selectively activates the adapter "
+                "weights only on tokens during and after the alora_invocation_tokens. When used in a CausalLM, this means that the KV cache prior to invocation "
+                "is interchangeable with that of the base model (and other aLoRA adapters operating this way). As a result, in inference pipelines involving switching "
+                "between base model inference and adapter inference (e.g. agentic pipelines, see paper for many examples), significant savings are realized (relative to LoRA) "
+                "by saving prefill operations. Overall adapter inference speedups of an order of magnitude or more can occur on vLLM, depending on the length of the shared "
+                "context. "
+                "NOTE 1: aLoRA often requires higher rank r than LoRA. r=32 often works well."
+                "NOTE 2: Merging is NOT supported due to the selective application of the adapter weights."
+                "Example: alora_invocation_tokens = tokenizer.encode(alora_invocation_string, add_special_tokens=False)."
+                "The adapter weights will be activated 1 token after the last occurence of this string in the input. "
+                "These tokens must be present in all inputs after tokenization. It is best to have alora_invocation_string begin and end with special tokens "
+                "to avoid tokenizer boundary effects when tokenizing the input."
             )
         },
     )
