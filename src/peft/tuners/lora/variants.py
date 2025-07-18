@@ -14,8 +14,8 @@
 from __future__ import annotations
 
 import collections
-from typing import Any, Optional
 import warnings
+from typing import Any, Optional
 
 import torch
 from accelerate.utils.imports import is_xpu_available
@@ -472,9 +472,9 @@ class ALoraLinearVariant(LoraVariant):
         scaling = module.scaling[active_adapter]
 
         x = x.to(lora_A.weight.dtype)
-        if x.dim() == 2: # comes up in some single-token tests
+        if x.dim() == 2:  # comes up in some single-token tests
             result = result + lora_B(lora_A(dropout(x))) * scaling
-        elif alora_offsets is not None: # typical LLM regime
+        elif alora_offsets is not None:  # typical LLM regime
             for i in range(result.shape[0]):
                 if alora_offsets[i] is not None and alora_offsets[i] > 0:  # otherwise use base model
                     offset = min(alora_offsets[i], result.shape[1])
@@ -483,6 +483,7 @@ class ALoraLinearVariant(LoraVariant):
                     )
 
         return result
+
 
 def calculate_alora_offsets(
     peft_config: PeftConfig, active_adapter: str, input_ids: torch.Tensor, adapter_names: Optional[list[str]] = None
@@ -497,18 +498,14 @@ def calculate_alora_offsets(
     adapters_to_process_indices = collections.defaultdict(list)
 
     for i in range(batch_size):
-        current_adapter_name = (
-            adapter_names[i] if adapter_names and i < len(adapter_names) else active_adapter
-        )
+        current_adapter_name = adapter_names[i] if adapter_names and i < len(adapter_names) else active_adapter
 
         if current_adapter_name == "__base__":
             alora_offsets[i] = None
             continue
 
         if current_adapter_name not in peft_config:
-            warnings.warn(
-                f"Adapter '{current_adapter_name}' not found in peft_config. Using base model for row {i}."
-            )
+            warnings.warn(f"Adapter '{current_adapter_name}' not found in peft_config. Using base model for row {i}.")
             alora_offsets[i] = None
             continue
 

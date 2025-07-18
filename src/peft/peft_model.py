@@ -38,8 +38,8 @@ from transformers import Cache, DynamicCache, EncoderDecoderCache, HybridCache, 
 from transformers.modeling_outputs import QuestionAnsweringModelOutput, SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
 
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.tuners.lora.variants import calculate_alora_offsets
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils.constants import DUMMY_MODEL_CONFIG
 from peft.utils.integrations import init_empty_weights
 from peft.utils.other import create_attention_mask, set_additional_trainable_modules
@@ -1852,7 +1852,10 @@ class PeftModelForCausalLM(PeftModel):
                         alora_offsets = [None] * inputs_embeds.shape[0]
                     elif input_ids is not None:
                         alora_offsets = calculate_alora_offsets(
-                            self.peft_config, self.active_adapter, input_ids, adapter_names=adapter_names_for_offset_calc
+                            self.peft_config,
+                            self.active_adapter,
+                            input_ids,
+                            adapter_names=adapter_names_for_offset_calc,
                         )
                     else:
                         alora_offsets = []  # Should not happen if _get_batch_size logic is sound
@@ -2015,7 +2018,7 @@ class PeftModelForCausalLM(PeftModel):
                     if alora_offsets_from_kwargs is None:
                         current_input_ids = kwargs.get("input_ids")
                         if current_input_ids is None:  # args[0] is usually input_ids
-                            if args and isinstance(args[0], torch.Tensor): 
+                            if args and isinstance(args[0], torch.Tensor):
                                 current_input_ids = args[0]
                             else:
                                 current_input_ids = None
@@ -2024,7 +2027,10 @@ class PeftModelForCausalLM(PeftModel):
                             if current_input_ids.ndim == 1:
                                 current_input_ids = current_input_ids.unsqueeze(0)
                             calculated_offsets = calculate_alora_offsets(
-                                self.peft_config, self.active_adapter, current_input_ids, adapter_names=adapter_names_for_offset_calc
+                                self.peft_config,
+                                self.active_adapter,
+                                current_input_ids,
+                                adapter_names=adapter_names_for_offset_calc,
                             )
                             for i in range(len(calculated_offsets)):
                                 if calculated_offsets[i] is not None:

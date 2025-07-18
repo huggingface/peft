@@ -301,16 +301,16 @@ class LoraConfig(PeftConfig):
             LoRA, so it is recommended to merge weights for inference. For more information, see
             https://huggingface.co/papers/2402.09353.
         alora_invocation_tokens (`List[int]`):
-            If not None, enable <a href='https://huggingface.co/papers/2504.12397'>'Activated LoRA' (aLoRA)</a>,
-            with alora_invocation_tokens being the tokenized invocation string for the adapter (must be present in all 
-            model input strings). This technique selectively activates the adapter weights only on tokens during and
-            after the alora_invocation_tokens. When used in a CausalLM, this means that the KV cache prior to invocation
-            is interchangeable with that of the base model (and other aLoRA adapters operating this way). As a result,
-            in inference pipelines involving switching between base model inference and adapter inference (e.g. agentic
+            If not None, enable <a href='https://huggingface.co/papers/2504.12397'>'Activated LoRA' (aLoRA)</a>, with
+            alora_invocation_tokens being the tokenized invocation string for the adapter (must be present in all model
+            input strings). This technique selectively activates the adapter weights only on tokens during and after
+            the alora_invocation_tokens. When used in a CausalLM, this means that the KV cache prior to invocation is
+            interchangeable with that of the base model (and other aLoRA adapters operating this way). As a result, in
+            inference pipelines involving switching between base model inference and adapter inference (e.g. agentic
             pipelines, see paper for examples), significant savings are realized (relative to LoRA) by saving prefill
-            operations. Overall adapter inference speedups of an order of magnitude or more can occur on vLLM, depending
-            on the length of the shared context. Note that merging is not possible due to the selective application of
-            the weights.
+            operations. Overall adapter inference speedups of an order of magnitude or more can occur on vLLM,
+            depending on the length of the shared context. Note that merging is not possible due to the selective
+            application of the weights.
         layer_replication (`List[Tuple[int, int]]`):
             Build a new stack of layers by stacking the original model layers according to the ranges specified. This
             allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will

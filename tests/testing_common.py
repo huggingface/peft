@@ -629,7 +629,10 @@ class PeftCommonTester:
                     assert load_result2.missing_keys == []
 
     def _test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig, VBLoRAConfig) or config_kwargs.get("alora_invocation_tokens") is not None:
+        if (
+            config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig, VBLoRAConfig)
+            or config_kwargs.get("alora_invocation_tokens") is not None
+        ):
             # Merge layers only supported for LoRA and IA³, and not for Activated LoRA (aLoRA)
             if config_kwargs.get("alora_invocation_tokens") is None:
                 return pytest.skip(f"Test not applicable for {config_cls}")
@@ -656,15 +659,19 @@ class PeftCommonTester:
             _ = model.merge_and_unload()
 
     def _test_merge_layers_nan(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (
-            LoraConfig,
-            IA3Config,
-            AdaLoraConfig,
-            LoHaConfig,
-            LoKrConfig,
-            VeraConfig,
-            FourierFTConfig,
-        ) or config_kwargs.get("alora_invocation_tokens") is not None:
+        if (
+            config_cls
+            not in (
+                LoraConfig,
+                IA3Config,
+                AdaLoraConfig,
+                LoHaConfig,
+                LoKrConfig,
+                VeraConfig,
+                FourierFTConfig,
+            )
+            or config_kwargs.get("alora_invocation_tokens") is not None
+        ):
             # Merge layers only supported for LoRA and IA³, and not for Activated LoRA (aLoRA)
             return
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
@@ -744,9 +751,9 @@ class PeftCommonTester:
 
         if issubclass(config_cls, (OFTConfig, BOFTConfig)):
             return pytest.skip(f"Test not applicable for {config_cls}")
-        
+
         if config_kwargs.get("alora_invocation_tokens") is not None:
-            return pytest.skip ("Merging not applicable to aLoRA")
+            return pytest.skip("Merging not applicable to aLoRA")
 
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
@@ -996,7 +1003,7 @@ class PeftCommonTester:
 
         dummy_input = self.prepare_inputs_for_testing()
         # ensure that we have at least 3 samples for this test
-        dummy_input = {k: torch.cat([v for _ in range(3)]) for k, v in dummy_input.items()} 
+        dummy_input = {k: torch.cat([v for _ in range(3)]) for k, v in dummy_input.items()}
         with torch.inference_mode():
             with model.disable_adapter():
                 output_base = model(**dummy_input)[0]
@@ -1025,12 +1032,12 @@ class PeftCommonTester:
 
         # alternate between base model, adapter0, and adapter1
         adapters = ["__base__", "adapter0", "adapter1"]
-        dummy_input["adapter_names"] = [adapters[i % 3] for i in (range(len(dummy_input["input_ids"])))] 
+        dummy_input["adapter_names"] = [adapters[i % 3] for i in (range(len(dummy_input["input_ids"])))]
         with torch.inference_mode():
             output_mixed = model(**dummy_input)[0]
             logits_mixed = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
-        #print(output_adapter0[1::3])
-        #print(output_mixed[1::3])
+        # print(output_adapter0[1::3])
+        # print(output_mixed[1::3])
         assert torch.allclose(output_base[::3], output_mixed[::3], atol=atol, rtol=rtol)
         assert torch.allclose(output_adapter0[1::3], output_mixed[1::3], atol=atol, rtol=rtol)
         assert torch.allclose(output_adapter1[2::3], output_mixed[2::3], atol=atol, rtol=rtol)
@@ -1073,7 +1080,7 @@ class PeftCommonTester:
             dummy_input = {k: torch.cat([v for _ in range(3)]) for k, v in dummy_input.items()}
             num_beams = 10
             if config_kwargs.get("alora_invocation_tokens") is not None:
-                num_beams = 1 # beam search not yet fully supported
+                num_beams = 1  # beam search not yet fully supported
             gen_kwargs = {**dummy_input, "max_length": 20, "num_beams": num_beams, "early_stopping": True}
             with torch.inference_mode():
                 with model.disable_adapter():

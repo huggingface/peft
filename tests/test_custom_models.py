@@ -1750,7 +1750,7 @@ class TestPeftCustomModel(PeftCommonTester):
             )
         if config_kwargs.get("alora_invocation_tokens") is not None:
             # Merge layers not supported for Activated LoRA (aLoRA)
-            pytest.skip(f"Test not applicable for Activated LoRA")
+            pytest.skip("Test not applicable for Activated LoRA")
         # same as test_disable_adapters, but with merging
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
@@ -2748,7 +2748,6 @@ class TestMultipleActiveAdapters:
     def test_multiple_active_adapters_merge_and_unmerge(
         self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
     ):
-
         torch.manual_seed(0)
 
         model = self.resolve_model_cls(tuner_method)
@@ -2782,7 +2781,6 @@ class TestMultipleActiveAdapters:
         "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES
     )
     def test_merge_layers_multi(self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2):
-
         torch.manual_seed(0)
 
         model = self.resolve_model_cls(tuner_method)
