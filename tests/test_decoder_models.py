@@ -231,8 +231,9 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         OFTConfig,
         ShiraConfig,
         C3AConfig,
+        MissConfig,
     ]:
-        pytest.skip("Skipping BOFT/HRA/OFT/Bone/SHiRA/C3A for GPT2LMHeadModel")
+        pytest.skip("Skipping BOFT/HRA/OFT/Bone/SHiRA/C3A/MiSS for GPT2LMHeadModel")
 
 
 def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
@@ -243,8 +244,9 @@ def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
         OFTConfig,
         BoneConfig,
         C3AConfig,
+        MissConfig,
     ]:
-        pytest.skip("Skipping AdaLora/BOFT/HRA/OFT/Bone for GPT2LMHeadModel")
+        pytest.skip("Skipping AdaLora/BOFT/HRA/OFT/Bone/MiSS for GPT2LMHeadModel")
 
 
 class TestDecoderModels(PeftCommonTester):

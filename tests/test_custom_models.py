@@ -2147,7 +2147,7 @@ class TestPeftCustomModel(PeftCommonTester):
         assert "other" in model.base_model.classifier.modules_to_save
 
     @pytest.mark.parametrize(
-        "config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig, ShiraConfig]
+        "config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig, ShiraConfig, MissConfig]
     )
     def test_multiple_adapters_mixed_modules_to_save(self, config_cls):
         # See issue 1574
