@@ -30,6 +30,7 @@ from peft import (
     PromptEncoderConfig,
     PromptLearningConfig,
     PromptTuningConfig,
+    ShiraConfig,
     VBLoRAConfig,
     VeraConfig,
 )
@@ -152,6 +153,15 @@ ALL_CONFIGS = [
         {
             "task_type": "FEATURE_EXTRACTION",
             "num_virtual_tokens": 10,
+        },
+    ),
+    (
+        ShiraConfig,
+        {
+            "r": 1,
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+            "init_weights": False,
         },
     ),
     (
