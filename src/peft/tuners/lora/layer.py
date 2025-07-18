@@ -563,7 +563,7 @@ class LoraLayer(BaseTunerLayer):
         sub_batch_indices_list = []
         for adapter in unique_adapters:
             sub_batch_indices_list.append([index for index, item in enumerate(adapter_names) if item == adapter])
-
+        alora_offsets = variant_kwargs.get("alora_offsets",None) 
         for i, active_adapter in enumerate(unique_adapters):
             if active_adapter == "__base__":
                 continue
@@ -581,16 +581,18 @@ class LoraLayer(BaseTunerLayer):
             if active_adapter not in self.lora_variant:  # vanilla LoRA
                 lora_output = lora_B(lora_A(dropout(sub_batch))) * scaling
                 result[sub_batch_indices_list[i]] += lora_output.to(torch_result_dtype)
-            else:
+            else: 
+                if alora_offsets is not None:
+                    variant_kwargs["alora_offsets"] = [alora_offsets[j] for j in sub_batch_indices_list[i]]
                 lora_output = self.lora_variant[active_adapter].forward(
                     self,
                     active_adapter=active_adapter,
-                    x=x,
-                    result=result,
+                    x=sub_batch,
+                    result=result[sub_batch_indices_list[i]],
                     **variant_kwargs,
                     **kwargs,
                 )
-                result[sub_batch_indices_list[i]] += lora_output.to(torch_result_dtype)
+                result[sub_batch_indices_list[i]] = lora_output.to(torch_result_dtype)
 
         return result
 
@@ -860,7 +862,7 @@ class Embedding(nn.Module, LoraLayer):
         return DoraEmbeddingVariant()
 
     def update_layer(
-        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora, lora_bias
+        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora, lora_bias, **kwargs
     ):
         # collect the kwargs
         kwargs = locals().copy()
@@ -1134,7 +1136,7 @@ class _ConvNd(nn.Module, LoraLayer):
         )
 
     def update_layer(
-        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora, lora_bias
+        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora, lora_bias, **kwargs
     ):
         # collect the kwargs
         kwargs = locals().copy()

@@ -1450,7 +1450,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
+        if model_id in ["Conv2dGroups", "Conv2dGroups2"] or config_kwargs.get("alora_invocation_tokens") is not None:
             # this model does not support merging
             return
 
@@ -1492,7 +1492,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
+        if model_id in ["Conv2dGroups", "Conv2dGroups2"] or config_kwargs.get("alora_invocation_tokens") is not None:
             # this model does not support merging
             return
 
@@ -1533,7 +1533,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
+        if model_id in ["Conv2dGroups", "Conv2dGroups2"] or config_kwargs.get("alora_invocation_tokens") is not None:
             # this model does not support merging
             return
 
@@ -1574,10 +1574,9 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
+        if model_id in ["Conv2dGroups", "Conv2dGroups2"] or config_kwargs.get("alora_invocation_tokens") is not None:
             # this model does not support merging
             return
-
         model.merge_adapter(safe_merge=False)
         model(**X)
         model.unmerge_adapter()
@@ -1749,7 +1748,9 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(
                 f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
             )
-
+        if config_kwargs.get("alora_invocation_tokens") is not None:
+            # Merge layers not supported for Activated LoRA (aLoRA)
+            pytest.skip(f"Test not applicable for Activated LoRA")
         # same as test_disable_adapters, but with merging
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)

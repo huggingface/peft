@@ -465,18 +465,16 @@ class ALoraLinearVariant(LoraVariant):
         result: torch.Tensor,
         **kwargs,
     ) -> torch.Tensor:
-        alora_offsets = kwargs.get("alora_offsets", [1])
-
+        alora_offsets = kwargs.get("alora_offsets", None)
         lora_A = module.lora_A[active_adapter]
         lora_B = module.lora_B[active_adapter]
         dropout = module.lora_dropout[active_adapter]
         scaling = module.scaling[active_adapter]
 
         x = x.to(lora_A.weight.dtype)
-
         if x.dim() == 2: # comes up in some single-token tests
             result = result + lora_B(lora_A(dropout(x))) * scaling
-        else: # typical LLM regime
+        elif alora_offsets is not None: # typical LLM regime
             for i in range(result.shape[0]):
                 if alora_offsets[i] is not None and alora_offsets[i] > 0:  # otherwise use base model
                     offset = min(alora_offsets[i], result.shape[1])
@@ -547,7 +545,7 @@ def calculate_alora_offsets(
                             best_match_start_idx = idx
 
             if best_match_start_idx != -1:
-                offset_val = seq_len - best_match_start_idx
+                offset_val = seq_len - best_match_start_idx + 1
                 alora_offsets[i] = offset_val if offset_val > 0 else None
             else:  # Invocation sequence not found in input
                 warnings.warn(

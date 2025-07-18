@@ -631,7 +631,10 @@ class PeftCommonTester:
     def _test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
         if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig, VBLoRAConfig) or config_kwargs.get("alora_invocation_tokens") is not None:
             # Merge layers only supported for LoRA and IA³, and not for Activated LoRA (aLoRA)
-            return pytest.skip(f"Test not applicable for {config_cls}")
+            if config_kwargs.get("alora_invocation_tokens") is None:
+                return pytest.skip(f"Test not applicable for {config_cls}")
+            else:
+                return pytest.skip("Test not applicable for Activated LoRA")
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
 
@@ -901,6 +904,9 @@ class PeftCommonTester:
             assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3)
 
     def _test_merge_layers_is_idempotent(self, model_id, config_cls, config_kwargs):
+        if config_kwargs.get("alora_invocation_tokens") is not None:
+            # Merging not supported for Activated LoRA (aLoRA)
+            return pytest.skip("Test not applicable for Activated LoRA (aLoRA)")
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
             config = config_cls(
@@ -923,6 +929,9 @@ class PeftCommonTester:
             assert torch.allclose(logits_0, logits_1, atol=1e-6, rtol=1e-6)
 
     def _test_safe_merge(self, model_id, config_cls, config_kwargs):
+        if config_kwargs.get("alora_invocation_tokens") is not None:
+            # Merging not supported for Activated LoRA (aLoRA)
+            return pytest.skip("Test not applicable for Activated LoRA (aLoRA)")
         torch.manual_seed(0)
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
@@ -987,8 +996,7 @@ class PeftCommonTester:
 
         dummy_input = self.prepare_inputs_for_testing()
         # ensure that we have at least 3 samples for this test
-        dummy_input = {k: torch.cat([v for _ in range(3)]) for k, v in dummy_input.items()}
-
+        dummy_input = {k: torch.cat([v for _ in range(3)]) for k, v in dummy_input.items()} 
         with torch.inference_mode():
             with model.disable_adapter():
                 output_base = model(**dummy_input)[0]
@@ -1017,12 +1025,12 @@ class PeftCommonTester:
 
         # alternate between base model, adapter0, and adapter1
         adapters = ["__base__", "adapter0", "adapter1"]
-        dummy_input["adapter_names"] = [adapters[i % 3] for i in (range(len(dummy_input["input_ids"])))]
-
+        dummy_input["adapter_names"] = [adapters[i % 3] for i in (range(len(dummy_input["input_ids"])))] 
         with torch.inference_mode():
             output_mixed = model(**dummy_input)[0]
             logits_mixed = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
-
+        #print(output_adapter0[1::3])
+        #print(output_mixed[1::3])
         assert torch.allclose(output_base[::3], output_mixed[::3], atol=atol, rtol=rtol)
         assert torch.allclose(output_adapter0[1::3], output_mixed[1::3], atol=atol, rtol=rtol)
         assert torch.allclose(output_adapter1[2::3], output_mixed[2::3], atol=atol, rtol=rtol)
@@ -1035,7 +1043,6 @@ class PeftCommonTester:
         # adapter_names argument. See #2283.
         if config_cls not in (LoraConfig,):
             return pytest.skip(f"Mixed adapter batches not supported for {config_cls}")
-
         if config_kwargs.get("trainable_token_indices", None) is not None:
             # for some configurations this test will fail since the adapter values don't differ.
             # this is probably a problem with the test setup and not with the implementation.
@@ -1064,8 +1071,10 @@ class PeftCommonTester:
             dummy_input = self.prepare_inputs_for_testing()
             # ensure that we have at least 3 samples for this test
             dummy_input = {k: torch.cat([v for _ in range(3)]) for k, v in dummy_input.items()}
-
-            gen_kwargs = {**dummy_input, "max_length": 20, "num_beams": 10, "early_stopping": True}
+            num_beams = 10
+            if config_kwargs.get("alora_invocation_tokens") is not None:
+                num_beams = 1 # beam search not yet fully supported
+            gen_kwargs = {**dummy_input, "max_length": 20, "num_beams": num_beams, "early_stopping": True}
             with torch.inference_mode():
                 with model.disable_adapter():
                     gen_base = model.generate(**gen_kwargs)

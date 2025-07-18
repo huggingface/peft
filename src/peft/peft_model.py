@@ -2014,8 +2014,8 @@ class PeftModelForCausalLM(PeftModel):
                     alora_offsets_from_kwargs = kwargs.get("alora_offsets")
                     if alora_offsets_from_kwargs is None:
                         current_input_ids = kwargs.get("input_ids")
-                        if not current_input_ids:  # args[0] is usually input_ids
-                            if args and isinstance(args[0], torch.Tensor):  # and args[0].dim() >=1 :
+                        if current_input_ids is None:  # args[0] is usually input_ids
+                            if args and isinstance(args[0], torch.Tensor): 
                                 current_input_ids = args[0]
                             else:
                                 current_input_ids = None
@@ -2024,10 +2024,11 @@ class PeftModelForCausalLM(PeftModel):
                             if current_input_ids.ndim == 1:
                                 current_input_ids = current_input_ids.unsqueeze(0)
                             calculated_offsets = calculate_alora_offsets(
-                                current_input_ids, adapter_names=adapter_names_for_offset_calc
+                                self.peft_config, self.active_adapter, current_input_ids, adapter_names=adapter_names_for_offset_calc
                             )
                             for i in range(len(calculated_offsets)):
-                                calculated_offsets[i] -= 1
+                                if calculated_offsets[i] is not None:
+                                    calculated_offsets[i] -= 1
                             kwargs["alora_offsets"] = calculated_offsets
 
                         else:
@@ -2049,7 +2050,6 @@ class PeftModelForCausalLM(PeftModel):
                                 bs = kwargs["input_ids"].shape[0]
 
                             kwargs["alora_offsets"] = [None] * bs
-
                 with self._enable_peft_forward_hooks(*args, **kwargs):
                     kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
                     outputs = self.base_model.generate(*args, **kwargs)

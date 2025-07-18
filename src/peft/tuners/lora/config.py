@@ -657,12 +657,6 @@ class LoraConfig(PeftConfig):
             if self.use_dora:
                 raise ValueError("The argument lora_bias=True is not supported for DoRA, please pass use_dora=False")
 
-        # If activated LoRA (aLoRA) is enabled, check for required invocation arguments.
-        if self.use_alora:
-            if self.alora_invocation_string is None or self.alora_invocation_tokens is None:
-                raise ValueError(
-                    "The fields alora_invocation_string and alora_invocation_tokens (tokenized copy of alora_invocation_string) are required to use aLoRA."
-                )
         # Using post training conversion of modified base weights to restore their initial values PiSSA/CorDA/OLoRA cannot
         # be correctly done when using rslora + rank_pattern/alpha_pattern. We can't really know if the user intends
         # this when they'll eventually call save_pretrained (i.e. if they'll pass
