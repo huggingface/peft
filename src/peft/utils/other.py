@@ -53,6 +53,8 @@ from .constants import (
     TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
+    #
+    TRANSFORMERS_MODELS_TO_ADAPTER_TYPE_MAPPING,
     WEIGHTS_NAME,
     bloom_model_postprocess_past_key_value,
     starcoder_model_postprocess_past_key_value,
@@ -83,6 +85,7 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_ADAPTER_TYPE_MAPPING",
     "WEIGHTS_NAME",
     "bloom_model_postprocess_past_key_value",
     "starcoder_model_postprocess_past_key_value",
@@ -770,7 +773,7 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
             self._active_adapter = []
             return
 
-        if new_active_adapters[0] not in self.token_adapter.trainable_tokens_delta:
+        if new_active_adapter not in self.token_adapter.trainable_tokens_delta:
             # a new active adapter was chosen but it seems like it has no trainable_tokens
             self._active_adapter = []
             return

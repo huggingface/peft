@@ -47,6 +47,8 @@ from .vblora import VBLoRAConfig, VBLoRAModel
 from .vera import VeraConfig, VeraModel
 from .xlora import XLoraConfig, XLoraModel
 
+# add
+from .bottleneck import BottleneckConfig, BottleneckModel
 
 __all__ = [
     "AdaLoraConfig",
@@ -108,4 +110,7 @@ __all__ = [
     "XLoraModel",
     "get_eva_state_dict",
     "initialize_lora_eva_weights",
+    # bottleneck
+    "BottleneckConfig",
+    "BottleneckModel",
 ]
