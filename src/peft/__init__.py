@@ -101,6 +101,9 @@ from .tuners import (
     VeraModel,
     XLoraConfig,
     XLoraModel,
+    # bottlenck
+    BottleneckModel,
+    BottleneckConfig,
     get_eva_state_dict,
     initialize_lora_eva_weights,
 )
@@ -200,6 +203,9 @@ __all__ = [
     "VeraModel",
     "XLoraConfig",
     "XLoraModel",
+    # bottlenecnk
+    "BottleneckModel",
+    "BottleneckConfig",
     "bloom_model_postprocess_past_key_value",
     "cast_mixed_precision_params",
     "get_eva_state_dict",

@@ -65,6 +65,10 @@ from .utils import (
     shift_tokens_right,
 )
 
+from .tuners.bottleneck import BottleneckConfig, BottleneckModel
+# 扩展映射字典
+PEFT_TYPE_TO_TUNER_MAPPING[PeftType.BOTTLENECK] = BottleneckModel
+PEFT_TYPE_TO_CONFIG_MAPPING[PeftType.BOTTLENECK] = BottleneckConfig
 
 class PeftModel(PushToHubMixin, torch.nn.Module):
     """
@@ -118,7 +122,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self.special_peft_forward_args = {"adapter_names"}
 
         self._is_prompt_learning = peft_config.is_prompt_learning
-        if self._is_prompt_learning:
+
+        # 添加bottleneck
+        self._is_bottleneck = peft_config.peft_type == "BOTTLENECK"
+
+        if self._is_prompt_learning or self._is_bottleneck:
             self._peft_config = {adapter_name: peft_config}
             self.base_model = model
             self.add_adapter(adapter_name, peft_config, low_cpu_mem_usage=low_cpu_mem_usage)
@@ -152,6 +160,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     @property
     def active_adapters(self) -> list[str]:
         try:
+            # print("=====here=====")
             adapters = self.base_model.active_adapters
             if not isinstance(adapters, list):
                 # Base model is probably a transformers model, see:
@@ -436,8 +445,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         # load the config
         if config is None:
-            config = PEFT_TYPE_TO_CONFIG_MAPPING[
-                PeftConfig._get_peft_type(
+            peft_type = PeftConfig._get_peft_type(
                     model_id,
                     subfolder=kwargs.get("subfolder", None),
                     revision=kwargs.get("revision", None),
@@ -445,7 +453,16 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     use_auth_token=kwargs.get("use_auth_token", None),
                     token=kwargs.get("token", None),
                 )
-            ].from_pretrained(model_id, **kwargs)
+            if peft_type == PeftType.BOTTLENECK:
+                from .config import BottleneckConfig
+                config = BottleneckConfig.from_pretrained(
+                    model_id,
+                    **kwargs
+                )
+            else:
+                config = PEFT_TYPE_TO_CONFIG_MAPPING[
+                    peft_type
+                ].from_pretrained(model_id, **kwargs)
         elif isinstance(config, PeftConfig):
             config.inference_mode = not is_trainable
         else:
@@ -983,6 +1000,22 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             )
 
         try:
+            # bottleneck
+            if peft_config.peft_type == PeftType.BOTTLENECK:
+                from .tuners.bottleneck import BottleneckModel
+                self.base_model = BottleneckModel(
+                    self.base_model, 
+                    {adapter_name: peft_config}, 
+                    adapter_name
+                )
+                # Bottleneck不需要额外的modules_to_save处理
+                set_additional_trainable_modules(
+                    model=self.base_model.model,
+                    peft_config=peft_config,
+                    model_config=self.base_model.model.config if hasattr(self.base_model.model, 'config') else None,
+                    adapter_name=adapter_name,
+                )
+                return
             if peft_config.is_prompt_learning:
                 self.peft_config[adapter_name] = peft_config
                 if hasattr(self.config, "to_dict"):
@@ -1300,17 +1333,35 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         if adapter_name not in self.peft_config:
             # load the config
-            peft_config = PEFT_TYPE_TO_CONFIG_MAPPING[
-                PeftConfig._get_peft_type(
-                    model_id,
-                    **hf_hub_download_kwargs,
-                )
-            ].from_pretrained(
+            # peft_config = PEFT_TYPE_TO_CONFIG_MAPPING[
+            #     PeftConfig._get_peft_type(
+            #         model_id,
+            #         **hf_hub_download_kwargs,
+            #     )
+            # ].from_pretrained(
+            #     model_id,
+            #     ephemeral_gpu_offload=ephemeral_gpu_offload,
+            #     **hf_hub_download_kwargs,
+            # )
+            peft_type = PeftConfig._get_peft_type(
                 model_id,
-                ephemeral_gpu_offload=ephemeral_gpu_offload,
                 **hf_hub_download_kwargs,
             )
-            self._check_new_adapter_config(peft_config, is_trainable=is_trainable)
+
+            if peft_type == PeftType.BOTTLENECK:
+                from .config import BottleneckConfig
+                peft_config = BottleneckConfig.from_pretrained(
+                    model_id,
+                    ephemeral_gpu_offload,
+                    **hf_hub_download_kwargs
+                )
+            else:
+                peft_config = PEFT_TYPE_TO_CONFIG_MAPPING[peft_type].from_pretrained(
+                    model_id,
+                    ephemeral_gpu_offload,
+                    **hf_hub_download_kwargs
+                )
+            self._check_new_adapter_config(peft_config, is_trainable)
             peft_config.inference_mode = not is_trainable
             self.add_adapter(adapter_name, peft_config, low_cpu_mem_usage=low_cpu_mem_usage)
 
