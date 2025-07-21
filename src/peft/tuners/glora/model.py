@@ -100,7 +100,12 @@ class GLoraModel(BaseTuner):
             )
 
         in_features, out_features = target.in_features, target.out_features
-        kwargs_glora = {"r": glora_config.r}
+        kwargs_glora = {
+            "r": glora_config.r,
+            "config_A_B": glora_config.config_A_B,
+            "config_C": glora_config.config_C,
+            "config_D_E": glora_config.config,
+        }
 
         new_module = GLoraLinear(adapter_name, in_features, out_features, bias=bias, **kwargs_glora)
         return new_module
@@ -207,7 +212,6 @@ class GLoraModel(BaseTuner):
                 if module.active_adapter == adapter_name:
                     module.eval_config = eval_config
                     self.adapters_config_history[adapter_name] = eval_config
-
 
     def get_peft_config_as_dict(self, inference: bool = False) -> dict[str, Any]:
         config_dict = {}
