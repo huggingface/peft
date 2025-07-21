@@ -18,11 +18,13 @@ import warnings
 from typing import Optional
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.utils.integrations import check_deepspeed_zero3_enabled, gather_params_ctx
 
 
 class TrainableTokensLayer(nn.Module, BaseTunerLayer):
@@ -73,6 +75,31 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             return self._tied_adapter[0]
         return None
 
+    def _collect_token_weights(self, weight: torch.Tensor, rows: torch.Tensor, embed_dim: int) -> torch.Tensor:
+        """DeepSpeed zero3 specific code to initialize trainable tokens.
+
+        Ensures that only the necessary weights are collected to a single rank, initialized, and then shared with all
+        ranks.
+        """
+        src_rank = 0
+        # right now, only CUDA is implemented
+        device = torch.device("cuda", torch.cuda.current_device())
+
+        with gather_params_ctx([weight], modifier_rank=None):
+            if dist.get_rank() == src_rank:
+                token_weights = weight[rows].clone()
+            else:
+                # build an empty tensor with correct shape/type/device
+                token_weights = torch.empty(
+                    (len(rows), embed_dim),
+                    dtype=weight.dtype,
+                    device=device,
+                )
+
+        # share the weights with all ranks
+        dist.broadcast(token_weights, src=src_rank)
+        return token_weights
+
     def update_layer(self, adapter_name, **kwargs):
         if kwargs.get("tied_adapter", None):
             # as a tied adapter, we're just following whatever the adpater we're tied to does, we don't update anything.
@@ -88,11 +115,21 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         # thus re-initializing the new embeddings again with new random variables. If we would add/subtract deltas
         # onto the new values, we would get undefined behavior. By replacing the specific token values we always
         # get defined behavior.
-        #
+        weight = self.get_base_layer().weight
+        embed_dim = self.get_base_layer().embedding_dim
+
         if init_weights:
-            values = self.get_base_layer().weight[self.token_indices[adapter_name]]
+            if check_deepspeed_zero3_enabled():
+                values = self._collect_token_weights(weight, self.token_indices[adapter_name], embed_dim)
+            else:
+                values = self.weight[self.token_indices[adapter_name]]
         else:
-            values = torch.rand_like(self.get_base_layer().weight[self.token_indices[adapter_name]])
+            # random init with matching dtype/device
+            values = torch.randn(
+                (len(self.token_indices[adapter_name]), embed_dim),
+                dtype=weight.dtype,
+                device=weight.device,
+            )
 
         self.trainable_tokens_delta[adapter_name] = nn.Parameter(values.clone(), requires_grad=True)
         self.trainable_tokens_original[adapter_name] = values.clone()

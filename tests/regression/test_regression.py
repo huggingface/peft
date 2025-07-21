@@ -79,6 +79,8 @@ from peft import (
 )
 from peft.utils import infer_device
 
+from ..testing_utils import require_bitsandbytes, require_deterministic_for_xpu, require_non_cpu
+
 
 PEFT_VERSION = peft.__version__
 REGRESSION_DIR = tempfile.mkdtemp(prefix="peft_regression_")
@@ -124,36 +126,6 @@ def strtobool(val):
         return 0
     else:
         raise ValueError(f"invalid truth value {val!r}")
-
-
-# same as in ..testing_utils.py but cannot be imported
-def require_torch_gpu(test_case):
-    """
-    Decorator marking a test that requires a GPU. Will be skipped when no GPU is available.
-
-    Copies from tsting_utils.py.
-
-    """
-    if not torch.cuda.is_available():
-        return unittest.skip("test requires GPU")(test_case)
-    else:
-        return test_case
-
-
-# same as in ..testing_utils.py but cannot be imported
-def require_bitsandbytes(test_case):
-    """
-    Decorator marking a test that requires the bitsandbytes library. Will be skipped when the library is not installed.
-
-    Copies from tsting_utils.py.
-
-    """
-    try:
-        import bitsandbytes  # noqa: F401
-    except ImportError:
-        return unittest.skip("test requires bitsandbytes")(test_case)
-    else:
-        return test_case
 
 
 def save_output(output, name, force=False):
@@ -236,6 +208,7 @@ class RegressionTester(unittest.TestCase):
             else:
                 raise RuntimeError("Git commit is not tagged") from exc
 
+    @require_deterministic_for_xpu
     def assert_results_equal_or_store(self, model, name):
         """Check if the outputs are the same or save the outputs if in creation mode."""
         if not self.creation_mode:  # normal regression testing mode
@@ -580,7 +553,7 @@ class TestOpt(RegressionTester):
         self.assert_results_equal_or_store(model, "ia3_opt-350m")
 
 
-@require_torch_gpu
+@require_non_cpu
 @require_bitsandbytes
 class TestOpt8bitBnb(RegressionTester):
     def get_output(self, model):
@@ -637,7 +610,7 @@ class TestOpt8bitBnb(RegressionTester):
         self.assert_results_equal_or_store(model, "adalora_opt-350m_8bit")
 
 
-@require_torch_gpu
+@require_non_cpu
 @require_bitsandbytes
 class TestOpt4bitBnb(RegressionTester):
     def get_output(self, model):

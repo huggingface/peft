@@ -67,9 +67,9 @@ class OFTConfig(PeftConfig):
             Whether to share the OFT parameters between blocks or not. This is `False` by default.
     """
 
-    r: int = field(default=8, metadata={"help": "OFT rank, number of OFT blocks per injected layer."})
+    r: int = field(default=0, metadata={"help": "OFT rank, number of OFT blocks per injected layer."})
     oft_block_size: int = field(
-        default=0,
+        default=32,
         metadata={
             "help": "OFT block size across different layers.",
             "note": "You can only specify either r or oft_block_size, but not both simultaneously, because r x oft_block_size = layer dimension.",
@@ -143,6 +143,18 @@ class OFTConfig(PeftConfig):
     block_share: bool = field(
         default=False,
         metadata={"help": "Whether to share the OFT parameters between blocks or not."},
+    )
+    use_cayley_neumann: bool = field(
+        default=True,
+        metadata={
+            "help": "Whether to use the Cayley-Neumann Formulation of OFT or not. Set to True to improve computational efficiency but comes at costs of bigger approximation error for orthogonality."
+        },
+    )
+    num_cayley_neumann_terms: int = field(
+        default=5,
+        metadata={
+            "help": "Number of Cayley-Neumann terms to use. Higher number results in less approximation error for orthogonality."
+        },
     )
 
     def __post_init__(self):

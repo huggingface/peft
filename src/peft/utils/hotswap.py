@@ -480,7 +480,7 @@ def hotswap_adapter_from_state_dict(
             # either
             # - adapters had the same rank
             # - adapters were padded with prepare_model_for_compiled_hotswap and 2nd adapter was larger
-            old_val.data = new_val.data
+            old_val.data.copy_(new_val.data)
         else:
             # if 2nd adapter was smaller, ensure to fill up to adapter dimension and set the rest to zeros
             if old_val.dim() not in (2, 4):
@@ -492,10 +492,10 @@ def hotswap_adapter_from_state_dict(
             # Linear or Conv2d: the check for dim 0 or 1 works for both of these layer types
             if old_val.shape[0] > new_val.shape[0]:
                 old_val.data.fill_(0)
-                old_val.data[: new_val.shape[0]] = new_val.data
+                old_val.data[: new_val.shape[0]].copy_(new_val.data)
             elif old_val.shape[1] > new_val.shape[1]:
                 old_val.data.fill_(0)
-                old_val.data[:, : new_val.shape[1]] = new_val.data
+                old_val.data[:, : new_val.shape[1]].copy_(new_val.data)
             else:
                 raise ValueError(
                     f"Incompatible shapes found for LoRA weights {key}: {old_val.shape} vs {new_val.shape}. Please "

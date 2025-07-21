@@ -16,6 +16,7 @@ from .adalora import AdaLoraConfig, AdaLoraModel
 from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
 from .boft import BOFTConfig, BOFTModel
 from .bone import BoneConfig, BoneModel
+from .c3a import C3AConfig, C3AModel
 from .cpt import CPTConfig, CPTEmbedding
 from .fourierft import FourierFTConfig, FourierFTModel
 from .hra import HRAConfig, HRAModel
@@ -40,6 +41,7 @@ from .poly import PolyConfig, PolyModel
 from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
 from .prompt_tuning import PromptEmbedding, PromptTuningConfig, PromptTuningInit
 from .randlora import RandLoraConfig, RandLoraModel
+from .shira import ShiraConfig, ShiraModel
 from .trainable_tokens import TrainableTokensConfig, TrainableTokensModel
 from .vblora import VBLoRAConfig, VBLoRAModel
 from .vera import VeraConfig, VeraModel
@@ -55,6 +57,8 @@ __all__ = [
     "BOFTModel",
     "BoneConfig",
     "BoneModel",
+    "C3AConfig",
+    "C3AModel",
     "CPTConfig",
     "CPTEmbedding",
     "EvaConfig",
@@ -94,6 +98,8 @@ __all__ = [
     "PromptTuningInit",
     "RandLoraConfig",
     "RandLoraModel",
+    "ShiraConfig",
+    "ShiraModel",
     "TrainableTokensConfig",
     "TrainableTokensModel",
     "VBLoRAConfig",

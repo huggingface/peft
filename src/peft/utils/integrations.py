@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import functools
 from contextlib import contextmanager
-from typing import Literal
+from typing import Literal, Optional
 
 import packaging.version
 import torch
@@ -26,15 +26,19 @@ from torch import nn
 from peft.import_utils import is_xpu_available
 
 
-@contextmanager
-def gather_params_ctx(param, modifier_rank: int = 0, fwd_module: torch.nn.Module = None):
-    """Call DeepSpeed GatheredParameters context manager if DeepSpeed is enabled, otherwise do nothing."""
+def check_deepspeed_zero3_enabled() -> bool:
     if packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.33.0"):
         from transformers.integrations import is_deepspeed_zero3_enabled
     else:
         from transformers.deepspeed import is_deepspeed_zero3_enabled
+    return is_deepspeed_zero3_enabled()
 
-    if not is_deepspeed_zero3_enabled():
+
+@contextmanager
+def gather_params_ctx(param, modifier_rank: Optional[int] = 0, fwd_module: torch.nn.Module = None):
+    """Call DeepSpeed GatheredParameters context manager if DeepSpeed is enabled, otherwise do nothing."""
+
+    if not check_deepspeed_zero3_enabled():
         yield
         return
 

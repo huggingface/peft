@@ -14,6 +14,8 @@
 from __future__ import annotations
 
 import os
+import platform
+import re
 import warnings
 from typing import Optional
 
@@ -151,6 +153,25 @@ def get_peft_model_state_dict(
                 prompt_embeddings = model.get_prompt_embedding_to_save(adapter_name)
         to_return["prompt_embeddings"] = prompt_embeddings
 
+    elif config.peft_type == PeftType.SHIRA:
+        shira_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
+        to_return = {k: state_dict[k] for k in state_dict if shira_prefix in k}
+        if platform.system() == "Windows":
+            warnings.warn(
+                "Windows has issues saving integers into safetensors. Hence, we convert shira_indices to float32 "
+                "before saving on Windows OS. The shira_indices will always be converted to integers when loading."
+            )
+        for name, module in model.named_modules():
+            if hasattr(module, "shira_indices"):
+                for k, v in module.shira_indices.items():
+                    # Windows has some issues with saving integers into safetensors. Tests fail with some kind of
+                    # PermissionError. This results in failed tests, so we are converting indices to float32 before
+                    # saving and then converting them back to int when loading. This is happening only for Windows,
+                    # not for Linux and Mac-OS.
+                    to_return[f"{name}.shira_indices.{k}"] = (
+                        v.to(torch.float32) if platform.system() == "Windows" else v
+                    )
+
     elif config.peft_type == PeftType.VERA:
         vera_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
         to_return = {k: state_dict[k] for k in state_dict if vera_prefix in k}
@@ -212,10 +233,17 @@ def get_peft_model_state_dict(
     # DEAL WITH EMBEDDINGS
     # check the common embedding layers in `target_modules` to reset `save_embedding_layers` if necessary
     is_embedding_in_target_modules = False
+    embedding_is_targeted = False
+    if hasattr(config, "target_modules"):
+        if isinstance(config.target_modules, str):
+            # TODO: implement this; note: this change is not directly related to the PR, the bug already existed b4
+            pass
+        elif config.target_modules:
+            embedding_is_targeted = any(k in config.target_modules for k in EMBEDDING_LAYER_NAMES)
     if (
         save_embedding_layers == "auto"
         and hasattr(config, "target_modules")
-        and any(k in config.target_modules for k in EMBEDDING_LAYER_NAMES)
+        and embedding_is_targeted
         and config.peft_type != PeftType.TRAINABLE_TOKENS
     ):
         warnings.warn("Setting `save_embedding_layers` to `True` as embedding layers found in `target_modules`.")
@@ -405,6 +433,22 @@ def set_peft_model_state_dict(
             rank_pattern = config.rank_pattern
             if rank_pattern is not None:
                 model.resize_modules_by_rank_pattern(rank_pattern, adapter_name)
+        elif config.peft_type == PeftType.SHIRA:
+            if platform.system() == "Windows":
+                warnings.warn(
+                    "Windows has issues saving integers into safetensors. Hence, we had converted shira_indices "
+                    "to float32 before saving on Windows OS. The shira_indices will always be converted to integers "
+                    "when loading."
+                )
+            for name, module in model.named_modules():
+                if hasattr(module, "shira_indices"):
+                    # for k, v in module.shira_indices.items():
+                    if f"{name}.shira_indices.{adapter_name}" in peft_model_state_dict:
+                        shira_indices_values = peft_model_state_dict.pop(f"{name}.shira_indices.{adapter_name}")
+                        # Convert shira_indices to int in case they were saved on a Windows OS and are being loaded
+                        # on a Linux or a Mac-OS system. If they were saved in Linux or Mac-OS, they are already
+                        # integers and the following will not affect anything.
+                        module.shira_indices[adapter_name] = shira_indices_values.to(torch.int)
         elif config.peft_type == PeftType.VERA:
             if config.save_projection and "base_model.vera_A" not in peft_model_state_dict:
                 raise ValueError(
@@ -433,6 +477,11 @@ def set_peft_model_state_dict(
                 return k
 
             peft_model_state_dict = {renamed_dora_weights(k): v for k, v in peft_model_state_dict.items()}
+        elif config.peft_type == PeftType.OFT:
+            if any(".oft_r." in key for key in peft_model_state_dict):
+                raise ValueError(
+                    "Trying to load old OFT checkpoint, which is no longer supported. Please install PEFT <= v0.15.2 to load it or train a new OFT adapter."
+                )
     else:
         raise NotImplementedError
 
@@ -482,7 +531,9 @@ def torch_load(*args, weights_only=True, **kwargs):
     return torch.load(*args, weights_only=weights_only, **kwargs)
 
 
-def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_download_kwargs) -> dict:
+def load_peft_weights(
+    model_id: str, device: Optional[str] = None, key_mapping: Optional[dict[str, str]] = None, **hf_hub_download_kwargs
+) -> dict:
     r"""
     A helper method to load the PEFT weights from the HuggingFace Hub or locally
 
@@ -491,6 +542,10 @@ def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_down
             The local path to the adapter weights or the name of the adapter to load from the HuggingFace Hub.
         device (`str`):
             The device to load the weights onto.
+        key_mapping (dict, *optional*, defaults to None)
+            Extra mapping of PEFT `state_dict` keys applied before loading the `state_dict`. When this mapping is
+            applied, the PEFT-specific `"base_model.model"` prefix is removed beforehand and the adapter name (e.g.
+            `"default"`) is not inserted yet. Only pass this argument if you know what you're doing.
         hf_hub_download_kwargs (`dict`):
             Additional arguments to pass to the `hf_hub_download` method when loading from the HuggingFace Hub.
     """
@@ -572,4 +627,31 @@ def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_down
     else:
         adapters_weights = torch_load(filename, map_location=torch.device(device))
 
-    return adapters_weights
+    if not key_mapping:
+        remapped_adapters_weights = adapters_weights
+    else:
+        # See discussion in https://github.com/huggingface/transformers/pull/38627
+        # Remap adapter weight names according to the provided key_mapping.
+        remapped_adapters_weights = {}
+        for key, val in adapters_weights.items():
+            if key.startswith("base_model.model."):
+                prefix = "base_model.model."
+            elif key.startswith("base_model."):
+                prefix = "base_model."
+            else:
+                raise ValueError(
+                    "An error occurred while trying to load a PEFT state_dict with key_mapping. This should not "
+                    "happen. Please open an issue on https://github.com/huggingface/peft/issues and report the error."
+                )
+
+            key = key.removeprefix(prefix)  # the key map assumes that there is no prefix
+            for pattern, replacement in key_mapping.items():
+                key_new, n_replace = re.subn(pattern, replacement, key)
+                # Early exit of the loop
+                if n_replace > 0:
+                    key = key_new
+                    break
+            key_with_prefix = f"{prefix}{key}"
+            remapped_adapters_weights[key_with_prefix] = val
+
+    return remapped_adapters_weights

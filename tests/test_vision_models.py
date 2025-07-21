@@ -46,7 +46,9 @@ CONFIGS = {
     "lora": LoraConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
     "loha": LoHaConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
     "lokr": LoKrConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
-    "oft": OFTConfig(r=1, target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
+    "oft": OFTConfig(
+        r=1, oft_block_size=0, target_modules=["convolution"], modules_to_save=["classifier", "normalization"]
+    ),
     "hra": HRAConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
     # TODO: cannot use BOFT because some convolutional kernel dimensions are even (64) and others odd (147). There is no
     # common denominator for the boft_block_size except 1, but using 1 results in an error in the fbd_cuda kernel:

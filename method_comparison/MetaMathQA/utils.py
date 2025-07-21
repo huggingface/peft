@@ -21,6 +21,7 @@ import json
 import os
 import platform
 import subprocess
+import tempfile
 import warnings
 from dataclasses import asdict, dataclass
 from decimal import Decimal, DivisionByZero, InvalidOperation
@@ -43,7 +44,7 @@ from transformers import (
 import peft
 from peft import PeftConfig, get_peft_model, prepare_model_for_kbit_training
 from peft.optimizers import create_lorafa_optimizer, create_loraplus_optimizer
-from peft.utils import CONFIG_NAME
+from peft.utils import SAFETENSORS_WEIGHTS_NAME
 
 
 if not torch.cuda.is_available():
@@ -146,8 +147,6 @@ def validate_experiment_path(path: str) -> str:
         )
     if not os.path.exists(path):
         raise FileNotFoundError(f"Path {path} does not exist")
-    if not os.path.exists(os.path.join(path, CONFIG_NAME)):
-        raise FileNotFoundError(os.path.join(path, CONFIG_NAME))
 
     # check path structure
     path_parts = path.rstrip(os.path.sep).split(os.path.sep)
@@ -243,13 +242,16 @@ def get_model(
     dtype: Literal["float32", "float16", "bfloat16", "int8", "int4"],
     compile: bool,
     attn_implementation: Optional[str],
-    peft_config: PeftConfig,
+    peft_config: Optional[PeftConfig],
     autocast_adapter_dtype: bool,
 ) -> nn.Module:
     base_model = get_base_model(
         model_id=model_id, dtype=dtype, compile=compile, attn_implementation=attn_implementation
     )
-    model = get_peft_model(base_model, peft_config, autocast_adapter_dtype=autocast_adapter_dtype)
+    if peft_config is None:
+        model = base_model
+    else:
+        model = get_peft_model(base_model, peft_config, autocast_adapter_dtype=autocast_adapter_dtype)
     return model
 
 
@@ -333,6 +335,31 @@ class BucketIterator:
         if len(self.ds) % bucket_size != 0:
             bucket = self.ds[-(len(self.ds) % bucket_size) :]
             yield from self._batch_iterator(bucket)
+
+
+def get_file_size(
+    model: nn.Module, *, peft_config: Optional[PeftConfig], clean: bool, print_fn: Callable[..., None]
+) -> int:
+    file_size = 99999999  # set a default dummy value
+    if peft_config is not None:
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True, delete=clean) as tmp_dir:
+                model.save_pretrained(tmp_dir)
+                stat = os.stat(os.path.join(tmp_dir, SAFETENSORS_WEIGHTS_NAME))
+                file_size = stat.st_size
+                if not clean:
+                    print_fn(f"Saved PEFT checkpoint to {tmp_dir}")
+        except Exception as exc:
+            print(f"Failed to save PEFT checkpoint due to the following error: {exc}")
+    else:
+        print_fn("Not saving the fully fine-tuned model because it's too big, estimating the size instead")
+        try:
+            num_params = model.num_parameters()
+            dtype_size = next(model.parameters()).element_size()
+            file_size = num_params * dtype_size
+        except Exception as exc:
+            print(f"Failed to determine file size for fully finetuned model because of: {exc}")
+    return file_size
 
 
 ##################
@@ -545,6 +572,9 @@ class TrainResult:
     cuda_memory_reserved_log: list[int]
     losses: list[float]
     metrics: list[Any]  # TODO
+    error_msg: str
+    num_trainable_params: int
+    num_total_params: int
 
 
 def log_to_console(log_data: dict[str, Any], print_fn: Callable[..., None]) -> None:
@@ -566,7 +596,12 @@ def log_to_console(log_data: dict[str, Any], print_fn: Callable[..., None]) -> N
 def log_to_file(
     *, log_data: dict, save_dir: str, experiment_name: str, timestamp: str, print_fn: Callable[..., None]
 ) -> None:
-    file_name = f"{experiment_name.replace(os.path.sep, '--')}--{timestamp.replace(':', '-')}.json"
+    if save_dir.endswith(RESULT_PATH):
+        file_name = f"{experiment_name.replace(os.path.sep, '--')}.json"
+    else:
+        # For cancelled and temporary runs, we want to include the timestamp, as these runs are not tracked in git, thus
+        # we need unique names to avoid losing history.
+        file_name = f"{experiment_name.replace(os.path.sep, '--')}--{timestamp.replace(':', '-')}.json"
     file_name = os.path.join(save_dir, file_name)
     with open(file_name, "w") as f:
         json.dump(log_data, f, indent=2)
@@ -584,7 +619,7 @@ def log_results(
     datasets_info: dict[str, Optional[huggingface_hub.DatasetInfo]],
     start_date: str,
     train_config: TrainConfig,
-    peft_config: PeftConfig,
+    peft_config: Optional[PeftConfig],
     print_fn: Callable[..., None],
 ) -> None:
     # collect results
@@ -621,11 +656,17 @@ def log_results(
     elif train_result.status == TrainStatus.SUCCESS:
         save_dir = RESULT_PATH
         print_fn("Experiment run was categorized as successful run")
+    else:
+        save_dir = tempfile.mkdtemp()
+        print_fn(f"Experiment could not be categorized, writing results to {save_dir}. Please open an issue on PEFT.")
 
-    peft_config_dict = peft_config.to_dict()
-    for key, value in peft_config_dict.items():
-        if isinstance(value, set):
-            peft_config_dict[key] = list(value)
+    if peft_config is None:
+        peft_config_dict: Optional[dict[str, Any]] = None
+    else:
+        peft_config_dict = peft_config.to_dict()
+        for key, value in peft_config_dict.items():
+            if isinstance(value, set):
+                peft_config_dict[key] = list(value)
 
     log_data = {
         "run_info": {
@@ -635,6 +676,7 @@ def log_results(
             "peft_branch": peft_branch,
             "train_config": asdict(train_config),
             "peft_config": peft_config_dict,
+            "error_msg": train_result.error_msg,
         },
         "train_info": {
             "cuda_memory_reserved_avg": cuda_memory_avg,
@@ -642,6 +684,8 @@ def log_results(
             "cuda_memory_reserved_99th": cuda_memory_reserved_99th,
             "train_time": train_result.train_time,
             "file_size": file_size,
+            "num_trainable_params": train_result.num_trainable_params,
+            "num_total_params": train_result.num_total_params,
             "status": train_result.status.value,
             "metrics": train_result.metrics,
         },

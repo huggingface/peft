@@ -49,17 +49,17 @@ $ pip install pre-commit
 $ pre-commit install
 ```
 
-Running all the tests can take a couple of minutes, so during development it can be more efficient to only run tests specific to your change:
+Running all the tests can take a while, so during development it can be more efficient to only [run tests specific to your change](https://docs.pytest.org/en/6.2.x/usage.html#specifying-tests-selecting-tests), e.g. via:
 
 ```sh
-pytest tests/ -k <name-of-test>
+pytest tests/<test-file-name> -k <name-of-test>
 ```
 
-This should finish much quicker and allow for faster iteration. However, you should still run the whole test suite before creating a PR because your change can inadvertently break tests that at first glance are unrelated.
+This should finish much quicker and allow for faster iteration.
 
 If your change is specific to a hardware setting (e.g., it requires CUDA), take a look at [tests/test_gpu_examples.py](https://github.com/huggingface/peft/blob/1c1c7fdaa6e6abaa53939b865dee1eded82ad032/tests/test_gpu_examples.py) and [tests/test_common_gpu.py](https://github.com/huggingface/peft/blob/1c1c7fdaa6e6abaa53939b865dee1eded82ad032/tests/test_common_gpu.py) to see if it makes sense to add tests there. If your change could have an effect on saving and loading models, please run the tests with the `--regression` flag to trigger regression tests.
 
-It can happen that while you’re working on your PR, the underlying code base changes due to other changes being merged. If that happens – especially when there is a merge conflict – please update your branch with the latest changes. This can be a merge or a rebase, and we'll squash and merge the PR once it’s ready.
+It can happen that while you’re working on your PR, the underlying code base changes due to other changes being merged. If that happens – especially when there is a merge conflict – please update your branch with the latest changes. This can be a merge or a rebase, and we'll squash and merge the PR once it’s ready. If possible, avoid force pushes to make reviews easier.
 
 ## PR description
 
@@ -77,10 +77,14 @@ Ideally when a bugfix is provided, it should be accompanied by a test for the bu
 
 New parameter-efficient fine-tuning methods are developed all the time. If you would like to add a new and promising method to PEFT, please follow these steps.
 
-1. Before you start to implement the new method, please open a GitHub issue with your proposal. This way, the maintainers can give you some early feedback.
-2. Please add a link to the source (usually a paper) of the method. Some evidence should be provided there is general interest in using the method. We will not add new methods that are freshly published, but there is no evidence of demand for it.
+1. Before you start to implement the new method, please open a [GitHub issue](https://github.com/huggingface/peft/issues) with your proposal. This way, the maintainers can give you some early feedback.
+2. Please add a link to the source (usually a paper) of the method. The paper should be in a final state to avoid changing requirements during development (e.g. due to reviewer feedback).
 3. When implementing the method, it makes sense to look for existing implementations that already exist as a guide. Moreover, when you structure your code, please take inspiration from the other PEFT methods. For example, if your method is similar to LoRA, it makes sense to structure your code similarly or even reuse some functions or classes where it makes sense (some code duplication is okay, but don’t overdo it).
-4. Ideally, in addition to the implementation of the new method, there should also be examples (notebooks, scripts), documentation, and an extensive test suite that proves the method works with a variety of tasks. However, this can be more challenging so it is acceptable to only provide the implementation and at least one working example. Documentation and tests can be added in follow up PRs.
+4. Ideally, in addition to the implementation of the new method, there should also be
+   - [examples](https://github.com/huggingface/peft/tree/main/examples) (notebooks, scripts)
+   - [documentation](https://github.com/huggingface/peft/tree/main/docs/source)
+   - [extensive test suite](https://github.com/huggingface/peft/tree/main/tests) that proves the method correctly integrates with PEFT
+   - [experimental setup](https://github.com/huggingface/peft/tree/main/method_comparison#creating-new-experiments) to run benchmarks
 5. Once you have something that seems to be working, don’t hesitate to create a draft PR even if it’s not in a mergeable state yet. The maintainers are happy to give you feedback and guidance along the way.
 
 ## Add other features

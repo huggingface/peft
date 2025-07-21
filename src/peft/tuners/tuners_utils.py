@@ -168,6 +168,9 @@ class BaseTuner(nn.Module, ABC):
         targeted_module_names (`list[str]`):
             The list of module names that were actually adapted. Can be useful to inspect if you want to quickly
             double-check that the `config.target_modules` were specified correctly.
+        targeted_parameter_names (`list[str]`):
+            The list of parameter names that were actually adapted. Can be useful to inspect if you want to quickly
+            double-check that the `config.target_parameters` were specified correctly.
     """
 
     def __init__(
@@ -181,6 +184,7 @@ class BaseTuner(nn.Module, ABC):
 
         self.model = model
         self.targeted_module_names: list[str] = []
+        self.targeted_parameter_names: list[str] = []
 
         # For advanced developers, if you want to attach multiple adapters to your
         # model, just add a `peft_config` dict attribute to your model.
@@ -285,6 +289,7 @@ class BaseTuner(nn.Module, ABC):
         target_name: str,
         parent: nn.Module,
         current_key: str,
+        parameter_name: Optional[str] = None,
     ) -> None:
         r"""
         Inplace replacement of the target module with the adapter layer. This method needs to be overridden by all the
@@ -305,6 +310,8 @@ class BaseTuner(nn.Module, ABC):
                 The parent module.
             current_key (`str`):
                 The key of the current target being adapted.
+            parameter_name (`str`, *optional*)
+                If, and only if, an `nn.Parameter` is being targeted, this is the name of the parameter.
         """
         ...
 
@@ -426,6 +433,11 @@ class BaseTuner(nn.Module, ABC):
         """
         _check_lora_target_modules_mamba(peft_config, model, target_name)
 
+    def _create_and_replace_parameter(
+        self, peft_config, adapter_name, target, target_name, parent, current_key
+    ) -> None:
+        raise NotImplementedError(f"{self.__class__.__name__} does not support targeting nn.Parameter.")
+
     def inject_adapter(
         self, model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True, low_cpu_mem_usage: bool = False
     ) -> None:
@@ -530,12 +542,22 @@ class BaseTuner(nn.Module, ABC):
                 with ctx():
                     self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
 
-        if not self.targeted_module_names and not uses_dummy_target_modules:
+        if getattr(peft_config, "target_parameters", []):
+            self._inject_parameters(
+                peft_config=peft_config, model=model, adapter_name=adapter_name, low_cpu_mem_usage=low_cpu_mem_usage
+            )
+
+        if not self.targeted_module_names and not self.targeted_parameter_names and not uses_dummy_target_modules:
             if excluded_modules and not unmatched_modules:
                 # All targeted modules were excluded
                 raise ValueError(
                     "All modules were excluded. This is likely unintended. "
                     "Check your `target_modules`, `exclude_modules` and `modules_to_save` configuration."
+                )
+            elif not excluded_modules and unmatched_modules and not peft_config.target_modules:
+                raise ValueError(
+                    "No `target_modules` passed but also no `target_parameters` found. Please check the values for "
+                    "these arguments."
                 )
             elif not excluded_modules and unmatched_modules:
                 # None of the targeted modules matched
@@ -569,6 +591,21 @@ class BaseTuner(nn.Module, ABC):
                 "Please check that exclude_modules was set correctly."
             )
 
+        elif not uses_dummy_target_modules:
+            # If we landed here, it means that at least one module or parameter was adapted, so let's not raise an
+            # error. However, let's warn the user if it seems like
+            # - they wanted to match a module but there was no match
+            # - they wanted to match a parameter but there was no match
+            if peft_config.target_modules and not self.targeted_module_names:
+                warnings.warn(
+                    f"target_modules={peft_config.target_modules} were set but no module was matched.", RuntimeWarning
+                )
+            elif getattr(peft_config, "target_parameters", []) and not self.targeted_parameter_names:
+                warnings.warn(
+                    f"target_parameters={peft_config.target_parameters} were set but no parameter was matched.",
+                    RuntimeWarning,
+                )
+
         tied_target_modules = self._get_tied_target_modules(model=model)
         if tied_target_modules:
             warnings.warn(
@@ -595,6 +632,45 @@ class BaseTuner(nn.Module, ABC):
             model_config=BaseTuner.get_model_config(self),
             adapter_name=adapter_name,
         )
+
+    def _inject_parameters(
+        self, peft_config: PeftConfig, model: nn.Module, adapter_name: str, low_cpu_mem_usage: bool
+    ) -> None:
+        # TODO very simple matching, might not cover all use cases
+        target_names = set(peft_config.target_parameters)
+        for module_name, module in model.named_modules():
+            for param_name, param in module.named_parameters(recurse=False):
+                # It is possible that the layer is already a PEFT layer and needs updating with a new adapter. In this
+                # case, the name of parameter would be something like `model.layers.0.experts.base_layer.weight`, i.e.
+                # there is a "base_layer" inserted in the name. We need to remove that, otherwise we won't be able to
+                # match correctly (in this case, "experts.weight" would not match).
+                prefix, _, suffix = module_name.rpartition(".base_layer")
+                module_name = prefix + suffix
+                key = f"{module_name}.{param_name}"
+                # we're interested in finding the "lowest" module that contains the parameter, hence recurse=False
+                if (key in target_names) or any(key.endswith(f".{target_key}") for target_key in target_names):
+                    self.targeted_parameter_names.append(key)
+
+                    parent, target, target_name = _get_submodules(model, module_name)
+                    # use the class name for checking to avoid circular import
+                    if isinstance(target, BaseTunerLayer) and target.__class__.__name__ != "ParamWrapper":
+                        raise ValueError(
+                            f"Trying to wrap an `nn.Parameter` of layer '{target_name}' of type "
+                            f"{type(target).__name__}, which is not a valid target."
+                        )
+
+                    self._check_target_module_compatiblity(peft_config, model, target_name)
+                    ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
+                    with ctx():
+                        self._create_and_replace(
+                            peft_config,
+                            adapter_name,
+                            target,
+                            target_name,
+                            parent,
+                            current_key=key,
+                            parameter_name=param_name.rpartition(".")[-1],
+                        )
 
     def merge_adapter(self, adapter_names: Optional[list[str]] = None, safe_merge: bool = False) -> None:
         """
@@ -902,6 +978,7 @@ class BaseTunerLayer(ABC):
             if any(p.device == meta for p in adapter_layer.parameters()):
                 continue
 
+            # TODO: weight is not necessarily defined here, leading to a NameError, fix that
             if weight.dtype.is_floating_point or weight.dtype.is_complex:
                 adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device, dtype=dtype)
             else:
@@ -1048,6 +1125,10 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
     if modules_to_save:
         if any(re.match(rf"(^|.*\.){m}($|\..*)", key) for m in modules_to_save):
             return _ExcludedModule()
+
+    if (config.target_modules is None) and (config.target_parameters is not None):
+        # this is allowed if config.target_parameters are specified
+        return False
 
     if isinstance(config.target_modules, str):
         target_module_found = re.fullmatch(config.target_modules, key)
