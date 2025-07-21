@@ -13,6 +13,8 @@
 # limitations under the License.
 
 from copy import deepcopy
+from functools import wraps
+from typing import Any, Optional
 
 import torch
 import torch.nn.functional as F
@@ -22,11 +24,50 @@ from peft.utils.integrations import dequantize_module_weight, gather_params_ctx
 from peft.utils.other import transpose
 
 
+def cache_weight_norm(func):
+    # TODO
+    cache_key = "weight_norm"
+
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        if self.training:
+            return func(self, *args, **kwargs)
+
+        output = self._cache_get(cache_key, None)
+        if output is not None:
+            return output
+
+        output = func(self, *args, **kwargs)
+        self._cache_store(cache_key, output)
+        return output
+
+    return wrapper
+
+
 class DoraLinearLayer(nn.Module):
     def __init__(self, fan_in_fan_out):
         super().__init__()
         self.fan_in_fan_out = fan_in_fan_out
+        self._caches: dict[str, Any] = {}  # small ad hoc cache; values are not part of the state_dict
 
+    def _cache_store(self, key: str, value: Any) -> None:
+        # cache intermediate values, e.g. weight norm of DoRA
+        self._caches[key] = value
+
+    def _cache_get(self, key: str, default: Optional[Any]) -> Optional[Any]:
+        # retrieve from ad hoc cache
+        return self._caches.get(key, default)
+
+    def _cache_clear(self) -> None:
+        self._caches.clear()
+
+    def train(self, mode: bool = True):
+        if mode:
+            self._cache_clear()
+        super().train(mode=mode)
+        return self
+
+    @cache_weight_norm
     def get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
         # calculate L2 norm of weight matrix, column-wise
         weight = transpose(weight, self.fan_in_fan_out)
@@ -132,6 +173,7 @@ class DoraEmbeddingLayer(DoraLinearLayer):
 
 
 class _DoraConvNdLayer(DoraLinearLayer):
+    @cache_weight_norm
     def get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
         # calculate L2 norm of weight matrix, column-wise
         weight = weight + scaling * lora_weight
