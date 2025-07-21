@@ -150,6 +150,8 @@ class GLoraModel(BaseTuner):
         try:
             return super().__getattr__(name)
         except AttributeError:
+            if name == "model":
+                raise
             return getattr(self.model, name)
 
     @staticmethod
