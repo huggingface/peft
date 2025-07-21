@@ -12,10 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import itertools
 import math
 import random
-import warnings
 from typing import Optional
 
 import torch
@@ -33,7 +31,16 @@ class GLoraLayer:
         self.glora_D = nn.Parameter(torch.zeros(out_features))
         self.glora_E = nn.Parameter(torch.zeros(out_features))
         # Initialize the parameters for GLora
-        self.eval_config = kwargs.get("eval_config", None)
+        # self.eval_config = kwargs.get("eval_config", None)
+        self.eval_config = (
+            {
+                "A": kwargs.get("config_A_B"),
+                "B": kwargs.get("config_A_B"),
+                "C": kwargs.get("config_C"),
+                "D": kwargs.get("config_D_E"),
+                "E": kwargs.get("config_D_E"),
+            },
+        )
         nn.init.kaiming_uniform_(self.glora_Au, a=math.sqrt(5))
         nn.init.kaiming_uniform_(self.glora_Bu, a=math.sqrt(5))
         nn.init.kaiming_uniform_(self.glora_Cu, a=math.sqrt(5))
@@ -42,14 +49,14 @@ class GLoraLayer:
         self.in_features = in_features
         self.out_features = out_features
         self.kwargs = kwargs
-        config_A_B = [f"LoRA_{r}", "vector", "constant", "none"]
-        config_C = [f"LoRA_{r}", "vector", "none"]
-        config_D_E = ["constant", "none", "vector"]
+        # config_A_B = [f"LoRA_{r}", "vector", "constant", "none"]
+        # config_C = [f"LoRA_{r}", "vector", "none"]
+        # config_D_E = ["constant", "none", "vector"]
         # All possible configurations for A, B, C, D, E
-        self.configs = [
-            {"A": a, "B": b, "C": c, "D": d, "E": e}
-            for a, b, c, d, e in itertools.product(config_A_B, config_A_B, config_C, config_D_E, config_D_E)
-        ]
+        # self.configs = [
+        #     {"A": a, "B": b, "C": c, "D": d, "E": e}
+        #     for a, b, c, d, e in itertools.product(config_A_B, config_A_B, config_C, config_D_E, config_D_E)
+        # ]
 
     def make_param(self, shape, config=None):
         if "LoRA" in config:
@@ -87,12 +94,7 @@ class Linear(nn.Linear, GLoraLayer):
         if self.merged:
             return
 
-        # If eval_config is not set, use a random config for merging
-        if self.eval_config is None:
-            warnings.warn("eval_config not set for GLora layer, using a random config for merge.")
-            path_config = random.choice(self.configs)
-        else:
-            path_config = self.eval_config
+        path_config = self.eval_config
 
         device, dtype = self.weight.device, self.weight.dtype
         # Prepare paths (A, B, C, D, E) based on path_config
