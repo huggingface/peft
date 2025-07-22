@@ -46,6 +46,7 @@ from peft import (
     OFTConfig,
     PeftModel,
     RandLoraConfig,
+    ShiraConfig,
     TaskType,
     TrainableTokensConfig,
     VBLoRAConfig,
@@ -147,6 +148,14 @@ TEST_CASES = [
     ),
     ("MHA 1 LoRA", "MHA", LoraConfig, {"target_modules": ["mha"]}),
     ("MHA 2 LoRA", "MHA", LoraConfig, {"target_modules": ["mha", "lin0"]}),
+    # targeting parameters directly
+    ("MLP 1 using nn.Parameter LoRA", "MlpUsingParameters", LoraConfig, {"target_parameters": ["lin0.weight"]}),
+    (
+        "MLP 2 using nn.Parameter LoRA",
+        "MLP",
+        LoraConfig,
+        {"target_modules": ["lin0"], "target_parameters": ["lin1.weight"]},
+    ),
     #######
     # IA³ #
     #######
@@ -522,6 +531,24 @@ TEST_CASES = [
         BOFTConfig,
         {"target_modules": ["conv2d"], "boft_block_size": 2, "boft_block_num": 0, "boft_n_butterfly_factor": 3},
     ),
+    #########
+    # SHiRA #
+    #########
+    ("Vanilla MLP 1 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": "lin0", "init_weights": False}),
+    ("Vanilla MLP 2 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": ["lin0"], "init_weights": False}),
+    ("Vanilla MLP 3 SHiRA", "MLP", ShiraConfig, {"r": 1, "target_modules": ["lin1"], "init_weights": False}),
+    (
+        "Vanilla MLP 4 SHiRA",
+        "MLP",
+        ShiraConfig,
+        {"r": 1, "target_modules": ["lin0", "lin1"], "random_seed": 56, "init_weights": False},
+    ),
+    (
+        "Vanilla MLP 5 SHiRA",
+        "MLP",
+        ShiraConfig,
+        {"r": 1, "target_modules": ["lin0"], "init_weights": False},
+    ),
     ########
     # VeRA #
     ########
@@ -602,9 +629,9 @@ TEST_CASES = [
         TrainableTokensConfig,
         {"target_modules": ["emb"], "token_indices": [0, 1, 3], "init_weights": False},
     ),
-    ########
+    ############
     # RandLora #
-    ########
+    ############
     # We have to reduce the default scaling parameter to avoid nans when using large learning rates
     ("Vanilla MLP 1 RandLora", "MLP", RandLoraConfig, {"target_modules": "lin0", "randlora_alpha": 1}),
     ("Vanilla MLP 2 RandLora", "MLP", RandLoraConfig, {"target_modules": ["lin0"], "randlora_alpha": 1}),
@@ -628,9 +655,9 @@ TEST_CASES = [
         RandLoraConfig,
         {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "randlora_alpha": 1},
     ),
-    ########
+    #######
     # C3A #
-    ########
+    #######
     ("Vanilla MLP 1 C3A", "MLP", C3AConfig, {"block_size": 2, "target_modules": "lin0"}),
     ("Vanilla MLP 2 C3A", "MLP", C3AConfig, {"block_size": 2, "target_modules": ["lin0"]}),
     ("Vanilla MLP 3 C3A", "MLP", C3AConfig, {"block_size": 2, "target_modules": ["lin1"]}),
@@ -695,6 +722,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin1"], "init_lora_weights": False, "trainable_token_indices": {"emb": [3, 4, 5, 6]}},
     ),
     (
+        "LoRA targeting nn.Parameter Same",
+        "lora",
+        LoraConfig,
+        {"target_parameters": ["lin0.weight"], "init_lora_weights": False},
+        {"target_parameters": ["lin0.weight"], "init_lora_weights": False},
+    ),
+    (
+        "LoRA targeting nn.Parameter Different",
+        "lora",
+        LoraConfig,
+        {"target_parameters": ["lin0.weight"], "init_lora_weights": False},
+        {"target_parameters": ["lin1.weight"], "init_lora_weights": False},
+    ),
+    (
         "IA3 Same",
         "ia3",
         IA3Config,
@@ -751,6 +792,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         FourierFTConfig,
         {"n_frequency": 10, "target_modules": ["lin0"]},
         {"n_frequency": 10, "target_modules": ["lin1"]},
+    ),
+    (
+        "SHiRA Same",
+        "shira",
+        ShiraConfig,
+        {"r": 1, "target_modules": ["lin0"], "init_weights": False},
+        {"r": 1, "target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "SHiRA Different",
+        "shira",
+        ShiraConfig,
+        {"r": 1, "target_modules": ["lin0"], "init_weights": False},
+        {"r": 1, "target_modules": ["lin1"], "init_weights": False},
     ),
     # Note: Currently, we cannot target lin0 and lin1 with different adapters when using VeRA. The reason is that the
     # first adapter being created will result in a vera_A or vera_B shape that is too small for the next adapter
@@ -841,6 +896,7 @@ PREFIXES = {
     FourierFTConfig: "fourierft_",
     C3AConfig: "c3a_",
     HRAConfig: "hra_",
+    ShiraConfig: "shira_",
     VBLoRAConfig: "vblora_",
     BoneConfig: "bone_",
     TrainableTokensConfig: "trainable_tokens_",
@@ -1169,6 +1225,42 @@ class ModelMha(nn.Module):
         return X
 
 
+class _LinearUsingParameter(nn.Module):
+    # TODO
+    def __init__(self, in_features, out_features, bias=None):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.weight = nn.Parameter(torch.randn(in_features, out_features))
+        if bias:
+            self.bias = nn.Parameter(torch.ones(out_features))
+
+    def forward(self, x):
+        return x @ self.weight + self.bias
+
+
+class MlpUsingParameters(nn.Module):
+    # TODO
+    def __init__(self, bias=True):
+        super().__init__()
+
+        self.lin0 = _LinearUsingParameter(10, 20, bias=bias)
+        self.relu = nn.ReLU()
+        self.drop = nn.Dropout(0.5)
+        self.lin1 = _LinearUsingParameter(20, 2, bias=bias)
+        self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
+
+    def forward(self, X):
+        X = X.to(self.dtype)
+        X = self.lin0(X)
+        X = self.relu(X)
+        X = self.drop(X)
+        X = self.lin1(X)
+        X = self.sm(X)
+        return X
+
+
 class MockTransformerWrapper:
     """Mock class to behave like a transformers model.
 
@@ -1216,6 +1308,9 @@ class MockTransformerWrapper:
 
         if model_id == "MHA":
             return ModelMha().to(torch_dtype)
+
+        if model_id == "MlpUsingParameters":
+            return MlpUsingParameters().to(torch_dtype)
 
         raise ValueError(f"model_id {model_id} not implemented")
 
@@ -1663,6 +1758,12 @@ class TestPeftCustomModel(PeftCommonTester):
             config_kwargs = config_kwargs.copy()
             # override the default value and make PEFT operation a no-op
             config_kwargs["init_weights"] = True
+        if issubclass(config_cls, (ShiraConfig,)):
+            # for SHiRA, setting this to default value of True will turn the PEFT operation into a no-op
+            # because SHiRA is always initialized to zeros. Configs declared in the test file had set init_weights
+            # to False (to make sure all other tests have a randn SHiRA initialization). Setting it back to True here
+            # as required by this test.
+            config_kwargs["init_weights"] = True
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -2100,7 +2201,9 @@ class TestPeftCustomModel(PeftCommonTester):
         assert "default" in model.base_model.classifier.modules_to_save
         assert "other" in model.base_model.classifier.modules_to_save
 
-    @pytest.mark.parametrize("config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig])
+    @pytest.mark.parametrize(
+        "config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig, ShiraConfig]
+    )
     def test_multiple_adapters_mixed_modules_to_save(self, config_cls):
         # See issue 1574
         # Check that we can have a model where one adapter has modules_to_save and the other doesn't. It should be
@@ -2110,6 +2213,8 @@ class TestPeftCustomModel(PeftCommonTester):
 
         if config_cls == BoneConfig:
             config_cls = partial(config_cls, r=2)
+        if config_cls == ShiraConfig:
+            config_cls = partial(config_cls, r=1)
 
         config0 = config_cls(target_modules=["lin0"], modules_to_save=["lin1"])
         config1 = config_cls(target_modules=["lin0"])
@@ -2128,7 +2233,9 @@ class TestPeftCustomModel(PeftCommonTester):
         model.set_adapter("other")
         model(**inputs)
 
-    @pytest.mark.parametrize("config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig])
+    @pytest.mark.parametrize(
+        "config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig, ShiraConfig]
+    )
     def test_multiple_adapters_mixed_modules_to_save_order_switched(self, config_cls):
         # See issue 1574
         # Same test as test_multiple_adapters_mixed_modules_to_save, but this time the 2nd adapter has modules_to_save.
@@ -2137,6 +2244,8 @@ class TestPeftCustomModel(PeftCommonTester):
 
         if config_cls == BoneConfig:
             config_cls = partial(config_cls, r=2)
+        if config_cls == ShiraConfig:
+            config_cls = partial(config_cls, r=1)
 
         config0 = config_cls(target_modules=["lin0"])
         config1 = config_cls(target_modules=["lin0"], modules_to_save=["lin1"])
@@ -2707,9 +2816,9 @@ class TestMultipleActiveAdapters:
         assert not torch.allclose(adapter_1_output, combined_output, atol=1e-5)
         assert not torch.allclose(adapter_2_output, combined_output, atol=1e-5)
 
-        if tuner_method == "lora":
-            # create a weighted adapter combining both adapters and check that
-            # its output is same as setting multiple active adapters
+        if (tuner_method == "lora") and not (config_1.target_parameters or config_2.target_parameters):
+            # Create a weighted adapter combining both adapters and check that its output is same as setting multiple
+            # active adapters. `target_parameters` is not supported.
             peft_model.add_weighted_adapter(
                 ["adapter_1", "adapter_2"], [1.0, 1.0], "new_combined_adapter", combination_type="cat"
             )
