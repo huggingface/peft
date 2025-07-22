@@ -48,7 +48,7 @@ TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {}
 transformers_le_4_53 = packaging.version.parse(transformers.__version__) < packaging.version.parse("4.54.0.dev0")
 if transformers_le_4_53:
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING["gpt_bigcode"] = (
-        starcoder_model_postprocess_past_key_value,
+        starcoder_model_postprocess_past_key_value
     )
 
 
