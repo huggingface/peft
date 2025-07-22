@@ -65,7 +65,7 @@ class AdaptionPromptModel(nn.Module):
 
         parents = []
         for name, _ in self.model.named_modules():
-            if name.endswith(config.target_modules) and not name.endswith(f"_{config.target_modules}"): #accounts for attn vs c_attn
+            if name.endswith(f".{config.target_modules}"):
                 par, _, _ = _get_submodules(self.model, name)
                 parents.append(par)
         if len(parents) < config.adapter_layers:
@@ -118,14 +118,14 @@ class AdaptionPromptModel(nn.Module):
     def _create_adapted_attentions(self, config: AdaptionPromptConfig, parents: list[nn.Module]) -> None:
         """Wrap LlamaAttention modules with newly created AdaptedAttention modules."""
         for par in parents:
-            if(self.model.config.model_type=="gpt2"):
+            if self.model.config.model_type == "gpt2":
                 attn = AdaptedAttentionGPT(
-                model_type=self.model.config.model_type,
-                adapter_len=config.adapter_len,
-                model=getattr(par, config.target_modules),
+                    model_type=self.model.config.model_type,
+                    adapter_len=config.adapter_len,
+                    model=getattr(par, config.target_modules),
                 )
 
-            else: 
+            else:
                 attn = AdaptedAttention(
                     model_type=self.model.config.model_type,
                     adapter_len=config.adapter_len,
