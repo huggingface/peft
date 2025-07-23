@@ -22,10 +22,10 @@ import torch.nn.functional as F
 from .config import TRANSFORMERS_MODEL_CONFIG
 
 
-class AdaptedAttentionGPT(nn.Module):
-    """This module wraps a GPT2Attention module and injects adaption prompts"""
+class _BaseAdaptedAttention(nn.Module):
+    """Base module, which defines adaption prompts for multiple model types."""
 
-    def __init__(self, model_type: str, adapter_len: int, model):
+    def __init__(self, model_type: str, adapter_len: int, model, target_dtype=torch.float32):
         """
         Initialize object.
 
@@ -35,7 +35,7 @@ class AdaptedAttentionGPT(nn.Module):
             adapter_len: The length of the adaption prompt to insert.
             model: The original transformer attention module that is being wrapped.
         """
-        if isinstance(model, AdaptedAttentionGPT):
+        if isinstance(model, _BaseAdaptedAttention):
             raise ValueError("Unable to stack multiple adaption prompts")
         super().__init__()
         self.model_type = model_type
@@ -48,9 +48,7 @@ class AdaptedAttentionGPT(nn.Module):
         # which initializes the tokens with standard normal values.
         # https://github.com/ZrrSkywalker/LLaMA-Adapter/blob/41c3546fe1997ab8a65809dc8d8f9252b19d9faf/llama/model.py#L234
         # (bsz, adapter_len, hidden_size)
-        target_dtype = (
-            model.c_proj.weight.dtype if model.c_proj.weight.dtype not in [torch.int8, torch.uint8] else torch.float32
-        )
+
         if hasattr(self.model, "hidden_size"):
             # TODO: remove this clause after 2026-01-01
             hidden_size = self.model.hidden_size
@@ -68,6 +66,18 @@ class AdaptedAttentionGPT(nn.Module):
         )
         # Initialize the gate to 0 as this is "zero-init".
         self.adaption_gate = nn.Parameter(torch.zeros(1, device=device, dtype=target_dtype))
+
+
+class AdaptedAttentionGPT(_BaseAdaptedAttention):
+    """This module wraps a GPT2Attention module and injects adaption prompts"""
+
+    def __init__(self, model_type, adapter_len, model):
+        target_dtype = (
+                model.c_proj.weight.dtype
+                if model.c_proj.weight.dtype not in [torch.int8, torch.uint8]
+                else torch.float32
+        )
+        super().__init__(model_type, adapter_len, model, target_dtype=target_dtype)
 
     def forward(
         self,
@@ -91,6 +101,9 @@ class AdaptedAttentionGPT(nn.Module):
             output_attentions=output_attentions,
             **kwargs,
         )
+        """
+        Forward pass for the adapter which wraps the GPT2Attention module
+        """
 
         attn_output = attn_outputs[0]
         add_outputs = attn_outputs[1:]
@@ -137,44 +150,16 @@ class AdaptedAttentionGPT(nn.Module):
         return output
 
 
-class AdaptedAttention(nn.Module):
+class AdaptedAttention(_BaseAdaptedAttention):
     """This module wraps a LLamaAttention module and injects adaption prompts."""
 
-    def __init__(self, model_type: str, adapter_len: int, model):
-        """
-        Initialize object.
-
-        Args:
-            model_type: The transformer model type. This is used to retrieve the right method to
-                compute query states.
-            adapter_len: The length of the adaption prompt to insert.
-            model: The original transformer attention module that is being wrapped.
-        """
-        if isinstance(model, AdaptedAttention):
-            raise ValueError("Unable to stack multiple adaption prompts")
-        super().__init__()
-        self.model_type = model_type
-        self.model = model
-        self.adapter_len = adapter_len
-        # Assume all parameters of the attention model we are wrapping are on the same device.
-        device = next(model.parameters()).device
-        # Don't think this was specified in the paper, but we follow the official repo which used an Embedding
-        # which initializes the tokens with standard normal values.
-        # https://github.com/ZrrSkywalker/LLaMA-Adapter/blob/41c3546fe1997ab8a65809dc8d8f9252b19d9faf/llama/model.py#L234
-        # (bsz, adapter_len, hidden_size)
+    def __init__(self, model_type, adapter_len, model):
         target_dtype = (
-            model.q_proj.weight.dtype if model.q_proj.weight.dtype not in [torch.int8, torch.uint8] else torch.float32
-        )
-        if hasattr(self.model, "hidden_size"):
-            # TODO: remove this clause after 2026-01-01
-            hidden_size = self.model.hidden_size
-        else:  # changed in https://github.com/huggingface/transformers/pull/35235
-            hidden_size = self.model.config.hidden_size
-        self.adaption_prompt = nn.Parameter(
-            torch.empty(1, adapter_len, hidden_size, device=device, dtype=target_dtype).normal_()
-        )
-        # Initialize the gate to 0 as this is "zero-init".
-        self.adaption_gate = nn.Parameter(torch.zeros(1, device=device, dtype=target_dtype))
+                model.q_proj.weight.dtype
+                if model.q_proj.weight.dtype not in [torch.int8, torch.uint8]
+                else torch.float32
+            )
+        super().__init__(model_type, adapter_len, model,target_dtype=target_dtype)
 
     def forward(self, **kwargs):
         """

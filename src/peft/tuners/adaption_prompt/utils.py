@@ -140,8 +140,8 @@ def gpt2_compute_query_states(
     if encoder_hidden_states is not None:
         if not hasattr(model, "q_attn"):
             raise ValueError(
-                "If class is used as cross attention, the weights `q_attn` have to be defined. "
-                "Please make sure to instantiate class with `GPT2Attention(..., is_cross_attention=True)`."
+                f"If `{model.__class__.__name__}` is used as cross attention, the weights `q_attn` must be defined. "
+                f"Please make sure to instantiate it with `GPT2Attention(..., is_cross_attention=True)`."
             )
         query_states = model.q_attn(hidden_states)
     else:

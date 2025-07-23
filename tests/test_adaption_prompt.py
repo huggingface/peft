@@ -29,7 +29,7 @@ from peft.utils.save_and_load import get_peft_model_state_dict
 
 
 MODELS_TO_TEST = [
-    "trl-internal-testing/tiny-GPT2LMHeadModel",
+    "hf-internal-testing/tiny-random-gpt2",
     "trl-internal-testing/tiny-random-LlamaForCausalLM",
     "hf-internal-testing/tiny-random-MistralForCausalLM",
 ]
