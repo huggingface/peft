@@ -302,7 +302,7 @@ class MissLinear(nn.Module, MissLayer):
         out_features = orig_weight.size(0)
         r = weight_miss.size(0)
         if self.miss_fn == "mini":
-            weight_miss = weight_miss.repeat(1, out_features // self.mini_r)
+            weight_miss = weight_miss.repeat(1, out_features // self.miss_mini_r[adapter])
 
         if in_features % r != 0:
             last_size = in_features % r
@@ -373,7 +373,6 @@ class MissLinear(nn.Module, MissLayer):
                         continue
                     miss = self.miss_block[active_adapter]
                     if self.miss_fn == "mini":
-                        # miss = miss.repeat(1, self.base_layer.out_features // self.mini_r)
                         miss = miss.repeat(1, self.base_layer.out_features // self.miss_mini_r[active_adapter])
 
                     dropout = self.miss_dropout[active_adapter]
