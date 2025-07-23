@@ -281,7 +281,7 @@ trainer = Trainer(
     args,
     train_dataset=train_ds,
     eval_dataset=val_ds,
-    tokenizer=image_processor,
+    processing_class=image_processor,
     data_collator=collate_fn,
 )
 trainer.train()

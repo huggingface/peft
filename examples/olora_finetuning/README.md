@@ -22,7 +22,7 @@ training_args = SFTConfig(dataset_text_field="text", max_seq_length=128)
 trainer = SFTTrainer(
     model=peft_model,
     train_dataset=dataset,
-    tokenizer=tokenizer,
+    processing_class=tokenizer,
 )
 trainer.train()
 peft_model.save_pretrained("olora-opt-350m")
