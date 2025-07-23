@@ -100,6 +100,8 @@ __all__ = [
     "ShiraModel",
     "TrainableTokensConfig",
     "TrainableTokensModel",
+    "OSFConfig",
+    "OSFModel",
     "VBLoRAConfig",
     "VBLoRAModel",
     "VeraConfig",
