@@ -1777,6 +1777,15 @@ class _LoraParameterProxy(nn.Module):
             return W + self.delta_weight
 
 
+# copied from:
+# https://github.com/pytorch/pytorch/blob/5e386eec9426f174eea130c0c012d9f65ebe65fb/torch/nn/utils/parametrize.py#L75-L79
+def _register_parameter_or_buffer(module, name, X):
+    if isinstance(X, nn.Parameter):
+        module.register_parameter(name, X)
+    else:
+        module.register_buffer(name, X)
+
+
 class ParamWrapper(nn.Module, LoraLayer):
     """A LoRA wrapper for `nn.Parameter`. This layer is dispatched if users target a parameter directly with
     `lora_config.target_parameters`
@@ -1807,8 +1816,8 @@ class ParamWrapper(nn.Module, LoraLayer):
     ) -> None:
         super().__init__()
         LoraLayer.__init__(self, base_layer, **kwargs)
-        param = getattr(base_layer, parameter_name)
         self.parameter_name = parameter_name
+        param = self.get_param()
         if param.ndim == 3:
             self.num_experts, self.in_features, self.out_features = param.shape
         else:
@@ -1867,15 +1876,6 @@ class ParamWrapper(nn.Module, LoraLayer):
         # This code works for linear layers, override for other layer types
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
-        if adapter_name in self.lora_A:
-            # It is not allowed to target multiple parameters on the same module. Supporting this would complicate
-            # things quite a lot, since we would require multiple self.lora_A, self.lora_B, etc., one for each targeted
-            # parameter.
-            raise ValueError(
-                f"lora.{self.__class__.__name__} already has an adapter for parameter '{self.parameter_name}'. "
-                "It is currently not possible to apply the same adapter to multiple parameters, please add a "
-                "different adapter to target another parameter of the same module."
-            )
 
         lora_variant = self.resolve_lora_variant(
             use_dora=use_dora, use_qalora=use_qalora, qalora_group_size=qalora_group_size
@@ -1958,7 +1958,11 @@ class ParamWrapper(nn.Module, LoraLayer):
                 adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device)
 
     def get_param(self):
-        return getattr(self.base_layer, self.parameter_name)
+        if isinstance(self.base_layer, ParamWrapper):
+            param = getattr(self.get_base_layer(), self.parameter_name)
+        else:
+            param = getattr(self.base_layer, self.parameter_name)
+        return param
 
     def get_delta_weight(self, adapter_name, *args, **kwargs):
         if self.num_experts == 1:
@@ -2004,9 +2008,33 @@ class ParamWrapper(nn.Module, LoraLayer):
         try:
             yield
         finally:
-            nn.utils.parametrize.remove_parametrizations(
-                self.base_layer, self.parameter_name, leave_parametrized=False
+            self._remove_parametrizations()
+
+    def _remove_parametrizations(self):
+        # Remove the parametrization of this specific parameter
+        base_layer = self.get_base_layer()
+        parameter_name = self.parameter_name
+        if parameter_name not in base_layer.parametrizations:
+            raise ValueError(
+                "Something went wrong, please report this issue on PEFT: https://github.com/huggingface/peft/issues"
             )
+
+        if len(base_layer.parametrizations) == 1:
+            # last parametrization, we can safely remove it completely
+            nn.utils.parametrize.remove_parametrizations(base_layer, parameter_name, leave_parametrized=False)
+        else:
+            # More than one parametrization, only remove this specific one. Unfortunately, torch does not implement a
+            # way to only remove a single parametrization, so we implement this ourselves and follow original torch code
+            # closely:
+            # see https://github.com/pytorch/pytorch/blob/7d296d5c19750cecd82e2b95f6fb0f8dd918282e/torch/nn/utils/parametrize.py#L731-L737
+
+            original = base_layer.parametrizations[parameter_name].original
+            # Delete the property that manages the parametrization
+            delattr(base_layer.__class__, parameter_name)
+            # Delete the ParametrizationList
+            del base_layer.parametrizations[parameter_name]
+            # Restore the parameter / buffer into the main class
+            _register_parameter_or_buffer(base_layer, parameter_name, original)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         # same as lora.Linear.merge but not hard-coding base_layer.weight and without special cases like variants removed
@@ -2058,6 +2086,18 @@ class ParamWrapper(nn.Module, LoraLayer):
         if kwargs.get("adapter_names", None):
             raise ValueError(f"lora.{self.__class__.__name__} does not support mixed adapter batches yet.")
         super()._check_forward_args(x, *args, **kwargs)
+
+    def unload_and_optionally_merge_module(self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]):
+        base_layer = self.base_layer
+        # ParamWrappers can be nested, so merge and retrieve base layer recursively
+        if merge:
+            self.merge(safe_merge=safe_merge, adapter_names=adapter_names)
+            while isinstance(base_layer, ParamWrapper):
+                base_layer.merge(safe_merge=safe_merge, adapter_names=adapter_names)
+                base_layer = base_layer.base_layer
+        else:
+            base_layer = self.get_base_layer()
+        return base_layer
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         self._check_forward_args(x, *args, **kwargs)
