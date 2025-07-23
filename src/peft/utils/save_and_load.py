@@ -233,13 +233,23 @@ def get_peft_model_state_dict(
             )
 
     # DEAL WITH EMBEDDINGS
-    # check the common embedding layers in `target_modules` to reset `save_embedding_layers` if necessary
+    #
+    # save_embedding_layer="auto" needs to check the following logic:
+    #
+    # - when vocab size was NOT changed, embeddings should be saved only when targeted
+    # but not when
+    # - using PeftType.TRAINABLE_TOKENS
+    # - LoRA using trainable_token_indices (since their goal is to space-efficient)
+    # but
+    # - when vocab size was changed, embeddings should be saved automatically regardless to cover this
+    #   scenario: 1) fine-tune embedding, 2) resize embedding, 3) train with trainable tokens
+    #
     embedding_is_targeted = False
     if hasattr(config, "target_modules"):
         if isinstance(config.target_modules, str) and config.target_modules != INCLUDE_LINEAR_LAYERS_SHORTHAND:
             embedding_is_targeted = any(
                 match_target_against_key(config.target_modules, k)
-                for k, _ in model.named_modules()
+                for k, _ in model.get_base_model().named_modules()
                 if any(e in k for e in EMBEDDING_LAYER_NAMES)
             )
         elif config.target_modules:
