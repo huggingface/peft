@@ -73,9 +73,7 @@ class AdaptedAttentionGPT(_BaseAdaptedAttention):
 
     def __init__(self, model_type, adapter_len, model):
         target_dtype = (
-                model.c_proj.weight.dtype
-                if model.c_proj.weight.dtype not in [torch.int8, torch.uint8]
-                else torch.float32
+            model.c_proj.weight.dtype if model.c_proj.weight.dtype not in [torch.int8, torch.uint8] else torch.float32
         )
         super().__init__(model_type, adapter_len, model, target_dtype=target_dtype)
 
@@ -155,11 +153,9 @@ class AdaptedAttention(_BaseAdaptedAttention):
 
     def __init__(self, model_type, adapter_len, model):
         target_dtype = (
-                model.q_proj.weight.dtype
-                if model.q_proj.weight.dtype not in [torch.int8, torch.uint8]
-                else torch.float32
-            )
-        super().__init__(model_type, adapter_len, model,target_dtype=target_dtype)
+            model.q_proj.weight.dtype if model.q_proj.weight.dtype not in [torch.int8, torch.uint8] else torch.float32
+        )
+        super().__init__(model_type, adapter_len, model, target_dtype=target_dtype)
 
     def forward(self, **kwargs):
         """
