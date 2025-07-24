@@ -153,7 +153,7 @@ For many language fine-tuning tasks, extending the model's vocabulary is necessa
 
 #### Using trainable tokens
 
-Let's start with trainable tokens, in this case it's [LoRA integration](../lora#efficiently-train-tokens-alongside-lora).  If you're interested in only training the embeddings and nothing else, refer to the [standalone documentation](../package_reference/trainable_tokens).
+Let's start with trainable tokens, in this case its [LoRA integration](../developer_guides/lora#efficiently-train-tokens-alongside-lora).  If you're interested in only training the new embeddings and nothing else, refer to the [standalone documentation](../package_reference/trainable_tokens).
 
 To enable selective token training of the embedding layer, you'll need to supply the token ids of your newly added tokens via the `trainable_token_indices` parameter.  Optionally you can specify which layer to target if there is more than one embedding layer. For a Mistral model this could look like this:
 
