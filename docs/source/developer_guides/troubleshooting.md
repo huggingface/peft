@@ -197,7 +197,7 @@ For a complete example, please check out [this notebook](https://github.com/hugg
 
 #### Full fine-tuning
 
-Full fine-tuning doesn't save VRAM or storage space but if all fails you can fall back to this and see if it works for you. Achieve it by adding the name of the embedding layer to `modules_to_save`. Note that you need to add tied layers as well, e.g. `lm_head`. Example for a Mistral model with LoRA:
+Full fine-tuning is more costly in terms of VRAM or storage space but if all else fails, you can fall back to this and see if it works for you. Achieve it by adding the name of the embedding layer to `modules_to_save`. Note that you need to add tied layers as well, e.g. `lm_head`. Example for a Mistral model with LoRA:
 
 ```python
 config = LoraConfig(..., modules_to_save=["embed_tokens", "lm_head"], target_modules=["q_proj", "v_proj"])
