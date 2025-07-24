@@ -1958,10 +1958,7 @@ class ParamWrapper(nn.Module, LoraLayer):
                 adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device)
 
     def get_param(self):
-        if isinstance(self.base_layer, ParamWrapper):
-            param = getattr(self.get_base_layer(), self.parameter_name)
-        else:
-            param = getattr(self.base_layer, self.parameter_name)
+        param = getattr(self.get_base_layer(), self.parameter_name)
         return param
 
     def get_delta_weight(self, adapter_name, *args, **kwargs):
@@ -2019,22 +2016,14 @@ class ParamWrapper(nn.Module, LoraLayer):
                 "Something went wrong, please report this issue on PEFT: https://github.com/huggingface/peft/issues"
             )
 
-        if len(base_layer.parametrizations) == 1:
+        if len(base_layer.parametrizations[parameter_name]) == 1:
             # last parametrization, we can safely remove it completely
             nn.utils.parametrize.remove_parametrizations(base_layer, parameter_name, leave_parametrized=False)
         else:
-            # More than one parametrization, only remove this specific one. Unfortunately, torch does not implement a
-            # way to only remove a single parametrization, so we implement this ourselves and follow original torch code
-            # closely:
-            # see https://github.com/pytorch/pytorch/blob/7d296d5c19750cecd82e2b95f6fb0f8dd918282e/torch/nn/utils/parametrize.py#L731-L737
-
-            original = base_layer.parametrizations[parameter_name].original
-            # Delete the property that manages the parametrization
-            delattr(base_layer.__class__, parameter_name)
-            # Delete the ParametrizationList
-            del base_layer.parametrizations[parameter_name]
-            # Restore the parameter / buffer into the main class
-            _register_parameter_or_buffer(base_layer, parameter_name, original)
+            # TODO: If there are multiple parametrizations for the same parameter_name, we currently remove all of them,
+            # which is not desired. Unfortunately, PyTorch does not support this directly, so we need to take care.
+            # For now, remove all parametrizations.
+            nn.utils.parametrize.remove_parametrizations(base_layer, parameter_name, leave_parametrized=False)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         # same as lora.Linear.merge but not hard-coding base_layer.weight and without special cases like variants removed

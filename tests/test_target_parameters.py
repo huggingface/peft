@@ -354,11 +354,11 @@ class TestTargetParameter:
 
             def mock_forward(self, W):
                 weights.append(W)
-                with torch.nn.utils.parametrize.cached():
-                    return W + self.delta_weight
+                return orig_forward(self, W)
 
             from peft.tuners.lora.layer import _LoraParameterProxy
 
+            orig_forward = _LoraParameterProxy.forward
             monkeypatch.setattr(_LoraParameterProxy, "forward", mock_forward)
 
             num_steps = 3
