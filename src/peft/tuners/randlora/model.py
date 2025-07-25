@@ -101,9 +101,6 @@ class RandLoraModel(BaseTuner):
 
     prefix: str = "randlora_"
 
-    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
-        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
-
     def _find_dim(self, config) -> tuple[int, int]:
         """
         Finds the largest input and output dimensions across linear layers that have been wrapped with RandLora.
