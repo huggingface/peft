@@ -584,6 +584,45 @@ class LoraConfig(PeftConfig):
         },
     )
 
+    use_arrow: bool = field(
+        default=False,
+        metadata={
+            "help": "Enable ArrowLoRA: a top-k routing variant of LoRA that combines multiple expert adapters per token."
+        },
+    )
+
+    arrow_top_k: int = field(
+        default=3,
+        metadata={"help": "Number of top LoRA experts to combine in ArrowLoRA routing."},
+    )
+
+    arrow_router_temperature: float = field(
+        default=1.0,
+        metadata={"help": "Softmax temperature for computing ArrowLoRA expert coefficients."},
+    )
+
+    arrow_expert_num: int = field(
+        default=10,
+        metadata={"help": "Number of the trained LoRA modules."},
+    )
+
+    use_gks: bool = field(
+        default=False,
+        metadata={
+            "help": "Enable GenKnowSub: an approach for purifying trained task-specific experts before inference."
+        },
+    )
+
+    ts_names: list = field(
+        default=None,
+        metadata={"help": "name of trained task-specific experts, required for GenKnowSub"},
+    )
+
+    le_names: list = field(
+        default=None,
+        metadata={"help": "name of language experts, required for GenKnowSub"},
+    )
+
     def to_dict(self):
         """
         Returns the configuration for your adapter model as a dictionary. Removes runtime configurations.
@@ -657,6 +696,12 @@ class LoraConfig(PeftConfig):
                 )
             if self.use_dora:
                 raise ValueError("The argument lora_bias=True is not supported for DoRA, please pass use_dora=False")
+
+        if self.use_arrow:
+            if self.arrow_top_k > self.arrow_expert_num:
+                raise ValueError("`arrow_top_k` cannot exceed `arrow_expert_num`.")
+            if self.arrow_expert_num <= 0:
+                raise ValueError("`arrow_expert_num` must be positive.")
 
         # Using post training conversion of modified base weights to restore their initial values PiSSA/CorDA/OLoRA cannot
         # be correctly done when using rslora + rank_pattern/alpha_pattern. We can't really know if the user intends

@@ -21,8 +21,118 @@ from torch import nn
 
 from peft.utils.other import transpose
 
+from .arrow import ArrowLoraLinearLayer
 from .dora import DoraConv1dLayer, DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer
 from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd
+
+
+# tuners/lora/variants.py  (add near DoraLinearVariant)
+
+
+class ArrowLinearVariant(LoraVariant):
+    """
+    Variant wrapper for ArrowLoRA on `nn.Linear` and `bnb.nn.Linear4bit`. One instance (actually: one *class*) serves
+    *all* adapters; per-adapter state lives in `module.lora_arrow[adapter_name]`, an ArrowLoRALayer.
+    """
+
+    # ------------------------------------------------------------------
+    # 1) INIT  – runs **once per adapter** during `model.load_adapter(...)`
+    # ------------------------------------------------------------------
+    @staticmethod
+    def init(module: Linear, adapter_name: str, **kwargs):
+        """
+        `module` : the patched Linear (already owns lora_A/B/etc.) `adapter_name` : "cluster7", "router", ... `kwargs`
+        : every extra field you added to LoraConfig
+                         (arrow_top_k, arrow_expert_num, etc.)
+        """
+        # print(kwargs)
+        # print(adapter_name)
+        # Checking for arrow necessary config
+        arrow_expert_num = kwargs["kwargs"].get("arrow_expert_num")
+        if arrow_expert_num is None:
+            raise ValueError("ArrowLinearVariant.init() did not receive a arrow_expert_num")
+
+        arrow_top_k = kwargs["kwargs"].get("arrow_top_k")
+        if arrow_top_k is None:
+            raise ValueError("ArrowLinearVariant.init() did not receive a arrow_top_k")
+
+        temperature = kwargs["kwargs"].get("arrow_router_temperature")
+        if temperature is None:
+            raise ValueError("ArrowLinearVariant.init() did not receive a temperature")
+
+        expert_names = kwargs["kwargs"].get("ts_names")
+        if expert_names is None:
+            raise ValueError("ArrowLinearVariant.init() did not receive a ts_names")
+
+        use_gks = kwargs["kwargs"].get("use_gks")
+        le_names = kwargs["kwargs"].get("le_names")
+        if use_gks is True and le_names is None:
+            raise ValueError("ArrowLinearVariant.init() did not receive a le_names while gks is True.")
+
+        # 1-a) build the ArrowLoRALayer
+        arrow_layer = ArrowLoraLinearLayer(
+            in_features=module.in_features,  # **check**
+            ts_names=expert_names,
+            num_experts=arrow_expert_num,
+            top_k=arrow_top_k,
+            temperature=temperature,
+            use_gks=use_gks,
+            le_names=le_names,
+        ).to(module.weight.device)
+
+        # 1-b) register a container if it doesn’t exist yet
+        if not hasattr(module, "lora_arrow"):
+            module.lora_arrow = nn.ModuleDict()
+            # ensure PEFT knows to save / load these params
+            module.other_param_names = module.other_param_names + ("lora_arrow",)
+
+        module.lora_arrow[adapter_name] = arrow_layer
+        # *** DO NOT compute prototypes here *** –
+        # we may not have loaded *all* experts yet.  ArrowLoraLinearLayer.forward()
+        # will lazily call `build_prototypes()` the first time it runs.
+
+    # ------------------------------------------------------------------
+    # 2) FORWARD – called every time the host Linear does a fwd pass
+    # ------------------------------------------------------------------
+    @staticmethod
+    def forward(
+        module: Linear,
+        *,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Parameters mirror those in PEFT’s `LoraVariant.forward`.
+
+        * `result` = base linear output (`x @ W₀ᵀ + b`)
+        * return = result + Δ (Δ from Arrow routing)
+        """
+        arrow = module.lora_arrow[active_adapter]  # ArrowLoraLinearLayer
+        # Apply GenKnowSub the 1st time if applcable.
+        arrow.gen_know_sub(module.lora_A, module.lora_B)
+        # lazily build prototypes the 1st time after GenKnowSub
+        arrow.build_prototypes(module.lora_A, module.lora_B)
+
+        delta = arrow(
+            x,
+            lora_A=module.lora_A,  # dict of nn.Linear
+            lora_B=module.lora_B,
+            dropout=module.lora_dropout[active_adapter],
+            scaling=module.scaling[active_adapter],
+        )
+        return result + delta
+
+    # ------------------------------------------------------------------
+    # 3) MERGE / UNMERGE  (optional)
+    # ------------------------------------------------------------------
+    # If you plan to support `model.merge_and_unload()`, add:
+    #
+    # @staticmethod
+    # def merge_weights(module: Linear, adapter_name: str) -> None: ...
+    #
+    # For most research prototypes you can skip this block; PEFT will simply
+    # fall back to keeping Arrow in “un-merged” mode.
 
 
 class DoraLinearVariant(LoraVariant):
