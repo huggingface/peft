@@ -24,24 +24,25 @@ from peft.utils.integrations import dequantize_module_weight, gather_params_ctx
 from peft.utils.other import transpose
 
 
-def cache_weight_norm(func):
+def cache_decorator(cache_key: str):
     # TODO
-    cache_key = "weight_norm"
+    def cache_value(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if self.training:
+                return func(self, *args, **kwargs)
 
-    @wraps(func)
-    def wrapper(self, *args, **kwargs):
-        if self.training:
-            return func(self, *args, **kwargs)
+            output = self._cache_get(cache_key, None)
+            if output is not None:
+                return output
 
-        output = self._cache_get(cache_key, None)
-        if output is not None:
+            output = func(self, *args, **kwargs)
+            self._cache_store(cache_key, output)
             return output
 
-        output = func(self, *args, **kwargs)
-        self._cache_store(cache_key, output)
-        return output
+        return wrapper
 
-    return wrapper
+    return cache_value
 
 
 class DoraLinearLayer(nn.Module):
@@ -67,13 +68,22 @@ class DoraLinearLayer(nn.Module):
         super().train(mode=mode)
         return self
 
-    @cache_weight_norm
+    @cache_decorator("weight-norm")
     def get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
         # calculate L2 norm of weight matrix, column-wise
         weight = transpose(weight, self.fan_in_fan_out)
         weight = weight + scaling * lora_weight
         weight_norm = torch.linalg.norm(weight, dim=1).to(weight.dtype)
         return weight_norm
+
+    # FIXME does not consider the active adapter yet, so caching will return wrong value when switching adapters
+    @cache_decorator("lora-weight")
+    def get_lora_weight(self, lora_A, lora_B):
+        # Don't use `lora_weight = lora_B.weight @ lora_A.weight` because this causes errors with FSDP. Instead,
+        # calculate the same but using forward.
+        x_eye = torch.eye(lora_A.weight.shape[1], device=lora_A.weight.device)
+        lora_weight = lora_B(lora_A(x_eye)).T
+        return lora_weight
 
     def update_layer(self, *, base_layer, lora_A, lora_B, scaling, place_on_cpu=False) -> None:
         # temporarily convert fp16 to fp32, as fp16 can cause trouble on CPU with PyTorch < 2.2
@@ -109,10 +119,8 @@ class DoraLinearLayer(nn.Module):
         For DoRA, calculate the extra output from LoRA with DoRA applied. This should be added on top of the base layer
         output.
         """
-        # Don't use `lora_weight = lora_B.weight @ lora_A.weight` because this causes errors with FSDP. Instead,
-        # calculate the same but using forward.
-        x_eye = torch.eye(lora_A.weight.shape[1], device=lora_A.weight.device, dtype=x.dtype)
-        lora_weight = lora_B(lora_A(x_eye)).T
+        lora_weight = self.get_lora_weight(lora_A, lora_B)
+        lora_weight = lora_weight.to(x.dtype)
 
         magnitude = self.weight
         weight = dequantize_module_weight(base_layer)
@@ -138,7 +146,6 @@ class DoraLinearLayer(nn.Module):
             base_result = F.linear(x, transpose(weight, self.fan_in_fan_out))
 
         result_dora = (mag_norm_scale - 1) * base_result + mag_norm_scale * lora_result * scaling
-
         return result_dora
 
     def __repr__(self) -> str:
@@ -173,7 +180,7 @@ class DoraEmbeddingLayer(DoraLinearLayer):
 
 
 class _DoraConvNdLayer(DoraLinearLayer):
-    @cache_weight_norm
+    @cache_decorator("weight-norm")
     def get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
         # calculate L2 norm of weight matrix, column-wise
         weight = weight + scaling * lora_weight
@@ -182,15 +189,23 @@ class _DoraConvNdLayer(DoraLinearLayer):
         weight_norm = weight.norm(p=2, dim=dim, keepdim=True).transpose(1, 0)
         return weight_norm
 
+    # FIXME does not consider the active adapter yet, so caching will return wrong value when switching adapters
+    @cache_decorator("lora-weight")
+    def get_lora_weight(self, lora_A, lora_B):
+        # Don't use `lora_weight = lora_B.weight @ lora_A.weight` because this causes errors with FSDP. Instead,
+        # calculate the same but using forward.
+        r = lora_A.weight.shape[0]
+        lora_weight = torch.mm(lora_B.weight.view([-1, r]), lora_A.weight.view([r, -1]))
+        lora_weight = lora_weight
+        return lora_weight
+
     def forward(self, x, *, lora_A, lora_B, scaling, base_layer, base_result=None):
         """
         For DoRA, calculate the extra output from LoRA with DoRA applied. This should be added on top of the base layer
         output.
         """
         weight = base_layer.weight
-        r = lora_A.weight.shape[0]
-        lora_weight = torch.mm(lora_B.weight.view([-1, r]), lora_A.weight.view([r, -1]))
-        lora_weight = lora_weight.reshape(weight.shape)
+        lora_weight = self.get_lora_weight(lora_A, lora_B).reshape(weight.shape)
         magnitude = self.weight
         weight_norm = self.get_weight_norm(weight, lora_weight.detach(), scaling)
         # see section 4.3 of DoRA (https://huggingface.co/papers/2402.09353)
