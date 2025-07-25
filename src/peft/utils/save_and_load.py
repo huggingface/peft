@@ -210,9 +210,29 @@ def get_peft_model_state_dict(
         to_return["base_model.vblora_vector_bank." + adapter_name] = state_dict[
             "base_model.vblora_vector_bank." + adapter_name
         ]
+    
+    elif config.peft_type == PeftType.BOTTLENECK:
+        # return the state dict of the model with Bottleneck adapters
+        bias = config.bias
+        if bias == "none":
+            to_return = {k: state_dict[k] for k in state_dict if "adapter_" in k}
+        elif bias == "all":
+            to_return = {k: state_dict[k] for k in state_dict if "adapter_" in k or "bias" in k}
+        elif bias == "adapter_only":
+            to_return = {}
+            for k in state_dict:
+                if "adapter_" in k:
+                    to_return[k] = state_dict[k]
+                    bias_name = k.split("adapter_")[0] + "bias"
+                    if bias_name in state_dict:
+                        to_return[bias_name] = state_dict[bias_name]
+        else:
+            raise NotImplementedError
+        
     elif config.peft_type in list(PeftType):
         prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
         to_return = {k: state_dict[k] for k in state_dict if prefix in k}
+    
     else:
         raise ValueError(f"Unknown PEFT type passed: {config.peft_type}")
 
@@ -394,6 +414,10 @@ def set_peft_model_state_dict(
         peft_model_state_dict = state_dict
     elif config.peft_type == PeftType.XLORA:
         peft_model_state_dict = state_dict
+    #
+    elif config.peft_type == PeftType.BOTTLENECK:
+        peft_model_state_dict = state_dict
+        
     elif config.peft_type in PEFT_TYPE_TO_PREFIX_MAPPING:
         peft_model_state_dict = {}
         parameter_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
