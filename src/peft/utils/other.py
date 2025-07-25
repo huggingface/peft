@@ -1229,6 +1229,14 @@ def check_file_exists_on_hf_hub(repo_id: str, filename: str, **kwargs) -> Option
     return exists
 
 
+def match_target_against_key(target_pattern: str, key: str):
+    """Backing function for `target_modules` config parameter.
+
+    Having this as its own function ensures that target key matching can be implemented in the same way everywhere.
+    """
+    return re.fullmatch(target_pattern, key)
+
+
 def get_pattern_key(pattern_keys: Sequence[str], key_to_match: str) -> str:
     """Match a substring of key_to_match in pattern keys"""
     for key in pattern_keys:
