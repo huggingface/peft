@@ -197,7 +197,7 @@ def run_benchmark(
         # Prepare benchmark prompts
         print_fn("Preparing benchmark prompts...")
         prompts = prepare_benchmark_prompts(
-            config=benchmark_config.to_dict(),
+            config=benchmark_config,
             tokenizer=tokenizer,
             max_input_length=None,
             seed=benchmark_config.seed,
@@ -330,8 +330,8 @@ def run_benchmark(
     end_time = time.perf_counter()
     error_message = str(e_main_benchmark) if e_main_benchmark is not None else None
 
-    # Convert PEFT config to dict for storage
-    peft_config_dict = peft_config.to_dict()
+
+    peft_config_dict = peft_config.to_dict() if 'peft_config' in locals() else None
     if peft_config_dict:
         for key, value in peft_config_dict.items():
             if isinstance(value, set):

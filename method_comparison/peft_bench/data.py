@@ -21,7 +21,7 @@ import os
 from typing import Optional
 
 from transformers import PreTrainedTokenizer
-
+from utils import BenchmarkConfig
 
 DEFAULT_PROMPTS_PATH = os.path.join(os.path.dirname(__file__), "configs", "prompts.json")
 
@@ -37,7 +37,7 @@ def load_test_prompts(config: dict) -> dict[str, list[str]]:
         dictionary with prompts by category
     """
     # Use the specified prompts file or fall back to default
-    prompts_file = config.get("prompts_file", DEFAULT_PROMPTS_PATH)
+    prompts_file = getattr(config, "prompts_file", DEFAULT_PROMPTS_PATH)
 
     with open(prompts_file) as f:
         prompts = json.load(f)
@@ -82,7 +82,7 @@ def truncate_prompt_for_model(
 
 
 def prepare_benchmark_prompts(
-    config: dict,
+    config: BenchmarkConfig,
     tokenizer: PreTrainedTokenizer,
     max_input_length: Optional[int] = None,
     seed: int = 42,
@@ -112,7 +112,7 @@ def prepare_benchmark_prompts(
                 prompt,
                 tokenizer,
                 max_length=max_input_length,
-                reserve_output_tokens=config.get("reserve_output_tokens", 50),
+                reserve_output_tokens=getattr(config, "reserve_output_tokens", 50)
             )
             for prompt in prompts
         ]
