@@ -1,12 +1,12 @@
 # PEFT Benchmarking Suite
 
-This directory contains a comprehensive benchmarking framework for Parameter-Efficient Fine-Tuning (PEFT) methods. The suite measures inference performance, memory usage, and other key metrics across different PEFT configurations.
+This directory contains a comprehensive benchmarking framework for Parameter-Efficient Fine-Tuning (PEFT) methods. For the task of text generation, the suite measures inference performance, memory usage, and other key metrics across different PEFT configurations.
 
 ## Overview
 
 The benchmarking suite provides:
 - **Inference time measurement** across different prompt categories
-- **Memory usage tracking** (RAM and GPU)
+- **Memory usage during inference** (RAM and GPU)
 - **Parameter efficiency metrics** (trainable vs total parameters)
 - **Time per token analysis** for fair comparison across different generation lengths
 - **Structured result logging** with detailed metadata
@@ -28,15 +28,6 @@ This ensures that all experiments are comparable while allowing flexibility in a
 python run.py experiments/lora/lora_r8 --verbose
 ```
 
-### Using the Python API
-
-```python
-from method_comparison.peft_bench import run_benchmark_from_path
-
-# Run benchmark programmatically
-exit_code = run_benchmark_from_path("experiments/lora/lora_r8", verbose=True)
-```
-
 ## Configuration Structure
 
 The benchmarking suite uses a hierarchical configuration system:
@@ -52,14 +43,12 @@ This structure ensures consistent comparison while allowing flexibility where ne
 Contains shared benchmark settings that apply to all experiments. Here are the key configuration fields:
 
 - `model_id`: The Hugging Face model ID to use as the base model (e.g., "facebook/opt-350m")
-- `peft_method`: The PEFT method to apply (e.g., "lora", "prefix_tuning", etc.)
 - `dtype`: Model precision ("float16", "float32", or "bfloat16")
 - `seed`: Random seed for reproducibility
 - `max_new_tokens`: Maximum number of tokens to generate during inference
 - `num_inference_runs`: Number of inference runs per prompt for statistical reliability
-- `train_batch_size`: Batch size for training
-- `train_steps`: Number of training steps
-- `num_prompt_samples`: Number of prompt samples to use per category (short/medium/long)
+- `use_4bit`: Whether to use 4-bit quantization (bool)
+- `use_8bit`: Whether to use 8-bit quantization (bool)
 
 Each experiment can override these settings by providing its own `benchmark_params.json` file.
 
@@ -94,37 +83,49 @@ If an experiment needs different benchmark settings, create `benchmark_params.js
 }
 ```
 
-These parameters will override the defaults from `default_benchmark_params.json`.
+These parameters will override the defaults from `default_benchmark_params.json`. However, the defaults should generally not be changed to keep the results from the individual experiments comparable.
 
-### Configuration Loading Process
+### Create a New Experiment Adapter Configuration
 
-The benchmark runner follows this process:
+To create a new experiment, follow these steps:
 
-1. **Load defaults**: Read `default_benchmark_params.json` from the peft_bench directory
-2. **Check for overrides**: Look for `benchmark_params.json` in the experiment directory  
-3. **Merge configurations**: Override default values with experiment-specific values
-4. **Load adapter config**: Read the required `adapter_config.json` for PEFT parameters
+1. **Create the experiment directory**
+   ```bash
+   mkdir -p experiments/lora/lora_r8
+   ```
 
-This ensures all experiments share the same baseline configuration unless explicitly overridden.
+2. **Generate the adapter configuration programmatically**
+   Use the PEFT library to create and save your adapter config:
 
-### Adapter Configuration Example
+   ```python
+   from peft import LoraConfig
 
-```json
-{
-    "base_model_name_or_path": "facebook/opt-350m",
-    "bias": "none",
-    "fan_in_fan_out": false,
-    "inference_mode": false,
-    "init_lora_weights": true,
-    "lora_alpha": 16,
-    "lora_dropout": 0.1,
-    "modules_to_save": null,
-    "peft_type": "LORA",
-    "r": 8,
-    "target_modules": ["q_proj", "v_proj"],
-    "task_type": "CAUSAL_LM"
-}
-```
+   config = LoraConfig(
+       base_model_name_or_path="facebook/opt-350m",
+       bias="none",
+       fan_in_fan_out=False,
+       inference_mode=False,
+       init_lora_weights=True,
+       lora_alpha=16,
+       lora_dropout=0.1,
+       modules_to_save=None,
+       peft_type="LORA",
+       r=8,
+       target_modules=["q_proj", "v_proj"],
+       task_type="CAUSAL_LM"
+   )
+   config.save_pretrained("experiments/lora/lora_r8")
+   ```
+
+   This will create an `adapter_config.json` in your experiment directory. Adjust parameters as needed for your experiment.
+
+3. **(Optional) Add benchmark overrides**
+   If you need to override default benchmark settings, create a `benchmark_params.json` in the same directory.
+
+4. **Run the benchmark**
+   ```bash
+   python run.py experiments/lora/lora_r8 --verbose
+   ```
 
 ## Prompt Categories
 
@@ -173,44 +174,3 @@ Results are saved in a structured JSON format with three main sections:
 - **Adapter Parameters**: Number of parameters in the PEFT adapter
 - **Parameter Ratio**: Percentage of total model parameters that are in the adapter
 - **Adapter Size**: Memory footprint of the adapter in MB
-
-## File Structure
-
-```
-peft_bench/
-├── README.md                        # This documentation
-├── run.py                          # Main benchmark runner
-├── utils.py                        # Core utilities and data structures
-├── data.py                         # Data preparation and prompt handling
-├── default_benchmark_params.json   # Default benchmark configuration
-├── configs/
-│   ├── prompts.json                # Benchmark prompts by category
-│   └── sample_config.json          # Example configuration
-├── experiments/
-│   └── lora/
-│       ├── lora_r8/                # LoRA rank 8 experiment
-│       └── lora_r16/               # LoRA rank 16 experiment
-└── results/                        # Benchmark results (auto-generated)
-```
-
-## Adding New Experiments
-
-1. Create a new experiment directory:
-   ```bash
-   mkdir -p experiments/lora/lora_r32
-   ```
-
-2. Add the adapter configuration:
-   ```bash
-   # Create adapter_config.json with your PEFT parameters
-   ```
-
-3. Optionally add benchmark overrides:
-   ```bash
-   # Create benchmark_params.json if you need different benchmark settings
-   ```
-
-4. Run the benchmark:
-   ```bash
-   python run.py experiments/lora/lora_r32 --verbose
-   ```
