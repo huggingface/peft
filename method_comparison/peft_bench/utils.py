@@ -52,7 +52,6 @@ class BenchmarkResult:
     """Container for benchmark results."""
 
     # Experiment identification
-    experiment_id: str
     experiment_name: str
     status: BenchmarkStatus
 
@@ -131,7 +130,7 @@ class BenchmarkResult:
         if package_info:
             self.meta_info["package_info"].update(package_info)
 
-    def update_generation_info(self, memory_data: dict = None, performance_metrics: dict = None):
+    def update_generation_info(self, memory_data: Optional[dict] = None, performance_metrics: Optional[dict] = None):
         """Update generation performance information, primarily for memory and high-level performance."""
         if memory_data:
             self.generation_info["memory"].update(memory_data)
@@ -173,16 +172,15 @@ class BenchmarkResult:
         if not self.generation_info["by_category"]:
             return
 
-
         categories = self.generation_info["by_category"]
         key_metrics = ["inference_time", "base_inference_time", "inference_overhead_pct", "time_per_token", "generated_tokens"]
-        
+
         for metric in key_metrics:
             values = []
             for category_data in categories.values():
                 if "metrics" in category_data and metric in category_data["metrics"]:
                     values.append(category_data["metrics"][metric])
-            
+
             if values:
                 self.generation_info["overall"][metric] = sum(values) / len(values)
 

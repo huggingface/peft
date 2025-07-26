@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """
-Main entry point to run the experiments. Contains general setup and the proper training code.
+Main entry point to run the experiments. Contains general setup and the proper inference code.
 """
 
 import argparse
@@ -62,10 +62,10 @@ def measure_inference_time(model, tokenizer, prompts, max_new_tokens, num_runs, 
             prompt_tokens = []
             prompt_time_per_token = []
 
-            for _ in range(num_runs):
-                # Prepare input
-                inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+            # Prepare input
+            inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
 
+            for _ in range(num_runs):
                 # Measure inference time
                 start_time = time.perf_counter()
                 outputs = model.generate(
@@ -173,6 +173,8 @@ def run_benchmark(
             model_kwargs["torch_dtype"] = torch.float16
         elif benchmark_config.dtype == "bfloat16":
             model_kwargs["torch_dtype"] = torch.bfloat16
+        else :
+            raise ValueError(f"Unsupported dtype: {benchmark_config.dtype}")
 
         # Add quantization if needed
         if benchmark_config.use_8bit:
@@ -224,10 +226,6 @@ def run_benchmark(
         except Exception as exc:
             error_msg = f"Error loading PEFT config: {str(exc)}"
             print_fn(error_msg)
-            import traceback
-
-            print_fn(traceback.format_exc())
-            raise ValueError(error_msg) from exc
 
         # Free memory by removing base model reference
         del base_model
