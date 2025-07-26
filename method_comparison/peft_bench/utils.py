@@ -25,7 +25,10 @@ from typing import Any, Callable, Optional
 
 import psutil
 import torch
+import subprocess
+import peft
 import platform
+
 
 
 # Constants
@@ -196,31 +199,35 @@ class BenchmarkResult:
     def save(self, path: Optional[str] = None):
         """Save result to JSON file."""
         if path is None:
-            # Determine the appropriate path based on status
-            if self.status == BenchmarkStatus.SUCCESS:
-                # If successful, use the main result path
-                base_path = RESULT_PATH
-            elif self.status == BenchmarkStatus.FAILED:
-                # If failed, use the cancelled path
-                base_path = RESULT_PATH_CANCELLED
-            elif self.status == BenchmarkStatus.CANCELLED:
-                # If explicitly cancelled, use the cancelled path
-                base_path = RESULT_PATH_CANCELLED
-            else:
-                # For running or other statuses, use temporary path
-                base_path = RESULT_PATH_TEMP
+            peft_branch = get_peft_branch()
+             # Determine the appropriate path based on status and branch
+        if self.status == BenchmarkStatus.CANCELLED:
+            # If explicitly cancelled, use the cancelled path
+            base_path = RESULT_PATH_CANCELLED
+        elif peft_branch != "main":
+            # If not on main branch, use temp path for testing
+            base_path = RESULT_PATH_TEMP
+        elif self.status == BenchmarkStatus.SUCCESS:
+            # If successful and on main branch, use the main result path
+            base_path = RESULT_PATH
+        elif self.status == BenchmarkStatus.FAILED:
+            # If failed and on main branch, use the cancelled path
+            base_path = RESULT_PATH_CANCELLED
+        else:
+            # For running or other statuses, use temporary path
+            base_path = RESULT_PATH_TEMP
 
-            # Create the filename
-            filename = f"{self.experiment_name}.json"
-            path = os.path.join(base_path, filename)
+        # Create the filename
+        filename = f"{self.experiment_name}.json"
+        path = os.path.join(base_path, filename)
 
         # Ensure the directory exists
         os.makedirs(os.path.dirname(path), exist_ok=True)
-
+    
         # Save the result
         with open(path, "w") as f:
             json.dump(self.to_dict(), f, indent=2)
-
+    
         return path
 
 
@@ -372,6 +379,13 @@ def get_model_size_mb(model: torch.nn.Module, dtype_bytes: int = 4) -> float:
     """Calculate model size in MB."""
     return sum(p.numel() * dtype_bytes for p in model.parameters()) / (1024 * 1024)
 
+def get_peft_branch() -> str:
+    repo_root = os.path.dirname(__file__)
+    return (
+        subprocess.check_output("git rev-parse --abbrev-ref HEAD".split(), cwd=repo_root)
+        .decode()
+        .strip()
+    )
 
 def log_results(
     experiment_name: str,

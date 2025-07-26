@@ -204,14 +204,7 @@ def run_benchmark(
 
         base_results = load_base_results(benchmark_config.model_id)
 
-        if base_results:
-            print_fn("Using cached base model results...")
-            base_inference_times = base_results['inference_results']
-        else:
-            print_fn("No cached base results found. Please run run_base.py first.")
-            print_fn("Computing base model inference times...")
-
-        # Prepare benchmark prompts
+               # Prepare benchmark prompts
         print_fn("Preparing benchmark prompts...")
         prompts = prepare_benchmark_prompts(
             config=benchmark_config,
@@ -219,6 +212,28 @@ def run_benchmark(
             max_input_length=None,
             seed=benchmark_config.seed,
         )
+
+        if base_results:
+            print_fn("Using cached base model results...")
+            base_inference_times = base_results['inference_results']
+        else:
+            print_fn("No cached base results found. Please run run_base.py first.")
+            print_fn("Computing base model inference times...")
+            # Compute base inference times here
+            base_inference_times = measure_inference_time(
+                base_model,
+                tokenizer,
+                prepare_benchmark_prompts(
+                    config=benchmark_config,
+                    tokenizer=tokenizer,
+                    max_input_length=None,
+                    seed=benchmark_config.seed,
+                ),
+                max_new_tokens=benchmark_config.max_new_tokens,
+                num_runs=benchmark_config.num_inference_runs,
+                print_fn=print_fn,
+            )
+            base_results = load_base_results(benchmark_config.model_id)
             
         # Load PEFT configuration from path or create dynamically
         try:
