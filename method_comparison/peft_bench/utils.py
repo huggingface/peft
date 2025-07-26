@@ -256,6 +256,8 @@ class BenchmarkConfig:
     use_4bit: bool = False
     use_8bit: bool = False
 
+    category_generation_params: Optional[dict] = None
+
     def __post_init__(self) -> None:
         """Validate configuration."""
         if not isinstance(self.model_id, str):

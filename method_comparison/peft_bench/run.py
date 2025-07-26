@@ -56,7 +56,9 @@ def load_base_results(model_id: str) -> Optional[dict]:
     return None
 
 
-def measure_inference_time(model, tokenizer, prompts, max_new_tokens, num_runs, print_fn):
+def measure_inference_time(
+    model, tokenizer, prompts, max_new_tokens, num_runs, print_fn, category_generation_params=None
+):
     """Measure inference time for each prompt category."""
     inference_times = {}
     time_per_token = {}
@@ -78,13 +80,16 @@ def measure_inference_time(model, tokenizer, prompts, max_new_tokens, num_runs, 
             # Prepare input
             inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
 
+            # Get category-specific max_new_tokens
+            cat_max_new_tokens = (category_generation_params.get(category, {}).get("max_new_tokens", max_new_tokens))
+
             for _ in range(num_runs):
                 # Measure inference time
                 start_time = time.perf_counter()
                 outputs = model.generate(
                     **inputs,
-                    max_new_tokens=max_new_tokens,
-                    min_new_tokens=max_new_tokens,
+                    max_new_tokens=cat_max_new_tokens,
+                    min_new_tokens=cat_max_new_tokens,
                     pad_token_id=tokenizer.pad_token_id,
                 )
                 end_time = time.perf_counter()
@@ -230,6 +235,7 @@ def run_benchmark(
                 max_new_tokens=benchmark_config.max_new_tokens,
                 num_runs=benchmark_config.num_inference_runs,
                 print_fn=print_fn,
+                category_generation_params=benchmark_config.category_generation_params,
             )
             base_results = load_base_results(benchmark_config.model_id)
 
@@ -286,6 +292,7 @@ def run_benchmark(
             max_new_tokens=benchmark_config.max_new_tokens,
             num_runs=benchmark_config.num_inference_runs,
             print_fn=print_fn,
+            category_generation_params=benchmark_config.category_generation_params,
         )
 
         # Calculate inference overhead for each category
