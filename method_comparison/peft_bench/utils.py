@@ -290,11 +290,6 @@ class BenchmarkConfig:
                 setattr(self, key, value)
 
 
-def generate_experiment_id() -> str:
-    """Generate a unique experiment ID."""
-    return datetime.datetime.now(tz=datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
-
-
 def validate_experiment_path(path: str) -> tuple[str, "BenchmarkConfig"]:
     """Validate experiment path, load and merge configs, and return them."""
     if not os.path.exists(path):

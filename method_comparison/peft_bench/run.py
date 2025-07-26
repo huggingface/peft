@@ -21,6 +21,7 @@ import gc
 import os
 import sys
 import time
+import json
 from typing import Optional
 
 import torch
@@ -30,7 +31,6 @@ from utils import (
     BenchmarkConfig,
     BenchmarkResult,
     BenchmarkStatus,
-    generate_experiment_id,
     get_memory_usage,
     init_cuda,
     log_results,
@@ -42,6 +42,17 @@ import transformers
 import peft
 import bitsandbytes
 
+def load_base_results(model_id: str) -> Optional[dict]:
+    """Load base model results if they exist."""
+    base_results_dir = os.path.join(os.path.dirname(__file__), "base_results")
+    model_name = model_id.replace("/", "_").replace("-", "_")
+    filename = f"base_{model_name}.json"
+    filepath = os.path.join(base_results_dir, filename)
+    
+    if os.path.exists(filepath):
+        with open(filepath, 'r') as f:
+            return json.load(f)
+    return None
 
 def measure_inference_time(model, tokenizer, prompts, max_new_tokens, num_runs, print_fn):
     """Measure inference time for each prompt category."""
@@ -135,7 +146,6 @@ def run_benchmark(
     """Run benchmarks for the specified PEFT method configuration."""
     # Initialize benchmark result
     result = BenchmarkResult(
-        experiment_id=generate_experiment_id(),
         experiment_name=experiment_name,
         status=BenchmarkStatus.RUNNING,
         model_id=benchmark_config.model_id,
@@ -192,9 +202,14 @@ def run_benchmark(
         # Load the base model
         base_model = AutoModelForCausalLM.from_pretrained(benchmark_config.model_id, **model_kwargs)
 
-        # Track memory after base model load
-        ram, gpu_allocated, gpu_reserved = get_memory_usage()
-        result.add_memory_log("base_model_loaded", ram, gpu_allocated, gpu_reserved)
+        base_results = load_base_results(benchmark_config.model_id)
+
+        if base_results:
+            print_fn("Using cached base model results...")
+            base_inference_times = base_results['inference_results']
+        else:
+            print_fn("No cached base results found. Please run run_base.py first.")
+            print_fn("Computing base model inference times...")
 
         # Prepare benchmark prompts
         print_fn("Preparing benchmark prompts...")
@@ -204,19 +219,7 @@ def run_benchmark(
             max_input_length=None,
             seed=benchmark_config.seed,
         )
-
-        # Measure base model inference for each prompt category
-        print_fn("Measuring base model inference times...")
-        base_inference_times = measure_inference_time(
-            base_model,
-            tokenizer,
-            prompts,
-            max_new_tokens=benchmark_config.max_new_tokens,
-            num_runs=benchmark_config.num_inference_runs,
-            print_fn=print_fn,
-        )
-
-
+            
         # Load PEFT configuration from path or create dynamically
         try:
             print_fn(f"Loading PEFT config from {experiment_path}")
