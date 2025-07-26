@@ -433,12 +433,14 @@ def log_results(
     benchmark_result.compute_overall_metrics()
 
     print_fn("\nOverall Metrics (from generation_info.overall):")
-    if benchmark_result.generation_info.get("overall"):
-        for metric_name, value in benchmark_result.generation_info["overall"].items():
-            if isinstance(value, float):
-                print_fn(f"  {metric_name.replace('_', ' ').title()}: {value:.4f}")
-            else:
-                print_fn(f"  {metric_name.replace('_', ' ').title()}: {value}")
+    overall = benchmark_result.generation_info.get("overall")
+    if overall:
+        # Use the same formatting as in Detailed Metrics
+        print_fn(f"    Inference Time: {overall.get('inference_time', 0):.4f} seconds")
+        print_fn(f"    Base Inference Time: {overall.get('base_inference_time', 0):.4f} seconds")
+        print_fn(f"    Inference Overhead: {overall.get('inference_overhead_pct', 0):.2f}%")
+        print_fn(f"    Time Per Token: {overall.get('time_per_token', 0):.6f} seconds/token")
+        print_fn(f"    Generated Tokens: {overall.get('generated_tokens', 0):.1f}")
     else:
         print_fn("  No overall metrics computed.")
 
