@@ -18,13 +18,15 @@ Main entry point to run the experiments. Contains general setup and the proper i
 
 import argparse
 import gc
+import json
 import os
 import sys
 import time
-import json
 from typing import Optional
 
+import bitsandbytes
 import torch
+import transformers
 from data import prepare_benchmark_prompts
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, set_seed
 from utils import (
@@ -37,10 +39,9 @@ from utils import (
     validate_experiment_path,
 )
 
-from peft import PeftConfig, get_peft_model
-import transformers
 import peft
-import bitsandbytes
+from peft import PeftConfig, get_peft_model
+
 
 def load_base_results(model_id: str) -> Optional[dict]:
     """Load base model results if they exist."""
@@ -48,11 +49,12 @@ def load_base_results(model_id: str) -> Optional[dict]:
     model_name = model_id.replace("/", "_").replace("-", "_")
     filename = f"base_{model_name}.json"
     filepath = os.path.join(base_results_dir, filename)
-    
+
     if os.path.exists(filepath):
-        with open(filepath, 'r') as f:
+        with open(filepath) as f:
             return json.load(f)
     return None
+
 
 def measure_inference_time(model, tokenizer, prompts, max_new_tokens, num_runs, print_fn):
     """Measure inference time for each prompt category."""
@@ -107,13 +109,9 @@ def measure_inference_time(model, tokenizer, prompts, max_new_tokens, num_runs, 
                 "generated_tokens": avg_tokens,
                 "time_per_token": avg_time_per_token,
                 "individual_runs": [
-                    {
-                        "inference_time": t,
-                        "generated_tokens": tok,
-                        "time_per_token": tpt
-                    }
+                    {"inference_time": t, "generated_tokens": tok, "time_per_token": tpt}
                     for t, tok, tpt in zip(prompt_times, prompt_tokens, prompt_time_per_token)
-                ]
+                ],
             }
             category_samples.append(sample_result)
 
@@ -136,7 +134,7 @@ def measure_inference_time(model, tokenizer, prompts, max_new_tokens, num_runs, 
         "inference_times": inference_times,
         "time_per_token": time_per_token,
         "generated_tokens": generated_tokens,
-        "individual_samples": individual_samples
+        "individual_samples": individual_samples,
     }
 
 
@@ -183,7 +181,7 @@ def run_benchmark(
             model_kwargs["torch_dtype"] = torch.float16
         elif benchmark_config.dtype == "bfloat16":
             model_kwargs["torch_dtype"] = torch.bfloat16
-        else :
+        else:
             raise ValueError(f"Unsupported dtype: {benchmark_config.dtype}")
 
         # Add quantization if needed
@@ -204,7 +202,7 @@ def run_benchmark(
 
         base_results = load_base_results(benchmark_config.model_id)
 
-               # Prepare benchmark prompts
+        # Prepare benchmark prompts
         print_fn("Preparing benchmark prompts...")
         prompts = prepare_benchmark_prompts(
             config=benchmark_config,
@@ -215,7 +213,7 @@ def run_benchmark(
 
         if base_results:
             print_fn("Using cached base model results...")
-            base_inference_times = base_results['inference_results']
+            base_inference_times = base_results["inference_results"]
         else:
             print_fn("No cached base results found. Please run run_base.py first.")
             print_fn("Computing base model inference times...")
@@ -234,7 +232,7 @@ def run_benchmark(
                 print_fn=print_fn,
             )
             base_results = load_base_results(benchmark_config.model_id)
-            
+
         # Load PEFT configuration from path or create dynamically
         try:
             print_fn(f"Loading PEFT config from {experiment_path}")
@@ -271,15 +269,12 @@ def run_benchmark(
                 "total_params": total_params,
                 "param_ratio": param_ratio,
             },
-            size_info={
-                "base_model_size_mb": base_model_size_mb,
-                "adapter_size_mb": adapter_size_mb
-            },
+            size_info={"base_model_size_mb": base_model_size_mb, "adapter_size_mb": adapter_size_mb},
             package_info={
                 "transformers-version": transformers.__version__,
                 "peft-version": peft.__version__,
                 "bitsandbytes-version": bitsandbytes.__version__ if hasattr(bitsandbytes, "__version__") else None,
-            }
+            },
         )
 
         # Measure PEFT model inference
@@ -311,21 +306,17 @@ def run_benchmark(
                 "generated_tokens": peft_inference_times["generated_tokens"][category],
             }
             result.add_metrics_for_category(
-                category,
-                category_metrics,
-                individual_samples=peft_inference_times["individual_samples"][category]
+                category, category_metrics, individual_samples=peft_inference_times["individual_samples"][category]
             )
 
         # Update generation_info with peak memory usage
         result.update_generation_info(
             memory_data={
                 "peak_gpu_memory_mb": max(
-                    (log["gpu_allocated_mb"] for log in result.generation_info["memory"]["memory_logs"]),
-                    default=0
+                    (log["gpu_allocated_mb"] for log in result.generation_info["memory"]["memory_logs"]), default=0
                 ),
                 "peak_ram_memory_mb": max(
-                    (log["ram_mb"] for log in result.generation_info["memory"]["memory_logs"]),
-                    default=0
+                    (log["ram_mb"] for log in result.generation_info["memory"]["memory_logs"]), default=0
                 ),
             }
         )
@@ -346,8 +337,7 @@ def run_benchmark(
     end_time = time.perf_counter()
     error_message = str(e_main_benchmark) if e_main_benchmark is not None else None
 
-
-    peft_config_dict = peft_config.to_dict() if 'peft_config' in locals() else None
+    peft_config_dict = peft_config.to_dict() if "peft_config" in locals() else None
     if peft_config_dict:
         for key, value in peft_config_dict.items():
             if isinstance(value, set):
@@ -358,13 +348,13 @@ def run_benchmark(
         status=result.status,
         error=error_message,
         peft_config=peft_config_dict,
-        benchmark_config=benchmark_config.to_dict()
+        benchmark_config=benchmark_config.to_dict(),
     )
 
     return result
 
 
-def main()-> None:
+def main() -> None:
     """Main entry point for the benchmark runner."""
     parser = argparse.ArgumentParser(description="Run PEFT method benchmarks")
     parser.add_argument("experiment_path", help="Path to experiment directory")

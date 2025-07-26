@@ -19,16 +19,14 @@ Utilities for PEFT benchmarking.
 import datetime
 import json
 import os
+import platform
+import subprocess
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any, Callable, Optional
 
 import psutil
 import torch
-import subprocess
-import peft
-import platform
-
 
 
 # Constants
@@ -153,13 +151,17 @@ class BenchmarkResult:
 
     def add_metrics_for_category(self, category: str, metrics: dict, individual_samples: list = None):
         """Add metrics for a specific prompt category under generation_info."""
-        category_data = {
-            "metrics": metrics,
-            "samples": individual_samples if individual_samples is not None else []
-        }
+        category_data = {"metrics": metrics, "samples": individual_samples if individual_samples is not None else []}
         self.generation_info["by_category"][category] = category_data
 
-    def update_run_info(self, duration: float, status: BenchmarkStatus, error: Optional[str] = None, peft_config: Optional[dict] = None, benchmark_config: Optional[dict] = None):
+    def update_run_info(
+        self,
+        duration: float,
+        status: BenchmarkStatus,
+        error: Optional[str] = None,
+        peft_config: Optional[dict] = None,
+        benchmark_config: Optional[dict] = None,
+    ):
         """Update run information."""
         self.run_info["duration"] = duration
         self.run_info["status"] = status.value
@@ -176,7 +178,13 @@ class BenchmarkResult:
             return
 
         categories = self.generation_info["by_category"]
-        key_metrics = ["inference_time", "base_inference_time", "inference_overhead_pct", "time_per_token", "generated_tokens"]
+        key_metrics = [
+            "inference_time",
+            "base_inference_time",
+            "inference_overhead_pct",
+            "time_per_token",
+            "generated_tokens",
+        ]
 
         for metric in key_metrics:
             values = []
@@ -200,7 +208,7 @@ class BenchmarkResult:
         """Save result to JSON file."""
         if path is None:
             peft_branch = get_peft_branch()
-             # Determine the appropriate path based on status and branch
+            # Determine the appropriate path based on status and branch
         if self.status == BenchmarkStatus.CANCELLED:
             # If explicitly cancelled, use the cancelled path
             base_path = RESULT_PATH_CANCELLED
@@ -223,11 +231,11 @@ class BenchmarkResult:
 
         # Ensure the directory exists
         os.makedirs(os.path.dirname(path), exist_ok=True)
-    
+
         # Save the result
         with open(path, "w") as f:
             json.dump(self.to_dict(), f, indent=2)
-    
+
         return path
 
 
@@ -301,10 +309,10 @@ def validate_experiment_path(path: str) -> tuple[str, "BenchmarkConfig"]:
     """Validate experiment path, load and merge configs, and return them."""
     if not os.path.exists(path):
         raise FileNotFoundError(f"Experiment path not found: {path}")
-    
+
     # For path like "experiments/loha/llama-3.2-3B/rank32/" -> "loha--llama-3.2-3B-rank32"
     path_parts = os.path.normpath(path).split(os.sep)
-    
+
     try:
         experiments_idx = path_parts.index("experiments")
     except ValueError:
@@ -312,7 +320,7 @@ def validate_experiment_path(path: str) -> tuple[str, "BenchmarkConfig"]:
     else:
         if experiments_idx + 1 < len(path_parts):
             method_name = path_parts[experiments_idx + 1]
-            remaining_parts = path_parts[experiments_idx + 2:]
+            remaining_parts = path_parts[experiments_idx + 2 :]
             if remaining_parts:
                 remaining_name = "-".join(remaining_parts)
                 experiment_name = f"{method_name}--{remaining_name}"
@@ -379,13 +387,11 @@ def get_model_size_mb(model: torch.nn.Module, dtype_bytes: int = 4) -> float:
     """Calculate model size in MB."""
     return sum(p.numel() * dtype_bytes for p in model.parameters()) / (1024 * 1024)
 
+
 def get_peft_branch() -> str:
     repo_root = os.path.dirname(__file__)
-    return (
-        subprocess.check_output("git rev-parse --abbrev-ref HEAD".split(), cwd=repo_root)
-        .decode()
-        .strip()
-    )
+    return subprocess.check_output("git rev-parse --abbrev-ref HEAD".split(), cwd=repo_root).decode().strip()
+
 
 def log_results(
     experiment_name: str,
@@ -440,7 +446,9 @@ def log_results(
             samples = cat_data.get("samples", [])
             if samples:
                 print_fn(f"    Number of Samples: {len(samples)}")
-                print_fn(f"    Average Generated Tokens: {sum(s.get('generated_tokens', 0) for s in samples) / len(samples):.1f}")
+                print_fn(
+                    f"    Average Generated Tokens: {sum(s.get('generated_tokens', 0) for s in samples) / len(samples):.1f}"
+                )
     else:
         print_fn("  No per-category metrics available.")
 

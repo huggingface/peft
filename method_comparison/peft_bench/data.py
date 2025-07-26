@@ -23,6 +23,7 @@ from typing import Optional
 from transformers import PreTrainedTokenizer
 from utils import BenchmarkConfig
 
+
 DEFAULT_PROMPTS_PATH = os.path.join(os.path.dirname(__file__), "configs", "prompts.json")
 
 
@@ -112,7 +113,7 @@ def prepare_benchmark_prompts(
                 prompt,
                 tokenizer,
                 max_length=max_input_length,
-                reserve_output_tokens=getattr(config, "reserve_output_tokens", 50)
+                reserve_output_tokens=getattr(config, "reserve_output_tokens", 50),
             )
             for prompt in prompts
         ]

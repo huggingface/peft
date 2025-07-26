@@ -36,7 +36,6 @@ import json
 import os
 import sys
 import time
-from typing import Optional
 
 import torch
 from data import prepare_benchmark_prompts
@@ -52,9 +51,9 @@ from utils import (
 
 def run_base_model_benchmark(benchmark_config: BenchmarkConfig, print_fn=print) -> dict:
     """Run benchmark for base model only and return results."""
-    
+
     print_fn(f"Running base model benchmark for: {benchmark_config.model_id}")
-    
+
     # Initialize CUDA
     print_fn("Initializing CUDA...")
     init_cuda()
@@ -131,7 +130,7 @@ def run_base_model_benchmark(benchmark_config: BenchmarkConfig, print_fn=print) 
             "ram_mb": ram,
             "gpu_allocated_mb": gpu_allocated,
             "gpu_reserved_mb": gpu_reserved,
-        }
+        },
     }
 
     return result
@@ -142,16 +141,17 @@ def save_base_results(result: dict, model_id: str) -> str:
     # Create results directory for base models
     base_results_dir = os.path.join(os.path.dirname(__file__), "base_results")
     os.makedirs(base_results_dir, exist_ok=True)
-    
+
     # Create filename based on model and config
     model_name = model_id.replace("/", "_").replace("-", "_")
     filename = f"base_{model_name}.json"
     filepath = os.path.join(base_results_dir, filename)
-    
-    with open(filepath, 'w') as f:
+
+    with open(filepath, "w") as f:
         json.dump(result, f, indent=2)
-    
+
     return filepath
+
 
 def main():
     """Main entry point for the base model benchmark runner."""
@@ -165,7 +165,7 @@ def main():
     print_fn = print if args.verbose else lambda *args, **kwargs: None
 
     experiment_path = args.experiment_path
-    
+
     # Validate experiment path and load configs
     experiment_name, benchmark_config = validate_experiment_path(experiment_path)
 
@@ -174,7 +174,7 @@ def main():
     base_results_dir = os.path.join(os.path.dirname(__file__), "base_results")
     filename = f"base_{model_name}.json"
     filepath = os.path.join(base_results_dir, filename)
-    
+
     if os.path.exists(filepath) and not args.force:
         print(f"Base results already exist at: {filepath}")
         print("Use --force to re-run the benchmark")
@@ -185,27 +185,30 @@ def main():
     # Run the base model benchmark
     try:
         result = run_base_model_benchmark(benchmark_config, print_fn=print_fn)
-        
+
         # Save results
         saved_path = save_base_results(result, benchmark_config.model_id)
         print(f"Base model results saved to: {saved_path}")
-        
+
         # Print summary
         print("\nBase Model Benchmark Summary:")
         print(f"Model: {result['model_id']}")
-        print(f"Memory Usage - RAM: {result['memory_info']['ram_mb']:.2f}MB, GPU: {result['memory_info']['gpu_allocated_mb']:.2f}MB")
-        
+        print(
+            f"Memory Usage - RAM: {result['memory_info']['ram_mb']:.2f}MB, GPU: {result['memory_info']['gpu_allocated_mb']:.2f}MB"
+        )
+
         print("\nInference Times by Category:")
-        for category, time_val in result['inference_results']['inference_times'].items():
-            time_per_token = result['inference_results']['time_per_token'][category]
-            tokens = result['inference_results']['generated_tokens'][category]
+        for category, time_val in result["inference_results"]["inference_times"].items():
+            time_per_token = result["inference_results"]["time_per_token"][category]
+            tokens = result["inference_results"]["generated_tokens"][category]
             print(f"  {category}: {time_val:.4f}s ({time_per_token:.6f}s/token, {tokens:.1f} tokens)")
-        
+
         return 0
-        
+
     except Exception as e:
         print(f"Base model benchmark failed: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 
