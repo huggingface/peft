@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Utilities for Orthogonal Subspace Learning with adaptive SVD."""
+"""Utilities for Orthogonal Subspace Learning with Adaptive OSF."""
 
 from __future__ import annotations
 
@@ -24,13 +24,13 @@ from torch.nn import functional as F
 
 
 __all__ = [
-    "auto_generate_target_svd_config",
-    "create_svd_model_class",
+    "auto_generate_target_osf_config",
+    "create_osf_model_class",
     "decompose_weight_matrix",
     "optim_wrapper",
     "project_gradient_to_orthogonal_space",
     "reconstruct_weight_matrix",
-    "wrap_model_with_svd",
+    "wrap_model_with_osf",
 ]
 
 
@@ -117,7 +117,7 @@ def project_gradient_to_orthogonal_space(svd_dict: dict[str, Any]) -> None:
             dV.copy_(local_dV)
 
 
-def auto_generate_target_svd_config(model: nn.Module) -> dict[str, int]:
+def auto_generate_target_osf_config(model: nn.Module) -> dict[str, int]:
     """Create a mapping from parameter names to ``top_k`` based on layer size."""
     target_patterns = [
         "self_attn.q_proj",
@@ -139,10 +139,10 @@ def auto_generate_target_svd_config(model: nn.Module) -> dict[str, int]:
     return config
 
 
-def create_svd_model_class(base_cls: type) -> type:
+def create_osf_model_class(base_cls: type) -> type:
     """Create a subclass of ``base_cls`` where selected linear weights are replaced by SVD decompositions."""
 
-    class ModelWithSVD(base_cls):
+    class ModelWithOSF(base_cls):
         def __init__(self, config, svd_config: dict[str, int] | None = None, initialize_svd: bool = True, **kwargs):
             super().__init__(config, **kwargs)
             self.svd_config = svd_config or {}
@@ -162,7 +162,7 @@ def create_svd_model_class(base_cls: type) -> type:
                 **kwargs,
             )
             if svd_config is None:
-                svd_config = auto_generate_target_svd_config(model)
+                svd_config = auto_generate_target_osf_config(model)
             model.svd_config = svd_config
             model.reinitialize_svd()
             return model
@@ -270,8 +270,8 @@ def create_svd_model_class(base_cls: type) -> type:
                 state_dict[orig] = W
             return state_dict
 
-    ModelWithSVD.__name__ = f"{base_cls.__name__}WithSVD"
-    return ModelWithSVD
+    ModelWithOSF.__name__ = f"{base_cls.__name__}WithOSF"
+    return ModelWithOSF
 
 
 def optim_wrapper(optimizer: torch.optim.Optimizer, model: nn.Module) -> torch.optim.Optimizer:
@@ -291,23 +291,23 @@ def optim_wrapper(optimizer: torch.optim.Optimizer, model: nn.Module) -> torch.o
     return optimizer
 
 
-def wrap_model_with_svd(model: nn.Module, svd_config: dict[str, int] | None = None) -> nn.Module:
+def wrap_model_with_osf(model: nn.Module, svd_config: dict[str, int] | None = None) -> nn.Module:
     """Return a version of ``model`` where selected weights are decomposed using SVD.
 
     Parameters ---------- model:
         The model to wrap. It must expose a ``config`` attribute that will be passed to the wrapped class' constructor.
     svd_config:
         A mapping from parameter names to ``top_k`` ranks. If not provided, it is automatically generated based on the
-        layer shapes using :func:`auto_generate_target_svd_config`.
+        layer shapes using :func:`auto_generate_target_osf_config`.
 
     Returns ------- ``nn.Module``
         A new model instance with the same weights as ``model`` but with trainable low-rank parameters and frozen
         high-rank components.
     """
 
-    svd_config = svd_config or auto_generate_target_svd_config(model)
-    SVDCls = create_svd_model_class(model.__class__)
-    wrapped = SVDCls(model.config, svd_config=svd_config, initialize_svd=False)
+    svd_config = svd_config or auto_generate_target_osf_config(model)
+    OSFCls = create_osf_model_class(model.__class__)
+    wrapped = OSFCls(model.config, svd_config=svd_config, initialize_svd=False)
     wrapped.load_state_dict(model.state_dict())
     wrapped.reinitialize_svd()
     return wrapped

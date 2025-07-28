@@ -49,6 +49,7 @@ from peft import (
     ShiraConfig,
     TaskType,
     TrainableTokensConfig,
+    OSFConfig,
     VBLoRAConfig,
     VeraConfig,
     get_peft_model,
@@ -621,6 +622,10 @@ TEST_CASES = [
         TrainableTokensConfig,
         {"target_modules": ["emb"], "token_indices": [0, 1, 3], "init_weights": False},
     ),
+    ################################
+    # Orthogonal Subspace Learning #
+    ################################
+    ("Vanilla MLP OSF", "MLP", OSFConfig, {}),
     ########
     # RandLora #
     ########
