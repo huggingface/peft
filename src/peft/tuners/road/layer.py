@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2025-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -31,18 +31,19 @@ class RoadLayer(BaseTunerLayer):
     2D rotation matrix. For additional flexibility, each rotation matrix is multiplied by a trainable scale.
 
     when applied to vector R @ x each pair of elements of x is transformed like this:
-    y₀ = x₀ * α₀cosθ₀ - xₙ * α₀sinθ₀
-    yₙ = x₀ * α₀sinθ₀ + xₙ * α₀cosθ₀
+    y₀ = x₀ * α * cosθ - xₙ * α * sinθ
+    yₙ = x₀ * α * sinθ + xₙ * α * cosθ
 
-    The scales and angles inside each rotation matrix may actually be different (when using variant 2 or 4).
+    The scales α and angles θ are learned for each pair of elements and, moreover, each of the 4 instances in the
+    rotation matrix may actually be different (when using variant 2 or 4).
 
-    Note that instead of using two consecutive elements x₀ x₁ we pair elements from the first and second half of the
-    group, which allows for more efficient inference implementation.
+    Note that instead of using two consecutive elements x₀ x₁ we first split the whole vector into groups and pair
+    elements from the first with the second half of the same group, which allows for more efficient inference implementation.
 
     The adapter needs to only store the angles θ and scales α, rather than the full matrix R and the inference
     implementation only needs to do elementwise vector multiplications.
 
-    For merging the weights, we make use of the following formula: R @ (W @ x + b) = (R @ W) @ x + R @ b The lhs part
+    For merging the weights, we make use of the following formula: R @ (W @ x + b) = (R @ W) @ x + R @ b. The lhs part
     is how it is used in unmerged state (using efficient elementwise implementation instead of matrix multiplication)
     and the rhs part is how it is used in merged state where (R @ W) becomes the new weight matrix and R @ b becomes
     the new bias.
@@ -310,6 +311,10 @@ class Linear(nn.Module, RoadLayer):
 
 def _get_delta_weight(variant: RoadVariant, group_size: int, road_theta: torch.Tensor, road_alpha: torch.Tensor):
     first_col, second_col = _prepare_cols(variant, group_size, road_theta, road_alpha)
+
+    # To help understand the logic below consider how rope embeddings work
+    # here it is similar, but done in groups.
+    # https://discuss.huggingface.co/t/is-llama-rotary-embedding-implementation-correct/44509/3
 
     # First column is simply put on the main diagonal
     output_tensor = torch.diag(first_col)

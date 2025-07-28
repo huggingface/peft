@@ -42,7 +42,7 @@ def train_model(
     # load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(base_model, token=hf_token)
 
-    # QDoRA (quantized dora): IF YOU WANNA QUANTIZE THE MODEL
+    # IF YOU WANNA QUANTIZE THE MODEL
     if quantize:
         model = AutoModelForCausalLM.from_pretrained(
             base_model,
@@ -60,8 +60,8 @@ def train_model(
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
     else:
         model = AutoModelForCausalLM.from_pretrained(base_model, token=hf_token, device_map="auto")
-    # LoRa config for the PEFT model
-    lora_config = RoadConfig(
+    # RoAd config for the PEFT model
+    road_config = RoadConfig(
         variant=variant,  # Rank of matrix
         target_modules=(
             road_target_modules.split(",")
@@ -70,8 +70,8 @@ def train_model(
         ),
     )
 
-    # get the peft model with LoRa config
-    model = get_peft_model(model, lora_config)
+    # get the peft model with RoAd config
+    model = get_peft_model(model, road_config)
 
     model.to(device)  # MODEL TO GPU/CUDA
     tokenizer.pad_token = tokenizer.eos_token
@@ -157,7 +157,7 @@ if __name__ == "__main__":
     parser.add_argument("--device", type=str, default="cuda:0", help="Device to use for training")
     parser.add_argument("--variant", type=str, default="1", choices=["1", "2", "4"], help="RoAD variant")
     parser.add_argument(
-        "--road_target_modules", type=str, default=None, help="Comma-separated list of target modules for LoRA"
+        "--road_target_modules", type=str, default=None, help="Comma-separated list of target modules for RoAd"
     )
     parser.add_argument(
         "--hub_model_id",

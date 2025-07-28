@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2025-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -212,9 +212,6 @@ class RoadModel(BaseTuner):
                 raise
             return getattr(self.model, name)
 
-    # def _check_merge_allowed(self):
-    #    raise ValueError("Road adapters do not support merging")
-
     def _unload_and_optionally_merge(
         self,
         merge=True,
@@ -296,7 +293,7 @@ class RoadModel(BaseTuner):
 
     def unload(self) -> torch.nn.Module:
         """
-        Gets back the base model by removing all the oft modules without merging. This gives back the original base
+        Gets back the base model by removing all the road modules without merging. This gives back the original base
         model.
         """
         return self._unload_and_optionally_merge(merge=False)

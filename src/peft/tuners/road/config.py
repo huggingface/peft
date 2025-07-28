@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2025-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -108,7 +108,7 @@ class RoadConfig(PeftConfig):
         default=None,
         metadata={
             "help": (
-                "List of modules apart from SHiRA layers to be set as trainable and saved in the final checkpoint. For"
+                "List of modules apart from RoAd layers to be set as trainable and saved in the final checkpoint. For"
                 " example, in Sequence Classification or Token Classification tasks, the final layer"
                 " `classifier/score` are randomly initialized and as such need to be trainable and saved."
             )
