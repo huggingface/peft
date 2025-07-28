@@ -1,7 +1,7 @@
 datasets==2.16.1
 diffusers==0.17.1
 transformers==4.48.0
-accelerate==1.1.1
+accelerate==1.9.0
 wandb==0.16.1
 scikit-image==0.22.0
 opencv-python==4.9.0.80
