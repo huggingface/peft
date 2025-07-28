@@ -684,9 +684,9 @@ TEST_CASES = [
             "modules_to_save": ["lin1"],
         },
     ),
-    ########
+    ##########
     # WaveFT #
-    ########
+    ##########
     ("Vanilla MLP 1 WaveFT", "MLP", WaveFTConfig, {"target_modules": "lin0", "n_frequency": 8}),
     ("Vanilla MLP 2 WaveFT", "MLP", WaveFTConfig, {"target_modules": ["lin0"], "n_frequency": 8}),
     ("Vanilla MLP 3 WaveFT", "MLP", WaveFTConfig, {"target_modules": ["lin1"], "n_frequency": 8}),
