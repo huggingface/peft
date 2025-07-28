@@ -32,8 +32,15 @@ from utils.args_loader import parse_args
 from utils.dataset import make_dataset
 
 
-detect_model = face_alignment.FaceAlignment(face_alignment.LandmarksType.TWO_D, device="cuda:0", flip_input=False)
+# Determine the best available device
+if torch.xpu.is_available():
+    device = "xpu:0"
+elif torch.cuda.is_available():
+    device = "cuda:0"
+else:
+    device = "cpu"
 
+detect_model = face_alignment.FaceAlignment(face_alignment.LandmarksType.TWO_D, device=device, flip_input=False)
 # with open('./data/celebhq-text/prompt_val_blip_full.json', 'rt') as f:    # fill50k, COCO
 #     for line in f:
 #         val_data = json.loads(line)

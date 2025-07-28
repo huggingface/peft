@@ -14,9 +14,14 @@ def b2mb(x):
 class TorchTracemalloc:
     def __enter__(self):
         gc.collect()
-        torch.cuda.empty_cache()
-        torch.cuda.reset_max_memory_allocated()  # reset the peak gauge to zero
-        self.begin = torch.cuda.memory_allocated()
+        if torch.xpu.is_available():
+            torch.xpu.empty_cache()
+            self.begin = torch.xpu.memory_allocated()
+            self.xpu_peak_start = torch.xpu.max_memory_allocated()
+        else:
+            torch.cuda.empty_cache()
+            torch.cuda.reset_max_memory_allocated()  # reset the peak gauge to zero
+            self.begin = torch.cuda.memory_allocated()
         self.process = psutil.Process()
 
         self.cpu_begin = self.cpu_mem_used()
@@ -46,9 +51,15 @@ class TorchTracemalloc:
         self.peak_monitoring = False
 
         gc.collect()
-        torch.cuda.empty_cache()
-        self.end = torch.cuda.memory_allocated()
-        self.peak = torch.cuda.max_memory_allocated()
+        if torch.xpu.is_available():
+            torch.xpu.empty_cache()
+            self.end = torch.xpu.memory_allocated()
+            current_max = torch.xpu.max_memory_allocated()
+            self.peak = max(current_max, self.xpu_peak_start)
+        else:
+            torch.cuda.empty_cache()
+            self.end = torch.cuda.memory_allocated()
+            self.peak = torch.cuda.max_memory_allocated()
         self.used = b2mb(self.end - self.begin)
         self.peaked = b2mb(self.peak - self.begin)
 
