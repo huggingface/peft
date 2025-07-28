@@ -590,6 +590,11 @@ class BaseTuner(nn.Module, ABC):
                 if self._check_target_module_exists(peft_config, key):
                     targeted_modules_from_peft_config.append(key)
 
+        if getattr(peft_config, "target_parameters", []):
+            self._inject_parameters(
+                peft_config=peft_config, model=model, adapter_name=adapter_name, low_cpu_mem_usage=low_cpu_mem_usage
+            )
+
         ####################
         # CHECK FOR ERRORS #
         ####################
@@ -616,11 +621,6 @@ class BaseTuner(nn.Module, ABC):
                 warning_msg += f"The state_dict contained these additional target modules: {sorted(diff_state_dict)}. "
             if warning_msg:
                 warnings.warn(warning_msg, RuntimeWarning)
-
-        if getattr(peft_config, "target_parameters", []):
-            self._inject_parameters(
-                peft_config=peft_config, model=model, adapter_name=adapter_name, low_cpu_mem_usage=low_cpu_mem_usage
-            )
 
         if not self.targeted_module_names and not self.targeted_parameter_names and not uses_dummy_target_modules:
             if excluded_modules and not unmatched_modules:
