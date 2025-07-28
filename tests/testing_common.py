@@ -1951,7 +1951,7 @@ class PeftCommonTester:
                 atol, rtol = 1e-6, 1e-6
                 if (platform.system() == "Windows") and (model_id == "trl-internal-testing/tiny-Llama4ForCausalLM"):
                     # for some reason, Windows CI fails with stricter tolerance
-                    atol, rtol = 1e-4, 1e-4
+                    atol, rtol = 1e-5, 1e-5
 
                 with peft_model.disable_adapter():
                     output_peft_disabled = get_output(peft_model)
