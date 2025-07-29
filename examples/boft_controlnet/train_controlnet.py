@@ -228,7 +228,7 @@ def main(args):
             if args.train_text_encoder and not (args.use_lora or args.use_boft or args.use_oft):
                 text_encoder.enable_xformers_memory_efficient_attention()
         else:
-            raise ValueError("xformers is not available. Make sure it is installed correctly")
+            logger.warning("xformers is not available. Make sure it is installed correctly")
 
     if args.gradient_checkpointing:
         controlnet.enable_gradient_checkpointing()

@@ -17,7 +17,6 @@ class TorchTracemalloc:
         if torch.xpu.is_available():
             torch.xpu.empty_cache()
             self.begin = torch.xpu.memory_allocated()
-            self.xpu_peak_start = torch.xpu.max_memory_allocated()
         else:
             torch.cuda.empty_cache()
             torch.cuda.reset_max_memory_allocated()  # reset the peak gauge to zero
