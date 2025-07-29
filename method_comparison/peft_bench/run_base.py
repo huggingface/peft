@@ -26,11 +26,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Script to measure base model inference times and save results for reuse.
-This should be run once per model configuration to avoid redundant computations.
-"""
-
 import argparse
 import json
 import os
@@ -156,7 +151,6 @@ def save_base_results(result: dict, model_id: str) -> str:
 def main():
     """Main entry point for the base model benchmark runner."""
     parser = argparse.ArgumentParser(description="Run base model benchmarks")
-    parser.add_argument("experiment_path", help="Path to experiment directory (to load config)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
     parser.add_argument("--force", "-f", action="store_true", help="Force re-run even if results exist")
     args = parser.parse_args()
@@ -164,10 +158,9 @@ def main():
     # Configure print function based on verbosity
     print_fn = print if args.verbose else lambda *args, **kwargs: None
 
-    experiment_path = args.experiment_path
 
-    # Validate experiment path and load configs
-    experiment_name, benchmark_config = validate_experiment_path(experiment_path)
+    default_experiment_path = "experiments/lora/lora_r8"
+    experiment_name, benchmark_config = validate_experiment_path(default_experiment_path)
 
     # Check if results already exist
     model_name = benchmark_config.model_id.replace("/", "_").replace("-", "_")
@@ -183,34 +176,26 @@ def main():
     print_fn(f"Running base model benchmark for: {benchmark_config.model_id}")
 
     # Run the base model benchmark
-    try:
-        result = run_base_model_benchmark(benchmark_config, print_fn=print_fn)
+    result = run_base_model_benchmark(benchmark_config, print_fn=print_fn)
 
-        # Save results
-        saved_path = save_base_results(result, benchmark_config.model_id)
-        print(f"Base model results saved to: {saved_path}")
+    # Save results
+    saved_path = save_base_results(result, benchmark_config.model_id)
+    print(f"Base model results saved to: {saved_path}")
 
-        # Print summary
-        print("\nBase Model Benchmark Summary:")
-        print(f"Model: {result['model_id']}")
-        print(
-            f"Memory Usage - RAM: {result['memory_info']['ram_mb']:.2f}MB, GPU: {result['memory_info']['gpu_allocated_mb']:.2f}MB"
-        )
+    # Print summary
+    print("\nBase Model Benchmark Summary:")
+    print(f"Model: {result['model_id']}")
+    print(
+        f"Memory Usage - RAM: {result['memory_info']['ram_mb']:.2f}MB, GPU: {result['memory_info']['gpu_allocated_mb']:.2f}MB"
+    )
 
-        print("\nInference Times by Category:")
-        for category, time_val in result["inference_results"]["inference_times"].items():
-            time_per_token = result["inference_results"]["time_per_token"][category]
-            tokens = result["inference_results"]["generated_tokens"][category]
-            print(f"  {category}: {time_val:.4f}s ({time_per_token:.6f}s/token, {tokens:.1f} tokens)")
+    print("\nInference Times by Category:")
+    for category, time_val in result["inference_results"]["inference_times"].items():
+        time_per_token = result["inference_results"]["time_per_token"][category]
+        tokens = result["inference_results"]["generated_tokens"][category]
+        print(f"  {category}: {time_val:.4f}s ({time_per_token:.6f}s/token, {tokens:.1f} tokens)")
 
-        return 0
-
-    except Exception as e:
-        print(f"Base model benchmark failed: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return 1
+    return 0
 
 
 if __name__ == "__main__":

@@ -459,7 +459,6 @@ def log_results(
     print_fn("\nOverall Metrics (from generation_info.overall):")
     overall = benchmark_result.generation_info.get("overall")
     if overall:
-        # Use the same formatting as in Detailed Metrics
         print_fn(f"    Inference Time: {overall.get('inference_time', 0):.4f} seconds")
         print_fn(f"    Base Inference Time: {overall.get('base_inference_time', 0):.4f} seconds")
         print_fn(f"    Inference Overhead: {overall.get('inference_overhead_pct', 0):.2f}%")

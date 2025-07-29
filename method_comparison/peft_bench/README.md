@@ -1,3 +1,13 @@
+## Base Model Inference Caching
+
+The benchmarking suite uses a separate script, `run_base.py`, to measure base model inference times and save results for reuse. This should be run once per model configuration to avoid redundant computations and ensure consistent baseline metrics for all PEFT experiments.
+
+**Usage:**
+```bash
+python run_base.py experiments/lora/lora_r8
+```
+This will cache the base model inference results for the specified configuration. Subsequent runs of `run.py` will automatically load these cached results.
+
 # PEFT Benchmarking Suite
 
 This directory contains a comprehensive benchmarking framework for Parameter-Efficient Fine-Tuning (PEFT) methods. For the task of text generation, the suite measures inference performance, memory usage, and other key metrics across different PEFT configurations.
@@ -101,15 +111,8 @@ To create a new experiment, follow these steps:
    from peft import LoraConfig
 
    config = LoraConfig(
-       base_model_name_or_path="facebook/opt-350m",
-       bias="none",
-       fan_in_fan_out=False,
-       inference_mode=False,
-       init_lora_weights=True,
        lora_alpha=16,
        lora_dropout=0.1,
-       modules_to_save=None,
-       peft_type="LORA",
        r=8,
        target_modules=["q_proj", "v_proj"],
        task_type="CAUSAL_LM"
