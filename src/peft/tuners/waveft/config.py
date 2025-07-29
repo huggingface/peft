@@ -120,7 +120,7 @@ class WaveFTConfig(PeftConfig):
         default=True,
         metadata={"help": "If True, use IDWT for reconstruction. If False, use sparse coefficients directly."},
     )
-    random_loc_seed: Optional[int] = field(
+    random_loc_seed: int = field(
         default=777, metadata={"help": "Seed for random selection of learnable wavelet coefficient locations."}
     )
     fan_in_fan_out: bool = field(
