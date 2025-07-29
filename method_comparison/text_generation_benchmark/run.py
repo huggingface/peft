@@ -358,7 +358,6 @@ def main() -> None:
     print_fn = print if args.verbose else lambda *args, **kwargs: None
 
     experiment_path = args.experiment_path
-    # Restrict to method_comparison/peft_bench only
     allowed_root = os.path.abspath(os.path.join(os.path.dirname(__file__)))
     abs_experiment_path = os.path.abspath(experiment_path)
     if not abs_experiment_path.startswith(allowed_root):
