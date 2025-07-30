@@ -370,7 +370,9 @@ class TestTargetParameter:
             # Note: We call forward twice per step, once to create the parametrization and once for the actual forward
             # step. This may be a bit wasteful but it's not clear how to prevent this and overall is probably negligible
             num_forward_per_step = 2
-            expected_call_count = num_steps * num_layers * num_params * num_forward_per_step
+            # Since https://github.com/huggingface/transformers/pull/39501, one of the parameters is accessed twice per
+            # forward call, so add +1.
+            expected_call_count = num_steps * num_layers * (1 + num_params * num_forward_per_step)
             assert actual_call_count == expected_call_count
 
             actual_shapes = {W.shape for W in weights}
@@ -382,7 +384,6 @@ class TestTargetParameter:
             lora_weights_before = {
                 k: v.clone() for k, v in model.named_parameters() if "lora_A.default" in k or "lora_B.default" in k
             }
-            print(lora_weights_before)
             # sanity check:
             assert len(lora_weights_before) == 2 * num_layers * num_params
             # train
@@ -394,7 +395,6 @@ class TestTargetParameter:
                 loss.backward()
                 optim.step()
 
-            print(lora_weights_before)
             lora_weights_after = {
                 k: v for k, v in model.named_parameters() if "lora_A.default" in k or "lora_B.default" in k
             }
