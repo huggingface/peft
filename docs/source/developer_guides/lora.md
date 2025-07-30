@@ -370,7 +370,7 @@ special_tokens = ['<|start_think|>', '<|stop_think|>']
 tokenizer.add_special_tokens({'additional_special_tokens': special_tokens})
 
 # make room for new tokens in the embedding matrix if it isn't big enough already
-base_model.resize_token_embeddings(max(len(tokenizer), base_model.model.embed_tokens.num_embeddings)
+base_model.resize_token_embeddings(max(len(tokenizer), base_model.model.embed_tokens.num_embeddings))
 
 # typical LoRA config with `trainable_token_indices` targeting embedding layer `embed_tokens`
 # and specifically our new tokens we just added

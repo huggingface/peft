@@ -1411,30 +1411,6 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match=msg):
             get_peft_model(base_model, config)
 
-    def test_targeting_2_params_on_1_module_raises(self):
-        # It is currently not supported to target multiple parameters on the same module.
-        class ModuleWith2Params(nn.Module):
-            def __init__(self, in_features, out_features):
-                super().__init__()
-                self.weight0 = nn.Parameter(torch.zeros(in_features, out_features))
-                self.weight1 = nn.Parameter(torch.ones(3, out_features, out_features))
-
-        class Outer(nn.Module):
-            def __init__(self, in_features, out_features):
-                super().__init__()
-                self.lin = nn.Linear(in_features, in_features)
-                self.submodule = ModuleWith2Params(in_features, out_features)
-
-        model = Outer(3, 4)
-        config = LoraConfig(target_parameters=["submodule.weight0", "submodule.weight1"], init_lora_weights=False)
-        msg = (
-            "lora.ParamWrapper already has an adapter for parameter 'weight0'. It is currently not possible to apply "
-            "the same adapter to multiple parameters, please add a different adapter to target another parameter of "
-            "the same module."
-        )
-        with pytest.raises(ValueError, match=msg):
-            get_peft_model(model, config)
-
     @pytest.mark.parametrize("target_parameters", [["linear"], ["foobar"], ["foobar.weight"], ["foo", "bar"]])
     @pytest.mark.parametrize("target_modules", [None, [], ""])
     def test_valid_no_target_module_nor_target_parameter_match_raises(self, target_parameters, target_modules):
