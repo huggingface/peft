@@ -215,7 +215,9 @@ def main(args):
         text_encoder.to(accelerator.device, dtype=weight_dtype)
 
     if args.enable_xformers_memory_efficient_attention:
-        if is_xformers_available():
+        if accelerator.device.type == "xpu":
+            logger.warning("XPU hasn't support xformers yet, ignore it.")
+        elif is_xformers_available():
             import xformers
 
             xformers_version = version.parse(xformers.__version__)
@@ -228,7 +230,7 @@ def main(args):
             if args.train_text_encoder and not (args.use_lora or args.use_boft or args.use_oft):
                 text_encoder.enable_xformers_memory_efficient_attention()
         else:
-            logger.warning("xformers is not available. Make sure it is installed correctly")
+            raise ValueError("xformers is not available. Make sure it is installed correctly")
 
     if args.gradient_checkpointing:
         controlnet.enable_gradient_checkpointing()
@@ -513,11 +515,17 @@ def main(args):
                     break
 
         # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
-        accelerator.print(f"GPU Memory before entering the train : {b2mb(tracemalloc.begin)}")
-        accelerator.print(f"GPU Memory consumed at the end of the train (end-begin): {tracemalloc.used}")
-        accelerator.print(f"GPU Peak Memory consumed during the train (max-begin): {tracemalloc.peaked}")
         accelerator.print(
-            f"GPU Total Peak Memory consumed during the train (max): {tracemalloc.peaked + b2mb(tracemalloc.begin)}"
+            f"{accelerator.device.type.upper()} Memory before entering the train : {b2mb(tracemalloc.begin)}"
+        )
+        accelerator.print(
+            f"{accelerator.device.type.upper()} Memory consumed at the end of the train (end-begin): {tracemalloc.used}"
+        )
+        accelerator.print(
+            f"{accelerator.device.type.upper()} Peak Memory consumed during the train (max-begin): {tracemalloc.peaked}"
+        )
+        accelerator.print(
+            f"{accelerator.device.type.upper()} Total Peak Memory consumed during the train (max): {tracemalloc.peaked + b2mb(tracemalloc.begin)}"
         )
 
         accelerator.print(f"CPU Memory before entering the train : {b2mb(tracemalloc.cpu_begin)}")
