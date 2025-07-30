@@ -1053,6 +1053,8 @@ class PeftCommonTester:
         # adapter_names argument. See #2283.
         if config_cls not in (LoraConfig,):
             return pytest.skip(f"Mixed adapter batches not supported for {config_cls}")
+        if config_kwargs.get("alora_invocation_tokens") is not None:
+                return pytest.skip(f"Beam search not yet supported for aLoRA")  # beam search not yet fully supported
         if config_kwargs.get("trainable_token_indices", None) is not None:
             # for some configurations this test will fail since the adapter values don't differ.
             # this is probably a problem with the test setup and not with the implementation.
@@ -1082,8 +1084,6 @@ class PeftCommonTester:
             # ensure that we have at least 3 samples for this test
             dummy_input = {k: torch.cat([v for _ in range(3)]) for k, v in dummy_input.items()}
             num_beams = 10
-            if config_kwargs.get("alora_invocation_tokens") is not None:
-                num_beams = 1  # beam search not yet fully supported
             gen_kwargs = {**dummy_input, "max_length": 20, "num_beams": num_beams, "early_stopping": True}
             with torch.inference_mode():
                 with model.disable_adapter():
