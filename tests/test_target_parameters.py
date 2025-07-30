@@ -59,6 +59,22 @@ ALL_CONFIGS = [
             ],
         },
     ),
+    # target down_proj and gate_up_proj on the same module
+    (
+        LoraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "r": 8,
+            "lora_alpha": 32,
+            "target_modules": None,
+            "lora_dropout": 0.0,
+            "bias": "none",
+            "target_parameters": [
+                "feed_forward.experts.down_proj",
+                "feed_forward.experts.gate_up_proj",
+            ],
+        },
+    ),
     # target q_proj, v_proj as modules, and down_proj as parameter
     (
         LoraConfig,
@@ -314,38 +330,75 @@ class TestTargetParameter:
             # LoRA outputs should be the same
             assert torch.allclose(out_lora_0, out_lora_1, atol=atol, rtol=rtol)
 
-    def test_target_multiple_parameters_on_same_module(self):
-        # for now, it is not supported to target multiple parameters from the same module with the same adapter,
-        # however, it is possible to target multiple parameters from same module with different adapters
+    def test_target_multiple_parameters_on_same_module(self, monkeypatch):
+        # test that if we target multiple nn.Parameters on the same module, all of them are being used during the
+        # forward pass
         torch.manual_seed(0)
-        model_id = "hf-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "trl-internal-testing/tiny-Llama4ForCausalLM"
         with hub_online_once(model_id):
-            model = AutoModelForCausalLM.from_pretrained(model_id)
             x = torch.arange(10).view(2, 5)
-            with torch.inference_mode():
-                out_base = model(x, output_hidden_states=True).hidden_states[-1]
+            model = MyAutoModelForCausalLM.from_pretrained(model_id)
+            shape_gate_up_proj = model.model.layers[0].feed_forward.experts.gate_up_proj.shape
+            shape_down_proj = model.model.layers[0].feed_forward.experts.down_proj.shape
+            num_layers = len(model.model.layers)
 
-            # targeting gate_up_proj
-            config0 = LoraConfig(target_parameters=["feed_forward.experts.gate_up_proj"], init_lora_weights=False)
-            model = get_peft_model(model, config0)
-            with torch.inference_mode():
-                out_lora_0 = model(x, output_hidden_states=True).hidden_states[-1]
-            atol, rtol = 1e-6, 1e-6
-            assert not torch.allclose(out_base, out_lora_0, atol=atol, rtol=rtol)
+            target_parameters = ["feed_forward.experts.gate_up_proj", "feed_forward.experts.down_proj"]
+            num_params = len(target_parameters)
+            config = LoraConfig(target_parameters=target_parameters, init_lora_weights=False)
+            model = get_peft_model(model, config)
 
-            # targeting down_proj
-            config1 = LoraConfig(target_parameters=["feed_forward.experts.down_proj"], init_lora_weights=False)
-            model.add_adapter("other", config1)
-            model.set_adapter("other")
-            with torch.inference_mode():
-                out_lora_1 = model(x, output_hidden_states=True).hidden_states[-1]
-            assert not torch.allclose(out_base, out_lora_1, atol=atol, rtol=rtol)
-            assert not torch.allclose(out_lora_0, out_lora_1, atol=atol, rtol=rtol)
+            # CHECK FORWARD CALLS
 
-            # targeting both gate_up_proj and down_proj
-            model.base_model.set_adapter(["default", "other"])
+            # log the weights seen during the forward call
+            weights = []
+
+            def mock_forward(self, W):
+                weights.append(W)
+                return orig_forward(self, W)
+
+            from peft.tuners.lora.layer import _LoraParameterProxy
+
+            orig_forward = _LoraParameterProxy.forward
+            monkeypatch.setattr(_LoraParameterProxy, "forward", mock_forward)
+
+            num_steps = 3
             with torch.inference_mode():
-                out_lora_01 = model(x, output_hidden_states=True).hidden_states[-1]
-            assert not torch.allclose(out_base, out_lora_01, atol=atol, rtol=rtol)
-            assert not torch.allclose(out_lora_0, out_lora_01, atol=atol, rtol=rtol)
-            assert not torch.allclose(out_lora_1, out_lora_01, atol=atol, rtol=rtol)
+                for _ in range(num_steps):
+                    out_base = model(x, output_hidden_states=True).hidden_states[-1]
+
+            actual_call_count = len(weights)
+            # Note: We call forward twice per step, once to create the parametrization and once for the actual forward
+            # step. This may be a bit wasteful but it's not clear how to prevent this and overall is probably negligible
+            num_forward_per_step = 2
+            expected_call_count = num_steps * num_layers * num_params * num_forward_per_step
+            assert actual_call_count == expected_call_count
+
+            actual_shapes = {W.shape for W in weights}
+            expected_shapes = {shape_gate_up_proj, shape_down_proj}
+            assert actual_shapes == expected_shapes
+
+            # CHECK WEIGHT UPDATES
+
+            lora_weights_before = {
+                k: v.clone() for k, v in model.named_parameters() if "lora_A.default" in k or "lora_B.default" in k
+            }
+            print(lora_weights_before)
+            # sanity check:
+            assert len(lora_weights_before) == 2 * num_layers * num_params
+            # train
+            optim = torch.optim.SGD(model.parameters(), lr=0.01)
+            for _ in range(10):
+                optim.zero_grad()
+                out = model(x)
+                loss = out.logits.sum()
+                loss.backward()
+                optim.step()
+
+            print(lora_weights_before)
+            lora_weights_after = {
+                k: v for k, v in model.named_parameters() if "lora_A.default" in k or "lora_B.default" in k
+            }
+            assert lora_weights_before.keys() == lora_weights_after.keys()
+            atol, rtol = 0.1, 0.1
+            for key in lora_weights_before.keys():
+                assert not torch.allclose(lora_weights_before[key], lora_weights_after[key], atol=atol, rtol=rtol)
