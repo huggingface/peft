@@ -283,7 +283,7 @@ class LoraConfig(PeftConfig):
             Either you specify a list of indices which will then target the model's input embedding layer (or, if not
             found, `embed_tokens`). Alternatively, you can specify a dictionary where the key is the name of the
             embedding module and the values are the list of token indices, e.g. `{'embed_tokens': [0, 1, ...]}`. Note
-            that training with FSDP requires `use_orig_params=True`.
+            that training with FSDP requires `use_orig_params=True` to avoid issues with non-uniform `requires_grad`.
         loftq_config (`Optional[LoftQConfig]`):
             The configuration of LoftQ. If this is not None, then LoftQ will be used to quantize the backbone weights
             and initialize Lora layers. Also pass `init_lora_weights='loftq'`. Note that you should not pass a
@@ -465,7 +465,8 @@ class LoraConfig(PeftConfig):
                 "in two ways. Either you specify a list of indices which will then target the model's input embedding "
                 "layer (or, if not found, `embed_tokens`). Alternatively, you can specify a dictionary where the key "
                 "is the name of the embedding module and the values are the list of token indices, e.g. "
-                "`{'embed_tokens': [0, 1, ...]}`. Note that training with FSDP requires `use_orig_params=True`."
+                "`{'embed_tokens': [0, 1, ...]}`. Note that training with FSDP requires `use_orig_params=True` to "
+                "avoid issues with non-uniform `requires_grad`."
             )
         },
     )
