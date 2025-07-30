@@ -151,7 +151,7 @@ ALL_CONFIGS = [
         RoadConfig,
         {
             "task_type": "FEATURE_EXTRACTION",
-            "variant": "1",
+            "variant": "road_1",
             "group_size": 2,
         },
     ),

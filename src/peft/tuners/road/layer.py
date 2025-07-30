@@ -67,10 +67,7 @@ class RoadLayer(BaseTunerLayer):
         if isinstance(base_layer, nn.Linear):
             in_features, out_features = base_layer.in_features, base_layer.out_features
         else:
-            in_features, out_features = None, None
-            warnings.warn(
-                f"Unsupported layer type '{type(base_layer)}' encountered, proceed at your own risk.", UserWarning
-            )
+            raise ValueError(f"Unsupported layer type '{type(base_layer)}' encountered, cannot apply RoAd adapter.")
         self.in_features = in_features
         self.out_features = out_features
 
@@ -85,22 +82,25 @@ class RoadLayer(BaseTunerLayer):
         group_size,
         init_weights,
     ):
-        # collect the kwargs
-        kwargs = locals().copy()
-        del kwargs["self"]
-
         self.variant[adapter_name] = variant
         self.group_size[adapter_name] = group_size
 
+        if self.out_features % group_size != 0:
+            raise ValueError(
+                f"The out_features of the base layer must be divisible by group_size ({group_size}) when using RoadLayer."
+            )
+
         # Actual trainable parameters
-        if variant == RoadVariant.ROAD_1:
+        if variant == "road_1":
             size = self.out_features // 2
-        elif variant == RoadVariant.ROAD_2:
+        elif variant == "road_2":
             size = self.out_features
-        elif variant == RoadVariant.ROAD_4:
+        elif variant == "road_4":
             size = self.out_features * 2
         else:
-            raise ValueError(f"Unsupported variant {variant} for RoadLayer. Supported variants are 1, 2, and 4.")
+            raise ValueError(
+                f"Unsupported variant {variant} for RoadLayer. Supported variants are road_1, road_2, and road_4."
+            )
         self.road_theta[adapter_name] = nn.Parameter(torch.rand(size))
         self.road_alpha[adapter_name] = nn.Parameter(torch.rand(size))
 
@@ -124,7 +124,7 @@ class Linear(nn.Module, RoadLayer):
         self,
         base_layer,
         adapter_name: str,
-        variant: RoadVariant = RoadVariant.ROAD_1,
+        variant: RoadVariant = "road_1",
         group_size: int = 64,
         init_weights: Union[bool, str] = True,
         **kwargs,
@@ -264,6 +264,12 @@ class Linear(nn.Module, RoadLayer):
                     if base_layer.bias is not None:
                         orig_bias = base_layer.bias.clone()
                         orig_bias = torch.matmul(road_R.to(orig_dtype), orig_bias)
+
+                        if not torch.isfinite(orig_bias).all():
+                            raise ValueError(
+                                f"NaNs detected in the merged bias. The adapter {active_adapter} seems to be broken"
+                            )
+
                         base_layer.bias.data = orig_bias.contiguous().to(orig_dtype)
                 else:
                     orig_weight = base_layer.weight.data
@@ -334,7 +340,7 @@ def _prepare_cols(
     variant: RoadVariant, group_size: int, road_theta: torch.Tensor, road_alpha: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor]:
     # In inference mode, this can be cached
-    if variant == RoadVariant.ROAD_1:
+    if variant == "road_1":
         # In each group there are only group_size // 2 parameters that are reused
         road_theta = road_theta.reshape(-1, group_size // 2).repeat_interleave(2, dim=0).flatten()
         road_alpha = road_alpha.reshape(-1, group_size // 2).repeat_interleave(2, dim=0).flatten()
@@ -344,14 +350,14 @@ def _prepare_cols(
 
         first_col = road_alpha * theta_cos
         second_col = road_alpha * theta_sin
-    elif variant == RoadVariant.ROAD_2:
+    elif variant == "road_2":
         # Each group has exactly group_size parameters
         theta_cos = road_theta.cos()
         theta_sin = road_theta.sin()
 
         first_col = road_alpha * theta_cos
         second_col = road_alpha * theta_sin
-    elif variant == RoadVariant.ROAD_4:
+    elif variant == "road_4":
         # Each group has 2*group_size parameters, first half used for first column, second half for second column
         road_theta = road_theta.reshape(-1, 2, group_size)
         theta_cos = road_theta[:, 0, :].cos().flatten()
@@ -362,6 +368,10 @@ def _prepare_cols(
 
         first_col = alpha_1 * theta_cos
         second_col = alpha_2 * theta_sin
+    else:
+        raise ValueError(
+            f"Unsupported variant {variant} for RoadLayer. Supported variants are road_1, road_2, and road_4."
+        )
 
     return first_col, second_col
 
@@ -372,6 +382,7 @@ def _apply_road(
     first_col, second_col = _prepare_cols(variant, group_size, road_theta, road_alpha)
 
     # Split in half groups and join back
+    # See equation 4 in the RoAD paper
     x_grouped = x.reshape(-1, 2, group_size // 2)
     x1 = x_grouped[:, 0, :]
     x2 = x_grouped[:, 1, :]

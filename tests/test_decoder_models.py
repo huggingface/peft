@@ -186,7 +186,7 @@ ALL_CONFIGS = [
         RoadConfig,
         {
             "task_type": "CAUSAL_LM",
-            "variant": "1",
+            "variant": "road_1",
             "group_size": 2,
         },
     ),

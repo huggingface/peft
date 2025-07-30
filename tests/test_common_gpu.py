@@ -2168,7 +2168,7 @@ class TestSameAdapterDifferentDevices:
 
     def test_road_add_new_adapter_does_not_change_device(self, mlp):
         # same as first test, but using HRA
-        config = RoadConfig(target_modules=["lin0"])
+        config = RoadConfig(target_modules=["lin0"], group_size=2)
         model = get_peft_model(mlp, config)
         model = model.to(self.device)
         model.lin0.road_theta.cpu()

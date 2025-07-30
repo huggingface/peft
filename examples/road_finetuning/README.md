@@ -2,13 +2,11 @@
 
 
 ## Introduction
-[RoAd](https://arxiv.org/pdf/2409.00119) a novel method
-which employs a straightforward 2D rotation to adapt LLMs which is 
-remarkably parameter-efficient, delivering good
-performance with < 0.1% trainable parameters; efficient
-in serving requests requiring different adapters within a batch, with an overhead
-comparable to element-wise multiplication instead of batch matrix multiplication;
-enhances LLM’s interpretability.
+
+[RoAd](https://arxiv.org/pdf/2409.00119) is a novel method that adapts LLMs using simple 2D rotations. It is highly parameter-efficient,
+achieving strong performance with less than 0.1% trainable parameters.
+RoAd also supports efficient serving of mixed-adapter requests within a batch, incurring only element-wise computation overhead rather than costly batch matrix multiplications.
+Additionally, it improves model interpretability through structured and composable transformations.
 
 ## Quick start
 ```python

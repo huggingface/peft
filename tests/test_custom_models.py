@@ -691,8 +691,8 @@ TEST_CASES = [
     ("Vanilla MLP 2 RoAd", "MLP", RoadConfig, {"target_modules": ["lin0"], "group_size": 2}),
     ("Vanilla MLP 3 RoAd", "MLP", RoadConfig, {"target_modules": ["lin1"], "group_size": 2}),
     ("Vanilla MLP 4 RoAd", "MLP", RoadConfig, {"target_modules": ["lin0", "lin1"], "group_size": 2}),
-    ("Vanilla MLP 5 RoAd", "MLP", RoadConfig, {"target_modules": ["lin0"], "variant": "2", "group_size": 2}),
-    ("Vanilla MLP 6 RoAd", "MLP", RoadConfig, {"target_modules": ["lin0"], "variant": "4", "group_size": 2}),
+    ("Vanilla MLP 5 RoAd", "MLP", RoadConfig, {"target_modules": ["lin0"], "variant": "road_2", "group_size": 2}),
+    ("Vanilla MLP 6 RoAd", "MLP", RoadConfig, {"target_modules": ["lin0"], "variant": "road_4", "group_size": 2}),
 ]
 
 # For this test matrix, each tuple consists of:
@@ -909,15 +909,15 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         "RoAd 2 Different",
         "road",
         RoadConfig,
-        {"target_modules": ["lin0"], "init_weights": False, "variant": "1", "group_size": 2},
-        {"target_modules": ["lin1"], "init_weights": False, "variant": "2", "group_size": 2},
+        {"target_modules": ["lin0"], "init_weights": False, "variant": "road_1", "group_size": 2},
+        {"target_modules": ["lin1"], "init_weights": False, "variant": "road_2", "group_size": 2},
     ),
     (
         "RoAd 4 Different",
         "road",
         RoadConfig,
-        {"target_modules": ["lin0"], "init_weights": False, "variant": "1", "group_size": 2},
-        {"target_modules": ["lin1"], "init_weights": False, "variant": "4", "group_size": 2},
+        {"target_modules": ["lin0"], "init_weights": False, "variant": "road_1", "group_size": 2},
+        {"target_modules": ["lin1"], "init_weights": False, "variant": "road_4", "group_size": 2},
     ),
 ]
 

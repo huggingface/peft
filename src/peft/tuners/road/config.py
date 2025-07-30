@@ -15,17 +15,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
 
 
-class RoadVariant(str, Enum):
-    ROAD_1 = "1"
-    ROAD_2 = "2"
-    ROAD_4 = "4"
+RoadVariant = Literal["road_1", "road_2", "road_4"]
 
 
 @dataclass
@@ -36,10 +32,15 @@ class RoadConfig(PeftConfig):
 
     Args:
         variant (Union[`RoadVariant`, `str`]):
-            The variant of the Road model to use. It can be one of 1, 2, or 4.
-            - 1: Road-1
-            - 2: Road-2
-            - 4: Road-4
+            The variant of the Road model to use. It can be one of road_1, road_2, or road_4. Refer to the paper
+            for more details.
+            - road_1: Uses the same scale and angle for all pairs of elements.
+            This variant has lowest number of parameters, it stores a number equal
+            to the output hidden size of parameters for each layer that RoAd is applied to.
+            - road_2: Uses the same scale and angle for each element.
+            This variant has 2x the number of parameters compared to road_1.
+            - road_4: Uses two different scales and angles for each ellement.
+            This variant has 4x the number of parameters compared to road_1.
         group_size (`int`):
             Group size defines how elements are grouped together into 2D vectors for rotation.
             Within each group element 0 is paired with element group_size/2,
@@ -64,7 +65,7 @@ class RoadConfig(PeftConfig):
     """
 
     variant: Union[str, RoadVariant] = field(
-        default=RoadVariant.ROAD_1,
+        default="road_1",
         metadata={"help": ("Variant of the Road model to use.")},
     )
     group_size: int = field(
@@ -121,3 +122,7 @@ class RoadConfig(PeftConfig):
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
+        if self.variant not in ["road_1", "road_2", "road_4"]:
+            raise ValueError(f"Invalid variant {self.variant} specified. Please choose from road_1, road_2 or road_4")
+        if self.group_size <= 0 or self.group_size % 2 != 0:
+            raise ValueError(f"The group_size must be divisible by 2 when using RoadLayer, but got {self.group_size}.")
