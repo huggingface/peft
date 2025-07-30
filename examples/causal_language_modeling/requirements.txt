@@ -3,4 +3,5 @@ accelerate
 evaluate
 deepspeed
 tqdm
-datasets
+dataclass-csv
+datasets==3.6.0
