@@ -481,6 +481,8 @@ class LoraModel(BaseTuner):
             uses_beam_search = isinstance(num_beams, int) and (num_beams > 1)
             original_adapter_names = adapter_names[:]
             if uses_beam_search:
+                if alora_offsets is not None:
+                    raise ValueError("Beam search not yet supported for aLoRA.")
                 if not isinstance(adapter_names, (list, tuple)):
                     raise TypeError(f"Got adapter names of type {type(adapter_names)}, expected a list of str.")
                 # When there is beam search, the inputs are repeated n times, thus we repeat each adapter name n times and
