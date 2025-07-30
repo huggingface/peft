@@ -685,6 +685,9 @@ class LoraConfig(PeftConfig):
             if self.use_dora:
                 raise ValueError("The argument lora_bias=True is not supported for DoRA, please pass use_dora=False")
 
+        if self.alora_invocation_tokens is not None and self.task_type is not "CAUSAL_LM":
+            raise ValueError("aLoRA is currently only supported for CAUSAL_LM task.")
+
         # Using post training conversion of modified base weights to restore their initial values PiSSA/CorDA/OLoRA cannot
         # be correctly done when using rslora + rank_pattern/alpha_pattern. We can't really know if the user intends
         # this when they'll eventually call save_pretrained (i.e. if they'll pass
