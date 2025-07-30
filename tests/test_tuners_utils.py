@@ -287,7 +287,9 @@ class PeftCustomKwargsTester(unittest.TestCase):
             config_kwargs = {"quantization_config": BitsAndBytesConfig(load_in_8bit=True)}
 
         with hub_online_once(model_id):
-            model = self.transformers_class_map[model_type].from_pretrained(model_id, device_map="auto", **config_kwargs)
+            model = self.transformers_class_map[model_type].from_pretrained(
+                model_id, device_map="auto", **config_kwargs
+            )
         config_cls = LoraConfig
         self._check_match_with_expected_target_modules(
             model_id, model, config_cls, initial_target_modules, expected_target_modules
