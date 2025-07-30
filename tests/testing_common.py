@@ -1039,8 +1039,7 @@ class PeftCommonTester:
         with torch.inference_mode():
             output_mixed = model(**dummy_input)[0]
             logits_mixed = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
-        # print(output_adapter0[1::3])
-        # print(output_mixed[1::3])
+
         assert torch.allclose(output_base[::3], output_mixed[::3], atol=atol, rtol=rtol)
         assert torch.allclose(output_adapter0[1::3], output_mixed[1::3], atol=atol, rtol=rtol)
         assert torch.allclose(output_adapter1[2::3], output_mixed[2::3], atol=atol, rtol=rtol)
