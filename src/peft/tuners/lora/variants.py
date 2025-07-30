@@ -663,5 +663,5 @@ def get_alora_offsets_for_generate(model: nn.module, *args, **kwargs):
             ):  # Should have been caught by current_input_ids
                 bs = kwargs["input_ids"].shape[0]
 
-            kwargs["alora_offsets"] = [None] * bs
+            kwargs["alora_offsets"] = None
     return kwargs
