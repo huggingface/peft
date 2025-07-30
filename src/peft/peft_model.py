@@ -1969,7 +1969,6 @@ class PeftModelForCausalLM(PeftModel):
             self.base_model.generation_config = self.generation_config
         try:
             if not peft_config.is_prompt_learning:
-                # for aLoRA, None otherwise.
                 kwargs = get_alora_offsets_for_generate(self, *args, **kwargs)
                 with self._enable_peft_forward_hooks(*args, **kwargs):
                     kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
