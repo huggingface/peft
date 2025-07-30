@@ -27,9 +27,10 @@ from peft.utils import CONFIG_NAME, SAFETENSORS_WEIGHTS_NAME
 
 def convert_bone_to_miss(bone_dir: Path, miss_dir: Path) -> None:
     """Convert Bone checkpoint files to MiSS format."""
-    bone_config_path = os.path.join(bone_dir, CONFIG_NAME)
-    miss_config_path = os.path.join(miss_dir, CONFIG_NAME)
-
+    bone_config_path = bone_dir / CONFIG_NAME
+    miss_config_path = miss_dir / CONFIG_NAME
+    if not os.path.exists(miss_dir):
+        os.makedirs(miss_dir, exist_ok=True)
     with open(bone_config_path, encoding='utf-8') as f:
         config = json.load(f)
 
@@ -39,8 +40,8 @@ def convert_bone_to_miss(bone_dir: Path, miss_dir: Path) -> None:
         json.dump(config, f, indent=2, ensure_ascii=False)
 
 
-    bone_weight_path = os.path.join(bone_dir, SAFETENSORS_WEIGHTS_NAME)
-    miss_weight_path = os.path.join(miss_dir, SAFETENSORS_WEIGHTS_NAME)
+    bone_weight_path = bone_dir / SAFETENSORS_WEIGHTS_NAME
+    miss_weight_path = miss_dir / SAFETENSORS_WEIGHTS_NAME
 
     new_data = {}
 
