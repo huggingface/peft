@@ -31,8 +31,8 @@ class RoadVariant(str, Enum):
 @dataclass
 class RoadConfig(PeftConfig):
     """
-    This is the configuration class to store the configuration of a [`RoadModel`]. Road adapter is proposed in
-    https://arxiv.org/pdf/2409.00119 .
+    This is the configuration class to store the configuration of a [`RoadModel`]. RoAd adapter is proposed in
+    https://arxiv.org/pdf/2409.00119.
 
     Args:
         variant (Union[`RoadVariant`, `str`]):
@@ -50,7 +50,7 @@ class RoadConfig(PeftConfig):
             Note that model hidden size (or hidden size per partition when used with tensor parallelism)
             must be divisible by group_size, so for very small models you might need to reduce this parameter.
         init_weights (`bool`):
-            Whether to perform initialization of Road weights.
+            Whether to perform initialization of RoAd weights.
         target_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
             names will be replaced. When passing a string, a regex match will be performed. When passing a list of
@@ -65,7 +65,7 @@ class RoadConfig(PeftConfig):
 
     variant: Union[str, RoadVariant] = field(
         default=RoadVariant.ROAD_1,
-        metadata={"help": ("Variant of the Road model to use. ")},
+        metadata={"help": ("Variant of the Road model to use.")},
     )
     group_size: int = field(
         default=64,

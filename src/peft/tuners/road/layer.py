@@ -51,6 +51,7 @@ class RoadLayer(BaseTunerLayer):
     """
 
     adapter_layer_names: tuple[str, ...] = ("road_theta", "road_alpha")
+    other_param_names: tuple[str, ...] = ("variant", "group_size")
 
     def __init__(self, base_layer: nn.Module, ephemeral_gpu_offload: bool = False, **kwargs) -> None:
         self.base_layer = base_layer

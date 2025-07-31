@@ -162,7 +162,7 @@ class RoadModel(BaseTuner):
             # no module could be matched
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
-                "`torch.nn.Linear` "
+                "`torch.nn.Linear`."
             )
 
         return new_module
