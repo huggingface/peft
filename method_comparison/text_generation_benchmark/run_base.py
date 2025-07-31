@@ -113,6 +113,7 @@ def run_base_model_benchmark(benchmark_config: BenchmarkConfig, print_fn=print) 
         max_new_tokens=benchmark_config.max_new_tokens,
         num_runs=benchmark_config.num_inference_runs,
         print_fn=print_fn,
+        category_generation_params=benchmark_config.category_generation_params,
     )
 
     # Create result structure
@@ -157,7 +158,6 @@ def main():
 
     # Configure print function based on verbosity
     print_fn = print if args.verbose else lambda *args, **kwargs: None
-
 
     default_experiment_path = "experiments/lora/lora_r8"
     experiment_name, benchmark_config = validate_experiment_path(default_experiment_path)

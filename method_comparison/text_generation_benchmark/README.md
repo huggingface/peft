@@ -4,7 +4,7 @@ The benchmarking suite uses a separate script, `run_base.py`, to measure base mo
 
 **Usage:**
 ```bash
-python run_base.py experiments/lora/lora_r8
+python run_base.py
 ```
 This will cache the base model inference results for the specified configuration. Subsequent runs of `run.py` will automatically load these cached results.
 

@@ -56,9 +56,7 @@ def load_base_results(model_id: str) -> Optional[dict]:
     return None
 
 
-def measure_inference_time(
-    model, tokenizer, prompts, max_new_tokens, num_runs, print_fn, category_generation_params=None
-):
+def measure_inference_time(model, tokenizer, prompts, max_new_tokens, num_runs, print_fn, category_generation_params):
     """Measure inference time for each prompt category."""
     inference_times = {}
     time_per_token = {}
@@ -81,7 +79,7 @@ def measure_inference_time(
             inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
 
             # Get category-specific max_new_tokens
-            cat_max_new_tokens = (category_generation_params.get(category, {}).get("max_new_tokens", max_new_tokens))
+            cat_max_new_tokens = category_generation_params.get(category, {}).get("max_new_tokens", max_new_tokens)
 
             for _ in range(num_runs):
                 # Measure inference time
@@ -221,8 +219,7 @@ def run_benchmark(
             base_inference_times = base_results["inference_results"]
         else:
             raise FileNotFoundError(
-                "No cached base results found. Please run `python run_base.py` first to generate "
-                "base model results."
+                "No cached base results found. Please run `python run_base.py` first to generate base model results."
             )
 
         # Load PEFT configuration from path or create dynamically
