@@ -47,7 +47,7 @@ from peft import (
     get_peft_model,
 )
 
-from .testing_common import PeftCommonTester
+from .testing_common import PeftCommonTester, hub_online_once
 from .testing_utils import device_count, load_dataset_english_quotes, set_init_weights_false
 
 
@@ -692,25 +692,27 @@ class TestDecoderModels(PeftCommonTester):
     )
     def test_save_pretrained_targeting_lora_to_embedding_layer(self, save_embedding_layers, tmp_path, peft_config):
         model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
-        model = AutoModelForCausalLM.from_pretrained(model_id)
-        model = get_peft_model(model, peft_config)
 
-        if save_embedding_layers == "auto":
-            # assert warning
-            msg_start = "Setting `save_embedding_layers` to `True` as embedding layers found in `target_modules`."
-            with pytest.warns(UserWarning, match=msg_start):
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            model = get_peft_model(model, peft_config)
+
+            if save_embedding_layers == "auto":
+                # assert warning
+                msg_start = "Setting `save_embedding_layers` to `True` as embedding layers found in `target_modules`."
+                with pytest.warns(UserWarning, match=msg_start):
+                    model.save_pretrained(tmp_path, save_embedding_layers=save_embedding_layers)
+            else:
                 model.save_pretrained(tmp_path, save_embedding_layers=save_embedding_layers)
-        else:
-            model.save_pretrained(tmp_path, save_embedding_layers=save_embedding_layers)
 
-        state_dict = safe_load_file(tmp_path / "adapter_model.safetensors")
-        contains_embedding = "base_model.model.model.embed_tokens.base_layer.weight" in state_dict
+            state_dict = safe_load_file(tmp_path / "adapter_model.safetensors")
+            contains_embedding = "base_model.model.model.embed_tokens.base_layer.weight" in state_dict
 
-        if save_embedding_layers in ["auto", True]:
-            assert contains_embedding
-            assert torch.allclose(
-                model.base_model.model.model.embed_tokens.base_layer.weight,
-                state_dict["base_model.model.model.embed_tokens.base_layer.weight"],
-            )
-        else:
-            assert not contains_embedding
+            if save_embedding_layers in ["auto", True]:
+                assert contains_embedding
+                assert torch.allclose(
+                    model.base_model.model.model.embed_tokens.base_layer.weight,
+                    state_dict["base_model.model.model.embed_tokens.base_layer.weight"],
+                )
+            else:
+                assert not contains_embedding

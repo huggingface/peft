@@ -250,7 +250,7 @@ def get_peft_model_state_dict(
             embedding_is_targeted = any(
                 match_target_against_key(config.target_modules, k)
                 for k, _ in model.get_base_model().named_modules()
-                if any(e in k for e in EMBEDDING_LAYER_NAMES)
+                if any(re.match(rf"(.*\.)?{e}$", k) for e in EMBEDDING_LAYER_NAMES)
             )
         elif config.target_modules:
             embedding_is_targeted = any(k in config.target_modules for k in EMBEDDING_LAYER_NAMES)
