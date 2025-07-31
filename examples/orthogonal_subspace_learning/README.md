@@ -5,13 +5,12 @@ This example shows how to wrap a pretrained model with SVD-decomposed weights to
 ```python
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from peft import wrap_model_with_osf, optim_wrapper
+from peft import OSFConfig, get_peft_model
 
 model = AutoModelForCausalLM.from_pretrained("gpt2")
-model = wrap_model_with_osf(model)  # add trainable low-rank parameters
+model = get_peft_model(model, OSFConfig())  # add trainable low-rank parameters
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
-optimizer = optim_wrapper(optimizer, model)
 
 tokenizer = AutoTokenizer.from_pretrained("gpt2")
 input_ids = tokenizer("Hello world", return_tensors="pt").input_ids

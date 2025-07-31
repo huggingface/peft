@@ -19,8 +19,5 @@ Helper functions for orthogonal subspace learning with Adaptive OSF.
 [[autodoc]] utils.osf_utils.create_osf_model_class
     - all
 
-[[autodoc]] utils.osf_utils.wrap_model_with_osf
-    - all
-
-[[autodoc]] utils.osf_utils.optim_wrapper
+[[autodoc]] utils.osf_utils.attach_gradient_hooks
     - all

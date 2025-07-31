@@ -24,13 +24,12 @@ from torch.nn import functional as F
 
 
 __all__ = [
+    "attach_gradient_hooks",
     "auto_generate_target_osf_config",
     "create_osf_model_class",
     "decompose_weight_matrix",
-    "optim_wrapper",
     "project_gradient_to_orthogonal_space",
     "reconstruct_weight_matrix",
-    "wrap_model_with_osf",
 ]
 
 
@@ -117,6 +116,29 @@ def project_gradient_to_orthogonal_space(svd_dict: dict[str, Any]) -> None:
             dV.copy_(local_dV)
 
 
+def attach_gradient_hooks(model: nn.Module) -> None:
+    """Attach gradient hooks to project OSF gradients automatically."""
+    if not hasattr(model, "svd_params"):
+        return
+    for safe_name, module_svd in model.svd_params.items():
+        svd_dict = {
+            "U_high": getattr(model, f"{safe_name}_U_high"),
+            "S_high": getattr(model, f"{safe_name}_S_high"),
+            "V_high": getattr(model, f"{safe_name}_V_high"),
+            "U_low": module_svd.U_low,
+            "S_low": module_svd.S_low,
+            "V_low": module_svd.V_low,
+        }
+
+        def hook(grad, svd=svd_dict):
+            project_gradient_to_orthogonal_space(svd)
+            return grad
+
+        module_svd.U_low.register_hook(hook)
+        module_svd.S_low.register_hook(hook)
+        module_svd.V_low.register_hook(hook)
+
+
 def auto_generate_target_osf_config(model: nn.Module) -> dict[str, int]:
     """Create a mapping from parameter names to ``top_k`` based on layer size."""
     target_patterns = [
@@ -150,6 +172,7 @@ def create_osf_model_class(base_cls: type) -> type:
             self.svd_params = nn.ModuleDict()
             if initialize_svd:
                 self._initialize_svd_parameters()
+                attach_gradient_hooks(self)
 
         @classmethod
         def from_pretrained(
@@ -171,6 +194,7 @@ def create_osf_model_class(base_cls: type) -> type:
             self.name_mapping = {}
             self.svd_params = nn.ModuleDict()
             self._initialize_svd_parameters()
+            attach_gradient_hooks(self)
 
         def _get_module_by_name(self, name: str):
             parts = name.split(".")
@@ -218,7 +242,6 @@ def create_osf_model_class(base_cls: type) -> type:
 
                     mod.forward = make_forward(safe_name, bias)
                     param.requires_grad = False
-                    mod._parameters.pop(attr, None)
 
         def _reconstruct_weight_by_safe_name(self, safe_name: str) -> torch.Tensor:
             U_high = getattr(self, f"{safe_name}_U_high")
@@ -272,42 +295,3 @@ def create_osf_model_class(base_cls: type) -> type:
 
     ModelWithOSF.__name__ = f"{base_cls.__name__}WithOSF"
     return ModelWithOSF
-
-
-def optim_wrapper(optimizer: torch.optim.Optimizer, model: nn.Module) -> torch.optim.Optimizer:
-    """Wrap ``optimizer.step`` to project gradients before each update."""
-    if not hasattr(model, "project_gradients"):
-        return optimizer
-
-    import types
-
-    orig_step = optimizer.step
-
-    def step(self, *args, **kwargs):
-        model.project_gradients()
-        return orig_step(*args, **kwargs)
-
-    optimizer.step = types.MethodType(step, optimizer)
-    return optimizer
-
-
-def wrap_model_with_osf(model: nn.Module, svd_config: dict[str, int] | None = None) -> nn.Module:
-    """Return a version of ``model`` where selected weights are decomposed using SVD.
-
-    Parameters ---------- model:
-        The model to wrap. It must expose a ``config`` attribute that will be passed to the wrapped class' constructor.
-    svd_config:
-        A mapping from parameter names to ``top_k`` ranks. If not provided, it is automatically generated based on the
-        layer shapes using :func:`auto_generate_target_osf_config`.
-
-    Returns ------- ``nn.Module``
-        A new model instance with the same weights as ``model`` but with trainable low-rank parameters and frozen
-        high-rank components.
-    """
-
-    svd_config = svd_config or auto_generate_target_osf_config(model)
-    OSFCls = create_osf_model_class(model.__class__)
-    wrapped = OSFCls(model.config, svd_config=svd_config, initialize_svd=False)
-    wrapped.load_state_dict(model.state_dict())
-    wrapped.reinitialize_svd()
-    return wrapped

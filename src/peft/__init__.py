@@ -110,6 +110,7 @@ from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     PeftType,
     TaskType,
+    attach_gradient_hooks,
     auto_generate_target_osf_config,
     bloom_model_postprocess_past_key_value,
     cast_mixed_precision_params,
@@ -117,14 +118,12 @@ from .utils import (
     decompose_weight_matrix,
     get_peft_model_state_dict,
     load_peft_weights,
-    optim_wrapper,
     prepare_model_for_kbit_training,
     project_gradient_to_orthogonal_space,
     reconstruct_weight_matrix,
     replace_lora_weights_loftq,
     set_peft_model_state_dict,
     shift_tokens_right,
-    wrap_model_with_osf,
 )
 
 
@@ -211,6 +210,7 @@ __all__ = [
     "VeraModel",
     "XLoraConfig",
     "XLoraModel",
+    "attach_gradient_hooks",
     "auto_generate_target_osf_config",
     "bloom_model_postprocess_past_key_value",
     "cast_mixed_precision_params",
@@ -225,12 +225,10 @@ __all__ = [
     "initialize_lora_eva_weights",
     "inject_adapter_in_model",
     "load_peft_weights",
-    "optim_wrapper",
     "prepare_model_for_kbit_training",
     "project_gradient_to_orthogonal_space",
     "reconstruct_weight_matrix",
     "replace_lora_weights_loftq",
     "set_peft_model_state_dict",
     "shift_tokens_right",
-    "wrap_model_with_osf",
 ]

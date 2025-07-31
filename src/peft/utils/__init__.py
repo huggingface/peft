@@ -56,13 +56,12 @@ from .other import (
 from .peft_types import PeftType, TaskType, register_peft_method
 from .save_and_load import get_peft_model_state_dict, load_peft_weights, set_peft_model_state_dict
 from .osf_utils import (
+    attach_gradient_hooks,
     auto_generate_target_osf_config,
     create_osf_model_class,
     decompose_weight_matrix,
-    optim_wrapper,
     project_gradient_to_orthogonal_space,
     reconstruct_weight_matrix,
-    wrap_model_with_osf,
 )
 
 
@@ -95,6 +94,7 @@ __all__ = [
     "_prepare_prompt_learning_config",
     "_set_adapter",
     "_set_trainable",
+    "attach_gradient_hooks",
     "auto_generate_target_osf_config",
     "bloom_model_postprocess_past_key_value",
     "cast_mixed_precision_params",
@@ -108,7 +108,6 @@ __all__ = [
     "infer_device",
     "load_peft_weights",
     "map_cache_to_layer_device_map",
-    "optim_wrapper",
     "prepare_model_for_kbit_training",
     "project_gradient_to_orthogonal_space",
     "reconstruct_weight_matrix",
@@ -118,5 +117,4 @@ __all__ = [
     "set_peft_model_state_dict",
     "shift_tokens_right",
     "transpose",
-    "wrap_model_with_osf",
 ]

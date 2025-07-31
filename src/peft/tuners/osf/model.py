@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import torch
 import torch.nn as nn
 
 from peft.tuners.tuners_utils import BaseTuner
 from peft.utils.osf_utils import (
+    attach_gradient_hooks,
     auto_generate_target_osf_config,
     create_osf_model_class,
 )
@@ -21,7 +21,9 @@ class OSFModel(BaseTuner):
     def _prepare_adapter_config(self, peft_config, model_config):
         return peft_config
 
-    def inject_adapter(self, model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True, low_cpu_mem_usage: bool = False) -> None:
+    def inject_adapter(
+        self, model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True, low_cpu_mem_usage: bool = False
+    ) -> None:
         svd_cfg = self.peft_config[adapter_name].target_svd_config
         if svd_cfg is None:
             svd_cfg = auto_generate_target_osf_config(model)
@@ -30,6 +32,7 @@ class OSFModel(BaseTuner):
         osf_model = OSFCls(model.config, svd_config=svd_cfg, initialize_svd=False)
         osf_model.load_state_dict(model.state_dict())
         osf_model.reinitialize_svd()
+        attach_gradient_hooks(osf_model)
         self.model = osf_model
 
     def _create_and_replace(self, *args, **kwargs):

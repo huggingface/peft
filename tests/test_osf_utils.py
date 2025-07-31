@@ -1,10 +1,10 @@
 import torch
 from torch.testing import assert_close
 
+from peft import OSFConfig, get_peft_model
 from peft.utils.osf_utils import (
     decompose_weight_matrix,
     reconstruct_weight_matrix,
-    wrap_model_with_osf,
 )
 
 
@@ -29,11 +29,11 @@ class DummyModel(torch.nn.Module):
         return self.linear(x)
 
 
-def test_wrap_model_with_osf_preserves_output():
+def test_osf_get_peft_model_preserves_output():
     torch.manual_seed(0)
     model = DummyModel(DummyConfig())
     x = torch.randn(2, 8)
     y_ref = model(x)
-    wrapped = wrap_model_with_osf(model)
+    wrapped = get_peft_model(model, OSFConfig())
     y = wrapped(x)
     assert_close(y, y_ref, atol=1e-5, rtol=1e-5)
