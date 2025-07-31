@@ -216,7 +216,7 @@ def main(args):
 
     if args.enable_xformers_memory_efficient_attention:
         if accelerator.device.type == "xpu":
-            logger.warning("XPU hasn't support xformers yet, ignore it.")
+            logger.warning("XPU doesn't support xformers yet, xformers is not applied.")
         elif is_xformers_available():
             import xformers
 
