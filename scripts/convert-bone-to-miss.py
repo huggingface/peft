@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Convert Bone checkpoint to MiSS format."""
+
 import argparse
 import json
 import os
@@ -31,22 +32,20 @@ def convert_bone_to_miss(bone_dir: Path, miss_dir: Path) -> None:
     miss_config_path = miss_dir / CONFIG_NAME
     if not os.path.exists(miss_dir):
         os.makedirs(miss_dir, exist_ok=True)
-    with open(bone_config_path, encoding='utf-8') as f:
+    with open(bone_config_path, encoding="utf-8") as f:
         config = json.load(f)
 
     config["peft_type"] = "MISS"
 
-    with open(miss_config_path, 'w', encoding='utf-8') as f:
+    with open(miss_config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
-
 
     bone_weight_path = bone_dir / SAFETENSORS_WEIGHTS_NAME
     miss_weight_path = miss_dir / SAFETENSORS_WEIGHTS_NAME
 
     new_data = {}
 
-
-    with safe_open(bone_weight_path, framework='pt') as f:
+    with safe_open(bone_weight_path, framework="pt") as f:
         for old_key in f.keys():
             tensor = f.get_tensor(old_key)
             new_key = old_key.replace(".bone_", ".miss_")
@@ -56,20 +55,16 @@ def convert_bone_to_miss(bone_dir: Path, miss_dir: Path) -> None:
 
     print(f"Converted checkpoint saved at {miss_weight_path}")
 
+
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Convert Bone checkpoint to MiSS format."
-    )
-    parser.add_argument(
-        "bone_dir", type=Path, help="Directory containing Bone checkpoint files"
-    )
-    parser.add_argument(
-        "miss_dir", type=Path, help="Directory to save MiSS checkpoint files"
-    )
+    parser = argparse.ArgumentParser(description="Convert Bone checkpoint to MiSS format.")
+    parser.add_argument("bone_dir", type=Path, help="Directory containing Bone checkpoint files")
+    parser.add_argument("miss_dir", type=Path, help="Directory to save MiSS checkpoint files")
     args = parser.parse_args()
 
     args.miss_dir.mkdir(parents=True, exist_ok=True)
     convert_bone_to_miss(args.bone_dir, args.miss_dir)
+
 
 if __name__ == "__main__":
     main()

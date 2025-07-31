@@ -75,7 +75,6 @@ class MissLayer(BaseTunerLayer):
 
         self.miss_dropout[adapter_name] = miss_dropout_layer
 
-
         # Determine shape of MiSS weights
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):

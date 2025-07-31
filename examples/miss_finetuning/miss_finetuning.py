@@ -34,7 +34,9 @@ class ScriptArguments(SFTConfig):
     init_weights: Literal[True, "bat"] = field(
         default=True,
         metadata={
-            "help": ("True -> MiSS efficience and balance; `bat` -> Bat, `mini` -> smaller MiSS efficience and balance"),
+            "help": (
+                "True -> MiSS efficience and balance; `bat` -> Bat, `mini` -> smaller MiSS efficience and balance"
+            ),
         },
     )
     miss_r: int = field(default=16)

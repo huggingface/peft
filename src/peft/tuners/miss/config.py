@@ -34,9 +34,9 @@ class MissConfig(PeftConfig):
         miss_dropout (`float`):
             The dropout probability for MiSS layers.
         mini_r (`int`):
-            The rank of MiSS corresponds to a low-rank decomposition along the out_features dimension.
-            When you set `init_weights=mini`, you need to set `mini_r`. Please make sure that `out_features` is
-            divisible by `mini_r`.
+            The rank of MiSS corresponds to a low-rank decomposition along the out_features dimension. When you set
+            `init_weights=mini`, you need to set `mini_r`. Please make sure that `out_features` is divisible by
+            `mini_r`.
         target_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
             names will be replaced. When passing a string, a regex match will be performed. When passing a list of

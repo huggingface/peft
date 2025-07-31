@@ -124,6 +124,6 @@ class BoneConfig(PeftConfig):
             raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
 
         warnings.warn(
-            "Bone will be removed in v0.18.0 of PEFT, use `MissConfig` instead. "
+            "Bone will be removed in v0.19.0 of PEFT, use `MissConfig` instead. "
             "If you already have a Bone checkpoint, you can use `/scripts/convert-bone-to-miss.py` to convert it into "
         )
