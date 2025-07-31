@@ -4,3 +4,4 @@ evaluate
 deepspeed
 tqdm
 datasets
+scikit-learn
