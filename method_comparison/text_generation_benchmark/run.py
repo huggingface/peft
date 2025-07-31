@@ -221,9 +221,9 @@ def run_benchmark(
             base_inference_times = base_results["inference_results"]
         else:
             raise FileNotFoundError(
-        "No cached base results found. Please run run_base.py first to generate "
-        f"base model results for {benchmark_config.model_id}."
-    )
+                "No cached base results found. Please run `python run_base.py` first to generate "
+                "base model results."
+            )
 
         # Load PEFT configuration from path or create dynamically
         try:
