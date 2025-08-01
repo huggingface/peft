@@ -40,11 +40,22 @@ cd peft/examples/boft_dreambooth
 
 Set up your environment: install PEFT, and all the required libraries. At the time of writing this guide we recommend installing PEFT from source. The following environment setup should work on A100 and H100:
 
+### CUDA
 ```bash
 conda create --name peft python=3.10
 conda activate peft
 conda install pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=11.8 -c pytorch -c nvidia
 conda install xformers -c xformers
+pip install -r requirements.txt
+pip install git+https://github.com/huggingface/peft
+```
+The follwing environment setuo is validated work on Intel XPU:
+
+### Intel XPU
+```bash
+conda create --name peft python=3.10
+conda activate peft
+pip install pip install torch==2.8.0.dev20250615+xpu torchvision==0.23.0.dev20250615+xpu torchaudio==2.8.0.dev20250615+xpu --index-url https://download.pytorch.org/whl/nightly/xpu --no-cache-dir
 pip install -r requirements.txt
 pip install git+https://github.com/huggingface/peft
 ```
