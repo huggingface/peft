@@ -744,7 +744,9 @@ def main(args):
         print(text_encoder)
 
     if args.enable_xformers_memory_efficient_attention:
-        if is_xformers_available():
+        if accelerator.device.type == "xpu":
+            logger.warn("XPU hasn't support xformers yet, ignore it.")
+        elif is_xformers_available():
             unet.enable_xformers_memory_efficient_attention()
         else:
             raise ValueError("xformers is not available. Make sure it is installed correctly")
@@ -1046,9 +1048,15 @@ def main(args):
 
         # Printing the accelerator memory usage details such as allocated memory, peak memory, and total memory usage
         if not args.no_tracemalloc:
-            accelerator.print(f"{accelerator.device.type.upper()} Memory before entering the train : {b2mb(tracemalloc.begin)}")
-            accelerator.print(f"{accelerator.device.type.upper()} Memory consumed at the end of the train (end-begin): {tracemalloc.used}")
-            accelerator.print(f"{accelerator.device.type.upper()} Peak Memory consumed during the train (max-begin): {tracemalloc.peaked}")
+            accelerator.print(
+                f"{accelerator.device.type.upper()} Memory before entering the train : {b2mb(tracemalloc.begin)}"
+            )
+            accelerator.print(
+                f"{accelerator.device.type.upper()} Memory consumed at the end of the train (end-begin): {tracemalloc.used}"
+            )
+            accelerator.print(
+                f"{accelerator.device.type.upper()} Peak Memory consumed during the train (max-begin): {tracemalloc.peaked}"
+            )
             accelerator.print(
                 f"{accelerator.device.type.upper()} Total Peak Memory consumed during the train (max): {tracemalloc.peaked + b2mb(tracemalloc.begin)}"
             )
