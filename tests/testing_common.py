@@ -1615,6 +1615,7 @@ class PeftCommonTester:
             "SHIRA",
             "BONE",
             "C3A",
+            "ROAD",
         ):
             with pytest.raises(AttributeError):
                 model = model.unload()
