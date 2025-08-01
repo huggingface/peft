@@ -742,7 +742,9 @@ class BaseTuner(nn.Module, ABC):
                     if isinstance(target, BaseTunerLayer) and target.__class__.__name__ != "ParamWrapper":
                         raise ValueError(
                             f"Trying to wrap an `nn.Parameter` of layer '{target_name}' of type "
-                            f"{type(target).__name__}, which is not a valid target."
+                            f"{type(target).__name__}, which is not a valid target. Make sure that this layer is not "
+                            "also targeted with `target_modules`. For some models, PEFT will do this automatically, "
+                            "try setting `target_modules=[]` to prevent it."
                         )
 
                     self._check_target_module_compatiblity(peft_config, model, target_name)

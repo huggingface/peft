@@ -1767,10 +1767,9 @@ class _LoraParameterProxy(nn.Module):
     Intended to be used in conjunction with `nn.utils.parametrize`, see `ParamWrapper`.
     """
 
-    def __init__(self, delta_weight, num_experts):
+    def __init__(self, delta_weight):
         super().__init__()
         self.delta_weight = delta_weight
-        self.num_experts = num_experts
 
     def forward(self, W):
         with nn.utils.parametrize.cached():
@@ -1998,7 +1997,7 @@ class ParamWrapper(nn.Module, LoraLayer):
         base_layer = self.get_base_layer()
         requires_grad_before = self.get_param().requires_grad
         nn.utils.parametrize.register_parametrization(
-            base_layer, self.parameter_name, _LoraParameterProxy(delta_weight, num_experts=self.num_experts)
+            base_layer, self.parameter_name, _LoraParameterProxy(delta_weight)
         )
         # set requires_grad, as it defaults to False
         base_layer.parametrizations[self.parameter_name].original.requires_grad_(requires_grad_before)
