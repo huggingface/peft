@@ -884,6 +884,7 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_weights": False, "r": 2},
         {"target_modules": ["lin1"], "init_weights": False, "r": 2},
     ),
+    # Not testing "mini" initialization targeting the same layer, because The matrix is initialized to all zeros in MiSS-mini mode.
     (
         "VBLoRA Same",
         "vblora",
