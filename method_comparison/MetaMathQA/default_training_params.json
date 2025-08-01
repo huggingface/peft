@@ -22,5 +22,6 @@
     "max_length": 800,
     "max_new_tokens": 300
   },
-  "query_template": "Question: {query} Think step by step.\nAnswer:"
+  "query_template": "Question: {query} Think step by step.\nAnswer:",
+  "fast_forward": false
 }
