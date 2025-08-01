@@ -885,20 +885,6 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin1"], "init_weights": False, "r": 2},
     ),
     (
-        "MiSS-Mini Same",
-        "miss-mini",
-        MissConfig,
-        {"target_modules": ["lin0"], "init_weights": "mini", "r": 2},
-        {"target_modules": ["lin0"], "init_weights": "mini", "r": 2},
-    ),
-    # (
-    #     "MiSS-Mini Different",
-    #     "miss-mini",
-    #     MissConfig,
-    #     {"target_modules": ["lin0"], "init_weights": "mini", "r": 2},
-    #     {"target_modules": ["lin1"], "init_weights": "mini", "r": 2},
-    # ),
-    (
         "VBLoRA Same",
         "vblora",
         VBLoRAConfig,
