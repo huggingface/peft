@@ -386,9 +386,28 @@ class LoraModel(BaseTuner):
         return config
 
     def _set_adapter_layers(self, enabled: bool = True) -> None:
+        """
+        Enable or disable adapter layers via their proper API, safe under FSDP.
+
+        Args:
+            enabled (bool): Whether to enable the adapter layers.
+        """
+        # Lazily import to avoid circular dependencies
+        from peft.tuners.tuners_utils import BaseTunerLayer
+        from peft.utils import AuxiliaryTrainingWrapper, ModulesToSaveWrapper
+
         for module in self.model.modules():
+            # The new implementation in the latest PEFT versions check for AuxiliaryTrainingWrapper
             if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
-                module.enable_adapters(enabled)
+                target = module
+                if isinstance(module, ModulesToSaveWrapper):
+                    # Defensively unwrap the module to find the target layer
+                    inner = getattr(module, "module", None) or getattr(module, "wrapped_module", None)
+                    if inner is not None:
+                        target = inner
+
+                # Directly call the public API, as intended
+                target.enable_adapters(enabled=enabled)
 
     def enable_adapter_layers(self) -> None:
         """Enable all adapters.
