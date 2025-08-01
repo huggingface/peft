@@ -11,7 +11,7 @@ from peft import AdaLoraConfig, PeftConfig, PeftModel, TaskType, get_peft_model
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-device = "xpu" if torch.xpu.is_available() else "cuda"
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
 model_name_or_path = "facebook/bart-base"
 tokenizer_name_or_path = "facebook/bart-base"
 
@@ -160,7 +160,7 @@ peft_model_id = f"{model_name_or_path}_{peft_config.peft_type}_{peft_config.task
 model.save_pretrained(peft_model_id)
 
 
-ckpt = f"{peft_model_id}/adapter_model.bin"
+ckpt = f"{peft_model_id}/adapter_model.safetensors"
 # get_ipython().system('du -h $ckpt')
 
 
