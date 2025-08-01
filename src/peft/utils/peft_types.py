@@ -44,6 +44,7 @@ class PeftType(str, enum.Enum):
     - RANDLORA
     - SHIRA
     - C3A
+    - WAVEFT
     """
 
     PROMPT_TUNING = "PROMPT_TUNING"
@@ -73,6 +74,7 @@ class PeftType(str, enum.Enum):
     SHIRA = "SHIRA"
     C3A = "C3A"
 
+    WAVEFT = "WAVEFT"
 
 class TaskType(str, enum.Enum):
     """
