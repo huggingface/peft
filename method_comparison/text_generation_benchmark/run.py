@@ -296,7 +296,7 @@ def run_benchmark(
     except Exception as exc:
         print_fn(f"Benchmark failed with error: {exc}")
         result.status = BenchmarkStatus.FAILED
-        e_main_benchmark = exc 
+        e_main_benchmark = exc
     end_time = time.perf_counter()
     error_message = str(e_main_benchmark) if e_main_benchmark is not None else None
 

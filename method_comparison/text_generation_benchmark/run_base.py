@@ -40,7 +40,6 @@ from utils import (
     BenchmarkConfig,
     get_memory_usage,
     init_cuda,
-    validate_experiment_path,
 )
 
 
@@ -148,7 +147,6 @@ def main():
 
     default_config_path = os.path.join(os.path.dirname(__file__), "default_benchmark_params.json")
     benchmark_config = BenchmarkConfig.from_json(default_config_path)
-    
 
     model_name = benchmark_config.model_id.replace("/", "_").replace("-", "_")
     base_results_dir = os.path.join(os.path.dirname(__file__), "base_results")
