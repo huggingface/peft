@@ -49,25 +49,20 @@ def run_base_model_benchmark(benchmark_config: BenchmarkConfig, print_fn=print) 
 
     print_fn(f"Running base model benchmark for: {benchmark_config.model_id}")
 
-    # Initialize CUDA
     print_fn("Initializing CUDA...")
     init_cuda()
 
-    # Set random seed
     set_seed(benchmark_config.seed)
 
-    # Load base model and tokenizer
     print_fn(f"Loading base model: {benchmark_config.model_id}")
     tokenizer = AutoTokenizer.from_pretrained(benchmark_config.model_id)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Configure model loading parameters
     model_kwargs = {
         "device_map": "auto" if torch.cuda.is_available() else None,
     }
 
-    # Add dtype configuration
     if benchmark_config.dtype == "float32":
         model_kwargs["torch_dtype"] = torch.float32
     elif benchmark_config.dtype == "float16":
@@ -75,7 +70,6 @@ def run_base_model_benchmark(benchmark_config: BenchmarkConfig, print_fn=print) 
     elif benchmark_config.dtype == "bfloat16":
         model_kwargs["torch_dtype"] = torch.bfloat16
 
-    # Add quantization if needed
     if benchmark_config.use_8bit:
         model_kwargs["quantization_config"] = BitsAndBytesConfig(
             load_in_8bit=True, llm_int8_enable_fp32_cpu_offload=True
@@ -88,14 +82,11 @@ def run_base_model_benchmark(benchmark_config: BenchmarkConfig, print_fn=print) 
             bnb_4bit_quant_type="nf4",
         )
 
-    # Load the base model
     model = AutoModelForCausalLM.from_pretrained(benchmark_config.model_id, **model_kwargs)
 
-    # Track memory after base model load
     ram, gpu_allocated, gpu_reserved = get_memory_usage()
     print_fn(f"Memory after model load - RAM: {ram:.2f}MB, GPU: {gpu_allocated:.2f}MB")
 
-    # Prepare benchmark prompts
     print_fn("Preparing benchmark prompts...")
     prompts = prepare_benchmark_prompts(
         config=benchmark_config.to_dict(),
@@ -116,7 +107,6 @@ def run_base_model_benchmark(benchmark_config: BenchmarkConfig, print_fn=print) 
         category_generation_params=benchmark_config.category_generation_params,
     )
 
-    # Create result structure
     result = {
         "model_id": benchmark_config.model_id,
         "benchmark_config": benchmark_config.to_dict(),
@@ -134,11 +124,9 @@ def run_base_model_benchmark(benchmark_config: BenchmarkConfig, print_fn=print) 
 
 def save_base_results(result: dict, model_id: str) -> str:
     """Save base model results with a filename based on model and config."""
-    # Create results directory for base models
     base_results_dir = os.path.join(os.path.dirname(__file__), "base_results")
     os.makedirs(base_results_dir, exist_ok=True)
 
-    # Create filename based on model and config
     model_name = model_id.replace("/", "_").replace("-", "_")
     filename = f"base_{model_name}.json"
     filepath = os.path.join(base_results_dir, filename)
@@ -156,14 +144,12 @@ def main():
     parser.add_argument("--force", "-f", action="store_true", help="Force re-run even if results exist")
     args = parser.parse_args()
 
-    # Configure print function based on verbosity
     print_fn = print if args.verbose else lambda *args, **kwargs: None
 
     default_config_path = os.path.join(os.path.dirname(__file__), "default_benchmark_params.json")
     benchmark_config = BenchmarkConfig.from_json(default_config_path)
     
 
-    # Check if results already exist
     model_name = benchmark_config.model_id.replace("/", "_").replace("-", "_")
     base_results_dir = os.path.join(os.path.dirname(__file__), "base_results")
     filename = f"base_{model_name}.json"
@@ -176,14 +162,11 @@ def main():
 
     print_fn(f"Running base model benchmark for: {benchmark_config.model_id}")
 
-    # Run the base model benchmark
     result = run_base_model_benchmark(benchmark_config, print_fn=print_fn)
 
-    # Save results
     saved_path = save_base_results(result, benchmark_config.model_id)
     print(f"Base model results saved to: {saved_path}")
 
-    # Print summary
     print("\nBase Model Benchmark Summary:")
     print(f"Model: {result['model_id']}")
     print(

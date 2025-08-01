@@ -149,7 +149,7 @@ def run_benchmark(
     result.save()
 
     start_time = time.perf_counter()
-    e_main_benchmark: Optional[Exception] = None  # Initialize e for the main try-except
+    e_main_benchmark: Optional[Exception] = None
 
     try:
         print_fn("Initializing CUDA...")
