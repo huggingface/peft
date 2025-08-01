@@ -65,10 +65,6 @@ class LNTuningModel(BaseTuner):
 
     prefix: str = "ln_tuning_"
 
-    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
-        # self.adapter_name = adapter_name
-        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
-
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
         try:

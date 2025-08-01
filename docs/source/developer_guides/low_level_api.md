@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # Adapter injection
 
-With PEFT, you can inject trainable adapters into any `torch` module which allows you to use adapter methods without relying on the modeling classes in PEFT. Currently, PEFT supports injecting [LoRA](../conceptual_guides/adapter#low-rank-adaptation-lora), [AdaLoRA](../conceptual_guides/adapter#adaptive-low-rank-adaptation-adalora), and [IA3](../conceptual_guides/ia3) into models because for these adapters, inplace modification of the model is sufficient for finetuning it.
+With PEFT, you can inject trainable adapters into any `torch` module which allows you to use adapter methods without relying on the modeling classes in PEFT. This works for all adapters except for those based on prompt learning (e.g. prefix tuning or p-tuning).
 
 Check the table below to see when you should inject adapters.
 
@@ -86,6 +86,28 @@ DummyModel(
   (lm_head): Linear(in_features=10, out_features=10, bias=True)
 )
 ```
+
+### Injection based on a `state_dict`
+
+Sometimes, it is possible that there is a PEFT adapter checkpoint but the corresponding PEFT config is not known for whatever reason. To inject the PEFT layers for this checkpoint, you would usually have to reverse-engineer the corresponding PEFT config, most notably the `target_modules` argument, based on the `state_dict` from the checkpoint. This can be cumbersome and error prone. To avoid this, it is also possible to call [`inject_adapter_in_model`] and pass the loaded `state_dict` as an argument:
+
+```python
+from safetensors.torch import load_file
+
+model = ...
+state_dict = load_file(<path-to-safetensors-file>)
+lora_config = LoraConfig(...)
+model = inject_adapter_in_model(lora_config, model, state_dict=state_dict)
+```
+
+In this case, PEFT will use the `state_dict` as reference for which layers to target instead of using the PEFT config. As a user, you don't have to set the exact `target_modules` of the PEFT config for this to work. However, you should still pass a PEFT config of the right type, in this example `LoraConfig`, you can leave the `target_modules` as `None`.
+
+Be aware that this still only creates the uninitialized PEFT layers, the values from the `state_dict` are not used to populate the model weights. To populate the weights, proceed with calling [`set_peft_model_state_dict`] as described below.
+
+⚠️ Note that if there is a mismatch between what is configured in the PEFT config and what is found in the `state_dict`, PEFT will warn you about this. You can ignore the warning if you know that the PEFT config is not correctly specified.
+
+> [!WARNING]
+> If the original PEFT adapters was using `target_parameters` instead of `target_modules`, injecting from a `state_dict` will not work correctly. In this case, it is mandatory to use the correct PEFT config for injection.
 
 ## Saving the model
 
