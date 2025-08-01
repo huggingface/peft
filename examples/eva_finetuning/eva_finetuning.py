@@ -21,8 +21,7 @@ from utils import DataCollator, TokenizerMetaMath
 from peft import EvaConfig, LoraConfig, get_peft_model, initialize_lora_eva_weights
 
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-
+DEVICE = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
 
 # config
 model_name = "meta-llama/Llama-3.1-8B"
@@ -69,7 +68,7 @@ peft_config = LoraConfig(
     r=rank, lora_alpha=alpha, target_modules=target_modules, init_lora_weights="eva", eva_config=eva_config
 )
 
-# move model to GPU
+# move model to accelerator
 model = model.to(DEVICE)
 
 # to optimize memory usage during eva initialization, set low_cpu_mem_usage=True
@@ -78,6 +77,7 @@ initialize_lora_eva_weights(peft_model, dataloader)
 
 # setup training arguments
 training_args = TrainingArguments(
+    report_to="none",
     per_device_train_batch_size=batch_size,
     learning_rate=learning_rate,
     gradient_accumulation_steps=gradient_accumulation_steps,
