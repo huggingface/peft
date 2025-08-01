@@ -43,6 +43,7 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
+    MissConfig,
     OFTConfig,
     PeftModel,
     PeftType,
@@ -134,6 +135,11 @@ CONFIG_TESTING_KWARGS = (
         "target_modules": None,
         "r": 2,
     },
+    # MiSS
+    {
+        "target_modules": None,
+        "r": 2,
+    },
     # LoRA + trainable_tokens
     {
         "r": 8,
@@ -175,6 +181,7 @@ CLASSES_MAPPING = {
     "vblora": (VBLoRAConfig, CONFIG_TESTING_KWARGS[10]),
     "oft": (OFTConfig, CONFIG_TESTING_KWARGS[11]),
     "bone": (BoneConfig, CONFIG_TESTING_KWARGS[12]),
+    "miss": (MissConfig, CONFIG_TESTING_KWARGS[12]),
     "lora+trainable_tokens": (LoraConfig, CONFIG_TESTING_KWARGS[13]),
     "randlora": (RandLoraConfig, CONFIG_TESTING_KWARGS[14]),
 }
@@ -832,6 +839,7 @@ class PeftCommonTester:
             PeftType.BOFT,
             PeftType.HRA,
             PeftType.BONE,
+            PeftType.MISS,
         ]
 
         if ("gpt2" in model_id.lower()) and (config_cls == IA3Config):
@@ -1444,6 +1452,7 @@ class PeftCommonTester:
             PeftType.HRA,
             PeftType.VBLORA,
             PeftType.BONE,
+            PeftType.MISS,
         ]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
@@ -1517,6 +1526,7 @@ class PeftCommonTester:
             PeftType.HRA,
             PeftType.VBLORA,
             PeftType.BONE,
+            PeftType.MISS,
         ]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
@@ -1615,6 +1625,7 @@ class PeftCommonTester:
             "SHIRA",
             "BONE",
             "C3A",
+            "MISS",
         ):
             with pytest.raises(AttributeError):
                 model = model.unload()

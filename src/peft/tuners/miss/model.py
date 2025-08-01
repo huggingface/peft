@@ -1,4 +1,4 @@
-# Copyright 2025-present the HuggingFace Inc. team.
+# Copyright 2024-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,77 +12,100 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from __future__ import annotations
-
 import warnings
 from dataclasses import asdict
 from enum import Enum
 from typing import Optional
 
 import torch
-import torch.nn as nn
+from torch import nn
 from tqdm import tqdm
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
 from peft.utils import (
-    TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
     _get_submodules,
 )
 
-from .config import ShiraConfig
-from .layer import Linear, ShiraLayer
+from .config import MissConfig
+from .layer import MissLayer, MissLinear
 
 
-class ShiraModel(BaseTuner):
+class MissModel(BaseTuner):
     """
-    Creates a Sparse High Rank Adapter (SHiRA) Model from a pretrained model.
+    Creates Householder reflection adaptation (MiSS) model from a pretrained model. The method is described in
+    https://huggingface.co/papers/2409.15371
 
     Args:
-        model ([`~transformers.PreTrainedModel`]): The model to be adapted.
-        config ([`ShiraConfig`]): The configuration of the SHiRA model.
+        model (`torch.nn.Module`): The model to which the adapter tuner layers will be attached.
+        config ([`MissConfig`]): The configuration of the MiSS model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
+        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+            Create empty adapter weights on meta device. Useful to speed up the loading process.
 
     Returns:
-        `torch.nn.Module`: The SHiRA model.
+        `torch.nn.Module`: The MiSS model.
 
     Example:
-
         ```py
-        >>> from transformers import AutoModelForCausalLM
-        >>> from peft import ShiraConfig, get_peft_model
+        >>> from diffusers import StableDiffusionPipeline
+        >>> from peft import MissModel, MissConfig
 
-        >>> base_model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
-        >>> config = ShiraConfig(r=32)
-        >>> model = get_peft_model(base_model, config)
+        >>> config_te = MissConfig(
+        ...     r=8,
+        ...     target_modules=["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
+        ...     init_weights=True,
+        ... )
+        >>> config_unet = MissConfig(
+        ...     r=8,
+        ...     target_modules=[
+        ...         "proj_in",
+        ...         "proj_out",
+        ...         "to_k",
+        ...         "to_q",
+        ...         "to_v",
+        ...         "to_out.0",
+        ...         "ff.net.0.proj",
+        ...         "ff.net.2",
+        ...     ],
+        ...     init_weights=True,
+        ... )
+
+        >>> model = StableDiffusionPipeline.from_pretrained("runwayml/stable-diffusion-v1-5")
+        >>> model.text_encoder = MissModel(model.text_encoder, config_te, "default")
+        >>> model.unet = MissModel(model.unet, config_unet, "default")
         ```
 
     **Attributes**:
-        - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
-        - **peft_config** ([`ShiraConfig`]): The configuration of the SHiRA model.
+        - **model** ([`~torch.nn.Module`]) -- The model to be adapted.
+        - **peft_config** ([`MissConfig`]): The configuration of the MiSS model.
     """
 
-    prefix: str = "shira_"
+    prefix: str = "miss_"
 
-    def _check_new_adapter_config(self, config: ShiraConfig) -> None:
+    def _check_new_adapter_config(self, config: MissConfig) -> None:
         """
         A helper method to check the config when a new adapter is being added.
 
         Raise a ValueError if there is something wrong with the config or if it conflicts with existing adapters.
 
         """
-        for existing_config in self.peft_config.values():
-            if existing_config is config:
-                # skip the current config
-                continue
+        # TODO: there should be a check if any of the existing adapters actually has bias != "none", or else the check
+        # does not fully correspond to the error message.
+        if (len(self.peft_config) > 1) and (config.bias != "none"):
+            raise ValueError(
+                f"{self.__class__.__name__} supports only 1 adapter with bias. When using multiple adapters, "
+                "set bias to 'none' for all adapters."
+            )
 
     @staticmethod
-    def _check_target_module_exists(shira_config, key):
-        return check_target_module_exists(shira_config, key)
+    def _check_target_module_exists(miss_config, key):
+        return check_target_module_exists(miss_config, key)
 
     def _create_and_replace(
         self,
-        shira_config,
+        miss_config,
         adapter_name,
         target,
         target_name,
@@ -94,35 +117,31 @@ class ShiraModel(BaseTuner):
             raise ValueError("Current Key shouldn't be `None`")
 
         bias = hasattr(target, "bias") and target.bias is not None
-        kwargs = {}
+        kwargs = {
+            "r": miss_config.r,
+            "mini_r": miss_config.mini_r,
+            "miss_dropout": miss_config.miss_dropout,
+            "init_weights": miss_config.init_weights,
+        }
         kwargs["bias"] = bias
-        if shira_config.mask_type == "random":
-            kwargs["random_seed"] = shira_config.random_seed
 
-        for k, v in optional_kwargs.items():
-            kwargs[k] = v
-
-        if isinstance(target, Linear):
-            mask = (
-                shira_config.mask_fn(target.base_layer, shira_config.r, **kwargs)
-                if shira_config.mask_fn is not None
-                else None
-            )
-            target.update_layer(
-                adapter_name,
-                mask,
-                shira_config.r,
-                init_weights=shira_config.init_weights,
-            )
-        else:
-            new_module = self._create_new_module(shira_config, adapter_name, target, **kwargs)
-            if adapter_name not in self.active_adapter:
+        # If it is not a MissLayer, create a new module, else update it with new adapters
+        if not isinstance(target, MissLayer):
+            new_module = self._create_new_module(miss_config, adapter_name, target, **kwargs)
+            if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
+        else:
+            target.update_layer(
+                adapter_name,
+                r=miss_config.r,
+                init_weights=miss_config.init_weights,
+                miss_dropout=miss_config.miss_dropout,
+                mini_r=miss_config.mini_r,
+            )
 
-    @staticmethod
-    def _replace_module(parent, child_name, new_module, child):
+    def _replace_module(self, parent, child_name, new_module, child):
         setattr(parent, child_name, new_module)
         # It's not necessary to set requires_grad here, as that is handled by
         # _mark_only_adapters_as_trainable
@@ -146,7 +165,7 @@ class ShiraModel(BaseTuner):
         meta = torch.device("meta")
         # dispatch to correct device
         for name, module in new_module.named_modules():
-            if "shira_" in name:
+            if self.prefix in name:
                 if not any(p.device == meta for p in module.parameters()):
                     module.to(child.weight.device)
 
@@ -155,45 +174,35 @@ class ShiraModel(BaseTuner):
             if self.prefix not in n:
                 p.requires_grad = False
 
+        for active_adapter in self.active_adapters:
+            bias = self.peft_config[active_adapter].bias
+            if bias == "none":
+                continue
+
+            if bias == "all":
+                for n, p in model.named_parameters():
+                    if "bias" in n:
+                        p.requires_grad = True
+            elif bias == "miss_only":
+                for name, m in model.named_modules():
+                    if isinstance(m, MissLayer) and hasattr(m, "bias") and m.bias is not None:
+                        m.bias.requires_grad = True
+            else:
+                raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
+
     @staticmethod
-    def _create_new_module(shira_config, adapter_name, target, **kwargs):
-        fan_in_fan_out = shira_config.fan_in_fan_out
-
-        _ = kwargs.pop("bias", False)
-
+    def _create_new_module(miss_config, adapter_name, target, **kwargs):
         if isinstance(target, BaseTunerLayer):
             target_base_layer = target.get_base_layer()
         else:
             target_base_layer = target
 
         if isinstance(target_base_layer, torch.nn.Linear):
-            if fan_in_fan_out:
-                warnings.warn(
-                    "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
-                    "Setting fan_in_fan_out to False."
-                )
-                fan_in_fan_out = shira_config.fan_in_fan_out = False
+            new_module = MissLinear(target, adapter_name, **kwargs)
         else:
             raise ValueError(
-                f"Target module {target} is not supported. Currently, only the following modules are supported: "
-                "`torch.nn.Linear`."
+                f"Target module {target} is not supported. Currently, only `torch.nn.Linear` is supported."
             )
-
-        mask = (
-            shira_config.mask_fn(target_base_layer, shira_config.r, **kwargs)
-            if shira_config.mask_fn is not None
-            else None
-        )
-
-        new_module = Linear(
-            target,
-            mask,
-            adapter_name,
-            shira_config.r,
-            fan_in_fan_out,
-            init_weights=shira_config.init_weights,
-            **kwargs,
-        )
 
         return new_module
 
@@ -202,7 +211,7 @@ class ShiraModel(BaseTuner):
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
-            if name == "model":  # see #1892: prevent infinite recursion if class is not initialized
+            if name == "base_model":
                 raise
             return getattr(self.model, name)
 
@@ -224,11 +233,19 @@ class ShiraModel(BaseTuner):
         self._set_adapter_layers(enabled=True)
 
     def disable_adapter_layers(self):
+        for active_adapter in self.active_adapters:
+            val = self.peft_config[active_adapter].bias
+            if val != "none":
+                msg = (
+                    f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
+                    "output as the base model would without adaption."
+                )
+                warnings.warn(msg)
         self._set_adapter_layers(enabled=False)
 
     def set_adapter(self, adapter_name):
         for module in self.model.modules():
-            if isinstance(module, ShiraLayer):
+            if isinstance(module, MissLayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
@@ -238,10 +255,10 @@ class ShiraModel(BaseTuner):
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
         if peft_config.target_modules is None:
-            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING:
+            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
                 raise ValueError("Please specify `target_modules` in `peft_config`")
             peft_config.target_modules = set(
-                TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING[model_config["model_type"]]
+                TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
             )
         return peft_config
 
@@ -252,8 +269,8 @@ class ShiraModel(BaseTuner):
         safe_merge: bool = False,
         adapter_names: Optional[list[str]] = None,
     ):
-        # we cannot use self.prefix as we want to include non-trainable shira parameters
-        key_list = [key for key, _ in self.model.named_modules() if "shira" not in key]
+        self._unloading_checks(adapter_names)
+        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for key in tqdm(key_list, disable=not progressbar, desc=desc):
             try:
@@ -264,7 +281,6 @@ class ShiraModel(BaseTuner):
             if hasattr(target, "base_layer"):
                 if merge:
                     target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
-
                 self._replace_module(parent, target_name, target.get_base_layer(), target)
             elif isinstance(target, ModulesToSaveWrapper):
                 # save any additional trainable modules part of `modules_to_save`
@@ -272,7 +288,7 @@ class ShiraModel(BaseTuner):
 
         return self.model
 
-    def delete_adapter(self, adapter_name: str):
+    def delete_adapter(self, adapter_name: str) -> None:
         """
         Deletes an existing adapter.
 
@@ -283,23 +299,23 @@ class ShiraModel(BaseTuner):
             raise ValueError(f"Adapter {adapter_name} does not exist")
         del self.peft_config[adapter_name]
 
-        # we cannot use self.prefix as we want to include non-trainable shira parameters
-        key_list = [key for key, _ in self.model.named_modules() if "shira" not in key]
+        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         new_adapter = None
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
-            if isinstance(target, ShiraLayer):
+            if isinstance(target, MissLayer):
                 target.delete_adapter(adapter_name)
                 if new_adapter is None:
-                    new_adapter = target.active_adapter[:]
+                    new_adapter = target.active_adapters[:]
 
         self.active_adapter = new_adapter or []
+        self._delete_auxiliary_adapter(adapter_name, new_active_adapters=new_adapter)
 
     def merge_and_unload(
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
-    ):
+    ) -> torch.nn.Module:
         r"""
-        This method merges the Shira layers into the base model. This is needed if someone wants to use the base model
+        This method merges the MiSS layers into the base model. This is needed if someone wants to use the base model
         as a standalone model.
 
         Args:
@@ -308,30 +324,18 @@ class ShiraModel(BaseTuner):
             safe_merge (`bool`):
                 whether to activate the safe merging check to check if there is any potential Nan in the adapter
                 weights
-            adapter_names (`list[str]`, *optional*):
+            adapter_names (`List[str]`, *optional*):
                 The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
                 to `None`.
 
-        Example:
-
-        ```py
-        >>> from transformers import AutoModelForCausalLM
-        >>> from peft import ShiraConfig, get_peft_model
-
-        >>> base_model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
-        >>> config = ShiraConfig(r=32)
-        >>> model = get_peft_model(base_model, config)
-        >>> ## [Train the adapter] ##
-        >>> merged_model = model.merge_and_unload()
-        ```
         """
         return self._unload_and_optionally_merge(
             progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
         )
 
-    def unload(self):
+    def unload(self) -> torch.nn.Module:
         """
-        Gets back the base model by removing all the Shira modules without merging. This gives back the original base
+        Gets back the base model by removing all the miss modules without merging. This gives back the original base
         model.
         """
         return self._unload_and_optionally_merge(merge=False)
