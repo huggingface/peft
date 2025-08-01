@@ -31,6 +31,7 @@ from peft import (
     get_peft_model_state_dict,
     inject_adapter_in_model,
 )
+from peft.tuners import lora
 from peft.utils import ModulesToSaveWrapper
 
 from .testing_common import hub_online_once
@@ -82,7 +83,7 @@ class TestLowLevelFunctional:
         for key in peft_state_dict.keys():
             assert "lora" in key
 
-    def test_modules_to_save(selfv):
+    def test_modules_to_save(self):
         model = DummyModel()
 
         lora_config = LoraConfig(
@@ -139,7 +140,7 @@ class TestInjectAdapterFromStateDict:
         ],
         ids=["AdaLoRA", "IA3", "LoKr", "LoRA", "RandLoRA"],
     )
-    def test_inject_from_state_dict_and_from_config_target_same_layers(self, model_cls_and_id, config):
+    def test_inject_from_state_dict_and_from_config_target_same_layers(self, model_cls_and_id, config, recwarn):
         model_cls, model_id = model_cls_and_id
         config = copy.deepcopy(config)  # since PEFT may mutate it
 
@@ -151,8 +152,12 @@ class TestInjectAdapterFromStateDict:
             del model
 
             model = model_cls.from_pretrained(model_id)
-            # TODO check no warnings
+            # get other warnings, if any, out of the way
+            recwarn.clear()
+            # assure that this doesn't cause any warnings
             model = inject_adapter_in_model(config, model, state_dict=sd_before)
+            assert not recwarn.list
+
             sd_after = get_peft_model_state_dict(model)
 
             # We exepct the same keys and the same shapes of the weights. Don't check the values: injection is only
@@ -182,6 +187,81 @@ class TestInjectAdapterFromStateDict:
             assert sd_before.keys() == sd_after.keys()
             for key in sd_before.keys():
                 assert sd_before[key].shape == sd_after[key].shape
+
+    def test_inject_from_state_dict_transformers_irregular_targets(self):
+        # ensure that this works even if an "irregular" pattern is used, i.e. only targeting some modules on some layers
+        model_id = "facebook/opt-125m"
+        config = LoraConfig(
+            target_modules=r".*\.[0-5]\.self_attn\.v_proj|.*\.[4-7]\.self_attn\.k_proj",
+        )
+
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            model.add_adapter(config)
+            sd_before = get_peft_model_state_dict(model)
+            del model
+
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            model = inject_adapter_in_model(config, model, state_dict=sd_before)
+            sd_after = get_peft_model_state_dict(model)
+
+            # We exepct the same keys and the same shapes of the weights. Don't check the values: injection is only
+            # about creating the PEFT adapter, not about loading the actual weights
+            assert len(sd_before) > 0
+            assert sd_before.keys() == sd_after.keys()
+            for key in sd_before.keys():
+                assert sd_before[key].shape == sd_after[key].shape
+
+    def test_inject_from_state_dict_transformers_target_parameters_raises(self):
+        # Injecting from state_dict does not correctly identify target_parameters. This is because, just from looking at
+        # the state_dict, we cannot tell if the user intends to use target_modules or target_parameters. Currently, we
+        # just assume the former, thus applying normal lora.Linear etc. layers instead of lora.ParamWrapper. When we
+        # detect that the user tries to do this, we raise an error.
+        model_id = "facebook/opt-125m"
+        config = LoraConfig(target_modules=[], target_parameters=["q_proj.weight", "v_proj.weight"])
+
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            model.add_adapter(config)
+            sd = get_peft_model_state_dict(model)
+            del model
+
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            msg = "Trying to inject a PEFT adapter from a state_dict but the PEFT config uses `target_parameters`"
+            with pytest.raises(ValueError, match=msg):
+                inject_adapter_in_model(config, model, state_dict=sd)
+
+    @pytest.mark.xfail(
+        reason="Loading from state_dict with target_parameters fails", raises=AssertionError, strict=True
+    )
+    def test_inject_from_state_dict_transformers_target_parameters_fails(self):
+        # Injecting from state_dict does not correctly identify target_parameters. This is because, just from looking at
+        # the state_dict, we cannot tell if the user intends to use target_modules or target_parameters. Currently, we
+        # just assume the former, thus applying normal lora.Linear etc. layers instead of lora.ParamWrapper. When we
+        # don't detect that the user tries to do this, there is nothing that can be done.
+        model_id = "facebook/opt-125m"
+        config = LoraConfig(target_modules=[], target_parameters=["q_proj.weight", "v_proj.weight"])
+
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            model.add_adapter(config)
+            # sanity check:
+            for name, module in model.named_modules():
+                if name.endswith((".q_proj", ".v_proj")):
+                    assert isinstance(module, lora.ParamWrapper)
+
+            sd_before = get_peft_model_state_dict(model)
+            del model
+
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            config = LoraConfig()  # no target_parameters defined, we cannot know the original intent
+            model = inject_adapter_in_model(config, model, state_dict=sd_before)
+            sd_after = get_peft_model_state_dict(model)
+
+            # this fails, we get lora.Linear instances
+            for name, module in model.named_modules():
+                if name.endswith((".q_proj", ".v_proj")):
+                    assert isinstance(module, lora.ParamWrapper)
 
     def test_inject_from_state_dict_stable_diffusion(self):
         # same test as above, but with stable diffusion model and only testing LoRA

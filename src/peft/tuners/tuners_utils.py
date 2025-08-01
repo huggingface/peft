@@ -489,6 +489,12 @@ class BaseTuner(nn.Module, ABC):
 
         self._prepare_model(peft_config, model)
 
+        if getattr(peft_config, "target_parameters", []) and state_dict:
+            raise ValueError(
+                "Trying to inject a PEFT adapter from a state_dict but the PEFT config uses `target_parameters`. This "
+                "is not supported -- when using `target_parameters`, please inject the adapter without the state_dict."
+            )
+
         named_modules = list(model.named_modules())
         key_list = [key for key, _ in named_modules]
 
@@ -591,6 +597,7 @@ class BaseTuner(nn.Module, ABC):
                     targeted_modules_from_peft_config.append(key)
 
         if getattr(peft_config, "target_parameters", []):
+            # Note: We don't need to check for no state_dict being passed, since we already checked this earlier.
             self._inject_parameters(
                 peft_config=peft_config, model=model, adapter_name=adapter_name, low_cpu_mem_usage=low_cpu_mem_usage
             )
