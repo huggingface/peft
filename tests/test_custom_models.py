@@ -1259,7 +1259,7 @@ class ModelMha(nn.Module):
 
 
 class _LinearUsingParameter(nn.Module):
-    # TODO
+    # Linear layer equivalent
     def __init__(self, in_features, out_features, bias=None):
         super().__init__()
         self.in_features = in_features
@@ -1273,7 +1273,7 @@ class _LinearUsingParameter(nn.Module):
 
 
 class MlpUsingParameters(nn.Module):
-    # TODO
+    # MLP that uses layers whose parameters need to be targeted with target_parameters
     def __init__(self, bias=True):
         super().__init__()
 
