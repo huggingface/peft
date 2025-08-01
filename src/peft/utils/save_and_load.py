@@ -250,10 +250,13 @@ def get_peft_model_state_dict(
     #
     embedding_is_targeted = False
     if hasattr(config, "target_modules"):
-        if isinstance(config.target_modules, str) and config.target_modules != INCLUDE_LINEAR_LAYERS_SHORTHAND:
+        if isinstance(config.target_modules, str) and (config.target_modules != INCLUDE_LINEAR_LAYERS_SHORTHAND):
+            # `model` could be a PeftModel or something else like transformers/diffusers/..., in which case unwrapping is
+            # not needed.
+            _model = model.get_base_model() if hasattr(model, "get_base_model") else model
             embedding_is_targeted = any(
                 match_target_against_key(config.target_modules, k)
-                for k, _ in model.get_base_model().named_modules()
+                for k, _ in _model.named_modules()
                 if any(re.match(rf"(.*\.)?{e}$", k) for e in EMBEDDING_LAYER_NAMES)
             )
         elif config.target_modules:
