@@ -1,4 +1,4 @@
-transformers
+transformers<4.54.0
 accelerate
 evaluate
 deepspeed
