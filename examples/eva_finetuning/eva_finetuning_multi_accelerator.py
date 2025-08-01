@@ -113,7 +113,6 @@ initialize_lora_eva_weights(peft_model, eva_state_dict=eva_state_dict)
 
 # setup training arguments
 training_args = TrainingArguments(
-    report_to="none",
     per_device_train_batch_size=batch_size,
     learning_rate=learning_rate,
     gradient_accumulation_steps=gradient_accumulation_steps,
