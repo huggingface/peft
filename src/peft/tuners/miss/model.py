@@ -137,6 +137,8 @@ class MissModel(BaseTuner):
                 adapter_name,
                 r=miss_config.r,
                 init_weights=miss_config.init_weights,
+                miss_dropout=miss_config.miss_dropout,
+                mini_r=miss_config.mini_r,
             )
 
     def _replace_module(self, parent, child_name, new_module, child):

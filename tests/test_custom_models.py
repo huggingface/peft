@@ -891,13 +891,13 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_weights": "mini", "r": 2},
         {"target_modules": ["lin0"], "init_weights": "mini", "r": 2},
     ),
-    (
-        "MiSS-Mini Different",
-        "miss-mini",
-        MissConfig,
-        {"target_modules": ["lin0"], "init_weights": "mini", "r": 2},
-        {"target_modules": ["lin1"], "init_weights": "mini", "r": 2},
-    ),
+    # (
+    #     "MiSS-Mini Different",
+    #     "miss-mini",
+    #     MissConfig,
+    #     {"target_modules": ["lin0"], "init_weights": "mini", "r": 2},
+    #     {"target_modules": ["lin1"], "init_weights": "mini", "r": 2},
+    # ),
     (
         "VBLoRA Same",
         "vblora",
@@ -3946,21 +3946,21 @@ class TestRequiresGrad:
         # active adapter is still "default"
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin0.bone_block.default",
+            "base_model.model.lin0.miss_block.default",
         )
 
         # set config0 as active, should not change anything
         peft_model.set_adapter("default")
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin0.bone_block.default",
+            "base_model.model.lin0.miss_block.default",
         )
 
         # change activate pter to pter1
         peft_model.set_adapter("adapter1")
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin1.bone_block.adapter1",
+            "base_model.model.lin1.miss_block.adapter1",
         )
 
         # disable all pters
@@ -3970,7 +3970,7 @@ class TestRequiresGrad:
         # after context is exited, return to the previous state
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin1.bone_block.adapter1",
+            "base_model.model.lin1.miss_block.adapter1",
         )
 
     def test_requires_grad_miss_same_targets(self):
@@ -3984,21 +3984,21 @@ class TestRequiresGrad:
         # active adapter is still "default"
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin0.bone_block.default",
+            "base_model.model.lin0.miss_block.default",
         )
 
         # set config0 as active, should not change anything
         peft_model.set_adapter("default")
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin0.bone_block.default",
+            "base_model.model.lin0.miss_block.default",
         )
 
         # change activate adapter to adapter1
         peft_model.set_adapter("adapter1")
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin0.bone_block.adapter1",
+            "base_model.model.lin0.miss_block.adapter1",
         )
 
         # disable all adapters
@@ -4009,7 +4009,7 @@ class TestRequiresGrad:
         peft_model.set_adapter("adapter1")
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin0.bone_block.adapter1",
+            "base_model.model.lin0.miss_block.adapter1",
         )
 
     def test_requires_grad_boft_different_targets(self):

@@ -181,7 +181,7 @@ class MissLinear(nn.Module, MissLayer):
                     # because of the copy operation.
                     orig_weight = base_layer.weight.data.clone()
                     if self.miss_fn == "bat":
-                        delta_weight = self.get_delta_weight_bat(active_adapter, orig_weight)
+                        delta_weight = self.get_delta_weight(active_adapter, orig_weight)
                         orig_weight += delta_weight
                     elif self.miss_fn == "mini":
                         delta_weight = self.get_delta_weight_miss(active_adapter, self.base_layer.weight.data)
@@ -198,7 +198,7 @@ class MissLinear(nn.Module, MissLayer):
                     base_layer.weight.data = orig_weight.to(orig_dtype)
                 else:
                     if self.miss_fn == "bat":
-                        delta_weight = self.get_delta_weight_bat(active_adapter, self.base_layer.weight.data)
+                        delta_weight = self.get_delta_weight(active_adapter, self.base_layer.weight.data)
                         base_layer.weight.data += delta_weight.to(orig_dtype)
                     elif self.miss_fn == "mini":
                         delta_weight = self.get_delta_weight_miss(active_adapter, self.base_layer.weight.data)
@@ -223,7 +223,7 @@ class MissLinear(nn.Module, MissLayer):
             if active_adapter in self.miss_block.keys():
                 orig_weight = self.get_base_layer().weight.data.clone()
                 if self.miss_fn == "bat":
-                    delta_weight = self.get_delta_weight_bat(active_adapter, orig_weight, re=True)
+                    delta_weight = self.get_delta_weight(active_adapter, orig_weight, re=True)
                 elif self.miss_fn == "mini":
                     delta_weight = self.get_delta_weight_miss(active_adapter, orig_weight, re=True)
                 else:
@@ -231,7 +231,7 @@ class MissLinear(nn.Module, MissLayer):
 
                 base_layer.weight.data = delta_weight.to(orig_dtype)
 
-    def get_delta_weight_bat(self, adapter, orig_weight, re: bool = False) -> torch.Tensor:
+    def get_delta_weight(self, adapter, orig_weight, re: bool = False) -> torch.Tensor:
         """
         Compute the delta weight for the given adapter.
 
