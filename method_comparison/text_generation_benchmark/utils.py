@@ -29,11 +29,9 @@ import psutil
 import torch
 
 
-# Constants
 FILE_NAME_BENCHMARK_PARAMS = "benchmark_params.json"
 FILE_NAME_DEFAULT_CONFIG = "default_benchmark_params.json"
 
-# Main paths for storing results
 RESULT_PATH = os.path.join(os.path.dirname(__file__), "results")
 RESULT_PATH_TEMP = os.path.join(os.path.dirname(__file__), "temporary_results")
 RESULT_PATH_CANCELLED = os.path.join(os.path.dirname(__file__), "cancelled_results")
@@ -52,21 +50,17 @@ class BenchmarkStatus(Enum):
 class BenchmarkResult:
     """Container for benchmark results."""
 
-    # Experiment identification
     experiment_name: str
     status: BenchmarkStatus
 
-    # Model info
     model_id: str
 
-    # Structure for organized results
     run_info: dict = field(default_factory=dict)
     generation_info: dict = field(default_factory=dict)
     meta_info: dict = field(default_factory=dict)
 
     def __post_init__(self):
         """Initialize structured data format."""
-        # Default run_info
         self.run_info = {
             "timestamp": datetime.datetime.now(tz=datetime.timezone.utc).isoformat(),
             "duration": 0.0,
@@ -79,7 +73,6 @@ class BenchmarkResult:
             },
         }
 
-        # Default meta_info with enhanced system information
         self.meta_info = {
             "model_id": self.model_id,
             "parameters": {
@@ -118,10 +111,10 @@ class BenchmarkResult:
             "memory": {
                 "peak_gpu_memory_mb": 0.0,
                 "peak_ram_memory_mb": 0.0,
-                "memory_logs": [],  # Detailed memory usage at different stages
+                "memory_logs": [],
             },
-            "by_category": {},  # Will hold metrics for each prompt category (e.g., inference_time, overhead_pct)
-            "overall": {},  # Overall metrics across all categories
+            "by_category": {},
+            "overall": {},
         }
 
     def update_meta_info(self, param_counts: dict, size_info: dict, package_info: Optional[dict] = None):
@@ -208,31 +201,22 @@ class BenchmarkResult:
         """Save result to JSON file."""
         if path is None:
             peft_branch = get_peft_branch()
-            # Determine the appropriate path based on status and branch
         if self.status == BenchmarkStatus.CANCELLED:
-            # If explicitly cancelled, use the cancelled path
             base_path = RESULT_PATH_CANCELLED
         elif peft_branch != "main":
-            # If not on main branch, use temp path for testing
             base_path = RESULT_PATH_TEMP
         elif self.status == BenchmarkStatus.SUCCESS:
-            # If successful and on main branch, use the main result path
             base_path = RESULT_PATH
         elif self.status == BenchmarkStatus.FAILED:
-            # If failed and on main branch, use the cancelled path
             base_path = RESULT_PATH_CANCELLED
         else:
-            # For running or other statuses, use temporary path
             base_path = RESULT_PATH_TEMP
 
-        # Create the filename
         filename = f"{self.experiment_name}.json"
         path = os.path.join(base_path, filename)
 
-        # Ensure the directory exists
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
-        # Save the result
         with open(path, "w") as f:
             json.dump(self.to_dict(), f, indent=2)
 
@@ -243,15 +227,12 @@ class BenchmarkResult:
 class BenchmarkConfig:
     """Configuration for benchmarking PEFT methods."""
 
-    # Model configuration
     model_id: str
 
-    # Benchmark settings
     seed: int
     num_inference_runs: int
     max_new_tokens: int
 
-    # Optional settings with defaults
     dtype: str = "float16"
     use_4bit: bool = False
     use_8bit: bool = False
@@ -275,7 +256,6 @@ class BenchmarkConfig:
     @classmethod
     def from_dict(cls, config_dict: dict) -> "BenchmarkConfig":
         """Create config from dictionary."""
-        # Extract basic configuration fields
         valid_keys = set(cls.__dataclass_fields__.keys())
         filtered_dict = {k: v for k, v in config_dict.items() if k in valid_keys}
 
@@ -312,7 +292,6 @@ def validate_experiment_path(path: str) -> tuple[str, "BenchmarkConfig"]:
     if not os.path.exists(path):
         raise FileNotFoundError(f"Experiment path not found: {path}")
 
-    # For path like "experiments/loha/llama-3.2-3B/rank32/" -> "loha--llama-3.2-3B-rank32"
     path_parts = os.path.normpath(path).split(os.sep)
 
     try:
@@ -331,22 +310,18 @@ def validate_experiment_path(path: str) -> tuple[str, "BenchmarkConfig"]:
         else:
             experiment_name = os.path.basename(path.rstrip(os.sep))
 
-    # Define paths for default and experiment-specific config files
     default_config_path = os.path.join(os.path.dirname(__file__), FILE_NAME_DEFAULT_CONFIG)
     experiment_benchmark_params_path = os.path.join(path, FILE_NAME_BENCHMARK_PARAMS)
 
-    # 1. Load default config - this is now mandatory
     if not os.path.exists(default_config_path):
         raise FileNotFoundError(f"Default configuration file not found: {default_config_path}. This is required.")
     benchmark_config = BenchmarkConfig.from_json(default_config_path)
     print(f"Loaded default configuration from {default_config_path}")
 
-    # 2. Load experiment-specific benchmark_params.json if it exists
     if os.path.exists(experiment_benchmark_params_path):
         with open(experiment_benchmark_params_path) as f:
             experiment_specific_params = json.load(f)
 
-        # 3. Merge experiment-specific params into the default config
         benchmark_config.merge_from_dict(experiment_specific_params)
         print(f"Loaded and merged experiment-specific parameters from {experiment_benchmark_params_path}")
     else:
@@ -357,12 +332,10 @@ def validate_experiment_path(path: str) -> tuple[str, "BenchmarkConfig"]:
 
 def get_memory_usage() -> tuple[float, float, float]:
     """Get current memory usage (RAM and GPU)."""
-    # Get RAM usage
     process = psutil.Process(os.getpid())
     ram_usage_bytes = process.memory_info().rss
     ram_usage_mb = ram_usage_bytes / (1024 * 1024)
 
-    # Get GPU usage if available
     if torch.cuda.is_available():
         gpu_allocated = torch.cuda.memory_allocated()
         gpu_reserved = torch.cuda.memory_reserved()
@@ -410,7 +383,6 @@ def log_results(
 
     if benchmark_result.run_info.get("status") != BenchmarkStatus.SUCCESS.value:
         print_fn(f"Error: {benchmark_result.run_info.get('error', 'Unknown error')}")
-        # Optionally print other sections if needed for failed runs, or just return
         print_fn("=" * 50)
         return
 
@@ -444,7 +416,6 @@ def log_results(
             print_fn(f"    Time Per Token: {metrics.get('time_per_token', 0):.6f} seconds/token")
             print_fn(f"    Generated Tokens: {metrics.get('generated_tokens', 0):.1f}")
 
-            # Print sample statistics if available
             samples = cat_data.get("samples", [])
             if samples:
                 print_fn(f"    Number of Samples: {len(samples)}")

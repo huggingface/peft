@@ -37,7 +37,6 @@ def load_test_prompts(config: dict) -> dict[str, list[str]]:
     Returns:
         dictionary with prompts by category
     """
-    # Use the specified prompts file or fall back to default
     prompts_file = getattr(config, "prompts_file", DEFAULT_PROMPTS_PATH)
 
     with open(prompts_file) as f:
@@ -68,7 +67,7 @@ def truncate_prompt_for_model(
         if hasattr(tokenizer, "model_max_length"):
             max_length = tokenizer.model_max_length
         else:
-            max_length = 2048  # Default fallback
+            max_length = 2048
 
     max_prompt_length = max_length - reserve_output_tokens
     input_ids = tokenizer.encode(prompt, return_tensors="pt")[0]
@@ -101,13 +100,10 @@ def prepare_benchmark_prompts(
     Returns:
         Dictionary with processed prompts by category (all categories included)
     """
-    # Load prompts
     all_prompts = load_test_prompts(config)
 
-    # Process each category - always include all categories for consistent benchmarking
     processed_prompts = {}
     for category, prompts in all_prompts.items():
-        # Use all prompts for each category
         truncated_prompts = [
             truncate_prompt_for_model(
                 prompt,

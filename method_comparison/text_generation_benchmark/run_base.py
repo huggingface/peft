@@ -159,8 +159,9 @@ def main():
     # Configure print function based on verbosity
     print_fn = print if args.verbose else lambda *args, **kwargs: None
 
-    default_experiment_path = "experiments/lora/lora_r8"
-    experiment_name, benchmark_config = validate_experiment_path(default_experiment_path)
+    default_config_path = os.path.join(os.path.dirname(__file__), "default_benchmark_params.json")
+    benchmark_config = BenchmarkConfig.from_json(default_config_path)
+    
 
     # Check if results already exist
     model_name = benchmark_config.model_id.replace("/", "_").replace("-", "_")
