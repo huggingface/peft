@@ -1036,7 +1036,10 @@ def main(args):
                             )
 
                     del pipeline
-                    self.device_module.empty_cache()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    elif torch.xpu.is_available():
+                        torch.xpu.empty_cache()
 
                 if global_step >= args.max_train_steps:
                     break
