@@ -59,7 +59,6 @@ def train_model(
         device_map = "xpu"
     compute_dtype = torch.bfloat16 if is_bf16_supported else torch.float16
 
-
     # load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(base_model_name_or_path)
 
