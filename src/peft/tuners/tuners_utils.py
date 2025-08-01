@@ -38,7 +38,7 @@ from peft.utils.constants import (
     SEQ_CLS_HEAD_NAMES,
 )
 from peft.utils.integrations import init_empty_weights
-from peft.utils.other import AuxiliaryTrainingWrapper, set_additional_trainable_modules
+from peft.utils.other import AuxiliaryTrainingWrapper, match_target_against_key, set_additional_trainable_modules
 from peft.utils.peft_types import PeftType, TaskType
 
 from ..config import PeftConfig
@@ -1133,7 +1133,7 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
         return False
 
     if isinstance(config.target_modules, str):
-        target_module_found = re.fullmatch(config.target_modules, key)
+        target_module_found = match_target_against_key(config.target_modules, key)
     elif key in config.target_modules:
         # this module is specified directly in target_modules
         target_module_found = True
