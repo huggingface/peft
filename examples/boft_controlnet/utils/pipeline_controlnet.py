@@ -20,7 +20,7 @@ import PIL.Image
 import torch
 from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
 from diffusers.pipelines.controlnet.pipeline_controlnet import StableDiffusionControlNetPipeline
-from diffusers.utils import BaseOutput, is_compiled_module, logging
+from diffusers.utils import BaseOutput, logging
 from torch.nn import functional as F
 from utils.light_controlnet import ControlNetModel
 
@@ -302,7 +302,7 @@ class LightControlNetPipeline(StableDiffusionControlNetPipeline):
         # corresponds to doing no classifier free guidance.
         do_classifier_free_guidance = guidance_scale > 1.0
 
-        controlnet = self.controlnet._orig_mod if is_compiled_module(self.controlnet) else self.controlnet
+        controlnet = self.controlnet._orig_mod if hasattr(self.controlnet, "_orig_mod") else self.controlnet
 
         if isinstance(controlnet, MultiControlNetModel) and isinstance(controlnet_conditioning_scale, float):
             controlnet_conditioning_scale = [controlnet_conditioning_scale] * len(controlnet.nets)
