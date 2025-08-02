@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import packaging.version
 import torch
+import transformers
 from transformers import BloomPreTrainedModel
 
 
@@ -41,9 +43,14 @@ def starcoder_model_postprocess_past_key_value(past_key_values):
     return tuple(result)
 
 
-TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {
-    "gpt_bigcode": starcoder_model_postprocess_past_key_value,
-}
+# TODO: remove this once transformers 4.53 is no longer supported
+TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {}
+transformers_le_4_53 = packaging.version.parse(transformers.__version__) < packaging.version.parse("4.54.0.dev0")
+if transformers_le_4_53:
+    TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING["gpt_bigcode"] = (
+        starcoder_model_postprocess_past_key_value
+    )
+
 
 if hasattr(BloomPreTrainedModel, "_convert_to_standard_cache"):
     # special handling for bloom architecture was fixed in:
@@ -128,6 +135,9 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
 }
+
+TRANSFORMERS_MODELS_TO_LOKR_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
+TRANSFORMERS_MODELS_TO_LOHA_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
 
 TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
     "t5": ["k", "v", "wo"],
@@ -253,6 +263,43 @@ TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING = {
     "gemma3_text": ["q_proj", "v_proj"],
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
+}
+
+TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING = {
+    "t5": ["q", "v"],
+    "mt5": ["q", "v"],
+    "bart": ["q_proj", "v_proj"],
+    "gpt2": ["c_attn"],
+    "bloom": ["query_key_value"],
+    "blip-2": ["q", "v", "q_proj", "v_proj"],
+    "opt": ["q_proj", "v_proj"],
+    "gptj": ["q_proj", "v_proj"],
+    "gpt_neox": ["query_key_value"],
+    "gpt_neo": ["q_proj", "v_proj"],
+    "bert": ["query", "value"],
+    "roberta": ["query", "value"],
+    "xlm-roberta": ["query", "value"],
+    "electra": ["query", "value"],
+    "deberta-v2": ["query_proj", "value_proj"],
+    "deberta": ["in_proj"],
+    "layoutlm": ["query", "value"],
+    "llama": ["q_proj", "v_proj"],
+    "chatglm": ["query_key_value"],
+    "gpt_bigcode": ["c_attn"],
+    "mpt": ["Wqkv"],
+    "RefinedWebModel": ["query_key_value"],
+    "RefinedWeb": ["query_key_value"],
+    "falcon": ["query_key_value"],
+    "btlm": ["c_proj", "c_attn"],
+    "codegen": ["qkv_proj"],
+    "mistral": ["q_proj", "v_proj"],
+    "mixtral": ["q_proj", "v_proj"],
+    "stablelm": ["q_proj", "v_proj"],
+    "phi": ["q_proj", "v_proj"],
+    "gemma": ["q_proj", "v_proj"],
+    "gemma2": ["q_proj", "v_proj"],
+    "gemma3_text": ["q_proj", "v_proj"],
+    "qwen2": ["q_proj", "v_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING = {

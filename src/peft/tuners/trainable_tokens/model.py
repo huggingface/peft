@@ -31,9 +31,6 @@ from .layer import TrainableTokensLayer
 class TrainableTokensModel(BaseTuner):
     prefix: str = "trainable_tokens_"
 
-    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False):
-        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
-
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
         try:
@@ -49,13 +46,19 @@ class TrainableTokensModel(BaseTuner):
         return peft_config
 
     def inject_adapter(
-        self, model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True, low_cpu_mem_usage: bool = False
+        self,
+        model: nn.Module,
+        adapter_name: str,
+        autocast_adapter_dtype: bool = True,
+        low_cpu_mem_usage: bool = False,
+        **kwargs,
     ) -> None:
         super().inject_adapter(
             model=model,
             adapter_name=adapter_name,
             autocast_adapter_dtype=autocast_adapter_dtype,
             low_cpu_mem_usage=low_cpu_mem_usage,
+            **kwargs,
         )
 
         model_config = self.get_model_config(self)

@@ -58,6 +58,7 @@ from peft.tuners.tuners_utils import (
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND, ModulesToSaveWrapper, infer_device
 from peft.utils.constants import DUMMY_MODEL_CONFIG, MIN_TARGET_MODULES_FOR_OPTIMIZATION
 
+from .testing_common import hub_online_once
 from .testing_utils import require_bitsandbytes, require_non_cpu
 
 
@@ -208,7 +209,8 @@ class PeftCustomKwargsTester(unittest.TestCase):
         # configs that could exist. This is okay as the method calls `check_target_module_exists` internally, which
         # has been extensively tested above.
         model_id = "hf-internal-testing/tiny-random-BloomForCausalLM"
-        model = AutoModel.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = AutoModel.from_pretrained(model_id)
         # by default, this model matches query_key_value
         config = LoraConfig()
         peft_model = get_peft_model(model, config)
@@ -231,7 +233,8 @@ class PeftCustomKwargsTester(unittest.TestCase):
 
     def test_feedforward_matching_ia3(self):
         model_id = "hf-internal-testing/tiny-random-T5ForConditionalGeneration"
-        model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
         # simple example for just one t5 block for testing
         config_kwargs = {
             "target_modules": ".*encoder.*block.0.*(SelfAttention|EncDecAttention|DenseReluDense).(k|q|v|wo|wi)$",
@@ -265,7 +268,8 @@ class PeftCustomKwargsTester(unittest.TestCase):
     def test_maybe_include_all_linear_layers_lora(
         self, model_id, model_type, initial_target_modules, expected_target_modules
     ):
-        model = self.transformers_class_map[model_type].from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = self.transformers_class_map[model_type].from_pretrained(model_id)
         config_cls = LoraConfig
         self._check_match_with_expected_target_modules(
             model_id, model, config_cls, initial_target_modules, expected_target_modules
@@ -281,7 +285,11 @@ class PeftCustomKwargsTester(unittest.TestCase):
             config_kwargs = {"quantization_config": BitsAndBytesConfig(load_in_4bit=True)}
         elif quantization == "8bit":
             config_kwargs = {"quantization_config": BitsAndBytesConfig(load_in_8bit=True)}
-        model = self.transformers_class_map[model_type].from_pretrained(model_id, device_map="auto", **config_kwargs)
+
+        with hub_online_once(model_id):
+            model = self.transformers_class_map[model_type].from_pretrained(
+                model_id, device_map="auto", **config_kwargs
+            )
         config_cls = LoraConfig
         self._check_match_with_expected_target_modules(
             model_id, model, config_cls, initial_target_modules, expected_target_modules
@@ -310,7 +318,8 @@ class PeftCustomKwargsTester(unittest.TestCase):
             INCLUDE_LINEAR_LAYERS_SHORTHAND,
             ["k_proj", "v_proj", "q_proj", "o_proj", "down_proj", "up_proj", "gate_proj"],
         )
-        model_ia3 = AutoModelForCausalLM.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model_ia3 = AutoModelForCausalLM.from_pretrained(model_id)
         model_loha = deepcopy(model_ia3)
         config_classes = [IA3Config, LoHaConfig]
         models = [model_ia3, model_loha]
@@ -322,7 +331,8 @@ class PeftCustomKwargsTester(unittest.TestCase):
     @parameterized.expand(MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_INTERNALS)
     def test_maybe_include_all_linear_layers_internals(self, initial_target_modules, expected_target_modules):
         model_id = "HuggingFaceH4/tiny-random-LlamaForCausalLM"
-        model = AutoModelForCausalLM.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
         config = LoraConfig(base_model_name_or_path=model_id, target_modules=initial_target_modules)
         new_config = _maybe_include_all_linear_layers(config, model)
         if isinstance(expected_target_modules, list):
@@ -333,7 +343,8 @@ class PeftCustomKwargsTester(unittest.TestCase):
 
     def test_maybe_include_all_linear_layers_diffusion(self):
         model_id = "hf-internal-testing/tiny-sd-pipe"
-        model = StableDiffusionPipeline.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = StableDiffusionPipeline.from_pretrained(model_id)
         config = LoraConfig(base_model_name_or_path=model_id, target_modules="all-linear")
 
         # all linear layers should be converted
@@ -347,7 +358,8 @@ class PeftCustomKwargsTester(unittest.TestCase):
         # Ensure that if a SEQ_CLS model is being used with target_modules="all-linear", the classification head is not
         # targeted by the adapter layer.
         model_id = "HuggingFaceH4/tiny-random-LlamaForCausalLM"
-        model = AutoModelForSequenceClassification.from_pretrained(model_id, num_labels=10)
+        with hub_online_once(model_id):
+            model = AutoModelForSequenceClassification.from_pretrained(model_id, num_labels=10)
         # sanity check
         assert isinstance(model.score, nn.Linear)
 
@@ -372,7 +384,8 @@ class PeftCustomKwargsTester(unittest.TestCase):
         # See 2390
         # Ensure that if adapter layers are already applied, we don't get nested adapter layers (e.g. LoRA targeting the
         # lora_A, lora_B layers)
-        model = self.transformers_class_map[model_type].from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = self.transformers_class_map[model_type].from_pretrained(model_id)
         config_cls = LoraConfig
         self._check_match_with_expected_target_modules(
             model_id, model, config_cls, initial_target_modules, expected_target_modules
@@ -386,7 +399,8 @@ class PeftCustomKwargsTester(unittest.TestCase):
         # See 2390 Similar test to test_all_linear_nested_targets_correct_layers above, but using add_adapter instead of
         # calling get_peft_model in an already adapted model
         model_id = "HuggingFaceH4/tiny-random-LlamaForCausalLM"
-        model = AutoModelForCausalLM.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
 
         # important: don't reuse the first config, since config.target_modules will be overwritten, which would make the
         # test pass trivially.
@@ -467,13 +481,43 @@ class TestTargetedModuleNames(unittest.TestCase):
         assert model.targeted_module_names == ["lin0", "lin1"]
 
     def test_realistic_example(self):
-        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-BloomForCausalLM")
+        model_id = "hf-internal-testing/tiny-random-BloomForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
         config = LoraConfig(task_type="CAUSAL_LM")
         model = get_peft_model(model, config)
         expected = [
             f"transformer.h.{i}.self_attention.query_key_value" for i in range(len(model.base_model.transformer.h))
         ]
         assert model.targeted_module_names == expected
+
+
+class TestTargetedParameterNames(unittest.TestCase):
+    """Check that the attribute targeted_parameter_names (via target_parameters) is correctly set.
+
+    This is only implemented for LoRA. Regex matching is currently not implemented.
+    """
+
+    def test_one_targeted_parameters_list(self):
+        model = MLP()
+        model = get_peft_model(model, LoraConfig(target_parameters=["lin0.weight"]))
+        assert model.targeted_parameter_names == ["lin0.weight"]
+
+    def test_two_targeted_parameters_list(self):
+        model = MLP()
+        model = get_peft_model(model, LoraConfig(target_parameters=["lin0.weight", "lin1.weight"]))
+        assert model.targeted_parameter_names == ["lin0.weight", "lin1.weight"]
+
+    def test_realistic_example(self):
+        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+        config = LoraConfig(target_modules=[], task_type="CAUSAL_LM", target_parameters=["v_proj.weight"])
+        model = get_peft_model(model, config)
+        expected = [
+            f"model.layers.{i}.self_attn.v_proj.weight" for i in range(len(model.base_model.model.model.layers))
+        ]
+        assert model.targeted_parameter_names == expected
 
 
 class TestExcludedModuleNames(unittest.TestCase):
@@ -538,7 +582,9 @@ class TestExcludedModuleNames(unittest.TestCase):
             get_peft_model(model, LoraConfig(target_modules=["lin1"], exclude_modules=["non_existent_module"]))
 
     def test_realistic_example(self):
-        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-BloomForCausalLM")
+        model_id = "hf-internal-testing/tiny-random-BloomForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
         config = LoraConfig(task_type="CAUSAL_LM", exclude_modules="transformer.h.2.self_attention.query_key_value")
         model = get_peft_model(model, config)
         expected = [
@@ -782,6 +828,26 @@ class TestModelAndLayerStatus:
         ]
         assert result == expected
 
+    def test_target_parameters(self, large_model):
+        # don't check each attribute, just the relevant ones
+        # first remove the normal LoRA layers
+        large_model = large_model.merge_and_unload()
+        config = LoraConfig(target_parameters=["lin0.weight", "lin1.weight"])
+        large_model = get_peft_model(large_model, config)
+        layer_status = large_model.get_layer_status()
+        assert [status.name for status in layer_status] == ["model.lin0", "model.lin1"]
+        assert [status.module_type for status in layer_status] == ["lora.ParamWrapper"] * 2
+
+    def test_target_parameters_and_target_modules(self, large_model):
+        # don't check each attribute, just the relevant ones
+        # first remove the normal LoRA layers
+        large_model = large_model.merge_and_unload()
+        config = LoraConfig(target_parameters=["lin0.weight"], target_modules=["lin1"])
+        large_model = get_peft_model(large_model, config)
+        layer_status = large_model.get_layer_status()
+        assert [status.name for status in layer_status] == ["model.lin0", "model.lin1"]
+        assert [status.module_type for status in layer_status] == ["lora.ParamWrapper", "lora.Linear"]
+
     ################
     # model status #
     ################
@@ -797,7 +863,8 @@ class TestModelAndLayerStatus:
     def test_base_model_type_transformers_automodel(self):
         # ensure that this also works with transformers AutoModels
         model_id = "google/flan-t5-small"
-        model = AutoModel.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = AutoModel.from_pretrained(model_id)
         model = get_peft_model(model, LoraConfig())
         model_status = model.get_model_status()
         assert model_status.base_model_type == "T5Model"
@@ -983,6 +1050,31 @@ class TestModelAndLayerStatus:
         model_status = large_model.get_model_status()
         assert model_status.devices == {"default": ["cpu", self.torch_device], "other": ["cpu"]}
 
+    def test_model_target_parameters(self, large_model):
+        # don't check each attribute, just the relevant ones
+        # first remove the normal LoRA layers
+        large_model = large_model.merge_and_unload()
+        config = LoraConfig(target_parameters=["lin0.weight", "lin1.weight"])
+        large_model = get_peft_model(large_model, config)
+        model_status = large_model.get_model_status()
+        model_status = large_model.get_model_status()
+        assert model_status.adapter_model_type == "LoraModel"
+        assert model_status.peft_types == {"default": "LORA", "other": "LORA"}
+        assert model_status.num_adapter_layers == 2
+        assert model_status.trainable_params == 2 * (8 * 10 + 10 * 8)
+
+    def test_model_target_parameters_and_target_modules(self, large_model):
+        # don't check each attribute, just the relevant ones
+        # first remove the normal LoRA layers
+        large_model = large_model.merge_and_unload()
+        config = LoraConfig(target_parameters=["lin0.weight"], target_modules=["lin1"])
+        large_model = get_peft_model(large_model, config)
+        model_status = large_model.get_model_status()
+        assert model_status.adapter_model_type == "LoraModel"
+        assert model_status.peft_types == {"default": "LORA", "other": "LORA"}
+        assert model_status.num_adapter_layers == 2
+        assert model_status.trainable_params == 2 * (8 * 10 + 10 * 8)
+
     def test_loha_model(self):
         # ensure that this also works with non-LoRA, it's not necessary to test all tuners
         class SmallModel(nn.Module):
@@ -1073,7 +1165,8 @@ class TestModelAndLayerStatus:
         model_id = "peft-internal-testing/gpt2-lora-random"
         # note that loading through AutoModelForCausalLM.from_pretrained does not enable training mode, hence
         # requires_grad=False
-        model = AutoModelForCausalLM.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
         model_status = get_model_status(model)
         layer_status = get_layer_status(model)
 
@@ -1144,7 +1237,9 @@ class TestModelAndLayerStatus:
             get_model_status(model)
 
     def test_transformer_model_without_adapter_raises(self):
-        model = AutoModelForCausalLM.from_pretrained("gpt2")
+        model_id = "gpt2"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
         # note: full error message is longer
         with pytest.raises(ValueError, match="No adapter layers found in the model"):
             get_layer_status(model)
@@ -1153,7 +1248,9 @@ class TestModelAndLayerStatus:
             get_model_status(model)
 
     def test_prefix_tuning(self):
-        model = AutoModelForSeq2SeqLM.from_pretrained("hf-internal-testing/tiny-random-BartForConditionalGeneration")
+        model_id = "hf-internal-testing/tiny-random-BartForConditionalGeneration"
+        with hub_online_once(model_id):
+            model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
         config = PromptTuningConfig(task_type="SEQ_2_SEQ_LM", num_virtual_tokens=10)
         model = get_peft_model(model, config)
 
@@ -1165,7 +1262,9 @@ class TestModelAndLayerStatus:
             model.get_model_status()
 
     def test_adaption_prompt(self):
-        model = AutoModelForCausalLM.from_pretrained("HuggingFaceH4/tiny-random-LlamaForCausalLM")
+        model_id = "HuggingFaceH4/tiny-random-LlamaForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
         config = AdaptionPromptConfig(adapter_layers=1, adapter_len=4)
         model = get_peft_model(model, config)
 
@@ -1251,8 +1350,10 @@ class TestBaseTunerWarnForTiedEmbeddings:
     )
 
     def _get_peft_model(self, tie_word_embeddings, target_module):
+        with hub_online_once(self.model_id):
+            base_model = AutoModelForCausalLM.from_pretrained(self.model_id, tie_word_embeddings=tie_word_embeddings)
         model = get_peft_model(
-            AutoModelForCausalLM.from_pretrained(self.model_id, tie_word_embeddings=tie_word_embeddings),
+            base_model,
             LoraConfig(target_modules=[target_module]),
         )
         return model
@@ -1383,7 +1484,8 @@ class TestFindMinimalTargetModules:
         # target_modules is big enough. The resulting model itself should be unaffected.
         torch.manual_seed(0)
         model_id = "facebook/opt-125m"  # must be big enough for optimization to trigger
-        model = AutoModelForCausalLM.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
 
         # base case: specify target_modules in a minimal fashion
         config = LoraConfig(init_lora_weights=False, target_modules=["q_proj", "v_proj"])
@@ -1404,7 +1506,8 @@ class TestFindMinimalTargetModules:
         del model
 
         torch.manual_seed(0)
-        model = AutoModelForCausalLM.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
         # pass the big target_modules to config
         config = LoraConfig(init_lora_weights=False, target_modules=big_target_modules)
         model = get_peft_model(model, config)

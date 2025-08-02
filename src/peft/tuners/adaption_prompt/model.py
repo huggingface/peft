@@ -18,7 +18,7 @@ import torch.nn as nn
 from peft.utils import _freeze_adapter, _get_submodules
 
 from .config import AdaptionPromptConfig, prepare_config
-from .layer import AdaptedAttention
+from .layer import AdaptedAttention, AdaptedAttentionGPT
 from .utils import is_adaption_prompt_trainable
 
 
@@ -65,7 +65,7 @@ class AdaptionPromptModel(nn.Module):
 
         parents = []
         for name, _ in self.model.named_modules():
-            if name.endswith(config.target_modules):
+            if name.endswith(f".{config.target_modules}"):
                 par, _, _ = _get_submodules(self.model, name)
                 parents.append(par)
         if len(parents) < config.adapter_layers:
@@ -118,11 +118,19 @@ class AdaptionPromptModel(nn.Module):
     def _create_adapted_attentions(self, config: AdaptionPromptConfig, parents: list[nn.Module]) -> None:
         """Wrap LlamaAttention modules with newly created AdaptedAttention modules."""
         for par in parents:
-            attn = AdaptedAttention(
-                model_type=self.model.config.model_type,
-                adapter_len=config.adapter_len,
-                model=getattr(par, config.target_modules),
-            )
+            if self.model.config.model_type == "gpt2":
+                attn = AdaptedAttentionGPT(
+                    model_type=self.model.config.model_type,
+                    adapter_len=config.adapter_len,
+                    model=getattr(par, config.target_modules),
+                )
+
+            else:
+                attn = AdaptedAttention(
+                    model_type=self.model.config.model_type,
+                    adapter_len=config.adapter_len,
+                    model=getattr(par, config.target_modules),
+                )
             setattr(par, config.target_modules, attn)
 
     def _set_adapted_attentions(self, adapter_name: str) -> None:

@@ -266,7 +266,7 @@ def train():
         "train_dataset": train_dataset,
         "data_collator": data_collator,
     }
-    trainer = Trainer(model=model, tokenizer=tokenizer, args=script_args, **data_module)
+    trainer = Trainer(model=model, processing_class=tokenizer, args=script_args, **data_module)
     trainer.train()
     trainer.save_state()
     model.save_pretrained(os.path.join(script_args.output_dir, "ft"))

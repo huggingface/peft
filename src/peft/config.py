@@ -335,6 +335,15 @@ class PromptLearningConfig(PeftConfig):
     )
     num_attention_heads: Optional[int] = field(default=None, metadata={"help": "Number of attention heads"})
     num_layers: Optional[int] = field(default=None, metadata={"help": "Number of transformer layers"})
+    modules_to_save: Optional[list[str]] = field(
+        default=None,
+        metadata={
+            "help": "List of extra modules to be set as trainable and saved in the final checkpoint. "
+            "For example, in Sequence Classification or Token Classification tasks, "
+            "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved. "
+            "The module(s) will be fully fine-tuned."
+        },
+    )
 
     @property
     def is_prompt_learning(self) -> bool:

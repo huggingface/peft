@@ -53,7 +53,7 @@ from .eetq import dispatch_eetq
 from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
 from .inc import dispatch_inc
-from .layer import Conv2d, LoraLayer, dispatch_default
+from .layer import Conv2d, LoraLayer, ParamWrapper, dispatch_default
 from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
 
@@ -139,9 +139,6 @@ class LoraModel(BaseTuner):
 
     prefix: str = "lora_"
 
-    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
-        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
-
     def _check_new_adapter_config(self, config: LoraConfig) -> None:
         """
         A helper method to check the config when a new adapter is being added.
@@ -182,7 +179,9 @@ class LoraModel(BaseTuner):
         target_name,
         parent,
         current_key,
-    ):
+        *,
+        parameter_name: Optional[str] = None,
+    ) -> None:
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
 
@@ -207,6 +206,7 @@ class LoraModel(BaseTuner):
             "use_arrow": lora_config.use_arrow,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
+            "parameter_name": parameter_name,
         }
 
         # Add arrow config to the kwargs if this is an arrow adapter
@@ -230,7 +230,9 @@ class LoraModel(BaseTuner):
         # note: AdaLoraLayer is a subclass of LoraLayer, we need to exclude it
         from peft.tuners.adalora import AdaLoraLayer
 
-        if isinstance(target, LoraLayer) and not isinstance(target, AdaLoraLayer):
+        # if the target is a ParamWrapper, we nest it to allow targeting multiple nn.Parameter on the same module
+        wrap_target_param = isinstance(target, ParamWrapper) and (adapter_name in target.lora_A)
+        if isinstance(target, LoraLayer) and not isinstance(target, AdaLoraLayer) and not wrap_target_param:
             target.update_layer(
                 adapter_name,
                 r,
@@ -244,6 +246,11 @@ class LoraModel(BaseTuner):
                 arrow_config=lora_config.arrow_config,
             )
         else:
+            if isinstance(target, ParamWrapper) and (parameter_name == target.parameter_name):
+                raise ValueError(
+                    "Trying to target the same nn.Parameter twice, this should not happen. Please open an issue on the "
+                    "PEFT repo: https://github.com/huggingface/peft/issues"
+                )
             device_map = self.model.hf_device_map if hasattr(self.model, "hf_device_map") else None
             new_module = self._create_new_module(lora_config, adapter_name, target, device_map=device_map, **kwargs)
             if adapter_name not in self.active_adapters:
@@ -507,11 +514,12 @@ class LoraModel(BaseTuner):
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
         if peft_config.target_modules is None:
-            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
-                raise ValueError("Please specify `target_modules` in `peft_config`")
-            peft_config.target_modules = set(
-                TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
-            )
+            if model_config["model_type"] in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
+                peft_config.target_modules = set(
+                    TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
+                )
+            elif not peft_config.target_parameters:
+                raise ValueError("Please specify `target_modules` or `target_parameters`in `peft_config`")
         return peft_config
 
     def _unload_and_optionally_merge(
@@ -555,6 +563,12 @@ class LoraModel(BaseTuner):
         for adapter in adapters:
             if adapter not in list(self.peft_config.keys()):
                 raise ValueError(f"Adapter {adapter} does not exist")
+
+        for adapter in adapters:
+            if self.peft_config[adapter].target_parameters:
+                raise ValueError(
+                    f"add_weighted_adapter does not support targeting nn.Parameter (problematic adapter '{adapter}')"
+                )
 
         # If more than one of the adapters targets the same module with modules_to_save, raise an error, as these
         # modules cannot be merged. First, find the ModulesToSaveWrapper instances in the model, then check if they
