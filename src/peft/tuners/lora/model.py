@@ -211,12 +211,7 @@ class LoraModel(BaseTuner):
 
         # Add arrow config to the kwargs if this is an arrow adapter
         if kwargs["use_arrow"]:
-            kwargs["arrow_top_k"] = lora_config.arrow_top_k
-            kwargs["arrow_expert_num"] = lora_config.arrow_expert_num
-            kwargs["arrow_router_temperature"] = lora_config.arrow_router_temperature
-            kwargs["use_gks"] = (lora_config.use_gks,)
-            kwargs["ts_names"] = (lora_config.ts_names,)
-            kwargs["le_names"] = (lora_config.le_names,)
+            kwargs["arrow_config"] = lora_config.arrow_config
 
         # for torchao merging, we need the get_apply_tensor_subclass from the quantization config
         try:
@@ -246,12 +241,7 @@ class LoraModel(BaseTuner):
                 use_dora=lora_config.use_dora,
                 lora_bias=lora_config.lora_bias,
                 use_arrow=lora_config.use_arrow,
-                arrow_top_k=lora_config.arrow_top_k,
-                arrow_expert_num=lora_config.arrow_expert_num,
-                arrow_router_temperature=lora_config.arrow_router_temperature,
-                use_gks=lora_config.use_gks,
-                ts_names=lora_config.ts_names,
-                le_names=lora_config.le_names,
+                arrow_config=lora_config.arrow_config,
             )
         else:
             device_map = self.model.hf_device_map if hasattr(self.model, "hf_device_map") else None

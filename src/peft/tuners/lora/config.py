@@ -70,6 +70,39 @@ class LoftQConfig:
 
 
 @dataclass
+class ArrowConfig:
+    """
+    This is the sub-configuration class to store the configuration for Arrow and GenKnowSub algorithm. Arrow is a
+    routing algorithm to combine the trained LoRA modules to solve new tasks, proposed in
+    'https://arxiv.org/pdf/2405.11157'. GenKnowSub is a refinement on the trained modules before being combined via
+    Arrow, introduced in 'https://aclanthology.org/2025.acl-short.54/'
+    """
+
+    arrow_top_k: int = field(
+        default=3,
+        metadata={"help": "Number of top LoRA modules to combine in Arrow routing."},
+    )
+
+    arrow_router_temperature: float = field(
+        default=1.0,
+        metadata={"help": "Softmax temperature for computing Arrow expert coefficients."},
+    )
+
+    use_gks: bool = field(
+        default=False,
+        metadata={"help": "Enable GenKnowSub."},
+    )
+
+    ts_names: list[str] = field(default=None, metadata={"help": "list of task-specific LoRA names."})
+
+    gen_names: list[str] = field(default=None, metadata={"help": "list of general LoRA names."})
+
+    def __post_init__(self):
+        if self.arrow_top_k <= 0:
+            raise ValueError("`arrow_top_k` could not be negative.")
+
+
+@dataclass
 class EvaConfig:
     """
     This is the sub-configuration class to store the configuration for a data-driven initialization via EVA. EVA was
@@ -554,44 +587,11 @@ class LoraConfig(PeftConfig):
             )
         },
     )
-
-    use_arrow: bool = field(
-        default=False,
-        metadata={
-            "help": "Enable ArrowLoRA: a top-k routing variant of LoRA that combines multiple expert adapters per token."
-        },
+    use_arrow: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to apply Arrow routing on the model or not."}
     )
-
-    arrow_top_k: int = field(
-        default=3,
-        metadata={"help": "Number of top LoRA experts to combine in ArrowLoRA routing."},
-    )
-
-    arrow_router_temperature: float = field(
-        default=1.0,
-        metadata={"help": "Softmax temperature for computing ArrowLoRA expert coefficients."},
-    )
-
-    arrow_expert_num: int = field(
-        default=10,
-        metadata={"help": "Number of the trained LoRA modules."},
-    )
-
-    use_gks: bool = field(
-        default=False,
-        metadata={
-            "help": "Enable GenKnowSub: an approach for purifying trained task-specific experts before inference."
-        },
-    )
-
-    ts_names: list = field(
-        default=None,
-        metadata={"help": "name of trained task-specific experts, required for GenKnowSub"},
-    )
-
-    le_names: list = field(
-        default=None,
-        metadata={"help": "name of language experts, required for GenKnowSub"},
+    arrow_config: Optional[ArrowConfig] = field(
+        default=None, metadata={"help": "The necessary config to apply arrow routing on the model."}
     )
 
     def to_dict(self):
@@ -664,12 +664,6 @@ class LoraConfig(PeftConfig):
                 )
             if self.use_dora:
                 raise ValueError("The argument lora_bias=True is not supported for DoRA, please pass use_dora=False")
-
-        if self.use_arrow:
-            if self.arrow_top_k > self.arrow_expert_num:
-                raise ValueError("`arrow_top_k` cannot exceed `arrow_expert_num`.")
-            if self.arrow_expert_num <= 0:
-                raise ValueError("`arrow_expert_num` must be positive.")
 
         # Using post training conversion of modified base weights to restore their initial values PiSSA/CorDA/OLoRA cannot
         # be correctly done when using rslora + rank_pattern/alpha_pattern. We can't really know if the user intends

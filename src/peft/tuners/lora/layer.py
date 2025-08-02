@@ -198,24 +198,14 @@ class LoraLayer(BaseTunerLayer):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
-        arrow_top_k = kwargs.get("arrow_top_k")
-        arrow_expert_num = kwargs.get("arrow_expert_num")
-        arrow_router_temperature = kwargs.get("arrow_router_temperature")
-        use_gks = kwargs.get("use_gks")
-        ts_names = kwargs.get("ts_names")
-        le_names = kwargs.get("le_names")
+        arrow_config = kwargs.get("arrow_config")
 
         lora_variant = self.resolve_lora_variant(
             use_dora=use_dora,
-            use_arrow=use_arrow,
             use_qalora=use_qalora,
             qalora_group_size=qalora_group_size,
-            arrow_top_k=arrow_top_k,
-            arrow_expert_num=arrow_expert_num,
-            arrow_router_temperature=arrow_router_temperature,
-            use_gks=use_gks,
-            ts_names=ts_names,
-            le_names=le_names,
+            use_arrow=use_arrow,
+            arrow_config=arrow_config,
         )
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant

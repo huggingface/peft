@@ -3,20 +3,21 @@ from torch import nn
 
 
 class ArrowLoraLinearLayer(nn.Module):
-    def __init__(self, in_features, ts_names, num_experts, top_k, temperature, use_gks, le_names):
+    def __init__(self, in_features, arrow_config):
         super().__init__()
         # extra parameters needed for arrow
-        self.register_buffer("prototypes", torch.empty((num_experts, in_features)), persistent=False)
         self._protos_ready = False
-        self.top_k = top_k
-        self.temperature = temperature
-        self.num_experts = num_experts
-        self.use_gks = use_gks
-        self.expert_names = ts_names.copy()
-        self.le_names = le_names
-        self.precomputed_W = None
+        self.top_k = arrow_config.arrow_top_k
+        self.temperature = arrow_config.arrow_router_temperature
+        self.expert_names = arrow_config.ts_names.copy()
+        self.le_names = arrow_config.gen_names
+        self.num_experts = len(self.expert_names)
+        self.register_buffer("prototypes", torch.empty((self.num_experts, in_features)), persistent=False)
+        self.use_gks = arrow_config.use_gks
+        # self.precomputed_W = None
         self.gks_done = False
         self.in_features = in_features
+        self.cast_input_dtype_enabled = True
 
     @torch.no_grad()
     def build_prototypes(self, lora_A, lora_B=None):
@@ -75,12 +76,30 @@ class ArrowLoraLinearLayer(nn.Module):
             # print(lora_B)
             self.gks_done = True
 
+    def _cast_input_dtype(self, x, dtype: torch.dtype):
+        """
+        Whether to cast the dtype of the input of the forward method.
+
+        Usually, we want to enable this to align the input dtype with the dtype of the weight, but by setting
+        layer.cast_input_dtype=False, this can be disabled if necessary.
+
+        Enabling or disabling can be managed via the peft.helpers.disable_lora_input_dtype_casting context manager.
+        """
+        if x is None:  # useful e.g. if x is the bias, which can be None
+            return None
+
+        cast_input_dtype_enabled = getattr(self, "cast_input_dtype_enabled", True)
+        if (not cast_input_dtype_enabled) or (x.dtype == dtype):
+            return x
+        return x.to(dtype=dtype)
+
     def forward(self, x, lora_A, lora_B, dropout, scaling):
         """
         x : (B, *, in_features) prototypes : (E, in_features) ← built from top-SV of W = B @ A returns : LoRA delta
         with Arrow routing
         """
-        self.prototypes = self.prototypes.to(x.dtype)
+        # self.prototypes = self.prototypes.to(x.dtype)
+        x = self._cast_input_dtype(x, lora_A[self.expert_names[0]].weight.dtype)
         B, *rest, F_in = x.shape
         tok = x.view(-1, F_in)  # (t, F_in)
         t, E = tok.size(0), self.prototypes.size(0)
@@ -92,27 +111,26 @@ class ArrowLoraLinearLayer(nn.Module):
         top_v, idx = torch.topk(sim, self.top_k, dim=1)
         full_score = tok.new_full((t, E), float("-inf"))
         full_score.scatter_(1, idx, top_v)
-        coeff = torch.softmax(full_score / self.temperature, dim=1).to(x.dtype)  # (t, E)
+        coeff = torch.softmax(full_score / self.temperature, dim=1)  # (t, E)
 
-        # 3) pre-compute W_e  (B @ A) once → gather
-        if self.precomputed_W is None:
-            Ws = []
-            for name in self.expert_names:
-                A = lora_A[name].weight  # (r, in)
-                B = lora_B[name].weight  # (out, r)
-                Ws.append(B @ A)  # (out, in)
-            self.precomputed_W = torch.stack(Ws, dim=0)  # (E, out, in)
-        W = self.precomputed_W.to(x.dtype)  # alias
+        # 3) stack all A and B weights once
+        #   A_stack: (E, r, in_features), B_stack: (E, out_features, r)
+        A_stack = torch.stack([lora_A[n].weight for n in self.expert_names], dim=0)
+        B_stack = torch.stack([lora_B[n].weight for n in self.expert_names], dim=0)
 
-        # 4) weighted sum:   Δ = Σ_e α_te · W_e · tok
-        # coeff: (t, E)
-        # W: (E, f_out, f_in)
-        # tok: (t, f_in)
-        # Substep 1: Compute all expert outputs (W_e @ tok) -> [E, t, f_out]
-        W_tok = torch.einsum("eoi,ti->eto", W, tok)  # [E, t, f_out]
+        # 4) project tokens into each expert’s low‑rank space:
+        #    z[e] = tok @ A_e.T   → shape (t, E, r)
+        z = torch.einsum("tf, erf -> ter", tok, A_stack)
 
-        # Substep 2: Weight by coefficients -> [t, f_out]
-        delta = torch.einsum("te,eto->to", coeff, W_tok)  # [t, f_out]
+        # 5) lift back each expert’s output:
+        #    y[e] = z[e] @ B_e.T  → shape (t, E, out_features)
+        y = torch.einsum("ter, eor -> teo", z, B_stack)
 
-        delta = scaling * dropout(delta).to(x.dtype)
-        return delta.view(*x.shape[:-1], delta.size(-1))
+        # 6) weighted sum over experts:
+        #    delta_flat[t,o] = Σ_e coeff[t,e] * y[t,e,o]
+        delta_flat = torch.einsum("te, teo -> to", coeff, y)  # (t, out_features)
+
+        # 7) dropout, scale, and reshape
+        delta = scaling * dropout(delta_flat)
+        out_dim = delta_flat.size(-1)
+        return delta.view(B, *rest, out_dim)
