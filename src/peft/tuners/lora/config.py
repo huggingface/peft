@@ -527,6 +527,12 @@ class LoraConfig(PeftConfig):
         },
     )
 
+    use_kasa: bool = field(
+        default=False,
+        metadata={
+            "help": ()
+        }
+    )
     def to_dict(self):
         """
         Returns the configuration for your adapter model as a dictionary. Removes runtime configurations.
