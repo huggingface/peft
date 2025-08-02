@@ -41,6 +41,7 @@ if is_bnb_available():
             init_lora_weights: bool = True,
             use_rslora: bool = False,
             use_dora: bool = False,
+            use_arrow: bool = False,
             lora_bias: bool = False,
             **kwargs,
         ) -> None:
@@ -58,9 +59,16 @@ if is_bnb_available():
                 use_rslora=use_rslora,
                 use_dora=use_dora,
                 lora_bias=lora_bias,
+                use_arrow=use_arrow,
             )
 
-        def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+        def resolve_lora_variant(self, *, use_dora: bool, use_arrow: bool, **kwargs) -> Optional[LoraVariant]:
+            if use_arrow:
+                # arrow variant must be imported so it registers itself
+                from .variants import ArrowLinearVariant
+
+                return ArrowLinearVariant()
+
             if not use_dora:
                 return None
 
@@ -296,6 +304,7 @@ if is_bnb_4bit_available():
             init_lora_weights: bool = True,
             use_rslora: bool = False,
             use_dora: bool = False,
+            use_arrow: bool = False,
             lora_bias: bool = False,
             **kwargs,
         ) -> None:
@@ -313,9 +322,16 @@ if is_bnb_4bit_available():
                 use_rslora=use_rslora,
                 use_dora=use_dora,
                 lora_bias=lora_bias,
+                use_arrow=use_arrow,
             )
 
-        def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+        def resolve_lora_variant(self, *, use_dora: bool, use_arrow: bool, **kwargs) -> Optional[LoraVariant]:
+            if use_arrow:
+                # arrow variant must be imported so it registers itself
+                from .variants import ArrowLinearVariant
+
+                return ArrowLinearVariant()
+
             if not use_dora:
                 return None
 

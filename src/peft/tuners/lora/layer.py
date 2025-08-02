@@ -188,6 +188,7 @@ class LoraLayer(BaseTunerLayer):
         use_dora: bool = False,
         use_qalora: bool = False,
         lora_bias: bool = False,
+        use_arrow: bool = False,
         qalora_group_size: int = 32,
         **kwargs,
     ):
@@ -199,8 +200,14 @@ class LoraLayer(BaseTunerLayer):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
+        arrow_config = kwargs.get("arrow_config")
+
         lora_variant = self.resolve_lora_variant(
-            use_dora=use_dora, use_qalora=use_qalora, qalora_group_size=qalora_group_size
+            use_dora=use_dora,
+            use_qalora=use_qalora,
+            qalora_group_size=qalora_group_size,
+            use_arrow=use_arrow,
+            arrow_config=arrow_config,
         )
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
@@ -598,6 +605,7 @@ class Linear(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        use_arrow: bool = False,
         lora_bias: bool = False,
         **kwargs,
     ) -> None:
@@ -615,10 +623,17 @@ class Linear(nn.Module, LoraLayer):
             use_rslora=use_rslora,
             use_dora=use_dora,
             lora_bias=lora_bias,
+            use_arrow=use_arrow,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+    def resolve_lora_variant(self, *, use_dora: bool, use_arrow: bool, **kwargs) -> Optional[LoraVariant]:
+        if use_arrow:
+            # arrow variant must be imported so it registers itself
+            from .variants import ArrowLinearVariant
+
+            return ArrowLinearVariant()
+
         if not use_dora:
             return None
 
