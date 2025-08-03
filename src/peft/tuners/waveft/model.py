@@ -33,6 +33,7 @@ from peft.utils import (
 
 from .config import WaveFTConfig
 from .layer import WaveFTLayer, WaveFTLinear
+from peft.utils.other import get_pattern_key
 
 
 class WaveFTModel(BaseTuner):
@@ -106,10 +107,10 @@ class WaveFTModel(BaseTuner):
             n_frequency = optional_kwargs["n_frequency"]
 
         if n_frequency is None:
-            pattern_keys = list(chain(waveft_config.n_frequency_pattern.keys()))
-            target_name_key = next(filter(lambda key: re.match(rf".*\.{key}$", current_key), pattern_keys), current_key)
+            pattern_keys = list(waveft_config.n_frequency_pattern.keys())
+            target_name_key = get_pattern_key(pattern_keys, current_key)
             n_frequency = waveft_config.n_frequency_pattern.get(target_name_key, waveft_config.n_frequency)
-        
+
         # Determine wavelet_family similarly
         wavelet_family = None
         if hasattr(waveft_config, "_proportional_wavelet_family"):
