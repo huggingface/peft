@@ -56,7 +56,7 @@ class WaveFTLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names = ("waveft_spectrum",)
     # All names of other parameters that may contain adapter-related parameters
-    other_param_names = ("waveft_n_frequency", "waveft_scaling", "waveft_random_loc_seed", "waveft_wavelet_family")
+    other_param_names = ("waveft_n_frequency", "waveft_scaling", "waveft_random_loc_seed", "waveft_wavelet_family", "waveft_indices")
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         self.base_layer = base_layer
@@ -64,7 +64,7 @@ class WaveFTLayer(BaseTunerLayer):
         self.waveft_scaling = {}
         self.waveft_spectrum = nn.ParameterDict({})
         self.waveft_wavelet_family = {}
-        self.indices = {}
+        self.waveft_indices = {}
         self.waveft_random_loc_seed = {}
         # Mark the weight as unmerged
         self._disable_adapters = False
@@ -109,7 +109,7 @@ class WaveFTLayer(BaseTunerLayer):
         indices = torch.randperm(self.out_features * self.in_features, generator=generator)[:n_frequency]
         
         # Convert to row, col format for the original dimensions
-        self.indices[adapter_name] = torch.stack(
+        self.waveft_indices[adapter_name] = torch.stack(
             [indices // self.in_features, indices % self.in_features], dim=0
         )
         
@@ -136,7 +136,7 @@ class WaveFTLayer(BaseTunerLayer):
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         spectrum = self.waveft_spectrum[adapter]
-        indices = self.indices[adapter].to(spectrum.device)
+        indices = self.waveft_indices[adapter].to(spectrum.device)
         wavelet_family = self.waveft_wavelet_family[adapter]
         
         # Choose whether to use IDWT or direct spectrum based on kwargs
