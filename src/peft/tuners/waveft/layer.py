@@ -34,7 +34,7 @@ class WaveFTLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names = ("waveft_spectrum",)
     # All names of other parameters that may contain adapter-related parameters
-    other_param_names = ("waveft_n_frequency", "waveft_scaling", "waveft_random_loc_seed", "waveft_wavelet_family", "waveft_indices")
+    other_param_names = ("waveft_n_frequency", "waveft_scaling", "waveft_random_loc_seed", "waveft_wavelet_family", "waveft_indices", "waveft_use_idwt")
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         self.base_layer = base_layer
@@ -44,6 +44,7 @@ class WaveFTLayer(BaseTunerLayer):
         self.waveft_wavelet_family = {}
         self.waveft_indices = {}
         self.waveft_random_loc_seed = {}
+        self.waveft_use_idwt = {}
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
@@ -59,7 +60,7 @@ class WaveFTLayer(BaseTunerLayer):
         else:
             raise ValueError(f"Unsupported layer type {type(base_layer)}")
 
-    def update_layer(self, adapter_name, n_frequency, scaling, init_weights, random_loc_seed, wavelet_family="db1"):
+    def update_layer(self, adapter_name, n_frequency, scaling, init_weights, random_loc_seed, wavelet_family="db1", use_idwt=True):
         if n_frequency <= 0:
             raise ValueError(f"`n_frequency` should be a positive integer value but the value passed is {n_frequency}")
         if n_frequency > self.in_features * self.out_features:
@@ -77,6 +78,7 @@ class WaveFTLayer(BaseTunerLayer):
         self.waveft_n_frequency[adapter_name] = n_frequency
         self.waveft_random_loc_seed[adapter_name] = random_loc_seed
         self.waveft_wavelet_family[adapter_name] = wavelet_family
+        self.waveft_use_idwt[adapter_name] = use_idwt
         
         # Get the expanded dimensions based on wavelet family
         reduction_rows, reduction_cols = WAVELET_REDUCTIONS[wavelet_family]
@@ -117,8 +119,8 @@ class WaveFTLayer(BaseTunerLayer):
         indices = self.waveft_indices[adapter].to(spectrum.device)
         wavelet_family = self.waveft_wavelet_family[adapter]
         
-        # Choose whether to use IDWT or direct spectrum based on kwargs
-        if self.kwargs.get("use_idwt", True):
+        # Choose whether to use IDWT or direct spectrum based on adapter setting
+        if self.waveft_use_idwt[adapter]:
             reduction_rows, reduction_cols = WAVELET_REDUCTIONS[wavelet_family]
             
             # Create a padded spectrum matrix with additional rows and columns
@@ -204,12 +206,10 @@ class WaveFTLinear(nn.Module, WaveFTLayer):
         **kwargs,
     ) -> None:
         super().__init__()
-        # Pass use_idwt to kwargs so it's available in get_delta_weight
-        kwargs["use_idwt"] = use_idwt
         WaveFTLayer.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = fan_in_fan_out
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, n_frequency, scaling, init_weights, random_loc_seed, wavelet_family)
+        self.update_layer(adapter_name, n_frequency, scaling, init_weights, random_loc_seed, wavelet_family, use_idwt)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         """

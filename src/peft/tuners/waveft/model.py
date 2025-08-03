@@ -121,7 +121,8 @@ class WaveFTModel(BaseTuner):
                 scaling,
                 waveft_config.init_weights,
                 random_loc_seed,
-                wavelet_family=wavelet_family # Pass determined wavelet family
+                wavelet_family=wavelet_family, # Pass determined wavelet family
+                use_idwt=waveft_config.use_idwt
             )
         else:
             new_module = self._create_new_module(waveft_config, adapter_name, target, **kwargs)
