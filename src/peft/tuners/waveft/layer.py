@@ -28,15 +28,12 @@ import os
 
 from .waverec2d import waverec2d
 
-
-class WaveFTLayer(BaseTunerLayer):
-    # All names of layers that may contain (trainable) adapter weights
-    adapter_layer_names = ("waveft_spectrum",)
-    # All names of other parameters that may contain adapter-related parameters
-    other_param_names = ("waveft_n_frequency", "waveft_scaling", "waveft_random_loc_seed", "waveft_wavelet_family")
-
-    # Reduction amounts for different wavelet families
-    WAVELET_REDUCTIONS = {
+# Dimensional reduction amounts for different wavelet families during wavelet transforms
+# Each tuple (rows, cols) represents the reduction in matrix dimensions that occurs when
+# applying wavelet decomposition/reconstruction due to boundary effects and filter sizes.
+# These values are used to pre-pad matrices before wavelet processing to ensure the
+# reconstructed matrix maintains the original target dimensions.
+WAVELET_REDUCTIONS = {
         'db1': (0, 0), 'db2': (2, 2), 'db3': (4, 4), 'db4': (6, 6), 'db5': (8, 8), 
         'db6': (10, 10), 'db7': (12, 12), 'db8': (14, 14), 'db9': (16, 16), 'db10': (18, 18), 
         'db11': (20, 20), 'db12': (22, 22), 'db13': (24, 24), 'db14': (26, 26), 'db15': (28, 28), 
@@ -53,6 +50,13 @@ class WaveFTLayer(BaseTunerLayer):
         'coif9': (52, 52), 'coif10': (58, 58), 'coif11': (64, 64), 'coif12': (70, 70), 'coif13': (76, 76), 
         'coif14': (82, 82), 'coif15': (88, 88), 'coif16': (94, 94), 'coif17': (100, 100)
     }
+
+
+class WaveFTLayer(BaseTunerLayer):
+    # All names of layers that may contain (trainable) adapter weights
+    adapter_layer_names = ("waveft_spectrum",)
+    # All names of other parameters that may contain adapter-related parameters
+    other_param_names = ("waveft_n_frequency", "waveft_scaling", "waveft_random_loc_seed", "waveft_wavelet_family")
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         self.base_layer = base_layer
@@ -85,8 +89,8 @@ class WaveFTLayer(BaseTunerLayer):
                 f"`n_frequency` should be less than or equal to the product of the input and output dimensions "
                 f"but the value passed is {n_frequency} and the product is {self.in_features * self.out_features}"
             )
-        if wavelet_family not in self.WAVELET_REDUCTIONS:
-            supported_wavelets = list(self.WAVELET_REDUCTIONS.keys())
+        if wavelet_family not in WAVELET_REDUCTIONS:
+            supported_wavelets = list(WAVELET_REDUCTIONS.keys())
             raise ValueError(
                 f"Unsupported wavelet family: {wavelet_family}. "
                 f"Supported wavelet families: {supported_wavelets}"
@@ -97,7 +101,7 @@ class WaveFTLayer(BaseTunerLayer):
         self.waveft_wavelet_family[adapter_name] = wavelet_family
         
         # Get the expanded dimensions based on wavelet family
-        reduction_rows, reduction_cols = self.WAVELET_REDUCTIONS[wavelet_family]
+        reduction_rows, reduction_cols = WAVELET_REDUCTIONS[wavelet_family]
         
         # Generate random indices within the original dimensions
         # We handle padding separately in get_delta_weight
@@ -137,7 +141,7 @@ class WaveFTLayer(BaseTunerLayer):
         
         # Choose whether to use IDWT or direct spectrum based on kwargs
         if self.kwargs.get("use_idwt", True):
-            reduction_rows, reduction_cols = self.WAVELET_REDUCTIONS[wavelet_family]
+            reduction_rows, reduction_cols = WAVELET_REDUCTIONS[wavelet_family]
             
             # Create a padded spectrum matrix with additional rows and columns
             # to account for the reduction during wavelet reconstruction
