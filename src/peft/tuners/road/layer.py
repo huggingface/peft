@@ -161,7 +161,6 @@ class Linear(nn.Module, RoadLayer):
             raise ValueError(msg)
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
-
         self._check_forward_args(x, *args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
 
@@ -309,7 +308,8 @@ class Linear(nn.Module, RoadLayer):
                     self.road_theta[active_adapter].data,
                     self.road_alpha[active_adapter].data,
                 )
-                # Since our matrix are not necessarily orthogonal we need inverse instead of transpose
+                # Since our matrix are not necessarily orthogonal we need inverse instead of transpose.
+                # In practice we expect this to basically always work since we start from block diagonal rotation matrix.
                 inv_road_R = torch.linalg.inv(road_R.to(torch.float32)).to(orig_dtype)
                 orig_weight = torch.matmul(inv_road_R, weight.data)
                 weight.data = orig_weight.contiguous()

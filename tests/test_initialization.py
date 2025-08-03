@@ -1412,30 +1412,6 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match=msg):
             get_peft_model(base_model, config)
 
-    def test_targeting_2_params_on_1_module_raises(self):
-        # It is currently not supported to target multiple parameters on the same module.
-        class ModuleWith2Params(nn.Module):
-            def __init__(self, in_features, out_features):
-                super().__init__()
-                self.weight0 = nn.Parameter(torch.zeros(in_features, out_features))
-                self.weight1 = nn.Parameter(torch.ones(3, out_features, out_features))
-
-        class Outer(nn.Module):
-            def __init__(self, in_features, out_features):
-                super().__init__()
-                self.lin = nn.Linear(in_features, in_features)
-                self.submodule = ModuleWith2Params(in_features, out_features)
-
-        model = Outer(3, 4)
-        config = LoraConfig(target_parameters=["submodule.weight0", "submodule.weight1"], init_lora_weights=False)
-        msg = (
-            "lora.ParamWrapper already has an adapter for parameter 'weight0'. It is currently not possible to apply "
-            "the same adapter to multiple parameters, please add a different adapter to target another parameter of "
-            "the same module."
-        )
-        with pytest.raises(ValueError, match=msg):
-            get_peft_model(model, config)
-
     @pytest.mark.parametrize("target_parameters", [["linear"], ["foobar"], ["foobar.weight"], ["foo", "bar"]])
     @pytest.mark.parametrize("target_modules", [None, [], ""])
     def test_valid_no_target_module_nor_target_parameter_match_raises(self, target_parameters, target_modules):
@@ -1757,6 +1733,7 @@ class TestC3AInitialization:
         with pytest.raises(ValueError, match=msg):
             get_peft_model(model, config)
 
+
 class TestRoadInitialization:
     torch_device = infer_device()
 
@@ -1801,31 +1778,35 @@ class TestRoadInitialization:
         torch.allclose(weight_theta, torch.zeros_like(weight_theta))
 
     def test_road_with_odd_group_size(self):
-        group_size = 3 # odd values are not allowed
+        group_size = 3  # odd values are not allowed
         msg = f"The group_size must be divisible by 2 when using RoadLayer, but got {group_size}."
         with pytest.raises(ValueError, match=re.escape(msg)):
             RoadConfig(group_size=group_size)
 
     def test_road_with_too_large_group_size(self):
-        group_size = 64 # larger than out_features
-        msg = f"The out_features of the base layer must be divisible by group_size ({group_size}) when using RoadLayer."
+        group_size = 64  # larger than out_features
+        msg = (
+            f"The out_features of the base layer must be divisible by group_size ({group_size}) when using RoadLayer."
+        )
         model = self.get_model()
         config = RoadConfig(target_modules=["lin0"], group_size=group_size)
         with pytest.raises(ValueError, match=re.escape(msg)):
             get_peft_model(model, config)
 
     def test_road_with_incompatible_group_size_with_out_features(self):
-        group_size = 4 # even, but 30 does not divide by 4
+        group_size = 4  # even, but 30 does not divide by 4
         model = self.get_model()
         config = RoadConfig(target_modules=["lin0"], group_size=group_size)
-        msg = f"The out_features of the base layer must be divisible by group_size ({group_size}) when using RoadLayer."
+        msg = (
+            f"The out_features of the base layer must be divisible by group_size ({group_size}) when using RoadLayer."
+        )
         with pytest.raises(ValueError, match=re.escape(msg)):
             get_peft_model(model, config)
 
     def test_road_with_conv2d_layer(self):
         model = self.get_conv2d_model()
         config = RoadConfig(target_modules=["conv2d"], group_size=2)
-        msg = f"Target module Conv2d(100, 100, kernel_size=(3, 3), stride=(1, 1)) is not supported. Currently, only the following modules are supported: `torch.nn.Linear`."
+        msg = "Target module Conv2d(100, 100, kernel_size=(3, 3), stride=(1, 1)) is not supported. Currently, only the following modules are supported: `torch.nn.Linear`."
         with pytest.raises(ValueError, match=re.escape(msg)):
             get_peft_model(model, config)
 

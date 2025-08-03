@@ -143,6 +143,24 @@ DEVICE_MAP_MAP: dict[str, dict[str, int]] = {
         "model.decoder.layers.31": 1,
         "lm_head": 0,  # tied with embed_tokens
     },
+    "facebook/opt-125m": {
+        "model.decoder.embed_tokens": 0,
+        "model.decoder.embed_positions": 0,
+        "model.decoder.final_layer_norm": 1,
+        "model.decoder.layers.0": 0,
+        "model.decoder.layers.1": 0,
+        "model.decoder.layers.2": 0,
+        "model.decoder.layers.3": 0,
+        "model.decoder.layers.4": 0,
+        "model.decoder.layers.5": 0,
+        "model.decoder.layers.6": 1,
+        "model.decoder.layers.7": 1,
+        "model.decoder.layers.8": 1,
+        "model.decoder.layers.9": 1,
+        "model.decoder.layers.10": 1,
+        "model.decoder.layers.11": 1,
+        "lm_head": 0,
+    },
     "marcsun13/opt-350m-gptq-4bit": {
         "model.decoder.embed_tokens": 0,
         "model.decoder.embed_positions": 0,
@@ -3807,7 +3825,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         # torchao breaks with fp16 and if a previous test uses fp16, transformers will set this env var, which affects
         # subsequent tests, therefore the env var needs to be cleared explicitly
         #
-        # TODO: remove this once https://github.com/huggingface/transformers/pull/37259 is merged
+        # TODO: remove this once https://github.com/huggingface/transformers/pull/39483 is merged
         os.environ.pop("ACCELERATE_MIXED_PRECISION", None)
 
     def tearDown(self):

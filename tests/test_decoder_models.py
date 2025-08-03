@@ -17,6 +17,7 @@ from unittest.mock import Mock, call, patch
 
 import pytest
 import torch
+from safetensors.torch import load_file as safe_load_file
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -35,6 +36,7 @@ from peft import (
     HRAConfig,
     IA3Config,
     LoraConfig,
+    MissConfig,
     OFTConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
@@ -47,7 +49,7 @@ from peft import (
     get_peft_model,
 )
 
-from .testing_common import PeftCommonTester
+from .testing_common import PeftCommonTester, hub_online_once
 from .testing_utils import device_count, load_dataset_english_quotes, set_init_weights_false
 
 
@@ -91,6 +93,14 @@ ALL_CONFIGS = [
     ),
     (
         BoneConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "r": 2,
+        },
+    ),
+    (
+        MissConfig,
         {
             "task_type": "CAUSAL_LM",
             "target_modules": None,
@@ -242,8 +252,9 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         RoadConfig,
         ShiraConfig,
         C3AConfig,
+        MissConfig,
     ]:
-        pytest.skip("Skipping BOFT/HRA/OFT/Bone/Road/SHiRA/C3A for GPT2LMHeadModel")
+        pytest.skip("Skipping BOFT/HRA/OFT/Bone/Road/SHiRA/C3A/MiSS for GPT2LMHeadModel")
 
 
 def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
@@ -255,8 +266,9 @@ def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
         BoneConfig,
         C3AConfig,
         RoadConfig,
+        MissConfig,
     ]:
-        pytest.skip("Skipping AdaLora/BOFT/HRA/OFT/Bone for GPT2LMHeadModel")
+        pytest.skip("Skipping AdaLora/BOFT/HRA/OFT/Bone/MiSS for GPT2LMHeadModel")
 
 
 class TestDecoderModels(PeftCommonTester):
@@ -691,3 +703,38 @@ class TestDecoderModels(PeftCommonTester):
                 data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
             )
             trainer.train()
+
+    @pytest.mark.parametrize("save_embedding_layers", ["auto", True, False])
+    @pytest.mark.parametrize(
+        "peft_config",
+        [
+            (LoraConfig(target_modules=["lin0", "embed_tokens"], init_lora_weights=False)),
+            (LoraConfig(target_modules=r".*\.embed_tokens", init_lora_weights=False)),
+        ],
+    )
+    def test_save_pretrained_targeting_lora_to_embedding_layer(self, save_embedding_layers, tmp_path, peft_config):
+        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            model = get_peft_model(model, peft_config)
+
+            if save_embedding_layers == "auto":
+                # assert warning
+                msg_start = "Setting `save_embedding_layers` to `True` as embedding layers found in `target_modules`."
+                with pytest.warns(UserWarning, match=msg_start):
+                    model.save_pretrained(tmp_path, save_embedding_layers=save_embedding_layers)
+            else:
+                model.save_pretrained(tmp_path, save_embedding_layers=save_embedding_layers)
+
+            state_dict = safe_load_file(tmp_path / "adapter_model.safetensors")
+            contains_embedding = "base_model.model.model.embed_tokens.base_layer.weight" in state_dict
+
+            if save_embedding_layers in ["auto", True]:
+                assert contains_embedding
+                assert torch.allclose(
+                    model.base_model.model.model.embed_tokens.base_layer.weight,
+                    state_dict["base_model.model.model.embed_tokens.base_layer.weight"],
+                )
+            else:
+                assert not contains_embedding

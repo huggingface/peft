@@ -43,6 +43,7 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
+    MissConfig,
     OFTConfig,
     PeftModel,
     RandLoraConfig,
@@ -443,6 +444,22 @@ TEST_CASES = [
         "Vanilla MLP 5 Bone",
         "MLP",
         BoneConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "r": 2, "init_weights": "bat"},
+    ),
+    ########
+    # MiSS #
+    ########
+    ("Vanilla MLP 1 MiSS", "MLP", MissConfig, {"target_modules": "lin0", "r": 2}),
+    ("Vanilla MLP 2 MiSS", "MLP", MissConfig, {"target_modules": ["lin0"], "r": 2}),
+    ("Vanilla MLP 3 MiSS", "MLP", MissConfig, {"target_modules": ["lin0", "lin1"], "r": 2}),
+    ("Vanilla MLP 5 MiSS", "MLP", MissConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "r": 2}),
+    ("Vanilla MLP 1 MiSS", "MLP", MissConfig, {"target_modules": "lin0", "r": 2, "init_weights": "bat"}),
+    ("Vanilla MLP 2 MiSS", "MLP", MissConfig, {"target_modules": ["lin0"], "r": 2, "init_weights": "bat"}),
+    ("Vanilla MLP 3 MiSS", "MLP", MissConfig, {"target_modules": ["lin0", "lin1"], "r": 2, "init_weights": "bat"}),
+    (
+        "Vanilla MLP 5 MiSS",
+        "MLP",
+        MissConfig,
         {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "r": 2, "init_weights": "bat"},
     ),
     #############
@@ -864,6 +881,21 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin1"], "init_weights": False, "r": 2},
     ),
     (
+        "MiSS Same",
+        "miss",
+        MissConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "r": 2},
+        {"target_modules": ["lin0"], "init_weights": False, "r": 2},
+    ),
+    (
+        "MiSS Different",
+        "miss",
+        MissConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "r": 2},
+        {"target_modules": ["lin1"], "init_weights": False, "r": 2},
+    ),
+    # Not testing "mini" initialization targeting the same layer, because The matrix is initialized to all zeros in MiSS-mini mode.
+    (
         "VBLoRA Same",
         "vblora",
         VBLoRAConfig,
@@ -938,6 +970,7 @@ PREFIXES = {
     VBLoRAConfig: "vblora_",
     BoneConfig: "bone_",
     RoadConfig: "road_",
+    MissConfig: "miss_",
     TrainableTokensConfig: "trainable_tokens_",
 }
 
@@ -1265,7 +1298,7 @@ class ModelMha(nn.Module):
 
 
 class _LinearUsingParameter(nn.Module):
-    # TODO
+    # Linear layer equivalent
     def __init__(self, in_features, out_features, bias=None):
         super().__init__()
         self.in_features = in_features
@@ -1279,7 +1312,7 @@ class _LinearUsingParameter(nn.Module):
 
 
 class MlpUsingParameters(nn.Module):
-    # TODO
+    # MLP that uses layers whose parameters need to be targeted with target_parameters
     def __init__(self, bias=True):
         super().__init__()
 
@@ -2241,7 +2274,7 @@ class TestPeftCustomModel(PeftCommonTester):
         assert "other" in model.base_model.classifier.modules_to_save
 
     @pytest.mark.parametrize(
-        "config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig, ShiraConfig]
+        "config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig, ShiraConfig, MissConfig]
     )
     def test_multiple_adapters_mixed_modules_to_save(self, config_cls):
         # See issue 1574
@@ -2250,7 +2283,7 @@ class TestPeftCustomModel(PeftCommonTester):
         if hasattr(config_cls, "feedforward_modules"):  # IA³
             config_cls = partial(config_cls, feedforward_modules=["lin0"])
 
-        if config_cls == BoneConfig:
+        if config_cls == BoneConfig or config_cls == MissConfig:
             config_cls = partial(config_cls, r=2)
         if config_cls == ShiraConfig:
             config_cls = partial(config_cls, r=1)
@@ -2281,7 +2314,7 @@ class TestPeftCustomModel(PeftCommonTester):
         if hasattr(config_cls, "feedforward_modules"):  # IA³
             config_cls = partial(config_cls, feedforward_modules=["lin0"])
 
-        if config_cls == BoneConfig:
+        if config_cls == BoneConfig or config_cls == MissConfig:
             config_cls = partial(config_cls, r=2)
         if config_cls == ShiraConfig:
             config_cls = partial(config_cls, r=1)
@@ -2363,7 +2396,9 @@ class TestPeftCustomModel(PeftCommonTester):
         with pytest.raises(ValueError, match=msg):
             model.add_weighted_adapter(["default", "other"], weights=[1.0, 1.0], adapter_name="merged")
 
-    @pytest.mark.parametrize("config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig])
+    @pytest.mark.parametrize(
+        "config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig, MissConfig]
+    )
     def test_add_weighted_adapter_cat_with_rank_pattern(self, config_cls):
         # Fixes a bug described in #2512, which resulted from the rank_pattern not being taken into account
         config0 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 2})
@@ -2431,52 +2466,62 @@ class TestPeftCustomModel(PeftCommonTester):
         assert len(model_card) > 1000
 
     @pytest.mark.parametrize("save_embedding_layers", ["auto", True, False])
-    def test_targeting_lora_to_embedding_layer(self, save_embedding_layers):
+    @pytest.mark.parametrize(
+        "peft_config",
+        [
+            (LoraConfig(target_modules=["lin0", "embed_tokens"], init_lora_weights=False)),
+            (LoraConfig(target_modules=r"^embed_tokens", init_lora_weights=False)),
+        ],
+    )
+    def test_save_pretrained_targeting_lora_to_embedding_layer(self, save_embedding_layers, tmp_path, peft_config):
         model = ModelEmbWithEmbeddingUtils()
-        config = LoraConfig(target_modules=["embed_tokens", "lin0"], init_lora_weights=False)
-        model = get_peft_model(model, config)
+        model = get_peft_model(model, peft_config)
 
-        with tempfile.TemporaryDirectory() as tmp_dirname:
-            if save_embedding_layers == "auto":
-                # assert warning
-                msg_start = "Setting `save_embedding_layers` to `True` as embedding layers found in `target_modules`."
-                with pytest.warns(UserWarning, match=msg_start):
-                    model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)
-            else:
-                model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)
-            from safetensors.torch import load_file as safe_load_file
+        if save_embedding_layers == "auto":
+            # assert warning
+            msg_start = "Setting `save_embedding_layers` to `True` as embedding layers found in `target_modules`."
+            with pytest.warns(UserWarning, match=msg_start):
+                model.save_pretrained(tmp_path, save_embedding_layers=save_embedding_layers)
+        else:
+            model.save_pretrained(tmp_path, save_embedding_layers=save_embedding_layers)
 
-            state_dict = safe_load_file(os.path.join(tmp_dirname, "adapter_model.safetensors"))
-            if save_embedding_layers in ["auto", True]:
-                assert "base_model.model.embed_tokens.base_layer.weight" in state_dict
-                assert torch.allclose(
-                    model.base_model.model.embed_tokens.base_layer.weight,
-                    state_dict["base_model.model.embed_tokens.base_layer.weight"],
-                )
-            else:
-                assert "base_model.model.embed_tokens.base_layer.weight" not in state_dict
-            del state_dict
+        state_dict = safe_load_file(tmp_path / "adapter_model.safetensors")
+        contains_embedding = "base_model.model.embed_tokens.base_layer.weight" in state_dict
+
+        if save_embedding_layers in ["auto", True]:
+            assert contains_embedding
+            assert torch.allclose(
+                model.base_model.model.embed_tokens.base_layer.weight,
+                state_dict["base_model.model.embed_tokens.base_layer.weight"],
+            )
+        else:
+            assert not contains_embedding
 
     @pytest.mark.parametrize("save_embedding_layers", ["auto", True, False])
-    def test_targeting_lora_to_embedding_layer_non_transformers(self, save_embedding_layers):
+    @pytest.mark.parametrize(
+        "peft_config",
+        [
+            (LoraConfig(target_modules=["lin0", "emb"], init_lora_weights=False)),
+            (LoraConfig(target_modules=r"^emb", init_lora_weights=False)),
+        ],
+    )
+    def test_save_pretrained_targeting_lora_to_embedding_layer_non_transformers(
+        self, save_embedding_layers, tmp_path, peft_config
+    ):
         model = ModelEmbConv1D()
-        config = LoraConfig(target_modules=["emb", "lin0"], init_lora_weights=False)
-        model = get_peft_model(model, config)
+        model = get_peft_model(model, peft_config)
 
-        with tempfile.TemporaryDirectory() as tmp_dirname:
-            if save_embedding_layers is True:
-                with pytest.warns(
-                    UserWarning,
-                    match=r"Could not identify embedding layer\(s\) because the model is not a 🤗 transformers model\.",
-                ):
-                    model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)
-            else:
-                model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)
-            from safetensors.torch import load_file as safe_load_file
+        if save_embedding_layers is True:
+            with pytest.warns(
+                UserWarning,
+                match=r"Could not identify embedding layer\(s\) because the model is not a 🤗 transformers model\.",
+            ):
+                model.save_pretrained(tmp_path, save_embedding_layers=save_embedding_layers)
+        else:
+            model.save_pretrained(tmp_path, save_embedding_layers=save_embedding_layers)
 
-            state_dict = safe_load_file(os.path.join(tmp_dirname, "adapter_model.safetensors"))
-            assert "base_model.model.emb.base_layer.weight" not in state_dict
-            del state_dict
+        state_dict = safe_load_file(tmp_path / "adapter_model.safetensors")
+        assert "base_model.model.emb.base_layer.weight" not in state_dict
 
     def test_load_resized_embedding_ignore_mismatched_sizes(self):
         # issue #1605
@@ -2519,6 +2564,7 @@ class TestPeftCustomModel(PeftCommonTester):
             BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
             HRAConfig(target_modules=["lin0"], init_weights=False),
             BoneConfig(target_modules=["lin0"], init_weights=False, r=2),
+            MissConfig(target_modules=["lin0"], init_weights=False, r=2),
         ],
     )
     def test_adapter_name_makes_no_difference(self, config0):
@@ -3915,6 +3961,83 @@ class TestRequiresGrad:
             "base_model.model.lin0.bone_block.adapter1",
         )
 
+    def test_requires_grad_miss_different_targets(self):
+        # test two different HRA adapters that target different modules
+        config0 = MissConfig(target_modules=["lin0"], r=2)
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = MissConfig(target_modules=["lin1"], r=2, inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.miss_block.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.miss_block.default",
+        )
+
+        # change activate pter to pter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.miss_block.adapter1",
+        )
+
+        # disable all pters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.miss_block.adapter1",
+        )
+
+    def test_requires_grad_miss_same_targets(self):
+        # same as previous test, except that HRA adapters target the same layer
+        config0 = MissConfig(target_modules=["lin0"], r=2)
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = MissConfig(target_modules=["lin0"], r=2, inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.miss_block.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.miss_block.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.miss_block.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.miss_block.adapter1",
+        )
+
     def test_requires_grad_boft_different_targets(self):
         # test two different OFT adapters that target different modules
         config0 = BOFTConfig(target_modules=["lin0"], boft_block_size=2)
@@ -4544,6 +4667,7 @@ class TestRequiresGrad:
             "base_model.model.lin0.fourierft_spectrum.adapter1",
         )
 
+
 MIXED_ADAPTER_TEST_CASES = [
     (
         "LoRA mixed adapter",
@@ -4556,6 +4680,7 @@ MIXED_ADAPTER_TEST_CASES = [
         RoadConfig(target_modules=["lin0"], group_size=2, variant="road_2", init_weights=False),
     ),
 ]
+
 
 class TestMixedAdapterBatches:
     torch_device = infer_device()
@@ -4609,18 +4734,21 @@ class TestMixedAdapterBatches:
         inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
         self.run_checks(mlp_peft, inputs)
 
-    @pytest.mark.parametrize("test_name, config0, config1", [
-        (
-            "LoRA mixed adapter with different target layers",
-            LoraConfig(target_modules=["lin0"], init_lora_weights=False),
-            LoraConfig(target_modules=["lin1"], init_lora_weights=False),
-        ),
-        (
-            "RoAd mixed adapter with different target layers",
-            RoadConfig(target_modules=["lin0"], group_size=2, init_weights=False),
-            RoadConfig(target_modules=["lin1"], group_size=2, init_weights=False),
-        ),
-        ])
+    @pytest.mark.parametrize(
+        "test_name, config0, config1",
+        [
+            (
+                "LoRA mixed adapter with different target layers",
+                LoraConfig(target_modules=["lin0"], init_lora_weights=False),
+                LoraConfig(target_modules=["lin1"], init_lora_weights=False),
+            ),
+            (
+                "RoAd mixed adapter with different target layers",
+                RoadConfig(target_modules=["lin0"], group_size=2, init_weights=False),
+                RoadConfig(target_modules=["lin1"], group_size=2, init_weights=False),
+            ),
+        ],
+    )
     def test_mixed_adapter_batches_lora_different_target_layers(self, test_name, config0, config1):
         base_model = MLP().to(self.torch_device).eval()
         peft_model = get_peft_model(base_model, config0, "adapter0").eval()
@@ -4628,18 +4756,21 @@ class TestMixedAdapterBatches:
         inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
         self.run_checks(peft_model, inputs)
 
-    @pytest.mark.parametrize("test_name, config0, config1", [
-        (
-            "LoRA mixed adapter with modules to save",
-            LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"], init_lora_weights=False),
-            LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"], init_lora_weights=False),
-        ),
-        (
-            "RoAd mixed adapter with modules to save",
-            RoadConfig(target_modules=["lin0"], modules_to_save=["lin1"], group_size=2, init_weights=False),
-            RoadConfig(target_modules=["lin0"], modules_to_save=["lin1"], group_size=2, init_weights=False),
-        ),
-        ])
+    @pytest.mark.parametrize(
+        "test_name, config0, config1",
+        [
+            (
+                "LoRA mixed adapter with modules to save",
+                LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"], init_lora_weights=False),
+                LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"], init_lora_weights=False),
+            ),
+            (
+                "RoAd mixed adapter with modules to save",
+                RoadConfig(target_modules=["lin0"], modules_to_save=["lin1"], group_size=2, init_weights=False),
+                RoadConfig(target_modules=["lin0"], modules_to_save=["lin1"], group_size=2, init_weights=False),
+            ),
+        ],
+    )
     def test_mixed_adapter_batches_lora_multiple_modules_to_save(self, test_name, config0, config1):
         base_model = MLP().to(self.torch_device).eval()
         peft_model = get_peft_model(base_model, config0, "adapter0").eval()
@@ -4647,13 +4778,16 @@ class TestMixedAdapterBatches:
         inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
         self.run_checks(peft_model, inputs)
 
-    @pytest.mark.parametrize("test_name, config0, config1", [
-        (
-            "LoRA mixed adapter with unsupported layer",
-            LoraConfig(target_modules=["lin0"], modules_to_save=["gru"], init_lora_weights=False),
-            LoraConfig(target_modules=["lin0"], modules_to_save=["gru"], init_lora_weights=False),
-        ),
-        ])
+    @pytest.mark.parametrize(
+        "test_name, config0, config1",
+        [
+            (
+                "LoRA mixed adapter with unsupported layer",
+                LoraConfig(target_modules=["lin0"], modules_to_save=["gru"], init_lora_weights=False),
+                LoraConfig(target_modules=["lin0"], modules_to_save=["gru"], init_lora_weights=False),
+            ),
+        ],
+    )
     def test_mixed_adapter_batches_lora_unsupported_layer_raises(self, test_name, config0, config1):
         base_model = MLPWithGRU().to(self.torch_device).eval()
         peft_model = get_peft_model(base_model, config0, "adapter0").eval()
@@ -4666,18 +4800,21 @@ class TestMixedAdapterBatches:
         ):
             self.run_checks(peft_model, inputs)
 
-    @pytest.mark.parametrize("test_name, config0, config1", [
-        (
-            "LoRA mixed adapter with overlapping layers",
-            LoraConfig(target_modules=["lin0"], init_lora_weights=False),
-            LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False),
-        ),
-        (
-            "RoAd mixed adapter with overlapping layers",
-            RoadConfig(target_modules=["lin0"], group_size=2, init_weights=False),
-            RoadConfig(target_modules=["lin0", "lin1"], group_size=2, init_weights=False),
-        ),
-        ])
+    @pytest.mark.parametrize(
+        "test_name, config0, config1",
+        [
+            (
+                "LoRA mixed adapter with overlapping layers",
+                LoraConfig(target_modules=["lin0"], init_lora_weights=False),
+                LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False),
+            ),
+            (
+                "RoAd mixed adapter with overlapping layers",
+                RoadConfig(target_modules=["lin0"], group_size=2, init_weights=False),
+                RoadConfig(target_modules=["lin0", "lin1"], group_size=2, init_weights=False),
+            ),
+        ],
+    )
     def test_mixed_adapter_batches_lora_partly_overlapping_target_layers(self, test_name, config0, config1):
         base_model = MLP().to(self.torch_device).eval()
         # target different lora layers
@@ -4687,13 +4824,16 @@ class TestMixedAdapterBatches:
         inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
         self.run_checks(peft_model, inputs)
 
-    @pytest.mark.parametrize("test_name, config0, config1", [
-        (
-            "LoRA mixed adapter with conv1d",
-            LoraConfig(target_modules=["emb", "conv1d"], init_lora_weights=False),
-            LoraConfig(target_modules=["emb", "conv1d"], r=16, init_lora_weights=False),
-        ),
-        ])
+    @pytest.mark.parametrize(
+        "test_name, config0, config1",
+        [
+            (
+                "LoRA mixed adapter with conv1d",
+                LoraConfig(target_modules=["emb", "conv1d"], init_lora_weights=False),
+                LoraConfig(target_modules=["emb", "conv1d"], r=16, init_lora_weights=False),
+            ),
+        ],
+    )
     def test_mixed_adapter_batches_lora_conv1d_emb(self, test_name, config0, config1):
         base_model = ModelEmbConv1D().to(self.torch_device).eval()
         peft_model = get_peft_model(base_model, config0, "adapter0").eval()
@@ -4702,13 +4842,16 @@ class TestMixedAdapterBatches:
         inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
         self.run_checks(peft_model, inputs)
 
-    @pytest.mark.parametrize("test_name, config0, config1", [
-        (
-            "LoRA mixed adapter with conv1d and emb and modules to save",
-            LoraConfig(target_modules=["emb", "conv1d"], modules_to_save=["lin0"], init_lora_weights=False),
-            LoraConfig(target_modules=["emb", "conv1d"], modules_to_save=["lin0"], init_lora_weights=False),
-        ),
-        ])
+    @pytest.mark.parametrize(
+        "test_name, config0, config1",
+        [
+            (
+                "LoRA mixed adapter with conv1d and emb and modules to save",
+                LoraConfig(target_modules=["emb", "conv1d"], modules_to_save=["lin0"], init_lora_weights=False),
+                LoraConfig(target_modules=["emb", "conv1d"], modules_to_save=["lin0"], init_lora_weights=False),
+            ),
+        ],
+    )
     def test_mixed_adapter_batches_lora_conv1d_emb_multiple_modules_to_save(self, test_name, config0, config1):
         base_model = ModelEmbConv1D().to(self.torch_device).eval()
         peft_model = get_peft_model(base_model, config0, "adapter0").eval()
@@ -4716,13 +4859,16 @@ class TestMixedAdapterBatches:
         inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
         self.run_checks(peft_model, inputs)
 
-    @pytest.mark.parametrize("test_name, config0, config1", [
-        (
-            "LoRA mixed adapter with conv2d",
-            LoraConfig(target_modules=["conv2d"], init_lora_weights=False),
-            LoraConfig(target_modules=["conv2d"], r=16, init_lora_weights=False),
-        ),
-        ])
+    @pytest.mark.parametrize(
+        "test_name, config0, config1",
+        [
+            (
+                "LoRA mixed adapter with conv2d",
+                LoraConfig(target_modules=["conv2d"], init_lora_weights=False),
+                LoraConfig(target_modules=["conv2d"], r=16, init_lora_weights=False),
+            ),
+        ],
+    )
     def test_mixed_adapter_batches_lora_conv2d(self, test_name, config0, config1):
         base_model = ModelConv2D().to(self.torch_device).eval()
         peft_model = get_peft_model(base_model, config0, "adapter0").eval()
@@ -4731,13 +4877,16 @@ class TestMixedAdapterBatches:
         inputs = {"X": torch.arange(270).view(6, 5, 3, 3).to(self.torch_device)}
         self.run_checks(peft_model, inputs)
 
-    @pytest.mark.parametrize("test_name, config0, config1", [
-        (
-            "LoRA mixed adapter with mha",
-            LoraConfig(target_modules=["mha"], init_lora_weights=False),
-            LoraConfig(target_modules=["mha"], r=16, init_lora_weights=False),
-        ),
-        ])
+    @pytest.mark.parametrize(
+        "test_name, config0, config1",
+        [
+            (
+                "LoRA mixed adapter with mha",
+                LoraConfig(target_modules=["mha"], init_lora_weights=False),
+                LoraConfig(target_modules=["mha"], r=16, init_lora_weights=False),
+            ),
+        ],
+    )
     def test_mixed_adapter_batches_mha_raises(self, test_name, config0, config1):
         base_model = ModelMha().to(self.torch_device).eval()
         peft_model = get_peft_model(base_model, config0, "adapter0").eval()
@@ -4799,16 +4948,19 @@ class TestMixedAdapterBatches:
         with pytest.raises(ValueError, match=msg):
             mlp_peft.forward(**inputs)
 
-    @pytest.mark.parametrize("test_name, config", [
-        (
-            "LoRA mixed batch wrong adapter name",
-            LoraConfig(target_modules=["lin0"], init_lora_weights=False),
-        ),
-        (
-            "LoRA mixed batch wrong adapter name",
-            RoadConfig(target_modules=["lin0"], group_size=2, init_weights=False),
-        ),
-        ])
+    @pytest.mark.parametrize(
+        "test_name, config",
+        [
+            (
+                "LoRA mixed batch wrong adapter name",
+                LoraConfig(target_modules=["lin0"], init_lora_weights=False),
+            ),
+            (
+                "LoRA mixed batch wrong adapter name",
+                RoadConfig(target_modules=["lin0"], group_size=2, init_weights=False),
+            ),
+        ],
+    )
     def test_mixed_adapter_batches_lora_wrong_adapter_name_raises(self, test_name, config):
         # Ensure that all of the adapter names that are being passed actually exist
         torch.manual_seed(0)
@@ -4869,20 +5021,23 @@ class TestMixedAdapterBatches:
         }
         peft_model.forward(**inputs)
 
-    @pytest.mark.parametrize("test_name, config0, config1, factor", [
-        (
-            "LoRA mixed adapter timing",
-            LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False),
-            LoraConfig(task_type="CAUSAL_LM", r=16, init_lora_weights=False),
-            2.0,
-        ),
-        (
-            "RoAd mixed adapter timing",
-            RoadConfig(task_type="CAUSAL_LM", init_weights=False),
-            RoadConfig(task_type="CAUSAL_LM", variant="road_2", init_weights=False),
-            3.0,
-        ),
-        ])
+    @pytest.mark.parametrize(
+        "test_name, config0, config1, factor",
+        [
+            (
+                "LoRA mixed adapter timing",
+                LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False),
+                LoraConfig(task_type="CAUSAL_LM", r=16, init_lora_weights=False),
+                2.0,
+            ),
+            (
+                "RoAd mixed adapter timing",
+                RoadConfig(task_type="CAUSAL_LM", init_weights=False),
+                RoadConfig(task_type="CAUSAL_LM", variant="road_2", init_weights=False),
+                3.0,
+            ),
+        ],
+    )
     @require_non_cpu
     def test_mixed_adapter_batches_lora_opt_timing(self, test_name, config0, config1, factor):
         # Use a more realistic model (opt-125m) and do a simple runtime check to ensure that mixed adapter batches

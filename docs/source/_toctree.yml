@@ -130,6 +130,8 @@
       title: SHiRA
     - local: package_reference/c3a
       title: C3A
+    - local: package_reference/miss
+      title: MiSS
 
     title: Adapters
   - sections:

@@ -74,9 +74,6 @@ class BOFTModel(BaseTuner):
 
     prefix: str = "boft_"
 
-    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
-        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
-
     def _check_new_adapter_config(self, config: BOFTConfig) -> None:
         """
         A helper method to check the config when a new adapter is being added.

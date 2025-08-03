@@ -13,9 +13,9 @@
 # limitations under the License.
 from __future__ import annotations
 
+import operator
 from contextlib import contextmanager
 from functools import partial
-import operator
 from typing import Optional
 
 import torch
@@ -44,13 +44,11 @@ def _adapter_names_pre_forward_hook(target, args, kwargs, adapter_names):
     kwargs["adapter_names"] = adapter_names
     return args, kwargs
 
+
 class RoadModel(BaseTuner):
     """ """
 
     prefix: str = "road_"
-
-    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
-        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
     @staticmethod
     def _prepare_adapter_config(road_config: RoadConfig, model_config: dict) -> RoadConfig:
