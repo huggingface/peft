@@ -113,7 +113,7 @@ class WaveFTModel(BaseTuner):
         # Determine wavelet_family similarly
         wavelet_family = None
         if hasattr(waveft_config, "_proportional_wavelet_family"):
-             wavelet_family = waveft_config._proportional_wavelet_family
+            wavelet_family = waveft_config._proportional_wavelet_family
         if wavelet_family is None and "wavelet_family" in optional_kwargs:
             wavelet_family = optional_kwargs["wavelet_family"]
         if wavelet_family is None:
@@ -172,7 +172,7 @@ class WaveFTModel(BaseTuner):
         meta = torch.device("meta")
         # dispatch to correct device
         for name, module in new_module.named_modules():
-            if "waveft_" in name:
+            if self.prefix in name:
                 if not any(p.device == meta for p in module.parameters()):
                     module.to(child.weight.device)
 

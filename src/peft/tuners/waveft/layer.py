@@ -297,7 +297,7 @@ class WaveFTLinear(nn.Module, WaveFTLayer):
                     continue
 
                 delta_w = self.get_delta_weight(active_adapter)
-                x = x.to(delta_w.dtype)
+                x = self._cast_input_dtype(x, delta_w.dtype)
                 result = result + F.linear(x, delta_w)
 
         result = result.to(previous_dtype)
