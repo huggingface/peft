@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
+# Based on implementation made available in https://github.com/ppetrushkov/peft/tree/road (not from paper authors)
+
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.utils import register_peft_method
 

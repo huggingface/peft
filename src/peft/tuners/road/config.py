@@ -47,7 +47,7 @@ class RoadConfig(PeftConfig):
             then element 1 is paired with element group_size/2+1 and so on.
             This has no effect on the model performance, since elements are unordered,
             however it has some effect on inference speed when used in e.g. VLLM.
-            For best speed group size of at least 64 is recommended.
+            For best speed group size of at least 32 or 64 (the default) is recommended.
             Note that model hidden size (or hidden size per partition when used with tensor parallelism)
             must be divisible by group_size, so for very small models you might need to reduce this parameter.
         init_weights (`bool`):

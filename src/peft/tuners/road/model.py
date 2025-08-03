@@ -13,6 +13,8 @@
 # limitations under the License.
 from __future__ import annotations
 
+from contextlib import contextmanager
+from functools import partial
 import operator
 from typing import Optional
 
@@ -36,6 +38,11 @@ from peft.utils import (
 
 from .layer import RoadLayer, dispatch_default
 
+
+def _adapter_names_pre_forward_hook(target, args, kwargs, adapter_names):
+    # pre-forward hook to inject the adapter_names argument when using mixed adapter batches inference
+    kwargs["adapter_names"] = adapter_names
+    return args, kwargs
 
 class RoadModel(BaseTuner):
     """ """
@@ -211,6 +218,44 @@ class RoadModel(BaseTuner):
             if name == "model":  # see #1892: prevent infinite recursion if class is not initialized
                 raise
             return getattr(self.model, name)
+
+    @contextmanager
+    def _enable_peft_forward_hooks(self, *args, **kwargs):
+        # If adapter_names is passed as an argument, we inject it into the forward arguments.
+        adapter_names = kwargs.pop("adapter_names", None)
+        if adapter_names is None:
+            # nothing to do
+            yield
+            return
+
+        if self.training:
+            raise ValueError("Cannot pass `adapter_names` when the model is in training mode.")
+
+        # Check that users only passed actually existing adapters.
+        # Note: We cannot do this on the layer level, as each individual layer may not have each adapter. Still, we want
+        # to check that there is at least one layer with the given name, or else something like typos can easily slip.
+        expected_adapters = set()
+        for layer in self.modules():
+            if isinstance(layer, RoadLayer):
+                expected_adapters |= layer.road_theta.keys()
+        unique_adapters = {name for name in adapter_names if name != "__base__"}
+        unexpected_adapters = unique_adapters - expected_adapters
+        if unexpected_adapters:
+            raise ValueError(f"Trying to infer with non-existing adapter(s): {', '.join(sorted(unexpected_adapters))}")
+
+        hook_handles = []
+        for module in self.modules():
+            if isinstance(module, RoadLayer):
+                pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
+                handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
+                hook_handles.append(handle)
+
+        # TODO LoRA also has hooks for beam search, ignore this for now
+
+        yield
+
+        for handle in hook_handles:
+            handle.remove()
 
     def _unload_and_optionally_merge(
         self,

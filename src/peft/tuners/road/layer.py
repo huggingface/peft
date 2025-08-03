@@ -101,18 +101,18 @@ class RoadLayer(BaseTunerLayer):
             raise ValueError(
                 f"Unsupported variant {variant} for RoadLayer. Supported variants are road_1, road_2, and road_4."
             )
-        self.road_theta[adapter_name] = nn.Parameter(torch.rand(size))
-        self.road_alpha[adapter_name] = nn.Parameter(torch.rand(size))
+        self.road_theta[adapter_name] = nn.Parameter(torch.empty(size))
+        self.road_alpha[adapter_name] = nn.Parameter(torch.empty(size))
 
-        # for inits that require access to the base weight, use gather_param_ctx so that the weight is gathered when using DeepSpeed
-        if init_weights:
-            self.reset_road_parameters(adapter_name, init_weights)
+        self.reset_parameters(adapter_name, init_weights)
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
         self.set_adapter(self.active_adapters)
 
-    def reset_road_parameters(self, adapter_name, init_weights):
+    def reset_parameters(self, adapter_name, init_weights):
         if init_weights is False:
+            nn.init.normal_(self.road_theta[adapter_name].data, mean=0.0, std=0.5)
+            nn.init.normal_(self.road_alpha[adapter_name].data, mean=1.0, std=0.5)
             return
         nn.init.zeros_(self.road_theta[adapter_name].data)
         nn.init.ones_(self.road_alpha[adapter_name].data)
@@ -154,7 +154,14 @@ class Linear(nn.Module, RoadLayer):
             )
             raise ValueError(msg)
 
+        if self.merged:
+            # It is unclear what would be the right thing to do if users pass adapter_names and there are merged
+            # adapters. Therefore, it is better to raise an error in this case.
+            msg = "Cannot pass `adapter_names` when there are merged adapters, please call `unmerge_adapter` first."
+            raise ValueError(msg)
+
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+
         self._check_forward_args(x, *args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
 
