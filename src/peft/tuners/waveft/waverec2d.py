@@ -1,3 +1,14 @@
+# Copyright 2021 Moritz Wolter
+# Copyright 2025-present the HuggingFace Inc. team.
+#
+# Licensed under the EUPL v1.2
+#
+# This file contains code derived from PyTorch-Wavelet-Toolbox:
+# https://github.com/v0lta/PyTorch-Wavelet-Toolbox
+#
+# Original work by Moritz Wolter, licensed under EUPL v1.2
+# Modifications and integration by HuggingFace Inc. team
+
 from collections.abc import Callable, Sequence
 from functools import partial
 from typing import Any, NamedTuple, Protocol, Union, cast, overload
