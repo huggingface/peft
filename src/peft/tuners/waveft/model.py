@@ -37,26 +37,6 @@ from peft.utils.other import get_pattern_key
 
 
 class WaveFTModel(BaseTuner):
-    """
-    Creates WaveFT model from a pretrained transformers model.
-
-    The method is described in detail in https://arxiv.org/abs/2405.03003.
-
-    Args:
-        model ([`torch.nn.Module`]): The model to be adapted.
-        config ([`FourierFTConfig`]): The configuration of the FourierFT model.
-        adapter_name (`str`): The name of the adapter, defaults to `"default"`.
-        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
-            Create empty adapter weights on meta device. Useful to speed up the loading process.
-
-    Returns:
-        `torch.nn.Module`: The FourierFT model.
-
-    **Attributes**:
-        - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
-        - **peft_config** ([`FourierFTConfig`]): The configuration of the Fourier model.
-    """
-
     prefix: str = "waveft_"
 
     def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
