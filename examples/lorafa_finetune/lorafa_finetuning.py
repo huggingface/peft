@@ -54,7 +54,7 @@ def train_model(
     if torch.cuda.is_available():
         is_bf16_supported = torch.cuda.is_bf16_supported()
         device_map = "cuda"
-    if torch.xpu.is_available():
+    elif torch.xpu.is_available():
         is_bf16_supported = torch.xpu.is_bf16_supported()
         device_map = "xpu"
     compute_dtype = torch.bfloat16 if is_bf16_supported else torch.float16
