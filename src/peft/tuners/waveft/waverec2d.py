@@ -14,9 +14,10 @@ from functools import partial
 from typing import Any, NamedTuple, Protocol, Union, cast, overload
 
 import numpy as np
-from .wavelet import Wavelet as minimal_wavelet
 import torch
 from typing_extensions import TypeAlias, Unpack
+
+from .wavelet import Wavelet as minimal_wavelet
 
 
 class WaveletDetailTuple2d(NamedTuple):
@@ -261,12 +262,12 @@ def waverec2d(
     for c_pos, coeff_tuple in enumerate(coeffs[1:]):
         if not isinstance(coeff_tuple, tuple) or len(coeff_tuple) != 3:
             raise ValueError(f"Unexpected detail coefficient type: {type(coeff_tuple)}. Must be a 3-tuple.")
-        
+
         curr_shape = res_ll.shape
         for coeff in coeff_tuple:
             if coeff.shape != curr_shape:
                 raise ValueError("All coefficients on each level must have the same shape")
-        
+
         res_lh, res_hl, res_hh = coeff_tuple
         res_ll = torch.stack([res_ll, res_lh, res_hl, res_hh], 1)
         res_ll = torch.nn.functional.conv_transpose2d(res_ll, rec_filt, stride=2).squeeze(1)
@@ -278,11 +279,11 @@ def waverec2d(
         if c_pos < len(coeffs) - 2:
             padr, padl = _adjust_padding_at_reconstruction(res_ll.shape[-1], coeffs[c_pos + 2][0].shape[-1], padr, padl)
             padb, padt = _adjust_padding_at_reconstruction(res_ll.shape[-2], coeffs[c_pos + 2][0].shape[-2], padb, padt)
-        
+
         if padt > 0: res_ll = res_ll[..., padt:, :]
         if padb > 0: res_ll = res_ll[..., :-padb, :]
         if padl > 0: res_ll = res_ll[..., padl:]
         if padr > 0: res_ll = res_ll[..., :-padr]
 
     res_ll = _postprocess_tensor(res_ll, ndim=2, ds=ds, axes=axes)
-    return res_ll 
+    return res_ll

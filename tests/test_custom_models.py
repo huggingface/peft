@@ -771,8 +771,8 @@ TEST_CASES = [
     ("Vanilla MLP 4 WaveFT", "MLP", WaveFTConfig, {"target_modules": ["lin0", "lin1"], "n_frequency": 8}),
     (
         "Vanilla MLP 5 WaveFT",
-        "MLP", 
-        WaveFTConfig, 
+        "MLP",
+        WaveFTConfig,
         {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "n_frequency": 8}
     ),
     (
@@ -788,8 +788,8 @@ TEST_CASES = [
     ),
     (
         "Vanilla MLP 7 WaveFT",
-        "MLP", 
-        WaveFTConfig, 
+        "MLP",
+        WaveFTConfig,
         {"target_modules": "lin1", "n_frequency": 8, "use_idwt": False}
     ),
     (

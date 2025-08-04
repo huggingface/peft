@@ -13,11 +13,9 @@
 # limitations under the License.
 from __future__ import annotations
 
-import re
 import warnings
 from dataclasses import asdict
 from enum import Enum
-from itertools import chain
 from typing import Optional
 
 import torch
@@ -30,17 +28,17 @@ from peft.utils import (
     ModulesToSaveWrapper,
     _get_submodules,
 )
+from peft.utils.other import get_pattern_key
 
 from .config import WaveFTConfig
 from .layer import WaveFTLayer, WaveFTLinear
-from peft.utils.other import get_pattern_key
 
 
 class WaveFTModel(BaseTuner):
     prefix: str = "waveft_"
 
-    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
-        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
+    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False, state_dict: Optional[dict[str, torch.Tensor]] = None) -> None:
+        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage, state_dict=state_dict)
 
     def _check_new_adapter_config(self, config: WaveFTConfig) -> None:
         """
@@ -83,7 +81,7 @@ class WaveFTModel(BaseTuner):
                 else:
                     continue
                 target_modules_info.append((name, input_dim, output_dim))
-        
+
         if not target_modules_info:
             raise ValueError("No target modules found for proportional parameter allocation.")
 
@@ -96,7 +94,7 @@ class WaveFTModel(BaseTuner):
             layer_ratio = (input_dim * output_dim) / total_sum
             n_freq = round(layer_ratio * total_budget)
             n_frequency_dict[name] = n_freq
-        
+
         # Store the results on the model instance using adapter-specific key
         if not hasattr(self, '_proportional_params_cache'):
             self._proportional_params_cache = {}
@@ -114,25 +112,25 @@ class WaveFTModel(BaseTuner):
     ):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
-        
+
         # Calculate proportional parameters if needed (only once per adapter)
         if waveft_config.proportional_parameters:
             if not hasattr(self, '_proportional_params_cache'):
                 self._proportional_params_cache = {}
             if adapter_name not in self._proportional_params_cache:
                 self._calculate_proportional_parameters(self.model, waveft_config, adapter_name)
-        
+
         # Determine n_frequency: Priority order:
         # 1. From proportional parameter cache (if proportional_parameters=True)
         # 2. From optional_kwargs (if passed directly)
         # 3. From n_frequency_pattern in config
         # 4. From default n_frequency in config
         n_frequency = None
-        if (waveft_config.proportional_parameters and 
-            hasattr(self, '_proportional_params_cache') and 
+        if (waveft_config.proportional_parameters and
+            hasattr(self, '_proportional_params_cache') and
             adapter_name in self._proportional_params_cache):
             n_frequency = self._proportional_params_cache[adapter_name].get(current_key)
-        
+
         if n_frequency is None and "n_frequency" in optional_kwargs:
             n_frequency = optional_kwargs["n_frequency"]
 

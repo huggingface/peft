@@ -2028,7 +2028,7 @@ class TestWaveFTInitialization:
     def test_waveft_invalid_n_frequency(self):
         # Test that invalid n_frequency values raise appropriate errors
         model = self.get_model()
-        
+
         # n_frequency should be positive
         with pytest.raises(ValueError):
             config = WaveFTConfig(target_modules=["linear"], n_frequency=0)
@@ -2050,7 +2050,7 @@ class TestWaveFTInitialization:
             init_weights=True
         )
         model = get_peft_model(model, config)
-        
+
         # Check that the pattern was applied
         waveft_layer = model.base_model.model.linear
         assert hasattr(waveft_layer, 'waveft_n_frequency')
