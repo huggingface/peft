@@ -61,8 +61,13 @@ from peft import (
 )
 from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
-from peft.utils import _get_submodules, infer_device
-from peft.utils.other import AuxiliaryTrainingWrapper, ModulesToSaveWrapper, TrainableTokensWrapper
+from peft.utils import (
+    AuxiliaryTrainingWrapper,
+    ModulesToSaveWrapper,
+    TrainableTokensWrapper,
+    _get_submodules,
+    infer_device,
+)
 
 from .testing_utils import get_state_dict
 
