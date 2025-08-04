@@ -51,7 +51,7 @@ peft_config = AdaLoraConfig(
     lora_dropout=0.1,
     task_type=TaskType.SEQ_2_SEQ_LM,
     inference_mode=False,
-    total_step=len(dataset['train']) * num_epochs,
+    total_step=len(dataset["train"]) * num_epochs,
 )
 
 model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)

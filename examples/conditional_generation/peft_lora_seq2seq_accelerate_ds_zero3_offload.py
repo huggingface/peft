@@ -202,9 +202,15 @@ def main():
                 lr_scheduler.step()
                 optimizer.zero_grad()
         # Printing the device memory usage details such as allocated memory, peak memory, and total memory usage
-        accelerator.print(f"{accelerator.device.type.upper()} Memory before entering the train : {b2mb(tracemalloc.begin)}")
-        accelerator.print(f"{accelerator.device.type.upper()} Memory consumed at the end of the train (end-begin): {tracemalloc.used}")
-        accelerator.print(f"{accelerator.device.type.upper()} Peak Memory consumed during the train (max-begin): {tracemalloc.peaked}")
+        accelerator.print(
+            f"{accelerator.device.type.upper()} Memory before entering the train : {b2mb(tracemalloc.begin)}"
+        )
+        accelerator.print(
+            f"{accelerator.device.type.upper()} Memory consumed at the end of the train (end-begin): {tracemalloc.used}"
+        )
+        accelerator.print(
+            f"{accelerator.device.type.upper()} Peak Memory consumed during the train (max-begin): {tracemalloc.peaked}"
+        )
         accelerator.print(
             f"{accelerator.device.type.upper()} Total Peak Memory consumed during the train (max): {tracemalloc.peaked + b2mb(tracemalloc.begin)}"
         )
@@ -233,9 +239,15 @@ def main():
                 eval_preds.extend(tokenizer.batch_decode(preds, skip_special_tokens=True))
 
         # Printing the device memory usage details such as allocated memory, peak memory, and total memory usage
-        accelerator.print(f"{accelerator.device.type.upper()} Memory before entering the eval : {b2mb(tracemalloc.begin)}")
-        accelerator.print(f"{accelerator.device.type.upper()} Memory consumed at the end of the eval (end-begin): {tracemalloc.used}")
-        accelerator.print(f"{accelerator.device.type.upper()} Peak Memory consumed during the eval (max-begin): {tracemalloc.peaked}")
+        accelerator.print(
+            f"{accelerator.device.type.upper()} Memory before entering the eval : {b2mb(tracemalloc.begin)}"
+        )
+        accelerator.print(
+            f"{accelerator.device.type.upper()} Memory consumed at the end of the eval (end-begin): {tracemalloc.used}"
+        )
+        accelerator.print(
+            f"{accelerator.device.type.upper()} Peak Memory consumed during the eval (max-begin): {tracemalloc.peaked}"
+        )
         accelerator.print(
             f"{accelerator.device.type.upper()} Total Peak Memory consumed during the eval (max): {tracemalloc.peaked + b2mb(tracemalloc.begin)}"
         )
@@ -249,9 +261,9 @@ def main():
 
         correct = 0
         total = 0
-        assert len(eval_preds) == len(dataset["train"][label_column]), (
-            f"{len(eval_preds)} != {len(dataset['train'][label_column])}"
-        )
+        assert len(eval_preds) == len(
+            dataset["train"][label_column]
+        ), f"{len(eval_preds)} != {len(dataset['train'][label_column])}"
         for pred, true in zip(eval_preds, dataset["train"][label_column]):
             if pred.strip() == true.strip():
                 correct += 1
