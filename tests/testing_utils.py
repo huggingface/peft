@@ -44,7 +44,7 @@ from peft.import_utils import (
 
 
 # Globally shared model cache used by `hub_online_once`.
-_HUB_MODEL_CACHE = {}
+_HUB_MODEL_ACCESSES = {}
 
 
 torch_device, device_count, memory_allocated_func = get_backend()
@@ -252,8 +252,8 @@ def set_init_weights_false(config_cls, kwargs):
 @contextmanager
 def hub_online_once(model_id: str):
     """Set env[HF_HUB_OFFLINE]=1 (and patch transformers/hugging_face_hub to think that it was always that way)
-    for model ids that were seen already so that the hub is not contacted twice for the same model id in said context.
-    The cache (`_HUB_MODEL_CACHE`) also tracks the number of cache hits per model id.
+    for model ids that were already to avoid contacting the hub twice for the same model id in the context. The global
+    variable `_HUB_MODEL_ACCESSES` tracks the number of hits per model id between `hub_online_once` calls.
 
     The reason for doing a context manager and not patching specific methods (e.g., `from_pretrained`) is that there
     are a lot of places (`PeftConfig.from_pretrained`, `get_peft_state_dict`, `load_adapter`, ...) that possibly
@@ -275,16 +275,16 @@ def hub_online_once(model_id: str):
     extend the cache key (`model_id` passed to `hub_online_once` in this case) by something in case the tokenizer is
     used, so that these tests don't share a cache pool with the tests that don't use a tokenizer.
     """
-    global _HUB_MODEL_CACHE
+    global _HUB_MODEL_ACCESSES
     override = {}
 
     try:
-        if model_id in _HUB_MODEL_CACHE:
+        if model_id in _HUB_MODEL_ACCESSES:
             override = {"HF_HUB_OFFLINE": "1"}
-            _HUB_MODEL_CACHE[model_id] += 1
+            _HUB_MODEL_ACCESSES[model_id] += 1
         else:
-            if model_id not in _HUB_MODEL_CACHE:
-                _HUB_MODEL_CACHE[model_id] = 0
+            if model_id not in _HUB_MODEL_ACCESSES:
+                _HUB_MODEL_ACCESSES[model_id] = 0
         with (
             # strictly speaking it is not necessary to set the environment variable since most code that's out there
             # is evaluating it at import time and we'd have to reload the modules for it to take effect. It's
@@ -297,6 +297,6 @@ def hub_online_once(model_id: str):
     except Exception:
         # in case of an error we have to assume that we didn't access the model properly from the hub
         # for the first time, so the next call cannot be considered cached.
-        if _HUB_MODEL_CACHE.get(model_id) == 0:
-            del _HUB_MODEL_CACHE[model_id]
+        if _HUB_MODEL_ACCESSES.get(model_id) == 0:
+            del _HUB_MODEL_ACCESSES[model_id]
         raise
