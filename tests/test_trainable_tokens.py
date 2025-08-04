@@ -25,7 +25,7 @@ from peft import AutoPeftModel, LoraConfig, PeftModel, TrainableTokensConfig, ge
 from peft.tuners.trainable_tokens.layer import TrainableTokensLayer
 from peft.utils import TrainableTokensWrapper, get_peft_model_state_dict
 
-from .testing_common import hub_online_once
+from .testing_utils import hub_online_once
 
 
 class ModelEmb(torch.nn.Module):

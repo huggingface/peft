@@ -37,7 +37,8 @@ from peft import (
 )
 from peft.utils.other import ModulesToSaveWrapper
 
-from .testing_common import PeftCommonTester, hub_online_once
+from .testing_common import PeftCommonTester
+from .testing_utils import hub_online_once
 
 
 PEFT_SEQ_CLS_MODELS_TO_TEST = [

@@ -48,8 +48,8 @@ from peft import (
     get_peft_model,
 )
 
-from .testing_common import PeftCommonTester, hub_online_once
-from .testing_utils import device_count, load_dataset_english_quotes, set_init_weights_false
+from .testing_common import PeftCommonTester
+from .testing_utils import device_count, hub_online_once, load_dataset_english_quotes, set_init_weights_false
 
 
 PEFT_DECODER_MODELS_TO_TEST = [
