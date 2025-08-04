@@ -61,6 +61,47 @@ class WaveFTModel(BaseTuner):
     def _check_target_module_exists(waveft_config, key):
         return check_target_module_exists(waveft_config, key)
 
+    def _calculate_proportional_parameters(self, model: torch.nn.Module, waveft_config, adapter_name: str):
+        """Calculate proportional parameter allocation for all target modules."""
+        target_modules_info = []
+        for name, module in model.named_modules():
+            if self._check_target_module_exists(waveft_config, name):
+                # Handle case where module is already wrapped with WaveFT
+                if isinstance(module, WaveFTLayer):
+                    # Use the base layer for dimension calculations
+                    base_module = module.base_layer
+                    if isinstance(base_module, torch.nn.Linear):
+                        input_dim, output_dim = base_module.in_features, base_module.out_features
+                    elif isinstance(base_module, Conv1D):
+                        input_dim, output_dim = base_module.weight.shape[1], base_module.weight.shape[0]
+                    else:
+                        continue
+                elif isinstance(module, torch.nn.Linear):
+                    input_dim, output_dim = module.in_features, module.out_features
+                elif isinstance(module, Conv1D):
+                    input_dim, output_dim = module.weight.shape[1], module.weight.shape[0]
+                else:
+                    continue
+                target_modules_info.append((name, input_dim, output_dim))
+        
+        if not target_modules_info:
+            raise ValueError("No target modules found for proportional parameter allocation.")
+
+        total_sum = sum(input_dim * output_dim for (_, input_dim, output_dim) in target_modules_info)
+        num_layers = len(target_modules_info)
+        total_budget = waveft_config.n_frequency * num_layers
+
+        n_frequency_dict = {}
+        for name, input_dim, output_dim in target_modules_info:
+            layer_ratio = (input_dim * output_dim) / total_sum
+            n_freq = round(layer_ratio * total_budget)
+            n_frequency_dict[name] = n_freq
+        
+        # Store the results on the model instance using adapter-specific key
+        if not hasattr(self, '_proportional_params_cache'):
+            self._proportional_params_cache = {}
+        self._proportional_params_cache[adapter_name] = n_frequency_dict
+
     def _create_and_replace(
         self,
         waveft_config,
@@ -74,14 +115,23 @@ class WaveFTModel(BaseTuner):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
         
+        # Calculate proportional parameters if needed (only once per adapter)
+        if waveft_config.proportional_parameters:
+            if not hasattr(self, '_proportional_params_cache'):
+                self._proportional_params_cache = {}
+            if adapter_name not in self._proportional_params_cache:
+                self._calculate_proportional_parameters(self.model, waveft_config, adapter_name)
+        
         # Determine n_frequency: Priority order:
-        # 1. From temporary proportional dict (if proportional_parameters=True)
+        # 1. From proportional parameter cache (if proportional_parameters=True)
         # 2. From optional_kwargs (if passed directly)
         # 3. From n_frequency_pattern in config
         # 4. From default n_frequency in config
         n_frequency = None
-        if hasattr(waveft_config, "_proportional_n_freq_dict"):
-            n_frequency = waveft_config._proportional_n_freq_dict.get(current_key)
+        if (waveft_config.proportional_parameters and 
+            hasattr(self, '_proportional_params_cache') and 
+            adapter_name in self._proportional_params_cache):
+            n_frequency = self._proportional_params_cache[adapter_name].get(current_key)
         
         if n_frequency is None and "n_frequency" in optional_kwargs:
             n_frequency = optional_kwargs["n_frequency"]
@@ -91,11 +141,9 @@ class WaveFTModel(BaseTuner):
             target_name_key = get_pattern_key(pattern_keys, current_key)
             n_frequency = waveft_config.n_frequency_pattern.get(target_name_key, waveft_config.n_frequency)
 
-        # Determine wavelet_family similarly
+        # Determine wavelet_family
         wavelet_family = None
-        if hasattr(waveft_config, "_proportional_wavelet_family"):
-            wavelet_family = waveft_config._proportional_wavelet_family
-        if wavelet_family is None and "wavelet_family" in optional_kwargs:
+        if "wavelet_family" in optional_kwargs:
             wavelet_family = optional_kwargs["wavelet_family"]
         if wavelet_family is None:
             wavelet_family = waveft_config.wavelet_family
@@ -227,60 +275,7 @@ class WaveFTModel(BaseTuner):
                 raise
             return getattr(self.model, name)
 
-    def inject_adapter(self, model: torch.nn.Module, adapter_name: str, **kwargs):
-        peft_config = self.peft_config[adapter_name]
-        
-        # Handle proportional parameters by calculating and storing them for _create_and_replace
-        if peft_config.proportional_parameters:
-            target_modules_info = []
-            for name, module in model.named_modules():
-                if self._check_target_module_exists(peft_config, name):
-                    # Handle case where module is already wrapped with WaveFT
-                    if isinstance(module, WaveFTLayer):
-                        # Use the base layer for dimension calculations
-                        base_module = module.base_layer
-                        if isinstance(base_module, torch.nn.Linear):
-                            input_dim, output_dim = base_module.in_features, base_module.out_features
-                        elif isinstance(base_module, Conv1D):
-                            input_dim, output_dim = base_module.weight.shape[1], base_module.weight.shape[0]
-                        else:
-                            continue
-                    elif isinstance(module, torch.nn.Linear):
-                        input_dim, output_dim = module.in_features, module.out_features
-                    elif isinstance(module, Conv1D):
-                        input_dim, output_dim = module.weight.shape[1], module.weight.shape[0]
-                    else:
-                        continue
-                    target_modules_info.append((name, input_dim, output_dim))
-            
-            if not target_modules_info:
-                raise ValueError("No target modules found for proportional parameter allocation.")
 
-            total_sum = sum(input_dim * output_dim for (_, input_dim, output_dim) in target_modules_info)
-            num_layers = len(target_modules_info)
-            total_budget = peft_config.n_frequency * num_layers
-
-            n_frequency_dict = {}
-            for name, input_dim, output_dim in target_modules_info:
-                layer_ratio = (input_dim * output_dim) / total_sum
-                n_freq = round(layer_ratio * total_budget)
-                n_frequency_dict[name] = n_freq
-            
-            # Store the calculated dict temporarily on the config object
-            # _create_and_replace will look for this attribute
-            peft_config._proportional_n_freq_dict = n_frequency_dict
-            # Store wavelet_family too, as it might be needed by _create_and_replace
-            peft_config._proportional_wavelet_family = peft_config.wavelet_family
-
-
-        # Always call the superclass inject_adapter to ensure proper PEFT workflow
-        super().inject_adapter(model, adapter_name, **kwargs)
-
-        # Clean up the temporary attribute after injection is done (optional but good practice)
-        if hasattr(peft_config, "_proportional_n_freq_dict"):
-            delattr(peft_config, "_proportional_n_freq_dict")
-        if hasattr(peft_config, "_proportional_wavelet_family"):
-            delattr(peft_config, "_proportional_wavelet_family")
 
     def get_peft_config_as_dict(self, inference: bool = False):
         config_dict = {}
@@ -377,6 +372,10 @@ class WaveFTModel(BaseTuner):
         if adapter_name not in list(self.peft_config.keys()):
             raise ValueError(f"Adapter {adapter_name} does not exist")
         del self.peft_config[adapter_name]
+
+        # Clean up proportional parameters cache
+        if hasattr(self, '_proportional_params_cache') and adapter_name in self._proportional_params_cache:
+            del self._proportional_params_cache[adapter_name]
 
         # we cannot use self.prefix as we want to include non-trainable waveft parameters
         key_list = [key for key, _ in self.model.named_modules() if "waveft" not in key]
