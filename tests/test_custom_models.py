@@ -798,6 +798,18 @@ TEST_CASES = [
         WaveFTConfig,
         {"target_modules": "lin0", "n_frequency": 16, "wavelet_family": "sym2"},
     ),
+    (
+        "Vanilla MLP 9 WaveFT",
+        "MLP",
+        WaveFTConfig,
+        {"target_modules": "lin0", "n_frequency": 16, "wavelet_family": "sym2", "use_idwt": False},
+    ),
+    (
+        "Vanilla MLP 10 WaveFT",
+        "MLP",
+        WaveFTConfig,
+        {"target_modules": "lin0", "n_frequency": 16, "wavelet_family": "db1", "proportional_parameters": True},
+    ),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
 
