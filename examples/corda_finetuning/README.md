@@ -150,7 +150,7 @@ corda_config = CordaConfig(
 ####  Knowledge-preserved adaptation mode
 
 ```bash
-export CUDA_VISIBLE_DEVICES=0  # force to use devcie 0 of CUDA GPU
+export CUDA_VISIBLE_DEVICES=0  # force to use device 0 of CUDA GPU
 export ZE_AFFINITY_MASK=0   # force to use device 0 of Intel XPU
 
 python -u preprocess.py --model_id="meta-llama/Llama-2-7b-hf" \
