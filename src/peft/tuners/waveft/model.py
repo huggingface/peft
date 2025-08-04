@@ -235,7 +235,17 @@ class WaveFTModel(BaseTuner):
             target_modules_info = []
             for name, module in model.named_modules():
                 if self._check_target_module_exists(peft_config, name):
-                    if isinstance(module, torch.nn.Linear):
+                    # Handle case where module is already wrapped with WaveFT
+                    if isinstance(module, WaveFTLayer):
+                        # Use the base layer for dimension calculations
+                        base_module = module.base_layer
+                        if isinstance(base_module, torch.nn.Linear):
+                            input_dim, output_dim = base_module.in_features, base_module.out_features
+                        elif isinstance(base_module, Conv1D):
+                            input_dim, output_dim = base_module.weight.shape[1], base_module.weight.shape[0]
+                        else:
+                            continue
+                    elif isinstance(module, torch.nn.Linear):
                         input_dim, output_dim = module.in_features, module.out_features
                     elif isinstance(module, Conv1D):
                         input_dim, output_dim = module.weight.shape[1], module.weight.shape[0]

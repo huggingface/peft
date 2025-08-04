@@ -32,6 +32,7 @@ from peft import (
     ShiraConfig,
     VBLoRAConfig,
     VeraConfig,
+    WaveFTConfig,
 )
 
 from .testing_common import PeftCommonTester
@@ -183,6 +184,14 @@ ALL_CONFIGS = [
         {
             "task_type": "FEATURE_EXTRACTION",
             "block_size": 1,
+            "target_modules": None,
+        },
+    ),
+    (
+        WaveFTConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "n_frequency": 8,
             "target_modules": None,
         },
     ),
