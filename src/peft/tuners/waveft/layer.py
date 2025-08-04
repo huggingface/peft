@@ -22,12 +22,8 @@ from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
-import sys
-import os
-
-
-from .waverec2d import waverec2d
 from .constants import WAVELET_REDUCTIONS
+from .waverec2d import waverec2d
 
 
 class WaveFTLayer(BaseTunerLayer):
@@ -74,27 +70,27 @@ class WaveFTLayer(BaseTunerLayer):
                 f"Unsupported wavelet family: {wavelet_family}. "
                 f"Supported wavelet families: {supported_wavelets}"
             )
-            
+
         self.waveft_n_frequency[adapter_name] = n_frequency
         self.waveft_random_loc_seed[adapter_name] = random_loc_seed
         self.waveft_wavelet_family[adapter_name] = wavelet_family
         self.waveft_use_idwt[adapter_name] = use_idwt
-        
+
         # Get the expanded dimensions based on wavelet family
         reduction_rows, reduction_cols = WAVELET_REDUCTIONS[wavelet_family]
-        
+
         # Generate random indices within the original dimensions
         # We handle padding separately in get_delta_weight
         generator = torch.Generator().manual_seed(self.waveft_random_loc_seed[adapter_name])
         indices = torch.randperm(self.out_features * self.in_features, generator=generator)[:n_frequency]
-        
+
         # Convert to row, col format for the original dimensions
         self.waveft_indices[adapter_name] = torch.stack(
             [indices // self.in_features, indices % self.in_features], dim=0
         )
-        
+
         self.waveft_scaling[adapter_name] = scaling
-        
+
         # Actual trainable parameters
         # Initialize based on init_weights
         if init_weights:
@@ -118,44 +114,44 @@ class WaveFTLayer(BaseTunerLayer):
         spectrum = self.waveft_spectrum[adapter]
         indices = self.waveft_indices[adapter].to(spectrum.device)
         wavelet_family = self.waveft_wavelet_family[adapter]
-        
+
         # Choose whether to use IDWT or direct spectrum based on adapter setting
         if self.waveft_use_idwt[adapter]:
             reduction_rows, reduction_cols = WAVELET_REDUCTIONS[wavelet_family]
-            
+
             # Create a padded spectrum matrix with additional rows and columns
             # to account for the reduction during wavelet reconstruction
             padded_out_features = self.out_features + reduction_rows
             padded_in_features = self.in_features + reduction_cols
-            
+
             # Make dimensions even if needed for wavelet processing
             if padded_out_features % 2 != 0:
                 padded_out_features += 1
             if padded_in_features % 2 != 0:
                 padded_in_features += 1
-                
+
             # Create the padded dense spectrum matrix
-            dense_spectrum = torch.zeros(padded_out_features, padded_in_features, 
+            dense_spectrum = torch.zeros(padded_out_features, padded_in_features,
                                         device=spectrum.device, dtype=spectrum.dtype)
-            
+
             # Calculate padding offsets to center the original data in the padded matrix
             row_offset = (padded_out_features - self.out_features) // 2
             col_offset = (padded_in_features - self.in_features) // 2
-            
+
             # Adjust indices to account for padding offsets
             padded_indices = indices.clone()
             padded_indices[0, :] += row_offset
             padded_indices[1, :] += col_offset
-            
+
             # Place spectrum values in the padded matrix
             # Filter out any indices that would be out of bounds
             valid_mask = (padded_indices[0, :] < padded_out_features) & (padded_indices[1, :] < padded_in_features)
             valid_indices = padded_indices[:, valid_mask]
             valid_spectrum = spectrum[valid_mask]
-            
+
             # Set the spectrum values in the padded matrix
             dense_spectrum[valid_indices[0, :], valid_indices[1, :]] = valid_spectrum
-            
+
             # Split into four sub-bands
             H, W = dense_spectrum.shape
             H2, W2 = H // 2, W // 2
@@ -166,19 +162,19 @@ class WaveFTLayer(BaseTunerLayer):
 
             # Construct wavelet-coefficient tuple
             coeffs = (cA, (cH, cV, cD))
-            
+
             # Reconstruct with the specified wavelet family
             delta_weight = waverec2d(coeffs, wavelet_family) * self.waveft_scaling[adapter]
-            
+
             # Ensure the delta weight has exactly the correct dimensions
             if delta_weight.shape[0] != self.out_features or delta_weight.shape[1] != self.in_features:
                 # Calculate where to start slicing to get a centered crop
                 start_row = (delta_weight.shape[0] - self.out_features) // 2
                 start_col = (delta_weight.shape[1] - self.in_features) // 2
-                
+
                 # Slice to the exact output size needed
                 delta_weight = delta_weight[
-                    start_row:start_row + self.out_features, 
+                    start_row:start_row + self.out_features,
                     start_col:start_col + self.in_features
                 ]
         else:
@@ -186,7 +182,7 @@ class WaveFTLayer(BaseTunerLayer):
             dense_spectrum = torch.zeros(self.out_features, self.in_features, device=spectrum.device, dtype=spectrum.dtype)
             dense_spectrum[indices[0, :], indices[1, :]] = spectrum
             delta_weight = dense_spectrum * self.waveft_scaling[adapter]
-            
+
         return delta_weight
 
 
