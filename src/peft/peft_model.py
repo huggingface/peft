@@ -947,7 +947,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         return (
             self.base_model
-            if (self.active_peft_config.is_prompt_learning or self.peft_type == PeftType.POLY)
+            if (self.active_peft_config.is_prompt_learning)
             else self.base_model.model
         )
 
