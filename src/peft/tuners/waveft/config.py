@@ -254,6 +254,6 @@ class WaveFTConfig(PeftConfig):
         # check for layers_to_transform and layers_pattern
         if self.layers_pattern and not self.layers_to_transform:
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
-        
+
         if self.wavelet_family not in WAVELET_REDUCTIONS:
             raise ValueError(f"Wavelet family {self.wavelet_family} not supported. Supported wavelet families are: {list(WAVELET_REDUCTIONS.keys())}")
