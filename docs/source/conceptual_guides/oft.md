@@ -123,7 +123,7 @@ trainer = SFTTrainer(
     model=model,
     train_dataset=ds['train'],
     peft_config=peft_config,
-    tokenizer=tokenizer,
+    processing_class=tokenizer,
     args=training_arguments,
     data_collator=collator,
 )

@@ -114,7 +114,7 @@ The first thing to know is that the script uses FSDP for distributed training as
 # trainer
 trainer = SFTTrainer(
     model=model,
-    tokenizer=tokenizer,
+    processing_class=tokenizer,
     args=training_args,
     train_dataset=train_dataset,
     eval_dataset=eval_dataset,

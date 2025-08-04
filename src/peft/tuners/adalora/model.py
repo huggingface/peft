@@ -65,8 +65,8 @@ class AdaLoraModel(LoraModel):
 
     # Note: don't redefine prefix here, it should be inherited from LoraModel
 
-    def __init__(self, model, config, adapter_name):
-        super().__init__(model, config, adapter_name)
+    def __init__(self, model, config, adapter_name, **kwargs):
+        super().__init__(model, config, adapter_name, **kwargs)
 
         traininable_mode_counter = 0
         for config in self.peft_config.values():

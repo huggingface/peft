@@ -53,7 +53,7 @@ from .eetq import dispatch_eetq
 from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
 from .inc import dispatch_inc
-from .layer import Conv2d, LoraLayer, dispatch_default
+from .layer import Conv2d, LoraLayer, ParamWrapper, dispatch_default
 from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
 
@@ -138,9 +138,6 @@ class LoraModel(BaseTuner):
     """
 
     prefix: str = "lora_"
-
-    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
-        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
     def _check_new_adapter_config(self, config: LoraConfig) -> None:
         """
@@ -227,7 +224,9 @@ class LoraModel(BaseTuner):
         # note: AdaLoraLayer is a subclass of LoraLayer, we need to exclude it
         from peft.tuners.adalora import AdaLoraLayer
 
-        if isinstance(target, LoraLayer) and not isinstance(target, AdaLoraLayer):
+        # if the target is a ParamWrapper, we nest it to allow targeting multiple nn.Parameter on the same module
+        wrap_target_param = isinstance(target, ParamWrapper) and (adapter_name in target.lora_A)
+        if isinstance(target, LoraLayer) and not isinstance(target, AdaLoraLayer) and not wrap_target_param:
             target.update_layer(
                 adapter_name,
                 r,
@@ -239,6 +238,11 @@ class LoraModel(BaseTuner):
                 lora_bias=lora_config.lora_bias,
             )
         else:
+            if isinstance(target, ParamWrapper) and (parameter_name == target.parameter_name):
+                raise ValueError(
+                    "Trying to target the same nn.Parameter twice, this should not happen. Please open an issue on the "
+                    "PEFT repo: https://github.com/huggingface/peft/issues"
+                )
             device_map = self.model.hf_device_map if hasattr(self.model, "hf_device_map") else None
             new_module = self._create_new_module(lora_config, adapter_name, target, device_map=device_map, **kwargs)
             if adapter_name not in self.active_adapters:

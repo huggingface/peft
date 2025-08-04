@@ -41,7 +41,7 @@ trainer = transformers.Trainer(
     train_dataset=dataset,
     dataset_text_field="text",
     max_seq_length=2048,
-    tokenizer=tokenizer,
+    processing_class=tokenizer,
     optimizers=(optimizer, None),
 )
 trainer.train()

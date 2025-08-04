@@ -159,9 +159,9 @@ Results are stored in one of the result directories. An example output could loo
     }
   },
   "train_info": {
-    "cuda_memory_reserved_avg": 14229219940,
-    "cuda_memory_max": 24847056896,
-    "cuda_memory_reserved_99th": 19115624366,
+    "accelerator_memory_reserved_avg": 14229219940,
+    "accelerator_memory_max": 24847056896,
+    "accelerator_memory_reserved_99th": 19115624366,
     "train_time": 2238.65277833899,
     "file_size": 1157064,
     "status": "success",
@@ -211,7 +211,7 @@ Results are stored in one of the result directories. An example output could loo
       "version": "#17~24.04.2-Ubuntu SMP PREEMPT_DYNAMIC Mon Jan 20 22:48:29 UTC 2",
       "machine": "x86_64",
       "processor": "x86_64",
-      "gpu": "NVIDIA GeForce RTX 4090"
+      "accelerator": "NVIDIA GeForce RTX 4090"
     },
     "pytorch_info": "PyTorch built with: [...]"
   }
