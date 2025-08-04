@@ -14,6 +14,7 @@
 
 import pytest
 import torch
+from torch import nn
 from transformers import AutoModelForCausalLM
 
 from peft import LoraConfig, TaskType, get_peft_model
@@ -139,11 +140,13 @@ class TestDecoderModelsTargetParameters(PeftCommonTester):
     def test_save_pretrained_pickle(self, model_id, config_cls, config_kwargs):
         self._test_save_pretrained(model_id, config_cls, config_kwargs.copy(), safe_serialization=False)
 
+    @pytest.mark.skip(reason="Multiple adapters with target_parameters are not supported yet.")
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs):
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs.copy())
 
+    @pytest.mark.skip(reason="Multiple adapters with target_parameters are not supported yet.")
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_selected_adapters_pickle(self, model_id, config_cls, config_kwargs):
@@ -162,6 +165,7 @@ class TestDecoderModelsTargetParameters(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers(model_id, config_cls, config_kwargs.copy())
 
+    @pytest.mark.skip(reason="Multiple adapters with target_parameters are not supported yet.")
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_merge_layers_multi(self, model_id, config_cls, config_kwargs):
@@ -174,6 +178,7 @@ class TestDecoderModelsTargetParameters(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers_nan(model_id, config_cls, config_kwargs.copy())
 
+    @pytest.mark.skip(reason="Multiple adapters with target_parameters are not supported yet.")
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_mixed_adapter_batches(self, model_id, config_cls, config_kwargs):
@@ -182,6 +187,7 @@ class TestDecoderModelsTargetParameters(PeftCommonTester):
         with pytest.raises(ValueError, match=msg):
             self._test_mixed_adapter_batches(model_id, config_cls, config_kwargs.copy())
 
+    @pytest.mark.skip(reason="Multiple adapters with target_parameters are not supported yet.")
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_generate_with_mixed_adapter_batches(self, model_id, config_cls, config_kwargs):
@@ -230,11 +236,13 @@ class TestDecoderModelsTargetParameters(PeftCommonTester):
     def test_peft_model_device_map(self, model_id, config_cls, config_kwargs):
         self._test_peft_model_device_map(model_id, config_cls, config_kwargs.copy())
 
+    @pytest.mark.skip(reason="Multiple adapters with target_parameters are not supported yet.")
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_delete_adapter(self, model_id, config_cls, config_kwargs):
         self._test_delete_adapter(model_id, config_cls, config_kwargs.copy())
 
+    @pytest.mark.skip(reason="Multiple adapters with target_parameters are not supported yet.")
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_delete_inactive_adapter(self, model_id, config_cls, config_kwargs):
@@ -251,6 +259,7 @@ class TestDecoderModelsTargetParameters(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_unload_adapter(model_id, config_cls, config_kwargs.copy())
 
+    @pytest.mark.skip(reason="Multiple adapters with target_parameters are not supported yet.")
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_weighted_combination_of_adapters(self, model_id, config_cls, config_kwargs):
@@ -276,8 +285,10 @@ class TestDecoderModelsTargetParameters(PeftCommonTester):
         self._test_passing_input_embeds_works("", model_id, config_cls, config_kwargs.copy())
 
 
-class TestTargetParameter:
+class TestTargetParameters:
+    # Tests specifically designed for target_parameters
     def test_targeting_module_and_targeting_param_equivalent(self):
+        # Test that using LoRA with target_modules vs target_parameters yields identical results.
         # note: we purposely target the gate_proj because its weight is not square (unlike q_proj, ...), this makes it
         # easier to catch shape errors
         torch.manual_seed(0)
@@ -313,7 +324,6 @@ class TestTargetParameter:
                 out_lora_1 = model1(x, output_hidden_states=True).hidden_states[-1]
 
             # sanity check: basemodel outputs should be different
-
             atol, rtol = 1e-6, 1e-6
             assert not torch.allclose(out_base, out_lora_0, atol=atol, rtol=rtol)
 
@@ -392,3 +402,72 @@ class TestTargetParameter:
             atol, rtol = 0.1, 0.1
             for key in lora_weights_before.keys():
                 assert not torch.allclose(lora_weights_before[key], lora_weights_after[key], atol=atol, rtol=rtol)
+
+    def test_target_parameters_works_with_existing_parametrization(self):
+        # When a parameter is already parametrized, we want the LoRA parametrization to work with it correctly.
+        class MyLinear(nn.Linear):
+            # For testing purposes, define a linear layer with 2 parameters: weight and other_weight.
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                nn.init.ones_(self.weight)
+                self.other_weight = nn.Parameter(torch.ones(self.weight.shape))
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = MyLinear(2, 2, bias=False)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        class MyParametrization(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x + 1
+
+        # base model
+        model = MyModule()
+        x = torch.ones((2, 2))
+
+        # sanity check: result should be 1*1 + 1*1 == 2
+        output_base = model(x)
+        assert torch.all(output_base == 2)
+
+        # add parametrization to the weight
+        nn.utils.parametrize.register_parametrization(model.lin, "weight", MyParametrization())
+
+        # result should be (1+1)*1 + (1+1)*1 == 4
+        output_parametrized = model(x)
+        assert torch.all(output_parametrized == 4)
+
+        # add LoRA parametrization to the weight
+        config = LoraConfig(r=2, lora_alpha=6, target_parameters=["lin.weight"], init_lora_weights=False)
+        model = get_peft_model(model, config)
+        # manually set LoRA weights to ones
+        nn.init.ones_(model.base_model.model.lin.lora_A["default"].weight)
+        nn.init.ones_(model.base_model.model.lin.lora_B["default"].weight)
+
+        output_lora = model(x)
+        # delta_weight should be: (1+1) * lora_scale = (1+1) * (alpha / rank) = 2 * (6 / 2) = 6
+        # result should be: (1+1+6)*1 + (1+1+6)*1 == 8 + 8 == 16
+        assert torch.all(output_lora == 16)
+
+        # calling twice should yield the same result
+        output_lora2 = model(x)
+        assert torch.allclose(output_lora, output_lora2)
+
+        # add another LoRA parametrization to other_weight, should have no effect on the output
+        config = LoraConfig(r=2, lora_alpha=6, target_parameters=["lin.other_weight"], init_lora_weights=False)
+        model.add_adapter("other", config)
+
+        output_other_lora = model(x)
+        # delta_weight should be: (1+1) * lora_scale = (1+1) * (alpha / rank) = 2 * (6 / 2) = 6
+        # result should be: (1+1+6)*1 + (1+1+6)*1 == 8 + 8 == 16
+        assert torch.all(output_other_lora == output_lora)
+
+        # after unloading, the output should be the same as before LoRA was applied
+        unloaded = model.unload()
+        output_unloaded = unloaded(x)
+        assert torch.all(output_unloaded == output_parametrized)

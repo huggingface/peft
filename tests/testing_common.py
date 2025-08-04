@@ -874,6 +874,12 @@ class PeftCommonTester:
             model.set_adapter("adapter-2")
             model.eval()
 
+            # sanity check: each adapter layer with a 'default' adapter should also have 'adapter-2'
+            num_default = len([m for m in model.modules() if isinstance(m, torch.nn.ModuleDict) and "default" in m])
+            num_adapter2 = len([m for m in model.modules() if isinstance(m, torch.nn.ModuleDict) and "adapter-2" in m])
+            assert num_default > 0
+            assert num_default == num_adapter2
+
             with torch.inference_mode():
                 logits_adapter_2 = model(**dummy_input)[0]
 
