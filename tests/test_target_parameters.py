@@ -16,28 +16,24 @@ import pytest
 import torch
 from transformers import AutoModelForCausalLM
 
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, TaskType, get_peft_model
 
-from .testing_common import PeftCommonTester, hub_online_once
-from .testing_utils import set_init_weights_false
+from .testing_common import PeftCommonTester
+from .testing_utils import hub_online_once, set_init_weights_false
 
 
 PEFT_DECODER_MODELS_TO_TEST = [
     "trl-internal-testing/tiny-Llama4ForCausalLM",
 ]
 
-# TODO Missing from this list are LoKr, LoHa, LN Tuning, add them
 ALL_CONFIGS = [
     # target down_proj
     (
         LoraConfig,
         {
-            "task_type": "CAUSAL_LM",
-            "r": 8,
-            "lora_alpha": 32,
-            "target_modules": None,
+            "task_type": TaskType.CAUSAL_LM,
+            "target_modules": [],
             "lora_dropout": 0.0,
-            "bias": "none",
             "target_parameters": [
                 "feed_forward.experts.down_proj",
             ],
@@ -47,12 +43,9 @@ ALL_CONFIGS = [
     (
         LoraConfig,
         {
-            "task_type": "CAUSAL_LM",
-            "r": 8,
-            "lora_alpha": 32,
-            "target_modules": None,
+            "task_type": TaskType.CAUSAL_LM,
+            "target_modules": [],
             "lora_dropout": 0.0,
-            "bias": "none",
             "target_parameters": [
                 "0.feed_forward.experts.gate_up_proj",
                 "1.feed_forward.experts.down_proj",
@@ -79,12 +72,9 @@ ALL_CONFIGS = [
     (
         LoraConfig,
         {
-            "task_type": "CAUSAL_LM",
-            "r": 8,
-            "lora_alpha": 32,
+            "task_type": TaskType.CAUSAL_LM,
             "target_modules": ["q_proj", "v_proj"],
             "lora_dropout": 0.0,
-            "bias": "none",
             "target_parameters": [
                 "feed_forward.experts.down_proj",
             ],

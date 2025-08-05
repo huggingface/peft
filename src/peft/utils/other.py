@@ -47,6 +47,8 @@ from .constants import (
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_LOHA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_LOKR_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING,
@@ -77,6 +79,8 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_LOHA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_LOKR_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
     "TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING",
@@ -1227,6 +1231,14 @@ def check_file_exists_on_hf_hub(repo_id: str, filename: str, **kwargs) -> Option
         )
 
     return exists
+
+
+def match_target_against_key(target_pattern: str, key: str):
+    """Backing function for `target_modules` config parameter.
+
+    Having this as its own function ensures that target key matching can be implemented in the same way everywhere.
+    """
+    return re.fullmatch(target_pattern, key)
 
 
 def get_pattern_key(pattern_keys: Sequence[str], key_to_match: str) -> str:

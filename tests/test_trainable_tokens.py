@@ -18,12 +18,14 @@ import copy
 
 import pytest
 import torch
+from safetensors.torch import load_file as safe_load_file
 from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer
 
 from peft import AutoPeftModel, LoraConfig, PeftModel, TrainableTokensConfig, get_peft_model
 from peft.tuners.trainable_tokens.layer import TrainableTokensLayer
-from peft.utils import get_peft_model_state_dict
-from peft.utils.other import TrainableTokensWrapper
+from peft.utils import TrainableTokensWrapper, get_peft_model_state_dict
+
+from .testing_utils import hub_online_once
 
 
 class ModelEmb(torch.nn.Module):
@@ -102,7 +104,10 @@ class TestTrainableTokens:
 
     @pytest.fixture
     def model(self, model_id):
-        return AutoModelForCausalLM.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            # This must not be a yield fixture so that we don't carry the hub_online_once
+            # behavior over to the rest of the test that uses this fixture
+            return AutoModelForCausalLM.from_pretrained(model_id)
 
     @pytest.fixture
     def tokenizer(self, model_id):
@@ -885,3 +890,31 @@ class TestTrainableTokens:
 
         assert isinstance(peft_model.model.embed_in_2, TrainableTokensWrapper)
         assert not isinstance(peft_model.model.embed_in, TrainableTokensWrapper)
+
+    @pytest.mark.parametrize("resize_embedding", [True, False])
+    @pytest.mark.parametrize(
+        "peft_config",
+        [
+            LoraConfig(target_modules="all-linear", trainable_token_indices=[1, 2, 3]),
+            TrainableTokensConfig(target_modules=None, token_indices=[1, 2, 3]),
+        ],
+    )
+    def test_save_pretrained_auto(self, model, resize_embedding, peft_config, tmp_path):
+        # make sure that embeddings are saved alongside trainable token weights but only when
+        # the we detect the embedding to be resized (as detected by save_embedding_layers="auto")
+        if resize_embedding:
+            model.resize_token_embeddings(model.config.vocab_size + 2)
+        peft_model = get_peft_model(model, peft_config)
+
+        peft_model.save_pretrained(tmp_path, save_embedding_layers="auto")
+        state_dict = safe_load_file(tmp_path / "adapter_model.safetensors")
+
+        if isinstance(peft_config, TrainableTokensConfig):
+            contains_embedding = "base_model.model.model.embed_tokens.base_layer.weight" in state_dict
+        else:
+            contains_embedding = "base_model.model.model.embed_tokens.token_adapter.base_layer.weight" in state_dict
+
+        if resize_embedding:
+            assert contains_embedding
+        else:
+            assert not contains_embedding

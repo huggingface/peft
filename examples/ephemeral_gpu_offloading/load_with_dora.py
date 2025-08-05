@@ -59,7 +59,7 @@ def main():
     )
     parser.add_argument("--ephemeral_gpu_offload", action="store_true", help="Use ephemeral GPU offloading")
     parser.add_argument(
-        "--merge_model_path", type="str", help="Merge the model with the DoRA model and save to the given path"
+        "--merge_model_path", type=str, help="Merge the model with the DoRA model and save to the given path"
     )
     args = parser.parse_args()
 
