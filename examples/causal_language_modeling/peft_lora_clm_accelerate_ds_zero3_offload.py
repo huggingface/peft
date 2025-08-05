@@ -164,7 +164,6 @@ def main():
         batch_size = len(examples[text_column])
         inputs = [f"{text_column} : {x} Label : " for x in examples[text_column]]
         model_inputs = tokenizer(inputs)
-        # print(model_inputs)
         for i in range(batch_size):
             sample_input_ids = model_inputs["input_ids"][i]
             model_inputs["input_ids"][i] = [tokenizer.pad_token_id] * (
