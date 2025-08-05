@@ -274,6 +274,10 @@ def hub_online_once(model_id: str):
     use the tokenizer and we're now in offline mode and cannot fetch the tokenizer. The recommended workaround is to
     extend the cache key (`model_id` passed to `hub_online_once` in this case) by something in case the tokenizer is
     used, so that these tests don't share a cache pool with the tests that don't use a tokenizer.
+
+    It is best to avoid using this context manager in *yield* fixtures (normal fixtures are fine) as this is equivalent
+    to wrapping the whole test in the context manager without explicitly writing it out, leading to unexpected
+    `HF_HUB_OFFLINE` behavior in the test body.
     """
     global _HUB_MODEL_ACCESSES
     override = {}
