@@ -27,6 +27,7 @@ def train_model(
     quantize: bool,
     eval_step: int,
     save_step: int,
+    device: str,
     lora_r: int,
     lora_alpha: int,
     lora_dropout: float,
@@ -38,7 +39,7 @@ def train_model(
     hf_token = os.getenv("HF_TOKEN")
 
     # Setup device
-    device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
+    device = torch.device(device)
     print(f"Using device: {device}")
 
     # load tokenizer
@@ -166,6 +167,7 @@ if __name__ == "__main__":
     parser.add_argument("--quantize", action="store_true", help="Use quantization")
     parser.add_argument("--eval_step", type=int, default=10, help="Evaluation step interval")
     parser.add_argument("--save_step", type=int, default=100, help="Save step interval")
+    parser.add_argument("--device", type=str, default="auto", help="Device to use for training")
     parser.add_argument("--lora_r", type=int, default=8, help="LoRA rank")
     parser.add_argument("--lora_alpha", type=int, default=16, help="LoRA alpha")
     parser.add_argument("--lora_dropout", type=float, default=0.05, help="LoRA dropout rate")
@@ -193,6 +195,7 @@ if __name__ == "__main__":
         quantize=args.quantize,
         eval_step=args.eval_step,
         save_step=args.save_step,
+        device=args.device,
         lora_r=args.lora_r,
         lora_alpha=args.lora_alpha,
         lora_dropout=args.lora_dropout,
