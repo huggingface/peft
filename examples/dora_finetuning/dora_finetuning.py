@@ -43,7 +43,7 @@ def train_model(
         device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
     else:
         device = torch.device(device)
-        print(f"Using device: {device}")
+    print(f"Using device: {device}")
 
     # load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(base_model, token=hf_token)
