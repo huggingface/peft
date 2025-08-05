@@ -49,8 +49,15 @@ def train_model(
 ):
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-    compute_dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
-    device_map = "cuda" if torch.cuda.is_available() else None
+    is_bf16_supported = False
+    device_map = "cpu"
+    if torch.cuda.is_available():
+        is_bf16_supported = torch.cuda.is_bf16_supported()
+        device_map = "cuda"
+    elif torch.xpu.is_available():
+        is_bf16_supported = torch.xpu.is_bf16_supported()
+        device_map = "xpu"
+    compute_dtype = torch.bfloat16 if is_bf16_supported else torch.float16
 
     # load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(base_model_name_or_path)
