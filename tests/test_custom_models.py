@@ -4729,7 +4729,7 @@ class TestMixedAdapterBatches:
         assert torch.allclose(output1[2::3], output_mixed[2::3])
 
     @pytest.mark.parametrize("test_name, config0, config1", MIXED_ADAPTER_TEST_CASES)
-    def test_mixed_adapter_batches_lora_mlp(self, test_name, config0, config1):
+    def test_mixed_adapter_batches_mlp(self, test_name, config0, config1):
         mlp_peft = self.get_mlp_peft(config0, config1)
         inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
         self.run_checks(mlp_peft, inputs)
@@ -4749,7 +4749,7 @@ class TestMixedAdapterBatches:
             ),
         ],
     )
-    def test_mixed_adapter_batches_lora_different_target_layers(self, test_name, config0, config1):
+    def test_mixed_adapter_batches_different_target_layers(self, test_name, config0, config1):
         base_model = MLP().to(self.torch_device).eval()
         peft_model = get_peft_model(base_model, config0, "adapter0").eval()
         peft_model.add_adapter("adapter1", config1)
@@ -4771,7 +4771,7 @@ class TestMixedAdapterBatches:
             ),
         ],
     )
-    def test_mixed_adapter_batches_lora_multiple_modules_to_save(self, test_name, config0, config1):
+    def test_mixed_adapter_batches_multiple_modules_to_save(self, test_name, config0, config1):
         base_model = MLP().to(self.torch_device).eval()
         peft_model = get_peft_model(base_model, config0, "adapter0").eval()
         peft_model.add_adapter("adapter1", config1)
@@ -4788,7 +4788,7 @@ class TestMixedAdapterBatches:
             ),
         ],
     )
-    def test_mixed_adapter_batches_lora_unsupported_layer_raises(self, test_name, config0, config1):
+    def test_mixed_adapter_batches_unsupported_layer_raises(self, test_name, config0, config1):
         base_model = MLPWithGRU().to(self.torch_device).eval()
         peft_model = get_peft_model(base_model, config0, "adapter0").eval()
         peft_model.add_adapter("adapter1", config1)
@@ -4815,7 +4815,7 @@ class TestMixedAdapterBatches:
             ),
         ],
     )
-    def test_mixed_adapter_batches_lora_partly_overlapping_target_layers(self, test_name, config0, config1):
+    def test_mixed_adapter_batches_partly_overlapping_target_layers(self, test_name, config0, config1):
         base_model = MLP().to(self.torch_device).eval()
         # target different lora layers
         peft_model = get_peft_model(base_model, config0, "adapter0").eval()
@@ -4898,7 +4898,7 @@ class TestMixedAdapterBatches:
             self.run_checks(peft_model, inputs)
 
     @pytest.mark.parametrize("test_name, config0, config1", MIXED_ADAPTER_TEST_CASES)
-    def test_mixed_adapter_batches_lora_length_mismatch_raises(self, test_name, config0, config1):
+    def test_mixed_adapter_batches_length_mismatch_raises(self, test_name, config0, config1):
         mlp_peft = self.get_mlp_peft(config0, config1)
         inputs = {
             "X": torch.arange(90).view(-1, 10).to(self.torch_device),
@@ -4909,7 +4909,7 @@ class TestMixedAdapterBatches:
             mlp_peft.forward(**inputs)
 
     @pytest.mark.parametrize("test_name, config0, config1", MIXED_ADAPTER_TEST_CASES)
-    def test_mixed_adapter_batches_lora_training_mode_raises(self, test_name, config0, config1):
+    def test_mixed_adapter_batches_training_mode_raises(self, test_name, config0, config1):
         mlp_peft = self.get_mlp_peft(config0, config1)
         inputs = {
             "X": torch.arange(90).view(-1, 10).to(self.torch_device),
@@ -4921,7 +4921,7 @@ class TestMixedAdapterBatches:
             mlp_peft.forward(**inputs)
 
     @pytest.mark.parametrize("test_name, config0, config1", MIXED_ADAPTER_TEST_CASES)
-    def test_mixed_adapter_batches_lora_disabled(self, test_name, config0, config1):
+    def test_mixed_adapter_batches_disabled(self, test_name, config0, config1):
         # Disabling adapters should have precedence over passing adapter names
         mlp_peft = self.get_mlp_peft(config0, config1)
         inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
@@ -4936,7 +4936,7 @@ class TestMixedAdapterBatches:
         assert torch.allclose(output_disabled, output_mixed)
 
     @pytest.mark.parametrize("test_name, config0, config1", MIXED_ADAPTER_TEST_CASES)
-    def test_mixed_adapter_batches_lora_merged_raises(self, test_name, config0, config1):
+    def test_mixed_adapter_batches_merged_raises(self, test_name, config0, config1):
         # When there are merged adapters, passing adapter names should raise an error
         mlp_peft = self.get_mlp_peft(config0, config1)
         inputs = {
@@ -4956,7 +4956,7 @@ class TestMixedAdapterBatches:
                 LoraConfig(target_modules=["lin0"], init_lora_weights=False),
             ),
             (
-                "LoRA mixed batch wrong adapter name",
+                "RoAD mixed batch wrong adapter name",
                 RoadConfig(target_modules=["lin0"], group_size=2, init_weights=False),
             ),
         ],
