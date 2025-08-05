@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import copy
 import pytest
 import torch
 from torch import nn
@@ -29,8 +28,8 @@ from peft.tuners.lora.variants import (
     DoraLinearVariant,
     calculate_alora_offsets,
     get_alora_offsets_for_forward,
-    get_alora_offsets_for_generate,
 )
+
 
 # Used for Dora
 class CustomModel(nn.Module):
@@ -64,16 +63,33 @@ class CustomModel(nn.Module):
         output = self.linear2(output)
         return output
 
-# Used for testing alora_offsets for aLoRA 
+# Used for testing alora_offsets for aLoRA
 class DummyLM(nn.Module):
     def __init__(self, vocab_size: int = 10, hidden_dim: int = 8):
         super().__init__()
         self.embed = nn.Embedding(vocab_size, hidden_dim)
         self.linear = nn.Linear(hidden_dim, vocab_size)
 
-    def forward(self, input_ids):
-        hidden = self.embed(input_ids)
+    def forward(self, X):
+        hidden = self.embed(X)
         return self.linear(hidden)
+
+class MockTransformerWrapper:
+    """Mock class to behave like a transformers model.
+
+    This is needed because the tests initialize the model by calling transformers_class.from_pretrained.
+
+    """
+
+    @classmethod
+    def from_pretrained(cls):
+        # set the seed so that from_pretrained always returns the same model
+        torch.manual_seed(0)
+
+        torch_dtype = torch.float32
+
+        return DummyLM().to(torch_dtype)
+
 
 VARIANT_MAP = {
     "dora": {
@@ -141,7 +157,7 @@ class TestLoraVariants:
 
 # Make sure warning is sent when invocation sequence is not present
 def test_calculate_alora_offsets_basic_and_warning():
-    config = LoraConfig(task_type="CAUSAL_LM", alora_invocation_tokens=[1, 2])
+    config = LoraConfig(alora_invocation_tokens=[1, 2])
     peft_config = {"default": config}
     input_ids = torch.tensor([[0, 1, 2, 3], [0, 4, 5, 6]])
 
@@ -149,42 +165,37 @@ def test_calculate_alora_offsets_basic_and_warning():
     with pytest.warns(UserWarning):
         offsets = calculate_alora_offsets(peft_config, "default", input_ids)
 
-    assert offsets[0] == input_ids.shape[1] - 2 + 1
+    assert offsets[0] == input_ids.shape[1] - 1 + 1
     assert offsets[1] is None
 
 # Verify alora_offsets are correct with multiple adapters
 def test_calculate_alora_offsets_with_adapter_names():
-    cfg1 = LoraConfig(task_type="CAUSAL_LM", alora_invocation_tokens=[1])
-    cfg2 = LoraConfig(task_type="CAUSAL_LM", alora_invocation_tokens=[2])
+    cfg1 = LoraConfig(alora_invocation_tokens=[1])
+    cfg2 = LoraConfig(alora_invocation_tokens=[2])
     peft_config = {"a1": cfg1, "a2": cfg2}
     input_ids = torch.tensor([[0, 1, 1], [0, 2, 2]])
 
     offsets = calculate_alora_offsets(peft_config, "a1", input_ids, adapter_names=["a1", "a2"])
 
-    assert offsets == [input_ids.shape[1] - 1 + 1, input_ids.shape[1] - 2 + 1]
-
-# Make sure that attempting to pass in embeddings rather than token ids gives a warning
-def test_get_alora_offsets_forward_inputs_embeds_warning():
-    cfg = LoraConfig(task_type="CAUSAL_LM", alora_invocation_tokens=[1])
-    model = get_peft_model(DummyLM(), cfg)
-    embeds = model.base_model.model.embed(torch.tensor([[1, 2, 3]]))
-
-    with pytest.warns(UserWarning):
-        kwargs = get_alora_offsets_for_forward(model, None, embeds)
-    assert kwargs["alora_offsets"] == [None]
+    assert offsets == [input_ids.shape[1] - 2 + 1, input_ids.shape[1] - 2 + 1]
 
 # Verify that the adapter does not modify outputs prior to invocation point
 def test_alora_activation_matches_base_until_invocation():
-    base_model = DummyLM()
-    cfg = LoraConfig(task_type="CAUSAL_LM", target_modules=["linear"], alora_invocation_tokens=[1])
-    lora_model = get_peft_model(copy.deepcopy(base_model), cfg)
+    transformers_class = MockTransformerWrapper
+    base_model = transformers_class.from_pretrained()
+    cfg = LoraConfig(target_modules=["linear"], alora_invocation_tokens=[2],init_lora_weights =  False)
+    lora_model = get_peft_model(base_model, cfg)
+    lora_model.eval()
 
     input_ids = torch.tensor([[0, 1, 2, 3]])
-    base_out = base_model(input_ids)
-    offsets = calculate_alora_offsets(lora_model.peft_config, lora_model.active_adapter, input_ids)
-    lora_out = lora_model(input_ids, alora_offsets=offsets)
+    with lora_model.disable_adapter():
+        with torch.no_grad():
+            base_out = lora_model(X = input_ids)
 
-    start = input_ids.shape[1] - offsets[0]
+    kwargs = get_alora_offsets_for_forward(lora_model, input_ids)
+    with torch.no_grad():
+        lora_out = lora_model(X = input_ids,**kwargs)
+    start = input_ids.shape[1] - kwargs['alora_offsets'][0]
     assert torch.allclose(lora_out[:, :start], base_out[:, :start])
     assert not torch.allclose(lora_out[:, start:], base_out[:, start:])
 

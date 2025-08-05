@@ -479,7 +479,7 @@ class ALoraLinearVariant(LoraVariant):
                 result = result + lora_B(lora_A(dropout(x))) * scaling
             else: #Typical regime
                 for i in range(result.shape[0]):
-                    # If alora_offsets[i] is None, this means that the invocation sequence was not found in the 
+                    # If alora_offsets[i] is None, this means that the invocation sequence was not found in the
                     # input. As a result, the weights should not be activated anywhere (equivalent to base model).
                     if alora_offsets[i] is not None and alora_offsets[i] > 0:
                         offset = min(alora_offsets[i], result.shape[1])
@@ -587,7 +587,7 @@ def is_alora_relevant_in_batch(model: nn.Module, adapter_names: Optional[list[st
     return is_alora_relevant
 
 
-def get_alora_offsets_for_forward(model: nn.Module, input_ids: torch.Tensor, inputs_embeds: torch.Tensor, **kwargs):
+def get_alora_offsets_for_forward(model: nn.Module, input_ids: torch.Tensor, inputs_embeds: torch.Tensor = None, **kwargs):
     """
     Wrapper around calculate_alora_offsets, for the .forward of the model. It only calculates alora_offsets if the batch
     contains aLoRA adapters.

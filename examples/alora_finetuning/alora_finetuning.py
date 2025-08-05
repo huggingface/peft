@@ -1,4 +1,5 @@
-import os, copy
+import copy
+import os
 
 import torch
 from datasets import load_dataset
@@ -12,8 +13,7 @@ from transformers import (
     TrainingArguments,
 )
 
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, PeftModel
-
+from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 
 
 def train_model(
@@ -83,7 +83,7 @@ def train_model(
     tokenizer.pad_token = tokenizer.eos_token
 
     dataset = load_dataset(data_path)
-    
+
     def formatting_prompts_func(example):
         output_texts = []
         for i in range(len(example['input'])):
@@ -172,7 +172,7 @@ def model_inference(model_path: str, adapter_path: str, prompt: str=None, data_p
         inputs_prefill = tokenizer(text_input,return_tensors="pt").to(base_model.device)
         # prefill input with base model
         with torch.no_grad():
-            kv_cache = alora_model(**inputs_prefill, past_key_values=kv_cache).past_key_values 
+            kv_cache = alora_model(**inputs_prefill, past_key_values=kv_cache).past_key_values
 
         # Generate answer with adapter
         alora_model.set_adapter("adapter")
