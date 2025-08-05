@@ -38,7 +38,7 @@ from transformers import Cache, DynamicCache, EncoderDecoderCache, HybridCache, 
 from transformers.modeling_outputs import QuestionAnsweringModelOutput, SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
 
-from peft.tuners.lora.variants import get_alora_offsets_for_generate, get_alora_offsets_for_forward
+from peft.tuners.lora.variants import get_alora_offsets_for_forward, get_alora_offsets_for_generate
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils.constants import DUMMY_MODEL_CONFIG
 from peft.utils.integrations import init_empty_weights
@@ -777,9 +777,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 # Dont' apply this to encoder-decoder models and not to models requiring special processing.
                 # local import in case users use a very old transformers version
                 past_key_values = DynamicCache.from_legacy_cache(past_key_values)
-            elif peft_config.num_transformer_submodules == 2 and self.base_model._supports_cache_class:
+            elif (peft_config.num_transformer_submodules == 2) and getattr(
+                self.base_model, "_supports_cache_class", True
+            ):
                 # Dont' apply this to encoder-decoder models that don't support new Cachc format yet
                 # If we don't apply this, prefix-tuning fails to update cross-attn cache
+                # TODO: remove check for _supports_cache_class once transformers 4.53 is no longer supported
                 past_key_values = EncoderDecoderCache.from_legacy_cache(past_key_values)
                 past_key_values.cross_attention_cache = DynamicCache()
                 past_key_values.is_updated = {
@@ -1828,8 +1831,8 @@ class PeftModelForCausalLM(PeftModel):
         peft_config = self.active_peft_config
 
         if not peft_config.is_prompt_learning:
-            # For aLoRA
-            kwargs = get_alora_offsets_for_forward(self, input_ids, inputs_embeds,**kwargs)
+            # Adds alora_offsets to kwargs if relevant. No other modifications.
+            kwargs = get_alora_offsets_for_forward(self, input_ids, inputs_embeds, **kwargs)
             if self.base_model.config.model_type == "mpt":
                 if inputs_embeds is not None:
                     raise AssertionError("forward in MPTForCausalLM does not support inputs_embeds")
@@ -1969,8 +1972,8 @@ class PeftModelForCausalLM(PeftModel):
             self.base_model.generation_config = self.generation_config
         try:
             if not peft_config.is_prompt_learning:
-                # for aLoRA, None otherwise.
-                kwargs["alora_offsets"] = get_alora_offsets_for_generate(self, *args, **kwargs)
+                # Adds alora_offsets to kwargs if relevant. No other changes.
+                kwargs = get_alora_offsets_for_generate(self, *args, **kwargs)
                 with self._enable_peft_forward_hooks(*args, **kwargs):
                     kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
                     outputs = self.base_model.generate(*args, **kwargs)

@@ -173,6 +173,50 @@ from peft import LoraConfig
 
 config = LoraConfig(use_rslora=True, ...)
 ```
+### Activated LoRA (aLoRA)
+
+Activated LoRA (aLoRA) is a low rank adapter architecture for Causal LMs that allows for reusing existing base model KV cache for more efficient inference. This approach is best suited for inference pipelines which rely on the base model for most tasks/generations, but use aLoRA adapter(s) to perform specialized task(s) within the chain. For example, checking or correcting generated outputs of the base model. In these settings, inference times can be sped up by an order of magnitude or more. For more information on aLoRA and many example use cases, see https://huggingface.co/papers/2504.12397.
+
+This technique scans for the last occurence of an invocation sequence (`alora_invocation_tokens`) in each input (this can be as short as 1 token), and activates the adapter weights on tokens starting 1 token after the beginning of the invocation sequence. Weights on prior tokens are left un-adapted -- making the cache for those tokens interchangeable with base model cache due to the causal attention mask in Causal LMs. Usage is very similar to standard LoRA, with the key difference that this invocation sequence must be specified when the adapter is created:
+
+```py
+from peft import LoraConfig
+
+config = LoraConfig(alora_invocation_tokens=alora_invocation_tokens, ...)
+```
+
+where `alora_invocation_tokens` is a list of integer token ids. Given a desired invocation string, this can be obtained as
+```
+invocation_string = "placeholder"
+alora_invocation_tokens = tokenizer.encode(invocation_string, add_special_tokens=False).
+```
+where the tokenizer is the tokenizer for the base model.
+
+**Notes**
+* aLoRA is only supported for CAUSAL_LM tasks due to its focus on cache reuse.
+* Since the weights are adapted on fewer tokens, often (not always) aLoRA requires higher rank (`r`) than LoRA. `r=32` can be a good starting point.
+* aLoRA weights cannot be merged into the base model by definition, since the adapter weights are selectively applied to a subset of tokens. Attempts to merge will throw errors.
+* Beam search is not yet supported.
+* It is generally not recommended to add new tokens to the tokenizer that are not present in the base model, as this can complicate the target use case of both the base model and adapter model operating on overlapping context.
+
+#### Choice of invocation sequence and SFT design 
+
+Each input must have the `alora_invocation_tokens` sequence present, it is not added automatically. To maximize model performance without compromising cache reuse, it is recommended to have the adapter weights activated early, i.e. at the start of any adapter-specific prompting, but after any long inputs such as prior generations or documents. As with any model,
+formatting should be consistent between train and test.
+
+Consider the following example, where the base model has a chat template,
+and the goal it to train the adapter to generate a desired output. 
+
+* Option 1: If there is no task-specific prompt, i.e. the input is a chat history with the `assistant` prompt, then the chat template's `assistant` prompt (e.g. `<|start_of_role|>assistant<|end_of_role|>`) is a natural choice for the invocation string. See the model's chat template to find the prompt for the model.
+* Option 2: If there is a task-specific prompt for the adapter that describes the task the adapter is learning, and that prompt is put as a `user` turn immediately prior to the generation, then the chat template's `user` prompt (e.g. `<|start_of_role|>user<|end_of_role|>`) is a natural choice for the invocation string.
+
+Once deciding on an invocation string, get the model tokenizer and obtain `alora_invocation_tokens` as 
+```
+alora_invocation_tokens = tokenizer.encode(invocation_string, add_special_tokens=False).
+```
+
+**Note** If using custom strings for the invocation string, make sure that the start and end of the string are special tokens to avoid issues with tokenization at the boundaries.
+
 
 ### Weight-Decomposed Low-Rank Adaptation (DoRA)
 
@@ -269,6 +313,15 @@ Outer(
 
 The same logic applies to `alpha_pattern`. If you're in doubt, don't try to get fancy with regular expressions -- just pass the full name for each module with a different rank/alpha, preceded by the `^` prefix, and you should be good.
 
+### Targeting `nn.Parameter` directly
+
+> [!WARNING]
+> This feature is experimental and subject to change.
+
+Generally, you should use `target_modules` to target the module (e.g. `nn.Linear`). However, in some circumstances, this is not possible. E.g., in many mixture of expert (MoE) layers in HF Transformers, instead of using `nn.Linear`, an `nn.Parameter` is used. PEFT normally overwrites the `forward` method for LoRA, but for `nn.Parameter`, there is none. Therefore, to apply LoRA to that parameter, it needs to be targeted with `target_parameters`. As an example, for [Llama4](https://huggingface.co/collections/meta-llama/llama-4-67f0c30d9fe03840bc9d0164), you can pass: `target_parameters=['feed_forward.experts.gate_up_proj', 'feed_forward.experts.down_proj]`.
+
+At the moment, this argument allows to target 2-dim or 3-dim `nn.Parameter`s. It is assumed that in the case of a 3-dim parameter, the 0th dimension is the expert dimension.
+
 ## Optimizers
 
 LoRA training can optionally include special purpose optimizers. Currently PEFT supports LoRA-FA and LoRA+.
@@ -361,7 +414,7 @@ special_tokens = ['<|start_think|>', '<|stop_think|>']
 tokenizer.add_special_tokens({'additional_special_tokens': special_tokens})
 
 # make room for new tokens in the embedding matrix if it isn't big enough already
-base_model.resize_token_embeddings(max(len(tokenizer), base_model.model.embed_tokens.num_embeddings)
+base_model.resize_token_embeddings(max(len(tokenizer), base_model.model.embed_tokens.num_embeddings))
 
 # typical LoRA config with `trainable_token_indices` targeting embedding layer `embed_tokens`
 # and specifically our new tokens we just added

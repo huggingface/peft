@@ -25,9 +25,9 @@ from sanitizer import parse_and_filter
 
 
 metric_preferences = {
-    "cuda_memory_reserved_avg": "lower",
-    "cuda_memory_max": "lower",
-    "cuda_memory_reserved_99th": "lower",
+    "accelerator_memory_reserved_avg": "lower",
+    "accelerator_memory_max": "lower",
+    "accelerator_memory_reserved_99th": "lower",
     "total_time": "lower",
     "train_time": "lower",
     "file_size": "lower",
@@ -181,6 +181,10 @@ def export_csv(df):
     return tmp_path
 
 
+def format_df(df):
+    return df.style.format(precision=3, thousands=",", decimal=".")
+
+
 def build_app(df):
     with gr.Blocks(theme=gr.themes.Soft()) as demo:
         gr.Markdown("# PEFT method comparison")
@@ -202,7 +206,20 @@ def build_app(df):
                 label="Select Model ID", choices=get_model_ids(sorted(df["task_name"].unique())[0], df)
             )
 
-        data_table = gr.DataFrame(label="Results", value=df, interactive=False)
+        # Make dataframe columns all equal in width so that they are good enough for numbers but don't
+        # get hugely extended by columns like `train_config`.
+        column_widths = ["150px" for _ in df.columns]
+        column2index = dict(zip(df.columns, range(len(df.columns))))
+        column_widths[column2index['experiment_name']] = '300px'
+
+        data_table = gr.DataFrame(
+            label="Results",
+            value=format_df(df),
+            interactive=False,
+            max_chars=100,
+            wrap=False,
+            column_widths=column_widths,
+        )
 
         with gr.Row():
             filter_textbox = gr.Textbox(
@@ -222,7 +239,9 @@ def build_app(df):
 
         with gr.Row():
             x_default = (
-                "cuda_memory_max" if "cuda_memory_max" in metric_preferences else list(metric_preferences.keys())[0]
+                "accelerator_memory_max"
+                if "accelerator_memory_max" in metric_preferences
+                else list(metric_preferences.keys())[0]
             )
             y_default = (
                 "test_accuracy" if "test_accuracy" in metric_preferences else list(metric_preferences.keys())[1]
@@ -254,7 +273,7 @@ def build_app(df):
                 except Exception:
                     # invalid filter query
                     pass
-            return gr.update(choices=new_models, value=new_models[0] if new_models else None), filtered
+            return gr.update(choices=new_models, value=new_models[0] if new_models else None), format_df(filtered)
 
         task_dropdown.change(
             fn=update_on_task, inputs=[task_dropdown, filter_state], outputs=[model_dropdown, data_table]
@@ -268,7 +287,7 @@ def build_app(df):
                     filtered = filtered[mask]
                 except Exception:
                     pass
-            return filtered
+            return format_df(filtered)
 
         model_dropdown.change(
             fn=update_on_model, inputs=[task_dropdown, model_dropdown, filter_state], outputs=data_table
@@ -313,7 +332,7 @@ def build_app(df):
             pareto_df = compute_pareto_frontier(filtered, metric_x, metric_y)
             fig = generate_pareto_plot(filtered, metric_x, metric_y)
             summary = compute_pareto_summary(filtered, pareto_df, metric_x, metric_y)
-            return filter_query, filtered, fig, summary
+            return filter_query, format_df(filtered), fig, summary
 
         apply_filter_button.click(
             fn=apply_filter,
@@ -327,7 +346,7 @@ def build_app(df):
             fig = generate_pareto_plot(filtered, metric_x, metric_y)
             summary = compute_pareto_summary(filtered, pareto_df, metric_x, metric_y)
             # Return empty strings to clear the filter state and textbox.
-            return "", "", filtered, fig, summary
+            return "", "", format_df(filtered), fig, summary
 
         reset_filter_button.click(
             fn=reset_filter,

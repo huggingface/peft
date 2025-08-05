@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import os
+import platform
 import re
 import warnings
 from typing import Optional
@@ -152,6 +153,25 @@ def get_peft_model_state_dict(
                 prompt_embeddings = model.get_prompt_embedding_to_save(adapter_name)
         to_return["prompt_embeddings"] = prompt_embeddings
 
+    elif config.peft_type == PeftType.SHIRA:
+        shira_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
+        to_return = {k: state_dict[k] for k in state_dict if shira_prefix in k}
+        if platform.system() == "Windows":
+            warnings.warn(
+                "Windows has issues saving integers into safetensors. Hence, we convert shira_indices to float32 "
+                "before saving on Windows OS. The shira_indices will always be converted to integers when loading."
+            )
+        for name, module in model.named_modules():
+            if hasattr(module, "shira_indices"):
+                for k, v in module.shira_indices.items():
+                    # Windows has some issues with saving integers into safetensors. Tests fail with some kind of
+                    # PermissionError. This results in failed tests, so we are converting indices to float32 before
+                    # saving and then converting them back to int when loading. This is happening only for Windows,
+                    # not for Linux and Mac-OS.
+                    to_return[f"{name}.shira_indices.{k}"] = (
+                        v.to(torch.float32) if platform.system() == "Windows" else v
+                    )
+
     elif config.peft_type == PeftType.VERA:
         vera_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
         to_return = {k: state_dict[k] for k in state_dict if vera_prefix in k}
@@ -199,6 +219,10 @@ def get_peft_model_state_dict(
     # ADDITIONAL TRAINING MODULES / MODULES_TO_SAVE
     for name, module in model.named_modules():
         if isinstance(module, AuxiliaryTrainingWrapper):
+            if name.startswith("_fsdp_wrapped_module."):
+                # If FSDP is used, the state_dict is from the unwrapped model, which will result in a key mismatch if we
+                # don't remove the FSDP-specific prefix
+                name = name.removeprefix("_fsdp_wrapped_module.")
             # Compute the module-relative state dict to make it easier for the adapter to fetch the appropriate
             # keys that the module thinks need to be saved. We cannot rely on `.state_dict()` internally of the
             # module since accelerators like DeepSpeed require special handling which is done for the model
@@ -213,10 +237,17 @@ def get_peft_model_state_dict(
     # DEAL WITH EMBEDDINGS
     # check the common embedding layers in `target_modules` to reset `save_embedding_layers` if necessary
     is_embedding_in_target_modules = False
+    embedding_is_targeted = False
+    if hasattr(config, "target_modules"):
+        if isinstance(config.target_modules, str):
+            # TODO: implement this; note: this change is not directly related to the PR, the bug already existed b4
+            pass
+        elif config.target_modules:
+            embedding_is_targeted = any(k in config.target_modules for k in EMBEDDING_LAYER_NAMES)
     if (
         save_embedding_layers == "auto"
         and hasattr(config, "target_modules")
-        and any(k in config.target_modules for k in EMBEDDING_LAYER_NAMES)
+        and embedding_is_targeted
         and config.peft_type != PeftType.TRAINABLE_TOKENS
     ):
         warnings.warn("Setting `save_embedding_layers` to `True` as embedding layers found in `target_modules`.")
@@ -354,6 +385,10 @@ def set_peft_model_state_dict(
             # `modules_to_save.{adapter_name}.` prefix. This prefix must be restored when loading the model from the
             # saved state dict which is why we fetch a load key map from the wrapper.
             key_map = module.adapter_state_dict_load_map(adapter_name)
+            if name.startswith("_fsdp_wrapped_module."):
+                # If FSDP is used, the state_dict is from the unwrapped model, which will result in a key mismatch if we
+                # don't remove the FSDP-specific prefix
+                name = name.removeprefix("_fsdp_wrapped_module.")
             for k in key_map:
                 lookup_key = f"{name}.{k}"
                 store_key = f"{name}.{key_map[k]}"
@@ -406,6 +441,22 @@ def set_peft_model_state_dict(
             rank_pattern = config.rank_pattern
             if rank_pattern is not None:
                 model.resize_modules_by_rank_pattern(rank_pattern, adapter_name)
+        elif config.peft_type == PeftType.SHIRA:
+            if platform.system() == "Windows":
+                warnings.warn(
+                    "Windows has issues saving integers into safetensors. Hence, we had converted shira_indices "
+                    "to float32 before saving on Windows OS. The shira_indices will always be converted to integers "
+                    "when loading."
+                )
+            for name, module in model.named_modules():
+                if hasattr(module, "shira_indices"):
+                    # for k, v in module.shira_indices.items():
+                    if f"{name}.shira_indices.{adapter_name}" in peft_model_state_dict:
+                        shira_indices_values = peft_model_state_dict.pop(f"{name}.shira_indices.{adapter_name}")
+                        # Convert shira_indices to int in case they were saved on a Windows OS and are being loaded
+                        # on a Linux or a Mac-OS system. If they were saved in Linux or Mac-OS, they are already
+                        # integers and the following will not affect anything.
+                        module.shira_indices[adapter_name] = shira_indices_values.to(torch.int)
         elif config.peft_type == PeftType.VERA:
             if config.save_projection and "base_model.vera_A" not in peft_model_state_dict:
                 raise ValueError(
