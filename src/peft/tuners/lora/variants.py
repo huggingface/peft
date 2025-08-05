@@ -594,7 +594,7 @@ def get_alora_offsets_for_forward(model: PeftModel, input_ids: torch.Tensor, inp
 
 
 
-def get_alora_offsets_for_generate(model: PeftModel, *args, **kwargs):
+def get_alora_offsets_for_generate(model, *args, **kwargs):
     adapter_names_for_offset_calc = kwargs.get("adapter_names")
     if is_alora_relevant_in_batch(model, adapter_names_for_offset_calc):
         alora_offsets_from_kwargs = kwargs.get("alora_offsets")
