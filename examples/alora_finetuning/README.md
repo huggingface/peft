@@ -37,10 +37,10 @@ trainer.train()
 peft_model.save_pretrained("alora-mistral-7b")
 ```
 
-Pass an invocation string with `--invocation_string` when running the example
+Pass the invocation string with `--invocation_string` when running the training example
 script:
 ```bash
-python examples/alora_finetuning/alora_finetuning.py --base_model meta-llama/Meta-Llama-3-8B --data_path timdettmers/openassistant-guanaco --invocation_string "<|start_of_turn|>assistant"
+python examples/alora_finetuning/alora_finetuning.py --base_model mistralai/Mistral-7B-Instruct-v0.3 --data_path Lots-of-LoRAs/task1660_super_glue_question_generation --invocation_string "[/INST]"
 ```
 
 ### Full example of the script
@@ -54,7 +54,7 @@ python alora_finetuning.py \
     --learning_rate 3e-4 \
     --cutoff_len 512 \
     --val_set_size 500 \
-    --invocation_string "<|start_of_turn|>assistant" \
+    --invocation_string "[/INST]" \
     --quantize \
     --eval_step 10 \
     --save_step 100 \

@@ -1010,7 +1010,7 @@ class PeftCommonTester:
         if config_cls not in (LoraConfig,):
             return pytest.skip(f"Mixed adapter batches not supported for {config_cls}")
         if config_kwargs.get("alora_invocation_tokens") is not None:
-                return pytest.skip("Beam search not yet supported for aLoRA")  # beam search not yet fully supported
+            return pytest.skip("Beam search not yet supported for aLoRA")  # beam search not yet fully supported
         if config_kwargs.get("trainable_token_indices", None) is not None:
             # for some configurations this test will fail since the adapter values don't differ.
             # this is probably a problem with the test setup and not with the implementation.

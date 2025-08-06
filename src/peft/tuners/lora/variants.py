@@ -472,12 +472,12 @@ class ALoraLinearVariant(LoraVariant):
         scaling = module.scaling[active_adapter]
 
         x = x.to(lora_A.weight.dtype)
-        if alora_offsets is not None: # should never be None
-            if x.dim() == 2:
-                # If x is 2-dimensional (unusual but comes up in certain tests), this means that for all inputs,
-                # there is only 1 token position being processed and we should adapt its weights.
-                result = result + lora_B(lora_A(dropout(x))) * scaling
-            else: #Typical regime
+        if x.dim() == 2:
+            # If x is 2-dimensional (unusual but comes up in certain tests), this means that for all inputs,
+            # there is only 1 token position being processed and we should adapt its weights.
+            result = result + lora_B(lora_A(dropout(x))) * scaling
+        else:  # Typical regime
+            if alora_offsets is not None:
                 for i in range(result.shape[0]):
                     # If alora_offsets[i] is None, this means that the invocation sequence was not found in the
                     # input. As a result, the weights should not be activated anywhere (equivalent to base model).
@@ -496,9 +496,9 @@ def calculate_alora_offsets(
     """
     This is a helper function for Activated LoRA (aLoRA) that searches each input token sequence for the last occurence
     of the appropriate "alora_invocation_tokens" invocation sequence. If adapter_names is passed, then each input uses
-    the appropriate invocation sequence for the specified adapter for that row. Logic is provided to handle mixed collections
-    of adapters for which not all are aLoRAs (e.g. some base model, some LoRA). If the invocation sequence is not present, the
-    corresponding alora_offset is set to None and a warning is printed.
+    the appropriate invocation sequence for the specified adapter for that row. Logic is provided to handle mixed
+    collections of adapters for which not all are aLoRAs (e.g. some base model, some LoRA). If the invocation sequence
+    is not present, the corresponding alora_offset is set to None and a warning is printed.
     """
     if input_ids is None:
         return []
@@ -587,10 +587,12 @@ def is_alora_relevant_in_batch(model: nn.Module, adapter_names: Optional[list[st
     return is_alora_relevant
 
 
-def get_alora_offsets_for_forward(model: nn.Module, input_ids: torch.Tensor, inputs_embeds: torch.Tensor = None, **kwargs):
+def get_alora_offsets_for_forward(
+    model: nn.Module, input_ids: torch.Tensor, inputs_embeds: torch.Tensor = None, **kwargs
+):
     """
-    Wrapper around calculate_alora_offsets, for the .forward of the model. It only calculates alora_offsets if the batch
-    contains aLoRA adapters.
+    Wrapper around calculate_alora_offsets, for the .forward of the model. It only calculates alora_offsets if the
+    batch contains aLoRA adapters.
     """
     adapter_names_for_offset_calc = kwargs.get("adapter_names", None)
     if not is_alora_relevant_in_batch(model, adapter_names_for_offset_calc):
@@ -617,8 +619,8 @@ def get_alora_offsets_for_forward(model: nn.Module, input_ids: torch.Tensor, inp
 
 def get_alora_offsets_for_generate(model: nn.module, *args, **kwargs):
     """
-    Wrapper around calculate_alora_offsets, for the .generate of the model. It only calculates alora_offsets if the batch
-    contains aLoRA adapters.
+    Wrapper around calculate_alora_offsets, for the .generate of the model. It only calculates alora_offsets if the
+    batch contains aLoRA adapters.
     """
     adapter_names_for_offset_calc = kwargs.get("adapter_names")
     if not is_alora_relevant_in_batch(model, adapter_names_for_offset_calc):

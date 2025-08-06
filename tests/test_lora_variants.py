@@ -63,6 +63,7 @@ class CustomModel(nn.Module):
         output = self.linear2(output)
         return output
 
+
 # Used for testing alora_offsets for aLoRA
 class DummyLM(nn.Module):
     def __init__(self, vocab_size: int = 10, hidden_dim: int = 8):
@@ -73,6 +74,7 @@ class DummyLM(nn.Module):
     def forward(self, X):
         hidden = self.embed(X)
         return self.linear(hidden)
+
 
 class MockTransformerWrapper:
     """Mock class to behave like a transformers model.
@@ -155,6 +157,7 @@ class TestLoraVariants:
         for layer in layer_names:
             assert getattr(peft_model.base_model.model, layer).lora_magnitude_vector["default"].weight.grad is not None
 
+
 # Make sure warning is sent when invocation sequence is not present
 def test_calculate_alora_offsets_basic_and_warning():
     config = LoraConfig(alora_invocation_tokens=[1, 2])
@@ -168,6 +171,7 @@ def test_calculate_alora_offsets_basic_and_warning():
     assert offsets[0] == input_ids.shape[1] - 1 + 1
     assert offsets[1] is None
 
+
 # Verify alora_offsets are correct with multiple adapters
 def test_calculate_alora_offsets_with_adapter_names():
     cfg1 = LoraConfig(alora_invocation_tokens=[1])
@@ -179,23 +183,23 @@ def test_calculate_alora_offsets_with_adapter_names():
 
     assert offsets == [input_ids.shape[1] - 2 + 1, input_ids.shape[1] - 2 + 1]
 
+
 # Verify that the adapter does not modify outputs prior to invocation point
 def test_alora_activation_matches_base_until_invocation():
     transformers_class = MockTransformerWrapper
     base_model = transformers_class.from_pretrained()
-    cfg = LoraConfig(target_modules=["linear"], alora_invocation_tokens=[2],init_lora_weights =  False)
+    cfg = LoraConfig(target_modules=["linear"], alora_invocation_tokens=[2], init_lora_weights=False)
     lora_model = get_peft_model(base_model, cfg)
     lora_model.eval()
 
     input_ids = torch.tensor([[0, 1, 2, 3]])
     with lora_model.disable_adapter():
         with torch.no_grad():
-            base_out = lora_model(X = input_ids)
+            base_out = lora_model(X=input_ids)
 
     kwargs = get_alora_offsets_for_forward(lora_model, input_ids)
     with torch.no_grad():
-        lora_out = lora_model(X = input_ids,**kwargs)
-    start = input_ids.shape[1] - kwargs['alora_offsets'][0]
+        lora_out = lora_model(X=input_ids, **kwargs)
+    start = input_ids.shape[1] - kwargs["alora_offsets"][0]
     assert torch.allclose(lora_out[:, :start], base_out[:, :start])
     assert not torch.allclose(lora_out[:, start:], base_out[:, start:])
-

@@ -1,4 +1,3 @@
-import copy
 import os
 
 import torch
@@ -7,8 +6,7 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
-    DataCollatorForCompletionOnlyLM,
-    DynamicCache,
+    DataCollatorForLanguageModeling,
     Trainer,
     TrainingArguments,
 )
@@ -44,7 +42,7 @@ def train_model(
     print(f"Using device: {device}")
 
     tokenizer = AutoTokenizer.from_pretrained(base_model, token=hf_token)
-
+    tokenizer.pad_token = tokenizer.unk_token
     invocation_tokens = tokenizer.encode(invocation_string, add_special_tokens=False)
 
     if quantize:
@@ -65,14 +63,11 @@ def train_model(
         model = AutoModelForCausalLM.from_pretrained(base_model, token=hf_token)
 
     lora_config = LoraConfig(
+        task_type="CAUSAL_LM",
         alora_invocation_tokens=invocation_tokens,
         r=lora_r,
         lora_alpha=lora_alpha,
-        target_modules=(
-            lora_target_modules.split(",")
-            if lora_target_modules
-            else ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
-        ),
+        target_modules=(lora_target_modules.split(",") if lora_target_modules else ["q_proj", "k_proj", "v_proj"]),
         lora_dropout=lora_dropout,
         bias="none",
     )
@@ -84,22 +79,39 @@ def train_model(
 
     dataset = load_dataset(data_path)
 
-    def formatting_prompts_func(example):
-        output_texts = []
-        for i in range(len(example['input'])):
-            chat = [{
-                "role": "user",
-                "content": example['input'][i]
-            },
-            {
-                "role": "assistant",
-                "content": example['output'][i]
-            }]
-            text = tokenizer.apply_chat_template(chat, tokenize=False,add_generation_prompt=False)
-            output_texts.append(text)
-        return output_texts
+    def tokenize_function(examples):
+        formatted_texts = [
+            tokenizer.apply_chat_template(
+                [
+                    {"role": "user", "content": user_msg},
+                    {"role": "assistant", "content": assistant_msg},
+                ],
+                tokenize=False,  # get plain text first
+                add_generation_prompt=False,
+            )
+            for user_msg, assistant_msg in zip(examples["input"], examples["output"])
+        ]
 
-    data_collator = DataCollatorForCompletionOnlyLM(invocation_string, tokenizer=tokenizer)
+        # 2) Tokenize those texts
+        model_inputs = tokenizer(
+            formatted_texts,
+            padding="max_length",
+            truncation=True,
+            max_length=cutoff_len,
+        )
+
+        labels = []
+        for ids in model_inputs["input_ids"]:
+            labels.append([(token_id if token_id != tokenizer.pad_token_id else -100) for token_id in ids])
+        model_inputs["labels"] = labels
+
+        return model_inputs
+
+    # Tokenize the dataset and prepare for training
+    tokenized_datasets = dataset.map(tokenize_function, batched=True, remove_columns=dataset["train"].column_names)
+
+    # Data collator to dynamically pad the batched examples
+    data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
 
     training_args = TrainingArguments(
         output_dir=output_dir,
@@ -125,9 +137,8 @@ def train_model(
     trainer = Trainer(
         model=model,
         args=training_args,
-        train_dataset=dataset["train"],
-        eval_dataset=dataset["test"],
-        formatting_func=formatting_prompts_func,
+        train_dataset=tokenized_datasets["train"],
+        eval_dataset=tokenized_datasets["test"],
         data_collator=data_collator,
     )
 
@@ -139,82 +150,57 @@ def train_model(
     model.save_pretrained(output_dir)
     tokenizer.save_pretrained(output_dir)
 
-def model_inference(model_path: str, adapter_path: str, prompt: str=None, data_path: str=None, reuse_cache: bool = True):
-    '''
+
+def model_inference(model_path: str, adapter_path: str, prompt: str = None, data_path: str = None):
+    """
     Simple inference with the tuned aLoRA adapter. Optionally (reuse_cache = True) demonstrates
     that the aLoRA adapter can (but does not need to) use KV cache created by the base model,
     perhaps during a prior generation turn.
 
     Purely for demonstration purposes. See the [paper](https://huggingface.co/papers/2504.12397)
     for realistic multiturn cache reuse examples.
-    '''
+    """
     if prompt is None:
         # Use first row of test data
         dataset = load_dataset(data_path)
         prompt = dataset["test"][0]["input"]
-
-    tokenizer = AutoTokenizer.from_pretrained(adapter_path)
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
     base_model = AutoModelForCausalLM.from_pretrained(model_path)
-    alora_model = PeftModel.from_pretrained(base_model, adapter_path,adapter_name="adapter")
-
-    chat = [{
-        "role": "user",
-        "content": prompt
-    }]
-    text = tokenizer.apply_chat_template(chat, tokenize=False,add_generation_prompt=True)
+    alora_model = PeftModel.from_pretrained(base_model, adapter_path)
+    chat = [{"role": "user", "content": prompt}]
+    text = tokenizer.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
     inputs = tokenizer(text, return_tensors="pt").to(base_model.device)
 
-    if reuse_cache:
-        # Input through the end of the last turn
-        text_input = tokenizer.apply_chat_template(chat, tokenize=False,add_generation_prompt=False)
-        alora_model.set_adapter(None)
-        kv_cache = DynamicCache()
-        inputs_prefill = tokenizer(text_input,return_tensors="pt").to(base_model.device)
-        # prefill input with base model
-        with torch.no_grad():
-            kv_cache = alora_model(**inputs_prefill, past_key_values=kv_cache).past_key_values
+    # Generate answer with adapter
 
-        # Generate answer with adapter
-        alora_model.set_adapter("adapter")
-        output_dict = alora_model.generate(**inputs,past_key_values=copy.deepcopy(kv_cache),return_dict_in_generate=True)
-        alora_outputs = output_dict.sequences
+    output_dict = alora_model.generate(**inputs, return_dict_in_generate=True, max_new_tokens=20)
+    alora_outputs = output_dict.sequences
 
-        # Generate answer with base model for comparison
-        alora_model.set_adapter(None)
-        output_dict = alora_model.generate(**inputs,past_key_values=copy.deepcopy(kv_cache),return_dict_in_generate=True)
-        base_outputs = output_dict.sequences
-    else:
-        # Simpler inference calls (output equivalent to the above)
-        # Generate answer with adapter
-        alora_model.set_adapter("adapter")
-        output_dict = alora_model.generate(**inputs,return_dict_in_generate=True)
-        alora_outputs = output_dict.sequences
-
-        # Generate answer with base model for comparison
-        alora_model.set_adapter(None)
-        output_dict = alora_model.generate(**inputs,return_dict_in_generate=True)
-        base_outputs = output_dict.sequences
     # Print results
     print(f"Prompt: {text}")
-    print(f"Base model response: {tokenizer.decode(base_outputs[0]).rsplit(text,1)[1]}")
-    print(f"Trained adapter response: {tokenizer.decode(alora_outputs[0]).rsplit(text,1)[1]}")
+    print(f"Trained adapter response: {tokenizer.decode(alora_outputs[0]).rsplit(text, 1)[1]}")
 
 
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Fine-tune Mistral with Activated LoRA")
-    parser.add_argument("--base_model", type=str, default="mistralai/Mistral-7B-Instruct-v0.3", help="Base model path or name")
     parser.add_argument(
-        "--data_path", type=str, default="timdettmers/openassistant-guanaco", help="Dataset path or name"
+        "--base_model", type=str, default="mistralai/Mistral-7B-Instruct-v0.3", help="Base model path or name"
+    )
+    parser.add_argument(
+        "--data_path",
+        type=str,
+        default="Lots-of-LoRAs/task1660_super_glue_question_generation",
+        help="Dataset path or name",
     )
     parser.add_argument(
         "--output_dir", type=str, default="path/to/output", help="Output directory for the fine-tuned model"
     )
-    parser.add_argument("--batch_size", type=int, default=1, help="Batch size")
+    parser.add_argument("--batch_size", type=int, default=2, help="Batch size")
     parser.add_argument("--num_epochs", type=int, default=1, help="Number of training epochs")
-    parser.add_argument("--learning_rate", type=float, default=3e-4, help="Learning rate")
-    parser.add_argument("--cutoff_len", type=int, default=512, help="Cutoff length for tokenization")
+    parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument("--cutoff_len", type=int, default=2048, help="Cutoff length for tokenization")
     parser.add_argument("--val_set_size", type=int, default=500, help="Validation set size")
     parser.add_argument(
         "--invocation_string",
@@ -262,4 +248,4 @@ if __name__ == "__main__":
         push_to_hub=args.push_to_hub,
     )
     print("Model trained. Running test inference.")
-    model_inference(model_path = args.base_model, adapter_path = args.output_dir, data_path=args.data_path, reuse_cache = True)
+    model_inference(model_path=args.base_model, adapter_path=args.output_dir, data_path=args.data_path)
