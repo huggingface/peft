@@ -119,6 +119,8 @@ def create_and_prepare_model(args, data_args, training_args):
             bnb_config = BitsAndBytesConfig(load_in_8bit=args.use_8bit_quantization)
 
     if args.use_unsloth:
+        if torch.xpu.is_available():
+            raise NotImplementedError(f"XPU hasn't supported unsloth yet")
         # Load model
         model, _ = FastLanguageModel.from_pretrained(
             model_name=args.model_name_or_path,
@@ -134,9 +136,14 @@ def create_and_prepare_model(args, data_args, training_args):
         # Prepare model loading arguments
         model_kwargs = {
             "trust_remote_code": True,
-            "attn_implementation": "flash_attention_2" if args.use_flash_attn else "eager",
             "torch_dtype": torch_dtype,
         }
+        if args.use_flash_attn:
+            if torch.xpu.is_available():
+                print(f"XPU hasn't supported flash_attn yet, use eager implementation instead.")
+                model_kwargs["attn_implementation"] = "eager"
+            else:
+                model_kwargs["attn_implementation"] = "flash_attention_2"
 
         # Only add quantization_config if bnb_config is not None
         if bnb_config is not None:
