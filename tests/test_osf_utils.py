@@ -4,7 +4,7 @@ import pytest
 import torch
 from torch.testing import assert_close
 
-from peft import OSFConfig, get_peft_model
+from peft import OSFConfig, PeftModel, get_peft_model
 from peft.utils.osf_utils import (
     decompose_weight_matrix,
     reconstruct_weight_matrix,
@@ -71,6 +71,39 @@ def test_osf_config_roundtrip():
         cfg.save_pretrained(tmp)
         loaded = OSFConfig.from_pretrained(tmp)
     assert cfg.target_svd_config == loaded.target_svd_config
+
+
+def test_osf_save_and_load_model():
+    torch.manual_seed(0)
+    model = DummyModel(DummyConfig())
+    cfg = OSFConfig(target_svd_config={"linear.weight": 2})
+    wrapped = get_peft_model(model, cfg)
+    x = torch.randn(2, 8)
+    y_ref = wrapped(x)
+    with TemporaryDirectory() as tmp:
+        wrapped.save_pretrained(tmp)
+        torch.manual_seed(0)
+        base = DummyModel(DummyConfig())
+        loaded = PeftModel.from_pretrained(base, tmp)
+        y = loaded(x)
+    assert_close(y, y_ref, atol=1e-5, rtol=1e-5)
+
+
+def test_osf_save_and_load_autogen_config():
+    torch.manual_seed(0)
+    model = DummyModel(DummyConfig())
+    wrapped = get_peft_model(model, OSFConfig())
+    x = torch.randn(2, 8)
+    y_ref = wrapped(x)
+    original_cfg = wrapped.peft_config["default"].target_svd_config
+    with TemporaryDirectory() as tmp:
+        wrapped.save_pretrained(tmp)
+        torch.manual_seed(0)
+        base = DummyModel(DummyConfig())
+        loaded = PeftModel.from_pretrained(base, tmp)
+        y = loaded(x)
+    assert_close(y, y_ref, atol=1e-5, rtol=1e-5)
+    assert original_cfg == loaded.peft_config["default"].target_svd_config
 
 
 def test_osf_merge_unmerge_unsupported():
