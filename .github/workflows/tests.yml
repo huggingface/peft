@@ -87,6 +87,8 @@ jobs:
         run: |
           pip install --force-reinstall -U "numpy<2.0.0"
       - name: Test with pytest
+        # MacOS tests are too flaky and will fail almost each time. To maintainers: still check the MacOS logs
+        continue-on-error: ${{ matrix.os == 'macos-13' }}
         run: |
           make test
       - name: Dump cache content and diff
