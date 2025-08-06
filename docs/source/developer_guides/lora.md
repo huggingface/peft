@@ -217,6 +217,7 @@ alora_invocation_tokens = tokenizer.encode(invocation_string, add_special_tokens
 
 **Note** If using custom strings for the invocation string, make sure that the start and end of the string are special tokens to avoid issues with tokenization at the boundaries.
 
+An example inference setup is at [alora finetuning](https://github.com/huggingface/peft/blob/main/examples/alora_finetuning/alora_finetuning.py).
 
 ### Weight-Decomposed Low-Rank Adaptation (DoRA)
 
