@@ -2797,6 +2797,19 @@ class TestLayerRepr:
         assert "lora_B" in print_output
         assert "default" in print_output
 
+    def test_repr_lora_paramwrapper(self):
+        config = LoraConfig(target_parameters=["lin0.weight"])
+        model = get_peft_model(MLP(), config)
+        print_output = repr(model.model.lin0)
+        assert print_output.startswith("lora.ParamWrapper")
+        # important: targeted parameter should be contained:
+        assert "parameter_name='weight'" in print_output
+        assert "in_features=10" in print_output
+        assert "out_features=20" in print_output
+        assert "lora_A" in print_output
+        assert "lora_B" in print_output
+        assert "default" in print_output
+
 
 class TestMultipleActiveAdapters:
     """

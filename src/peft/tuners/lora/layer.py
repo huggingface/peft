@@ -2121,7 +2121,8 @@ class ParamWrapper(nn.Module, LoraLayer):
     def __repr__(self) -> str:
         rep = super().__repr__()
         idx = rep.find("(") + 1
-        # insert the name of the parameter
+        # insert the name of the parameter to allow the repr to be disambiguous when multiple parameters on the same mdule
+        # are being targeted
         rep = f"{rep[:idx]}\n  parameter_name='{self.parameter_name}',{rep[idx:]}"
         return "lora." + rep
 
