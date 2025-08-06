@@ -164,7 +164,7 @@ def train_model(
         quantize: Whether to use quantization
         eval_step: Steps between evaluations
         save_step: Steps between saving checkpoints
-        device: Device to use (cuda:0, etc.)
+        device: Device to use (cuda:0, xpu:0, etc.)
         lora_r: LoRA rank
         lora_alpha: LoRA alpha
         lora_dropout: LoRA dropout rate
@@ -209,7 +209,7 @@ def train_model(
     model.print_trainable_parameters()
 
     # Move model to device if not already there
-    if device.type != "cuda" or not hasattr(model, "device") or model.device.type != "cuda":
+    if not hasattr(model, "device") or model.device.type != device.type:
         model = model.to(device)
 
     # Load and prepare dataset
@@ -313,12 +313,16 @@ if __name__ == "__main__":
     # Training process options
     parser.add_argument("--eval_step", type=int, default=100, help="Evaluation step interval")
     parser.add_argument("--save_step", type=int, default=500, help="Save step interval")
-    parser.add_argument("--device", type=str, default="cuda", help="Device to use for training")
+    parser.add_argument("--device", type=str, default="auto", help="Device to use for training")
 
     # Hugging Face Hub options
     parser.add_argument("--push_to_hub", action="store_true", help="Whether to push the model to Hugging Face Hub")
 
     args = parser.parse_args()
+
+    device = args.device
+    if args.device == "auto":
+        device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
 
     # If use_qalora isn't explicitly set in args but passed to train_model
     if not args.use_qalora:
@@ -336,7 +340,7 @@ if __name__ == "__main__":
         use_qalora=args.use_qalora,
         eval_step=args.eval_step,
         save_step=args.save_step,
-        device=args.device,
+        device=device,
         lora_r=args.lora_r,
         lora_alpha=args.lora_alpha,
         lora_dropout=args.lora_dropout,
