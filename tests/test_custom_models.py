@@ -44,6 +44,7 @@ from peft import (
     LoKrConfig,
     LoraConfig,
     OFTConfig,
+    OSFConfig,
     PeftModel,
     RandLoraConfig,
     ShiraConfig,
@@ -625,7 +626,8 @@ TEST_CASES = [
     ################################
     # Orthogonal Subspace Learning #
     ################################
-    ("Vanilla MLP OSF", "MLP", OSFConfig, {}),
+    ("Vanilla MLP 1 OSF", "MLP", OSFConfig, {}),
+    ("Vanilla MLP 2 OSF", "MLP", OSFConfig, {"target_svd_config": {"lin0.weight": 5, "lin1.weight": 1}}),
     ########
     # RandLora #
     ########
@@ -1313,7 +1315,7 @@ class TestPeftCustomModel(PeftCommonTester):
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
         # https://github.com/huggingface/peft/pull/2403
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
+        if model_id in ["Conv2dGroups", "Conv2dGroups2"] or issubclass(config_cls, OSFConfig):
             pytest.skip(
                 f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
             )
@@ -1336,7 +1338,7 @@ class TestPeftCustomModel(PeftCommonTester):
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
         # https://github.com/huggingface/peft/pull/2403
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
+        if model_id in ["Conv2dGroups", "Conv2dGroups2"] or issubclass(config_cls, OSFConfig):
             pytest.skip(
                 f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
             )
@@ -1351,7 +1353,7 @@ class TestPeftCustomModel(PeftCommonTester):
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_is_idempotent(self, test_name, model_id, config_cls, config_kwargs):
         # https://github.com/huggingface/peft/pull/2403
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
+        if model_id in ["Conv2dGroups", "Conv2dGroups2"] or issubclass(config_cls, OSFConfig):
             pytest.skip(
                 f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
             )
@@ -1367,7 +1369,7 @@ class TestPeftCustomModel(PeftCommonTester):
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_safe_merge(self, test_name, model_id, config_cls, config_kwargs):
         # https://github.com/huggingface/peft/pull/2403
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
+        if model_id in ["Conv2dGroups", "Conv2dGroups2"] or issubclass(config_cls, OSFConfig):
             pytest.skip(
                 f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
             )
@@ -1762,7 +1764,7 @@ class TestPeftCustomModel(PeftCommonTester):
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_disable_adapters_with_merging(self, test_name, model_id, config_cls, config_kwargs):
         # https://github.com/huggingface/peft/pull/2403
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
+        if model_id in ["Conv2dGroups", "Conv2dGroups2"] or issubclass(config_cls, OSFConfig):
             pytest.skip(
                 f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
             )

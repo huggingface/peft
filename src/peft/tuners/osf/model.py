@@ -29,7 +29,8 @@ class OSFModel(BaseTuner):
             svd_cfg = auto_generate_target_osf_config(model)
             self.peft_config[adapter_name].target_svd_config = svd_cfg
         OSFCls = create_osf_model_class(model.__class__)
-        osf_model = OSFCls(model.config, svd_config=svd_cfg, initialize_svd=False)
+        base_cfg = getattr(model, "config", None)
+        osf_model = OSFCls(base_cfg, svd_config=svd_cfg, initialize_svd=False)
         osf_model.load_state_dict(model.state_dict())
         osf_model.reinitialize_svd()
         attach_gradient_hooks(osf_model)
@@ -60,6 +61,12 @@ class OSFModel(BaseTuner):
 
     def unload(self):
         raise NotImplementedError("OSF models cannot be unloaded yet")
+
+    def merge_adapter(self, *args, **kwargs):
+        raise NotImplementedError("OSF models do not support merging")
+
+    def unmerge_adapter(self, *args, **kwargs):
+        raise NotImplementedError("OSF models do not support merging")
 
     def merge_and_unload(self, *args, **kwargs):
         raise NotImplementedError("OSF models do not support merging")

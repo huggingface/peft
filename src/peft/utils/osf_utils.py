@@ -165,8 +165,17 @@ def create_osf_model_class(base_cls: type) -> type:
     """Create a subclass of ``base_cls`` where selected linear weights are replaced by SVD decompositions."""
 
     class ModelWithOSF(base_cls):
-        def __init__(self, config, svd_config: dict[str, int] | None = None, initialize_svd: bool = True, **kwargs):
-            super().__init__(config, **kwargs)
+        def __init__(
+            self, config=None, svd_config: dict[str, int] | None = None, initialize_svd: bool = True, **kwargs
+        ):
+            if config is not None:
+                try:
+                    super().__init__(config, **kwargs)
+                except TypeError:
+                    super().__init__(**kwargs)
+                    self.config = config
+            else:
+                super().__init__(**kwargs)
             self.svd_config = svd_config or {}
             self.name_mapping: dict[str, str] = {}
             self.svd_params = nn.ModuleDict()
