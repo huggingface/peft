@@ -4668,6 +4668,7 @@ class TestRequiresGrad:
         )
 
 
+# this is for PEFT methods that support mixed adapter batches.
 MIXED_ADAPTER_TEST_CASES = [
     (
         "LoRA mixed adapter",
