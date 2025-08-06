@@ -1938,7 +1938,6 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             # assert loss is not None
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
-
     @pytest.mark.single_gpu_tests
     def test_causal_lm_training_lora_resize_embeddings_trainable_tokens(self):
         r"""

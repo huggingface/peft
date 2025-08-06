@@ -169,7 +169,9 @@ if __name__ == "__main__":
     parser.add_argument("--eval_step", type=int, default=10, help="Evaluation step interval")
     parser.add_argument("--save_step", type=int, default=100, help="Save step interval")
     parser.add_argument("--device", type=str, default="cuda:0", help="Device to use for training")
-    parser.add_argument("--variant", type=str, default="road_1", choices=["road_1", "road_2", "road_4"], help="RoAD variant")
+    parser.add_argument(
+        "--variant", type=str, default="road_1", choices=["road_1", "road_2", "road_4"], help="RoAD variant"
+    )
     parser.add_argument(
         "--road_target_modules", type=str, default=None, help="Comma-separated list of target modules for RoAd"
     )
