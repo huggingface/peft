@@ -182,7 +182,7 @@ This technique scans for the last occurence of an invocation sequence (`alora_in
 ```py
 from peft import LoraConfig
 
-config = LoraConfig(alora_invocation_tokens=alora_invocation_tokens, ...)
+config = LoraConfig(alora_invocation_tokens=alora_invocation_tokens, task_type="CAUSAL_LM", ...)
 ```
 
 where `alora_invocation_tokens` is a list of integer token ids. Given a desired invocation string, this can be obtained as
@@ -193,7 +193,7 @@ alora_invocation_tokens = tokenizer.encode(invocation_string, add_special_tokens
 where the tokenizer is the tokenizer for the base model.
 
 **Notes**
-* aLoRA is only supported for CAUSAL_LM tasks due to its focus on cache reuse.
+* aLoRA is only supported for `task_type=CAUSAL_LM` tasks due to its focus on cache reuse.
 * Since the weights are adapted on fewer tokens, often (not always) aLoRA requires higher rank (`r`) than LoRA. `r=32` can be a good starting point.
 * aLoRA weights cannot be merged into the base model by definition, since the adapter weights are selectively applied to a subset of tokens. Attempts to merge will throw errors.
 * Beam search is not yet supported.
