@@ -33,12 +33,10 @@ from utils.dataset import make_dataset
 
 
 # Determine the best available device
-# TODO: xpu support in facealignment will be ready after this PR is merged:https://github.com/1adrianb/face-alignment/pull/371
-if torch.xpu.is_available():
-    device = "xpu:0"
-elif torch.cuda.is_available():
+if torch.cuda.is_available():
     device = "cuda:0"
 else:
+    # TODO: xpu support in facealignment will be ready after this PR is merged:https://github.com/1adrianb/face-alignment/pull/371
     device = "cpu"
 
 detect_model = face_alignment.FaceAlignment(face_alignment.LandmarksType.TWO_D, device=device, flip_input=False)
