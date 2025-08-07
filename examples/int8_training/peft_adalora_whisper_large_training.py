@@ -629,7 +629,7 @@ def main():
     if args.use_peft and args.use_adalora:
         # Update the total_step in the config to reflect the adjusted max_train_steps
         # Handle DDP case where model is wrapped
-        if hasattr(model, 'module'):
+        if hasattr(model, "module"):
             # DDP case
             model.module.base_model.peft_config["default"].total_step = args.max_train_steps
         else:
@@ -697,12 +697,21 @@ def main():
                 # Hence being called before optimizer.zero_grad().
                 if args.use_peft and args.use_adalora:
                     # Handle DDP case where model is wrapped
-                    if hasattr(model, 'module'):
+                    if hasattr(model, "module"):
                         # DDP case
-                        model.module.update_and_allocate(global_step)
+                        peft_model = model.module
                     else:
                         # Non-DDP case
-                        model.update_and_allocate(global_step)
+                        peft_model = model
+
+                    # Check if rank_pattern exists before calling update_and_allocate
+                    if (
+                        hasattr(peft_model, "peft_config")
+                        and peft_model.peft_config["default"].rank_pattern is not None
+                    ):
+                        peft_model.update_and_allocate(global_step)
+                    elif global_step >= args.tinit:  # Only start updating after tinit steps
+                        peft_model.update_and_allocate(global_step)
 
                 optimizer.zero_grad()
                 global_step += 1
@@ -770,12 +779,17 @@ def main():
         # load the best model
         accelerator.load_state(os.path.join(args.output_dir, "best_checkpoint"))
         # Handle DDP case where model is wrapped
-        if hasattr(model, 'module'):
+        if hasattr(model, "module"):
             # DDP case
-            model.module.resize_modules_by_rank_pattern(model.module.peft_config["default"].rank_pattern, "default")
+            peft_model = model.module
         else:
             # Non-DDP case
-            model.resize_modules_by_rank_pattern(model.peft_config["default"].rank_pattern, "default")
+            peft_model = model
+
+        # Only resize if rank_pattern exists
+        if hasattr(peft_model, "peft_config") and peft_model.peft_config["default"].rank_pattern is not None:
+            peft_model.resize_modules_by_rank_pattern(peft_model.peft_config["default"].rank_pattern, "default")
+
         eval_metrics = evaluation_loop(
             model, eval_dataloader, processor, normalizer, metric, forced_decoder_ids, accelerator
         )
