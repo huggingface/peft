@@ -62,7 +62,10 @@ def load_or_quantize_model(
             print(f"Model {base_model} is not GPTQ-quantized. Will quantize it.")
             # Clean up the test model to free memory
             del test_model
-            torch.cuda.empty_cache() if torch.cuda.is_available() else None
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            elif torch.xpu.is_available():
+                torch.xpu.empty_cache()
 
     except Exception as e:
         print(f"Could not load model {base_model} directly: {e}")
@@ -253,8 +256,11 @@ def train_model(
         label_names=["labels"],
     )
 
-    # Clear CUDA cache to free memory
-    torch.cuda.empty_cache()
+    # Clear accelerator cache to free memory
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    elif torch.xpu.is_available():
+        torch.xpu.empty_cache()
 
     # Initialize trainer
     trainer = Trainer(

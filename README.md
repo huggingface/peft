@@ -42,7 +42,7 @@ Prepare a model for training with a PEFT method such as LoRA by wrapping the bas
 from transformers import AutoModelForCausalLM
 from peft import LoraConfig, TaskType, get_peft_model
 
-device = "cuda"
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
 model_id = "Qwen/Qwen2.5-3B-Instruct"
 model = AutoModelForCausalLM.from_pretrained(model_id, device_map=device)
 peft_config = LoraConfig(
@@ -65,7 +65,7 @@ To load a PEFT model for inference:
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 
-device = "cuda"
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
 model_id = "Qwen/Qwen2.5-3B-Instruct"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 model = AutoModelForCausalLM.from_pretrained(model_id, device_map=device)
