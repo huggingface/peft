@@ -1938,7 +1938,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
     @pytest.mark.parametrize("device", devices)
     def test_load_adapter_low_cpu_mem_usage_works(self, device, inputs, lora_path, lora_config):
@@ -1965,7 +1965,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
     @pytest.mark.parametrize("device", devices)
     def test_get_peft_model_low_cpu_mem_usage_works(self, device, inputs):
@@ -2027,7 +2027,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
     ############################
     # tests for PeftMixedModel #
@@ -2049,7 +2049,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
     @pytest.mark.parametrize("device", devices)
     def test_mixed_model_load_adapter_low_cpu_mem_usage_works(self, device, inputs, lora_path, lora_config):
@@ -2076,7 +2076,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
 
 def test_from_pretrained_missing_keys_warning(recwarn, tmp_path):
