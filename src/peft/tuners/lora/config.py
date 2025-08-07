@@ -70,6 +70,39 @@ class LoftQConfig:
 
 
 @dataclass
+class ArrowConfig:
+    """
+    This is the sub-configuration class to store the configuration for Arrow and GenKnowSub algorithm. Arrow is a
+    routing algorithm to combine the trained LoRA modules to solve new tasks, proposed in
+    'https://arxiv.org/pdf/2405.11157'. GenKnowSub is a refinement on the trained modules before being combined via
+    Arrow, introduced in 'https://aclanthology.org/2025.acl-short.54/'
+    """
+
+    arrow_top_k: int = field(
+        default=3,
+        metadata={"help": "Number of top LoRA modules to combine in Arrow routing."},
+    )
+
+    arrow_router_temperature: float = field(
+        default=1.0,
+        metadata={"help": "Softmax temperature for computing Arrow expert coefficients."},
+    )
+
+    use_gks: bool = field(
+        default=False,
+        metadata={"help": "Enable GenKnowSub."},
+    )
+
+    ts_names: list[str] = field(default=None, metadata={"help": "list of task-specific LoRA names."})
+
+    gen_names: list[str] = field(default=None, metadata={"help": "list of general LoRA names."})
+
+    def __post_init__(self):
+        if self.arrow_top_k <= 0:
+            raise ValueError("`arrow_top_k` could not be negative.")
+
+
+@dataclass
 class EvaConfig:
     """
     This is the sub-configuration class to store the configuration for a data-driven initialization via EVA. EVA was
@@ -565,6 +598,12 @@ class LoraConfig(PeftConfig):
                 "the bias of those parameters can be taken into account."
             )
         },
+    )
+    use_arrow: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to apply Arrow routing on the model or not."}
+    )
+    arrow_config: Optional[ArrowConfig] = field(
+        default=None, metadata={"help": "The necessary config to apply arrow routing on the model."}
     )
     target_parameters: Optional[list[str]] = field(
         default=None,

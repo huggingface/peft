@@ -18,11 +18,99 @@ from typing import Any
 import torch
 from accelerate.utils.imports import is_xpu_available
 from torch import nn
+from transformers import PreTrainedModel
 
 from peft.utils.other import transpose
 
+from .arrow import ArrowLoraLinearLayer
+from .config import ArrowConfig, LoraConfig
 from .dora import DoraConv1dLayer, DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer
 from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd
+
+
+class ArrowLinearVariant(LoraVariant):
+    """
+    Variant wrapper for ArrowLoRA on `nn.Linear` and `bnb.nn.Linear4bit`. One instance (actually: one *class*) serves
+    *all* adapters; per-adapter state lives in `module.lora_arrow[adapter_name]`, an ArrowLoRALayer.
+    """
+
+    # ------------------------------------------------------------------
+    # 1) INIT  – runs **once per adapter** during `model.load_adapter(...)`
+    # ------------------------------------------------------------------
+    @staticmethod
+    def init(module: Linear, adapter_name: str, **kwargs):
+        """
+        `module` : the patched Linear (already owns lora_A/B/etc.) `adapter_name` : "cluster7", "router", ... `kwargs`
+        : every extra field you added to LoraConfig
+                         (arrow_top_k, arrow_expert_num, etc.)
+        """
+        # print(kwargs)
+        # print(adapter_name)
+        # Checking for arrow necessary config
+
+        arrow_config = kwargs["kwargs"].get("arrow_config")
+        if arrow_config is None:
+            raise ValueError("ArrowLinearVariant.init() did not receive a arrow_config")
+
+        # 1-a) build the ArrowLoRALayer
+        arrow_layer = ArrowLoraLinearLayer(
+            in_features=module.in_features,  # **check**
+            arrow_config=arrow_config,
+        ).to(module.weight.device)
+
+        # 1-b) register a container if it doesn’t exist yet
+        if not hasattr(module, "lora_arrow"):
+            module.lora_arrow = nn.ModuleDict()
+            # ensure PEFT knows to save / load these params
+            module.other_param_names = module.other_param_names + ("lora_arrow",)
+
+        module.lora_arrow[adapter_name] = arrow_layer
+        # *** DO NOT compute prototypes here *** –
+        # we may not have loaded *all* experts yet.  ArrowLoraLinearLayer.forward()
+        # will lazily call `build_prototypes()` the first time it runs.
+
+    # ------------------------------------------------------------------
+    # 2) FORWARD – called every time the host Linear does a fwd pass
+    # ------------------------------------------------------------------
+    @staticmethod
+    def forward(
+        module: Linear,
+        *,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Parameters mirror those in PEFT’s `LoraVariant.forward`.
+
+        * `result` = base linear output (`x @ W₀ᵀ + b`)
+        * return = result + Δ (Δ from Arrow routing)
+        """
+        arrow = module.lora_arrow[active_adapter]  # ArrowLoraLinearLayer
+        # Apply GenKnowSub the 1st time if applcable.
+        arrow.gen_know_sub(module.lora_A, module.lora_B)
+        # lazily build prototypes the 1st time after GenKnowSub
+        arrow.build_prototypes(module.lora_A, module.lora_B)
+
+        delta = arrow(
+            x,
+            lora_A=module.lora_A,  # dict of nn.Linear
+            lora_B=module.lora_B,
+            dropout=module.lora_dropout[active_adapter],
+            scaling=module.scaling[active_adapter],
+        )
+        return result + delta
+
+    # ------------------------------------------------------------------
+    # 3) MERGE / UNMERGE  (optional)
+    # ------------------------------------------------------------------
+    # If you plan to support `model.merge_and_unload()`, add:
+    #
+    # @staticmethod
+    # def merge_weights(module: Linear, adapter_name: str) -> None: ...
+    #
+    # For most research prototypes you can skip this block; PEFT will simply
+    # fall back to keeping Arrow in “un-merged” mode.
 
 
 class DoraLinearVariant(LoraVariant):
@@ -411,3 +499,143 @@ class QALoraLinearVariant(LoraVariant):
             delta = delta.view(orig_shape[:-1] + (delta.size(-1),))
 
         return result + delta
+
+
+def check_loaded_lora_compatibility_arrow(model, adapter_names: list[str]):
+    """
+    After loading all adapters into `model`, check they share:
+      - the same LoRA rank (r)
+      - identical weight shapes
+      - identical sets of target_modules
+    Returns the sorted list of target module names (e.g. ["qkv_proj","o_proj"]).
+    """
+    reference = None  # will hold {'r':…, 'shapes':(Ashape,Bshape), 'modules':set([...])}
+
+    for name in adapter_names:
+        curr_modules = set()
+        curr_r = None
+        curr_shapes = None
+
+        # Use named_modules to get both module and its name in the model hierarchy
+        for full_name, module in model.named_modules():
+            if hasattr(module, "lora_A") and name in module.lora_A:
+                A = module.lora_A[name].weight
+                B = module.lora_B[name].weight
+
+                # extract the *attribute* name (last component of the path)
+                mod_name = full_name.split(".")[-1]
+
+                curr_modules.add(mod_name)
+                curr_r = A.shape[1]
+                curr_shapes = (A.shape, B.shape)
+
+        if reference is None:
+            reference = {"r": curr_r, "shapes": curr_shapes, "modules": curr_modules}
+        else:
+            if curr_r != reference["r"]:
+                raise ValueError(f"[{name}] rank mismatch: {curr_r} != {reference['r']}")
+            if curr_shapes != reference["shapes"]:
+                raise ValueError(f"[{name}] shape mismatch: {curr_shapes} != {reference['shapes']}")
+            if curr_modules != reference["modules"]:
+                raise ValueError(
+                    f"[{name}] target_modules mismatch:\n"
+                    f"  this adapter -> {sorted(curr_modules)}\n"
+                    f"  reference   -> {sorted(reference['modules'])}"
+                )
+
+    agreed_modules = sorted(reference["modules"])
+    print(f"✅ All adapters target: {agreed_modules}")
+    return agreed_modules
+
+
+def create_arrow_model(
+    base_model: PreTrainedModel,
+    task_specific_adapter_paths: list[str],  # path of task-specific LoRAs
+    arrow_config: ArrowConfig,
+    general_adapter_paths: list[str] | None = None,  # path to the trained general-knowledge LoRAs
+    **adapter_kwargs: Any,
+):
+    def split_repo_and_subfolder(path: str):
+        """
+        Splits a Hugging Face path into repo_id and subfolder. For example:
+        "TahaBa/phi3-mini-clustered-flan/ts_expert_0"
+        """
+        parts = path.strip("/").split("/")
+        if len(parts) <= 2:
+            return path, None  # It's a repo without subfolder
+        repo_id = "/".join(parts[:2])
+        subfolder = "/".join(parts[2:])
+        return repo_id, subfolder
+
+    if task_specific_adapter_paths is None:
+        raise ValueError("`task_specific_adapter_paths` should contain at least one adapter path")
+
+    from peft import PeftModel
+
+    # Loading the first expert on the model so we have a PeftModel
+    repo_id, sub_folder = split_repo_and_subfolder(task_specific_adapter_paths[0])
+    initial_ts_expert_name = "ts_expert_0"
+    model = PeftModel.from_pretrained(
+        base_model,
+        model_id=repo_id,
+        adapter_name=initial_ts_expert_name,
+        subfolder=sub_folder,
+        **adapter_kwargs,
+    )
+
+    # Loading other task-specific adapters
+    for i in range(1, len(task_specific_adapter_paths)):
+        ts_expert_name = f"ts_expert_{i}"
+        repo_id, sub_folder = split_repo_and_subfolder(task_specific_adapter_paths[i])
+        model.load_adapter(
+            model_id=repo_id,
+            adapter_name=ts_expert_name,
+            subfolder=sub_folder,
+            **adapter_kwargs,
+        )
+    # Adding task-specific adapter names to the arrow_config
+    arrow_config.ts_names = [f"ts_expert_{i}" for i in range(len(task_specific_adapter_paths))]
+
+    # Loading general LoRAs if available (to be used in GenKnowSub)
+    if arrow_config.use_gks:
+        if general_adapter_paths is None:
+            raise ValueError("You should provide general LoRA paths if want to use GenKnowSub.")
+        for i in range(0, len(general_adapter_paths)):
+            gen_expert_name = f"gen_expert_{i}"
+            repo_id, sub_folder = split_repo_and_subfolder(general_adapter_paths[i])
+            model.load_adapter(
+                model_id=repo_id,
+                adapter_name=gen_expert_name,
+                subfolder=sub_folder,
+                **adapter_kwargs,
+            )
+        # Adding general adapter names to the arrow_config
+        arrow_config.gen_names = [f"gen_expert_{i}" for i in range(len(general_adapter_paths))]
+    else:
+        arrow_config.gen_names = []
+
+    # Now checking the compatibility of all adapters
+    target_modules = check_loaded_lora_compatibility_arrow(
+        model, adapter_names=arrow_config.ts_names + arrow_config.gen_names
+    )
+
+    # Add a dummy LoRA as the arrow router
+    # 1) Define the router’s config:
+    router_cfg = LoraConfig(
+        r=2,  # rank of router adapter (dummy)
+        use_arrow=True,  # turns on Arrow routing instead of vanilla LoRA
+        arrow_config=arrow_config,  # all the necessary configs for arrow
+        target_modules=target_modules,  # target modules which adapters are applied on
+    )
+
+    # 2) Create the adapter “router” (weights are randomly init’d LoRA mats,
+    #    but will never actually be applied because use_arrow=True):
+    model.add_adapter(
+        adapter_name="router",
+        peft_config=router_cfg,
+    )
+
+    # 3) Tell the model “hey, from now on use the ‘router’ adapter”:
+    model.set_adapter("router")
+
+    return model
