@@ -33,6 +33,7 @@ from peft.utils.integrations import (
     skip_init_on_device,
 )
 from peft.utils.other import transpose
+from peft.utils.warning import PeftWarning
 
 from .config import LoraConfig
 
@@ -198,6 +199,13 @@ class LoraLayer(BaseTunerLayer):
         # This code works for linear layers, override for other layer types
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+
+        if lora_bias and (getattr(self.get_base_layer(), "bias", None) is None):
+            warnings.warn(
+                f"`lora_bias=True` was passed but the targeted layer of type {type(self.get_base_layer()).__name__} "
+                "has no bias. This means that merging LoRA weights won't be possible.",
+                PeftWarning,
+            )
 
         lora_variant = self.resolve_lora_variant(
             use_dora=use_dora, use_qalora=use_qalora, qalora_group_size=qalora_group_size
@@ -666,6 +674,10 @@ class Linear(nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weight
 
                     if self.lora_bias[active_adapter]:
+                        if getattr(base_layer, "bias", None) is None:
+                            raise RuntimeError(
+                                "Impossible to merge LoRA with `lora_bias=True` because the base layer has no bias."
+                            )
                         new_bias = base_layer.bias + self.lora_B[active_adapter].bias * self.scaling[active_adapter]
                         if not torch.isfinite(new_bias).all():
                             raise ValueError(
@@ -681,6 +693,10 @@ class Linear(nn.Module, LoraLayer):
                         self.lora_variant[active_adapter].merge_unsafe(self, active_adapter, base_layer.weight)
 
                     if self.lora_bias[active_adapter]:
+                        if getattr(base_layer, "bias", None) is None:
+                            raise RuntimeError(
+                                "Impossible to merge LoRA with `lora_bias=True` because the base layer has no bias."
+                            )
                         base_layer.bias.data += self.lora_B[active_adapter].bias * self.scaling[active_adapter]
 
                 self.merged_adapters.append(active_adapter)
@@ -1111,6 +1127,13 @@ class _ConvNd(nn.Module, LoraLayer):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
+        if lora_bias and (getattr(self.get_base_layer(), "bias", None) is None):
+            warnings.warn(
+                f"`lora_bias=True` was passed but the targeted layer of type {type(self.get_base_layer()).__name__} "
+                "has no bias. This means that merging LoRA weights won't be possible.",
+                PeftWarning,
+            )
+
         lora_variant = self.resolve_lora_variant(use_dora=use_dora)
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
@@ -1204,6 +1227,10 @@ class _ConvNd(nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weight
 
                     if self.lora_bias[active_adapter]:
+                        if getattr(base_layer, "bias", None) is None:
+                            raise RuntimeError(
+                                "Impossible to merge LoRA with `lora_bias=True` because the base layer has no bias."
+                            )
                         new_bias = base_layer.bias + self.lora_B[active_adapter].bias * self.scaling[active_adapter]
                         if not torch.isfinite(new_bias).all():
                             raise ValueError(
@@ -1219,6 +1246,10 @@ class _ConvNd(nn.Module, LoraLayer):
                         self.lora_variant[active_adapter].merge_unsafe(self, active_adapter, base_layer.weight)
 
                     if self.lora_bias[active_adapter]:
+                        if getattr(base_layer, "bias", None) is None:
+                            raise RuntimeError(
+                                "Impossible to merge LoRA with `lora_bias=True` because the base layer has no bias."
+                            )
                         base_layer.bias.data += self.lora_B[active_adapter].bias * self.scaling[active_adapter]
 
                 self.merged_adapters.append(active_adapter)

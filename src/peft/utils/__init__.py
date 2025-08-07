@@ -58,6 +58,7 @@ from .other import (
 )
 from .peft_types import PeftType, TaskType, register_peft_method
 from .save_and_load import get_peft_model_state_dict, load_peft_weights, set_peft_model_state_dict
+from .warning import PeftWarning
 
 
 __all__ = [
@@ -82,6 +83,7 @@ __all__ = [
     "AuxiliaryTrainingWrapper",
     "ModulesToSaveWrapper",
     "PeftType",
+    "PeftWarning",
     "TaskType",
     "TrainableTokensWrapper",
     "_freeze_adapter",
