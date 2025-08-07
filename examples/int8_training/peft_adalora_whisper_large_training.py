@@ -628,7 +628,13 @@ def main():
     args.max_train_steps = math.ceil(args.max_train_steps / accelerator.num_processes)
     if args.use_peft and args.use_adalora:
         # Update the total_step in the config to reflect the adjusted max_train_steps
-        model.base_model.peft_config["default"].total_step = args.max_train_steps
+        # Handle DDP case where model is wrapped
+        if hasattr(model, 'module'):
+            # DDP case
+            model.module.base_model.peft_config["default"].total_step = args.max_train_steps
+        else:
+            # Non-DDP case
+            model.base_model.peft_config["default"].total_step = args.max_train_steps
 
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
@@ -690,7 +696,13 @@ def main():
                 # Note that this requires parameter gradients.
                 # Hence being called before optimizer.zero_grad().
                 if args.use_peft and args.use_adalora:
-                    model.update_and_allocate(global_step)
+                    # Handle DDP case where model is wrapped
+                    if hasattr(model, 'module'):
+                        # DDP case
+                        model.module.update_and_allocate(global_step)
+                    else:
+                        # Non-DDP case
+                        model.update_and_allocate(global_step)
 
                 optimizer.zero_grad()
                 global_step += 1
@@ -757,7 +769,13 @@ def main():
     if args.load_best_model:
         # load the best model
         accelerator.load_state(os.path.join(args.output_dir, "best_checkpoint"))
-        model.resize_modules_by_rank_pattern(model.peft_config["default"].rank_pattern, "default")
+        # Handle DDP case where model is wrapped
+        if hasattr(model, 'module'):
+            # DDP case
+            model.module.resize_modules_by_rank_pattern(model.module.peft_config["default"].rank_pattern, "default")
+        else:
+            # Non-DDP case
+            model.resize_modules_by_rank_pattern(model.peft_config["default"].rank_pattern, "default")
         eval_metrics = evaluation_loop(
             model, eval_dataloader, processor, normalizer, metric, forced_decoder_ids, accelerator
         )
