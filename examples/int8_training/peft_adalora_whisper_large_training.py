@@ -534,9 +534,7 @@ def main():
     metric = evaluate.load("wer")
 
     # model
-    model = WhisperForConditionalGeneration.from_pretrained(
-        args.model_name_or_path, quantization_config=BitsAndBytesConfig(load_in_8bit=True)
-    )
+    model = WhisperForConditionalGeneration.from_pretrained(args.model_name_or_path, quantization_config=BitsAndBytesConfig(load_in_8bit=True))
     model.config.forced_decoder_ids = None
     model.config.suppress_tokens = []
     if hasattr(model, "hf_device_map") and len(set(model.hf_device_map.values()).intersection({"cpu", "disk"})) > 0:
@@ -708,9 +706,8 @@ def main():
                     if (
                         hasattr(peft_model, "peft_config")
                         and peft_model.peft_config["default"].rank_pattern is not None
+                        and global_step >= args.tinit  # Only start updating after tinit steps
                     ):
-                        peft_model.update_and_allocate(global_step)
-                    elif global_step >= args.tinit:  # Only start updating after tinit steps
                         peft_model.update_and_allocate(global_step)
 
                 optimizer.zero_grad()
