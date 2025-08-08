@@ -1421,7 +1421,7 @@ class TestLoraInitialization:
                 self.linear = nn.Linear(10, 10)
 
         base_model = MyModule()
-        config = LoraConfig(target_modules=["linear"], target_parameters=["weight"])
+        config = LoraConfig(target_modules=["linear"], target_parameters=["linear.weight"])
         msg = "Trying to wrap an `nn.Parameter` of layer 'linear' of type Linear, which is not a valid target."
         with pytest.raises(ValueError, match=msg):
             get_peft_model(base_model, config)
@@ -1459,6 +1459,26 @@ class TestLoraInitialization:
         msg = re.escape("target_parameters=['foobar.weight'] were set but no parameter was matched.")
         with pytest.warns(RuntimeWarning, match=msg):
             get_peft_model(model, config)
+
+    def test_adding_multiple_adapters_with_target_parameters_raises(self):
+        model = self.get_model()
+        config = LoraConfig(target_modules=[], target_parameters=["linear.weight"])
+        model = get_peft_model(model, config)
+        msg = re.escape("only one LoRA adapter per model with `target_parameters` is allowed")
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter(adapter_name="other", peft_config=config)
+
+    def test_loading_loading_adapters_with_target_parameters_raises(self, tmp_path):
+        model = self.get_model()
+        config = LoraConfig(target_modules=[], target_parameters=["linear.weight"])
+        model = get_peft_model(model, config)
+        model.save_pretrained(tmp_path)
+
+        model = self.get_model()
+        model = PeftModel.from_pretrained(model, tmp_path)
+        msg = re.escape("only one LoRA adapter per model with `target_parameters` is allowed")
+        with pytest.raises(ValueError, match=msg):
+            model.load_adapter(tmp_path, adapter_name="other")
 
 
 class TestLokrInitialization:
