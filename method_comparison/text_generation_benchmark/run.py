@@ -219,7 +219,7 @@ def run_benchmark(
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        if torch.xpu.is_available():
+        elif torch.xpu.is_available():
             torch.xpu.empty_cache()
 
         ram, accelerator_allocated, accelerator_reserved = get_memory_usage()
