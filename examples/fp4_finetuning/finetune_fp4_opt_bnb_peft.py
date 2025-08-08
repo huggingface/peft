@@ -9,7 +9,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import LoraConfig, get_peft_model
 
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # force to use CUDA GPU device 0
+os.environ["ZE_AFFINITY_MASK"] = "0"  # force to use Intel XPU device 0
 # -*- coding: utf-8 -*-
 """Finetune-opt-bnb-peft.ipynb
 
