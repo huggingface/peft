@@ -357,7 +357,7 @@ def get_memory_usage() -> tuple[float, float, float]:
 
 
 def init_accelerator() -> tuple[float, float]:
-    """Initialize acceleratot and return initial memory usage."""
+    """Initialize accelerator and return initial memory usage."""
     if torch.cuda.is_available():
         torch.cuda.init()
         torch.cuda.empty_cache()
