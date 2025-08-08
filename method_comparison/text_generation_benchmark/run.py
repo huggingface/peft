@@ -34,7 +34,7 @@ from utils import (
     BenchmarkResult,
     BenchmarkStatus,
     get_memory_usage,
-    init_cuda,
+    init_accelerator,
     log_results,
     validate_experiment_path,
 )
@@ -152,8 +152,8 @@ def run_benchmark(
     e_main_benchmark: Optional[Exception] = None
 
     try:
-        print_fn("Initializing CUDA...")
-        gpu_allocated_init, gpu_reserved_init = init_cuda()
+        print_fn("Initializing accelerator...")
+        accelerator_allocated_init, accelerator_reserved_init = init_accelerator()
         set_seed(benchmark_config.seed)
 
         print_fn(f"Loading base model: {benchmark_config.model_id}")
@@ -162,7 +162,7 @@ def run_benchmark(
             tokenizer.pad_token = tokenizer.eos_token
 
         model_kwargs = {
-            "device_map": "auto" if torch.cuda.is_available() else None,
+            "device_map": "auto" if (torch.cuda.is_available() or torch.xpu.is_available()) else None,
         }
 
         if benchmark_config.dtype == "float32":
@@ -217,10 +217,13 @@ def run_benchmark(
 
         del base_model
         gc.collect()
-        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        if torch.xpu.is_available():
+            torch.xpu.empty_cache()
 
-        ram, gpu_allocated, gpu_reserved = get_memory_usage()
-        result.add_memory_log("peft_model_loaded", ram, gpu_allocated, gpu_reserved)
+        ram, accelerator_allocated, accelerator_reserved = get_memory_usage()
+        result.add_memory_log("peft_model_loaded", ram, accelerator_allocated, accelerator_reserved)
 
         # Calculate PEFT model metrics
         trainable_params = model.get_nb_trainable_parameters()[0]
@@ -279,8 +282,8 @@ def run_benchmark(
 
         result.update_generation_info(
             memory_data={
-                "peak_gpu_memory_mb": max(
-                    (log["gpu_allocated_mb"] for log in result.generation_info["memory"]["memory_logs"]), default=0
+                "peak_accelerator_memory_mb": max(
+                    (log["accelerator_allocated_mb"] for log in result.generation_info["memory"]["memory_logs"]), default=0
                 ),
                 "peak_ram_memory_mb": max(
                     (log["ram_mb"] for log in result.generation_info["memory"]["memory_logs"]), default=0
@@ -288,8 +291,8 @@ def run_benchmark(
             }
         )
 
-        ram, gpu_allocated, gpu_reserved = get_memory_usage()
-        result.add_memory_log("benchmark_complete", ram, gpu_allocated, gpu_reserved)
+        ram, accelerator_allocated, accelerator_reserved = get_memory_usage()
+        result.add_memory_log("benchmark_complete", ram, accelerator_allocated, accelerator_reserved)
 
         result.status = BenchmarkStatus.SUCCESS
 
