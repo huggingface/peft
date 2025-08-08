@@ -40,6 +40,7 @@ from peft import (
     PromptEncoder,
     PromptEncoderConfig,
     PromptTuningConfig,
+    RoadConfig,
     TaskType,
     VBLoRAConfig,
     VeraConfig,
@@ -65,6 +66,7 @@ ALL_CONFIG_CLASSES = (
     (PrefixTuningConfig, {}),
     (PromptEncoderConfig, {}),
     (PromptTuningConfig, {}),
+    (RoadConfig, {}),
     (VeraConfig, {}),
     (VBLoRAConfig, {}),
 )

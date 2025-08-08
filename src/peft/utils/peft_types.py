@@ -44,6 +44,7 @@ class PeftType(str, enum.Enum):
     - RANDLORA
     - SHIRA
     - C3A
+    - ROAD
     """
 
     PROMPT_TUNING = "PROMPT_TUNING"
@@ -69,6 +70,7 @@ class PeftType(str, enum.Enum):
     BONE = "BONE"
     MISS = "MISS"
     RANDLORA = "RANDLORA"
+    ROAD = "ROAD"
     TRAINABLE_TOKENS = "TRAINABLE_TOKENS"
     SHIRA = "SHIRA"
     C3A = "C3A"
