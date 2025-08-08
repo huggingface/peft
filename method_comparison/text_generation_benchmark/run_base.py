@@ -39,7 +39,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from utils import (
     BenchmarkConfig,
     get_memory_usage,
-    init_cuda,
+    init_accelerator,
 )
 
 
@@ -48,8 +48,8 @@ def run_base_model_benchmark(benchmark_config: BenchmarkConfig, print_fn=print) 
 
     print_fn(f"Running base model benchmark for: {benchmark_config.model_id}")
 
-    print_fn("Initializing CUDA...")
-    init_cuda()
+    print_fn("Initializing accelerator...")
+    init_accelerator()
 
     set_seed(benchmark_config.seed)
 
@@ -59,7 +59,7 @@ def run_base_model_benchmark(benchmark_config: BenchmarkConfig, print_fn=print) 
         tokenizer.pad_token = tokenizer.eos_token
 
     model_kwargs = {
-        "device_map": "auto" if torch.cuda.is_available() else None,
+        "device_map": "auto" if (torch.cuda.is_available() or torch.xpu.is_available()) else None,
     }
 
     if benchmark_config.dtype == "float32":
@@ -83,8 +83,8 @@ def run_base_model_benchmark(benchmark_config: BenchmarkConfig, print_fn=print) 
 
     model = AutoModelForCausalLM.from_pretrained(benchmark_config.model_id, **model_kwargs)
 
-    ram, gpu_allocated, gpu_reserved = get_memory_usage()
-    print_fn(f"Memory after model load - RAM: {ram:.2f}MB, GPU: {gpu_allocated:.2f}MB")
+    ram, accelerator_allocated, accelerator_reserved = get_memory_usage()
+    print_fn(f"Memory after model load - RAM: {ram:.2f}MB, {model.device.type.upper()}: {accelerator_allocated:.2f}MB")
 
     print_fn("Preparing benchmark prompts...")
     prompts = prepare_benchmark_prompts(
@@ -113,8 +113,8 @@ def run_base_model_benchmark(benchmark_config: BenchmarkConfig, print_fn=print) 
         "inference_results": base_inference_results,
         "memory_info": {
             "ram_mb": ram,
-            "gpu_allocated_mb": gpu_allocated,
-            "gpu_reserved_mb": gpu_reserved,
+            "accelerator_allocated_mb": accelerator_allocated,
+            "accelerator_reserved_mb": accelerator_reserved,
         },
     }
 
@@ -163,12 +163,13 @@ def main():
     result = run_base_model_benchmark(benchmark_config, print_fn=print_fn)
 
     saved_path = save_base_results(result, benchmark_config.model_id)
+    device_type = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
     print(f"Base model results saved to: {saved_path}")
 
     print("\nBase Model Benchmark Summary:")
     print(f"Model: {result['model_id']}")
     print(
-        f"Memory Usage - RAM: {result['memory_info']['ram_mb']:.2f}MB, GPU: {result['memory_info']['gpu_allocated_mb']:.2f}MB"
+        f"Memory Usage - RAM: {result['memory_info']['ram_mb']:.2f}MB, {device_type.upper()}: {result['memory_info']['accelerator_allocated_mb']:.2f}MB"
     )
 
     print("\nInference Times by Category:")
