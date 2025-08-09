@@ -37,9 +37,8 @@ from peft.utils.other import transpose
 from peft.utils.warning import PeftWarning
 
 from .config import LoraConfig
-from .scatter_kernels import (
-    scattered_experts
-)
+from .scatter_kernels import scattered_experts
+
 
 class LoraVariant:
     """
@@ -594,70 +593,21 @@ class LoraLayer(BaseTunerLayer):
 #  Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 #  ------------------------------------------------------------------------------------------
 
-class Trilinear(nn.Module):
-    __constants__ = ["in_features", "mid_features", "out_features"]
-    in_features: int
-    mid_features: int
-    out_features: int
-    weight: Tensor
-
-    def __init__(
-        self,
-        in_features: int,
-        mid_features: int,
-        out_features: int,
-        bias: bool = True,
-        device=None,
-        dtype=None,
-    ) -> None:
-        factory_kwargs = {"device": device, "dtype": dtype}
-        super().__init__()
-        self.in_features = in_features
-        self.mid_features = mid_features
-        self.out_features = out_features
-        self.weight = nn.Parameter(
-            torch.empty((out_features, mid_features, in_features), **factory_kwargs)
-        )
-        if bias:
-            self.bias = nn.Parameter(torch.empty(out_features, **factory_kwargs))
-        else:
-            self.register_parameter("bias", None)
-        self.reset_parameters()
-
-    def reset_parameters(self) -> None:
-        # Setting a=sqrt(5) in kaiming_uniform is the same as initializing with
-        # uniform(-1/sqrt(in_features), 1/sqrt(in_features)). For details, see
-        # https://github.com/pytorch/pytorch/issues/57109
-        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-        if self.bias is not None:
-            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
-            bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
-            nn.init.uniform_(self.bias, -bound, bound)
-
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError(
-            "Trilinear forward method is not implemented. "
-            "This is intended to be able to use a 3d tensor as a module"
-        )
-
-    def extra_repr(self) -> str:
-        return f"in_features={self.in_features}, mid_features={self.mid_features}, out_features={self.out_features}, bias={self.bias is not None}"
-
 
 class ParallelExperts(nn.Module, LoraLayer):
     def __init__(
-            self,
-            base_layer,
-            adapter_name: str,
-            r: int = 0,
-            lora_alpha: int = 1,
-            lora_dropout: float = 0.0,
-            fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
-            init_lora_weights: Union[bool, str] = True,
-            use_rslora: bool = False,
-            use_dora: bool = False,
-            lora_bias: bool = False,
-            **kwargs,
+        self,
+        base_layer,
+        adapter_name: str,
+        r: int = 0,
+        lora_alpha: int = 1,
+        lora_dropout: float = 0.0,
+        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
+        init_lora_weights: Union[bool, str] = True,
+        use_rslora: bool = False,
+        use_dora: bool = False,
+        lora_bias: bool = False,
+        **kwargs,
     ) -> None:
         if use_dora:
             # TODO: probably not so hard to implement
@@ -668,6 +618,8 @@ class ParallelExperts(nn.Module, LoraLayer):
         self.fan_in_fan_out = fan_in_fan_out
 
         self._active_adapter = adapter_name
+        self.in_features = self.in_features * self.get_base_layer().weight.shape[0]  # num_experts
+        self.out_features = self.out_features * self.get_base_layer().weight.shape[0]  # num_experts
         self.update_layer(
             adapter_name,
             r,
@@ -678,100 +630,6 @@ class ParallelExperts(nn.Module, LoraLayer):
             use_dora=use_dora,
             lora_bias=lora_bias,
         )
-    
-    def update_layer(
-        self,
-        adapter_name,
-        r,
-        lora_alpha,
-        lora_dropout,
-        init_lora_weights,
-        use_rslora,
-        use_dora: bool = False,
-        use_qalora: bool = False,
-        lora_bias: bool = False,
-        qalora_group_size: int = 32,
-        **kwargs,
-    ):
-        # collect the kwargs
-        kwargs = locals().copy()
-        del kwargs["self"]
-
-        # This code works for linear layers, override for other layer types
-        if r <= 0:
-            raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
-
-        if lora_bias and (getattr(self.get_base_layer(), "bias", None) is None):
-            warnings.warn(
-                f"`lora_bias=True` was passed but the targeted layer of type {type(self.get_base_layer()).__name__} "
-                "has no bias. This means that merging LoRA weights won't be possible.",
-                PeftWarning,
-            )
-
-        lora_variant = self.resolve_lora_variant(
-            use_dora=use_dora, use_qalora=use_qalora, qalora_group_size=qalora_group_size
-        )
-        if lora_variant is not None:
-            self.lora_variant[adapter_name] = lora_variant
-
-        self.r[adapter_name] = r
-        self.lora_alpha[adapter_name] = lora_alpha
-        if lora_dropout > 0.0:
-            lora_dropout_layer = nn.Dropout(p=lora_dropout)
-        else:
-            lora_dropout_layer = nn.Identity()
-
-        self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
-
-        num_experts = self.get_base_layer().weight.size(0)
-        # Actual trainable parameters
-        self.lora_A[adapter_name] = Trilinear(
-            r,
-            self.in_features,
-            num_experts,
-        )
-        self.lora_B[adapter_name] = Trilinear(
-            self.out_features,
-            r,
-            num_experts,
-            bias=True
-        )
-        self.lora_bias[adapter_name] = lora_bias
-
-        if use_rslora:
-            self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
-        else:
-            self.scaling[adapter_name] = lora_alpha / r
-
-        self.use_dora[adapter_name] = use_dora
-
-        # for inits that require access to the base weight, use gather_param_ctx so that the weight is gathered when using DeepSpeed
-        if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
-            with gather_params_ctx(self.get_base_layer().weight):
-                self.pissa_init(adapter_name, init_lora_weights)
-        elif isinstance(init_lora_weights, str) and init_lora_weights.startswith("corda"):
-            with gather_params_ctx(self.get_base_layer().weight):
-                self.corda_init(adapter_name, init_lora_weights)
-        elif isinstance(init_lora_weights, str) and init_lora_weights.lower() == "olora":
-            with gather_params_ctx(self.get_base_layer().weight):
-                self.olora_init(adapter_name)
-        elif init_lora_weights == "loftq":
-            with gather_params_ctx(self.get_base_layer().weight):
-                self.loftq_init(adapter_name)
-        elif init_lora_weights == "eva":
-            nn.init.zeros_(self.lora_B[adapter_name].weight)
-        elif init_lora_weights == "orthogonal":
-            with gather_params_ctx(self.get_base_layer().weight):
-                self.orthogonal_init(adapter_name)
-        elif init_lora_weights:
-            self.reset_lora_parameters(adapter_name, init_lora_weights)
-        # call this before init of the lora variants
-        self._move_adapter_to_device_of_base_layer(adapter_name)
-
-        if adapter_name in self.lora_variant:
-            self.lora_variant[adapter_name].init(self, **kwargs)
-
-        self.set_adapter(self.active_adapters)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -790,7 +648,7 @@ class ParallelExperts(nn.Module, LoraLayer):
         if not adapter_names:
             # no adapter to merge
             return
-        
+
         for active_adapter in adapter_names:
             if active_adapter in self.lora_A.keys():
                 base_layer = self.get_base_layer()
@@ -881,7 +739,16 @@ class ParallelExperts(nn.Module, LoraLayer):
 
         return output_tensor
 
-    def forward(self, x: torch.Tensor, k, sorted_expert_idxs, sorted_scattered_idxs, padded_block_idxs, expert_offsets, **kwargs) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        k,
+        sorted_expert_idxs,
+        sorted_scattered_idxs,
+        padded_block_idxs,
+        expert_offsets,
+        **kwargs,
+    ) -> torch.Tensor:
         self._check_forward_args(x, k, sorted_expert_idxs, sorted_scattered_idxs, padded_block_idxs, expert_offsets)
         adapter_names = kwargs.pop("adapter_names", None)
         gates = kwargs.pop("gates", None)
@@ -891,13 +758,15 @@ class ParallelExperts(nn.Module, LoraLayer):
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
-            result = self.get_base_layer()(x, k, sorted_expert_idxs, sorted_scattered_idxs, padded_block_idxs, expert_offsets, **kwargs)
-        elif adapter_names is not None:
-            raise NotImplementedError(
-                "Passing `adapter_names` is not supported for ParallelExperts layers."
+            result = self.get_base_layer()(
+                x, k, sorted_expert_idxs, sorted_scattered_idxs, padded_block_idxs, expert_offsets, **kwargs
             )
+        elif adapter_names is not None:
+            raise NotImplementedError("Passing `adapter_names` is not supported for ParallelExperts layers.")
         elif self.merged:
-            result = self.get_base_layer()(x, k, sorted_expert_idxs, sorted_scattered_idxs, padded_block_idxs, expert_offsets, **kwargs)
+            result = self.get_base_layer()(
+                x, k, sorted_expert_idxs, sorted_scattered_idxs, padded_block_idxs, expert_offsets, **kwargs
+            )
         else:
             result = None
 
@@ -912,26 +781,35 @@ class ParallelExperts(nn.Module, LoraLayer):
                 scaling = self.scaling[active_adapter]
                 x = self._cast_input_dtype(x, lora_A.weight.dtype)
                 if active_adapter not in self.lora_variant:  # vanilla LoRA
+                    # reshape flattened LoRA weights into per-expert tensors
+                    base_w = self.get_base_layer().weight
+                    E = base_w.size(0)
+                    N = base_w.size(1)
+                    K = base_w.size(2)
+                    rnk = lora_A.weight.size(0)
+                    expert_lora_A = lora_A.weight.view(rnk, E, K).permute(1, 2, 0).contiguous()  # (E,K,r)
+                    expert_lora_B = lora_B.weight.view(E, N, rnk).permute(0, 2, 1).contiguous()  # (E,r,N)
+
                     result_ = scattered_experts(
                         x,
-                        self.get_base_layer().weight.permute(0, 2, 1),
+                        base_w.permute(0, 2, 1),
                         k,
-                        sorted_expert_idxs, # sorted_expert_idxs
-                        sorted_scattered_idxs, # sorted_scattered_idxs
-                        padded_block_idxs, # padded_block_idxs
-                        expert_offsets, # expert_offsets
-                        gates=gates, # gates we dont have router weights
-                        grouped_in=grouped_in, # grouped_in
-                        grouped_out=grouped_out, # grouped_out
-                        expert_lora_A=lora_A.weight,
-                        expert_lora_B=lora_B.weight,
+                        sorted_expert_idxs,  # sorted_expert_idxs
+                        sorted_scattered_idxs,  # sorted_scattered_idxs
+                        padded_block_idxs,  # padded_block_idxs
+                        expert_offsets,  # expert_offsets
+                        gates=gates,  # gates we dont have router weights
+                        grouped_in=grouped_in,  # grouped_in
+                        grouped_out=grouped_out,  # grouped_out
+                        expert_lora_A=expert_lora_A,
+                        expert_lora_B=expert_lora_B,
                         lora_alp=scaling,
                     )
                     if result is None:
                         result = result_
                     else:
                         result += result_
-                    
+
                 else:
                     raise NotImplementedError(
                         f"LoRA variant {self.lora_variant[active_adapter]} is not supported for ParallelExperts layers."
