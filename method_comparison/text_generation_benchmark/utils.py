@@ -362,13 +362,14 @@ def init_accelerator() -> tuple[float, float]:
         torch.cuda.init()
         torch.cuda.empty_cache()
         _, accelerator_allocated, accelerator_reserved = get_memory_usage()
-        return accelerator_allocated, accelerator_reserved
-    if torch.xpu.is_available():
+    elif torch.xpu.is_available():
         torch.xpu.init()
         torch.xpu.empty_cache()
         _, accelerator_allocated, accelerator_reserved = get_memory_usage()
-        return accelerator_allocated, accelerator_reserved
-    return 0.0, 0.0
+    else:
+        accelerator_allocated = 0.0
+        accelerator_reserved = 0.0
+    return accelerator_allocated, accelerator_reserved
 
 
 def get_model_size_mb(model: torch.nn.Module, dtype_bytes: int = 4) -> float:
