@@ -363,10 +363,11 @@ def init_accelerator() -> tuple[float, float]:
         torch.cuda.empty_cache()
         _, accelerator_allocated, accelerator_reserved = get_memory_usage()
         return accelerator_allocated, accelerator_reserved
-    elif torch.xpu.is_available():
+    if torch.xpu.is_available():
         torch.xpu.init()
         torch.xpu.empty_cache()
         _, accelerator_allocated, accelerator_reserved = get_memory_usage()
+        return accelerator_allocated, accelerator_reserved
     return 0.0, 0.0
 
 
