@@ -120,7 +120,7 @@ def create_and_prepare_model(args, data_args, training_args):
 
     if args.use_unsloth:
         if torch.xpu.is_available():
-            raise NotImplementedError(f"XPU hasn't supported unsloth yet")
+            raise NotImplementedError("XPU hasn't supported unsloth yet")
         # Load model
         model, _ = FastLanguageModel.from_pretrained(
             model_name=args.model_name_or_path,
@@ -140,7 +140,7 @@ def create_and_prepare_model(args, data_args, training_args):
         }
         if args.use_flash_attn:
             if torch.xpu.is_available():
-                print(f"XPU hasn't supported flash_attn yet, use eager implementation instead.")
+                print("XPU hasn't supported flash_attn yet, use eager implementation instead.")
                 model_kwargs["attn_implementation"] = "eager"
             else:
                 model_kwargs["attn_implementation"] = "flash_attention_2"
