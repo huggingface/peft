@@ -61,9 +61,11 @@ def b2mb(x):
 class TorchTracemalloc:
     def __enter__(self):
         gc.collect()
-        torch.cuda.empty_cache()
-        torch.cuda.reset_max_memory_allocated()  # reset the peak gauge to zero
-        self.begin = torch.cuda.memory_allocated()
+        self.device_type = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
+        self.device_module = getattr(torch, self.device_type, torch.cuda)
+        self.device_module.empty_cache()
+        self.device_module.reset_peak_memory_stats()  # reset the peak gauge to zero
+        self.begin = self.device_module.memory_allocated()
         self.process = psutil.Process()
 
         self.cpu_begin = self.cpu_mem_used()
@@ -93,9 +95,9 @@ class TorchTracemalloc:
         self.peak_monitoring = False
 
         gc.collect()
-        torch.cuda.empty_cache()
-        self.end = torch.cuda.memory_allocated()
-        self.peak = torch.cuda.max_memory_allocated()
+        self.device_module.empty_cache()
+        self.end = self.device_module.memory_allocated()
+        self.peak = self.device_module.max_memory_allocated()
         self.used = b2mb(self.end - self.begin)
         self.peaked = b2mb(self.peak - self.begin)
 
@@ -162,7 +164,6 @@ def main():
         batch_size = len(examples[text_column])
         inputs = [f"{text_column} : {x} Label : " for x in examples[text_column]]
         model_inputs = tokenizer(inputs)
-        # print(model_inputs)
         for i in range(batch_size):
             sample_input_ids = model_inputs["input_ids"][i]
             model_inputs["input_ids"][i] = [tokenizer.pad_token_id] * (
@@ -248,12 +249,18 @@ def main():
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
-        # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
-        accelerator.print(f"GPU Memory before entering the train : {b2mb(tracemalloc.begin)}")
-        accelerator.print(f"GPU Memory consumed at the end of the train (end-begin): {tracemalloc.used}")
-        accelerator.print(f"GPU Peak Memory consumed during the train (max-begin): {tracemalloc.peaked}")
+        # Printing the memory usage details such as allocated memory, peak memory, and total memory usage
         accelerator.print(
-            f"GPU Total Peak Memory consumed during the train (max): {tracemalloc.peaked + b2mb(tracemalloc.begin)}"
+            f"{accelerator.device.type.upper()} Memory before entering the train : {b2mb(tracemalloc.begin)}"
+        )
+        accelerator.print(
+            f"{accelerator.device.type.upper()} Memory consumed at the end of the train (end-begin): {tracemalloc.used}"
+        )
+        accelerator.print(
+            f"{accelerator.device.type.upper()} Peak Memory consumed during the train (max-begin): {tracemalloc.peaked}"
+        )
+        accelerator.print(
+            f"{accelerator.device.type.upper()} Total Peak Memory consumed during the train (max): {tracemalloc.peaked + b2mb(tracemalloc.begin)}"
         )
 
         accelerator.print(f"CPU Memory before entering the train : {b2mb(tracemalloc.cpu_begin)}")
@@ -280,12 +287,18 @@ def main():
                 preds = preds[:, max_length:].detach().cpu().numpy()
                 eval_preds.extend(tokenizer.batch_decode(preds, skip_special_tokens=True))
 
-        # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
-        accelerator.print(f"GPU Memory before entering the eval : {b2mb(tracemalloc.begin)}")
-        accelerator.print(f"GPU Memory consumed at the end of the eval (end-begin): {tracemalloc.used}")
-        accelerator.print(f"GPU Peak Memory consumed during the eval (max-begin): {tracemalloc.peaked}")
+        # Printing the memory usage details such as allocated memory, peak memory, and total memory usage
         accelerator.print(
-            f"GPU Total Peak Memory consumed during the eval (max): {tracemalloc.peaked + b2mb(tracemalloc.begin)}"
+            f"{accelerator.device.type.upper()} Memory before entering the eval : {b2mb(tracemalloc.begin)}"
+        )
+        accelerator.print(
+            f"{accelerator.device.type.upper()} Memory consumed at the end of the eval (end-begin): {tracemalloc.used}"
+        )
+        accelerator.print(
+            f"{accelerator.device.type.upper()} Peak Memory consumed during the eval (max-begin): {tracemalloc.peaked}"
+        )
+        accelerator.print(
+            f"{accelerator.device.type.upper()} Total Peak Memory consumed during the eval (max): {tracemalloc.peaked + b2mb(tracemalloc.begin)}"
         )
 
         accelerator.print(f"CPU Memory before entering the eval : {b2mb(tracemalloc.cpu_begin)}")

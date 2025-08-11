@@ -2,7 +2,7 @@
 
 ## Introduction
 
-[LoRA-FA](https://huggingface.co/papers/2308.03303) is a noval Parameter-efficient Fine-tuning method, which freezes the projection down layer (matrix A) during LoRA training process and thus lead to less GPU memory consumption by eliminating the need for storing the activations of input tensors (X). Furthermore, LoRA-FA narrows the gap between the update amount of pre-trained weights when using the low-rank fine-tuning method and the full fine-tuning method. In conclusion, LoRA-FA reduces the memory consumption and leads to superior performance compared to vanilla LoRA.
+[LoRA-FA](https://huggingface.co/papers/2308.03303) is a noval Parameter-efficient Fine-tuning method, which freezes the projection down layer (matrix A) during LoRA training process and thus lead to less accelerator memory consumption by eliminating the need for storing the activations of input tensors (X). Furthermore, LoRA-FA narrows the gap between the update amount of pre-trained weights when using the low-rank fine-tuning method and the full fine-tuning method. In conclusion, LoRA-FA reduces the memory consumption and leads to superior performance compared to vanilla LoRA.
 
 ## Quick start
 
@@ -54,7 +54,7 @@ The only change in your code is to pass the LoRA-FA optimizer to the trainer (if
 
 In this dir, we also provide you a simple example for fine-tuning with LoRA-FA optimizer.
 
-### Run on CPU, single-GPU or multi-GPU
+### Run on CPU, single-accelerator or multi-accelerator
 
 This 👇 by default will load the model in peft set up with LoRA config, and train the model with LoRA-FA optimizer.
 
@@ -66,23 +66,29 @@ You can simply run LoRA-FA as below:
 python lorafa_finetuning.py --base_model_name_or_path meta-llama/Meta-Llama-3-8B --dataset_name_or_path meta-math/MetaMathQA-40K --output_dir path/to/output --lorafa
 ```
 
-1. Single-GPU
+1. Single-accelerator
 
-Run the finetuning script on 1 GPU:
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python lorafa_finetuning.py --base_model_name_or_path meta-llama/Meta-Llama-3-8B --dataset_name_or_path meta-math/MetaMathQA-40K --output_dir path/to/output --lorafa
-```
-
-2. Multi-GPU
-
-LoRA-FA can also be run on multi-GPU, with 🤗 Accelerate:
+Run the finetuning script on 1 accelerator:
 
 ```bash
-CUDA_VISIBLE_DEVICES=0,1,2,3 accelerate launch lorafa_finetuning.py --base_model_name_or_path meta-llama/Meta-Llama-3-8B --dataset_name_or_path meta-math/MetaMathQA-40K --output_dir path/to/output --lorafa
+export CUDA_VISIBLE_DEVICES=0  # force to use CUDA GPU 0
+export ZE_AFFINITY_MASK=0      # force to use Intel XPU 0
+
+python lorafa_finetuning.py --base_model_name_or_path meta-llama/Meta-Llama-3-8B --dataset_name_or_path meta-math/MetaMathQA-40K --output_dir path/to/output --lorafa
 ```
 
-The `accelerate launch` will automatically configure multi-GPU for you. You can also utilize `accelerate launch` in single-GPU scenario.
+2. Multi-accelerator
+
+LoRA-FA can also be run on multi-accelerator, with 🤗 Accelerate:
+
+```bash
+export CUDA_VISIBLE_DEVICES=0,1,2,3 # force to use CUDA GPU 0,1,2,3
+export ZE_AFFINITY_MASK=0,1,2,3     # force to use Intel XPU 0,1,2,3
+
+accelerate launch lorafa_finetuning.py --base_model_name_or_path meta-llama/Meta-Llama-3-8B --dataset_name_or_path meta-math/MetaMathQA-40K --output_dir path/to/output --lorafa
+```
+
+The `accelerate launch` will automatically configure multi-accelerator for you. You can also utilize `accelerate launch` in single-accelerator scenario.
 
 ### Use the model from 🤗
 You can load and use the model as any other 🤗 models.
@@ -97,7 +103,7 @@ Sometimes, achieving optimal LoRA fine-tuning can be challenging due to the larg
 
 ## LoRA-FA's advantages and limitations
 
-By eliminating the activation of adapter A, LoRA-FA uses less memory for fine-tuning compared to LoRA. For instance, when fine-tuning Llama-2-7b-chat-hf with a batch size of 8 and a sequence length of 1024, LoRA-FA requires 36GB of memory to store activations. This allows it to run successfully on an 80GB GPU. In contrast, LoRA requires at least 60GB of memory for activations, leading to an Out of Memory (OOM) error. Additionally, the memory consumption of LoRA-FA is not sensitive to the rank, allowing for performance improvements by increasing the LoRA rank without additional memory usage. LoRA-FA further narrows the performance gap with Full-FT by minimizing the discrepancy between the low-rank gradient and the full gradient, enabling it to achieve performance that is on par with or even superior to vanilla LoRA.
+By eliminating the activation of adapter A, LoRA-FA uses less memory for fine-tuning compared to LoRA. For instance, when fine-tuning Llama-2-7b-chat-hf with a batch size of 8 and a sequence length of 1024, LoRA-FA requires 36GB of memory to store activations. This allows it to run successfully on an 80GB accelerator. In contrast, LoRA requires at least 60GB of memory for activations, leading to an Out of Memory (OOM) error. Additionally, the memory consumption of LoRA-FA is not sensitive to the rank, allowing for performance improvements by increasing the LoRA rank without additional memory usage. LoRA-FA further narrows the performance gap with Full-FT by minimizing the discrepancy between the low-rank gradient and the full gradient, enabling it to achieve performance that is on par with or even superior to vanilla LoRA.
 
 Despite its advantages, LoRA-FA is inherently limited by its low-rank approximation nature and potential issues with catastrophic forgetting. The gradient approximation can impact training throughput. Addressing these limitations, especially in terms of approximation accuracy and forgetting phenomena, presents a promising direction for future research.
 

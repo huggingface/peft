@@ -34,7 +34,7 @@ from peft import (
 from peft.tuners import lora
 from peft.utils import ModulesToSaveWrapper
 
-from .testing_common import hub_online_once
+from .testing_utils import hub_online_once
 
 
 class DummyModel(torch.nn.Module):

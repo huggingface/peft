@@ -50,6 +50,7 @@ from peft import (
     PeftModelForSeq2SeqLM,
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
+    PeftWarning,
     PrefixTuningConfig,
     PromptTuningConfig,
     VBLoRAConfig,
@@ -85,14 +86,14 @@ class TestLoraInitialization:
         samples = normal.sample(size)
         return samples
 
-    def get_model(self):
+    def get_model(self, bias=True):
         class MyModule(nn.Module):
             def __init__(self):
                 super().__init__()
                 # choose a large weight so that averages are close to expected values
-                self.linear = nn.Linear(1000, 1000)
+                self.linear = nn.Linear(1000, 1000, bias=bias)
                 self.embed = nn.Embedding(1000, 1000)
-                self.conv2d = nn.Conv2d(100, 100, 3)
+                self.conv2d = nn.Conv2d(100, 100, 3, bias=bias)
 
             def forward(self, x):
                 x_int = (100 * x).int()
@@ -1311,6 +1312,20 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match=msg):
             LoraConfig(target_modules=["linear"], lora_bias=True, **extra_kwargs)
 
+    def test_lora_linear_with_bias_when_base_layer_has_no_bias_warns(self):
+        model = self.get_model(bias=False)
+        config = LoraConfig(target_modules=["linear"], lora_bias=True)
+        msg = re.escape("`lora_bias=True` was passed but the targeted layer of type Linear has no bias")
+        with pytest.warns(PeftWarning, match=msg):
+            get_peft_model(model, config)
+
+    def test_lora_conv2d_with_bias_when_base_layer_has_no_bias_warns(self):
+        model = self.get_model(bias=False)
+        config = LoraConfig(target_modules=["conv2d"], lora_bias=True)
+        msg = re.escape("`lora_bias=True` was passed but the targeted layer of type Conv2d has no bias")
+        with pytest.warns(PeftWarning, match=msg):
+            get_peft_model(model, config)
+
     def test_lora_incompatible_mamba_modules(self):
         # Ensure LoRA raises an error when applying to forbidden modules
         # ('out_proj', 'conv1d') in Mamba-based architectures like Falcon-Mamba tiny.
@@ -1958,7 +1973,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
     @pytest.mark.parametrize("device", devices)
     def test_load_adapter_low_cpu_mem_usage_works(self, device, inputs, lora_path, lora_config):
@@ -1985,7 +2000,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
     @pytest.mark.parametrize("device", devices)
     def test_get_peft_model_low_cpu_mem_usage_works(self, device, inputs):
@@ -2047,7 +2062,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
     ############################
     # tests for PeftMixedModel #
@@ -2069,7 +2084,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
     @pytest.mark.parametrize("device", devices)
     def test_mixed_model_load_adapter_low_cpu_mem_usage_works(self, device, inputs, lora_path, lora_config):
@@ -2096,7 +2111,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
 
 def test_from_pretrained_missing_keys_warning(recwarn, tmp_path):

@@ -19,8 +19,8 @@ from transformers import AutoModelForCausalLM
 
 from peft import LoraConfig, TaskType, get_peft_model
 
-from .testing_common import PeftCommonTester, hub_online_once
-from .testing_utils import set_init_weights_false
+from .testing_common import PeftCommonTester
+from .testing_utils import hub_online_once, set_init_weights_false
 
 
 ALL_CONFIGS = [

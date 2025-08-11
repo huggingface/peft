@@ -150,7 +150,10 @@ corda_config = CordaConfig(
 ####  Knowledge-preserved adaptation mode
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 python -u preprocess.py --model_id="meta-llama/Llama-2-7b-hf" \
+export CUDA_VISIBLE_DEVICES=0  # force to use device 0 of CUDA GPU
+export ZE_AFFINITY_MASK=0   # force to use device 0 of Intel XPU
+
+python -u preprocess.py --model_id="meta-llama/Llama-2-7b-hf" \
     --r 128 --seed 233 \
     --save_model --save_path {path_to_residual_model} \
     --calib_dataset "nqopen"
@@ -165,7 +168,10 @@ Arguments:
 #### Instruction-previewed adaptation mode
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 python -u preprocess.py --model_id="meta-llama/Llama-2-7b-hf" \
+export CUDA_VISIBLE_DEVICES=0  # force to use device 0 of CUDA GPU
+export ZE_AFFINITY_MASK=0   # force to use device 0 of Intel XPU
+
+python -u preprocess.py --model_id="meta-llama/Llama-2-7b-hf" \
     --r 128 --seed 233 \
     --save_model --save_path {path_to_residual_model} \
     --first_eigen --calib_dataset "MetaMATH"
