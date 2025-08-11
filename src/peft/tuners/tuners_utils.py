@@ -782,7 +782,8 @@ class BaseTuner(nn.Module, ABC):
                     self.targeted_parameter_names.append(key)
             else:
                 # Standard case: the parameter is not already parametrized. Note, however, that the model could already
-                # be nested with lora.ParamWrapper.
+                # be nested with lora.ParamWrapper, as this is how we allow targeting multiple Parameters on the same
+                # module.
                 unwrapped_module_name = strip_base_layer_from_name(module_name)
                 # we're interested in finding the "lowest" module that contains the parameter, hence recurse=False
                 for param_name, param in module.named_parameters(recurse=False):
