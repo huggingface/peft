@@ -126,8 +126,8 @@ def main():
         "parquet",
         data_files={
             "train": f"hf://datasets/ought/raft@refs/convert/parquet/{dataset_name}/train/0000.parquet",
-            "test": f"hf://datasets/ought/raft@refs/convert/parquet/{dataset_name}/test/0000.parquet"
-        }
+            "test": f"hf://datasets/ought/raft@refs/convert/parquet/{dataset_name}/test/0000.parquet",
+        },
     )
     classes = [k.replace("_", " ") for k in dataset["train"].features["Label"].names]
     dataset = dataset.map(
