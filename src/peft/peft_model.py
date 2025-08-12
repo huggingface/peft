@@ -750,16 +750,16 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 past_key_values = post_process_fn(past_key_values)
             elif ("gemma2" in model_type) or ("gemma3_text" in model_type):
                 # Gemma2 and Gemma3 only support HybridCache (which does not have the from_legacy_cache method)
-                if max_cache_len is None:
+                if (max_cache_len is None) or (max_cache_len == -1):
                     raise ValueError(
-                        "max_cache_len is None but it should have been passed. Something went wrong, please open an "
+                        "max_cache_len is missing but it should have been passed. Something went wrong, please open an "
                         "issue on GitHub with a reproducer: https://github.com/huggingface/peft/issues"
                     )
                 base_config = base_model.config
                 if hasattr(base_config, "get_text_config"):
                     base_config = base_config.get_text_config()
                 new_cache = HybridCache(
-                    base_config,
+                    config=base_config,
                     max_batch_size=batch_size,
                     max_cache_len=max_cache_len,
                     dtype=past_key_values[0].dtype,
@@ -2068,15 +2068,18 @@ class PeftModelForCausalLM(PeftModel):
                 )
                 kwargs["token_type_ids"] = None
 
+            cache: transformers.Cache | None = model_kwargs.get("past_key_values", None)
             # no past_key_values or past_key_values empty cache
-            requires_prompt_injection = (model_kwargs.get("past_key_values", None) is None) or (
-                isinstance(model_kwargs["past_key_values"], transformers.Cache)
-                and not model_kwargs["past_key_values"].get_seq_length()
+            requires_prompt_injection = (cache is None) or (
+                isinstance(cache, transformers.Cache) and not cache.get_seq_length()
             )
 
             if requires_prompt_injection and peft_config.peft_type == PeftType.PREFIX_TUNING:
-                # some archs require max_cache_len to re-initialize the cache
-                max_cache_len = getattr(model_kwargs.get("past_key_values", None), "max_cache_len", None)
+                # some archs require max_cache_len to re-initialize the cache, but DynamicCache has no max len
+                if isinstance(cache, transformers.Cache) and not isinstance(cache, transformers.DynamicCache):
+                    max_cache_len = cache.max_cache_len
+                else:
+                    max_cache_len = -1  # -1 means no max length
                 new_past_key_values = self.get_prompt(
                     batch_size=model_kwargs["input_ids"].shape[0],
                     max_cache_len=max_cache_len,
