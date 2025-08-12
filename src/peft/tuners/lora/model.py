@@ -185,6 +185,18 @@ class LoraModel(BaseTuner):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
 
+        if lora_config.target_parameters:
+            # Right now, unfortunately, we don't support multiple adapters with target_parameters on the same model.
+            other_configs_use_target_params = any(
+                conf.target_parameters for key, conf in self.peft_config.items() if key != adapter_name
+            )
+            if other_configs_use_target_params:
+                raise ValueError(
+                    f"Adding a LoRA config with `target_parameters={lora_config.target_parameters}` but there are "
+                    "already other LoRA adapters on this model that use `target_parameters`. At the moment, only "
+                    "one LoRA adapter per model with `target_parameters` is allowed."
+                )
+
         # Regexp matching - Find key which matches current target_name in patterns provided
         r_key = get_pattern_key(lora_config.rank_pattern.keys(), current_key)
         alpha_key = get_pattern_key(lora_config.alpha_pattern.keys(), current_key)

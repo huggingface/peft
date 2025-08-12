@@ -722,43 +722,77 @@ class BaseTuner(nn.Module, ABC):
     def _inject_parameters(
         self, peft_config: PeftConfig, model: nn.Module, adapter_name: str, low_cpu_mem_usage: bool
     ) -> None:
-        # TODO very simple matching, might not cover all use cases
-        target_names = set(peft_config.target_parameters)
-        for module_name, module in model.named_modules():
-            for param_name, param in module.named_parameters(recurse=False):
-                # It is possible that the layer is already a PEFT layer and needs updating with a new adapter. In this
-                # case, the name of parameter would be something like `model.layers.0.experts.base_layer.weight`, i.e.
-                # there is a "base_layer" inserted in the name. We need to remove that, otherwise we won't be able to
-                # match correctly (in this case, "experts.weight" would not match).
-                prefix, _, suffix = module_name.rpartition(".base_layer")
+        """Inject layers based on peft_config.target_modules"""
+
+        def strip_base_layer_from_name(module_name):
+            # It is possible that the layer is already a PEFT layer and needs updating with a new adapter. In this case,
+            # the name of parameter would be something like `model.layers.0.experts.base_layer.weight`, i.e. there is a
+            # "base_layer" inserted in the name. We need to remove that, otherwise we won't be able to match correctly
+            # (in this case, "experts.weight" would not match).
+            name = ".base_layer"
+            while name in module_name:
+                prefix, _, suffix = module_name.rpartition(name)
                 module_name = prefix + suffix
-                key = f"{module_name}.{param_name}"
-                # we're interested in finding the "lowest" module that contains the parameter, hence recurse=False
-                if (key in target_names) or any(key.endswith(f".{target_key}") for target_key in target_names):
+            return module_name
+
+        def create_and_replace_param(module_name, key, param_name):
+            # helper function to avoid duplication
+            parent, target, target_name = _get_submodules(model, module_name)
+            unwrapped_module_name = strip_base_layer_from_name(module_name)
+            unwrapped_module = model.get_submodule(unwrapped_module_name)
+            # use the class name for checking to avoid circular import
+            if isinstance(unwrapped_module, BaseTunerLayer) and unwrapped_module.__class__.__name__ != "ParamWrapper":
+                raise ValueError(
+                    f"Trying to wrap an `nn.Parameter` of layer '{unwrapped_module_name}' of type "
+                    f"{type(target).__name__}, which is not a valid target. Make sure that this layer is not "
+                    "also targeted with `target_modules`. For some models, PEFT will do this automatically, "
+                    "try setting `target_modules=[]` to prevent it."
+                )
+
+            self._check_target_module_compatiblity(peft_config, model, target_name)
+            ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
+            with ctx():
+                self._create_and_replace(
+                    peft_config,
+                    adapter_name,
+                    target,
+                    target_name,
+                    parent,
+                    current_key=key,
+                    parameter_name=param_name.rpartition(".")[-1],
+                )
+
+        # TODO very simple matching, might not cover all use cases
+        unsorted_target_names = set(peft_config.target_parameters)
+        # As the order of matching can influence the nesting of multiple params on the same module, ensure determinism
+        # by sorting.
+        target_names = sorted(unsorted_target_names)
+        for module_name, module in model.named_modules():
+            if hasattr(module, "parametrizations"):
+                # Deal with the case that the parameter is already parametrized. The issue is that we would not be able
+                # to match `f"{module_name}.{param_name}"`, as the parameter is now something like
+                # `module.parametrization.weight`.
+                for key in target_names:
+                    target_module_name, _, param_name = key.rpartition(".")
+                    if target_module_name != module_name:
+                        continue
+                    if getattr(module, param_name, None) is None:
+                        continue
+                    create_and_replace_param(module_name, key, param_name)
                     self.targeted_parameter_names.append(key)
-
-                    parent, target, target_name = _get_submodules(model, module_name)
-                    # use the class name for checking to avoid circular import
-                    if isinstance(target, BaseTunerLayer) and target.__class__.__name__ != "ParamWrapper":
-                        raise ValueError(
-                            f"Trying to wrap an `nn.Parameter` of layer '{target_name}' of type "
-                            f"{type(target).__name__}, which is not a valid target. Make sure that this layer is not "
-                            "also targeted with `target_modules`. For some models, PEFT will do this automatically, "
-                            "try setting `target_modules=[]` to prevent it."
-                        )
-
-                    self._check_target_module_compatiblity(peft_config, model, target_name)
-                    ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
-                    with ctx():
-                        self._create_and_replace(
-                            peft_config,
-                            adapter_name,
-                            target,
-                            target_name,
-                            parent,
-                            current_key=key,
-                            parameter_name=param_name.rpartition(".")[-1],
-                        )
+            else:
+                # Standard case: the parameter is not already parametrized. Note, however, that the model could already
+                # be nested with lora.ParamWrapper, as this is how we allow targeting multiple Parameters on the same
+                # module.
+                unwrapped_module_name = strip_base_layer_from_name(module_name)
+                # we're interested in finding the "lowest" module that contains the parameter, hence recurse=False
+                for param_name, param in module.named_parameters(recurse=False):
+                    key = f"{unwrapped_module_name}.{param_name}"
+                    if (key in target_names) or any(key.endswith(f".{target_key}") for target_key in target_names):
+                        # Note: We use the unwrapped_module_name to check if the key matches, but we use the module_name for
+                        # replacement, since we want to replace the wrapped module.
+                        create_and_replace_param(module_name, key, param_name)
+                        self.targeted_parameter_names.append(key)
 
     def merge_adapter(self, adapter_names: Optional[list[str]] = None, safe_merge: bool = False) -> None:
         """
