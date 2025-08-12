@@ -2046,14 +2046,28 @@ class ParamWrapper(nn.Module, LoraLayer):
                 "Something went wrong, please report this issue on PEFT: https://github.com/huggingface/peft/issues"
             )
 
-        if len(base_layer.parametrizations[parameter_name]) == 1:
+        param_list = base_layer.parametrizations[parameter_name]
+        if len(param_list) == 1:
             # last parametrization, we can safely remove it completely
             nn.utils.parametrize.remove_parametrizations(base_layer, parameter_name, leave_parametrized=False)
-        else:
-            # TODO: If there are multiple parametrizations for the same parameter_name, we currently remove all of them,
-            # which is not desired. Unfortunately, PyTorch does not support this directly, so we need to take care.
-            # For now, remove all parametrizations.
-            nn.utils.parametrize.remove_parametrizations(base_layer, parameter_name, leave_parametrized=False)
+            return
+
+        # If there are multiple parametrizations for the same parameter_name, we only want to remove the LoRA proxy.
+        # Unfortunately, PyTorch does not support this directly, so we need to take care of it manually. To achieve
+        # this, we check the ParameterList from the back until we find the _LoraParameterProxy instance and then remove
+        # it.
+        reversed_indices = reversed(range(len(param_list)))
+        for i in reversed_indices:
+            module = param_list[i]
+            if isinstance(module, _LoraParameterProxy):
+                del param_list[i]
+                break
+        else:  # no break encountered
+            # this should not happen, but raising an error is probably not necessary
+            warnings.warn(
+                f"Could not find any LoRA parametrization on {self}, please open an issue on "
+                "https://github.com/huggingface/peft/issues and report this warning."
+            )
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         # same as lora.Linear.merge but not hard-coding base_layer.weight and without special cases like variants removed
@@ -2137,6 +2151,10 @@ class ParamWrapper(nn.Module, LoraLayer):
 
     def __repr__(self) -> str:
         rep = super().__repr__()
+        idx = rep.find("(") + 1
+        # insert the name of the parameter to allow the repr to be disambiguous when multiple parameters on the same
+        # module are being targeted
+        rep = f"{rep[:idx]}\n  parameter_name='{self.parameter_name}',{rep[idx:]}"
         return "lora." + rep
 
 
