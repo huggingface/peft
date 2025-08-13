@@ -153,10 +153,7 @@ def auto_generate_target_osf_config(model: nn.Module) -> dict[str, int]:
     config: dict[str, int] = {}
     for name, param in model.named_parameters():
         if any(pat in name for pat in target_patterns) and len(param.shape) == 2:
-            top_k = int(math.floor(min(param.shape) * 0.5))
-            full_rank = min(param.shape)
-            if top_k >= full_rank:
-                top_k = full_rank - 1
+            top_k = min(param.shape) // 2
             config[name] = top_k
     return config
 
