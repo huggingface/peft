@@ -15,7 +15,6 @@ import copy
 import json
 import os
 import pickle
-import platform
 import re
 import shutil
 import tempfile
@@ -43,7 +42,6 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
-    MissConfig,
     OFTConfig,
     PeftModel,
     PeftType,
@@ -135,11 +133,6 @@ CONFIG_TESTING_KWARGS = (
         "target_modules": None,
         "r": 2,
     },
-    # MiSS
-    {
-        "target_modules": None,
-        "r": 2,
-    },
     # LoRA + trainable_tokens
     {
         "r": 8,
@@ -181,7 +174,6 @@ CLASSES_MAPPING = {
     "vblora": (VBLoRAConfig, CONFIG_TESTING_KWARGS[10]),
     "oft": (OFTConfig, CONFIG_TESTING_KWARGS[11]),
     "bone": (BoneConfig, CONFIG_TESTING_KWARGS[12]),
-    "miss": (MissConfig, CONFIG_TESTING_KWARGS[12]),
     "lora+trainable_tokens": (LoraConfig, CONFIG_TESTING_KWARGS[13]),
     "randlora": (RandLoraConfig, CONFIG_TESTING_KWARGS[14]),
 }
@@ -795,9 +787,6 @@ class PeftCommonTester:
             if (config.peft_type in {"IA3", "LORA"}) and (model_id in conv_ids):
                 # for some reason, the Conv introduces a larger error
                 atol, rtol = 0.3, 0.01
-            if model_id == "trl-internal-testing/tiny-Llama4ForCausalLM":
-                # also getting larger errors here, not exactly sure why
-                atol, rtol = 0.3, 0.01
             assert torch.allclose(logits, logits_merged, atol=atol, rtol=rtol)
             assert torch.allclose(logits, logits_unmerged, atol=atol, rtol=rtol)
             assert torch.allclose(logits, logits_merged_unloaded, atol=atol, rtol=rtol)
@@ -839,7 +828,6 @@ class PeftCommonTester:
             PeftType.BOFT,
             PeftType.HRA,
             PeftType.BONE,
-            PeftType.MISS,
         ]
 
         if ("gpt2" in model_id.lower()) and (config_cls == IA3Config):
@@ -1452,7 +1440,6 @@ class PeftCommonTester:
             PeftType.HRA,
             PeftType.VBLORA,
             PeftType.BONE,
-            PeftType.MISS,
         ]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
@@ -1526,7 +1513,6 @@ class PeftCommonTester:
             PeftType.HRA,
             PeftType.VBLORA,
             PeftType.BONE,
-            PeftType.MISS,
         ]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
@@ -1622,10 +1608,8 @@ class PeftCommonTester:
             "HRA",
             "VBLORA",
             "RANDLORA",
-            "SHIRA",
             "BONE",
             "C3A",
-            "MISS",
         ):
             with pytest.raises(AttributeError):
                 model = model.unload()
@@ -1959,19 +1943,14 @@ class PeftCommonTester:
                 # for SD, very rarely, a pixel can differ
                 assert (output_before != output_peft_disabled).float().mean() < 1e-4
             else:
-                atol, rtol = 1e-6, 1e-6
-                if (platform.system() == "Windows") and (model_id == "trl-internal-testing/tiny-Llama4ForCausalLM"):
-                    # for some reason, Windows CI fails with stricter tolerance
-                    atol, rtol = 1e-5, 1e-5
-
                 with peft_model.disable_adapter():
                     output_peft_disabled = get_output(peft_model)
-                assert torch.allclose(output_before, output_peft_disabled, atol=atol, rtol=rtol)
+                assert torch.allclose(output_before, output_peft_disabled, atol=1e-6, rtol=1e-6)
 
                 # after leaving the disable_adapter context, the output should be the same as with enabled adapter again
                 # see #1501
                 output_peft_after_disabled = get_output(peft_model)
-                assert torch.allclose(output_peft, output_peft_after_disabled, atol=atol, rtol=rtol)
+                assert torch.allclose(output_peft, output_peft_after_disabled, atol=1e-6, rtol=1e-6)
 
             # TODO: add tests to check if disabling adapters works after calling merge_adapter
 

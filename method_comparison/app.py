@@ -210,7 +210,7 @@ def build_app(df):
         # get hugely extended by columns like `train_config`.
         column_widths = ["150px" for _ in df.columns]
         column2index = dict(zip(df.columns, range(len(df.columns))))
-        column_widths[column2index['experiment_name']] = '300px'
+        column_widths[column2index["experiment_name"]] = "300px"
 
         data_table = gr.DataFrame(
             label="Results",

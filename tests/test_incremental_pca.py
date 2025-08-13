@@ -24,13 +24,10 @@ from peft.utils.incremental_pca import IncrementalPCA
 
 torch.manual_seed(1999)
 
-
-@pytest.fixture(scope="module")
-def iris():
-    return load_dataset("scikit-learn/iris", split="train")
+iris = load_dataset("scikit-learn/iris", split="train")
 
 
-def test_incremental_pca(iris):
+def test_incremental_pca():
     # Incremental PCA on dense arrays.
     n_components = 2
     X = torch.tensor([iris["SepalLengthCm"], iris["SepalWidthCm"], iris["PetalLengthCm"], iris["PetalWidthCm"]]).T
@@ -173,7 +170,7 @@ def test_incremental_pca_partial_fit():
     assert_close(ipca.components_, pipca.components_, rtol=1e-3, atol=1e-3)
 
 
-def test_incremental_pca_lowrank(iris):
+def test_incremental_pca_lowrank():
     # Test that lowrank mode is equivalent to non-lowrank mode.
     n_components = 2
     X = torch.tensor([iris["SepalLengthCm"], iris["SepalWidthCm"], iris["PetalLengthCm"], iris["PetalWidthCm"]]).T

@@ -1,26 +1,88 @@
+# Copyright 2025-present the HuggingFace Inc. team.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import torch
 from torch import nn
 
 
 class ArrowLoraLinearLayer(nn.Module):
+    """
+    This class represent the main logic of the arrow routing algorithm for linear layers.
+    """
+
     def __init__(self, in_features, arrow_config):
         super().__init__()
         # extra parameters needed for arrow
+        self.in_features = in_features
         self._protos_ready = False
-        self.top_k = arrow_config.arrow_top_k
-        self.temperature = arrow_config.arrow_router_temperature
-        self.expert_names = arrow_config.ts_names.copy()
-        self.le_names = arrow_config.gen_names
-        self.num_experts = len(self.expert_names)
-        self.register_buffer("prototypes", torch.empty((self.num_experts, in_features)), persistent=False)
+        self.top_k = arrow_config.top_k
+        self.temperature = arrow_config.router_temperature
+        self.expert_names = arrow_config.task_adapter_names.copy()
+        self.gks_adapter_names = arrow_config.gks_adapter_names
         self.use_gks = arrow_config.use_gks
-        # self.precomputed_W = None
         self.gks_done = False
+        self.gks_added_adapter_names = []
         self.in_features = in_features
         self.cast_input_dtype_enabled = True
 
     @torch.no_grad()
+    def on_adapter_change(self, lora_A, lora_B):
+        """
+        Called when adapters are added/removed/renamed so Arrow can refresh its internal state before the next forward
+        pass.
+        """
+        all_ts_adapter_names = [
+            k
+            for k in lora_A.keys()
+            if k in lora_B
+            and k != "arrow_router"
+            and not (k.startswith("gen_expert_") and k[len("gen_expert_") :].isdigit())
+        ]
+
+        if sorted(self.expert_names) == sorted(all_ts_adapter_names):  # No changes in the ts_adapters
+            return
+
+        # Getting the name(s) of added adapter(s)
+        if len(self.expert_names) < len(all_ts_adapter_names):  # Adapter(s) are added.
+            self.gks_added_adapter_names = [x for x in all_ts_adapter_names if x not in self.expert_names]
+
+        # Updating the expert_names
+        self.expert_names = all_ts_adapter_names.copy()
+        # Invalidate caches so they’ll be rebuilt lazily on next forward()
+        self._protos_ready = False
+        # GKS will be handled by self.gks_added_adapter_names
+
+    @torch.no_grad()
     def build_prototypes(self, lora_A, lora_B=None):
+        """
+        Computes a prototype vector for each LoRA module in every layer by applying Singular Value Decomposition (SVD)
+        to the `lora_A` matrix and extracting the top right singular vector.
+
+        These prototypes are later used to calculate the cosine similarity between each input token and each expert.
+        The resulting similarity scores serve as coefficients to compute a weighted average of the corresponding LoRA
+        modules, effectively routing each token through its most relevant experts.
+
+        For efficiency and to maintain consistency with the token representation dimensions, SVD is applied only to
+        `lora_A` (not to the product `lora_A * lora_B`).
+
+        ** This prototype computation is done only once for all the experts.**
+
+        Args:
+            lora_A : Matrices A in LoRA layer.
+            lora_B (optional): Matrices B in LoRA layer. Defaults to None.
+        """
+
         if self._protos_ready:
             return
         protos = []
@@ -29,52 +91,52 @@ class ArrowLoraLinearLayer(nn.Module):
             # SVD on A (tiny: r≪in_features)
             _, _, Vh = torch.linalg.svd(A.float(), full_matrices=False)
             protos.append(Vh[0].to(A.dtype))  # (in_features,)
-        self.prototypes[:] = torch.stack(protos, dim=0)  # (E, in_features)
+        proto_stack = torch.stack(protos, dim=0)  # (E, in_features)
+
+        # Register the prototypes buffer with correct dtype/device consistent with A and B weights
+        self.register_buffer("prototypes", proto_stack, persistent=False)
         self._protos_ready = True
 
     @torch.no_grad()
     def gen_know_sub(self, lora_A, lora_B):
-        if self.gks_done or not self.use_gks:
+        """
+        This function performs General Knowledge Subtraction. It takes an average of provided general_adapters, and
+        subtract it from each task_adapter. This subtraction tries to purify the task adapters, based on
+        "forgetting-via-negation" principle. Forgetting-via-negation is a task-arithmetic operation, explained in:
+        https://arxiv.org/abs/2212.04089 The task adapters will be more focused and isolated, enhancing the performance
+        on new tasks.
+
+        Args:
+            lora_A : Matrices A in LoRA layer.
+            lora_B : Matrices A in LoRA layer.
+        """
+        if not self.use_gks:
+            return
+        elif self.gks_done and not self.gks_added_adapter_names:
             return
         else:
-            # 1) compute average A/B over le_names
-            avg_A = torch.stack([lora_A[n].weight for n in self.le_names], dim=0).mean(0)  # shape (r, in_features)
-            avg_B = torch.stack([lora_B[n].weight for n in self.le_names], dim=0).mean(0)  # shape (out_features, r)
+            # 1) compute average A/B over gks_adapter_names
+            avg_A = torch.stack([lora_A[n].weight for n in self.gks_adapter_names], dim=0).mean(
+                0
+            )  # shape (r, in_features)
+            avg_B = torch.stack([lora_B[n].weight for n in self.gks_adapter_names], dim=0).mean(
+                0
+            )  # shape (out_features, r)
 
             # 2) Subtract the average from task-specific experts
-            for name in self.expert_names:
-                lora_A[name].weight.data.sub_(avg_A)
-                lora_B[name].weight.data.sub_(avg_B)
+            if self.gks_done is False:  # GKS is done for all the experts, since it hasn't been done yet.
+                for name in self.expert_names:
+                    lora_A[name].weight.data.sub_(avg_A)
+                    lora_B[name].weight.data.sub_(avg_B)
+            else:  # GKS is only done on new added experts, since GKS has been done previously.
+                for name in self.gks_added_adapter_names:
+                    lora_A[name].weight.data.sub_(avg_A)
+                    lora_B[name].weight.data.sub_(avg_B)
 
-            # 3) now delete the original LE adapters
-            for n in self.le_names:
-                del lora_A[n]
-                del lora_B[n]
-
-            # # 4) register the avg as a new adapter at position num_experts
-            # avg_name = "gks_avg"
-            # device = self.prototypes.device
-            # A_mod = nn.Linear(avg_A.size(1), avg_A.size(0), bias=False).to(device)
-            # B_mod = nn.Linear(avg_B.size(1), avg_B.size(0), bias=False).to(device)
-
-            # A_mod.weight.data.copy_(avg_A.to(device))
-            # B_mod.weight.data.copy_(avg_B.to(device))
-
-            # lora_A[avg_name] = A_mod
-            # lora_B[avg_name] = B_mod
-            # self.expert_names.append(avg_name)
-
-            # # 5) reset caches
-            # E = len(self.expert_names)
-            # new_protos = torch.empty((E, self.in_features), device=self.prototypes.device, dtype=self.prototypes.dtype)
-            # # this replaces the old buffer in-place with newer size
-            # self.prototypes = new_protos
-            # self._protos_ready = False
-            # self.precomputed_W = None
-
-            # print(lora_A)
-            # print(lora_B)
+            # 3) Set gks_done flag as true, so we won't do it again in ArrowLinearVariant.forward().
             self.gks_done = True
+            # Clearing the self.gks_added_adapter_names
+            self.gks_added_adapter_names = []
 
     def _cast_input_dtype(self, x, dtype: torch.dtype):
         """
@@ -95,10 +157,22 @@ class ArrowLoraLinearLayer(nn.Module):
 
     def forward(self, x, lora_A, lora_B, dropout, scaling):
         """
-        x : (B, *, in_features) prototypes : (E, in_features) ← built from top-SV of W = B @ A returns : LoRA delta
-        with Arrow routing
+        Applies Arrow routing inside a LoRA layer.
+
+        Steps:
+        1. Compute cosine similarity between each token representation and all adapter prototypes.
+        2. Select the top-k experts per token and normalize their scores with a softmax.
+        3. Project tokens into each selected expert’s low-rank space (A weights).
+        4. Map back to the output space (B weights).
+        5. Aggregate expert outputs via the weighted sum of their contributions.
+        6. Apply dropout, scaling, and return the reshaped delta.
+
+        - Conceptually, this is a Mixture-of-Experts (MoE) over LoRA adapters,
+        where coefficients are derived from prototype similarity.
+
+        Returns:
+            delta: LoRA output adjustment computed by Arrow routing.
         """
-        # self.prototypes = self.prototypes.to(x.dtype)
         x = self._cast_input_dtype(x, lora_A[self.expert_names[0]].weight.dtype)
         B, *rest, F_in = x.shape
         tok = x.view(-1, F_in)  # (t, F_in)

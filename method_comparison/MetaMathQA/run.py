@@ -55,7 +55,7 @@ from utils import (
 )
 
 from peft import AdaLoraConfig, PeftConfig
-from peft.utils import infer_device, CONFIG_NAME
+from peft.utils import CONFIG_NAME, infer_device
 
 
 # # suppress all warnings
@@ -143,7 +143,7 @@ def train(
     torch_accelerator_module = getattr(torch, device_type, torch.cuda)
     if use_amp:
         grad_scaler: GradScaler | DummyGradScaler = GradScaler(device=device_type)
-        autocast_ctx: Callable[[], ContextManager[Any]] = partial(autocast, device_type=device_type)
+        autocast_ctx: Callable[[], AbstractContextManager[Any]] = partial(autocast, device_type=device_type)
     else:
         grad_scaler = DummyGradScaler()
         autocast_ctx = nullcontext
