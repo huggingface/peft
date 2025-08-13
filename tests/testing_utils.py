@@ -26,9 +26,9 @@ from datasets import load_dataset
 from peft import (
     AdaLoraConfig,
     IA3Config,
+    LNTuningConfig,
     LoraConfig,
     PromptLearningConfig,
-    ShiraConfig,
     VBLoRAConfig,
 )
 from peft.import_utils import (
@@ -231,16 +231,13 @@ def load_cat_image():
 
 
 def set_init_weights_false(config_cls, kwargs):
+    # helper function that sets the config kwargs such that the model is *not* initialized as an identity transform
     kwargs = kwargs.copy()
 
-    if issubclass(config_cls, PromptLearningConfig):
-        return kwargs
-    if issubclass(config_cls, ShiraConfig):
-        return kwargs
-    if config_cls == VBLoRAConfig:
+    if config_cls in (LNTuningConfig, PromptLearningConfig, VBLoRAConfig):
         return kwargs
 
-    if (config_cls == LoraConfig) or (config_cls == AdaLoraConfig):
+    if config_cls in (LoraConfig, AdaLoraConfig):
         kwargs["init_lora_weights"] = False
     elif config_cls == IA3Config:
         kwargs["init_ia3_weights"] = False
