@@ -43,6 +43,7 @@ from peft import (
     LoKrConfig,
     LoraConfig,
     OFTConfig,
+    OSFConfig,
     PeftModel,
     PeftType,
     PrefixTuningConfig,
@@ -232,6 +233,15 @@ def hub_online_once(model_id: str):
         if HUB_MODEL_ACCESSES.get(model_id) == 0:
             del HUB_MODEL_ACCESSES[model_id]
         raise
+
+
+def _skip_if_merging_not_supported(model_id, config_cls):
+    """Skip tests for Conv2dGroups models or OSF configs where merging is not supported."""
+    if model_id in ["Conv2dGroups", "Conv2dGroups2"] or issubclass(config_cls, OSFConfig):
+        pytest.skip(
+            f"Skipping test for {model_id} with {config_cls} as merging is not supported. "
+            "(See https://github.com/huggingface/peft/pull/2403 for details)"
+        )
 
 
 class PeftCommonTester:
@@ -629,6 +639,8 @@ class PeftCommonTester:
                     assert load_result2.missing_keys == []
 
     def _test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
+        
         if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig, VBLoRAConfig):
             # Merge layers only supported for LoRA and IA³
             return pytest.skip(f"Test not applicable for {config_cls}")
@@ -654,6 +666,8 @@ class PeftCommonTester:
             _ = model.merge_and_unload()
 
     def _test_merge_layers_nan(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
+        
         if config_cls not in (
             LoraConfig,
             IA3Config,
@@ -737,6 +751,8 @@ class PeftCommonTester:
                 model = model.merge_and_unload(safe_merge=True)
 
     def _test_merge_layers(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
+        
         if issubclass(config_cls, PromptLearningConfig):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
@@ -819,6 +835,8 @@ class PeftCommonTester:
             assert torch.allclose(logits_merged, logits_merged_from_pretrained, atol=atol, rtol=rtol)
 
     def _test_merge_layers_multi(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
+        
         supported_peft_types = [
             PeftType.LORA,
             PeftType.LOHA,
@@ -899,6 +917,8 @@ class PeftCommonTester:
             assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3)
 
     def _test_merge_layers_is_idempotent(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
+        
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
             config = config_cls(
@@ -921,6 +941,8 @@ class PeftCommonTester:
             assert torch.allclose(logits_0, logits_1, atol=1e-6, rtol=1e-6)
 
     def _test_safe_merge(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
+        
         torch.manual_seed(0)
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
