@@ -131,8 +131,8 @@ def attach_gradient_hooks(model: nn.Module) -> None:
             "V_low": module_svd.V_low,
         }
 
-        def hook(grad, svd=svd_dict):
-            project_gradient_to_orthogonal_space(svd)
+        def hook(grad):
+            project_gradient_to_orthogonal_space(svd_dict)
             return grad
 
         module_svd.U_low.register_hook(hook)
