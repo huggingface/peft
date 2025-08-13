@@ -22,6 +22,8 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from peft.utils.constants import TRANSFORMERS_MODELS_TO_OSF_TARGET_MODULES_MAPPING
+
 
 __all__ = [
     "attach_gradient_hooks",
@@ -159,15 +161,27 @@ def detach_gradient_hooks(model: nn.Module) -> None:
 
 def auto_generate_target_osf_config(model: nn.Module) -> dict[str, int]:
     """Create a mapping from parameter names to ``top_k`` based on layer size."""
-    target_patterns = [
-        "self_attn.q_proj",
-        "self_attn.k_proj",
-        "self_attn.v_proj",
-        "self_attn.o_proj",
-        "mlp.gate_proj",
-        "mlp.down_proj",
-        "mlp.up_proj",
-    ]
+    # Get model type and corresponding target modules
+    model_type = getattr(model.config, "model_type", None)
+    target_modules = TRANSFORMERS_MODELS_TO_OSF_TARGET_MODULES_MAPPING.get(model_type, [])
+    
+    # Fallback to hardcoded patterns if model type not found
+    if not target_modules:
+        target_patterns = [
+            "self_attn.q_proj",
+            "self_attn.k_proj", 
+            "self_attn.v_proj",
+            "self_attn.o_proj",
+            "mlp.gate_proj",
+            "mlp.down_proj",
+            "mlp.up_proj",
+        ]
+    else:
+        # Convert module names to patterns that match the full parameter names
+        target_patterns = [f"self_attn.{mod}" if mod in ["q_proj", "k_proj", "v_proj", "o_proj"] 
+                          else f"mlp.{mod}" if mod in ["gate_proj", "down_proj", "up_proj"] 
+                          else mod for mod in target_modules]
+    
     config: dict[str, int] = {}
     for name, param in model.named_parameters():
         if any(pat in name for pat in target_patterns) and len(param.shape) == 2:
