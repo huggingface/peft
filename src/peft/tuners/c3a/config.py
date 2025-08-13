@@ -46,7 +46,7 @@ class C3AConfig(PeftConfig):
             The mapping from layer names or regexp expression to block_size which are different from the default
             specified. For example, `{"model.decoder.layers.0.encoder_attn.k_proj": 1280`}
         init_weights (`Union[bool, Literal["gaussian", "kaiming_uniform", "xavier_uniform"]]`):
-            Defaults to 'xavier_uniform'. Setting this to `False` also usese 'xavier_uniform'. To set the weights to
+            Defaults to 'xavier_uniform'. Setting this to `False` also uses 'xavier_uniform'. To set the weights to
             zeros (thus making C3A a no-op), set the value to `False`.
     """
 
@@ -116,7 +116,7 @@ class C3AConfig(PeftConfig):
         default="xavier_uniform",
         metadata={
             "help": (
-                "Defaults to 'xavier_uniform'. Setting this to `False` also usese 'xavier_uniform'. To set the weights "
+                "Defaults to 'xavier_uniform'. Setting this to `False` also uses 'xavier_uniform'. To set the weights "
                 "to zeros (thus making C3A a no-op), set the value to `False`."
             )
         },
