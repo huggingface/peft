@@ -28,6 +28,7 @@ __all__ = [
     "auto_generate_target_osf_config",
     "create_osf_model_class",
     "decompose_weight_matrix",
+    "detach_gradient_hooks",
     "project_gradient_to_orthogonal_space",
     "reconstruct_weight_matrix",
 ]
@@ -121,6 +122,11 @@ def attach_gradient_hooks(model: nn.Module) -> None:
     """Attach gradient hooks to project OSF gradients automatically."""
     if not hasattr(model, "svd_params"):
         return
+    
+    # Initialize hook_handles if not exists
+    if not hasattr(model, "hook_handles"):
+        model.hook_handles = []
+    
     for safe_name, module_svd in model.svd_params.items():
         svd_dict = {
             "U_high": getattr(model, f"{safe_name}_U_high"),
@@ -135,9 +141,20 @@ def attach_gradient_hooks(model: nn.Module) -> None:
             project_gradient_to_orthogonal_space(svd_dict)
             return grad
 
-        module_svd.U_low.register_hook(hook)
-        module_svd.S_low.register_hook(hook)
-        module_svd.V_low.register_hook(hook)
+        # Store hook handles for later cleanup
+        handle_u = module_svd.U_low.register_hook(hook)
+        handle_s = module_svd.S_low.register_hook(hook)
+        handle_v = module_svd.V_low.register_hook(hook)
+        
+        model.hook_handles.extend([handle_u, handle_s, handle_v])
+
+
+def detach_gradient_hooks(model: nn.Module) -> None:
+    """Remove all gradient hooks that were attached by attach_gradient_hooks."""
+    if hasattr(model, "hook_handles"):
+        for handle in model.hook_handles:
+            handle.remove()
+        model.hook_handles.clear()
 
 
 def auto_generate_target_osf_config(model: nn.Module) -> dict[str, int]:
@@ -198,6 +215,8 @@ def create_osf_model_class(base_cls: type) -> type:
             return model
 
         def reinitialize_svd(self) -> None:
+            # Clean up existing hooks before reinitializing
+            detach_gradient_hooks(self)
             self.name_mapping = {}
             self.svd_params = nn.ModuleDict()
             self._initialize_svd_parameters()
