@@ -234,7 +234,9 @@ def set_init_weights_false(config_cls, kwargs):
     # helper function that sets the config kwargs such that the model is *not* initialized as an identity transform
     kwargs = kwargs.copy()
 
-    if config_cls in (LNTuningConfig, PromptLearningConfig, VBLoRAConfig):
+    if issubclass(config_cls, PromptLearningConfig):
+        return kwargs
+    if config_cls in (LNTuningConfig, VBLoRAConfig):
         return kwargs
 
     if config_cls in (LoraConfig, AdaLoraConfig):
