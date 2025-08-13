@@ -33,6 +33,13 @@ __all__ = [
 ]
 
 
+def _wait_if_async(tensor):
+    """Wait for AsyncCollectiveTensor if needed, otherwise return tensor as-is."""
+    if hasattr(tensor, "wait"):
+        return tensor.wait()
+    return tensor
+
+
 def decompose_weight_matrix(weight: torch.Tensor, top_k: int) -> dict[str, Any]:
     """Perform an SVD of ``weight`` and split it into frozen and trainable parts."""
     device_local = weight.device
@@ -85,8 +92,8 @@ def project_gradient_to_orthogonal_space(svd_dict: dict[str, Any]) -> None:
 
     if svd_dict["U_low"].grad is not None:
         dU = svd_dict["U_low"].grad
-        local_U_high = getattr(U_high, "to_local", lambda: U_high)()
-        local_dU = getattr(dU, "to_local", lambda: dU)()
+        local_U_high = _wait_if_async(getattr(U_high, "to_local", lambda: U_high)())
+        local_dU = _wait_if_async(getattr(dU, "to_local", lambda: dU)())
         if local_U_high.size(0) != local_dU.size(0):
             rank = torch.distributed.get_rank()
             start = rank * local_dU.size(0)
@@ -101,8 +108,8 @@ def project_gradient_to_orthogonal_space(svd_dict: dict[str, Any]) -> None:
 
     if svd_dict["V_low"].grad is not None:
         dV = svd_dict["V_low"].grad
-        local_V_high = getattr(V_high, "to_local", lambda: V_high)()
-        local_dV = getattr(dV, "to_local", lambda: dV)()
+        local_V_high = _wait_if_async(getattr(V_high, "to_local", lambda: V_high)())
+        local_dV = _wait_if_async(getattr(dV, "to_local", lambda: dV)())
         if local_V_high.size(1) != local_dV.size(1):
             rank = torch.distributed.get_rank()
             start = rank * local_dV.size(1)
