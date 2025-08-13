@@ -55,14 +55,6 @@ from .other import (
 )
 from .peft_types import PeftType, TaskType, register_peft_method
 from .save_and_load import get_peft_model_state_dict, load_peft_weights, set_peft_model_state_dict
-from .osf_utils import (
-    attach_gradient_hooks,
-    auto_generate_target_osf_config,
-    create_osf_model_class,
-    decompose_weight_matrix,
-    project_gradient_to_orthogonal_space,
-    reconstruct_weight_matrix,
-)
 
 
 __all__ = [
@@ -94,12 +86,8 @@ __all__ = [
     "_prepare_prompt_learning_config",
     "_set_adapter",
     "_set_trainable",
-    "attach_gradient_hooks",
-    "auto_generate_target_osf_config",
     "bloom_model_postprocess_past_key_value",
     "cast_mixed_precision_params",
-    "create_osf_model_class",
-    "decompose_weight_matrix",
     "get_auto_gptq_quant_linear",
     "get_gptqmodel_quant_linear",
     "get_peft_model_state_dict",
@@ -109,8 +97,6 @@ __all__ = [
     "load_peft_weights",
     "map_cache_to_layer_device_map",
     "prepare_model_for_kbit_training",
-    "project_gradient_to_orthogonal_space",
-    "reconstruct_weight_matrix",
     "register_peft_method",
     "replace_lora_weights_loftq",
     "set_additional_trainable_modules",

@@ -5,7 +5,7 @@ import torch
 from torch.testing import assert_close
 
 from peft import OSFConfig, PeftModel, get_peft_model
-from peft.utils.osf_utils import (
+from peft.tuners.osf.utils import (
     decompose_weight_matrix,
     reconstruct_weight_matrix,
 )

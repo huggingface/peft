@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch.nn as nn
 
 from peft.tuners.tuners_utils import BaseTuner
-from peft.utils.osf_utils import (
+from .utils import (
     attach_gradient_hooks,
     auto_generate_target_osf_config,
     create_osf_model_class,
