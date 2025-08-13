@@ -101,10 +101,7 @@ def project_gradient_to_orthogonal_space(svd_dict: dict[str, Any]) -> None:
             local_U_high = local_U_high[start:end]
         proj = local_U_high @ (local_U_high.transpose(0, 1) @ local_dU)
         local_dU.sub_(proj)
-        if hasattr(dU, "_local_tensor"):
-            dU._local_tensor.copy_(local_dU)
-        else:
-            dU.copy_(local_dU)
+        dU.copy_(local_dU)
 
     if svd_dict["V_low"].grad is not None:
         dV = svd_dict["V_low"].grad
@@ -117,10 +114,7 @@ def project_gradient_to_orthogonal_space(svd_dict: dict[str, Any]) -> None:
             local_V_high = local_V_high[:, start:end]
         proj = (local_dV @ local_V_high.transpose(0, 1)) @ local_V_high
         local_dV.sub_(proj)
-        if hasattr(dV, "_local_tensor"):
-            dV._local_tensor.copy_(local_dV)
-        else:
-            dV.copy_(local_dV)
+        dV.copy_(local_dV)
 
 
 def attach_gradient_hooks(model: nn.Module) -> None:
