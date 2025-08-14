@@ -5140,10 +5140,3 @@ class TestDynamicDispatch:
         # we should still get a warning message
         msg = "Unsupported layer type '<class 'torch.nn.modules.rnn.LSTM'>' encountered, proceed at your own risk."
         assert str(recwarn.list[-1].message) == msg
-
-
-# FIXME
-def test_foobar():
-    if platform.system() == "Darwin":
-        1 / 0
-    assert True
