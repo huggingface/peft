@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import re
 import torch.nn as nn
 
 from peft.tuners.tuners_utils import BaseTuner
+from peft.utils.constants import TRANSFORMERS_MODELS_TO_OSF_TARGET_MODULES_MAPPING
+
+from .layer import OSFLayer, Linear, dispatch_default
 from .utils import (
     attach_gradient_hooks,
     auto_generate_target_osf_config,
@@ -21,13 +25,11 @@ class OSFModel(BaseTuner):
     def _prepare_adapter_config(self, peft_config, model_config):
         return peft_config
 
-    def inject_adapter(
-        self, model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True, low_cpu_mem_usage: bool = False
-    ) -> None:
-        svd_cfg = self.peft_config[adapter_name].target_svd_config
-        if svd_cfg is None:
-            svd_cfg = auto_generate_target_osf_config(model)
-            self.peft_config[adapter_name].target_svd_config = svd_cfg
+    def inject_adapter(self, model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True, low_cpu_mem_usage: bool = False) -> None:
+        # For now, keep using the legacy approach
+        # TODO: Refactor to use _create_and_replace pattern
+        svd_cfg = auto_generate_target_osf_config(model)
+            
         OSFCls = create_osf_model_class(model.__class__)
         base_cfg = getattr(model, "config", None)
         osf_model = OSFCls(base_cfg, svd_config=svd_cfg, initialize_svd=False)
@@ -36,8 +38,40 @@ class OSFModel(BaseTuner):
         attach_gradient_hooks(osf_model)
         self.model = osf_model
 
-    def _create_and_replace(self, *args, **kwargs):
-        pass
+    def _create_and_replace(
+        self,
+        osf_config,
+        adapter_name: str,
+        target: nn.Module,
+        target_name: str,
+        parent: nn.Module,
+        current_key: str,
+    ):
+        # OSF only works on 2D weight matrices
+        if not hasattr(target, 'weight') or len(target.weight.shape) != 2:
+            return None
+            
+        # Determine effective rank for this target
+        effective_rank = osf_config.effective_rank
+        if effective_rank is None:
+            # Default to 50% of min dimension
+            effective_rank = min(target.weight.shape) // 2
+        
+        # Check for per-module rank overrides
+        if hasattr(osf_config, 'rank_pattern') and osf_config.rank_pattern:
+            for pattern, rank in osf_config.rank_pattern.items():
+                if re.search(pattern, current_key):
+                    effective_rank = rank
+                    break
+
+        kwargs = {
+            "effective_rank": effective_rank,
+        }
+
+        # Create new OSF layer
+        new_module = dispatch_default(target, adapter_name, osf_config, **kwargs)
+        
+        return new_module
 
     def _check_target_module_exists(self, *args, **kwargs) -> bool:
         return True
