@@ -21,7 +21,7 @@ extras = {}
 extras["quality"] = [
     "black",  # doc-builder has an implicit dependency on Black, see huggingface/doc-builder#434
     "hf-doc-builder",
-    "ruff~=0.9.2",
+    "ruff~=0.12.8",
 ]
 extras["docs_specific"] = [
     "black",  # doc-builder has an implicit dependency on Black, see huggingface/doc-builder#434
