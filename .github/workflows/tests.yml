@@ -98,7 +98,14 @@ jobs:
           status=$?
           # Post a notice only if this is macOS AND tests failed
           if [ "$status" -ne 0 ] && [ "${{ matrix.os }}" = "macos-13" ]; then
-            echo "::notice title=MacOS tests failed::One or more tests failed on MacOS-13 (Python ${{ matrix.python-version }}). Check the logs."
+            {
+              echo "## ⚠️ macOS tests failed"
+              echo ""
+              echo "- OS: ${{ matrix.os }}"
+              echo "- Python: ${{ matrix.python-version }}"
+              echo ""
+              echo "Check the logs from this step for details."
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
           # Return the real status. On macOS this won't fail the job because of continue-on-error.
           exit $status
