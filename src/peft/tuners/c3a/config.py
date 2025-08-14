@@ -47,7 +47,7 @@ class C3AConfig(PeftConfig):
             specified. For example, `{"model.decoder.layers.0.encoder_attn.k_proj": 1280`}
         init_weights (`Union[bool, Literal["gaussian", "kaiming_uniform", "xavier_uniform"]]`):
             Defaults to 'xavier_uniform'. Setting this to `False` also uses 'xavier_uniform'. To set the weights to
-            zeros (thus making C3A a no-op), set the value to `False`.
+            zeros (thus making C3A a no-op), set the value to `True`.
     """
 
     block_size: int = field(
@@ -117,7 +117,7 @@ class C3AConfig(PeftConfig):
         metadata={
             "help": (
                 "Defaults to 'xavier_uniform'. Setting this to `False` also uses 'xavier_uniform'. To set the weights "
-                "to zeros (thus making C3A a no-op), set the value to `False`."
+                "to zeros (thus making C3A a no-op), set the value to `True`."
             )
         },
     )
