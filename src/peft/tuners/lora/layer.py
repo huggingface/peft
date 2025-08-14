@@ -16,6 +16,7 @@ from __future__ import annotations
 import math
 import warnings
 from contextlib import contextmanager
+from packaging import version
 from typing import Any, Optional, Union
 
 import torch
@@ -113,7 +114,8 @@ class LoraLayer(BaseTunerLayer):
 
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
-            if isinstance(self.base_layer.weight, torch.distributed.tensor.DTensor):
+            torch_supports_dtensor = version.parse(torch.__version__) >= version.parse("2.5.0")
+            if torch_supports_dtensor and isinstance(self.base_layer.weight, torch.distributed.tensor.DTensor):
                 # If Tensor Parallel is used, the weight is sharded, so we need to get the local shape
                 out_features, in_features = self.base_layer.weight.to_local().shape
             else:
