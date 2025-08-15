@@ -1047,8 +1047,7 @@ class PeftCommonTester:
             dummy_input = self.prepare_inputs_for_testing()
             # ensure that we have at least 3 samples for this test
             dummy_input = {k: torch.cat([v for _ in range(3)]) for k, v in dummy_input.items()}
-            num_beams = 10
-            gen_kwargs = {**dummy_input, "max_length": 20, "num_beams": num_beams, "early_stopping": True}
+            gen_kwargs = {**dummy_input, "max_length": 20, "num_beams": 10, "early_stopping": True}
             with torch.inference_mode():
                 with model.disable_adapter():
                     gen_base = model.generate(**gen_kwargs)
