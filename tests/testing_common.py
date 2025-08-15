@@ -57,6 +57,7 @@ from peft import (
     inject_adapter_in_model,
     prepare_model_for_kbit_training,
 )
+from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import (
@@ -833,6 +834,13 @@ class PeftCommonTester:
             model.add_adapter("adapter-2", config)
             model.set_adapter("adapter-2")
             model.eval()
+
+            # sanity check: each adapter layer with a 'default' adapter should also have 'adapter-2'
+            containers = (torch.nn.ModuleDict, torch.nn.ParameterDict, BufferDict)
+            num_default = len([m for m in model.modules() if isinstance(m, containers) and "default" in m])
+            num_adapter2 = len([m for m in model.modules() if isinstance(m, containers) and "adapter-2" in m])
+            assert num_default > 0
+            assert num_default == num_adapter2
 
             with torch.inference_mode():
                 logits_adapter_2 = model(**dummy_input)[0]

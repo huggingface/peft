@@ -109,6 +109,7 @@ from .tuners import (
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     PeftType,
+    PeftWarning,
     TaskType,
     bloom_model_postprocess_past_key_value,
     cast_mixed_precision_params,
@@ -179,6 +180,7 @@ __all__ = [
     "PeftModelForSequenceClassification",
     "PeftModelForTokenClassification",
     "PeftType",
+    "PeftWarning",
     "PolyConfig",
     "PolyModel",
     "PrefixEncoder",
