@@ -283,7 +283,8 @@ def run_benchmark(
         result.update_generation_info(
             memory_data={
                 "peak_accelerator_memory_mb": max(
-                    (log["accelerator_allocated_mb"] for log in result.generation_info["memory"]["memory_logs"]), default=0
+                    (log["accelerator_allocated_mb"] for log in result.generation_info["memory"]["memory_logs"]),
+                    default=0,
                 ),
                 "peak_ram_memory_mb": max(
                     (log["ram_mb"] for log in result.generation_info["memory"]["memory_logs"]), default=0

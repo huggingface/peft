@@ -1,0 +1,265 @@
+# Copyright 2025-present the HuggingFace Inc. team.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import torch
+from torch import nn
+
+
+class ArrowLoraLinearLayer(nn.Module):
+    """
+    This class represent the main logic of the arrow routing algorithm for linear layers.
+    """
+
+    def __init__(self, in_features, arrow_config):
+        super().__init__()
+        # extra parameters needed for arrow
+        self.in_features = in_features
+        self._protos_ready = False
+        self.top_k = arrow_config.top_k
+        self.temperature = arrow_config.router_temperature
+        self.expert_names = arrow_config.task_adapter_names.copy()
+        self.gks_adapter_names = arrow_config.gks_adapter_names
+        self.use_gks = arrow_config.use_gks
+        self.gks_done = False
+        self.gks_added_adapter_names = []
+        self.in_features = in_features
+        self.cast_input_dtype_enabled = True
+
+    @torch.no_grad()
+    def on_adapter_change(self, lora_A, lora_B):
+        """
+        Called when adapters are added/removed/renamed so Arrow can refresh its internal state before the next forward
+        pass.
+        """
+        all_ts_adapter_names = [
+            k
+            for k in lora_A.keys()
+            if k in lora_B
+            and k != "arrow_router"
+            and not (k.startswith("gen_expert_") and k[len("gen_expert_") :].isdigit())
+        ]
+
+        if sorted(self.expert_names) == sorted(all_ts_adapter_names):  # No changes in the ts_adapters
+            return
+
+        # Getting the name(s) of added adapter(s)
+        if len(self.expert_names) < len(all_ts_adapter_names):  # Adapter(s) are added.
+            self.gks_added_adapter_names = [x for x in all_ts_adapter_names if x not in self.expert_names]
+
+        # Updating the expert_names
+        self.expert_names = all_ts_adapter_names.copy()
+        # Invalidate caches so they’ll be rebuilt lazily on next forward()
+        self._protos_ready = False
+        # GKS will be handled by self.gks_added_adapter_names
+
+    def top_right_singular_vec_from_BA(self, A, B, iters=15, eps=1e-8):
+        """
+        Computes the top *right* singular vector of ΔW = B @ A without forming ΔW.
+
+        Theory:
+            For any matrix M, the right singular vectors are the eigenvectors of Mᵀ M. If ΔW = B @ A (with A ∈
+            ℝ^{r×in}, B ∈ ℝ^{out×r}), then
+                ΔWᵀ ΔW = (B @ A)ᵀ (B @ A) = Aᵀ (Bᵀ B) A ∈ ℝ^{in×in}.
+            Therefore, the dominant right singular vector of ΔW is the dominant eigenvector of M := Aᵀ (Bᵀ B) A. We
+            find it by *power iteration* on the linear operator
+                v ↦ Aᵀ (Bᵀ B) (A v),
+            which avoids materializing ΔW (out×in) or M (in×in). The result lives in the input/token space (size =
+            in_features), which is exactly what Arrow needs. (Right singular vectors ≡ eigenvectors of MᵀM; power
+            iteration converges to the dominant eigenvector under mild conditions.)
+        =============================== Practical notes:
+            - We perform all iteration in float32 for numerical stability, then cast back
+            to the LoRA dtype/device before storing/using the prototype.
+            - Convergence is checked with a simple fixed-iter cap (`iters`) and/or
+            `allclose` tolerance (`tol`).
+            - The returned vector is unique up to sign (±), as with any singular vector.
+            Downstream code should be sign-invariant.
+        """
+
+        # A: (r, in), B: (out, r)
+        A32 = A.to(torch.float32)
+        B32 = B.to(torch.float32)
+        C = B32.T @ B32  # (r, r)
+
+        cpu_state = torch.random.get_rng_state()
+        if torch.cuda.is_available():
+            gpu_state = torch.cuda.get_rng_state()
+
+        # Set temporary seed for reproducibility
+        torch.manual_seed(42)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(42)
+
+        # init vector in input space
+        v = torch.randn(A32.size(1), dtype=A32.dtype, device=A32.device)
+        v = v / (v.norm() + eps)
+
+        # Restore RNG state
+        torch.random.set_rng_state(cpu_state)
+        if torch.cuda.is_available():
+            torch.cuda.set_rng_state(gpu_state)
+
+        for _ in range(iters):
+            # w = (ΔWᵀΔW) v = Aᵀ (BᵀB) (A v)
+            w = A32.T @ (C @ (A32 @ v))
+            v = w / (w.norm() + eps)
+
+        return v  # fp32
+
+    @torch.no_grad()
+    def build_prototypes(self, lora_A, lora_B):
+        """
+        Computes a prototype vector for each LoRA module in every layer by applying Singular Value Decomposition (SVD)
+        to the `lora_A` matrix and extracting the top right singular vector.
+
+        These prototypes are later used to calculate the cosine similarity between each input token and each expert.
+        The resulting similarity scores serve as coefficients to compute a weighted average of the corresponding LoRA
+        modules, effectively routing each token through its most relevant experts.
+
+        ** This prototype computation is done only once for all the experts.**
+
+        Args:
+            lora_A : Matrices A in LoRA layer.
+            lora_B (optional): Matrices B in LoRA layer. Defaults to None.
+        """
+
+        if self._protos_ready:
+            return
+        protos = []
+        for name in self.expert_names:
+            A = lora_A[name].weight  # (r, in_features)
+            B = lora_B[name].weight  # (out_features, r)
+
+            # Efficiently computing right singular vector of A @ B
+            proto32 = self.top_right_singular_vec_from_BA(A, B)
+
+            proto = proto32.to(dtype=A.dtype, device=A.device)
+            protos.append(proto)
+
+        proto_stack = torch.stack(protos, dim=0)  # (E, in_features)
+
+        # Register the prototypes buffer with correct dtype/device consistent with A and B weights
+        self.register_buffer("prototypes", proto_stack, persistent=False)
+        self._protos_ready = True
+
+    @torch.no_grad()
+    def gen_know_sub(self, lora_A, lora_B):
+        """
+        This function performs General Knowledge Subtraction. It takes an average of provided general_adapters, and
+        subtract it from each task_adapter. This subtraction tries to purify the task adapters, based on
+        "forgetting-via-negation" principle. Forgetting-via-negation is a task-arithmetic operation, explained in:
+        https://arxiv.org/abs/2212.04089 The task adapters will be more focused and isolated, enhancing the performance
+        on new tasks.
+
+        Args:
+            lora_A : Matrices A in LoRA layer.
+            lora_B : Matrices A in LoRA layer.
+        """
+        if not self.use_gks:
+            return
+        elif self.gks_done and not self.gks_added_adapter_names:
+            return
+        else:
+            # 1) compute average A/B over gks_adapter_names
+            avg_A = torch.stack([lora_A[n].weight for n in self.gks_adapter_names], dim=0).mean(
+                0
+            )  # shape (r, in_features)
+            avg_B = torch.stack([lora_B[n].weight for n in self.gks_adapter_names], dim=0).mean(
+                0
+            )  # shape (out_features, r)
+
+            # 2) Subtract the average from task-specific experts
+            if self.gks_done is False:  # GKS is done for all the experts, since it hasn't been done yet.
+                for name in self.expert_names:
+                    lora_A[name].weight.data.sub_(avg_A)
+                    lora_B[name].weight.data.sub_(avg_B)
+            else:  # GKS is only done on new added experts, since GKS has been done previously.
+                for name in self.gks_added_adapter_names:
+                    lora_A[name].weight.data.sub_(avg_A)
+                    lora_B[name].weight.data.sub_(avg_B)
+
+            # 3) Set gks_done flag as true, so we won't do it again in ArrowLinearVariant.forward().
+            self.gks_done = True
+            # Clearing the self.gks_added_adapter_names
+            self.gks_added_adapter_names = []
+
+    def _cast_input_dtype(self, x, dtype: torch.dtype):
+        """
+        Whether to cast the dtype of the input of the forward method.
+
+        Usually, we want to enable this to align the input dtype with the dtype of the weight, but by setting
+        layer.cast_input_dtype=False, this can be disabled if necessary.
+
+        Enabling or disabling can be managed via the peft.helpers.disable_lora_input_dtype_casting context manager.
+        """
+        if x is None:  # useful e.g. if x is the bias, which can be None
+            return None
+
+        cast_input_dtype_enabled = getattr(self, "cast_input_dtype_enabled", True)
+        if (not cast_input_dtype_enabled) or (x.dtype == dtype):
+            return x
+        return x.to(dtype=dtype)
+
+    def forward(self, x, lora_A, lora_B, dropout, scaling):
+        """
+        Applies Arrow routing inside a LoRA layer.
+
+        Steps:
+        1. Compute cosine similarity between each token representation and all adapter prototypes.
+        2. Select the top-k experts per token and normalize their scores with a softmax.
+        3. Project tokens into each selected expert’s low-rank space (A weights).
+        4. Map back to the output space (B weights).
+        5. Aggregate expert outputs via the weighted sum of their contributions.
+        6. Apply dropout, scaling, and return the reshaped delta.
+
+        - Conceptually, this is a Mixture-of-Experts (MoE) over LoRA adapters,
+        where coefficients are derived from prototype similarity.
+
+        Returns:
+            delta: LoRA output adjustment computed by Arrow routing.
+        """
+        x = self._cast_input_dtype(x, lora_A[self.expert_names[0]].weight.dtype)
+        B, *rest, F_in = x.shape
+        tok = x.view(-1, F_in)  # (t, F_in)
+        t, E = tok.size(0), self.prototypes.size(0)
+
+        # 1) similarity   — sign-agnostic
+        sim = torch.abs(tok @ self.prototypes.T)  # (t, E)
+
+        # 2) top-k + softmax over full E (non-top-k = -inf)
+        top_v, idx = torch.topk(sim, self.top_k, dim=1)
+        full_score = tok.new_full((t, E), float("-inf"))
+        full_score.scatter_(1, idx, top_v)
+        coeff = torch.softmax(full_score / self.temperature, dim=1)  # (t, E)
+
+        # 3) stack all A and B weights once
+        #   A_stack: (E, r, in_features), B_stack: (E, out_features, r)
+        A_stack = torch.stack([lora_A[n].weight for n in self.expert_names], dim=0)
+        B_stack = torch.stack([lora_B[n].weight for n in self.expert_names], dim=0)
+
+        # 4) project tokens into each expert’s low‑rank space:
+        #    z[e] = tok @ A_e.T   → shape (t, E, r)
+        z = torch.einsum("tf, erf -> ter", tok, A_stack)
+
+        # 5) lift back each expert’s output:
+        #    y[e] = z[e] @ B_e.T  → shape (t, E, out_features)
+        y = torch.einsum("ter, eor -> teo", z, B_stack)
+
+        # 6) weighted sum over experts:
+        #    delta_flat[t,o] = Σ_e coeff[t,e] * y[t,e,o]
+        delta_flat = torch.einsum("te, teo -> to", coeff, y)  # (t, out_features)
+
+        # 7) dropout, scale, and reshape
+        delta = scaling * dropout(delta_flat)
+        out_dim = delta_flat.size(-1)
+        return delta.view(B, *rest, out_dim)

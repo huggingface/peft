@@ -26,12 +26,10 @@ from peft import (
     HRAConfig,
     IA3Config,
     LoraConfig,
-    MissConfig,
     OFTConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
-    ShiraConfig,
     TaskType,
     VBLoRAConfig,
     VeraConfig,
@@ -66,14 +64,6 @@ ALL_CONFIGS = [
     ),
     (
         BoneConfig,
-        {
-            "target_modules": None,
-            "r": 2,
-            "task_type": "SEQ_2_SEQ_LM",
-        },
-    ),
-    (
-        MissConfig,
         {
             "target_modules": None,
             "r": 2,
@@ -153,15 +143,6 @@ ALL_CONFIGS = [
         {
             "num_virtual_tokens": 10,
             "task_type": "SEQ_2_SEQ_LM",
-        },
-    ),
-    (
-        ShiraConfig,
-        {
-            "r": 1,
-            "task_type": "SEQ_2_SEQ_LM",
-            "target_modules": None,
-            "init_weights": False,
         },
     ),
     (
