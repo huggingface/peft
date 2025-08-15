@@ -644,6 +644,7 @@ def get_alora_offsets_for_generate(model: nn.module, *args, **kwargs):
                 current_input_ids,
                 adapter_names=adapter_names_for_offset_calc,
             )
+            # Subtract 1 from offsets for generate, due to position difference between "forward" and generate forward pass
             for i in range(len(calculated_offsets)):
                 if calculated_offsets[i] is not None:
                     calculated_offsets[i] -= 1
