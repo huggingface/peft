@@ -1581,6 +1581,7 @@ class PeftCommonTester:
             "SHIRA",
             "BONE",
             "C3A",
+            "WAVEFT",
             "MISS",
         ):
             with pytest.raises(AttributeError):

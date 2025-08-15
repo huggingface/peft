@@ -53,6 +53,7 @@ from peft import (
     TrainableTokensConfig,
     VBLoRAConfig,
     VeraConfig,
+    WaveFTConfig,
     get_peft_model,
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
@@ -701,6 +702,54 @@ TEST_CASES = [
             "modules_to_save": ["lin1"],
         },
     ),
+    ##########
+    # WaveFT #
+    ##########
+    ("Vanilla MLP 1 WaveFT", "MLP", WaveFTConfig, {"target_modules": "lin0", "n_frequency": 8}),
+    ("Vanilla MLP 2 WaveFT", "MLP", WaveFTConfig, {"target_modules": ["lin0"], "n_frequency": 8}),
+    ("Vanilla MLP 3 WaveFT", "MLP", WaveFTConfig, {"target_modules": ["lin1"], "n_frequency": 8}),
+    ("Vanilla MLP 4 WaveFT", "MLP", WaveFTConfig, {"target_modules": ["lin0", "lin1"], "n_frequency": 8}),
+    (
+        "Vanilla MLP 5 WaveFT",
+        "MLP",
+        WaveFTConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "n_frequency": 8}
+    ),
+    (
+        "Vanilla MLP 6 WaveFT",
+        "MLP",
+        WaveFTConfig,
+        {
+            "target_modules": ["lin0"],
+            "n_frequency": 8,
+            "scaling": 25.0,
+            "wavelet_family": "db1",
+        },
+    ),
+    (
+        "Vanilla MLP 7 WaveFT",
+        "MLP",
+        WaveFTConfig,
+        {"target_modules": "lin1", "n_frequency": 8, "use_idwt": False}
+    ),
+    (
+        "Vanilla MLP 8 WaveFT",
+        "MLP",
+        WaveFTConfig,
+        {"target_modules": "lin0", "n_frequency": 16, "wavelet_family": "sym2"},
+    ),
+    (
+        "Vanilla MLP 9 WaveFT",
+        "MLP",
+        WaveFTConfig,
+        {"target_modules": "lin0", "n_frequency": 16, "wavelet_family": "sym2", "use_idwt": False},
+    ),
+    (
+        "Vanilla MLP 10 WaveFT",
+        "MLP",
+        WaveFTConfig,
+        {"target_modules": "lin0", "n_frequency": 16, "wavelet_family": "db1", "proportional_parameters": True},
+    ),
 ]
 
 # For this test matrix, each tuple consists of:
@@ -914,6 +963,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_weights": False, "boft_block_size": 2},
         {"target_modules": ["lin1"], "init_weights": False, "boft_block_size": 2},
     ),
+    (
+        "WaveFT Same",
+        "waveft",
+        WaveFTConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "n_frequency": 8},
+        {"target_modules": ["lin0"], "init_weights": False, "n_frequency": 8},
+    ),
+    (
+        "WaveFT Different",
+        "waveft",
+        WaveFTConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "n_frequency": 8},
+        {"target_modules": ["lin1"], "init_weights": False, "n_frequency": 8},
+    ),
 ]
 
 PREFIXES = {
@@ -934,6 +997,7 @@ PREFIXES = {
     BoneConfig: "bone_",
     MissConfig: "miss_",
     TrainableTokensConfig: "trainable_tokens_",
+    WaveFTConfig: "waveft_",
 }
 
 
