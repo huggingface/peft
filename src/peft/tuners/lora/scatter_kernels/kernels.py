@@ -97,7 +97,7 @@ def scatter2scatter_triton_kernel(
 
         X_blk_ptrs += BLOCK_K * stride_xk
         W_blk_ptrs += BLOCK_K * stride_wk
-        acc += tl.dot(x, w, allow_tf32=allow_tf32, out_dtype=ACC_TYPE)
+        acc += tl.dot(x.to(w.dtype), w, allow_tf32=allow_tf32, out_dtype=ACC_TYPE)
 
     Y_blk_ptrs = Y_ptr + (M_out_idx[:, None] * stride_ym + N_block[None, :] * stride_yn)
     tl.store(Y_blk_ptrs, acc, mask=E_mask[:, None] & N_mask[None, :])
