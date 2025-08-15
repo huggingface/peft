@@ -653,17 +653,6 @@ def get_alora_offsets_for_generate(model: nn.module, *args, **kwargs):
             warnings.warn(
                 "Cannot calculate aLoRA offsets during generate as input_ids are not available. Disabling aLoRA."
             )
-            bs = 1
-            if "attention_mask" in kwargs and kwargs["attention_mask"] is not None:
-                bs = kwargs["attention_mask"].shape[0]
-            elif "inputs_embeds" in kwargs and kwargs["inputs_embeds"] is not None:
-                bs = kwargs["inputs_embeds"].shape[0]
-            elif args and isinstance(args[0], torch.Tensor) and args[0].dim() > 0:  # input_ids might be in args[0]
-                bs = args[0].shape[0]
-            elif (
-                "input_ids" in kwargs and kwargs["input_ids"] is not None
-            ):  # Should have been caught by current_input_ids
-                bs = kwargs["input_ids"].shape[0]
-
+            
             kwargs["alora_offsets"] = None
     return kwargs
