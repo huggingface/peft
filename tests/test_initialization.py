@@ -53,6 +53,7 @@ from peft import (
     PeftWarning,
     PrefixTuningConfig,
     PromptTuningConfig,
+    RoadConfig,
     VBLoRAConfig,
     VeraConfig,
     get_eva_state_dict,
@@ -1765,6 +1766,83 @@ class TestC3AInitialization:
         config = C3AConfig(target_modules=["lin1"], block_size=block_size)
         msg = f"The block size should be a factor of the output size. However, the output size is {model.lin1.out_features} and the block size is {block_size}"
         with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+
+class TestRoadInitialization:
+    torch_device = infer_device()
+
+    def get_model(self):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 30, bias=bias)
+                self.lin1 = nn.Linear(30, 2, bias=bias)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                return X
+
+        return MLP().to(self.torch_device)
+
+    def get_conv2d_model(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                # choose a large weight so that averages are close to expected values
+                self.linear = nn.Linear(1000, 1000)
+                self.embed = nn.Embedding(1000, 1000)
+                self.conv2d = nn.Conv2d(100, 100, 3)
+
+            def forward(self, x):
+                x_int = (100 * x).int()
+                x_4d = x.flatten().reshape(1, 100, 10, 10)
+                return self.linear(x), self.embed(x_int), self.conv2d(x_4d)
+
+        return MyModule().eval().to(self.torch_device)
+
+    def test_road_default_initialization(self):
+        torch.manual_seed(0)
+        model = self.get_model()
+        config = RoadConfig(target_modules=["lin0"], group_size=2)
+        model = get_peft_model(model, config)
+        weight_alpha = model.lin0.road_alpha["default"].data
+        weight_theta = model.lin0.road_theta["default"].data
+        torch.allclose(weight_alpha, torch.ones_like(weight_alpha))
+        torch.allclose(weight_theta, torch.zeros_like(weight_theta))
+
+    def test_road_with_odd_group_size(self):
+        group_size = 3  # odd values are not allowed
+        msg = f"The group_size must be divisible by 2 when using RoadLayer, but got {group_size}."
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            RoadConfig(group_size=group_size)
+
+    def test_road_with_too_large_group_size(self):
+        group_size = 64  # larger than out_features
+        msg = (
+            f"The out_features of the base layer must be divisible by group_size ({group_size}) when using RoadLayer."
+        )
+        model = self.get_model()
+        config = RoadConfig(target_modules=["lin0"], group_size=group_size)
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            get_peft_model(model, config)
+
+    def test_road_with_incompatible_group_size_with_out_features(self):
+        group_size = 4  # even, but 30 does not divide by 4
+        model = self.get_model()
+        config = RoadConfig(target_modules=["lin0"], group_size=group_size)
+        msg = (
+            f"The out_features of the base layer must be divisible by group_size ({group_size}) when using RoadLayer."
+        )
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            get_peft_model(model, config)
+
+    def test_road_with_conv2d_layer(self):
+        model = self.get_conv2d_model()
+        config = RoadConfig(target_modules=["conv2d"], group_size=2)
+        msg = "Target module Conv2d(100, 100, kernel_size=(3, 3), stride=(1, 1)) is not supported. Currently, only the following modules are supported: `torch.nn.Linear`."
+        with pytest.raises(ValueError, match=re.escape(msg)):
             get_peft_model(model, config)
 
 
