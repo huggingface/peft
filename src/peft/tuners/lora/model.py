@@ -460,11 +460,12 @@ class LoraModel(BaseTuner):
             yield
             return
         hook_handles = []
-        for layer in self.modules():
-            if isinstance(layer, LoraLayer):
-                pre_forward = partial(_alora_offsets_pre_forward_hook, alora_offsets=alora_offsets)
-                handle = layer.register_forward_pre_hook(pre_forward, with_kwargs=True)
-                hook_handles.append(handle)
+        if alora_offsets is not None:
+            for layer in self.modules():
+                if isinstance(layer, LoraLayer):
+                    pre_forward = partial(_alora_offsets_pre_forward_hook, alora_offsets=alora_offsets)
+                    handle = layer.register_forward_pre_hook(pre_forward, with_kwargs=True)
+                    hook_handles.append(handle)
 
         if adapter_names is not None:
             if self.training:
