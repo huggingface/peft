@@ -31,7 +31,7 @@ from peft.tuners.lora.variants import (
 )
 
 
-# Used for Dora
+# Custom model featuring embeddings and a 'visual stack'
 class CustomModel(nn.Module):
     """pytorch module that contains common targetable layers (linear, embedding, conv, ...)"""
 
