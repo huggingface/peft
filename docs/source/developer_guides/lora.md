@@ -205,7 +205,7 @@ Each input must have the `alora_invocation_tokens` sequence present, it is not a
 formatting should be consistent between train and test.
 
 Consider the following example, where the base model has a chat template,
-and the goal it to train the adapter to generate a desired output. 
+and the goal is to train the adapter to generate a desired output. 
 
 * Option 1: If there is no task-specific prompt, i.e. the input is a chat history with the `assistant` prompt, then the chat template's `assistant` prompt (e.g. `<|start_of_role|>assistant<|end_of_role|>`) is a natural choice for the invocation string. See the model's chat template to find the prompt for the model.
 * Option 2: If there is a task-specific prompt for the adapter that describes the task the adapter is learning, and that prompt is put as a `user` turn immediately prior to the generation, then the chat template's `user` prompt (e.g. `<|start_of_role|>user<|end_of_role|>`) is a natural choice for the invocation string.
