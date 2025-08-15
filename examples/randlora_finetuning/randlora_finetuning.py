@@ -49,7 +49,10 @@ def train_model(
     tokenizer = AutoTokenizer.from_pretrained(base_model, token=hf_token)
 
     # Compute type
-    torch_dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
+    device_type = device.type
+    device_module = getattr(torch, device_type, torch.cuda)
+    bf16_suppotrted = device_module.is_available() and device_module.is_bf16_supported()
+    torch_dtype = torch.bfloat16 if bf16_suppotrted else torch.float16
 
     # QRandLora (quantized randlora): IF YOU WANNA QUANTIZE THE MODEL
     if quantize:
@@ -58,9 +61,7 @@ def train_model(
             token=hf_token,
             quantization_config=BitsAndBytesConfig(
                 load_in_4bit=True,
-                bnb_4bit_compute_dtype=(
-                    torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
-                ),
+                bnb_4bit_compute_dtype=torch.bfloat16 if bf16_suppotrted else torch.float16,
                 bnb_4bit_use_double_quant=True,
                 bnb_4bit_quant_type="nf4",
             ),
@@ -97,7 +98,7 @@ def train_model(
     # get the peft model with RandLora config
     model = get_peft_model(model, peft_config)
 
-    model.to(device)  # MODEL TO GPU/CUDA
+    model.to(device)  # MODEL TO ACCELERATOR
     tokenizer.pad_token = tokenizer.eos_token
 
     # Load the dataset
@@ -138,8 +139,8 @@ def train_model(
         label_names=["labels"],
     )
 
-    # Clear CUDA cache to free memory
-    torch.cuda.empty_cache()
+    # Clear accelerator cache to free memory
+    device_module.empty_cache()
 
     # Initialize the Trainer
     trainer = Trainer(
@@ -183,7 +184,7 @@ if __name__ == "__main__":
     parser.add_argument("--quantize", action="store_true", help="Use quantization")
     parser.add_argument("--eval_step", type=int, default=10, help="Evaluation step interval")
     parser.add_argument("--save_step", type=int, default=100, help="Save step interval")
-    parser.add_argument("--device", type=str, default="cuda:0", help="Device to use for training")
+    parser.add_argument("--device", type=str, default="auto", help="Device to use for training")
     parser.add_argument("--rank", type=int, default=32, help="RandLora basis rank")
     parser.add_argument("--randlora_alpha", type=int, default=640, help="RandLora alpha")
     parser.add_argument("--randlora_dropout", type=float, default=0.05, help="RandLora dropout rate")
@@ -200,6 +201,10 @@ if __name__ == "__main__":
     )
     parser.add_argument("--push_to_hub", action="store_true", help="Whether to push the model to Hugging Face Hub")
     args = parser.parse_args()
+
+    if args.device == "auto":
+        args.device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
+
     train_model(
         base_model=args.base_model,
         data_path=args.data_path,

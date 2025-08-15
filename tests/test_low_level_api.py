@@ -21,6 +21,8 @@ import torch
 from peft import LoraConfig, get_peft_model_state_dict, inject_adapter_in_model
 from peft.utils import ModulesToSaveWrapper
 
+from .testing_utils import hub_online_once
+
 
 class DummyModel(torch.nn.Module):
     def __init__(self):

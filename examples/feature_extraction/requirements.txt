@@ -1,7 +1,7 @@
-git+https://github.com/huggingface/peft
-git+https://github.com/huggingface/accelerate
-git+https://github.com/huggingface/transformers
-datasets
+peft
+accelerate
+transformers
+datasets==2.18.0
 evaluate
 hnswlib
 pandas

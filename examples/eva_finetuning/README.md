@@ -60,8 +60,9 @@ peft_config = LoraConfig(
     eva_config=eva_config
 )
 
-# move model to GPU
-model = model.cuda()
+# move model to accelerator
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
+model = model.to(device)
 
 # to optimize memory usage during EVA initialization, set low_cpu_mem_usage=True
 peft_model = get_peft_model(model, peft_config, low_cpu_mem_usage=True)
@@ -90,7 +91,7 @@ In some cases you might just want to get the state_dict after EVA initialization
 - you want to precompute and store the state_dict for different downstream tasks.
 - you need to quantize the model for finetuning but want to perform EVA initialization with model weights in full/half precision.
 - you do not intend to use a peft model for LoRA finetuning.
-- you would like to leverage multiple GPUs for EVA initialization. (At the moment this is not directly supported by `initialize_lora_eva_weights`)
+- you would like to leverage multiple accelerators for EVA initialization. (At the moment this is not directly supported by `initialize_lora_eva_weights`)
 
 You can do this by calling `get_eva_state_dict` directly (you only need to pass `peft_config` if `model` is not a PeftModel):
 ```python
@@ -103,9 +104,9 @@ Later you can load the state_dict into a `PeftModel` by using the `eva_state_dic
 initialize_lora_eva_weights(peft_model, eva_state_dict=eva_state_dict)
 ```
 
-## Leveraging multiple GPUs
+## Leveraging multiple accelerators
 
-EVA initialization can be parallelized across multiple GPUs. In this case inputs from multiple GPUs are gathered before computing the SVD for the batch. This requires that the model is wrapped in a `torch.nn.DataParallel` or `torch.nn.DistributedDataParallel` class. An example of how to use this can be found in [eva_finetuning_multi_gpu.py](https://github.com/huggingface/peft/blob/main/examples/eva_finetuning/eva_finetuning_multi_gpu.py).
+EVA initialization can be parallelized across multiple accelerators. In this case inputs from multiple accelerators are gathered before computing the SVD for the batch. This requires that the model is wrapped in a `torch.nn.DataParallel` or `torch.nn.DistributedDataParallel` class. An example of how to use this can be found in [eva_finetuning_multi_accelerator.py](https://github.com/huggingface/peft/blob/main/examples/eva_finetuning/eva_finetuning_multi_accelerator.py).
 
 ## Customizing EVA
 

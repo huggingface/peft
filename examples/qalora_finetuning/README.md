@@ -78,7 +78,7 @@ python qalora_gptq_finetuning.py \
     --qalora_group_size 32 \
     --eval_step 10 \
     --save_step 100 \
-    --device "cuda:0" \
+    --device "auto" \
     --lora_r 16 \
     --lora_alpha 32 \
     --lora_dropout 0.05 \

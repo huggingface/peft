@@ -21,10 +21,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import LoraConfig, get_peft_model
 
 
-parser = argparse.ArgumentParser()
+parser = argparse.ArgumentParser(description="Merge Adapter to Base Model")
 parser.add_argument(
     "--base_model_name_or_path",
-    description="Merge Adapter to Base Model",
     help="The name or path of the fp32/16 base model.",
 )
 parser.add_argument("--output_dir", type=str, help="The directory to save the PiSSA model.")

@@ -92,7 +92,7 @@ processed_ds = ds.map(
 )
 ```
 
-Create a training and evaluation [`DataLoader`](https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader), and set `pin_memory=True` to speed up data transfer to the GPU during training if your dataset samples are on a CPU.
+Create a training and evaluation [`DataLoader`](https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader), and set `pin_memory=True` to speed up data transfer to the accelerator during training if your dataset samples are on a CPU.
 
 ```py
 from torch.utils.data import DataLoader
@@ -159,12 +159,12 @@ lr_scheduler = get_linear_schedule_with_warmup(
 )
 ```
 
-Move the model to the GPU and create a training loop that reports the loss and perplexity for each epoch.
+Move the model to the accelerator and create a training loop that reports the loss and perplexity for each epoch.
 
 ```py
 from tqdm import tqdm
 
-device = "cuda"
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
 model = model.to(device)
 
 for epoch in range(num_epochs):
@@ -219,7 +219,9 @@ To load the model for inference, use the [`~AutoPeftModelForSeq2SeqLM.from_pretr
 ```py
 from peft import AutoPeftModelForSeq2SeqLM
 
-model = AutoPeftModelForSeq2SeqLM.from_pretrained("<your-hf-account-name>/mt0-large-ia3").to("cuda")
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
+
+model = AutoPeftModelForSeq2SeqLM.from_pretrained("<your-hf-account-name>/mt0-large-ia3").to(device)
 tokenizer = AutoTokenizer.from_pretrained("bigscience/mt0-large")
 
 i = 15

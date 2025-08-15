@@ -63,8 +63,61 @@ class ArrowLoraLinearLayer(nn.Module):
         self._protos_ready = False
         # GKS will be handled by self.gks_added_adapter_names
 
+    def top_right_singular_vec_from_BA(self, A, B, iters=15, eps=1e-8):
+        """
+        Computes the top *right* singular vector of ΔW = B @ A without forming ΔW.
+
+        Theory:
+            For any matrix M, the right singular vectors are the eigenvectors of Mᵀ M. If ΔW = B @ A (with A ∈
+            ℝ^{r×in}, B ∈ ℝ^{out×r}), then
+                ΔWᵀ ΔW = (B @ A)ᵀ (B @ A) = Aᵀ (Bᵀ B) A ∈ ℝ^{in×in}.
+            Therefore, the dominant right singular vector of ΔW is the dominant eigenvector of M := Aᵀ (Bᵀ B) A. We
+            find it by *power iteration* on the linear operator
+                v ↦ Aᵀ (Bᵀ B) (A v),
+            which avoids materializing ΔW (out×in) or M (in×in). The result lives in the input/token space (size =
+            in_features), which is exactly what Arrow needs. (Right singular vectors ≡ eigenvectors of MᵀM; power
+            iteration converges to the dominant eigenvector under mild conditions.)
+        =============================== Practical notes:
+            - We perform all iteration in float32 for numerical stability, then cast back
+            to the LoRA dtype/device before storing/using the prototype.
+            - Convergence is checked with a simple fixed-iter cap (`iters`) and/or
+            `allclose` tolerance (`tol`).
+            - The returned vector is unique up to sign (±), as with any singular vector.
+            Downstream code should be sign-invariant.
+        """
+
+        # A: (r, in), B: (out, r)
+        A32 = A.to(torch.float32)
+        B32 = B.to(torch.float32)
+        C = B32.T @ B32  # (r, r)
+
+        cpu_state = torch.random.get_rng_state()
+        if torch.cuda.is_available():
+            gpu_state = torch.cuda.get_rng_state()
+
+        # Set temporary seed for reproducibility
+        torch.manual_seed(42)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(42)
+
+        # init vector in input space
+        v = torch.randn(A32.size(1), dtype=A32.dtype, device=A32.device)
+        v = v / (v.norm() + eps)
+
+        # Restore RNG state
+        torch.random.set_rng_state(cpu_state)
+        if torch.cuda.is_available():
+            torch.cuda.set_rng_state(gpu_state)
+
+        for _ in range(iters):
+            # w = (ΔWᵀΔW) v = Aᵀ (BᵀB) (A v)
+            w = A32.T @ (C @ (A32 @ v))
+            v = w / (w.norm() + eps)
+
+        return v  # fp32
+
     @torch.no_grad()
-    def build_prototypes(self, lora_A, lora_B=None):
+    def build_prototypes(self, lora_A, lora_B):
         """
         Computes a prototype vector for each LoRA module in every layer by applying Singular Value Decomposition (SVD)
         to the `lora_A` matrix and extracting the top right singular vector.
@@ -72,9 +125,6 @@ class ArrowLoraLinearLayer(nn.Module):
         These prototypes are later used to calculate the cosine similarity between each input token and each expert.
         The resulting similarity scores serve as coefficients to compute a weighted average of the corresponding LoRA
         modules, effectively routing each token through its most relevant experts.
-
-        For efficiency and to maintain consistency with the token representation dimensions, SVD is applied only to
-        `lora_A` (not to the product `lora_A * lora_B`).
 
         ** This prototype computation is done only once for all the experts.**
 
@@ -88,9 +138,14 @@ class ArrowLoraLinearLayer(nn.Module):
         protos = []
         for name in self.expert_names:
             A = lora_A[name].weight  # (r, in_features)
-            # SVD on A (tiny: r≪in_features)
-            _, _, Vh = torch.linalg.svd(A.float(), full_matrices=False)
-            protos.append(Vh[0].to(A.dtype))  # (in_features,)
+            B = lora_B[name].weight  # (out_features, r)
+
+            # Efficiently computing right singular vector of A @ B
+            proto32 = self.top_right_singular_vec_from_BA(A, B)
+
+            proto = proto32.to(dtype=A.dtype, device=A.device)
+            protos.append(proto)
+
         proto_stack = torch.stack(protos, dim=0)  # (E, in_features)
 
         # Register the prototypes buffer with correct dtype/device consistent with A and B weights

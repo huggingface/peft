@@ -50,6 +50,7 @@ from peft import (
     PeftModelForSeq2SeqLM,
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
+    PeftWarning,
     PrefixTuningConfig,
     PromptTuningConfig,
     VBLoRAConfig,
@@ -85,14 +86,14 @@ class TestLoraInitialization:
         samples = normal.sample(size)
         return samples
 
-    def get_model(self):
+    def get_model(self, bias=True):
         class MyModule(nn.Module):
             def __init__(self):
                 super().__init__()
                 # choose a large weight so that averages are close to expected values
-                self.linear = nn.Linear(1000, 1000)
+                self.linear = nn.Linear(1000, 1000, bias=bias)
                 self.embed = nn.Embedding(1000, 1000)
-                self.conv2d = nn.Conv2d(100, 100, 3)
+                self.conv2d = nn.Conv2d(100, 100, 3, bias=bias)
 
             def forward(self, x):
                 x_int = (100 * x).int()
@@ -1311,6 +1312,20 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match=msg):
             LoraConfig(target_modules=["linear"], lora_bias=True, **extra_kwargs)
 
+    def test_lora_linear_with_bias_when_base_layer_has_no_bias_warns(self):
+        model = self.get_model(bias=False)
+        config = LoraConfig(target_modules=["linear"], lora_bias=True)
+        msg = re.escape("`lora_bias=True` was passed but the targeted layer of type Linear has no bias")
+        with pytest.warns(PeftWarning, match=msg):
+            get_peft_model(model, config)
+
+    def test_lora_conv2d_with_bias_when_base_layer_has_no_bias_warns(self):
+        model = self.get_model(bias=False)
+        config = LoraConfig(target_modules=["conv2d"], lora_bias=True)
+        msg = re.escape("`lora_bias=True` was passed but the targeted layer of type Conv2d has no bias")
+        with pytest.warns(PeftWarning, match=msg):
+            get_peft_model(model, config)
+
     def test_lora_incompatible_mamba_modules(self):
         # Ensure LoRA raises an error when applying to forbidden modules
         # ('out_proj', 'conv1d') in Mamba-based architectures like Falcon-Mamba tiny.
@@ -1396,6 +1411,74 @@ class TestLoraInitialization:
         else:
             # No error should be raised
             peft_model = get_peft_model(base_model, peft_config)
+
+    def test_target_module_and_target_parameter_on_same_layer(self):
+        # When targeting an nn.Parameter with LoRA using target_parameters, ensure that this is not already another LoRA
+        # layer (i.e. avoid double wrapping).
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(10, 10)
+
+        base_model = MyModule()
+        config = LoraConfig(target_modules=["linear"], target_parameters=["linear.weight"])
+        msg = "Trying to wrap an `nn.Parameter` of layer 'linear' of type Linear, which is not a valid target."
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(base_model, config)
+
+    @pytest.mark.parametrize("target_parameters", [["linear"], ["foobar"], ["foobar.weight"], ["foo", "bar"]])
+    @pytest.mark.parametrize("target_modules", [None, [], ""])
+    def test_valid_no_target_module_nor_target_parameter_match_raises(self, target_parameters, target_modules):
+        model = self.get_model()
+        config = LoraConfig(target_modules=target_modules, target_parameters=target_parameters)
+        msg = re.escape(
+            "No `target_modules` passed but also no `target_parameters` found. Please check the values for "
+            "these arguments."
+        )
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+    def test_target_parameters_wrong_type_raises(self):
+        # Check that target_parameters being a string raises a useful error message -- this is an easy mistake to make
+        # because strings are allowed for target_modules
+        model = self.get_model()
+        msg = "`target_parameters` must be a list of strings or None."
+        with pytest.raises(TypeError, match=msg):
+            LoraConfig(target_parameters="linear.weight")
+
+    def test_valid_target_parameters_invalid_target_modules_warns(self):
+        model = self.get_model()
+        config = LoraConfig(target_modules=["foobar"], target_parameters=["linear.weight"])
+        msg = re.escape("target_modules={'foobar'} were set but no module was matched.")
+        with pytest.warns(RuntimeWarning, match=msg):
+            get_peft_model(model, config)
+
+    def test_valid_target_modules_invalid_target_parameters_warns(self):
+        model = self.get_model()
+        config = LoraConfig(target_modules=["linear"], target_parameters=["foobar.weight"])
+        msg = re.escape("target_parameters=['foobar.weight'] were set but no parameter was matched.")
+        with pytest.warns(RuntimeWarning, match=msg):
+            get_peft_model(model, config)
+
+    def test_adding_multiple_adapters_with_target_parameters_raises(self):
+        model = self.get_model()
+        config = LoraConfig(target_modules=[], target_parameters=["linear.weight"])
+        model = get_peft_model(model, config)
+        msg = re.escape("only one LoRA adapter per model with `target_parameters` is allowed")
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter(adapter_name="other", peft_config=config)
+
+    def test_loading_loading_adapters_with_target_parameters_raises(self, tmp_path):
+        model = self.get_model()
+        config = LoraConfig(target_modules=[], target_parameters=["linear.weight"])
+        model = get_peft_model(model, config)
+        model.save_pretrained(tmp_path)
+
+        model = self.get_model()
+        model = PeftModel.from_pretrained(model, tmp_path)
+        msg = re.escape("only one LoRA adapter per model with `target_parameters` is allowed")
+        with pytest.raises(ValueError, match=msg):
+            model.load_adapter(tmp_path, adapter_name="other")
 
 
 class TestLokrInitialization:
@@ -1890,7 +1973,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
     @pytest.mark.parametrize("device", devices)
     def test_load_adapter_low_cpu_mem_usage_works(self, device, inputs, lora_path, lora_config):
@@ -1917,7 +2000,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
     @pytest.mark.parametrize("device", devices)
     def test_get_peft_model_low_cpu_mem_usage_works(self, device, inputs):
@@ -1979,7 +2062,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
     ############################
     # tests for PeftMixedModel #
@@ -2001,7 +2084,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
     @pytest.mark.parametrize("device", devices)
     def test_mixed_model_load_adapter_low_cpu_mem_usage_works(self, device, inputs, lora_path, lora_config):
@@ -2028,7 +2111,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
 
 def test_from_pretrained_missing_keys_warning(recwarn, tmp_path):
