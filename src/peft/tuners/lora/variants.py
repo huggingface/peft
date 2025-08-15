@@ -604,7 +604,7 @@ def get_alora_offsets_for_forward(
             warnings.warn(
                 "Cannot calculate aLoRA offsets when only inputs_embeds are provided. Disabling aLoRA for this forward pass."
             )
-            kwargs["alora_offsets"] = [None] * inputs_embeds.shape[0]
+            kwargs["alora_offsets"] = None
         elif input_ids is not None:
             kwargs["alora_offsets"] = calculate_alora_offsets(
                 model.peft_config,
