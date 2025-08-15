@@ -190,7 +190,7 @@ where `alora_invocation_tokens` is a list of integer token ids. Given a desired 
 invocation_string = "placeholder"
 alora_invocation_tokens = tokenizer.encode(invocation_string, add_special_tokens=False).
 ```
-where the tokenizer is the tokenizer for the base model.
+where the tokenizer is the tokenizer for the base model. Note that we have `add_special_tokens=False` to avoid adding SOS/EOS tokens in our search string (which will most likely cause failure to find).
 
 **Notes**
 * aLoRA is only supported for `task_type=CAUSAL_LM` tasks due to its focus on cache reuse.
