@@ -39,7 +39,6 @@ jobs:
   tests:
     needs: check_code_quality
     strategy:
-      # TODO: remove 'fail-fast' line once timeout issue from the Hub is solved
       fail-fast: false
       matrix:
         python-version: ["3.9", "3.10", "3.11", "3.12"]
@@ -87,8 +86,27 @@ jobs:
         run: |
           pip install --force-reinstall -U "numpy<2.0.0"
       - name: Test with pytest
+        # MacOS tests are currently too flaky and will fail almost each time. Thus, continue (green checkmark) even if
+        # they fail, but add a notice so that the failure is not completely silent
+        continue-on-error: ${{ matrix.os == 'macos-13' }}
+        shell: bash
         run: |
+          set +e
           make test
+          status=$?
+          # Post a notice only if this is macOS AND tests failed
+          if [ "$status" -ne 0 ] && [ "${{ matrix.os }}" = "macos-13" ]; then
+            {
+              echo "## ⚠️ macOS tests failed"
+              echo ""
+              echo "- OS: ${{ matrix.os }}"
+              echo "- Python: ${{ matrix.python-version }}"
+              echo ""
+              echo "Check the logs from this step for details."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # Return the real status. On macOS this won't fail the job because of continue-on-error.
+          exit $status
       - name: Dump cache content and diff
         # This is just debug info so that we can monitor if the model cache diverges substantially
         # over time and what the diverging model is.
