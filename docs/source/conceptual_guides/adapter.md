@@ -85,9 +85,11 @@ OFT preserves the hyperspherical energy by learning an orthogonal transformation
 
 ## Orthogonal Butterfly (BOFT)
 
-[BOFT](https://hf.co/papers/2311.06243) is a method that primarily focuses on preserving a pretrained model's generative performance in the finetuned model. It tries to maintain the same cosine similarity (hyperspherical energy) between all pairwise neurons in a layer because this better captures the semantic information among neurons. This means OFT is more capable at preserving the subject and it is better for controllable generation (similar to [ControlNet](https://huggingface.co/docs/diffusers/using-diffusers/controlnet)).
+[BOFT](https://hf.co/papers/2311.06243) is an improved orthogonal finetuning method that focuses on preserving a pretrained model’s generative capabilities while being significantly more parameter-efficient than standard OFT. Like OFT, BOFT maintains the same cosine similarity (hyperspherical energy) between all pairwise neurons in a layer by applying an orthogonal transformation to the pretrained weight matrix, ensuring the semantic relationships among neurons are preserved.
 
-OFT preserves the hyperspherical energy by learning an orthogonal transformation for neurons to keep the cosine similarity between them unchanged. In practice, this means taking the matrix product of an orthogonal matrix with the pretrained weight matrix. However, to be parameter-efficient, the orthogonal matrix is represented as a block-diagonal matrix with rank `r` blocks. Whereas LoRA reduces the number of trainable parameters with low-rank structures, OFT reduces the number of trainable parameters with a sparse block-diagonal matrix structure.
+Instead of using a dense or block-diagonal orthogonal matrix, BOFT factorizes the orthogonal transformation into a product of **sparse butterfly matrices** (originally introduced in the [Cooley–Tukey FFT](https://en.wikipedia.org/wiki/Cooley%E2%80%93Tukey_FFT_algorithm)), a structured form that allows any input neuron to interact with any output neuron in only `O(d log d)` parameters and computation. This factorization preserves expressivity while drastically reducing the parameter count compared to dense OFT and avoiding the arbitrary sparsity patterns of block-diagonal OFT.
+
+In practice, BOFT multiplies each pretrained weight matrix by a sequence of butterfly-structured orthogonal factors, enabling efficient and expressive neuron rotations. This makes BOFT well-suited for controllable generation and tasks where maintaining the pretrained model’s subject representation is critical, while also scaling to larger models with lower memory and compute overhead.
 
 ## Adaptive Low-Rank Adaptation (AdaLoRA)
 
