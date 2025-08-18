@@ -216,10 +216,10 @@ with `CUDA_VISIBLE_DEVICES=0 ZE_AFFINITY_MASK=0 time python examples/dora_finetu
 Moreover, it is possible to further increase runtime performance of DoRA by using the [`DoraCaching`] helper context. This requires the model to be in `eval` mode:
 
 ```py
-from peft.helpers import DoraContext
+from peft.helpers import DoraCaching
 
 model.eval()
-with DoraContext():
+with DoraCaching():
     output = model(inputs)
 ```
 
