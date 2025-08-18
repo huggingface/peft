@@ -193,6 +193,7 @@ def test_alora_activation_matches_base_until_invocation():
     lora_model.eval()
 
     input_ids = torch.tensor([[0, 1, 2, 3]])
+    start = 2 #index of invocation token
     with lora_model.disable_adapter():
         with torch.no_grad():
             base_out = lora_model(X=input_ids)
@@ -200,6 +201,5 @@ def test_alora_activation_matches_base_until_invocation():
     kwargs = get_alora_offsets_for_forward(lora_model, input_ids)
     with torch.no_grad():
         lora_out = lora_model(X=input_ids, **kwargs)
-    start = 2 #index of invocation token
     assert torch.allclose(lora_out[:, :start], base_out[:, :start])
     assert not torch.allclose(lora_out[:, start:], base_out[:, start:])
