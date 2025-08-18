@@ -71,9 +71,10 @@ class DummyLM(nn.Module):
         self.embed = nn.Embedding(vocab_size, hidden_dim)
         self.linear = nn.Linear(hidden_dim, vocab_size)
 
-    def forward(self, X):
-        hidden = self.embed(X)
-        return self.linear(hidden)
+    def forward(self, X=None, embeds=None):
+        if X is not None:
+            embeds = self.embed(X)
+        return self.linear(embeds)
 
 
 class MockTransformerWrapper:
@@ -168,7 +169,7 @@ def test_calculate_alora_offsets_basic_and_warning():
     with pytest.warns(UserWarning):
         offsets = calculate_alora_offsets(peft_config, "default", input_ids)
 
-    assert offsets[0] == input_ids.shape[1] - 1 + 1
+    assert offsets[0] == 4
     assert offsets[1] is None
 
 
@@ -181,7 +182,7 @@ def test_calculate_alora_offsets_with_adapter_names():
 
     offsets = calculate_alora_offsets(peft_config, "a1", input_ids, adapter_names=["a1", "a2"])
 
-    assert offsets == [input_ids.shape[1] - 2 + 1, input_ids.shape[1] - 2 + 1]
+    assert offsets == [2, 2]
 
 
 # Verify that the adapter does not modify outputs prior to invocation point
@@ -203,3 +204,30 @@ def test_alora_activation_matches_base_until_invocation():
         lora_out = lora_model(X=input_ids, **kwargs)
     assert torch.allclose(lora_out[:, :start], base_out[:, :start])
     assert not torch.allclose(lora_out[:, start:], base_out[:, start:])
+
+# Verify that warning is given for alora when providing embeddings only
+def test_input_embeds_warning():
+    transformers_class = MockTransformerWrapper
+    base_model = transformers_class.from_pretrained()
+    cfg = LoraConfig(target_modules=["linear"], alora_invocation_tokens=[2], init_lora_weights=False)
+    lora_model = get_peft_model(base_model, cfg)
+    lora_model.eval()
+
+    input_ids = torch.tensor([[0, 1, 2, 3]])
+    input_embeds = base_model.embed(input_ids)
+    with pytest.warns(UserWarning):
+        with torch.no_grad():
+            lora_out = lora_model(embeds=input_embeds)
+
+# Verify that error is raised when requesting num_beams > 1 for alora
+def test_num_beams_error():
+    transformers_class = MockTransformerWrapper
+    base_model = transformers_class.from_pretrained()
+    cfg = LoraConfig(target_modules=["linear"], alora_invocation_tokens=[2], init_lora_weights=False)
+    lora_model = get_peft_model(base_model, cfg)
+    lora_model.eval()
+
+    input_ids = torch.tensor([[0, 1, 2, 3]])
+    with pytest.pytest.raises(ValueError):
+        with torch.no_grad():
+            lora_out = lora_model(X=input_ids,num_beams=2)
