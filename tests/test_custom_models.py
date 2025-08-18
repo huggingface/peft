@@ -937,6 +937,11 @@ PREFIXES = {
 }
 
 
+def _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs):
+    if (config_cls == LoraConfig) and config_kwargs.get("target_parameters"):
+        pytest.skip("LoRA with multiple adapters with target_parameters is not supported")
+
+
 class MLP(nn.Module):
     def __init__(self, bias=True):
         super().__init__()
@@ -1390,6 +1395,7 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_load_model_low_cpu_mem_usage(self, test_name, model_id, config_cls, config_kwargs):
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
         self._test_load_model_low_cpu_mem_usage(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
@@ -1398,6 +1404,7 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_load_multiple_adapters(self, test_name, model_id, config_cls, config_kwargs):
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
         self._test_load_multiple_adapters(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
@@ -2018,6 +2025,8 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_active_adapter(self, test_name, model_id, config_cls, config_kwargs):
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
+
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -2108,10 +2117,12 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_delete_adapter(self, test_name, model_id, config_cls, config_kwargs):
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
         self._test_delete_adapter(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_delete_inactive_adapter(self, test_name, model_id, config_cls, config_kwargs):
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
         self._test_delete_inactive_adapter(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
@@ -2809,6 +2820,19 @@ class TestLayerRepr:
         assert "lora_B" in print_output
         assert "default" in print_output
 
+    def test_repr_lora_paramwrapper(self):
+        config = LoraConfig(target_parameters=["lin0.weight"])
+        model = get_peft_model(MLP(), config)
+        print_output = repr(model.model.lin0)
+        assert print_output.startswith("lora.ParamWrapper")
+        # important: targeted parameter should be contained:
+        assert "parameter_name='weight'" in print_output
+        assert "in_features=10" in print_output
+        assert "out_features=20" in print_output
+        assert "lora_A" in print_output
+        assert "lora_B" in print_output
+        assert "default" in print_output
+
 
 class TestMultipleActiveAdapters:
     """
@@ -2843,6 +2867,8 @@ class TestMultipleActiveAdapters:
     def test_multiple_active_adapters_forward(
         self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
     ):
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs_2)
+
         torch.manual_seed(0)
 
         model = self.resolve_model_cls(tuner_method)
@@ -2901,6 +2927,8 @@ class TestMultipleActiveAdapters:
     def test_multiple_active_adapters_merge_and_unmerge(
         self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
     ):
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs_2)
+
         torch.manual_seed(0)
 
         model = self.resolve_model_cls(tuner_method)
@@ -2934,6 +2962,8 @@ class TestMultipleActiveAdapters:
         "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES
     )
     def test_merge_layers_multi(self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2):
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs_2)
+
         torch.manual_seed(0)
 
         model = self.resolve_model_cls(tuner_method)
