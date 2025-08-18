@@ -32,23 +32,21 @@ class RoadConfig(PeftConfig):
 
     Args:
         variant (Union[`RoadVariant`, `str`]):
-            The variant of the Road model to use. It can be one of road_1, road_2, or road_4. Refer to the paper
-            for more details.
+            The variant of the Road model to use. It can be one of road_1, road_2, or road_4. Refer to the paper for
+            more details.
             - road_1: Uses the same scale and angle for all pairs of elements.
-            This variant has lowest number of parameters, it stores a number equal
-            to the output hidden size of parameters for each layer that RoAd is applied to.
+            This variant has lowest number of parameters, it stores a number equal to the output hidden size of
+            parameters for each layer that RoAd is applied to.
             - road_2: Uses the same scale and angle for each element.
             This variant has 2x the number of parameters compared to road_1.
             - road_4: Uses two different scales and angles for each ellement.
             This variant has 4x the number of parameters compared to road_1.
         group_size (`int`):
-            Group size defines how elements are grouped together into 2D vectors for rotation.
-            Within each group element 0 is paired with element group_size/2,
-            then element 1 is paired with element group_size/2+1 and so on.
-            This has no effect on the model performance, since elements are unordered,
-            however it has some effect on inference speed when used in e.g. VLLM.
-            For best speed group size of at least 32 or 64 (the default) is recommended.
-            Note that model hidden size (or hidden size per partition when used with tensor parallelism)
+            Group size defines how elements are grouped together into 2D vectors for rotation. Within each group
+            element 0 is paired with element group_size/2, then element 1 is paired with element group_size/2+1 and so
+            on. This has no effect on the model performance, since elements are unordered, however it has some effect
+            on inference speed when used in e.g. VLLM. For best speed group size of at least 32 or 64 (the default) is
+            recommended. Note that model hidden size (or hidden size per partition when used with tensor parallelism)
             must be divisible by group_size, so for very small models you might need to reduce this parameter.
         init_weights (`bool`):
             Whether to perform initialization of RoAd weights.

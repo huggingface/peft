@@ -30,15 +30,15 @@ class RoadLayer(BaseTunerLayer):
     Generally the idea of RoAD is to split the input vector into many 2D vectors and rotate each 2D vector with its own
     2D rotation matrix. For additional flexibility, each rotation matrix is multiplied by a trainable scale.
 
-    when applied to vector R @ x each pair of elements of x is transformed like this:
-    y₀ = x₀ * α * cosθ - xₙ * α * sinθ
-    yₙ = x₀ * α * sinθ + xₙ * α * cosθ
+    when applied to vector R @ x each pair of elements of x is transformed like this: `y₀ = x₀ * α * cosθ - xₙ * α *
+    sinθ` and `yₙ = x₀ * α * sinθ + xₙ * α * cosθ`
 
     The scales α and angles θ are learned for each pair of elements and, moreover, each of the 4 instances in the
     rotation matrix may actually be different (when using variant 2 or 4).
 
     Note that instead of using two consecutive elements x₀ x₁ we first split the whole vector into groups and pair
-    elements from the first with the second half of the same group, which allows for more efficient inference implementation.
+    elements from the first with the second half of the same group, which allows for more efficient inference
+    implementation.
 
     The adapter needs to only store the angles θ and scales α, rather than the full matrix R and the inference
     implementation only needs to do elementwise vector multiplications.
