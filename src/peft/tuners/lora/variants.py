@@ -126,6 +126,7 @@ class DoraLinearVariant(LoraVariant):
             scaling=scaling,
             base_layer=module.get_base_layer(),
             base_result=base_result,
+            adapter_name=active_adapter,
         )
         return result
 
@@ -209,6 +210,7 @@ class DoraEmbeddingVariant(DoraLinearVariant):
             scaling=scaling,
             base_layer=module.get_base_layer(),
             embed_fn=module._embed,
+            adapter_name=active_adapter,
         )
         result = mag_norm_scale * result + dora_result
         return result
@@ -292,6 +294,7 @@ class _DoraConvNdVariant(LoraVariant):
             scaling=scaling,
             base_layer=module.get_base_layer(),
             base_result=base_result,
+            adapter_name=active_adapter,
         )
         return result
 

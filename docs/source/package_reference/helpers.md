@@ -20,3 +20,8 @@ A collection of helper functions for PEFT.
 
 [[autodoc]] helpers.disable_input_dtype_casting
     - all
+
+## Context manager to enable DoRA caching (faster at inference time but requires more memory)
+
+[[autodoc]] helpers.DoraCaching
+    - all
