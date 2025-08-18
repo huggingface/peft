@@ -43,8 +43,10 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
+    MissConfig,
     OFTConfig,
     PeftModel,
+    PeftWarning,
     RandLoraConfig,
     ShiraConfig,
     TaskType,
@@ -442,6 +444,22 @@ TEST_CASES = [
         "Vanilla MLP 5 Bone",
         "MLP",
         BoneConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "r": 2, "init_weights": "bat"},
+    ),
+    ########
+    # MiSS #
+    ########
+    ("Vanilla MLP 1 MiSS", "MLP", MissConfig, {"target_modules": "lin0", "r": 2}),
+    ("Vanilla MLP 2 MiSS", "MLP", MissConfig, {"target_modules": ["lin0"], "r": 2}),
+    ("Vanilla MLP 3 MiSS", "MLP", MissConfig, {"target_modules": ["lin0", "lin1"], "r": 2}),
+    ("Vanilla MLP 5 MiSS", "MLP", MissConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "r": 2}),
+    ("Vanilla MLP 1 MiSS", "MLP", MissConfig, {"target_modules": "lin0", "r": 2, "init_weights": "bat"}),
+    ("Vanilla MLP 2 MiSS", "MLP", MissConfig, {"target_modules": ["lin0"], "r": 2, "init_weights": "bat"}),
+    ("Vanilla MLP 3 MiSS", "MLP", MissConfig, {"target_modules": ["lin0", "lin1"], "r": 2, "init_weights": "bat"}),
+    (
+        "Vanilla MLP 5 MiSS",
+        "MLP",
+        MissConfig,
         {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "r": 2, "init_weights": "bat"},
     ),
     #############
@@ -854,6 +872,21 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin1"], "init_weights": False, "r": 2},
     ),
     (
+        "MiSS Same",
+        "miss",
+        MissConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "r": 2},
+        {"target_modules": ["lin0"], "init_weights": False, "r": 2},
+    ),
+    (
+        "MiSS Different",
+        "miss",
+        MissConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "r": 2},
+        {"target_modules": ["lin1"], "init_weights": False, "r": 2},
+    ),
+    # Not testing "mini" initialization targeting the same layer, because The matrix is initialized to all zeros in MiSS-mini mode.
+    (
         "VBLoRA Same",
         "vblora",
         VBLoRAConfig,
@@ -899,8 +932,14 @@ PREFIXES = {
     ShiraConfig: "shira_",
     VBLoRAConfig: "vblora_",
     BoneConfig: "bone_",
+    MissConfig: "miss_",
     TrainableTokensConfig: "trainable_tokens_",
 }
+
+
+def _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs):
+    if (config_cls == LoraConfig) and config_kwargs.get("target_parameters"):
+        pytest.skip("LoRA with multiple adapters with target_parameters is not supported")
 
 
 class MLP(nn.Module):
@@ -1093,9 +1132,9 @@ class ModelConv1D(nn.Module):
 
 
 class ModelConv2D(nn.Module):
-    def __init__(self):
+    def __init__(self, bias=True):
         super().__init__()
-        self.conv2d = nn.Conv2d(5, 10, 3)
+        self.conv2d = nn.Conv2d(5, 10, 3, bias=bias)
         self.relu = nn.ReLU()
         self.flat = nn.Flatten()
         self.lin0 = nn.Linear(10, 2)
@@ -1226,7 +1265,7 @@ class ModelMha(nn.Module):
 
 
 class _LinearUsingParameter(nn.Module):
-    # TODO
+    # Linear layer equivalent
     def __init__(self, in_features, out_features, bias=None):
         super().__init__()
         self.in_features = in_features
@@ -1240,7 +1279,7 @@ class _LinearUsingParameter(nn.Module):
 
 
 class MlpUsingParameters(nn.Module):
-    # TODO
+    # MLP that uses layers whose parameters need to be targeted with target_parameters
     def __init__(self, bias=True):
         super().__init__()
 
@@ -1356,6 +1395,7 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_load_model_low_cpu_mem_usage(self, test_name, model_id, config_cls, config_kwargs):
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
         self._test_load_model_low_cpu_mem_usage(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
@@ -1364,6 +1404,7 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_load_multiple_adapters(self, test_name, model_id, config_cls, config_kwargs):
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
         self._test_load_multiple_adapters(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
@@ -1443,6 +1484,28 @@ class TestPeftCustomModel(PeftCommonTester):
         else:
             config_kwargs["init_weights"] = False
         self._test_safe_merge(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("safe_merge", [False, True])
+    @pytest.mark.parametrize("module_type", ["linear", "conv2d"])
+    def test_merge_with_lora_bias_when_base_layer_has_no_bias_warns_and_raises(self, safe_merge, module_type):
+        # It is not possible to merge the lora_B bias if the base layer doesn't have a bias itself.
+        if module_type == "linear":
+            model = MLP(bias=False)
+            config = LoraConfig(target_modules=["lin0", "lin1"], lora_bias=True)
+            warn_msg = re.escape("`lora_bias=True` was passed but the targeted layer of type Linear has no bias")
+        elif module_type == "conv2d":
+            model = ModelConv2D(bias=False)
+            config = LoraConfig(target_modules=["conv2d"], lora_bias=True)
+            warn_msg = re.escape("`lora_bias=True` was passed but the targeted layer of type Conv2d has no bias")
+        else:
+            raise ValueError(f"Wrong module_type passed, expected 'linear' or 'conv2d', got {module_type}")
+
+        with pytest.warns(PeftWarning, match=warn_msg):
+            model = get_peft_model(model, config)
+
+        err_msg = "Impossible to merge LoRA with `lora_bias=True` because the base layer has no bias"
+        with pytest.raises(RuntimeError, match=err_msg):
+            model.merge_adapter(safe_merge=safe_merge)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_generate(self, test_name, model_id, config_cls, config_kwargs):
@@ -1962,6 +2025,8 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_active_adapter(self, test_name, model_id, config_cls, config_kwargs):
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
+
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -2052,10 +2117,12 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_delete_adapter(self, test_name, model_id, config_cls, config_kwargs):
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
         self._test_delete_adapter(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_delete_inactive_adapter(self, test_name, model_id, config_cls, config_kwargs):
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
         self._test_delete_inactive_adapter(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
@@ -2202,7 +2269,7 @@ class TestPeftCustomModel(PeftCommonTester):
         assert "other" in model.base_model.classifier.modules_to_save
 
     @pytest.mark.parametrize(
-        "config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig, ShiraConfig]
+        "config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig, ShiraConfig, MissConfig]
     )
     def test_multiple_adapters_mixed_modules_to_save(self, config_cls):
         # See issue 1574
@@ -2211,7 +2278,7 @@ class TestPeftCustomModel(PeftCommonTester):
         if hasattr(config_cls, "feedforward_modules"):  # IA³
             config_cls = partial(config_cls, feedforward_modules=["lin0"])
 
-        if config_cls == BoneConfig:
+        if config_cls == BoneConfig or config_cls == MissConfig:
             config_cls = partial(config_cls, r=2)
         if config_cls == ShiraConfig:
             config_cls = partial(config_cls, r=1)
@@ -2242,7 +2309,7 @@ class TestPeftCustomModel(PeftCommonTester):
         if hasattr(config_cls, "feedforward_modules"):  # IA³
             config_cls = partial(config_cls, feedforward_modules=["lin0"])
 
-        if config_cls == BoneConfig:
+        if config_cls == BoneConfig or config_cls == MissConfig:
             config_cls = partial(config_cls, r=2)
         if config_cls == ShiraConfig:
             config_cls = partial(config_cls, r=1)
@@ -2324,7 +2391,9 @@ class TestPeftCustomModel(PeftCommonTester):
         with pytest.raises(ValueError, match=msg):
             model.add_weighted_adapter(["default", "other"], weights=[1.0, 1.0], adapter_name="merged")
 
-    @pytest.mark.parametrize("config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig])
+    @pytest.mark.parametrize(
+        "config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, BoneConfig, MissConfig]
+    )
     def test_add_weighted_adapter_cat_with_rank_pattern(self, config_cls):
         # Fixes a bug described in #2512, which resulted from the rank_pattern not being taken into account
         config0 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 2})
@@ -2392,52 +2461,62 @@ class TestPeftCustomModel(PeftCommonTester):
         assert len(model_card) > 1000
 
     @pytest.mark.parametrize("save_embedding_layers", ["auto", True, False])
-    def test_targeting_lora_to_embedding_layer(self, save_embedding_layers):
+    @pytest.mark.parametrize(
+        "peft_config",
+        [
+            (LoraConfig(target_modules=["lin0", "embed_tokens"], init_lora_weights=False)),
+            (LoraConfig(target_modules=r"^embed_tokens", init_lora_weights=False)),
+        ],
+    )
+    def test_save_pretrained_targeting_lora_to_embedding_layer(self, save_embedding_layers, tmp_path, peft_config):
         model = ModelEmbWithEmbeddingUtils()
-        config = LoraConfig(target_modules=["embed_tokens", "lin0"], init_lora_weights=False)
-        model = get_peft_model(model, config)
+        model = get_peft_model(model, peft_config)
 
-        with tempfile.TemporaryDirectory() as tmp_dirname:
-            if save_embedding_layers == "auto":
-                # assert warning
-                msg_start = "Setting `save_embedding_layers` to `True` as embedding layers found in `target_modules`."
-                with pytest.warns(UserWarning, match=msg_start):
-                    model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)
-            else:
-                model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)
-            from safetensors.torch import load_file as safe_load_file
+        if save_embedding_layers == "auto":
+            # assert warning
+            msg_start = "Setting `save_embedding_layers` to `True` as embedding layers found in `target_modules`."
+            with pytest.warns(UserWarning, match=msg_start):
+                model.save_pretrained(tmp_path, save_embedding_layers=save_embedding_layers)
+        else:
+            model.save_pretrained(tmp_path, save_embedding_layers=save_embedding_layers)
 
-            state_dict = safe_load_file(os.path.join(tmp_dirname, "adapter_model.safetensors"))
-            if save_embedding_layers in ["auto", True]:
-                assert "base_model.model.embed_tokens.base_layer.weight" in state_dict
-                assert torch.allclose(
-                    model.base_model.model.embed_tokens.base_layer.weight,
-                    state_dict["base_model.model.embed_tokens.base_layer.weight"],
-                )
-            else:
-                assert "base_model.model.embed_tokens.base_layer.weight" not in state_dict
-            del state_dict
+        state_dict = safe_load_file(tmp_path / "adapter_model.safetensors")
+        contains_embedding = "base_model.model.embed_tokens.base_layer.weight" in state_dict
+
+        if save_embedding_layers in ["auto", True]:
+            assert contains_embedding
+            assert torch.allclose(
+                model.base_model.model.embed_tokens.base_layer.weight,
+                state_dict["base_model.model.embed_tokens.base_layer.weight"],
+            )
+        else:
+            assert not contains_embedding
 
     @pytest.mark.parametrize("save_embedding_layers", ["auto", True, False])
-    def test_targeting_lora_to_embedding_layer_non_transformers(self, save_embedding_layers):
+    @pytest.mark.parametrize(
+        "peft_config",
+        [
+            (LoraConfig(target_modules=["lin0", "emb"], init_lora_weights=False)),
+            (LoraConfig(target_modules=r"^emb", init_lora_weights=False)),
+        ],
+    )
+    def test_save_pretrained_targeting_lora_to_embedding_layer_non_transformers(
+        self, save_embedding_layers, tmp_path, peft_config
+    ):
         model = ModelEmbConv1D()
-        config = LoraConfig(target_modules=["emb", "lin0"], init_lora_weights=False)
-        model = get_peft_model(model, config)
+        model = get_peft_model(model, peft_config)
 
-        with tempfile.TemporaryDirectory() as tmp_dirname:
-            if save_embedding_layers is True:
-                with pytest.warns(
-                    UserWarning,
-                    match=r"Could not identify embedding layer\(s\) because the model is not a 🤗 transformers model\.",
-                ):
-                    model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)
-            else:
-                model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)
-            from safetensors.torch import load_file as safe_load_file
+        if save_embedding_layers is True:
+            with pytest.warns(
+                UserWarning,
+                match=r"Could not identify embedding layer\(s\) because the model is not a 🤗 transformers model\.",
+            ):
+                model.save_pretrained(tmp_path, save_embedding_layers=save_embedding_layers)
+        else:
+            model.save_pretrained(tmp_path, save_embedding_layers=save_embedding_layers)
 
-            state_dict = safe_load_file(os.path.join(tmp_dirname, "adapter_model.safetensors"))
-            assert "base_model.model.emb.base_layer.weight" not in state_dict
-            del state_dict
+        state_dict = safe_load_file(tmp_path / "adapter_model.safetensors")
+        assert "base_model.model.emb.base_layer.weight" not in state_dict
 
     def test_load_resized_embedding_ignore_mismatched_sizes(self):
         # issue #1605
@@ -2480,6 +2559,7 @@ class TestPeftCustomModel(PeftCommonTester):
             BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
             HRAConfig(target_modules=["lin0"], init_weights=False),
             BoneConfig(target_modules=["lin0"], init_weights=False, r=2),
+            MissConfig(target_modules=["lin0"], init_weights=False, r=2),
         ],
     )
     def test_adapter_name_makes_no_difference(self, config0):
@@ -2740,6 +2820,19 @@ class TestLayerRepr:
         assert "lora_B" in print_output
         assert "default" in print_output
 
+    def test_repr_lora_paramwrapper(self):
+        config = LoraConfig(target_parameters=["lin0.weight"])
+        model = get_peft_model(MLP(), config)
+        print_output = repr(model.model.lin0)
+        assert print_output.startswith("lora.ParamWrapper")
+        # important: targeted parameter should be contained:
+        assert "parameter_name='weight'" in print_output
+        assert "in_features=10" in print_output
+        assert "out_features=20" in print_output
+        assert "lora_A" in print_output
+        assert "lora_B" in print_output
+        assert "default" in print_output
+
 
 class TestMultipleActiveAdapters:
     """
@@ -2774,6 +2867,8 @@ class TestMultipleActiveAdapters:
     def test_multiple_active_adapters_forward(
         self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
     ):
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs_2)
+
         torch.manual_seed(0)
 
         model = self.resolve_model_cls(tuner_method)
@@ -2832,6 +2927,8 @@ class TestMultipleActiveAdapters:
     def test_multiple_active_adapters_merge_and_unmerge(
         self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
     ):
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs_2)
+
         torch.manual_seed(0)
 
         model = self.resolve_model_cls(tuner_method)
@@ -2865,6 +2962,8 @@ class TestMultipleActiveAdapters:
         "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES
     )
     def test_merge_layers_multi(self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2):
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs_2)
+
         torch.manual_seed(0)
 
         model = self.resolve_model_cls(tuner_method)
@@ -3874,6 +3973,83 @@ class TestRequiresGrad:
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.bone_block.adapter1",
+        )
+
+    def test_requires_grad_miss_different_targets(self):
+        # test two different HRA adapters that target different modules
+        config0 = MissConfig(target_modules=["lin0"], r=2)
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = MissConfig(target_modules=["lin1"], r=2, inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.miss_block.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.miss_block.default",
+        )
+
+        # change activate pter to pter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.miss_block.adapter1",
+        )
+
+        # disable all pters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.miss_block.adapter1",
+        )
+
+    def test_requires_grad_miss_same_targets(self):
+        # same as previous test, except that HRA adapters target the same layer
+        config0 = MissConfig(target_modules=["lin0"], r=2)
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = MissConfig(target_modules=["lin0"], r=2, inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.miss_block.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.miss_block.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.miss_block.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.miss_block.adapter1",
         )
 
     def test_requires_grad_boft_different_targets(self):

@@ -15,13 +15,12 @@ import copy
 import json
 import os
 import pickle
+import platform
 import re
 import shutil
 import tempfile
 import warnings
-from contextlib import contextmanager
 from dataclasses import replace
-from unittest import mock
 
 import pytest
 import torch
@@ -42,6 +41,7 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
+    MissConfig,
     OFTConfig,
     PeftModel,
     PeftType,
@@ -57,15 +57,19 @@ from peft import (
     inject_adapter_in_model,
     prepare_model_for_kbit_training,
 )
+from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
-from peft.utils import _get_submodules, infer_device
-from peft.utils.other import AuxiliaryTrainingWrapper, ModulesToSaveWrapper, TrainableTokensWrapper
+from peft.utils import (
+    AuxiliaryTrainingWrapper,
+    ModulesToSaveWrapper,
+    TrainableTokensWrapper,
+    _get_submodules,
+    infer_device,
+)
 
-from .testing_utils import get_state_dict
+from .testing_utils import get_state_dict, hub_online_once
 
-
-HUB_MODEL_ACCESSES = {}
 
 CONFIG_TESTING_KWARGS = (
     # IA³
@@ -133,6 +137,11 @@ CONFIG_TESTING_KWARGS = (
         "target_modules": None,
         "r": 2,
     },
+    # MiSS
+    {
+        "target_modules": None,
+        "r": 2,
+    },
     # LoRA + trainable_tokens
     {
         "r": 8,
@@ -174,64 +183,12 @@ CLASSES_MAPPING = {
     "vblora": (VBLoRAConfig, CONFIG_TESTING_KWARGS[10]),
     "oft": (OFTConfig, CONFIG_TESTING_KWARGS[11]),
     "bone": (BoneConfig, CONFIG_TESTING_KWARGS[12]),
+    "miss": (MissConfig, CONFIG_TESTING_KWARGS[12]),
     "lora+trainable_tokens": (LoraConfig, CONFIG_TESTING_KWARGS[13]),
     "randlora": (RandLoraConfig, CONFIG_TESTING_KWARGS[14]),
 }
 
 DECODER_MODELS_EXTRA = {"cpt": (CPTConfig, CONFIG_TESTING_KWARGS[15])}
-
-
-@contextmanager
-def hub_online_once(model_id: str):
-    """Set env[HF_HUB_OFFLINE]=1 (and patch transformers/hugging_face_hub to think that it was always that way)
-    for model ids that were seen already so that the hub is not contacted twice for the same model id in said context.
-    The cache (`HUB_MODEL_ACCESSES`) also tracks the number of cache hits per model id.
-
-    The reason for doing a context manager and not patching specific methods (e.g., `from_pretrained`) is that there
-    are a lot of places (`PeftConfig.from_pretrained`, `get_peft_state_dict`, `load_adapter`, ...) that possibly
-    communicate with the hub to download files / check versions / etc.
-
-    Note that using this context manager can cause problems when used in code sections that access different resources.
-    Example:
-
-    ```
-    def test_something(model_id, config_kwargs):
-        with hub_online_once(model_id):
-            model = ...from_pretrained(model_id)
-            self.do_something_specific_with_model(model)
-    ```
-    It is assumed that `do_something_specific_with_model` is an absract method that is implement by several tests.
-    Imagine the first test simply does `model.generate([1,2,3])`. The second call from another test suite however uses
-    a tokenizer (`AutoTokenizer.from_pretrained(model_id)`) - this will fail since the first pass was online but didn't
-    use the tokenizer and we're now in offline mode and cannot fetch the tokenizer. The recommended workaround is to
-    extend the cache key (`model_id` passed to `hub_online_once` in this case) by something in case the tokenizer is
-    used, so that these tests don't share a cache pool with the tests that don't use a tokenizer.
-    """
-    global HUB_MODEL_ACCESSES
-    override = {}
-
-    try:
-        if model_id in HUB_MODEL_ACCESSES:
-            override = {"HF_HUB_OFFLINE": "1"}
-            HUB_MODEL_ACCESSES[model_id] += 1
-        else:
-            if model_id not in HUB_MODEL_ACCESSES:
-                HUB_MODEL_ACCESSES[model_id] = 0
-        with (
-            # strictly speaking it is not necessary to set the environment variable since most code that's out there
-            # is evaluating it at import time and we'd have to reload the modules for it to take effect. It's
-            # probably still a good idea to have it if there's some dynamic code that checks it.
-            mock.patch.dict(os.environ, override),
-            mock.patch("huggingface_hub.constants.HF_HUB_OFFLINE", override.get("HF_HUB_OFFLINE", False) == "1"),
-            mock.patch("transformers.utils.hub._is_offline_mode", override.get("HF_HUB_OFFLINE", False) == "1"),
-        ):
-            yield
-    except Exception:
-        # in case of an error we have to assume that we didn't access the model properly from the hub
-        # for the first time, so the next call cannot be considered cached.
-        if HUB_MODEL_ACCESSES.get(model_id) == 0:
-            del HUB_MODEL_ACCESSES[model_id]
-        raise
 
 
 class PeftCommonTester:
@@ -831,6 +788,7 @@ class PeftCommonTester:
             PeftType.BOFT,
             PeftType.HRA,
             PeftType.BONE,
+            PeftType.MISS,
         ]
 
         if ("gpt2" in model_id.lower()) and (config_cls == IA3Config):
@@ -864,6 +822,13 @@ class PeftCommonTester:
             model.add_adapter("adapter-2", config)
             model.set_adapter("adapter-2")
             model.eval()
+
+            # sanity check: each adapter layer with a 'default' adapter should also have 'adapter-2'
+            containers = (torch.nn.ModuleDict, torch.nn.ParameterDict, BufferDict)
+            num_default = len([m for m in model.modules() if isinstance(m, containers) and "default" in m])
+            num_adapter2 = len([m for m in model.modules() if isinstance(m, containers) and "adapter-2" in m])
+            assert num_default > 0
+            assert num_default == num_adapter2
 
             with torch.inference_mode():
                 logits_adapter_2 = model(**dummy_input)[0]
@@ -1443,6 +1408,7 @@ class PeftCommonTester:
             PeftType.HRA,
             PeftType.VBLORA,
             PeftType.BONE,
+            PeftType.MISS,
         ]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
@@ -1516,6 +1482,7 @@ class PeftCommonTester:
             PeftType.HRA,
             PeftType.VBLORA,
             PeftType.BONE,
+            PeftType.MISS,
         ]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
@@ -1614,6 +1581,7 @@ class PeftCommonTester:
             "SHIRA",
             "BONE",
             "C3A",
+            "MISS",
         ):
             with pytest.raises(AttributeError):
                 model = model.unload()
@@ -1947,14 +1915,19 @@ class PeftCommonTester:
                 # for SD, very rarely, a pixel can differ
                 assert (output_before != output_peft_disabled).float().mean() < 1e-4
             else:
+                atol, rtol = 1e-6, 1e-6
+                if (platform.system() == "Windows") and (model_id == "trl-internal-testing/tiny-Llama4ForCausalLM"):
+                    # for some reason, Windows CI fails with stricter tolerance
+                    atol, rtol = 1e-5, 1e-5
+
                 with peft_model.disable_adapter():
                     output_peft_disabled = get_output(peft_model)
-                assert torch.allclose(output_before, output_peft_disabled, atol=1e-6, rtol=1e-6)
+                assert torch.allclose(output_before, output_peft_disabled, atol=atol, rtol=rtol)
 
                 # after leaving the disable_adapter context, the output should be the same as with enabled adapter again
                 # see #1501
                 output_peft_after_disabled = get_output(peft_model)
-                assert torch.allclose(output_peft, output_peft_after_disabled, atol=1e-6, rtol=1e-6)
+                assert torch.allclose(output_peft, output_peft_after_disabled, atol=atol, rtol=rtol)
 
             # TODO: add tests to check if disabling adapters works after calling merge_adapter
 

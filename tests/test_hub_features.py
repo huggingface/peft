@@ -20,7 +20,7 @@ from transformers import AutoModelForCausalLM
 
 from peft import AutoPeftModelForCausalLM, BoneConfig, LoraConfig, PeftConfig, PeftModel, TaskType, get_peft_model
 
-from .testing_common import hub_online_once
+from .testing_utils import hub_online_once
 
 
 PEFT_MODELS_TO_TEST = [("peft-internal-testing/test-lora-subfolder", "test")]

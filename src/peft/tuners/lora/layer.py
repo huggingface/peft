@@ -33,6 +33,7 @@ from peft.utils.integrations import (
     skip_init_on_device,
 )
 from peft.utils.other import transpose
+from peft.utils.warning import PeftWarning
 
 from .config import LoraConfig
 
@@ -198,6 +199,13 @@ class LoraLayer(BaseTunerLayer):
         # This code works for linear layers, override for other layer types
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+
+        if lora_bias and (getattr(self.get_base_layer(), "bias", None) is None):
+            warnings.warn(
+                f"`lora_bias=True` was passed but the targeted layer of type {type(self.get_base_layer()).__name__} "
+                "has no bias. This means that merging LoRA weights won't be possible.",
+                PeftWarning,
+            )
 
         lora_variant = self.resolve_lora_variant(
             use_dora=use_dora, use_qalora=use_qalora, qalora_group_size=qalora_group_size
@@ -668,6 +676,10 @@ class Linear(nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weight
 
                     if self.lora_bias[active_adapter]:
+                        if getattr(base_layer, "bias", None) is None:
+                            raise RuntimeError(
+                                "Impossible to merge LoRA with `lora_bias=True` because the base layer has no bias."
+                            )
                         new_bias = base_layer.bias + self.lora_B[active_adapter].bias * self.scaling[active_adapter]
                         if not torch.isfinite(new_bias).all():
                             raise ValueError(
@@ -683,6 +695,10 @@ class Linear(nn.Module, LoraLayer):
                         self.lora_variant[active_adapter].merge_unsafe(self, active_adapter, base_layer.weight)
 
                     if self.lora_bias[active_adapter]:
+                        if getattr(base_layer, "bias", None) is None:
+                            raise RuntimeError(
+                                "Impossible to merge LoRA with `lora_bias=True` because the base layer has no bias."
+                            )
                         base_layer.bias.data += self.lora_B[active_adapter].bias * self.scaling[active_adapter]
 
                 self.merged_adapters.append(active_adapter)
@@ -1113,6 +1129,13 @@ class _ConvNd(nn.Module, LoraLayer):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
+        if lora_bias and (getattr(self.get_base_layer(), "bias", None) is None):
+            warnings.warn(
+                f"`lora_bias=True` was passed but the targeted layer of type {type(self.get_base_layer()).__name__} "
+                "has no bias. This means that merging LoRA weights won't be possible.",
+                PeftWarning,
+            )
+
         lora_variant = self.resolve_lora_variant(use_dora=use_dora)
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
@@ -1206,6 +1229,10 @@ class _ConvNd(nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weight
 
                     if self.lora_bias[active_adapter]:
+                        if getattr(base_layer, "bias", None) is None:
+                            raise RuntimeError(
+                                "Impossible to merge LoRA with `lora_bias=True` because the base layer has no bias."
+                            )
                         new_bias = base_layer.bias + self.lora_B[active_adapter].bias * self.scaling[active_adapter]
                         if not torch.isfinite(new_bias).all():
                             raise ValueError(
@@ -1221,6 +1248,10 @@ class _ConvNd(nn.Module, LoraLayer):
                         self.lora_variant[active_adapter].merge_unsafe(self, active_adapter, base_layer.weight)
 
                     if self.lora_bias[active_adapter]:
+                        if getattr(base_layer, "bias", None) is None:
+                            raise RuntimeError(
+                                "Impossible to merge LoRA with `lora_bias=True` because the base layer has no bias."
+                            )
                         base_layer.bias.data += self.lora_B[active_adapter].bias * self.scaling[active_adapter]
 
                 self.merged_adapters.append(active_adapter)
@@ -1769,14 +1800,22 @@ class _LoraParameterProxy(nn.Module):
     Intended to be used in conjunction with `nn.utils.parametrize`, see `ParamWrapper`.
     """
 
-    def __init__(self, delta_weight, num_experts):
+    def __init__(self, delta_weight):
         super().__init__()
         self.delta_weight = delta_weight
-        self.num_experts = num_experts
 
     def forward(self, W):
         with nn.utils.parametrize.cached():
             return W + self.delta_weight
+
+
+# copied from:
+# https://github.com/pytorch/pytorch/blob/5e386eec9426f174eea130c0c012d9f65ebe65fb/torch/nn/utils/parametrize.py#L75-L79
+def _register_parameter_or_buffer(module, name, X):
+    if isinstance(X, nn.Parameter):
+        module.register_parameter(name, X)
+    else:
+        module.register_buffer(name, X)
 
 
 class ParamWrapper(nn.Module, LoraLayer):
@@ -1809,8 +1848,8 @@ class ParamWrapper(nn.Module, LoraLayer):
     ) -> None:
         super().__init__()
         LoraLayer.__init__(self, base_layer, **kwargs)
-        param = getattr(base_layer, parameter_name)
         self.parameter_name = parameter_name
+        param = self.get_param()
         if param.ndim == 3:
             self.num_experts, self.in_features, self.out_features = param.shape
         else:
@@ -1869,15 +1908,6 @@ class ParamWrapper(nn.Module, LoraLayer):
         # This code works for linear layers, override for other layer types
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
-        if adapter_name in self.lora_A:
-            # It is not allowed to target multiple parameters on the same module. Supporting this would complicate
-            # things quite a lot, since we would require multiple self.lora_A, self.lora_B, etc., one for each targeted
-            # parameter.
-            raise ValueError(
-                f"lora.{self.__class__.__name__} already has an adapter for parameter '{self.parameter_name}'. "
-                "It is currently not possible to apply the same adapter to multiple parameters, please add a "
-                "different adapter to target another parameter of the same module."
-            )
 
         lora_variant = self.resolve_lora_variant(
             use_dora=use_dora, use_qalora=use_qalora, qalora_group_size=qalora_group_size
@@ -1960,7 +1990,8 @@ class ParamWrapper(nn.Module, LoraLayer):
                 adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device)
 
     def get_param(self):
-        return getattr(self.base_layer, self.parameter_name)
+        param = getattr(self.get_base_layer(), self.parameter_name)
+        return param
 
     def get_delta_weight(self, adapter_name, *args, **kwargs):
         if self.num_experts == 1:
@@ -1999,15 +2030,45 @@ class ParamWrapper(nn.Module, LoraLayer):
         base_layer = self.get_base_layer()
         requires_grad_before = self.get_param().requires_grad
         nn.utils.parametrize.register_parametrization(
-            base_layer, self.parameter_name, _LoraParameterProxy(delta_weight, num_experts=self.num_experts)
+            base_layer, self.parameter_name, _LoraParameterProxy(delta_weight)
         )
         # set requires_grad, as it defaults to False
         base_layer.parametrizations[self.parameter_name].original.requires_grad_(requires_grad_before)
         try:
             yield
         finally:
-            nn.utils.parametrize.remove_parametrizations(
-                self.base_layer, self.parameter_name, leave_parametrized=False
+            self._remove_parametrizations()
+
+    def _remove_parametrizations(self):
+        # Remove the parametrization of this specific parameter
+        base_layer = self.get_base_layer()
+        parameter_name = self.parameter_name
+        if parameter_name not in base_layer.parametrizations:
+            raise ValueError(
+                "Something went wrong, please report this issue on PEFT: https://github.com/huggingface/peft/issues"
+            )
+
+        param_list = base_layer.parametrizations[parameter_name]
+        if len(param_list) == 1:
+            # last parametrization, we can safely remove it completely
+            nn.utils.parametrize.remove_parametrizations(base_layer, parameter_name, leave_parametrized=False)
+            return
+
+        # If there are multiple parametrizations for the same parameter_name, we only want to remove the LoRA proxy.
+        # Unfortunately, PyTorch does not support this directly, so we need to take care of it manually. To achieve
+        # this, we check the ParameterList from the back until we find the _LoraParameterProxy instance and then remove
+        # it.
+        reversed_indices = reversed(range(len(param_list)))
+        for i in reversed_indices:
+            module = param_list[i]
+            if isinstance(module, _LoraParameterProxy):
+                del param_list[i]
+                break
+        else:  # no break encountered
+            # this should not happen, but raising an error is probably not necessary
+            warnings.warn(
+                f"Could not find any LoRA parametrization on {self}, please open an issue on "
+                "https://github.com/huggingface/peft/issues and report this warning."
             )
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -2061,6 +2122,18 @@ class ParamWrapper(nn.Module, LoraLayer):
             raise ValueError(f"lora.{self.__class__.__name__} does not support mixed adapter batches yet.")
         super()._check_forward_args(x, *args, **kwargs)
 
+    def unload_and_optionally_merge_module(self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]):
+        base_layer = self.base_layer
+        # ParamWrappers can be nested, so merge and retrieve base layer recursively
+        if merge:
+            self.merge(safe_merge=safe_merge, adapter_names=adapter_names)
+            while isinstance(base_layer, ParamWrapper):
+                base_layer.merge(safe_merge=safe_merge, adapter_names=adapter_names)
+                base_layer = base_layer.base_layer
+        else:
+            base_layer = self.get_base_layer()
+        return base_layer
+
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         self._check_forward_args(x, *args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
@@ -2080,6 +2153,10 @@ class ParamWrapper(nn.Module, LoraLayer):
 
     def __repr__(self) -> str:
         rep = super().__repr__()
+        idx = rep.find("(") + 1
+        # insert the name of the parameter to allow the repr to be disambiguous when multiple parameters on the same
+        # module are being targeted
+        rep = f"{rep[:idx]}\n  parameter_name='{self.parameter_name}',{rep[idx:]}"
         return "lora." + rep
 
 

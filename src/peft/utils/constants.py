@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import packaging.version
 import torch
+import transformers
 from transformers import BloomPreTrainedModel
 
 
@@ -41,9 +43,14 @@ def starcoder_model_postprocess_past_key_value(past_key_values):
     return tuple(result)
 
 
-TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {
-    "gpt_bigcode": starcoder_model_postprocess_past_key_value,
-}
+# TODO: remove this once transformers 4.53 is no longer supported
+TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {}
+transformers_le_4_53 = packaging.version.parse(transformers.__version__) < packaging.version.parse("4.54.0.dev0")
+if transformers_le_4_53:
+    TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING["gpt_bigcode"] = (
+        starcoder_model_postprocess_past_key_value
+    )
+
 
 if hasattr(BloomPreTrainedModel, "_convert_to_standard_cache"):
     # special handling for bloom architecture was fixed in:
@@ -128,6 +135,9 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
 }
+
+TRANSFORMERS_MODELS_TO_LOKR_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
+TRANSFORMERS_MODELS_TO_LOHA_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
 
 TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
     "t5": ["k", "v", "wo"],

@@ -1,0 +1,23 @@
+{
+  "short": [
+    "Explain quantum computing in one paragraph.",
+    "Write a haiku about machine learning.",
+    "What's the difference between supervised and unsupervised learning?",
+    "Define parameter-efficient fine-tuning in one sentence.",
+    "List three applications of natural language processing."
+  ],
+  "medium": [
+    "Explain the concept of low-rank adaptation (LoRA) for large language models. Include its benefits and limitations.",
+    "Compare and contrast prompt tuning and prefix tuning approaches for adapting large language models.",
+    "What are the key differences between full fine-tuning and parameter-efficient methods? Explain with examples.",
+    "Describe the process of quantization for neural networks and how it affects model size and inference speed.",
+    "Explain how sparse expert models like Mixture of Experts work and their advantages over dense models."
+  ],
+  "long": [
+    "Analyze the evolution of parameter-efficient fine-tuning methods from 2020 to present. Include a detailed comparison of at least five different approaches, their theoretical foundations, and practical implications for deploying large language models.",
+    "Provide a comprehensive tutorial on implementing LoRA for a transformer-based language model. Include code examples, hyperparameter selection guidance, and best practices for training and deployment.",
+    "Compare the computational efficiency, parameter count, and performance characteristics of different PEFT methods (LoRA, Prefix Tuning, Prompt Tuning, IA3, AdaLoRA) across various downstream tasks. Include a discussion of when each method is most appropriate.",
+    "Explain the mathematical foundations of various parameter-efficient fine-tuning techniques. Discuss how each technique modifies the original neural network architecture and the optimization challenges involved.",
+    "Discuss the ethical implications of parameter-efficient fine-tuning methods in democratizing access to large language models. Include considerations about computational resources, environmental impact, and accessibility for researchers in resource-constrained settings."
+  ]
+} 
