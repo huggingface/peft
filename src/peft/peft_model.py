@@ -749,8 +749,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 post_process_fn = TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING[self.config.model_type]
                 past_key_values = post_process_fn(past_key_values)
             elif ("gemma2" in model_type) or ("gemma3_text" in model_type):
+                # TODO: remove this logic once transformers < 4.56 is dropped
+                transformers_le_4_55 = (
+                    packaging.version.parse(transformers.__version__) <= packaging.version.parse("4.55.2")
+                )
                 # Gemma2 and Gemma3 only support HybridCache (which does not have the from_legacy_cache method)
-                if (max_cache_len is None) or (max_cache_len == -1):
+                if transformers_le_4_55 and ((max_cache_len is None) or (max_cache_len == -1)):
                     raise ValueError(
                         "max_cache_len is missing but it should have been passed. Something went wrong, please open an "
                         "issue on GitHub with a reproducer: https://github.com/huggingface/peft/issues"
@@ -758,13 +762,17 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 base_config = base_model.config
                 if hasattr(base_config, "get_text_config"):
                     base_config = base_config.get_text_config()
-                new_cache = HybridCache(
-                    config=base_config,
-                    max_batch_size=batch_size,
-                    max_cache_len=max_cache_len,
-                    dtype=past_key_values[0].dtype,
-                    device=past_key_values[0].device,
-                )
+                if transformers_le_4_55:
+                    new_cache = HybridCache(
+                        config=base_config,
+                        max_batch_size=batch_size,
+                        max_cache_len=max_cache_len,
+                        dtype=past_key_values[0].dtype,
+                        device=past_key_values[0].device,
+                    )
+                else:
+                    # transformers 4.56+ uses DynamicCache for gemma
+                    new_cache = DynamicCache(config=base_config)
                 cache_position = torch.arange(peft_config.num_virtual_tokens, device=past_key_values[0].device)
                 for layer_idx in range(peft_config.num_layers):
                     key_states, value_states = past_key_values[0][layer_idx], past_key_values[1][layer_idx]
