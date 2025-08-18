@@ -85,7 +85,7 @@ OFT preserves the hyperspherical energy by learning an orthogonal transformation
 
 ## Orthogonal Butterfly (BOFT)
 
-[BOFT](https://hf.co/papers/2311.06243) is an improved orthogonal finetuning method that focuses on preserving a pretrained model’s generative capabilities while being significantly more parameter-efficient than standard OFT. Like OFT, BOFT maintains the same cosine similarity (hyperspherical energy) between all pairwise neurons in a layer by applying an orthogonal transformation to the pretrained weight matrix, ensuring the semantic relationships among neurons are preserved.
+[BOFT](https://hf.co/papers/2311.06243) is an improved orthogonal finetuning method that focuses on preserving a pretrained model's generative capabilities while being significantly more parameter-efficient than standard OFT. Like OFT, BOFT maintains the same cosine similarity (hyperspherical energy) between all pairwise neurons in a layer by applying an orthogonal transformation to the pretrained weight matrix, ensuring the semantic relationships among neurons are preserved.
 
 Instead of using a block-diagonal orthogonal matrix, BOFT factorizes the orthogonal transformation into a product of **sparse butterfly matrices** (originally introduced in the [Cooley–Tukey FFT](https://en.wikipedia.org/wiki/Cooley%E2%80%93Tukey_FFT_algorithm)). Unlike OFT's block-diagonal rotations, which only mix inputs within each block, the butterfly structure guarantees that every input can influence every output, producing a **dense connectivity** with just `O(d log d)` parameters. This factorization preserves expressivity while drastically reducing the parameter count compared to OFT (at the expense of computation time).
 
