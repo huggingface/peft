@@ -18,11 +18,92 @@ from typing import Any
 import torch
 from accelerate.utils.imports import is_xpu_available
 from torch import nn
+from transformers import PreTrainedModel
 
 from peft.utils.other import transpose
 
+from .arrow import ArrowLoraLinearLayer
+from .config import ArrowConfig
 from .dora import DoraConv1dLayer, DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer
 from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd
+
+
+class ArrowLinearVariant(LoraVariant):
+    @staticmethod
+    def init(module: Linear, adapter_name: str, **kwargs):
+        """
+        Initialise the ArrowLoraLinearLayer() inside lora_arrow. lora_arrow is nn.ModuleDict(), serving as a container
+        for ArrowLoraLinearLayer(). A layer of the base model with LoRA adapter loaded on it will be like:
+        ----------------------------------------------------
+            (qkv_proj): lora.Linear4bit or lora.Linear(
+                (base_layer): Linear4bit or Linear (lora_dropout): ModuleDict( ... ) (lora_A): ModuleDict( ... )
+                (lora_B): ModuleDict( ... ) (lora_embedding_A): ParameterDict( ... ) (lora_embedding_B): ParameterDict(
+                ... ) (lora_magnitude_vector): ModuleDict( ... ) (lora_arrow): ModuleDict(
+                    (arrow_router): ArrowLoraLinearLayer() )
+            )
+        ----------------------------------------------------
+
+        Args:
+            module (Linear): LoRA Layer of the model, containing base_layer, lora_A, lora_B, etc.
+            adapter_name (str): name of the adapter that will be put in lora_arrow.
+            The adapter_name is "arrow_router" by default, set in create_arrow_model() in ./variants.py
+        """
+        # Checking for arrow necessary config
+        arrow_config = kwargs.get("arrow_config")
+        if arrow_config is None:
+            raise ValueError("ArrowLinearVariant.init() did not receive an arrow_config")
+
+        # 1-a) build the ArrowLoRALayer
+        arrow_layer = ArrowLoraLinearLayer(
+            in_features=module.in_features,
+            arrow_config=arrow_config,
+        ).to(module.weight.device)
+
+        # 1-b) register a container if it doesn’t exist yet
+        if not hasattr(module, "lora_arrow"):
+            module.lora_arrow = nn.ModuleDict()
+
+        module.lora_arrow[adapter_name] = arrow_layer
+
+    @staticmethod
+    def forward(
+        module: Linear,
+        *,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Parameters mirror those in PEFT’s `LoraVariant.forward`. Called every time the host Linear does a fwd pass.
+
+        build_prototypes() and gen_know_sub() should run only once before routing. Both are implemented in
+        ArrowLoraLinearLayer (see ./arrow.py). They are lazily invoked in the forward pass below. Attributes of
+        ArrowLoraLinearLayer() class ensure they execute only a single time.
+
+        Args:
+            module (Linear): LoRA Layer of the model
+            active_adapter (str): name of the arrow route, which should be active to perform arrow.
+            x (torch.Tensor): input to the layer
+            result (torch.Tensor): output of the base layer.
+
+        Return value:
+            output of the base model + delta weight computed by arrow layer.
+        """
+        arrow = module.lora_arrow[active_adapter]  # ArrowLoraLinearLayer
+        # Apply GenKnowSub the 1st time if applcable.
+        arrow.gen_know_sub(module.lora_A, module.lora_B)
+        # lazily build prototypes the 1st time after GenKnowSub
+        arrow.build_prototypes(module.lora_A, module.lora_B)
+
+        # A forward path of ArrowLoraLinearLayer is called so routing performs.
+        delta = arrow(
+            x,
+            lora_A=module.lora_A,
+            lora_B=module.lora_B,
+            dropout=module.lora_dropout[active_adapter],
+            scaling=module.scaling[active_adapter],
+        )
+        return result + delta
 
 
 class DoraLinearVariant(LoraVariant):
@@ -411,3 +492,267 @@ class QALoraLinearVariant(LoraVariant):
             delta = delta.view(orig_shape[:-1] + (delta.size(-1),))
 
         return result + delta
+
+
+def check_loaded_lora_compatibility_arrow(model, adapter_names: list[str]):
+    """
+    After loading all adapters into `model`, check they share:
+      - the same LoRA rank (r)
+      - identical weight shapes
+      - identical sets of target_modules
+    Returns the sorted list of target module names (e.g. ["qkv_proj","o_proj"]).
+    """
+    reference = None  # will hold {'r':…, 'shapes':(Ashape,Bshape), 'modules':set([...])}
+
+    for name in adapter_names:
+        curr_modules = set()
+        curr_r = None
+        curr_shapes = None
+
+        # Use named_modules to get both module and its name in the model hierarchy
+        for full_name, module in model.named_modules():
+            if hasattr(module, "lora_A") and name in module.lora_A:
+                A = module.lora_A[name].weight
+                B = module.lora_B[name].weight
+
+                # extract the *attribute* name (last component of the path)
+                mod_name = full_name.split(".")[-1]
+
+                curr_modules.add(mod_name)
+                curr_r = A.shape[1]
+                curr_shapes = (A.shape, B.shape)
+
+        if reference is None:
+            reference = {"r": curr_r, "shapes": curr_shapes, "modules": curr_modules}
+        else:
+            if curr_r != reference["r"]:
+                raise ValueError(f"[{name}] rank mismatch: {curr_r} != {reference['r']}")
+            if curr_shapes != reference["shapes"]:
+                raise ValueError(f"[{name}] shape mismatch: {curr_shapes} != {reference['shapes']}")
+            if curr_modules != reference["modules"]:
+                raise ValueError(
+                    f"[{name}] target_modules mismatch:\n"
+                    f"  this adapter -> {sorted(curr_modules)}\n"
+                    f"  reference   -> {sorted(reference['modules'])}"
+                )
+
+    agreed_modules = sorted(reference["modules"])
+    return agreed_modules
+
+
+def ensure_adapters_target_linear_layers_only(model, adapter_names: list[str]):
+    """
+    Validate that every module holding LoRA weights for any of `adapter_names` is Linear-like: nn.Linear,
+    bitsandbytes.nn.Linear4bit, nn.Conv1d, or transformers.models.gpt2.modeling_gpt2.Conv1D. If not, raise.
+    """
+    import torch.nn as nn
+
+    # Optional bnb Linear4bit
+    Linear4bit = None
+    try:
+        import bitsandbytes as bnb  # type: ignore
+
+        Linear4bit = bnb.nn.Linear4bit
+    except Exception:
+        pass
+
+    # HF GPT-2 Conv1D (linear wrapper)
+    HFConv1D = None
+    try:
+        from transformers.models.gpt2.modeling_gpt2 import Conv1D as HFConv1D  # type: ignore
+    except Exception:
+        pass
+
+    allowed_types = (nn.Linear, nn.Conv1d)
+    if Linear4bit is not None:
+        allowed_types = allowed_types + (Linear4bit,)
+    if HFConv1D is not None:
+        allowed_types = allowed_types + (HFConv1D,)
+
+    offenders = []
+
+    for full_name, module in model.named_modules():
+        if hasattr(module, "lora_A"):
+            for name in adapter_names:
+                if name in getattr(module, "lora_A", {}):
+                    base = getattr(module, "base_layer", None) or getattr(module, "original_module", None)
+                    layer_to_check = base if base is not None else module
+
+                    if not isinstance(layer_to_check, allowed_types):
+                        offenders.append((name, full_name, type(layer_to_check).__name__))
+
+    if offenders:
+        lines = [
+            "LoRA adapters must only target Linear-like layers "
+            "(nn.Linear, nn.Conv1d, HF Conv1D, or bitsandbytes.nn.Linear4bit). Found:"
+        ]
+        for name, full_name, tname in offenders:
+            lines.append(f"  - adapter '{name}' on module '{full_name}' of type {tname}")
+        raise TypeError("\n".join(lines))
+
+
+def get_adapter_hyperparams(model, adapter_name: str):
+    """
+    Return (r, lora_alpha, scaling) for `adapter_name`. Prefers the config dict when available; falls back to the first
+    LoRA layer.
+    """
+    # 1) Try from the config dict
+    r = alpha = scaling = None
+    try:
+        cfg = model.peft_config[adapter_name]
+        r = getattr(cfg, "r", None)
+        alpha = getattr(cfg, "lora_alpha", None)
+        # scaling is usually alpha / r inside layers; keep None for now
+    except Exception:
+        pass
+
+    # 2) Fall back to inspecting a LoRA-wrapped layer
+    for _, module in model.named_modules():
+        if hasattr(module, "lora_A") and adapter_name in getattr(module, "lora_A", {}):
+            # r from A’s shape: (r, in_features)
+            if r is None:
+                r = int(module.lora_A[adapter_name].weight.shape[0])
+            # alpha from layer dict if present; otherwise leave as-is
+            if alpha is None and hasattr(module, "lora_alpha"):
+                alpha = module.lora_alpha.get(adapter_name, None)
+            # scaling stored per-layer in PEFT
+            if hasattr(module, "scaling"):
+                scaling = module.scaling.get(adapter_name, None)
+            break
+
+    if r is None or alpha is None or scaling is None:
+        raise ValueError(
+            f"Could not infer hyperparams for adapter '{adapter_name}' (r={r}, alpha={alpha}, scaling={scaling})."
+        )
+    return r, alpha, scaling
+
+
+def check_lora_hyperparams_consistency(model, adapter_names: list[str]):
+    """
+    Ensure all listed adapters share identical (r, alpha, scaling) across all LoRA layers. Returns the agreed tuple (r,
+    alpha, scaling).
+    """
+    reference = None
+    for name in adapter_names:
+        r, alpha, scaling = get_adapter_hyperparams(model, name)
+        current = (r, alpha, scaling)
+        if reference is None:
+            reference = current
+        else:
+            if current != reference:
+                raise ValueError(
+                    "LoRA hyperparameter mismatch:\n"
+                    f"  adapter '{name}' -> (r={r}, alpha={alpha}, scaling={scaling})\n"
+                    f"  reference       -> (r={reference[0]}, alpha={reference[1]}, scaling={reference[2]})"
+                )
+
+    # Also verify per-layer consistency for each adapter
+    r_ref, alpha_ref, scaling_ref = reference
+    for name in adapter_names:
+        for _, module in model.named_modules():
+            if hasattr(module, "lora_A") and name in module.lora_A:
+                r_layer = int(module.lora_A[name].weight.shape[0])
+                alpha_layer = module.lora_alpha.get(name) if hasattr(module, "lora_alpha") else alpha_ref
+                scaling_layer = module.scaling.get(name) if hasattr(module, "scaling") else scaling_ref
+                if (r_layer, alpha_layer, scaling_layer) != reference:
+                    raise ValueError(
+                        "Per-layer LoRA hyperparameter mismatch:\n"
+                        f"  adapter '{name}' in module has (r={r_layer}, alpha={alpha_layer}, scaling={scaling_layer})\n"
+                        f"  reference              is (r={r_ref}, alpha={alpha_ref}, scaling={scaling_ref})"
+                    )
+    return reference
+
+
+def create_arrow_model(
+    base_model: PreTrainedModel,
+    task_specific_adapter_paths: list[str],  # path of task-specific LoRAs
+    ts_repo_id: str,
+    arrow_config: ArrowConfig,
+    general_adapter_paths: list[str] | None = None,  # path to the trained general-knowledge LoRAs
+    gen_repo_id: str | None = None,
+    **adapter_kwargs: Any,
+):
+    def get_subfolder_from_path(path: str, repo_id: str):
+        """
+        Given a Hugging Face path and a repo_id, check if repo_id is in the path. If yes, return the subfolder part;
+        otherwise raise an error.
+        """
+        path = path.strip("/")
+        repo_id = repo_id.strip("/")
+
+        if not path.startswith(repo_id):
+            raise ValueError(f"Repo ID '{repo_id}' not found in path '{path}'.")
+
+        remaining = path[len(repo_id) :].strip("/")
+        return remaining if remaining else None
+
+    if task_specific_adapter_paths is None or len(task_specific_adapter_paths) == 0:
+        raise ValueError("`task_specific_adapter_paths` should contain at least one adapter path")
+
+    from peft import LoraConfig, PeftModel
+
+    # Load the first TS expert to get a PeftModel
+    sub_folder = get_subfolder_from_path(task_specific_adapter_paths[0], ts_repo_id)
+    initial_ts_expert_name = "ts_expert_0"
+    model = PeftModel.from_pretrained(
+        base_model,
+        model_id=ts_repo_id,
+        adapter_name=initial_ts_expert_name,
+        subfolder=sub_folder,
+        **adapter_kwargs,
+    )
+
+    # Load other task-specific adapters
+    for i in range(1, len(task_specific_adapter_paths)):
+        ts_expert_name = f"ts_expert_{i}"
+        sub_folder = get_subfolder_from_path(task_specific_adapter_paths[i], ts_repo_id)
+        model.load_adapter(
+            model_id=ts_repo_id,
+            adapter_name=ts_expert_name,
+            subfolder=sub_folder,
+            **adapter_kwargs,
+        )
+    arrow_config.task_adapter_names = [f"ts_expert_{i}" for i in range(len(task_specific_adapter_paths))]
+
+    # Load general adapters (for GKS) if requested
+    if arrow_config.use_gks:
+        if general_adapter_paths is None or len(general_adapter_paths) == 0:
+            raise ValueError("You should provide general LoRA paths if you want to use GenKnowSub.")
+        for i in range(len(general_adapter_paths)):
+            gen_expert_name = f"gen_expert_{i}"
+            sub_folder = get_subfolder_from_path(general_adapter_paths[i], gen_repo_id)
+            model.load_adapter(
+                model_id=gen_repo_id,
+                adapter_name=gen_expert_name,
+                subfolder=sub_folder,
+                **adapter_kwargs,
+            )
+        arrow_config.gks_adapter_names = [f"gen_expert_{i}" for i in range(len(general_adapter_paths))]
+    else:
+        arrow_config.gks_adapter_names = []
+
+    # Check LoRA compatibility
+    target_modules = check_loaded_lora_compatibility_arrow(
+        model, adapter_names=arrow_config.task_adapter_names + arrow_config.gks_adapter_names
+    )
+
+    # Enforce adapters are ONLY on Linear/Linear4bit
+    ensure_adapters_target_linear_layers_only(
+        model, adapter_names=arrow_config.task_adapter_names + arrow_config.gks_adapter_names
+    )
+
+    r, alpha, scaling = check_lora_hyperparams_consistency(
+        model, adapter_names=arrow_config.task_adapter_names + arrow_config.gks_adapter_names
+    )
+
+    # --- Add the Arrow router (dummy LoRA) and activate it
+    router_cfg = LoraConfig(
+        arrow_config=arrow_config,
+        target_modules=target_modules,
+        lora_alpha=alpha,
+        r=r,
+    )
+    model.add_adapter(adapter_name="arrow_router", peft_config=router_cfg)
+    model.set_adapter("arrow_router")
+
+    return model

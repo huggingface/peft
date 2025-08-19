@@ -70,6 +70,47 @@ class LoftQConfig:
 
 
 @dataclass
+class ArrowConfig:
+    """
+    This is the sub-configuration class to store the configuration for Arrow and GenKnowSub algorithm. Arrow is a
+    routing algorithm to combine the trained LoRA modules to solve new tasks, proposed in
+    'https://arxiv.org/pdf/2405.11157'. GenKnowSub is a refinement on the trained modules before being combined via
+    Arrow, introduced in 'https://aclanthology.org/2025.acl-short.54/'
+    """
+
+    top_k: int = field(
+        default=3,
+        metadata={"help": "Number of top LoRA modules to combine in Arrow routing."},
+    )
+
+    router_temperature: float = field(
+        default=1.0,
+        metadata={"help": "Softmax temperature for computing Arrow expert coefficients."},
+    )
+
+    use_gks: bool = field(
+        default=False,
+        metadata={"help": "Enable GenKnowSub."},
+    )
+
+    task_adapter_names: Optional[list[str]] = field(
+        default=None, metadata={"help": "list of task-specific LoRA adapter names."}
+    )
+
+    gks_adapter_names: Optional[list[str]] = field(
+        default=None, metadata={"help": "list of general LoRA adapter names for GenKnowSub."}
+    )
+
+    def __post_init__(self):
+        if self.top_k <= 0:
+            raise ValueError("top_k cannot be negative.")
+        if self.task_adapter_names is not None:
+            raise ValueError("task_adapter_names will be set in create_arrow_model with this format: ts_expert_i")
+        if self.gks_adapter_names is not None:
+            raise ValueError("gks_adapter_names will be set in create_arrow_model with this format: gen_expert_i")
+
+
+@dataclass
 class EvaConfig:
     """
     This is the sub-configuration class to store the configuration for a data-driven initialization via EVA. EVA was
@@ -211,8 +252,7 @@ class LoraConfig(PeftConfig):
             of the passed strings. If this is specified as 'all-linear', then all linear/Conv1D modules are chosen (if
             the model is a PreTrainedModel, the output layer excluded). If this is not specified, modules will be
             chosen according to the model architecture. If the architecture is not known, an error will be raised -- in
-            this case, you should specify the target modules manually. To avoid targeting any modules (because you want
-            to apply `target_parameters`), set `target_modules=[]`.
+            this case, you should specify the target modules manually.
         exclude_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to not apply the adapter. When passing a string, a regex match will be performed.
             When passing a list of strings, either an exact match will be performed or it is checked if the name of the
@@ -283,7 +323,7 @@ class LoraConfig(PeftConfig):
             Either you specify a list of indices which will then target the model's input embedding layer (or, if not
             found, `embed_tokens`). Alternatively, you can specify a dictionary where the key is the name of the
             embedding module and the values are the list of token indices, e.g. `{'embed_tokens': [0, 1, ...]}`. Note
-            that training with FSDP requires `use_orig_params=True` to avoid issues with non-uniform `requires_grad`.
+            that training with FSDP/DeepSpeed might not yet be fully supported with this option enabled.
         loftq_config (`Optional[LoftQConfig]`):
             The configuration of LoftQ. If this is not None, then LoftQ will be used to quantize the backbone weights
             and initialize Lora layers. Also pass `init_lora_weights='loftq'`. Note that you should not pass a
@@ -311,16 +351,6 @@ class LoraConfig(PeftConfig):
             Defaults to `False`. Whether to enable the bias term for the LoRA B parameter. Typically, this should be
             disabled. The main use case for this is when the LoRA weights were extracted from fully fine-tuned
             parameters so the bias of those parameters can be taken into account.
-        target_parameters (`List[str]`, *optional*)
-            List of parameter names or regex expression of the parameter names to replace with LoRA. This argument
-            behaves similarly to `target_modules`, except that the parameter name should be passed. Generally, you
-            should use `target_modules` to target the module (e.g. `nn.Linear`). However, in some circumstances, this
-            is not possible. E.g., in many mixture of expert (MoE) layers in HF Transformers, instead of using
-            `nn.Linear`, an `nn.Parameter` is used. PEFT normally overwrites the `forward` method for LoRA, but for
-            `nn.Parameter`, there is none. Therefore, to apply LoRA to that parameter, it needs to be targeted with
-            `target_parameters`. As an example, for Llama4, you can pass:
-            `target_parameters=['feed_forward.experts.gate_up_proj', 'feed_forward.experts.down_proj]`. Passing a
-            string for regex matching is not implemented yet.
     """
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})
@@ -328,14 +358,12 @@ class LoraConfig(PeftConfig):
         default=None,
         metadata={
             "help": (
-                "List of module names or regex expression of the module names to replace with LoRA. "
-                "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. "
+                "List of module names or regex expression of the module names to replace with LoRA."
+                "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'."
                 "This can also be a wildcard 'all-linear' which matches all linear/Conv1D "
-                "(if the model is a PreTrainedModel, the output layer excluded). "
+                "(if the model is a PreTrainedModel, the output layer excluded)."
                 "If not specified, modules will be chosen according to the model architecture, If the architecture is "
-                "not known, an error will be raised -- in this case, you should specify the target modules manually. "
-                "To avoid targeting any modules (because you want to apply `target_parameters`), set "
-                "`target_modules=[]`."
+                "not known, an error will be raised -- in this case, you should specify the target modules manually."
             ),
         },
     )
@@ -465,8 +493,9 @@ class LoraConfig(PeftConfig):
                 "in two ways. Either you specify a list of indices which will then target the model's input embedding "
                 "layer (or, if not found, `embed_tokens`). Alternatively, you can specify a dictionary where the key "
                 "is the name of the embedding module and the values are the list of token indices, e.g. "
-                "`{'embed_tokens': [0, 1, ...]}`. Note that training with FSDP requires `use_orig_params=True` to "
-                "avoid issues with non-uniform `requires_grad`."
+                "`{'embed_tokens': [0, 1, ...]}`. "
+                "Note that training with FSDP/DeepSpeed might not yet be fully supported with this option enabled. "
+                "Also note that models using weight-tying are currently not supported."
             )
         },
     )
@@ -566,21 +595,11 @@ class LoraConfig(PeftConfig):
             )
         },
     )
-    target_parameters: Optional[list[str]] = field(
-        default=None,
-        metadata={
-            "help": (
-                "List of parameter names or regex expression of the parameter names to replace with LoRA. "
-                "This argument behaves similarly to `target_modules`, except that the parameter name should be passed. "
-                "Generally, you should use `target_modules` to target the module (e.g. `nn.Linear`). However, in some "
-                "circumstances, this is not possible. E.g., in many mixture of expert (MoE) layers in HF Transformers, "
-                "instead of using `nn.Linear`, an `nn.Parameter` is used. PEFT normally overwrites the `forward` "
-                "method for LoRA, but for `nn.Parameter`, there is none. Therefore, to apply LoRA to that parameter, "
-                "it needs to be targeted with `target_parameters`. As an example, for Llama4, you can pass: "
-                "`target_parameters=['feed_forward.experts.gate_up_proj', 'feed_forward.experts.down_proj]`. Passing a "
-                "string for regex matching is not implemented yet."
-            )
-        },
+    # use_arrow: Optional[bool] = field(
+    #     default=False, metadata={"help": "Whether to apply Arrow routing on the model or not."}
+    # )
+    arrow_config: Optional[ArrowConfig] = field(
+        default=None, metadata={"help": "The necessary config to apply arrow routing on the model."}
     )
 
     def to_dict(self):
@@ -600,9 +619,6 @@ class LoraConfig(PeftConfig):
         self.exclude_modules = (
             set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
-
-        if isinstance(self.target_parameters, str):
-            raise TypeError("`target_parameters` must be a list of strings or None.")
 
         # if target_modules is a regex expression, then layers_to_transform should be None
         if isinstance(self.target_modules, str) and self.layers_to_transform is not None:
