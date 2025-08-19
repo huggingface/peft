@@ -141,7 +141,7 @@ def main(args):
         cur_class_images = len(list(class_images_dir.iterdir()))
 
         if cur_class_images < args.num_class_images:
-            torch_dtype = torch.float16 if accelerator.device.type == "cuda" else torch.float32
+            torch_dtype = torch.float16 if accelerator.device.type in ["cuda", "xpu"] else torch.float32
             if args.prior_generation_precision == "fp32":
                 torch_dtype = torch.float32
             elif args.prior_generation_precision == "fp16":
@@ -178,6 +178,8 @@ def main(args):
             del pipeline
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+            elif torch.xpu.is_available():
+                torch.xpu.empty_cache()
 
     # Handle the repository creation
     if accelerator.is_main_process:
@@ -261,7 +263,9 @@ def main(args):
     text_encoder.to(accelerator.device, dtype=weight_dtype)
 
     if args.enable_xformers_memory_efficient_attention:
-        if is_xformers_available():
+        if accelerator.device.type == "xpu":
+            logger.warning("XPU hasn't support xformers yet, ignore it.")
+        elif is_xformers_available():
             unet.enable_xformers_memory_efficient_attention()
         else:
             raise ValueError("xformers is not available. Make sure it is installed correctly")
@@ -578,18 +582,26 @@ def main(args):
                             )
 
                     del pipeline
-                    torch.cuda.empty_cache()
-
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    elif torch.xpu.is_available():
+                        torch.xpu.empty_cache()
                 if global_step >= args.max_train_steps:
                     break
 
-        # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
+        # Printing the device memory usage details such as allocated memory, peak memory, and total memory usage
         if not args.no_tracemalloc:
-            accelerator.print(f"GPU Memory before entering the train : {b2mb(tracemalloc.begin)}")
-            accelerator.print(f"GPU Memory consumed at the end of the train (end-begin): {tracemalloc.used}")
-            accelerator.print(f"GPU Peak Memory consumed during the train (max-begin): {tracemalloc.peaked}")
             accelerator.print(
-                f"GPU Total Peak Memory consumed during the train (max): {tracemalloc.peaked + b2mb(tracemalloc.begin)}"
+                f"{accelerator.device.type.upper()} Memory before entering the train : {b2mb(tracemalloc.begin)}"
+            )
+            accelerator.print(
+                f"{accelerator.device.type.upper()} Memory consumed at the end of the train (end-begin): {tracemalloc.used}"
+            )
+            accelerator.print(
+                f"{accelerator.device.type.upper()} Peak Memory consumed during the train (max-begin): {tracemalloc.peaked}"
+            )
+            accelerator.print(
+                f"{accelerator.device.type.upper()} Total Peak Memory consumed during the train (max): {tracemalloc.peaked + b2mb(tracemalloc.begin)}"
             )
 
             accelerator.print(f"CPU Memory before entering the train : {b2mb(tracemalloc.cpu_begin)}")

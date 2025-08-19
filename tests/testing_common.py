@@ -20,9 +20,7 @@ import re
 import shutil
 import tempfile
 import warnings
-from contextlib import contextmanager
 from dataclasses import replace
-from unittest import mock
 
 import pytest
 import torch
@@ -59,15 +57,19 @@ from peft import (
     inject_adapter_in_model,
     prepare_model_for_kbit_training,
 )
+from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
-from peft.utils import _get_submodules, infer_device
-from peft.utils.other import AuxiliaryTrainingWrapper, ModulesToSaveWrapper, TrainableTokensWrapper
+from peft.utils import (
+    AuxiliaryTrainingWrapper,
+    ModulesToSaveWrapper,
+    TrainableTokensWrapper,
+    _get_submodules,
+    infer_device,
+)
 
-from .testing_utils import get_state_dict
+from .testing_utils import get_state_dict, hub_online_once
 
-
-HUB_MODEL_ACCESSES = {}
 
 CONFIG_TESTING_KWARGS = (
     # IA³
@@ -187,59 +189,6 @@ CLASSES_MAPPING = {
 }
 
 DECODER_MODELS_EXTRA = {"cpt": (CPTConfig, CONFIG_TESTING_KWARGS[15])}
-
-
-@contextmanager
-def hub_online_once(model_id: str):
-    """Set env[HF_HUB_OFFLINE]=1 (and patch transformers/hugging_face_hub to think that it was always that way)
-    for model ids that were seen already so that the hub is not contacted twice for the same model id in said context.
-    The cache (`HUB_MODEL_ACCESSES`) also tracks the number of cache hits per model id.
-
-    The reason for doing a context manager and not patching specific methods (e.g., `from_pretrained`) is that there
-    are a lot of places (`PeftConfig.from_pretrained`, `get_peft_state_dict`, `load_adapter`, ...) that possibly
-    communicate with the hub to download files / check versions / etc.
-
-    Note that using this context manager can cause problems when used in code sections that access different resources.
-    Example:
-
-    ```
-    def test_something(model_id, config_kwargs):
-        with hub_online_once(model_id):
-            model = ...from_pretrained(model_id)
-            self.do_something_specific_with_model(model)
-    ```
-    It is assumed that `do_something_specific_with_model` is an absract method that is implement by several tests.
-    Imagine the first test simply does `model.generate([1,2,3])`. The second call from another test suite however uses
-    a tokenizer (`AutoTokenizer.from_pretrained(model_id)`) - this will fail since the first pass was online but didn't
-    use the tokenizer and we're now in offline mode and cannot fetch the tokenizer. The recommended workaround is to
-    extend the cache key (`model_id` passed to `hub_online_once` in this case) by something in case the tokenizer is
-    used, so that these tests don't share a cache pool with the tests that don't use a tokenizer.
-    """
-    global HUB_MODEL_ACCESSES
-    override = {}
-
-    try:
-        if model_id in HUB_MODEL_ACCESSES:
-            override = {"HF_HUB_OFFLINE": "1"}
-            HUB_MODEL_ACCESSES[model_id] += 1
-        else:
-            if model_id not in HUB_MODEL_ACCESSES:
-                HUB_MODEL_ACCESSES[model_id] = 0
-        with (
-            # strictly speaking it is not necessary to set the environment variable since most code that's out there
-            # is evaluating it at import time and we'd have to reload the modules for it to take effect. It's
-            # probably still a good idea to have it if there's some dynamic code that checks it.
-            mock.patch.dict(os.environ, override),
-            mock.patch("huggingface_hub.constants.HF_HUB_OFFLINE", override.get("HF_HUB_OFFLINE", False) == "1"),
-            mock.patch("transformers.utils.hub._is_offline_mode", override.get("HF_HUB_OFFLINE", False) == "1"),
-        ):
-            yield
-    except Exception:
-        # in case of an error we have to assume that we didn't access the model properly from the hub
-        # for the first time, so the next call cannot be considered cached.
-        if HUB_MODEL_ACCESSES.get(model_id) == 0:
-            del HUB_MODEL_ACCESSES[model_id]
-        raise
 
 
 class PeftCommonTester:
@@ -873,6 +822,13 @@ class PeftCommonTester:
             model.add_adapter("adapter-2", config)
             model.set_adapter("adapter-2")
             model.eval()
+
+            # sanity check: each adapter layer with a 'default' adapter should also have 'adapter-2'
+            containers = (torch.nn.ModuleDict, torch.nn.ParameterDict, BufferDict)
+            num_default = len([m for m in model.modules() if isinstance(m, containers) and "default" in m])
+            num_adapter2 = len([m for m in model.modules() if isinstance(m, containers) and "adapter-2" in m])
+            assert num_default > 0
+            assert num_default == num_adapter2
 
             with torch.inference_mode():
                 logits_adapter_2 = model(**dummy_input)[0]
@@ -1601,8 +1557,11 @@ class PeftCommonTester:
 
     def _test_unload_adapter(self, model_id, config_cls, config_kwargs):
         with hub_online_once(model_id):
-            model = self.transformers_class.from_pretrained(model_id)
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         num_params_base = len(model.state_dict())
+        dummy_input = self.prepare_inputs_for_testing()
+        with torch.inference_mode():
+            logits_transformers = model(**dummy_input)[0]
 
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -1611,45 +1570,26 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        if config.peft_type not in (
-            "LORA",
-            "ADALORA",
-            "IA3",
-            "BOFT",
-            "OFT",
-            "VERA",
-            "FOURIERFT",
-            "HRA",
-            "VBLORA",
-            "RANDLORA",
-            "SHIRA",
-            "BONE",
-            "C3A",
-            "ROAD",
-            "MISS",
-        ):
+        if isinstance(config, PromptLearningConfig):
+            # prompt learning does not support unloading
             with pytest.raises(AttributeError):
                 model = model.unload()
         else:
             self.perturb_trainable_token_weights_if_used(model, config_kwargs)
+            with torch.inference_mode():
+                logits_with_adapter = model(**dummy_input)[0]
 
-            dummy_input = self.prepare_inputs_for_testing()
-            logits_with_adapter = model(**dummy_input)[0]
-
-            with hub_online_once(model_id):
-                transformers_model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
-                logits_transformers = transformers_model(**dummy_input)[0]
-
-                model.eval()
-                model = model.unload()
+            model.eval()
+            model = model.unload()
+            num_params_unloaded = len(model.state_dict())
+            with torch.inference_mode():
                 logits_unload = model(**dummy_input)[0]
-                num_params_unloaded = len(model.state_dict())
 
-                # check that PEFT layers are completely removed
-                assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
-                assert not torch.allclose(logits_with_adapter, logits_unload, atol=1e-10, rtol=1e-10)
-                assert torch.allclose(logits_transformers, logits_unload, atol=1e-4, rtol=1e-4)
-                assert num_params_base == num_params_unloaded
+            # check that PEFT layers are completely removed
+            assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
+            assert not torch.allclose(logits_with_adapter, logits_unload, atol=1e-10, rtol=1e-10)
+            assert torch.allclose(logits_transformers, logits_unload, atol=1e-4, rtol=1e-4)
+            assert num_params_base == num_params_unloaded
 
     def _test_weighted_combination_of_adapters_lora(self, model, config, adapter_list, weight_list):
         model.add_adapter(adapter_list[1], config)

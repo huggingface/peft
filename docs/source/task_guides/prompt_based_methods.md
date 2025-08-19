@@ -43,7 +43,13 @@ Use the [`~datasets.load_dataset`] function to load the dataset and create a new
 ```py
 from datasets import load_dataset
 
-ds = load_dataset("ought/raft", "twitter_complaints")
+ds = load_dataset(
+    "parquet",
+    data_files={
+        "train": "hf://datasets/ought/raft@refs/convert/parquet/twitter_complaints/train/0000.parquet",
+        "test": "hf://datasets/ought/raft@refs/convert/parquet/twitter_complaints/test/0000.parquet"
+    }
+)
 
 classes = [k.replace("_", " ") for k in ds["train"].features["Label"].names]
 ds = ds.map(

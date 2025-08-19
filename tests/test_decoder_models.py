@@ -49,8 +49,8 @@ from peft import (
     get_peft_model,
 )
 
-from .testing_common import PeftCommonTester, hub_online_once
-from .testing_utils import device_count, load_dataset_english_quotes, set_init_weights_false
+from .testing_common import PeftCommonTester
+from .testing_utils import device_count, hub_online_once, load_dataset_english_quotes, set_init_weights_false
 
 
 PEFT_DECODER_MODELS_TO_TEST = [
@@ -75,6 +75,8 @@ SMALL_GRID_MODELS = [
 
 
 # TODO Missing from this list are LoKr, LoHa, LN Tuning, add them
+# Note: If the PEFT method offers an initialization option to make it an identity transform (typically via the
+# init_weights argument), then this option should be set here, if it's not already the default.
 ALL_CONFIGS = [
     (
         AdaLoraConfig,

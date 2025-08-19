@@ -76,8 +76,8 @@ class FourierFTConfig(PeftConfig):
             The mapping from layer names or regexp expression to n_frequency which are different from the default
             specified. For example, `{model.decoder.layers.0.encoder_attn.k_proj: 1000`}.
         init_weights (`bool`):
-            The initialization of the Fourier weights. Set this to False if the spectrum are initialized to a standard
-            normal distribution. Set this to True if the spectrum are initialized to zeros.
+            The initialization of the Fourier weights. Set this to False (the default) if the spectrum are initialized
+            to a standard normal distribution. Set this to True if the spectrum are initialized to zeros.
     """
 
     n_frequency: int = field(
@@ -178,8 +178,9 @@ class FourierFTConfig(PeftConfig):
         default=False,
         metadata={
             "help": (
-                "The initialization of the Fourier weights. Set this to False if the spectrum should be initialized to a standard normal distribution."
-                "Set this to True if the spectrum should be initialized to zeros."
+                "The initialization of the Fourier weights. Set this to False (the default) if the spectrum should be "
+                "initialized to a standard normal distribution. Set this to True if the spectrum should be initialized "
+                "to zeros."
             )
         },
     )
