@@ -21,6 +21,7 @@ from typing import Any, Optional, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from packaging import version
 from torch import svd_lowrank
 from transformers.pytorch_utils import Conv1D
 
@@ -113,7 +114,12 @@ class LoraLayer(BaseTunerLayer):
 
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
-            in_features, out_features = base_layer.in_features, base_layer.out_features
+            torch_supports_dtensor = version.parse(torch.__version__) >= version.parse("2.5.0")
+            if torch_supports_dtensor and isinstance(self.base_layer.weight, torch.distributed.tensor.DTensor):
+                # If Tensor Parallel is used, the weight is sharded, so we need to get the local shape
+                out_features, in_features = self.base_layer.weight.to_local().shape
+            else:
+                in_features, out_features = base_layer.in_features, base_layer.out_features
         elif isinstance(base_layer, nn.Conv1d):
             in_features, out_features = base_layer.in_channels, base_layer.out_channels
         elif isinstance(base_layer, nn.Conv2d):
@@ -221,6 +227,7 @@ class LoraLayer(BaseTunerLayer):
             lora_dropout_layer = nn.Identity()
 
         self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
+
         # Actual trainable parameters
         self.lora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
         self.lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=lora_bias)
@@ -2046,14 +2053,28 @@ class ParamWrapper(nn.Module, LoraLayer):
                 "Something went wrong, please report this issue on PEFT: https://github.com/huggingface/peft/issues"
             )
 
-        if len(base_layer.parametrizations[parameter_name]) == 1:
+        param_list = base_layer.parametrizations[parameter_name]
+        if len(param_list) == 1:
             # last parametrization, we can safely remove it completely
             nn.utils.parametrize.remove_parametrizations(base_layer, parameter_name, leave_parametrized=False)
-        else:
-            # TODO: If there are multiple parametrizations for the same parameter_name, we currently remove all of them,
-            # which is not desired. Unfortunately, PyTorch does not support this directly, so we need to take care.
-            # For now, remove all parametrizations.
-            nn.utils.parametrize.remove_parametrizations(base_layer, parameter_name, leave_parametrized=False)
+            return
+
+        # If there are multiple parametrizations for the same parameter_name, we only want to remove the LoRA proxy.
+        # Unfortunately, PyTorch does not support this directly, so we need to take care of it manually. To achieve
+        # this, we check the ParameterList from the back until we find the _LoraParameterProxy instance and then remove
+        # it.
+        reversed_indices = reversed(range(len(param_list)))
+        for i in reversed_indices:
+            module = param_list[i]
+            if isinstance(module, _LoraParameterProxy):
+                del param_list[i]
+                break
+        else:  # no break encountered
+            # this should not happen, but raising an error is probably not necessary
+            warnings.warn(
+                f"Could not find any LoRA parametrization on {self}, please open an issue on "
+                "https://github.com/huggingface/peft/issues and report this warning."
+            )
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         # same as lora.Linear.merge but not hard-coding base_layer.weight and without special cases like variants removed
@@ -2137,6 +2158,10 @@ class ParamWrapper(nn.Module, LoraLayer):
 
     def __repr__(self) -> str:
         rep = super().__repr__()
+        idx = rep.find("(") + 1
+        # insert the name of the parameter to allow the repr to be disambiguous when multiple parameters on the same
+        # module are being targeted
+        rep = f"{rep[:idx]}\n  parameter_name='{self.parameter_name}',{rep[idx:]}"
         return "lora." + rep
 
 

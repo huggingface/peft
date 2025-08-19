@@ -24,6 +24,7 @@ import subprocess
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any, Callable, Optional
+from peft.utils import infer_device
 
 import psutil
 import torch
@@ -61,13 +62,15 @@ class BenchmarkResult:
 
     def __post_init__(self):
         """Initialize structured data format."""
+        device = infer_device()
+        torch_accelerator_module = getattr(torch, device, torch.cuda)
         self.run_info = {
             "timestamp": datetime.datetime.now(tz=datetime.timezone.utc).isoformat(),
             "duration": 0.0,
             "status": self.status.value,
             "hardware": {
-                "num_gpus": torch.cuda.device_count() if torch.cuda.is_available() else 0,
-                "gpu_type": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "N/A",
+                "num_accelerators": torch_accelerator_module.device_count() if torch_accelerator_module.is_available() else 0,
+                "accelerator_type": torch_accelerator_module.get_device_name(0) if torch_accelerator_module.is_available() else "N/A",
                 "cuda_version": torch.version.cuda if torch.cuda.is_available() else "N/A",
                 "pytorch_version": torch.__version__,
             },
@@ -103,13 +106,13 @@ class BenchmarkResult:
                 "version": platform.version(),
                 "machine": platform.machine(),
                 "processor": platform.processor(),
-                "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "N/A",
+                "accelerator": torch_accelerator_module.get_device_name(0) if torch_accelerator_module.is_available() else "N/A",
             },
         }
 
         self.generation_info = {
             "memory": {
-                "peak_gpu_memory_mb": 0.0,
+                "peak_accelerator_memory_mb": 0.0,
                 "peak_ram_memory_mb": 0.0,
                 "memory_logs": [],
             },
@@ -131,14 +134,14 @@ class BenchmarkResult:
         if performance_metrics:  # For things like overall tokens/sec if calculated
             self.generation_info.update(performance_metrics)
 
-    def add_memory_log(self, stage: str, ram_mb: float, gpu_allocated_mb: float, gpu_reserved_mb: float):
+    def add_memory_log(self, stage: str, ram_mb: float, accelerator_allocated_mb: float, accelerator_reserved_mb: float):
         """Add a memory usage log entry to generation_info."""
         self.generation_info["memory"]["memory_logs"].append(
             {
                 "stage": stage,
                 "ram_mb": ram_mb,
-                "gpu_allocated_mb": gpu_allocated_mb,
-                "gpu_reserved_mb": gpu_reserved_mb,
+                "accelerator_allocated_mb": accelerator_allocated_mb,
+                "accelerator_reserved_mb": accelerator_reserved_mb,
             }
         )
 
@@ -331,31 +334,42 @@ def validate_experiment_path(path: str) -> tuple[str, "BenchmarkConfig"]:
 
 
 def get_memory_usage() -> tuple[float, float, float]:
-    """Get current memory usage (RAM and GPU)."""
+    """Get current memory usage (RAM and accelerator)."""
     process = psutil.Process(os.getpid())
     ram_usage_bytes = process.memory_info().rss
     ram_usage_mb = ram_usage_bytes / (1024 * 1024)
 
     if torch.cuda.is_available():
-        gpu_allocated = torch.cuda.memory_allocated()
-        gpu_reserved = torch.cuda.memory_reserved()
-        gpu_allocated_mb = gpu_allocated / (1024 * 1024)
-        gpu_reserved_mb = gpu_reserved / (1024 * 1024)
+        accelerator_allocated = torch.cuda.memory_allocated()
+        accelerator_reserved = torch.cuda.memory_reserved()
+        accelerator_allocated_mb = accelerator_allocated / (1024 * 1024)
+        accelerator_reserved_mb = accelerator_reserved / (1024 * 1024)
+    elif torch.xpu.is_available():
+        accelerator_allocated = torch.xpu.memory_allocated()
+        accelerator_reserved = torch.xpu.memory_reserved()
+        accelerator_allocated_mb = accelerator_allocated / (1024 * 1024)
+        accelerator_reserved_mb = accelerator_reserved / (1024 * 1024)
     else:
-        gpu_allocated_mb = 0.0
-        gpu_reserved_mb = 0.0
+        accelerator_allocated_mb = 0.0
+        accelerator_reserved_mb = 0.0
 
-    return ram_usage_mb, gpu_allocated_mb, gpu_reserved_mb
+    return ram_usage_mb, accelerator_allocated_mb, accelerator_reserved_mb
 
 
-def init_cuda() -> tuple[float, float]:
-    """Initialize CUDA and return initial memory usage."""
+def init_accelerator() -> tuple[float, float]:
+    """Initialize accelerator and return initial memory usage."""
     if torch.cuda.is_available():
         torch.cuda.init()
         torch.cuda.empty_cache()
-        _, gpu_allocated, gpu_reserved = get_memory_usage()
-        return gpu_allocated, gpu_reserved
-    return 0.0, 0.0
+        _, accelerator_allocated, accelerator_reserved = get_memory_usage()
+    elif torch.xpu.is_available():
+        torch.xpu.init()
+        torch.xpu.empty_cache()
+        _, accelerator_allocated, accelerator_reserved = get_memory_usage()
+    else:
+        accelerator_allocated = 0.0
+        accelerator_reserved = 0.0
+    return accelerator_allocated, accelerator_reserved
 
 
 def get_model_size_mb(model: torch.nn.Module, dtype_bytes: int = 4) -> float:
@@ -402,7 +416,7 @@ def log_results(
 
     print_fn("\nMemory Usage (from generation_info):")
     memory_data = benchmark_result.generation_info.get("memory", {})
-    print_fn(f"  Peak GPU Memory: {memory_data.get('peak_gpu_memory_mb', 0):.2f} MB")
+    print_fn(f"  Peak Accelerator Memory: {memory_data.get('peak_accelerator_memory_mb', 0):.2f} MB")
     print_fn(f"  Peak RAM Memory: {memory_data.get('peak_ram_memory_mb', 0):.2f} MB")
 
     print_fn("\nDetailed Metrics (from generation_info.by_category):")
