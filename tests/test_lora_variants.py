@@ -22,6 +22,7 @@ from peft.tuners.lora.layer import Conv2d as LoraConv2d
 from peft.tuners.lora.layer import Embedding as LoraEmbedding
 from peft.tuners.lora.layer import Linear as LoraLinear
 from peft.tuners.lora.variants import (
+    ALoraLinearVariant,
     DoraConv1dVariant,
     DoraConv2dVariant,
     DoraEmbeddingVariant,
@@ -100,7 +101,10 @@ VARIANT_MAP = {
         LoraEmbedding: DoraEmbeddingVariant,
         LoraConv1d: DoraConv1dVariant,
         LoraConv2d: DoraConv2dVariant,
-    }
+    },
+    "alora": {
+        LoraLinear: ALoraLinearVariant,
+    },
 }
 
 
@@ -109,6 +113,11 @@ TEST_CASES = [
         "dora",
         LoraConfig,
         {"target_modules": ["linear1", "linear2", "conv1d", "conv2d", "embedding"], "use_dora": True},
+    ),
+    (
+        "alora",
+        LoraConfig,
+        {"target_modules": ["linear1", "linear2"], "alora_invocation_tokens": [1]},
     ),
 ]
 
@@ -193,7 +202,7 @@ def test_alora_activation_matches_base_until_invocation():
     lora_model.eval()
 
     input_ids = torch.tensor([[0, 1, 2, 3]])
-    start = 2 #index of invocation token
+    start = 1
     with lora_model.disable_adapter():
         with torch.no_grad():
             base_out = lora_model(X=input_ids)
@@ -203,6 +212,7 @@ def test_alora_activation_matches_base_until_invocation():
         lora_out = lora_model(X=input_ids, **kwargs)
     assert torch.allclose(lora_out[:, :start], base_out[:, :start])
     assert not torch.allclose(lora_out[:, start:], base_out[:, start:])
+
 
 # Verify that warning is given for alora when providing embeddings only
 def test_input_embeds_warning():
@@ -218,6 +228,7 @@ def test_input_embeds_warning():
         with torch.no_grad():
             lora_out = lora_model(embeds=input_embeds)
 
+
 # Verify that error is raised when requesting num_beams > 1 for alora
 def test_num_beams_error():
     transformers_class = MockTransformerWrapper
@@ -227,6 +238,6 @@ def test_num_beams_error():
     lora_model.eval()
 
     input_ids = torch.tensor([[0, 1, 2, 3]])
-    with pytest.pytest.raises(ValueError):
+    with pytest.raises(ValueError):
         with torch.no_grad():
-            lora_out = lora_model(X=input_ids,num_beams=2)
+            lora_out = lora_model(X=input_ids, num_beams=2)

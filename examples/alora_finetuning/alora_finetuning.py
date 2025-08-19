@@ -172,13 +172,13 @@ def model_inference(model_path: str, adapter_path: str, prompt: str = None, data
     inputs = tokenizer(text, return_tensors="pt").to(base_model.device)
 
     # Generate answer with adapter
-
     output_dict = alora_model.generate(**inputs, return_dict_in_generate=True, max_new_tokens=20)
     alora_outputs = output_dict.sequences
 
     # Print results
     print(f"Prompt: {text}")
-    print(f"Trained adapter response: {tokenizer.decode(alora_outputs[0]).rsplit(text, 1)[1]}")
+    response = tokenizer.decode(alora_outputs[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True)
+    print(f"Trained adapter response: {response}")  # {tokenizer.decode(alora_outputs[0]).rsplit(text, 1)[1]}")
 
 
 if __name__ == "__main__":

@@ -192,7 +192,7 @@ if is_bnb_available():
             sub_batch_indices_list = []
             for adapter in unique_adapters:
                 sub_batch_indices_list.append([index for index, item in enumerate(adapter_names) if item == adapter])
-            
+
             for i, active_adapter in enumerate(unique_adapters):
                 if active_adapter == "__base__":
                     continue

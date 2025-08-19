@@ -99,7 +99,7 @@ TEST_CASES = [
         LoraConfig,
         {
             "target_modules": ["lin0"],
-            "alora_invocation_tokens": [1, 2, 3], #placeholder, not important for tests in this file
+            "alora_invocation_tokens": [1, 2, 3],  # placeholder, not important for tests in this file
         },
     ),
     (
@@ -108,7 +108,7 @@ TEST_CASES = [
         LoraConfig,
         {
             "target_modules": ["lin0", "lin1"],
-            "alora_invocation_tokens": [1, 2, 3], #placeholder, not important for tests in this file
+            "alora_invocation_tokens": [1, 2, 3],  # placeholder, not important for tests in this file
         },
     ),
     (
@@ -117,7 +117,7 @@ TEST_CASES = [
         LoraConfig,
         {
             "target_modules": "lin1",
-            "alora_invocation_tokens": [1, 2, 3], #placeholder, not important for tests in this file
+            "alora_invocation_tokens": [1, 2, 3],  # placeholder, not important for tests in this file
             "lora_alpha": 32,
         },
     ),

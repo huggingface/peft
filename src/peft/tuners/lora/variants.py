@@ -647,6 +647,6 @@ def get_alora_offsets_for_generate(model: nn.module, *args, **kwargs):
             warnings.warn(
                 "Cannot calculate aLoRA offsets during generate as input_ids are not available. Disabling aLoRA."
             )
-            
+
             kwargs["alora_offsets"] = None
     return kwargs
