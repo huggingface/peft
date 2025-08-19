@@ -159,15 +159,14 @@ class TestLoraVariants:
             assert getattr(peft_model.base_model.model, layer).lora_magnitude_vector["default"].weight.grad is not None
 
 
-# Make sure warning is sent when invocation sequence is not present
-def test_calculate_alora_offsets_basic_and_warning():
+# Make sure None is set when invocation sequence is not present
+def test_calculate_alora_offsets():
     config = LoraConfig(alora_invocation_tokens=[1, 2])
     peft_config = {"default": config}
     input_ids = torch.tensor([[0, 1, 2, 3], [0, 4, 5, 6]])
 
-    # second row lacks invocation sequence -> warning and None offset
-    with pytest.warns(UserWarning):
-        offsets = calculate_alora_offsets(peft_config, "default", input_ids)
+    # second row lacks invocation sequence -> None offset
+    offsets = calculate_alora_offsets(peft_config, "default", input_ids)
 
     assert offsets[0] == 4
     assert offsets[1] is None
