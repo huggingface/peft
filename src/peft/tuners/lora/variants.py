@@ -557,13 +557,6 @@ def calculate_alora_offsets(
                 offset_val = seq_len - best_match_start_idx + 1
                 alora_offsets[i] = offset_val if offset_val > 0 else None
             else:  # Invocation sequence not found in input
-                warnings.warn(
-                    f"Could not find alora_invocation_tokens for specified aLoRA adapter in the "
-                    f"following instance"
-                    f"{sequence}"
-                    f"Invocation tokens: {current_invocation_ids_tensor} \n"
-                    f"Defaulting to base model. "
-                )
                 alora_offsets[i] = None
     return alora_offsets
 
