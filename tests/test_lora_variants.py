@@ -72,7 +72,7 @@ class DummyLM(nn.Module):
         self.embed = nn.Embedding(vocab_size, hidden_dim)
         self.linear = nn.Linear(hidden_dim, vocab_size)
 
-    def forward(self, X=None, embeds=None):
+    def forward(self, X=None, embeds=None, num_beams=None):
         if X is not None:
             embeds = self.embed(X)
         return self.linear(embeds)
@@ -225,8 +225,11 @@ def test_input_embeds_warning():
     input_ids = torch.tensor([[0, 1, 2, 3]])
     input_embeds = base_model.embed(input_ids)
     with pytest.warns(UserWarning):
-        with torch.no_grad():
-            lora_out = lora_model(embeds=input_embeds)
+        kwargs = get_alora_offsets_for_forward(lora_model, input_embeds=input_embeds)
+    assert kwargs.get("alora_offsets") is None
+    with pytest.warns(UserWarning):
+        kwargs = get_alora_offsets_for_generate(lora_model, input_embeds=input_embeds)
+    assert kwargs.get("alora_offsets") is None
 
 
 # Verify that error is raised when requesting num_beams > 1 for alora
