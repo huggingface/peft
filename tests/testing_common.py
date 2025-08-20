@@ -57,6 +57,7 @@ from peft import (
     inject_adapter_in_model,
     prepare_model_for_kbit_training,
 )
+from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import (
@@ -834,6 +835,13 @@ class PeftCommonTester:
             model.set_adapter("adapter-2")
             model.eval()
 
+            # sanity check: each adapter layer with a 'default' adapter should also have 'adapter-2'
+            containers = (torch.nn.ModuleDict, torch.nn.ParameterDict, BufferDict)
+            num_default = len([m for m in model.modules() if isinstance(m, containers) and "default" in m])
+            num_adapter2 = len([m for m in model.modules() if isinstance(m, containers) and "adapter-2" in m])
+            assert num_default > 0
+            assert num_default == num_adapter2
+
             with torch.inference_mode():
                 logits_adapter_2 = model(**dummy_input)[0]
 
@@ -1566,8 +1574,11 @@ class PeftCommonTester:
 
     def _test_unload_adapter(self, model_id, config_cls, config_kwargs):
         with hub_online_once(model_id):
-            model = self.transformers_class.from_pretrained(model_id)
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         num_params_base = len(model.state_dict())
+        dummy_input = self.prepare_inputs_for_testing()
+        with torch.inference_mode():
+            logits_transformers = model(**dummy_input)[0]
 
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -1576,44 +1587,26 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        if config.peft_type not in (
-            "LORA",
-            "ADALORA",
-            "IA3",
-            "BOFT",
-            "OFT",
-            "VERA",
-            "FOURIERFT",
-            "HRA",
-            "VBLORA",
-            "RANDLORA",
-            "SHIRA",
-            "BONE",
-            "C3A",
-            "MISS",
-        ):
+        if isinstance(config, PromptLearningConfig):
+            # prompt learning does not support unloading
             with pytest.raises(AttributeError):
                 model = model.unload()
         else:
             self.perturb_trainable_token_weights_if_used(model, config_kwargs)
+            with torch.inference_mode():
+                logits_with_adapter = model(**dummy_input)[0]
 
-            dummy_input = self.prepare_inputs_for_testing()
-            logits_with_adapter = model(**dummy_input)[0]
-
-            with hub_online_once(model_id):
-                transformers_model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
-                logits_transformers = transformers_model(**dummy_input)[0]
-
-                model.eval()
-                model = model.unload()
+            model.eval()
+            model = model.unload()
+            num_params_unloaded = len(model.state_dict())
+            with torch.inference_mode():
                 logits_unload = model(**dummy_input)[0]
-                num_params_unloaded = len(model.state_dict())
 
-                # check that PEFT layers are completely removed
-                assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
-                assert not torch.allclose(logits_with_adapter, logits_unload, atol=1e-10, rtol=1e-10)
-                assert torch.allclose(logits_transformers, logits_unload, atol=1e-4, rtol=1e-4)
-                assert num_params_base == num_params_unloaded
+            # check that PEFT layers are completely removed
+            assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
+            assert not torch.allclose(logits_with_adapter, logits_unload, atol=1e-10, rtol=1e-10)
+            assert torch.allclose(logits_transformers, logits_unload, atol=1e-4, rtol=1e-4)
+            assert num_params_base == num_params_unloaded
 
     def _test_weighted_combination_of_adapters_lora(self, model, config, adapter_list, weight_list):
         model.add_adapter(adapter_list[1], config)

@@ -109,7 +109,7 @@ peft_config = LoraConfig(
 ```
 The parameter `rho` (≥ 1.0) determines how much redistribution is allowed. When `rho=1.0` and `r=16`, LoRA adapters are limited to exactly 16 ranks, preventing any redistribution from occurring. A recommended value for EVA with redistribution is 2.0, meaning the maximum rank allowed for a layer is 2r.
 
-It is recommended to perform EVA initialization on a GPU as it is much faster. To optimize the amount of available memory for EVA, you can use the `low_cpu_mem_usage` flag in [`get_peft_model`]:
+It is recommended to perform EVA initialization on an accelerator(e.g. CUDA GPU, Intel XPU) as it is much faster. To optimize the amount of available memory for EVA, you can use the `low_cpu_mem_usage` flag in [`get_peft_model`]:
 ```python
 peft_model = get_peft_model(model, peft_config, low_cpu_mem_usage=True)
 ```
@@ -247,7 +247,7 @@ model = PeftModel.from_pretrained(base_model, peft_model_id, ephemeral_gpu_offlo
 DoRA is optimized (computes faster and takes less memory) for models in the evaluation mode, or when dropout is set to 0. We reuse the
 base result at those times to get the speedup.
 Running [dora finetuning](https://github.com/huggingface/peft/blob/main/examples/dora_finetuning/dora_finetuning.py)
-with `CUDA_VISIBLE_DEVICES=0 time python examples/dora_finetuning/dora_finetuning.py --quantize --lora_dropout 0 --batch_size 16 --eval_step 2 --use_dora`
+with `CUDA_VISIBLE_DEVICES=0 ZE_AFFINITY_MASK=0 time python examples/dora_finetuning/dora_finetuning.py --quantize --lora_dropout 0 --batch_size 16 --eval_step 2 --use_dora`
 on a 4090 with gradient accumulation set to 2 and max step to 20 resulted with the following observations:
 
 | | Without Optimization | With Optimization |
@@ -320,7 +320,10 @@ The same logic applies to `alpha_pattern`. If you're in doubt, don't try to get 
 
 Generally, you should use `target_modules` to target the module (e.g. `nn.Linear`). However, in some circumstances, this is not possible. E.g., in many mixture of expert (MoE) layers in HF Transformers, instead of using `nn.Linear`, an `nn.Parameter` is used. PEFT normally overwrites the `forward` method for LoRA, but for `nn.Parameter`, there is none. Therefore, to apply LoRA to that parameter, it needs to be targeted with `target_parameters`. As an example, for [Llama4](https://huggingface.co/collections/meta-llama/llama-4-67f0c30d9fe03840bc9d0164), you can pass: `target_parameters=['feed_forward.experts.gate_up_proj', 'feed_forward.experts.down_proj]`.
 
-At the moment, this argument allows to target 2-dim or 3-dim `nn.Parameter`s. It is assumed that in the case of a 3-dim parameter, the 0th dimension is the expert dimension.
+#### Caveats
+
+- At the moment, this argument allows to target 2-dim or 3-dim `nn.Parameter`s. It is assumed that in the case of a 3-dim parameter, the 0th dimension is the expert dimension.
+- It is currently not possible to add multiple LoRA adapters (via `model.add_adapter` or `model.load_adapter`) that use `target_parameters` at the same time.
 
 ## Optimizers
 
@@ -515,11 +518,13 @@ There are several supported methods for `combination_type`. Refer to the [docume
 Now, perform inference:
 
 ```python
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
+
 tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-v0.1")
 
 prompt = "Hey, are you conscious? Can you talk to me?"
 inputs = tokenizer(prompt, return_tensors="pt")
-inputs = {k: v.to("cuda") for k, v in inputs.items()}
+inputs = {k: v.to(device) for k, v in inputs.items()}
 
 with torch.no_grad():
     generate_ids = model.generate(**inputs, max_length=30)
