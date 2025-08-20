@@ -25,6 +25,7 @@ from typing import Any, Optional, Union
 
 import accelerate
 import torch
+import transformers
 from accelerate import FullyShardedDataParallelPlugin
 from accelerate.hooks import add_hook_to_module, remove_hook_from_module
 from accelerate.utils import is_npu_available, is_xpu_available
@@ -41,13 +42,17 @@ from .constants import (
     INCLUDE_LINEAR_LAYERS_SHORTHAND,
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_LOHA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_LOKR_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
     WEIGHTS_NAME,
@@ -69,13 +74,17 @@ __all__ = [
     "INCLUDE_LINEAR_LAYERS_SHORTHAND",
     "SAFETENSORS_WEIGHTS_NAME",
     "TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_LOHA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_LOKR_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
     "TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING",
     "WEIGHTS_NAME",
@@ -1224,6 +1233,14 @@ def check_file_exists_on_hf_hub(repo_id: str, filename: str, **kwargs) -> Option
     return exists
 
 
+def match_target_against_key(target_pattern: str, key: str):
+    """Backing function for `target_modules` config parameter.
+
+    Having this as its own function ensures that target key matching can be implemented in the same way everywhere.
+    """
+    return re.fullmatch(target_pattern, key)
+
+
 def get_pattern_key(pattern_keys: Sequence[str], key_to_match: str) -> str:
     """Match a substring of key_to_match in pattern keys"""
     for key in pattern_keys:
@@ -1294,3 +1311,56 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
                 token_indices=token_adapter.token_indices[adapter_name],
                 tied_adapter=model.get_input_embeddings().token_adapter,
             )
+
+
+def create_attention_mask(
+    model, *, model_input, attention_mask, past_key_values, cache_position, batch_size, sequence_length, position_ids
+):
+    # adapted from:
+    # https://github.com/huggingface/transformers/blob/cb4c56ce0dfa1350267ed28e57760986a58a9ba4/src/transformers/generation/utils.py#L644-L680
+    # In PEFT, we sometimes need to re-create the attention mask. This is because some prompt learning methods insert
+    # new items into the sequence, which results in the attention mask needing an update. We re-use transformers code
+    # for this as much as possible.
+    transformers_ge_4_53_1 = version.parse(transformers.__version__) >= version.parse("4.53.1")
+    if transformers_ge_4_53_1:
+        # the function already exists in v4.53.0 but has a different signature, so we check for 4.53.1
+        from transformers.masking_utils import create_masks_for_generate
+    else:
+        raise ImportError("Your transformers version is too old, please upgrade it to >= 4.53.1")
+
+    # Create the causal mask with fixed shape in advance, to reduce recompilations. If the function to create
+    # the 4D causal mask exists, it should be present in the base model (XXXModel class) or in its decoder.
+    base_model = getattr(model, model.base_model_prefix, model)
+    decoder = base_model.get_decoder() if hasattr(base_model, "get_decoder") else None
+    causal_mask_creation_function = getattr(base_model, "_prepare_4d_causal_attention_mask_with_cache_position", None)
+    if causal_mask_creation_function is None and decoder is not None:  # it may be in the decoder
+        causal_mask_creation_function = getattr(decoder, "_prepare_4d_causal_attention_mask_with_cache_position", None)
+
+    # If it's not defined, it means the model uses the new general mask API
+    if causal_mask_creation_function is None:  # can't be found
+        token_type_ids = getattr(model_input, "token_type_ids", None)
+        # Some models may overwrite the general one
+        causal_mask_creation_function = getattr(model, "create_masks_for_generate", create_masks_for_generate)
+        attention_mask = causal_mask_creation_function(
+            config=model.config,
+            # we only need batch size, seq_length and dtype here - we don't care about the values of the embeddings
+            input_embeds=torch.empty((batch_size, sequence_length), dtype=model.dtype),
+            attention_mask=attention_mask,
+            cache_position=cache_position,
+            past_key_values=past_key_values,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+        )
+    else:
+        attention_mask = causal_mask_creation_function(
+            attention_mask,
+            sequence_length=sequence_length,
+            target_length=past_key_values.get_max_cache_shape(),
+            dtype=model.dtype,
+            cache_position=cache_position,
+            batch_size=batch_size,
+            config=model.config,
+            past_key_values=past_key_values,
+            position_ids=position_ids,
+        )
+    return attention_mask

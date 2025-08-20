@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.15.2.dev0"
+__version__ = "0.17.1.dev0"
 
 from .auto import (
     MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
@@ -54,6 +54,8 @@ from .tuners import (
     BOFTModel,
     BoneConfig,
     BoneModel,
+    C3AConfig,
+    C3AModel,
     CPTConfig,
     CPTEmbedding,
     EvaConfig,
@@ -73,6 +75,8 @@ from .tuners import (
     LoraConfig,
     LoraModel,
     LoraRuntimeConfig,
+    MissConfig,
+    MissModel,
     MultitaskPromptTuningConfig,
     MultitaskPromptTuningInit,
     OFTConfig,
@@ -89,6 +93,10 @@ from .tuners import (
     PromptTuningInit,
     RandLoraConfig,
     RandLoraModel,
+    RoadConfig,
+    RoadModel,
+    ShiraConfig,
+    ShiraModel,
     TrainableTokensConfig,
     TrainableTokensModel,
     VBLoRAConfig,
@@ -103,6 +111,7 @@ from .tuners import (
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     PeftType,
+    PeftWarning,
     TaskType,
     bloom_model_postprocess_past_key_value,
     cast_mixed_precision_params,
@@ -136,6 +145,8 @@ __all__ = [
     "BOFTModel",
     "BoneConfig",
     "BoneModel",
+    "C3AConfig",
+    "C3AModel",
     "CPTConfig",
     "CPTEmbedding",
     "EvaConfig",
@@ -155,6 +166,8 @@ __all__ = [
     "LoraConfig",
     "LoraModel",
     "LoraRuntimeConfig",
+    "MissConfig",
+    "MissModel",
     "MultitaskPromptTuningConfig",
     "MultitaskPromptTuningInit",
     "OFTConfig",
@@ -169,6 +182,7 @@ __all__ = [
     "PeftModelForSequenceClassification",
     "PeftModelForTokenClassification",
     "PeftType",
+    "PeftWarning",
     "PolyConfig",
     "PolyModel",
     "PrefixEncoder",
@@ -182,6 +196,10 @@ __all__ = [
     "PromptTuningInit",
     "RandLoraConfig",
     "RandLoraModel",
+    "RoadConfig",
+    "RoadModel",
+    "ShiraConfig",
+    "ShiraModel",
     "TaskType",
     "TrainableTokensConfig",
     "TrainableTokensModel",

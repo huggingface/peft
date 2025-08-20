@@ -211,7 +211,8 @@ class LoraConfig(PeftConfig):
             of the passed strings. If this is specified as 'all-linear', then all linear/Conv1D modules are chosen (if
             the model is a PreTrainedModel, the output layer excluded). If this is not specified, modules will be
             chosen according to the model architecture. If the architecture is not known, an error will be raised -- in
-            this case, you should specify the target modules manually.
+            this case, you should specify the target modules manually. To avoid targeting any modules (because you want
+            to apply `target_parameters`), set `target_modules=[]`.
         exclude_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to not apply the adapter. When passing a string, a regex match will be performed.
             When passing a list of strings, either an exact match will be performed or it is checked if the name of the
@@ -282,7 +283,7 @@ class LoraConfig(PeftConfig):
             Either you specify a list of indices which will then target the model's input embedding layer (or, if not
             found, `embed_tokens`). Alternatively, you can specify a dictionary where the key is the name of the
             embedding module and the values are the list of token indices, e.g. `{'embed_tokens': [0, 1, ...]}`. Note
-            that training with FSDP/DeepSpeed might not yet be fully supported with this option enabled.
+            that training with FSDP requires `use_orig_params=True` to avoid issues with non-uniform `requires_grad`.
         loftq_config (`Optional[LoftQConfig]`):
             The configuration of LoftQ. If this is not None, then LoftQ will be used to quantize the backbone weights
             and initialize Lora layers. Also pass `init_lora_weights='loftq'`. Note that you should not pass a
@@ -310,6 +311,16 @@ class LoraConfig(PeftConfig):
             Defaults to `False`. Whether to enable the bias term for the LoRA B parameter. Typically, this should be
             disabled. The main use case for this is when the LoRA weights were extracted from fully fine-tuned
             parameters so the bias of those parameters can be taken into account.
+        target_parameters (`List[str]`, *optional*)
+            List of parameter names or regex expression of the parameter names to replace with LoRA. This argument
+            behaves similarly to `target_modules`, except that the parameter name should be passed. Generally, you
+            should use `target_modules` to target the module (e.g. `nn.Linear`). However, in some circumstances, this
+            is not possible. E.g., in many mixture of expert (MoE) layers in HF Transformers, instead of using
+            `nn.Linear`, an `nn.Parameter` is used. PEFT normally overwrites the `forward` method for LoRA, but for
+            `nn.Parameter`, there is none. Therefore, to apply LoRA to that parameter, it needs to be targeted with
+            `target_parameters`. As an example, for Llama4, you can pass:
+            `target_parameters=['feed_forward.experts.gate_up_proj', 'feed_forward.experts.down_proj]`. Passing a
+            string for regex matching is not implemented yet.
     """
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})
@@ -317,12 +328,14 @@ class LoraConfig(PeftConfig):
         default=None,
         metadata={
             "help": (
-                "List of module names or regex expression of the module names to replace with LoRA."
-                "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'."
+                "List of module names or regex expression of the module names to replace with LoRA. "
+                "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. "
                 "This can also be a wildcard 'all-linear' which matches all linear/Conv1D "
-                "(if the model is a PreTrainedModel, the output layer excluded)."
+                "(if the model is a PreTrainedModel, the output layer excluded). "
                 "If not specified, modules will be chosen according to the model architecture, If the architecture is "
-                "not known, an error will be raised -- in this case, you should specify the target modules manually."
+                "not known, an error will be raised -- in this case, you should specify the target modules manually. "
+                "To avoid targeting any modules (because you want to apply `target_parameters`), set "
+                "`target_modules=[]`."
             ),
         },
     )
@@ -452,9 +465,8 @@ class LoraConfig(PeftConfig):
                 "in two ways. Either you specify a list of indices which will then target the model's input embedding "
                 "layer (or, if not found, `embed_tokens`). Alternatively, you can specify a dictionary where the key "
                 "is the name of the embedding module and the values are the list of token indices, e.g. "
-                "`{'embed_tokens': [0, 1, ...]}`. "
-                "Note that training with FSDP/DeepSpeed might not yet be fully supported with this option enabled. "
-                "Also note that models using weight-tying are currently not supported."
+                "`{'embed_tokens': [0, 1, ...]}`. Note that training with FSDP requires `use_orig_params=True` to "
+                "avoid issues with non-uniform `requires_grad`."
             )
         },
     )
@@ -498,6 +510,29 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    use_qalora: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "It is only implemented in GPTQ for now. Enable <a href='https://huggingface.co/papers/2309.14717'>Quantization-Aware Low-Rank Adaptation (QALoRA)</a>."
+                "This technique combines quantization-aware training "
+                "with LoRA to improve performance for quantized models. This can improve the performance of LoRA, "
+                "especially at low ranks. Right now, QALoRA only supports linear layers."
+            )
+        },
+    )
+    qalora_group_size: int = field(
+        default=16,
+        metadata={
+            "help": (
+                "Group size parameter for QALoRA pooling, controlling the dimension reduction factor. "
+                "Input dimensions are pooled into groups of this size, reducing the computational cost. "
+                "Higher values provide more compression but may reduce model quality. "
+                "This parameter determines how many original features are averaged together to create "
+                "one pooled feature. Only used when `use_qalora=True`."
+            )
+        },
+    )
     # Enables replicating layers in a model to expand it to a larger model.
     layer_replication: Optional[list[tuple[int, int]]] = field(
         default=None,
@@ -531,6 +566,22 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    target_parameters: Optional[list[str]] = field(
+        default=None,
+        metadata={
+            "help": (
+                "List of parameter names or regex expression of the parameter names to replace with LoRA. "
+                "This argument behaves similarly to `target_modules`, except that the parameter name should be passed. "
+                "Generally, you should use `target_modules` to target the module (e.g. `nn.Linear`). However, in some "
+                "circumstances, this is not possible. E.g., in many mixture of expert (MoE) layers in HF Transformers, "
+                "instead of using `nn.Linear`, an `nn.Parameter` is used. PEFT normally overwrites the `forward` "
+                "method for LoRA, but for `nn.Parameter`, there is none. Therefore, to apply LoRA to that parameter, "
+                "it needs to be targeted with `target_parameters`. As an example, for Llama4, you can pass: "
+                "`target_parameters=['feed_forward.experts.gate_up_proj', 'feed_forward.experts.down_proj]`. Passing a "
+                "string for regex matching is not implemented yet."
+            )
+        },
+    )
 
     def to_dict(self):
         """
@@ -549,6 +600,9 @@ class LoraConfig(PeftConfig):
         self.exclude_modules = (
             set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
+
+        if isinstance(self.target_parameters, str):
+            raise TypeError("`target_parameters` must be a list of strings or None.")
 
         # if target_modules is a regex expression, then layers_to_transform should be None
         if isinstance(self.target_modules, str) and self.layers_to_transform is not None:

@@ -23,17 +23,13 @@ import json
 import os
 import random
 import sys
-import tempfile
 import textwrap
 import time
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from functools import partial
-from typing import Any, Callable, ContextManager, Literal, Optional
+from typing import Any, Callable, Literal, Optional
 
 import torch
-from data import (
-    get_train_valid_test_datasets,
-)
 from torch import nn
 from torch.amp import GradScaler, autocast
 from tqdm import tqdm
@@ -46,18 +42,20 @@ from utils import (
     get_accuracy,
     get_base_model_info,
     get_dataset_info,
+    get_file_size,
     get_model,
     get_optimizer_and_scheduler,
     get_peft_branch,
     get_tokenizer,
     get_train_config,
-    init_cuda,
+    init_accelerator,
     log_results,
     validate_experiment_path,
 )
 
+from data import get_train_valid_test_datasets
 from peft import AdaLoraConfig, PeftConfig
-from peft.utils import SAFETENSORS_WEIGHTS_NAME
+from peft.utils import infer_device, CONFIG_NAME
 
 
 # # suppress all warnings
@@ -121,7 +119,7 @@ def train(
     batch_size: int,
     batch_size_eval: int,
     tokenizer: Any,
-    cuda_memory_init: int,
+    accelerator_memory_init: int,
     eval_steps: int,
     generation_kwargs: dict[str, Any],
     grad_norm_clip: float,
@@ -132,17 +130,20 @@ def train(
     use_amp: bool,
     is_adalora: bool,
 ) -> TrainResult:
-    cuda_memory_allocated_log = []
-    cuda_memory_reserved_log = []
+    accelerator_memory_allocated_log = []
+    accelerator_memory_reserved_log = []
     losses = []
     durations = []
     metrics = []
     sample = 0  # keep count of the current sample
     total_samples = 0  # total number of samples over all epochs
     total_tokens = []  # total number of tokens over all epochs
+
+    device_type = infer_device()
+    torch_accelerator_module = getattr(torch, device_type, torch.cuda)
     if use_amp:
-        grad_scaler: GradScaler | DummyGradScaler = GradScaler(device="cuda")
-        autocast_ctx: Callable[[], ContextManager[Any]] = partial(autocast, device_type="cuda")
+        grad_scaler: GradScaler | DummyGradScaler = GradScaler(device=device_type)
+        autocast_ctx: Callable[[], ContextManager[Any]] = partial(autocast, device_type=device_type)
     else:
         grad_scaler = DummyGradScaler()
         autocast_ctx = nullcontext
@@ -155,7 +156,11 @@ def train(
         **optimizer_kwargs,
     )
     # print this after getting the optimizer, in case it modifies requires_gard
-    num_trainable_params, num_params = model.get_nb_trainable_parameters()
+    if hasattr(model, "get_nb_trainable_parameters"):
+        num_trainable_params, num_params = model.get_nb_trainable_parameters()
+    else:
+        num_params = model.num_parameters()
+        num_trainable_params = num_params
     print_verbose(
         f"trainable params: {num_trainable_params:,d} || all params: {num_params:,d} || "
         f"trainable: {100 * num_trainable_params / num_params:.4f}%"
@@ -221,8 +226,12 @@ def train(
 
             losses.append(loss.item())
             pbar.set_postfix({"loss": loss.item()})
-            cuda_memory_allocated_log.append(torch.cuda.memory_allocated() - cuda_memory_init)
-            cuda_memory_reserved_log.append(torch.cuda.memory_reserved() - cuda_memory_init)
+            accelerator_memory_allocated_log.append(
+                torch_accelerator_module.memory_allocated() - accelerator_memory_init
+            )
+            accelerator_memory_reserved_log.append(
+                torch_accelerator_module.memory_reserved() - accelerator_memory_init
+            )
             toc = time.perf_counter()
             durations.append(toc - tic)
 
@@ -230,8 +239,8 @@ def train(
             if step % eval_steps == 0:
                 tic_eval = time.perf_counter()
                 loss_avg = sum(losses[-eval_steps:]) / eval_steps
-                memory_allocated_avg = sum(cuda_memory_allocated_log[-eval_steps:]) / eval_steps
-                memory_reserved_avg = sum(cuda_memory_reserved_log[-eval_steps:]) / eval_steps
+                memory_allocated_avg = sum(accelerator_memory_allocated_log[-eval_steps:]) / eval_steps
+                memory_reserved_avg = sum(accelerator_memory_reserved_log[-eval_steps:]) / eval_steps
                 token_sum = sum(total_tokens[-eval_steps:])
                 dur_train = sum(durations[-eval_steps:])
                 tokens_per_sec = token_sum / dur_train
@@ -264,7 +273,6 @@ def train(
                         "valid accuracy": accuracy,
                         "train loss": loss_avg,
                         "train samples": total_samples,
-                        "loss avg": loss_avg,
                         "train time": dur_train,
                         "eval time": dur_eval,
                         "tokens / sec": tokens_per_sec,
@@ -291,7 +299,7 @@ def train(
                 print_verbose(json.dumps(log_dict))
 
             # # TODO is this needed?
-            torch.cuda.empty_cache()
+            torch_accelerator_module.empty_cache()
             gc.collect()
 
         print_verbose(f"Training finished after {max_steps} steps, evaluation on test set follows.")
@@ -339,10 +347,12 @@ def train(
     train_result = TrainResult(
         status=status,
         train_time=train_time,
-        cuda_memory_reserved_log=cuda_memory_reserved_log,
+        accelerator_memory_reserved_log=accelerator_memory_reserved_log,
         losses=losses,
         metrics=metrics,
         error_msg=error_msg,
+        num_trainable_params=num_trainable_params,
+        num_total_params=num_params,
     )
     return train_result
 
@@ -360,13 +370,17 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         )
 
     # load configs
-    peft_config = PeftConfig.from_pretrained(path_experiment)
+    peft_config: Optional[PeftConfig] = None
+    if os.path.exists(os.path.join(path_experiment, CONFIG_NAME)):
+        peft_config = PeftConfig.from_pretrained(path_experiment)
+    else:
+        print_verbose(f"Could not find PEFT config at {path_experiment}, performing FULL FINETUNING")
     path_train_config = os.path.join(path_experiment, FILE_NAME_TRAIN_PARAMS)
     train_config = get_train_config(path_train_config)
     set_seed(train_config.seed)
 
     # initialize objects
-    cuda_memory_init = init_cuda()
+    accelerator_memory_init = init_accelerator()
     tokenizer = get_tokenizer(model_id=train_config.model_id, max_seq_length=train_config.max_seq_length)
 
     model_info = get_base_model_info(train_config.model_id)
@@ -389,7 +403,7 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         batch_size=train_config.batch_size,
         batch_size_eval=train_config.batch_size_eval,
         tokenizer=tokenizer,
-        cuda_memory_init=cuda_memory_init,
+        accelerator_memory_init=accelerator_memory_init,
         eval_steps=train_config.eval_steps,
         generation_kwargs=train_config.generation_kwargs,
         grad_norm_clip=train_config.grad_norm_clip,
@@ -405,23 +419,19 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         print_verbose("Training failed, not logging results")
         sys.exit(1)
 
-    # save the model in temp dir, get file size, clean it up afterwards if clean is passed
-    try:
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True, delete=clean) as tmp_dir:
-            model.save_pretrained(tmp_dir)
-            stat = os.stat(os.path.join(tmp_dir, SAFETENSORS_WEIGHTS_NAME))
-            file_size = stat.st_size
-            if not clean:
-                print_verbose(f"Saved PEFT checkpoint to {tmp_dir}")
-    except Exception as exc:
-        print(f"Failed to save PEFT checkpoint due to the following error: {exc}")
+    file_size = get_file_size(
+        model,
+        peft_config=peft_config,
+        clean=clean,
+        print_fn=print_verbose,
+    )
 
     time_total = time.perf_counter() - tic_total
     # log results: print and save to file
     log_results(
         experiment_name=experiment_name,
         train_result=train_result,
-        cuda_memory_init=cuda_memory_init,
+        accelerator_memory_init=accelerator_memory_init,
         time_total=time_total,
         file_size=file_size,
         model_info=model_info,
