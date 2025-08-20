@@ -182,7 +182,7 @@ This technique scans for the last occurence of an invocation sequence (`alora_in
 ```py
 from peft import LoraConfig
 
-config = LoraConfig(alora_invocation_tokens=alora_invocation_tokens, ...)
+config = LoraConfig(alora_invocation_tokens=alora_invocation_tokens, task_type="CAUSAL_LM", ...)
 ```
 
 where `alora_invocation_tokens` is a list of integer token ids. Given a desired invocation string, this can be obtained as
@@ -190,14 +190,14 @@ where `alora_invocation_tokens` is a list of integer token ids. Given a desired 
 invocation_string = "placeholder"
 alora_invocation_tokens = tokenizer.encode(invocation_string, add_special_tokens=False).
 ```
-where the tokenizer is the tokenizer for the base model.
+where the tokenizer is the tokenizer for the base model. Note that we have `add_special_tokens=False` to avoid adding SOS/EOS tokens in our search string (which will most likely cause failure to find).
 
 **Notes**
-* aLoRA is only supported for CAUSAL_LM tasks due to its focus on cache reuse.
+* aLoRA is only supported for `task_type=CAUSAL_LM` tasks due to its focus on cache reuse.
 * Since the weights are adapted on fewer tokens, often (not always) aLoRA requires higher rank (`r`) than LoRA. `r=32` can be a good starting point.
 * aLoRA weights cannot be merged into the base model by definition, since the adapter weights are selectively applied to a subset of tokens. Attempts to merge will throw errors.
 * Beam search is not yet supported.
-* It is generally not recommended to add new tokens to the tokenizer that are not present in the base model, as this can complicate the target use case of both the base model and adapter model operating on overlapping context.
+* It is generally not recommended to add new tokens to the tokenizer that are not present in the base model, as this can complicate the target use case of both the base model and adapter model operating on overlapping context. That said, there is a possible workaround by first efficiently adding [trainable tokens](https://huggingface.co/docs/peft/en/package_reference/trainable_tokens) to the base model prior to training the adapter.
 
 #### Choice of invocation sequence and SFT design 
 
@@ -205,7 +205,7 @@ Each input must have the `alora_invocation_tokens` sequence present, it is not a
 formatting should be consistent between train and test.
 
 Consider the following example, where the base model has a chat template,
-and the goal it to train the adapter to generate a desired output. 
+and the goal is to train the adapter to generate a desired output. 
 
 * Option 1: If there is no task-specific prompt, i.e. the input is a chat history with the `assistant` prompt, then the chat template's `assistant` prompt (e.g. `<|start_of_role|>assistant<|end_of_role|>`) is a natural choice for the invocation string. See the model's chat template to find the prompt for the model.
 * Option 2: If there is a task-specific prompt for the adapter that describes the task the adapter is learning, and that prompt is put as a `user` turn immediately prior to the generation, then the chat template's `user` prompt (e.g. `<|start_of_role|>user<|end_of_role|>`) is a natural choice for the invocation string.
@@ -215,8 +215,11 @@ Once deciding on an invocation string, get the model tokenizer and obtain `alora
 alora_invocation_tokens = tokenizer.encode(invocation_string, add_special_tokens=False).
 ```
 
-**Note** If using custom strings for the invocation string, make sure that the start and end of the string are special tokens to avoid issues with tokenization at the boundaries.
+An example inference setup is at [alora finetuning](https://github.com/huggingface/peft/blob/main/examples/alora_finetuning/alora_finetuning.py).
 
+**Note** If using custom strings for the invocation string, make sure that the start and end of the string are special tokens to avoid issues with tokenization at the boundaries. 
+
+To see why, imagine that 'a', 'b', 'c', and 'ab' are tokens in your tokenizer (numbers 1, 2, 3, 4 respectively). Suppose that your alora_invocation_tokens = [2, 3]. Now imagine your input string is "abc". Because "ab" is a token, this will get tokenized as [4,3]. So the alora_invocation_tokens will fail to be found, despite the string "bc" being in it. If the start and end of the invocation string are special tokens, however, this failure case will never happen since special tokens are never tokenized into the same token with other characters.
 
 ### Weight-Decomposed Low-Rank Adaptation (DoRA)
 
