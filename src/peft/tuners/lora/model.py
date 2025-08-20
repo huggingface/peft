@@ -466,7 +466,11 @@ class LoraModel(BaseTuner):
                     pre_forward = partial(_alora_offsets_pre_forward_hook, alora_offsets=alora_offsets)
                     handle = layer.register_forward_pre_hook(pre_forward, with_kwargs=True)
                     hook_handles.append(handle)
-
+        num_beams = kwargs.get("num_beams", None)
+        uses_beam_search = isinstance(num_beams, int) and (num_beams > 1)
+        if uses_beam_search:
+            if alora_offsets is not None:
+                raise ValueError("Beam search not yet supported for aLoRA.")
         if adapter_names is not None:
             if self.training:
                 raise ValueError("Cannot pass `adapter_names` when the model is in training mode.")
@@ -487,12 +491,8 @@ class LoraModel(BaseTuner):
                 )
 
             # deal with beam search
-            num_beams = kwargs.get("num_beams", None)
-            uses_beam_search = isinstance(num_beams, int) and (num_beams > 1)
             original_adapter_names = adapter_names[:]
             if uses_beam_search:
-                if alora_offsets is not None:
-                    raise ValueError("Beam search not yet supported for aLoRA.")
                 if not isinstance(adapter_names, (list, tuple)):
                     raise TypeError(f"Got adapter names of type {type(adapter_names)}, expected a list of str.")
                 # When there is beam search, the inputs are repeated n times, thus we repeat each adapter name n times and

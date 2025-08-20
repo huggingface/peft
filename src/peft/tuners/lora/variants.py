@@ -470,7 +470,6 @@ class ALoraLinearVariant(LoraVariant):
         lora_B = module.lora_B[active_adapter]
         dropout = module.lora_dropout[active_adapter]
         scaling = module.scaling[active_adapter]
-
         x = x.to(lora_A.weight.dtype)
         if x.dim() == 2:
             # If x is 2-dimensional (unusual but comes up in certain tests), this means that for all inputs,
@@ -554,7 +553,7 @@ def calculate_alora_offsets(
                             best_match_start_idx = idx
 
             if best_match_start_idx != -1:
-                offset_val = seq_len - best_match_start_idx + 1
+                offset_val = seq_len - best_match_start_idx
                 alora_offsets[i] = offset_val if offset_val > 0 else None
             else:  # Invocation sequence not found in input
                 alora_offsets[i] = None
@@ -581,7 +580,7 @@ def is_alora_relevant_in_batch(model: nn.Module, adapter_names: Optional[list[st
 
 
 def get_alora_offsets_for_forward(
-    model: nn.Module, input_ids: torch.Tensor, inputs_embeds: torch.Tensor = None, **kwargs
+    model: nn.Module, input_ids: torch.Tensor = None, inputs_embeds: torch.Tensor = None, **kwargs
 ):
     """
     Wrapper around calculate_alora_offsets, for the .forward of the model. It only calculates alora_offsets if the
@@ -637,10 +636,6 @@ def get_alora_offsets_for_generate(model: nn.module, *args, **kwargs):
                 current_input_ids,
                 adapter_names=adapter_names_for_offset_calc,
             )
-            # Subtract 1 from offsets for generate, due to position difference between "forward" and generate forward pass
-            for i in range(len(calculated_offsets)):
-                if calculated_offsets[i] is not None:
-                    calculated_offsets[i] -= 1
             kwargs["alora_offsets"] = calculated_offsets
 
         else:

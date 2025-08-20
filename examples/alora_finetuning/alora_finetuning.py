@@ -178,7 +178,7 @@ def model_inference(model_path: str, adapter_path: str, prompt: str = None, data
     # Print results
     print(f"Prompt: {text}")
     response = tokenizer.decode(alora_outputs[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True)
-    print(f"Trained adapter response: {response}")  # {tokenizer.decode(alora_outputs[0]).rsplit(text, 1)[1]}")
+    print(f"Trained adapter response: {response}")
 
 
 if __name__ == "__main__":

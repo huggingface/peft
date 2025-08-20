@@ -29,6 +29,7 @@ from peft.tuners.lora.variants import (
     DoraLinearVariant,
     calculate_alora_offsets,
     get_alora_offsets_for_forward,
+    get_alora_offsets_for_generate,
 )
 
 
@@ -72,7 +73,7 @@ class DummyLM(nn.Module):
         self.embed = nn.Embedding(vocab_size, hidden_dim)
         self.linear = nn.Linear(hidden_dim, vocab_size)
 
-    def forward(self, X=None, embeds=None, num_beams=None):
+    def forward(self, X=None, embeds=None, num_beams=None, alora_offsets=None):
         if X is not None:
             embeds = self.embed(X)
         return self.linear(embeds)
@@ -177,7 +178,7 @@ def test_calculate_alora_offsets():
     # second row lacks invocation sequence -> None offset
     offsets = calculate_alora_offsets(peft_config, "default", input_ids)
 
-    assert offsets[0] == 4
+    assert offsets[0] == 3
     assert offsets[1] is None
 
 
@@ -190,7 +191,7 @@ def test_calculate_alora_offsets_with_adapter_names():
 
     offsets = calculate_alora_offsets(peft_config, "a1", input_ids, adapter_names=["a1", "a2"])
 
-    assert offsets == [2, 2]
+    assert offsets == [1, 1]
 
 
 # Verify that the adapter does not modify outputs prior to invocation point
@@ -202,7 +203,7 @@ def test_alora_activation_matches_base_until_invocation():
     lora_model.eval()
 
     input_ids = torch.tensor([[0, 1, 2, 3]])
-    start = 1
+    start = 2
     with lora_model.disable_adapter():
         with torch.no_grad():
             base_out = lora_model(X=input_ids)
@@ -225,10 +226,10 @@ def test_input_embeds_warning():
     input_ids = torch.tensor([[0, 1, 2, 3]])
     input_embeds = base_model.embed(input_ids)
     with pytest.warns(UserWarning):
-        kwargs = get_alora_offsets_for_forward(lora_model, input_embeds=input_embeds)
+        kwargs = get_alora_offsets_for_forward(lora_model, inputs_embeds=input_embeds)
     assert kwargs.get("alora_offsets") is None
     with pytest.warns(UserWarning):
-        kwargs = get_alora_offsets_for_generate(lora_model, input_embeds=input_embeds)
+        kwargs = get_alora_offsets_for_generate(lora_model, inputs_embeds=input_embeds)
     assert kwargs.get("alora_offsets") is None
 
 
@@ -243,4 +244,4 @@ def test_num_beams_error():
     input_ids = torch.tensor([[0, 1, 2, 3]])
     with pytest.raises(ValueError):
         with torch.no_grad():
-            lora_out = lora_model(X=input_ids, num_beams=2)
+            lora_out = lora_model(X=input_ids, num_beams=2, alora_offsets=[3])
