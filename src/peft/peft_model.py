@@ -783,6 +783,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 # TODO: remove check for _supports_cache_class once transformers 4.53 is no longer supported
                 past_key_values = EncoderDecoderCache.from_legacy_cache(past_key_values)
                 past_key_values.cross_attention_cache = DynamicCache()
+                # invalidate the cross attention cache, since we add virtual tokens to the encoder
                 for key in past_key_values.is_updated.keys():
                     past_key_values.is_updated[key] = False
             map_cache_to_layer_device_map(self.get_base_model(), past_key_values)  # no-op if not a Cache instance
