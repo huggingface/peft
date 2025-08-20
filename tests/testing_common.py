@@ -1572,11 +1572,24 @@ class PeftCommonTester:
                 model.delete_adapter("unknown-adapter")
 
     def _test_unload_adapter(self, model_id, config_cls, config_kwargs):
+        from transformers.quantizers.quantizer_quanto import QuantoHfQuantizer
+
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = model.to(self.torch_device)
+
+        # Using quanto with inference model raises an error:
+        # > RuntimeError: Cannot set version_counter for inference tensor
+        # https://github.com/huggingface/optimum-quanto/issues/304
+        # TODO: remove when/if this is fixed
+        if isinstance(getattr(model, "hf_quantizer", None), QuantoHfQuantizer):
+            inference_mode = nullcontext
+        else:
+            inference_mode = torch.inference_mode
+
         num_params_base = len(model.state_dict())
         dummy_input = self.prepare_inputs_for_testing()
-        with torch.inference_mode():
+        with inference_mode():
             logits_transformers = model(**dummy_input)[0]
 
         config = config_cls(
@@ -1584,7 +1597,6 @@ class PeftCommonTester:
             **config_kwargs,
         )
         model = get_peft_model(model, config)
-        model = model.to(self.torch_device)
 
         if isinstance(config, PromptLearningConfig):
             # prompt learning does not support unloading
@@ -1592,13 +1604,13 @@ class PeftCommonTester:
                 model = model.unload()
         else:
             self.perturb_trainable_token_weights_if_used(model, config_kwargs)
-            with torch.inference_mode():
+            with inference_mode():
                 logits_with_adapter = model(**dummy_input)[0]
 
             model.eval()
             model = model.unload()
             num_params_unloaded = len(model.state_dict())
-            with torch.inference_mode():
+            with inference_mode():
                 logits_unload = model(**dummy_input)[0]
 
             # check that PEFT layers are completely removed

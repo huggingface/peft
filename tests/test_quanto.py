@@ -534,6 +534,7 @@ class BasePeftQuantoModelTester:
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_disable_adapter(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls)
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_disable_adapter(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
