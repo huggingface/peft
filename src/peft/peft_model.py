@@ -34,7 +34,7 @@ from huggingface_hub import HfFileSystem, ModelCard, ModelCardData, hf_hub_downl
 from safetensors import safe_open
 from safetensors.torch import save_file as safe_save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
-from transformers import Cache, DynamicCache, EncoderDecoderCache, HybridCache, PreTrainedModel
+from transformers import Cache, DynamicCache, EncoderDecoderCache, PreTrainedModel
 from transformers.modeling_outputs import QuestionAnsweringModelOutput, SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
 
@@ -763,6 +763,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 if hasattr(base_config, "get_text_config"):
                     base_config = base_config.get_text_config()
                 if transformers_lt_4_56:
+                    # HybridCache is deprecated, and will be removed in 4.60.0
+                    # see https://github.com/huggingface/transformers/pull/40276
+                    from transformers import HybridCache
+
                     new_cache = HybridCache(
                         config=base_config,
                         max_batch_size=batch_size,
