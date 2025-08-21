@@ -750,7 +750,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 past_key_values = post_process_fn(past_key_values)
             elif ("gemma2" in model_type) or ("gemma3_text" in model_type):
                 # TODO: remove this logic once transformers < 4.56 is dropped
-                transformers_lt_4_56 = packaging.version.parse(transformers.__version__) <= packaging.version.parse(
+                transformers_lt_4_56 = packaging.version.parse(transformers.__version__) < packaging.version.parse(
                     "4.56.0.dev0"
                 )
                 # Gemma2 and Gemma3 only support HybridCache (which does not have the from_legacy_cache method)
