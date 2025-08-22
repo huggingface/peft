@@ -28,8 +28,13 @@ class ArrowLoraLinearLayer(nn.Module):
         self._protos_ready = False
         self.top_k = arrow_config.top_k
         self.temperature = arrow_config.router_temperature
-        self.expert_names = arrow_config.task_adapter_names.copy()
-        self.gks_adapter_names = arrow_config.gks_adapter_names
+        self.rng_seed = arrow_config.rng_seed
+        self.task_adapter_names = (
+            arrow_config.task_adapter_names.copy()
+        )  # Set in create_arrow_model() with this format: task_0, task_1, ...
+        self.gks_adapter_names = (
+            arrow_config.gks_adapter_names
+        )  # Set in create_arrow_model() with this format: gks_0, gks_1, ...
         self.use_gks = arrow_config.use_gks
         self.gks_done = False
         self.gks_added_adapter_names = []
@@ -45,20 +50,18 @@ class ArrowLoraLinearLayer(nn.Module):
         all_ts_adapter_names = [
             k
             for k in lora_A.keys()
-            if k in lora_B
-            and k != "arrow_router"
-            and not (k.startswith("gen_expert_") and k[len("gen_expert_") :].isdigit())
+            if k in lora_B and k != "arrow_router" and not (k.startswith("gks_") and k[len("gks_") :].isdigit())
         ]
 
-        if sorted(self.expert_names) == sorted(all_ts_adapter_names):  # No changes in the ts_adapters
+        if sorted(self.task_adapter_names) == sorted(all_ts_adapter_names):  # No changes in the ts_adapters
             return
 
         # Getting the name(s) of added adapter(s)
-        if len(self.expert_names) < len(all_ts_adapter_names):  # Adapter(s) are added.
-            self.gks_added_adapter_names = [x for x in all_ts_adapter_names if x not in self.expert_names]
+        if len(self.task_adapter_names) < len(all_ts_adapter_names):  # Adapter(s) are added.
+            self.gks_added_adapter_names = [x for x in all_ts_adapter_names if x not in self.task_adapter_names]
 
-        # Updating the expert_names
-        self.expert_names = all_ts_adapter_names.copy()
+        # Updating the task_adapter_names
+        self.task_adapter_names = all_ts_adapter_names.copy()
         # Invalidate caches so they’ll be rebuilt lazily on next forward()
         self._protos_ready = False
         # GKS will be handled by self.gks_added_adapter_names
@@ -91,23 +94,15 @@ class ArrowLoraLinearLayer(nn.Module):
         B32 = B.to(torch.float32)
         C = B32.T @ B32  # (r, r)
 
-        cpu_state = torch.random.get_rng_state()
-        if torch.cuda.is_available():
-            gpu_state = torch.cuda.get_rng_state()
-
-        # Set temporary seed for reproducibility
-        torch.manual_seed(42)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(42)
+        # Private RNG on A's device
+        gen = None
+        if self.rng_seed is not None:
+            gen = torch.Generator(device=A32.device.type)
+            gen.manual_seed(int(self.rng_seed))
 
         # init vector in input space
-        v = torch.randn(A32.size(1), dtype=A32.dtype, device=A32.device)
+        v = torch.randn(A32.size(1), dtype=A32.dtype, device=A32.device, generator=gen)
         v = v / (v.norm() + eps)
-
-        # Restore RNG state
-        torch.random.set_rng_state(cpu_state)
-        if torch.cuda.is_available():
-            torch.cuda.set_rng_state(gpu_state)
 
         for _ in range(iters):
             # w = (ΔWᵀΔW) v = Aᵀ (BᵀB) (A v)
@@ -126,7 +121,7 @@ class ArrowLoraLinearLayer(nn.Module):
         The resulting similarity scores serve as coefficients to compute a weighted average of the corresponding LoRA
         modules, effectively routing each token through its most relevant experts.
 
-        ** This prototype computation is done only once for all the experts.**
+        ** This prototype computation is done is done once for all experts and is re-done on newly added adapters.**
 
         Args:
             lora_A : Matrices A in LoRA layer.
@@ -136,7 +131,7 @@ class ArrowLoraLinearLayer(nn.Module):
         if self._protos_ready:
             return
         protos = []
-        for name in self.expert_names:
+        for name in self.task_adapter_names:
             A = lora_A[name].weight  # (r, in_features)
             B = lora_B[name].weight  # (out_features, r)
 
@@ -180,7 +175,7 @@ class ArrowLoraLinearLayer(nn.Module):
 
             # 2) Subtract the average from task-specific experts
             if self.gks_done is False:  # GKS is done for all the experts, since it hasn't been done yet.
-                for name in self.expert_names:
+                for name in self.task_adapter_names:
                     lora_A[name].weight.data.sub_(avg_A)
                     lora_B[name].weight.data.sub_(avg_B)
             else:  # GKS is only done on new added experts, since GKS has been done previously.
@@ -228,10 +223,17 @@ class ArrowLoraLinearLayer(nn.Module):
         Returns:
             delta: LoRA output adjustment computed by Arrow routing.
         """
-        x = self._cast_input_dtype(x, lora_A[self.expert_names[0]].weight.dtype)
+        x = self._cast_input_dtype(x, lora_A[self.task_adapter_names[0]].weight.dtype)
         B, *rest, F_in = x.shape
         tok = x.view(-1, F_in)  # (t, F_in)
         t, E = tok.size(0), self.prototypes.size(0)
+
+        # We now turn scaling, which is a dict, to tensors in order to use them later
+        scales_tens = torch.tensor(
+            [scaling[n] for n in self.task_adapter_names],
+            device=tok.device,
+            dtype=tok.dtype,
+        )  # shape (E,)
 
         # 1) similarity   — sign-agnostic
         sim = torch.abs(tok @ self.prototypes.T)  # (t, E)
@@ -244,8 +246,8 @@ class ArrowLoraLinearLayer(nn.Module):
 
         # 3) stack all A and B weights once
         #   A_stack: (E, r, in_features), B_stack: (E, out_features, r)
-        A_stack = torch.stack([lora_A[n].weight for n in self.expert_names], dim=0)
-        B_stack = torch.stack([lora_B[n].weight for n in self.expert_names], dim=0)
+        A_stack = torch.stack([lora_A[n].weight for n in self.task_adapter_names], dim=0)
+        B_stack = torch.stack([lora_B[n].weight for n in self.task_adapter_names], dim=0)
 
         # 4) project tokens into each expert’s low‑rank space:
         #    z[e] = tok @ A_e.T   → shape (t, E, r)
@@ -255,11 +257,15 @@ class ArrowLoraLinearLayer(nn.Module):
         #    y[e] = z[e] @ B_e.T  → shape (t, E, out_features)
         y = torch.einsum("ter, eor -> teo", z, B_stack)
 
+        # 6) apply per-expert scaling before the weighted sum
+        # y_scaled[t, e, o] = scales[e] * y[t, e, o]
+        y = y * scales_tens.view(1, -1, 1)
+
         # 6) weighted sum over experts:
         #    delta_flat[t,o] = Σ_e coeff[t,e] * y[t,e,o]
         delta_flat = torch.einsum("te, teo -> to", coeff, y)  # (t, out_features)
 
         # 7) dropout, scale, and reshape
-        delta = scaling * dropout(delta_flat)
+        delta = dropout(delta_flat)
         out_dim = delta_flat.size(-1)
         return delta.view(B, *rest, out_dim)

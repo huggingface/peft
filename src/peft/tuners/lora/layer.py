@@ -272,7 +272,12 @@ class LoraLayer(BaseTunerLayer):
 
         self.set_adapter(self.active_adapters)
 
-        # check for added/removed adapters to/from the arrow_model
+        # Check for adapters that were added or removed from the arrow_model.
+        # The arrow model may be modified after creation by adding new experts
+        # (pre-trained or trainable) or by removing existing ones. Whenever such
+        # a change occurs, on_adapter_change() is called to update the set of
+        # active task-specific experts and, if needed, to handle recomputing prototypes
+        # and doing general knowledge subtraction (GKS) again.
         if hasattr(self, "lora_arrow"):
             for adapter in self.lora_variant:
                 if adapter in self.lora_arrow:
@@ -676,7 +681,11 @@ class Linear(nn.Module, LoraLayer):
             # no adapter to merge
             return
 
-        # Check for merging in arrow model
+        # Check for merging in an Arrow model.
+        # Since Arrow is a Mixture-of-Experts (MoE) approach, merging adapters is not
+        # meaningful or even possible: for each token, the top-k LoRA experts are
+        # dynamically selected and routed. Because of this per-token routing, there is
+        # no single set of weights that can represent a merged adapter.
         if hasattr(self, "lora_arrow"):  # if model is an arrow_model
             for active_adapter in adapter_names:
                 if active_adapter in self.lora_arrow:  # if lora router was an active adapter
@@ -1854,8 +1863,7 @@ def _register_parameter_or_buffer(module, name, X):
 
 class ParamWrapper(nn.Module, LoraLayer):
     """A LoRA wrapper for `nn.Parameter`. This layer is dispatched if users target a parameter directly with
-    `lora_config.target_parameters`
-    Note:
+    `lora_config.target_parameters` Note:
     - When accessing the wrapped nn.Parameter directly, e.g. via `module.weight`, the LoRA weights are *not* applied.
     - It is currently not implemented to target multiple parameters on the same module. To achieve this, it is
       currently required to create a separate LoRA adapter (with another adapter name) and activate both at the same

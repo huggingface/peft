@@ -94,20 +94,29 @@ class ArrowConfig:
     )
 
     task_adapter_names: Optional[list[str]] = field(
-        default=None, metadata={"help": "list of task-specific LoRA adapter names."}
+        default=None,
+        init=False,
+        metadata={"help": "list of task-specific LoRA adapter names. It will be set in create_arrow_model()."},
     )
 
     gks_adapter_names: Optional[list[str]] = field(
-        default=None, metadata={"help": "list of general LoRA adapter names for GenKnowSub."}
+        default=None,
+        init=False,
+        metadata={
+            "help": "list of general LoRA adapter names for GenKnowSub. It will be set in create_arrow_model()."
+        },
+    )
+
+    rng_seed: Optional[int] = field(
+        default=None,
+        metadata={"help": "Optional RNG seed for reproducibility. If None, sampling is non-deterministic."},
     )
 
     def __post_init__(self):
         if self.top_k <= 0:
             raise ValueError("top_k cannot be negative.")
-        if self.task_adapter_names is not None:
-            raise ValueError("task_adapter_names will be set in create_arrow_model with this format: ts_expert_i")
-        if self.gks_adapter_names is not None:
-            raise ValueError("gks_adapter_names will be set in create_arrow_model with this format: gen_expert_i")
+        if self.router_temperature <= 0:
+            raise ValueError("router_temperature must be greater than 0.")
 
 
 @dataclass

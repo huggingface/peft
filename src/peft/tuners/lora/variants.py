@@ -90,9 +90,11 @@ class ArrowLinearVariant(LoraVariant):
             output of the base model + delta weight computed by arrow layer.
         """
         arrow = module.lora_arrow[active_adapter]  # ArrowLoraLinearLayer
-        # Apply GenKnowSub the 1st time if applcable.
+        # Apply GenKnowSub the 1st time if applcable. By calling arrow/on_adapter_change(),
+        # gen_know_sub() is done again for new added adapters after variants/create_arrow_model().
         arrow.gen_know_sub(module.lora_A, module.lora_B)
-        # lazily build prototypes the 1st time after GenKnowSub
+        # lazily build prototypes the 1st time after GenKnowSub. By calling arrow/on_adapter_change(),
+        # build_prototypes() is done again for new added adapters after variants/create_arrow_model().
         arrow.build_prototypes(module.lora_A, module.lora_B)
 
         # A forward path of ArrowLoraLinearLayer is called so routing performs.
@@ -101,7 +103,7 @@ class ArrowLinearVariant(LoraVariant):
             lora_A=module.lora_A,
             lora_B=module.lora_B,
             dropout=module.lora_dropout[active_adapter],
-            scaling=module.scaling[active_adapter],
+            scaling=module.scaling,
         )
         return result + delta
 
@@ -627,40 +629,42 @@ def get_adapter_hyperparams(model, adapter_name: str):
     return r, alpha, scaling
 
 
-def check_lora_hyperparams_consistency(model, adapter_names: list[str]):
+def check_lora_rank_consistency(model, adapter_names: list[str]) -> int:
     """
-    Ensure all listed adapters share identical (r, alpha, scaling) across all LoRA layers. Returns the agreed tuple (r,
-    alpha, scaling).
+    Ensure all listed adapters share identical LoRA rank `r` across all LoRA layers. Returns the agreed rank `r`.
     """
-    reference = None
-    for name in adapter_names:
-        r, alpha, scaling = get_adapter_hyperparams(model, name)
-        current = (r, alpha, scaling)
-        if reference is None:
-            reference = current
-        else:
-            if current != reference:
-                raise ValueError(
-                    "LoRA hyperparameter mismatch:\n"
-                    f"  adapter '{name}' -> (r={r}, alpha={alpha}, scaling={scaling})\n"
-                    f"  reference       -> (r={reference[0]}, alpha={reference[1]}, scaling={reference[2]})"
-                )
+    ref_r = None
+    found = False
 
-    # Also verify per-layer consistency for each adapter
-    r_ref, alpha_ref, scaling_ref = reference
     for name in adapter_names:
         for _, module in model.named_modules():
             if hasattr(module, "lora_A") and name in module.lora_A:
+                found = True
                 r_layer = int(module.lora_A[name].weight.shape[0])
-                alpha_layer = module.lora_alpha.get(name) if hasattr(module, "lora_alpha") else alpha_ref
-                scaling_layer = module.scaling.get(name) if hasattr(module, "scaling") else scaling_ref
-                if (r_layer, alpha_layer, scaling_layer) != reference:
-                    raise ValueError(
-                        "Per-layer LoRA hyperparameter mismatch:\n"
-                        f"  adapter '{name}' in module has (r={r_layer}, alpha={alpha_layer}, scaling={scaling_layer})\n"
-                        f"  reference              is (r={r_ref}, alpha={alpha_ref}, scaling={scaling_ref})"
-                    )
-    return reference
+                if ref_r is None:
+                    ref_r = r_layer
+                elif r_layer != ref_r:
+                    raise ValueError(f"LoRA rank mismatch: adapter '{name}' has r={r_layer}, expected r={ref_r}")
+
+    if not found:
+        raise ValueError("No LoRA layers found for the provided adapters.")
+
+    return ref_r
+
+
+def get_subfolder_from_path(path: str, repo_id: str):
+    """
+    Given a Hugging Face path and a repo_id, check if repo_id is in the path. If yes, return the subfolder part;
+    otherwise raise an error.
+    """
+    path = path.strip("/")
+    repo_id = repo_id.strip("/")
+
+    if not path.startswith(repo_id):
+        raise ValueError(f"Repo ID '{repo_id}' not found in path '{path}'.")
+
+    remaining = path[len(repo_id) :].strip("/")
+    return remaining if remaining else None
 
 
 def create_arrow_model(
@@ -672,28 +676,17 @@ def create_arrow_model(
     gen_repo_id: str | None = None,
     **adapter_kwargs: Any,
 ):
-    def get_subfolder_from_path(path: str, repo_id: str):
-        """
-        Given a Hugging Face path and a repo_id, check if repo_id is in the path. If yes, return the subfolder part;
-        otherwise raise an error.
-        """
-        path = path.strip("/")
-        repo_id = repo_id.strip("/")
-
-        if not path.startswith(repo_id):
-            raise ValueError(f"Repo ID '{repo_id}' not found in path '{path}'.")
-
-        remaining = path[len(repo_id) :].strip("/")
-        return remaining if remaining else None
-
     if task_specific_adapter_paths is None or len(task_specific_adapter_paths) == 0:
         raise ValueError("`task_specific_adapter_paths` should contain at least one adapter path")
 
     from peft import LoraConfig, PeftModel
 
+    TASK_ADAPTER_PREFIX = "task_"
+    GKS_ADAPTER_PREFIX = "gks_"
+
     # Load the first TS expert to get a PeftModel
     sub_folder = get_subfolder_from_path(task_specific_adapter_paths[0], ts_repo_id)
-    initial_ts_expert_name = "ts_expert_0"
+    initial_ts_expert_name = f"{TASK_ADAPTER_PREFIX}0"
     model = PeftModel.from_pretrained(
         base_model,
         model_id=ts_repo_id,
@@ -704,7 +697,7 @@ def create_arrow_model(
 
     # Load other task-specific adapters
     for i in range(1, len(task_specific_adapter_paths)):
-        ts_expert_name = f"ts_expert_{i}"
+        ts_expert_name = f"{TASK_ADAPTER_PREFIX}{i}"
         sub_folder = get_subfolder_from_path(task_specific_adapter_paths[i], ts_repo_id)
         model.load_adapter(
             model_id=ts_repo_id,
@@ -712,14 +705,14 @@ def create_arrow_model(
             subfolder=sub_folder,
             **adapter_kwargs,
         )
-    arrow_config.task_adapter_names = [f"ts_expert_{i}" for i in range(len(task_specific_adapter_paths))]
+    arrow_config.task_adapter_names = [f"{TASK_ADAPTER_PREFIX}{i}" for i in range(len(task_specific_adapter_paths))]
 
     # Load general adapters (for GKS) if requested
     if arrow_config.use_gks:
         if general_adapter_paths is None or len(general_adapter_paths) == 0:
             raise ValueError("You should provide general LoRA paths if you want to use GenKnowSub.")
         for i in range(len(general_adapter_paths)):
-            gen_expert_name = f"gen_expert_{i}"
+            gen_expert_name = f"{GKS_ADAPTER_PREFIX}{i}"
             sub_folder = get_subfolder_from_path(general_adapter_paths[i], gen_repo_id)
             model.load_adapter(
                 model_id=gen_repo_id,
@@ -727,7 +720,7 @@ def create_arrow_model(
                 subfolder=sub_folder,
                 **adapter_kwargs,
             )
-        arrow_config.gks_adapter_names = [f"gen_expert_{i}" for i in range(len(general_adapter_paths))]
+        arrow_config.gks_adapter_names = [f"{GKS_ADAPTER_PREFIX}{i}" for i in range(len(general_adapter_paths))]
     else:
         arrow_config.gks_adapter_names = []
 
@@ -741,7 +734,8 @@ def create_arrow_model(
         model, adapter_names=arrow_config.task_adapter_names + arrow_config.gks_adapter_names
     )
 
-    r, alpha, scaling = check_lora_hyperparams_consistency(
+    # Check for the consistency of adapters' rank
+    r = check_lora_rank_consistency(
         model, adapter_names=arrow_config.task_adapter_names + arrow_config.gks_adapter_names
     )
 
@@ -749,7 +743,6 @@ def create_arrow_model(
     router_cfg = LoraConfig(
         arrow_config=arrow_config,
         target_modules=target_modules,
-        lora_alpha=alpha,
         r=r,
     )
     model.add_adapter(adapter_name="arrow_router", peft_config=router_cfg)
