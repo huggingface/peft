@@ -582,3 +582,64 @@ Using this feature has some drawbacks, namely:
   - Increase the batch size.
   - Try to avoid having a large number of different adapters in the same batch, prefer homogeneous batches. This can be achieved by buffering samples with the same adapter and only perform inference with a small handful of different adapters.
   - Take a look at alternative implementations such as [LoRAX](https://github.com/predibase/lorax), [punica](https://github.com/punica-ai/punica), or [S-LoRA](https://github.com/S-LoRA/S-LoRA), which are specialized to work with a large number of different adapters.
+
+## Composing and Reusing LoRA Adapters
+### Arrow
+[Arrow](https://arxiv.org/abs/2405.11157) is a modular routing algorithm designed to combine multiple pre-trained task-specific LoRA adapters to solve a given task. Rather than merging all adapters naively, Arrow introduces a **gradient-free, token-wise mixture-of-experts (MoE) routing mechanism**. At inference time, it first computes a _prototype_ for each LoRA by extracting the top right singular vector from its SVD decomposition. Each token representation is then compared to these prototypes via cosine similarity to obtain routing coefficients. Tokens are assigned to the top-k most relevant LoRA adapters, with the coefficients normalized through softmax, and their outputs linearly combined. This allows effective reuse of existing LoRA modules for new tasks and leads to stronger zero-shot generalization.
+
+In PEFT, Arrow is enabled through ```ArrowConfig``` and ```create_arrow_model```. You can also configure parameters such as ```top_k``` (the number of LoRA adapters combined per token), ```router_temperature``` (the softmax temperature applied to the routing coefficients), and ```rng_seed``` (for reproducibility). 
+
+```py
+from peft import create_arrow_model, ArrowConfig
+from transformers import AutoModelForCausalLM
+
+# Loading the model
+base_model = AutoModelForCausalLM.from_pretrained("microsoft/Phi-3-mini-4k-instruct")
+
+# Creating the Arrow config
+arrow_config = ArrowConfig(
+    top_k = 3,
+    router_temperature = 1.0,
+    rng_seed = 42,
+)
+
+# Task-specific and General adapters paths. It should be in the format of: <user>/<repo>/<adapter>
+# ts_repo_id is the path of directory, where all the adapters exist there.
+# The provided LoRA adapters below are trained on a clustered Flan dataset. 
+# The clustering is done using MBC method explained in the Arrow paper.
+task_specific_adapter_paths = [
+        f"TahaBa/phi3-mini-clustered-flan/ts_expert_{i}" for i in range(10)
+    ]
+
+# Creating the Arrow model
+model = create_arrow_model(
+        base_model = base_model,
+        task_specific_adapter_paths = task_specific_adapter_paths,
+        ts_repo_id = "TahaBa/phi3-mini-clustered-flan",
+        arrow_config = arrow_config,
+    )
+
+# Now the forward path could be called on this model, like a normal PeftModel.
+```
+
+Furthermore, you can add or remove adapters after calling ```create_arrow_model```—for example, to fine-tune a new adapter or discard an unnecessary one. Once the adapters are in place, you can activate the ```"arrow_router"``` for inference to use Arrow. Note that if you add a new LoRA adapter after ```create_arrow_model``` and want to fine-tune it, you must explicitly set this adapter as active, since ```"arrow_router"``` is activated by default in ```create_arrow_model```.
+
+```py
+from trl import SFTTrainer, SFTConfig
+
+# Adding a new adapter and activating it
+model.add_adapter(adapter_name='new_adapter')
+model.set_adapter('new_adapter')
+
+# Now the model could be trained along the `new_adapter`.
+trainer = SFTTrainer(
+        model=model,
+        args=SFTConfig(...),
+        ...
+    )
+
+# Once the training is done, you can activate `arrow_router` and use it in inference
+model.set_adapter('arrow_router')    # Model is ready to be used at inference time now
+```
+
+### GenKnowSub

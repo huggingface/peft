@@ -151,10 +151,68 @@ class TestArrowRouting:
             adapter_name="new_added_ts_expert",
             subfolder=sub_folder,
         )
+        # Activating the new adapter and run forward path on it
+        m_small_later_big.set_adapter("new_added_ts_expert")
+        x = torch.ones(3, 5, dtype=torch.long)
+        m_small_later_big(x)
+
+        # Now we switch back to the arrow_router
+        m_small_later_big.set_adapter("arrow_router")
         m_small_later_big.eval()
 
         x = torch.ones(1, 4, dtype=torch.long)
         assert torch.allclose(m_big(x).logits, m_small_later_big(x).logits)
+
+    def test_arrow_with_load_adapter_later_with_forward_activate_new(self, ts_adapters, gen_adapter):
+        """
+        Loading the last expert after creating the arrow model and activate it should produce different result compared
+        to the case where arrow_router is activate, and the model's using arrow.
+        """
+        # Arrow over all three experts
+        model_id = "hf-internal-testing/tiny-random-gpt2"
+        with hub_online_once(model_id):
+            base_model_1 = AutoModelForCausalLM.from_pretrained(model_id)
+            base_model_2 = AutoModelForCausalLM.from_pretrained(model_id)
+        cfg_big = ArrowConfig(top_k=2, use_gks=True, rng_seed=42)
+        m_big = create_arrow_model(
+            base_model=base_model_1,
+            task_specific_adapter_paths=ts_adapters,
+            ts_repo_id="/".join(ts_adapters[0].split("/")[:2]),
+            general_adapter_paths=gen_adapter,
+            gen_repo_id="/".join(gen_adapter[0].split("/")[:2]),
+            arrow_config=cfg_big,
+        ).eval()
+
+        # Arrow over all 2 experts + loading the third expert later
+        cfg_small_later_big = ArrowConfig(top_k=2, use_gks=True, rng_seed=42)
+        m_small_later_big = create_arrow_model(
+            base_model=base_model_2,
+            task_specific_adapter_paths=ts_adapters[:2],
+            ts_repo_id="/".join(ts_adapters[0].split("/")[:2]),
+            general_adapter_paths=gen_adapter,
+            gen_repo_id="/".join(gen_adapter[0].split("/")[:2]),
+            arrow_config=cfg_small_later_big,
+        )
+
+        # Ensuring that the prototypes and gks are done one time by running a forward path
+        x = torch.ones(1, 4, dtype=torch.long)
+        m_small_later_big(x)
+
+        # Now loading the third expert
+        parts = ts_adapters[-1].split("/")
+        repo_id = "/".join(parts[:2])
+        sub_folder = "/".join(parts[2:])
+        m_small_later_big.load_adapter(
+            model_id=repo_id,
+            adapter_name="new_added_ts_expert",
+            subfolder=sub_folder,
+        )
+        # The new adapter is activated
+        m_small_later_big.set_adapter("new_added_ts_expert")
+        m_small_later_big.eval()
+
+        x = torch.ones(1, 4, dtype=torch.long)
+        assert not torch.allclose(m_big(x).logits, m_small_later_big(x).logits)
 
     def test_arrow_gks_with_load_adapter_later_without_forward(self, ts_adapters, gen_adapter):
         """
