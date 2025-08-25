@@ -603,8 +603,7 @@ arrow_config = ArrowConfig(
     rng_seed = 42,
 )
 
-# Task-specific and General adapters paths. It should be in the format of: <user>/<repo>/<adapter>
-# ts_repo_id is the path of directory, where all the adapters exist there.
+# ts_repo_id is the path of directory, where all the task adapters exist there.
 # The provided LoRA adapters below are trained on a clustered Flan dataset. 
 # The clustering is done using MBC method explained in the Arrow paper.
 task_specific_adapter_paths = [
@@ -643,3 +642,89 @@ model.set_adapter('arrow_router')    # Model is ready to be used at inference ti
 ```
 
 ### GenKnowSub
+[GenKnowSub](https://aclanthology.org/2025.acl-short.54/) augments Arrow by purifying task-specific LoRA adapters before routing. The key idea is to subtract general knowledge encoded in LoRA space—based on the [forgetting-via-negation principle](https://arxiv.org/abs/2212.04089)—so that task adapters become more isolated and focused on task-relevant signals. Concretely, GenKnowSub estimates a low-dimensional “general” subspace from a set of general (non task-specific) LoRA adapters and removes this component from each task adapter’s LoRA update prior to Arrow’s token-wise routing. This typically improves compositionality and reduces interference when combining many task adapters.
+
+In PEFT, enable GenKnowSub by setting ```use_gks=True``` in ArrowConfig, and providing ```gen_repo_id``` and ```general_adapter_paths``` in ```create_arrow_model```:
+
+```py
+from peft import create_arrow_model, ArrowConfig
+from transformers import AutoModelForCausalLM
+
+# Loading the model
+base_model = AutoModelForCausalLM.from_pretrained("microsoft/Phi-3-mini-4k-instruct")
+
+# Creating the Arrow config
+arrow_config = ArrowConfig(
+    top_k = 3,
+    router_temperature = 1.0,
+    use_gks = True,
+    rng_seed = 42,
+)
+
+# Path to task-specific, trained on flan clustered dataset (as we explained before.)
+task_specific_adapter_paths = [
+        f"TahaBa/phi3-mini-clustered-flan/ts_expert_{i}" for i in range(10)
+    ]
+# gen_repo_id is the path of directory, where all the general adapters exist there.
+# These general adapters are trained on English, German, and French Wikipedia dataset,
+# with causal language modelling objective, each pair like: (507 token tsentence, 5 token completion), and the loss computed on the completion
+general_adapter_paths = [
+        "TahaBa/phi3-mini-general-adapters/cluster0_batch16_prop1.0_langen/checkpoint-17",
+        "TahaBa/phi3-mini-general-adapters/cluster0_batch16_prop1.0_langfr/checkpoint-35",
+        "TahaBa/phi3-mini-general-adapters/cluster0_batch16_prop1.0_langger/checkpoint-17"
+    ]
+
+# Creating the Arrow model
+model = create_arrow_model(
+        base_model = base_model,
+        task_specific_adapter_paths = task_specific_adapter_paths,
+        ts_repo_id = "TahaBa/phi3-mini-clustered-flan",
+        general_adapter_paths = general_adapter_paths,
+        gen_repo_id = "TahaBa/phi3-mini-general-adapters",
+        arrow_config = arrow_config,
+    )
+
+# Now the forward path could be called on this model, like a normal PeftModel.
+```
+To encode general knowledge, GenKnowSub subtracts the average of the provided general adapters from each task-specific adapter once, before routing begins. Furthermore, the ability to add or remove adapters after calling ```create_arrow_model``` (as described in the Arrow section) is still supported in this case.
+
+<Tip>
+
+**Things to keep in mind when using Arrow + GenKnowSub:**
+
+- All LoRA adapters (task-specific and general) must share the same ```rank``` and ```target_modules```.
+
+- Any inconsistency in these settings will raise an error in ```create_arrow_model```.
+
+- Having different scaling factors (```lora_alpha```) across task adapters is supported — Arrow handles them automatically.
+
+- Merging the ```"arrow_router"``` is not supported, due to its dynamic routing behavior.
+
+- In create_arrow_model, task adapters are loaded as ```task_i``` and general adapters as ```gks_j``` (where ```i``` and ```j``` are indices). The function ensures consistency of ```target_modules```, ```rank```, and whether adapters are applied to ```Linear``` or ```Linear4bit``` layers. It then adds the ```"arrow_router"``` module and activates it. Any customization of this process requires overriding ```create_arrow_model```.
+
+- This implementation is compatible with 4-bit quantization (via bitsandbytes):
+
+    ```py
+    from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+    import torch
+
+    # Quantisation config
+    bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=False,
+        )
+
+    # Loading the model
+    base_model = AutoModelForCausalLM.from_pretrained(
+        "microsoft/Phi-3-mini-4k-instruct",
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+        quantization_config=bnb_config,
+    )
+
+    # Now call create_arrow_model() as we explained before.
+    ```
+
+</Tip>
