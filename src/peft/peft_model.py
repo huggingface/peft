@@ -786,19 +786,18 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 past_key_values = new_cache
             elif peft_config.num_transformer_submodules == 1:
                 # Dont' apply this to encoder-decoder models and not to models requiring special processing.
-                # local import in case users use a very old transformers version
                 past_key_values = DynamicCache.from_legacy_cache(past_key_values)
             elif (peft_config.num_transformer_submodules == 2) and getattr(
                 self.base_model, "_supports_cache_class", True
             ):
-                # Dont' apply this to encoder-decoder models that don't support new Cachc format yet
+                # Dont' apply this to encoder-decoder models that don't support new Cache format yet
                 # If we don't apply this, prefix-tuning fails to update cross-attn cache
                 # TODO: remove check for _supports_cache_class once transformers 4.53 is no longer supported
                 past_key_values = EncoderDecoderCache.from_legacy_cache(past_key_values)
                 past_key_values.cross_attention_cache = DynamicCache()
-                past_key_values.is_updated = {
-                    layer_idx: False for layer_idx in range(len(past_key_values.cross_attention_cache.key_cache))
-                }
+                # invalidate the cross attention cache, since we add virtual tokens to the encoder
+                for key in past_key_values.is_updated.keys():
+                    past_key_values.is_updated[key] = False
             map_cache_to_layer_device_map(self.get_base_model(), past_key_values)  # no-op if not a Cache instance
             return past_key_values
         else:
