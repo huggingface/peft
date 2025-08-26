@@ -34,14 +34,14 @@ from huggingface_hub import HfFileSystem, ModelCard, ModelCardData, hf_hub_downl
 from safetensors import safe_open
 from safetensors.torch import save_file as safe_save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
-from transformers import Cache, DynamicCache, EncoderDecoderCache, HybridCache, PreTrainedModel
+from transformers import Cache, DynamicCache, EncoderDecoderCache, PreTrainedModel
 from transformers.modeling_outputs import QuestionAnsweringModelOutput, SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils.constants import DUMMY_MODEL_CONFIG
 from peft.utils.integrations import init_empty_weights
-from peft.utils.other import set_additional_trainable_modules
+from peft.utils.other import create_attention_mask, set_additional_trainable_modules
 
 from . import __version__
 from .config import PeftConfig
@@ -135,7 +135,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             )
 
         if getattr(model, "is_gradient_checkpointing", True):
-            model = self._prepare_model_for_gradient_checkpointing(model)
+            model = self.prepare_model_for_gradient_checkpointing(model)
 
         # the `pretraining_tp` is set for some models to simulate Tensor Parallelism during inference to avoid
         # numerical differences, https://github.com/pytorch/pytorch/issues/76232 - to avoid any unexpected
@@ -384,6 +384,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         autocast_adapter_dtype: bool = True,
         ephemeral_gpu_offload: bool = False,
         low_cpu_mem_usage: bool = False,
+        key_mapping: Optional[dict[str, str]] = None,
         **kwargs: Any,
     ) -> PeftModel:
         r"""
@@ -423,6 +424,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 process.
             torch_device (`str`, *optional*, defaults to None):
                 The device to load the adapter on. If `None`, the device will be inferred.
+            key_mapping (dict, *optional*, defaults to None)
+                Extra mapping of PEFT `state_dict` keys applied before loading the `state_dict`. When this mapping is
+                applied, the PEFT-specific `"base_model.model"` prefix is removed beforehand and the adapter name (e.g.
+                `"default"`) is not inserted yet. Only pass this argument if you know what you're doing.
             kwargs: (`optional`):
                 Additional keyword arguments passed along to the specific PEFT configuration class.
         """
@@ -445,6 +450,19 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             config.inference_mode = not is_trainable
         else:
             raise ValueError(f"The input config must be a PeftConfig, got {config.__class__}")
+
+        # See discussion in https://github.com/huggingface/transformers/pull/38627
+        # Some transformers models can have a _checkpoint_conversion_mapping dict that is used to map state_dicts
+        # stemming from updated model architectures so that they still correspond to the initial architecture. When
+        # loading a PEFT state_dict created with the initial architecture on a model with the new architecture, we need
+        # to map it too according to the same rules. Note that we skip prompt learning methods. This is because they
+        # don't have the "base_model.model." prefix, which we need to remove before mapping. Instead just using
+        # "base_model.". This could be fine, we could only remove "base_model.", However, the subsequent sub-module
+        # could also be called "model", resulting in what looks like "base_model.model.". To avoid this confusion, we
+        # skip prompt learning. Since it applies itself directly to the pre-trained model (unlike LoRA et al that target
+        # sub-modules), skipping should be fine.
+        if (key_mapping is None) and (not config.is_prompt_learning):
+            key_mapping = getattr(model, "_checkpoint_conversion_mapping", {})
 
         # Runtime configuration, if supported
         if hasattr(config, "runtime_config"):
@@ -540,6 +558,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             is_trainable=is_trainable,
             autocast_adapter_dtype=autocast_adapter_dtype,
             low_cpu_mem_usage=low_cpu_mem_usage,
+            key_mapping=key_mapping,
             **kwargs,
         )
 
@@ -553,6 +572,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             # difficult for users to even notice that something might have gone wrong here. As we filter out non PEFT
             # keys from the missing keys, this gives no false positives.
 
+            # careful: if the wording of the warning is changed, adjust the unit tests accordingly!
             warn_message = f"Found missing adapter keys while loading the checkpoint: {missing_keys}."
 
             prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(config.peft_type)
@@ -605,9 +625,18 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 # For reference refer to issue: https://github.com/huggingface/peft/issues/996
                 deepspeed_distributed_tensor_shape = getattr(value, "ds_shape", None)
 
-                if value.shape[0] == self.base_model.config.vocab_size or (
+                # Handle VLM case with separate text and vision configs
+                if hasattr(self.base_model.config, "get_text_config"):
+                    vocab_size = self.base_model.config.get_text_config().vocab_size
+                # below: for older transformers versions before get_text_config was added
+                elif "text_config" in self.base_model.config:
+                    vocab_size = self.base_model.config.text_config.vocab_size
+                else:
+                    vocab_size = self.base_model.config.vocab_size
+
+                if value.shape[0] == vocab_size or (
                     deepspeed_distributed_tensor_shape is not None
-                    and deepspeed_distributed_tensor_shape[0] == self.base_model.config.vocab_size
+                    and deepspeed_distributed_tensor_shape[0] == vocab_size
                 ):
                     word_embeddings = transformer_backbone.get_submodule(named_param.replace(".weight", ""))
                     break
@@ -633,10 +662,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             config.num_virtual_tokens * config.num_transformer_submodules
         ).long()
 
-    def _prepare_model_for_gradient_checkpointing(self, model: PreTrainedModel):
+    def prepare_model_for_gradient_checkpointing(self, model: PreTrainedModel):
         r"""
         Prepares the model for gradient checkpointing if necessary
         """
+        self._prepare_model_for_gradient_checkpointing(model)
+
+    def _prepare_model_for_gradient_checkpointing(self, model: PreTrainedModel):
         if not (
             getattr(model, "is_loaded_in_8bit", False)
             or getattr(model, "is_loaded_in_4bit", False)
@@ -717,23 +749,35 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 post_process_fn = TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING[self.config.model_type]
                 past_key_values = post_process_fn(past_key_values)
             elif ("gemma2" in model_type) or ("gemma3_text" in model_type):
+                # TODO: remove this logic once transformers < 4.56 is dropped
+                transformers_lt_4_56 = packaging.version.parse(transformers.__version__) < packaging.version.parse(
+                    "4.56.0.dev0"
+                )
                 # Gemma2 and Gemma3 only support HybridCache (which does not have the from_legacy_cache method)
-                if max_cache_len is None:
+                if transformers_lt_4_56 and ((max_cache_len is None) or (max_cache_len == -1)):
                     raise ValueError(
-                        "max_cache_len is None but it should have been passed. Something went wrong, please open an "
+                        "max_cache_len is missing but it should have been passed. Something went wrong, please open an "
                         "issue on GitHub with a reproducer: https://github.com/huggingface/peft/issues"
                     )
                 base_config = base_model.config
                 if hasattr(base_config, "get_text_config"):
                     base_config = base_config.get_text_config()
-                new_cache = HybridCache(
-                    base_config,
-                    max_batch_size=batch_size,
-                    max_cache_len=max_cache_len,
-                    dtype=past_key_values[0].dtype,
-                    device=past_key_values[0].device,
-                )
-                cache_position = torch.arange(peft_config.num_virtual_tokens)
+                if transformers_lt_4_56:
+                    # HybridCache is deprecated, and will be removed in 4.60.0
+                    # see https://github.com/huggingface/transformers/pull/40276
+                    from transformers import HybridCache
+
+                    new_cache = HybridCache(
+                        config=base_config,
+                        max_batch_size=batch_size,
+                        max_cache_len=max_cache_len,
+                        dtype=past_key_values[0].dtype,
+                        device=past_key_values[0].device,
+                    )
+                else:
+                    # transformers 4.56+ uses DynamicCache for gemma
+                    new_cache = DynamicCache(config=base_config)
+                cache_position = torch.arange(peft_config.num_virtual_tokens, device=past_key_values[0].device)
                 for layer_idx in range(peft_config.num_layers):
                     key_states, value_states = past_key_values[0][layer_idx], past_key_values[1][layer_idx]
                     new_cache.update(
@@ -742,16 +786,18 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 past_key_values = new_cache
             elif peft_config.num_transformer_submodules == 1:
                 # Dont' apply this to encoder-decoder models and not to models requiring special processing.
-                # local import in case users use a very old transformers version
                 past_key_values = DynamicCache.from_legacy_cache(past_key_values)
-            elif peft_config.num_transformer_submodules == 2 and self.base_model._supports_cache_class:
-                # Dont' apply this to encoder-decoder models that don't support new Cachc format yet
+            elif (peft_config.num_transformer_submodules == 2) and getattr(
+                self.base_model, "_supports_cache_class", True
+            ):
+                # Dont' apply this to encoder-decoder models that don't support new Cache format yet
                 # If we don't apply this, prefix-tuning fails to update cross-attn cache
+                # TODO: remove check for _supports_cache_class once transformers 4.53 is no longer supported
                 past_key_values = EncoderDecoderCache.from_legacy_cache(past_key_values)
                 past_key_values.cross_attention_cache = DynamicCache()
-                past_key_values.is_updated = {
-                    layer_idx: False for layer_idx in range(len(past_key_values.cross_attention_cache.key_cache))
-                }
+                # invalidate the cross attention cache, since we add virtual tokens to the encoder
+                for key in past_key_values.is_updated.keys():
+                    past_key_values.is_updated[key] = False
             map_cache_to_layer_device_map(self.get_base_model(), past_key_values)  # no-op if not a Cache instance
             return past_key_values
         else:
@@ -910,11 +956,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         Returns the base model.
         """
-        return (
-            self.base_model
-            if (self.active_peft_config.is_prompt_learning or self.peft_type == PeftType.POLY)
-            else self.base_model.model
-        )
+        return self.base_model if self.active_peft_config.is_prompt_learning else self.base_model.model
 
     def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """
@@ -1219,6 +1261,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         autocast_adapter_dtype: bool = True,
         ephemeral_gpu_offload: bool = False,
         low_cpu_mem_usage: bool = False,
+        key_mapping: Optional[dict[str, str]] = None,
         **kwargs: Any,
     ):
         """
@@ -1252,6 +1295,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
                 Create empty adapter weights on meta device before loading the saved weights. Useful to speed up the
                 process.
+            key_mapping (dict, *optional*, defaults to None)
+                Extra mapping of PEFT `state_dict` keys applied before loading the `state_dict`. When this mapping is
+                applied, the PEFT-specific `"base_model.model"` prefix is removed beforehand and the adapter name (e.g.
+                `"default"`) is not inserted yet. Only pass this argument if you know what you're doing.
             kwargs: (`optional`):
                 Additional arguments to modify the way the adapter is loaded, e.g. the token for Hugging Face Hub.
         """
@@ -1277,7 +1324,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             peft_config.inference_mode = not is_trainable
             self.add_adapter(adapter_name, peft_config, low_cpu_mem_usage=low_cpu_mem_usage)
 
-        adapters_weights = load_peft_weights(model_id, device=torch_device, **hf_hub_download_kwargs)
+        adapters_weights = load_peft_weights(
+            model_id, device=torch_device, key_mapping=key_mapping, **hf_hub_download_kwargs
+        )
 
         # load the weights into the model
         ignore_mismatched_sizes = kwargs.get("ignore_mismatched_sizes", False)
@@ -1308,8 +1357,16 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         ):
             device_map = kwargs.get("device_map", "auto")
             max_memory = kwargs.get("max_memory", None)
-            offload_dir = kwargs.get("offload_folder", None)
+            offload_folder = kwargs.get("offload_folder", None)
+            offload_dir = kwargs.get("offload_dir", None)
             offload_index = kwargs.get("offload_index", None)
+
+            if offload_dir is not None and offload_folder is not None:
+                # see https://github.com/huggingface/peft/issues/2541
+                raise ValueError("Cannot use `offload_folder` when `offload_dir` is specified.")
+            elif offload_dir is None:
+                # to keep backwards compatibility
+                offload_dir = offload_folder
 
             dispatch_model_kwargs = {}
             # Safety checker for previous `accelerate` versions
@@ -1391,6 +1448,28 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     def active_peft_config(self):
         return self.peft_config[self.active_adapter]
 
+    def _get_peft_specific_model_tags(self):
+        """Derive tags for the model card from the adapter's config. For example, setting the
+        base model is important for enabling support for HF inference providers but it also makes models more
+        searchable on the HF hub.
+        """
+        peft_method = self.active_peft_config.peft_type
+        if not isinstance(peft_method, str):
+            peft_method = peft_method.value
+
+        tags = []
+
+        if hasattr(self.base_model, "model") and isinstance(self.base_model.model, transformers.PreTrainedModel):
+            tags.append("transformers")
+
+        if peft_method == "LORA":
+            tags.append("lora")
+
+        if hasattr(self.base_model, "name_or_path"):
+            tags.append(f"base_model:adapter:{self.base_model.name_or_path}")
+
+        return tags
+
     def create_or_update_model_card(self, output_dir: str):
         """
         Updates or create model card to include information about peft:
@@ -1405,6 +1484,20 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         card = ModelCard.load(filename) if os.path.exists(filename) else ModelCard.from_template(ModelCardData())
 
         card.data["library_name"] = "peft"
+
+        tags = set()
+        base_model = self.get_base_model()
+        if hasattr(base_model, "model_tags"):
+            tags = tags.union(base_model.model_tags or [])
+
+        tags = tags.union(self._get_peft_specific_model_tags())
+        if tags:
+            card.data["tags"] = sorted(tags)
+
+        # One of the rare moments where we can select the pipeline tag with certainty, so let's do that.
+        # Makes it easier to deploy an adapter with auto inference since the user doesn't have to add any tags.
+        if not card.data.pipeline_tag and isinstance(self, PeftModelForCausalLM):
+            card.data.pipeline_tag = "text-generation"
 
         model_config = BaseTuner.get_model_config(self)
         model_config = None if model_config == DUMMY_MODEL_CONFIG else model_config
@@ -1912,6 +2005,10 @@ class PeftModelForCausalLM(PeftModel):
             uses_transformers_4_36 and self.base_model.config.model_type in transformers_new_cache_archs
         )
 
+        # heuristic to determine if we're in 'prefill stage' (when the KV cache is filled with the values from the
+        # initial input)
+        is_prefill = (model_kwargs.get("cache_position") is not None) and (model_kwargs["cache_position"][0] == 0)
+
         if peft_config.peft_type == PeftType.POLY:
             model_kwargs["task_ids"] = task_ids
         if peft_config.is_prompt_learning:
@@ -1928,6 +2025,16 @@ class PeftModelForCausalLM(PeftModel):
                     model_kwargs["input_ids"] = model_kwargs["input_ids"][:, -1:]
 
             if (attention_mask := model_kwargs.get("attention_mask", None)) is not None:
+                if isinstance(attention_mask, dict):
+                    # see: https://github.com/huggingface/transformers/pull/37866
+                    # For now, just deal with the case of a single attention mask
+                    if len(attention_mask) != 1:
+                        raise ValueError(
+                            f"Expected a single attention mask, got {len(attention_mask)} instead, please open an "
+                            "issue (https://github.com/huggingface/peft/issues) and report the error."
+                        )
+                    attention_mask = list(attention_mask.values())[0]
+
                 size = model_kwargs["input_ids"].shape[0], peft_config.num_virtual_tokens
                 prefix_attention_mask = torch.ones(size).to(model_kwargs["input_ids"].device)
                 if attention_mask.dim() == 4:
@@ -1937,7 +2044,27 @@ class PeftModelForCausalLM(PeftModel):
                     # to   [batch_size, total_sequence_length]
                     bs = attention_mask.shape[0]
                     total_seq_len = prefix_attention_mask.shape[1] + attention_mask.shape[2]
-                    model_kwargs["attention_mask"] = torch.ones((bs, total_seq_len), dtype=attention_mask.dtype)
+                    attention_mask_2d = torch.ones((bs, total_seq_len), dtype=attention_mask.dtype)
+
+                    if is_prefill and (peft_config.peft_type != PeftType.PREFIX_TUNING):
+                        # if in prefill stage, for prompt learning methods that are not prefix tuning, new tokens
+                        # (embeddings) are inserted, thus set cache_position to correspond to these tokens
+                        cache_position_ = torch.arange(total_seq_len, device=model_kwargs["input_ids"].device)
+                    else:
+                        # prefix tuning acts directly on the cache, no need to upate cache_position
+                        cache_position_ = model_kwargs["cache_position"]
+
+                    attention_mask_new = create_attention_mask(
+                        self.get_base_model(),
+                        model_input=None,
+                        attention_mask=attention_mask_2d,
+                        past_key_values=model_kwargs.get("past_key_values"),
+                        cache_position=cache_position_,
+                        batch_size=bs,
+                        sequence_length=total_seq_len,
+                        position_ids=model_kwargs.get("position_ids", None),
+                    )
+                    model_kwargs["attention_mask"] = attention_mask_new
                 else:
                     # 2d attention mask
                     model_kwargs["attention_mask"] = torch.cat((prefix_attention_mask, attention_mask), dim=1)
@@ -1952,15 +2079,18 @@ class PeftModelForCausalLM(PeftModel):
                 )
                 kwargs["token_type_ids"] = None
 
+            cache: transformers.Cache | None = model_kwargs.get("past_key_values", None)
             # no past_key_values or past_key_values empty cache
-            requires_prompt_injection = (model_kwargs.get("past_key_values", None) is None) or (
-                isinstance(model_kwargs["past_key_values"], transformers.Cache)
-                and not model_kwargs["past_key_values"].get_seq_length()
+            requires_prompt_injection = (cache is None) or (
+                isinstance(cache, transformers.Cache) and not cache.get_seq_length()
             )
 
             if requires_prompt_injection and peft_config.peft_type == PeftType.PREFIX_TUNING:
-                # some archs require max_cache_len to re-initialize the cache
-                max_cache_len = getattr(model_kwargs.get("past_key_values", None), "max_cache_len", None)
+                # some archs require max_cache_len to re-initialize the cache, but DynamicCache has no max len
+                if isinstance(cache, transformers.Cache) and not isinstance(cache, transformers.DynamicCache):
+                    max_cache_len = cache.max_cache_len
+                else:
+                    max_cache_len = -1  # -1 means no max length
                 new_past_key_values = self.get_prompt(
                     batch_size=model_kwargs["input_ids"].shape[0],
                     max_cache_len=max_cache_len,
@@ -1973,11 +2103,16 @@ class PeftModelForCausalLM(PeftModel):
                 model_kwargs["inputs_embeds"] = torch.cat((prompts, inputs_embeds), dim=1)
                 model_kwargs["input_ids"] = None
 
-        # For transformers>=4.38.0 - for some architectures such as Llama, `cache_position` is
-        # passed in the forward pass to keep track of the position ids of the cache. We have to
-        # pop that from `model_kwargs` as `cache_position` is properly created by the model, using the passed
-        # `inputs_embeds`: https://github.com/huggingface/transformers/blob/593230f0a1150ea9c0477b9d859f25daf73c8c33/src/transformers/models/llama/modeling_llama.py#L956
-        _ = model_kwargs.pop("cache_position", None)
+        # if we're in the prefill stage
+        if is_prefill and (peft_config.peft_type == PeftType.PREFIX_TUNING):
+            # for prefix tuning, the past_key_values have been prefilled
+            model_kwargs["cache_position"] += peft_config.num_virtual_tokens
+        elif peft_config.peft_type != PeftType.PREFIX_TUNING:  # prefix tuning needs cache_position
+            # For transformers>=4.38.0 - for some architectures such as Llama, `cache_position` is passed in the forward
+            # pass to keep track of the position ids of the cache. We have to pop that from `model_kwargs` as
+            # `cache_position` is properly created by the model, using the passed `inputs_embeds`:
+            # https://github.com/huggingface/transformers/blob/593230f0a1150ea9c0477b9d859f25daf73c8c33/src/transformers/models/llama/modeling_llama.py#L956
+            _ = model_kwargs.pop("cache_position", None)
 
         return model_kwargs
 

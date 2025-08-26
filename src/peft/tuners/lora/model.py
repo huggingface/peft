@@ -53,7 +53,7 @@ from .eetq import dispatch_eetq
 from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
 from .inc import dispatch_inc
-from .layer import Conv2d, LoraLayer, dispatch_default
+from .layer import Conv2d, LoraLayer, ParamWrapper, dispatch_default
 from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
 
@@ -139,9 +139,6 @@ class LoraModel(BaseTuner):
 
     prefix: str = "lora_"
 
-    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
-        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
-
     def _check_new_adapter_config(self, config: LoraConfig) -> None:
         """
         A helper method to check the config when a new adapter is being added.
@@ -182,9 +179,23 @@ class LoraModel(BaseTuner):
         target_name,
         parent,
         current_key,
-    ):
+        *,
+        parameter_name: Optional[str] = None,
+    ) -> None:
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
+
+        if lora_config.target_parameters:
+            # Right now, unfortunately, we don't support multiple adapters with target_parameters on the same model.
+            other_configs_use_target_params = any(
+                conf.target_parameters for key, conf in self.peft_config.items() if key != adapter_name
+            )
+            if other_configs_use_target_params:
+                raise ValueError(
+                    f"Adding a LoRA config with `target_parameters={lora_config.target_parameters}` but there are "
+                    "already other LoRA adapters on this model that use `target_parameters`. At the moment, only "
+                    "one LoRA adapter per model with `target_parameters` is allowed."
+                )
 
         # Regexp matching - Find key which matches current target_name in patterns provided
         r_key = get_pattern_key(lora_config.rank_pattern.keys(), current_key)
@@ -200,10 +211,13 @@ class LoraModel(BaseTuner):
             "init_lora_weights": lora_config.init_lora_weights,
             "use_rslora": lora_config.use_rslora,
             "use_dora": lora_config.use_dora,
+            "use_qalora": lora_config.use_qalora,
+            "qalora_group_size": lora_config.qalora_group_size,
             "ephemeral_gpu_offload": lora_config.runtime_config.ephemeral_gpu_offload,
             "lora_bias": lora_config.lora_bias,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
+            "parameter_name": parameter_name,
         }
         # for torchao merging, we need the get_apply_tensor_subclass from the quantization config
         try:
@@ -222,7 +236,9 @@ class LoraModel(BaseTuner):
         # note: AdaLoraLayer is a subclass of LoraLayer, we need to exclude it
         from peft.tuners.adalora import AdaLoraLayer
 
-        if isinstance(target, LoraLayer) and not isinstance(target, AdaLoraLayer):
+        # if the target is a ParamWrapper, we nest it to allow targeting multiple nn.Parameter on the same module
+        wrap_target_param = isinstance(target, ParamWrapper) and (adapter_name in target.lora_A)
+        if isinstance(target, LoraLayer) and not isinstance(target, AdaLoraLayer) and not wrap_target_param:
             target.update_layer(
                 adapter_name,
                 r,
@@ -234,6 +250,11 @@ class LoraModel(BaseTuner):
                 lora_bias=lora_config.lora_bias,
             )
         else:
+            if isinstance(target, ParamWrapper) and (parameter_name == target.parameter_name):
+                raise ValueError(
+                    "Trying to target the same nn.Parameter twice, this should not happen. Please open an issue on the "
+                    "PEFT repo: https://github.com/huggingface/peft/issues"
+                )
             device_map = self.model.hf_device_map if hasattr(self.model, "hf_device_map") else None
             new_module = self._create_new_module(lora_config, adapter_name, target, device_map=device_map, **kwargs)
             if adapter_name not in self.active_adapters:
@@ -497,11 +518,12 @@ class LoraModel(BaseTuner):
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
         if peft_config.target_modules is None:
-            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
-                raise ValueError("Please specify `target_modules` in `peft_config`")
-            peft_config.target_modules = set(
-                TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
-            )
+            if model_config["model_type"] in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
+                peft_config.target_modules = set(
+                    TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
+                )
+            elif not peft_config.target_parameters:
+                raise ValueError("Please specify `target_modules` or `target_parameters`in `peft_config`")
         return peft_config
 
     def _unload_and_optionally_merge(
@@ -545,6 +567,12 @@ class LoraModel(BaseTuner):
         for adapter in adapters:
             if adapter not in list(self.peft_config.keys()):
                 raise ValueError(f"Adapter {adapter} does not exist")
+
+        for adapter in adapters:
+            if self.peft_config[adapter].target_parameters:
+                raise ValueError(
+                    f"add_weighted_adapter does not support targeting nn.Parameter (problematic adapter '{adapter}')"
+                )
 
         # If more than one of the adapters targets the same module with modules_to_save, raise an error, as these
         # modules cannot be merged. First, find the ModulesToSaveWrapper instances in the model, then check if they
@@ -675,6 +703,8 @@ class LoraModel(BaseTuner):
             r=new_rank,
             lora_alpha=new_rank,
             target_modules=new_target_modules,
+            alpha_pattern={},
+            rank_pattern={},
         )
         self.inject_adapter(self.model, adapter_name)
 

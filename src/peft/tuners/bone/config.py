@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
 
@@ -121,3 +122,8 @@ class BoneConfig(PeftConfig):
         # if target_modules is a regex expression, then layers_pattern should be None
         if isinstance(self.target_modules, str) and self.layers_pattern is not None:
             raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
+
+        warnings.warn(
+            "Bone will be removed in v0.19.0 of PEFT, use `MissConfig` instead. "
+            "If you already have a Bone checkpoint, you can use `/scripts/convert-bone-to-miss.py` to convert it into "
+        )

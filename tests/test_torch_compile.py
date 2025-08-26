@@ -24,6 +24,7 @@ import os
 
 import pytest
 import torch
+from accelerate.utils.memory import clear_device_cache
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -44,6 +45,7 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
+    MissConfig,
     OFTConfig,
     PeftModel,
     TaskType,
@@ -85,6 +87,15 @@ SETTINGS = {
         BoneConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], r=2, init_weights="bat"),
         {},
     ),
+    "miss": (MissConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], r=2), {}),
+    "miss-bat": (
+        MissConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], r=2, init_weights="bat"),
+        {},
+    ),
+    "miss-mini": (
+        MissConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], r=2, init_weights="mini"),
+        {},
+    ),
 }
 
 
@@ -113,9 +124,7 @@ class TestTorchCompileCausalLM:
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
         gc.collect()
 
     @pytest.fixture(scope="class")

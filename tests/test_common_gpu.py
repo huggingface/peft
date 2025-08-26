@@ -18,6 +18,7 @@ import unittest
 import pytest
 import torch
 import torch.nn.functional as F
+from accelerate.utils.memory import clear_device_cache
 from parameterized import parameterized
 from torch import nn
 from transformers import (
@@ -47,6 +48,7 @@ from peft import (
     OFTConfig,
     PeftModel,
     RandLoraConfig,
+    RoadConfig,
     TaskType,
     VBLoRAConfig,
     VeraConfig,
@@ -62,8 +64,8 @@ from .testing_utils import (
     load_cat_image,
     require_bitsandbytes,
     require_deterministic_for_xpu,
-    require_multi_accelerator,
     require_non_cpu,
+    require_torch_multi_accelerator,
 )
 
 
@@ -73,12 +75,14 @@ if is_bnb_available():
     from peft.tuners.ia3 import Linear8bitLt as IA3Linear8bitLt
     from peft.tuners.lora import Linear8bitLt as LoraLinear8bitLt
     from peft.tuners.randlora import Linear8bitLt as RandLoraLinear8bitLt
+    from peft.tuners.road import Linear8bitLt as RoadLinear8bitLt
     from peft.tuners.vera import Linear8bitLt as VeraLinear8bitLt
 
     if is_bnb_4bit_available():
         from peft.tuners.ia3 import Linear4bit as IA3Linear4bit
         from peft.tuners.lora import Linear4bit as LoraLinear4bit
         from peft.tuners.randlora import Linear4bit as RandLoraLinear4bit
+        from peft.tuners.road import Linear4bit as RoadLinear4bit
         from peft.tuners.vera import Linear4bit as VeraLinear4bit
 
 
@@ -99,11 +103,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        elif is_xpu_available():
-            torch.xpu.empty_cache()
+        clear_device_cache(garbage_collection=True)
         gc.collect()
 
     @require_bitsandbytes
@@ -294,6 +294,49 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         whisper_8bit = get_peft_model(whisper_8bit, config)
         assert isinstance(whisper_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, IA3Linear8bitLt)
+
+    @require_bitsandbytes
+    @pytest.mark.multi_gpu_tests
+    @pytest.mark.single_gpu_tests
+    def test_road_bnb_8bit_quantization(self):
+        r"""
+        Test that tests if the 8bit quantization using Road works as expected
+        """
+        whisper_8bit = WhisperForConditionalGeneration.from_pretrained(
+            self.audio_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+        )
+
+        opt_8bit = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+        )
+
+        flan_8bit = AutoModelForSeq2SeqLM.from_pretrained(
+            self.seq2seq_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+        )
+
+        flan_road_config = RoadConfig(target_modules=["q", "v"], task_type="SEQ_2_SEQ_LM")
+
+        opt_road_config = RoadConfig(
+            target_modules=["q_proj", "v_proj", "fc2"],
+            task_type="CAUSAL_LM",
+        )
+
+        config = RoadConfig(target_modules=["q_proj", "v_proj", "fc2"])
+
+        flan_8bit = get_peft_model(flan_8bit, flan_road_config)
+        assert isinstance(flan_8bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, RoadLinear8bitLt)
+
+        opt_8bit = get_peft_model(opt_8bit, opt_road_config)
+        assert isinstance(opt_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, RoadLinear8bitLt)
+
+        whisper_8bit = get_peft_model(whisper_8bit, config)
+        assert isinstance(whisper_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, RoadLinear8bitLt)
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
@@ -700,8 +743,51 @@ class PeftGPUCommonTests(unittest.TestCase):
         whisper_4bit = get_peft_model(whisper_4bit, config)
         assert isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, IA3Linear4bit)
 
+    @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
-    @require_multi_accelerator
+    @pytest.mark.single_gpu_tests
+    def test_road_bnb_4bit_quantization(self):
+        r"""
+        Test that tests if the 4bit quantization using IA3 works as expected
+        """
+        whisper_4bit = WhisperForConditionalGeneration.from_pretrained(
+            self.audio_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+        )
+
+        opt_4bit = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+        )
+
+        flan_4bit = AutoModelForSeq2SeqLM.from_pretrained(
+            self.seq2seq_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+        )
+
+        flan_road_config = RoadConfig(target_modules=["q", "v"], task_type="SEQ_2_SEQ_LM")
+
+        opt_road_config = RoadConfig(
+            target_modules=["q_proj", "v_proj", "fc2"],
+            task_type="CAUSAL_LM",
+        )
+
+        config = RoadConfig(target_modules=["q_proj", "v_proj", "fc2"])
+
+        flan_4bit = get_peft_model(flan_4bit, flan_road_config)
+        assert isinstance(flan_4bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, RoadLinear4bit)
+
+        opt_4bit = get_peft_model(opt_4bit, opt_road_config)
+        assert isinstance(opt_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, RoadLinear4bit)
+
+        whisper_4bit = get_peft_model(whisper_4bit, config)
+        assert isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, RoadLinear4bit)
+
+    @pytest.mark.multi_gpu_tests
+    @require_torch_multi_accelerator
     def test_lora_causal_lm_multi_gpu_inference(self):
         r"""
         Test if LORA can be used for inference on multiple GPUs.
@@ -729,7 +815,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         # this should work without any problem
         _ = model.generate(input_ids=input_ids)
 
-    @require_multi_accelerator
+    @require_torch_multi_accelerator
     @pytest.mark.multi_gpu_tests
     @require_bitsandbytes
     def test_lora_seq2seq_lm_multi_gpu_inference(self):
@@ -757,7 +843,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         # this should work without any problem
         _ = model.generate(input_ids=input_ids)
 
-    @require_multi_accelerator
+    @require_torch_multi_accelerator
     @pytest.mark.multi_gpu_tests
     @require_bitsandbytes
     def test_adaption_prompt_8bit(self):
@@ -780,7 +866,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
         _ = model(random_input)
 
-    @require_multi_accelerator
+    @require_torch_multi_accelerator
     @pytest.mark.multi_gpu_tests
     @require_bitsandbytes
     def test_adaption_prompt_4bit(self):
@@ -1493,7 +1579,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         # The results should be the same
         assert torch.allclose(out_peft_model_cpu, out_peft_model_ego)
 
-    @require_multi_accelerator
+    @require_torch_multi_accelerator
     @pytest.mark.multi_gpu_tests
     def test_dora_ephemeral_gpu_offload_multigpu(self):
         torch.manual_seed(0)
@@ -1522,6 +1608,98 @@ class PeftGPUCommonTests(unittest.TestCase):
                 lb = lora_B.to(device_B)
                 layer.lora_A, layer.lora_B = la, lb
                 layer.lora_variant[adapter_name].init(layer, adapter_name=adapter_name)  # should not raise an error
+
+    @require_non_cpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_8bit_road_merging(self):
+        # Check results for merging, unmerging, unloading
+        torch.manual_seed(0)
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+            torch_dtype=torch.float32,
+        ).eval()
+
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        # compare outputs in probability space, because logits can have outliers
+        # and token ids are not precise enough
+        out_base = F.softmax(model(random_input).logits, dim=-1)
+
+        config = RoadConfig(
+            init_weights=False,
+        )
+        model = get_peft_model(model, config).eval()
+
+        with torch.inference_mode():
+            out_road = F.softmax(model(random_input).logits, dim=-1)
+
+            model.merge_adapter()
+            out_merged = F.softmax(model(random_input).logits, dim=-1)
+
+            model.unmerge_adapter()
+            out_unmerged = F.softmax(model(random_input).logits, dim=-1)
+
+            model = model.merge_and_unload()
+            out_unloaded = F.softmax(model(random_input).logits, dim=-1)
+
+        atol = 1e-3
+        rtol = 1
+        # sanity check that using DoRA changes the results
+        assert not torch.allclose(out_base, out_road, atol=atol, rtol=rtol)
+        assert torch.allclose(out_road, out_merged, atol=atol, rtol=rtol)
+        assert torch.allclose(out_road, out_unmerged, atol=atol, rtol=rtol)
+        assert torch.allclose(out_road, out_unloaded, atol=atol, rtol=rtol)
+
+    @require_non_cpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_4bit_road_merging(self):
+        # Check results for merging, unmerging, unloading
+        torch.manual_seed(0)
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=False,
+            bnb_4bit_compute_dtype=torch.float32,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            "trl-internal-testing/tiny-random-LlamaForCausalLM",
+            quantization_config=bnb_config,
+            torch_dtype=torch.float32,
+        ).eval()
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        # compare outputs in probability space, because logits can have outliers
+        # and token ids are not precise enough
+        out_base = model(random_input).logits
+        probs_base = F.softmax(out_base, dim=-1)
+
+        config = RoadConfig(
+            init_weights=False,
+            group_size=4,
+        )
+        model = get_peft_model(model, config).eval()
+
+        with torch.inference_mode():
+            out_road = model(random_input).logits
+            probs_road = F.softmax(out_road, dim=-1)
+
+            model.merge_adapter()
+            probs_merged = F.softmax(model(random_input).logits, dim=-1)
+
+            model.unmerge_adapter()
+            probs_unmerged = F.softmax(model(random_input).logits, dim=-1)
+
+            model = model.merge_and_unload()
+            probs_unloaded = F.softmax(model(random_input).logits, dim=-1)
+
+        atol = 1e-5
+        rtol = 1e-3
+        # sanity check that using DoRA changes the results
+        # we compare outputs instead of logits because they may not be sensitive enough
+        assert not torch.allclose(out_base, out_road, atol=atol, rtol=rtol)
+        assert torch.allclose(probs_road, probs_merged, atol=atol, rtol=rtol)
+        assert torch.allclose(probs_road, probs_unmerged, atol=atol, rtol=rtol)
+        assert torch.allclose(probs_road, probs_unloaded, atol=atol, rtol=rtol)
 
     def test_apply_GS_hra_inference(self):
         # check for different result with and without apply_GS
@@ -1596,9 +1774,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert not torch.allclose(logits, logits_hra)
 
 
-@pytest.mark.skipif(
-    not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a hardware accelerator"
-)
+@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU")
 @pytest.mark.single_gpu_tests
 class TestSameAdapterDifferentDevices:
     device = infer_device()
@@ -1889,18 +2065,18 @@ class TestSameAdapterDifferentDevices:
         config = OFTConfig(target_modules=["lin0"])
         model = get_peft_model(mlp, config)
         model = model.to(self.device)
-        model.lin0.oft_r.cpu()
+        model.lin0.oft_R.default.cpu()
 
         # check that the adapter is indeed on CPU and the base model on GPU
-        assert model.lin0.oft_r.default.device.type == "cpu"
+        assert model.lin0.oft_R.default.weight.device.type == "cpu"
         assert model.lin0.base_layer.weight.device.type == self.device
 
         model.add_adapter("other", config)
         # check that after adding a new adapter, the old adapter is still on CPU
-        assert model.lin0.oft_r.default.device.type == "cpu"
+        assert model.lin0.oft_R.default.weight.device.type == "cpu"
         # the rest should be on GPU
         assert model.lin0.base_layer.weight.device.type == self.device
-        assert model.lin0.oft_r.other.device.type == self.device
+        assert model.lin0.oft_R.other.weight.device.type == self.device
 
     def test_vera_add_new_adapter_does_not_change_device(self, mlp):
         # same as first test, but using VERA
@@ -1989,3 +2165,21 @@ class TestSameAdapterDifferentDevices:
         # the rest should be on GPU
         assert model.lin0.base_layer.weight.device.type == self.device
         assert model.lin0.hra_u.other.device.type == self.device
+
+    def test_road_add_new_adapter_does_not_change_device(self, mlp):
+        # same as first test, but using HRA
+        config = RoadConfig(target_modules=["lin0"], group_size=2)
+        model = get_peft_model(mlp, config)
+        model = model.to(self.device)
+        model.lin0.road_theta.cpu()
+
+        # check that the adapter is indeed on CPU and the base model on GPU
+        assert model.lin0.road_theta.default.device.type == "cpu"
+        assert model.lin0.base_layer.weight.device.type == self.device
+
+        model.add_adapter("other", config)
+        # check that after adding a new adapter, the old adapter is still on CPU
+        assert model.lin0.road_theta.default.device.type == "cpu"
+        # the rest should be on GPU
+        assert model.lin0.base_layer.weight.device.type == self.device
+        assert model.lin0.road_theta.other.device.type == self.device

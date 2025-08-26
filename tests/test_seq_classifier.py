@@ -19,20 +19,27 @@ from peft import (
     AdaLoraConfig,
     BOFTConfig,
     BoneConfig,
+    C3AConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
     LoraConfig,
+    MissConfig,
     OFTConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
     PromptTuningInit,
+    RoadConfig,
+    ShiraConfig,
     VBLoRAConfig,
     VeraConfig,
+    get_peft_model,
 )
+from peft.utils.other import ModulesToSaveWrapper
 
 from .testing_common import PeftCommonTester
+from .testing_utils import hub_online_once
 
 
 PEFT_SEQ_CLS_MODELS_TO_TEST = [
@@ -60,6 +67,14 @@ ALL_CONFIGS = [
     ),
     (
         BoneConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+            "r": 2,
+        },
+    ),
+    (
+        MissConfig,
         {
             "task_type": "SEQ_CLS",
             "target_modules": None,
@@ -143,6 +158,23 @@ ALL_CONFIGS = [
         },
     ),
     (
+        RoadConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "variant": "road_1",
+            "group_size": 2,
+        },
+    ),
+    (
+        ShiraConfig,
+        {
+            "r": 1,
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+            "init_weights": False,
+        },
+    ),
+    (
         VBLoRAConfig,
         {
             "task_type": "SEQ_CLS",
@@ -163,6 +195,14 @@ ALL_CONFIGS = [
             "d_initial": 0.1,
             "save_projection": True,
             "bias": "none",
+        },
+    ),
+    (
+        C3AConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "block_size": 1,
+            "target_modules": None,
         },
     ),
 ]
@@ -237,3 +277,21 @@ class TestSequenceClassificationModels(PeftCommonTester):
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_from_pretrained_config_construction(self, model_id, config_cls, config_kwargs):
         self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs.copy())
+
+    @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_modules_to_save_correctly_set(self, model_id, config_cls, config_kwargs):
+        # tests for a regression, introduced via #2220, where modules_to_save was not applied to prompt learning methods
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+            config = config_cls(
+                base_model_name_or_path=model_id,
+                **config_kwargs,
+            )
+            model = get_peft_model(model, config)
+            base_model = model.get_base_model()
+            # classifier layer is called either "classifier" or "score"
+            classifier = getattr(base_model, "classifier", getattr(base_model, "score", None))
+            if classifier is None:
+                raise ValueError(f"Could not determine classifier layer name for {model_id}, please fix the test")
+            assert isinstance(classifier, ModulesToSaveWrapper)
