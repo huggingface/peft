@@ -107,6 +107,7 @@ class TrainConfig:
     autocast_adapter_dtype: bool
     generation_kwargs: dict[str, Any]
     attn_implementation: Optional[str]
+    fast_forward: bool
 
     def __post_init__(self) -> None:
         if not isinstance(self.model_id, str):
