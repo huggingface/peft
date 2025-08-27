@@ -90,7 +90,9 @@ class LoKrLayer(nn.Module, LycorisLayer):
             if use_w2:
                 self.lokr_w2[adapter_name] = nn.Parameter(torch.empty(shape[0][1], shape[1][1], shape[2]))
             elif use_effective_conv2d:  # Even for Conv1d, use the effective parameter for kernel dimension
-                self.lokr_t2[adapter_name] = nn.Parameter(torch.empty(r, r, shape[2]))
+                # We pass (r, r, kernel_size, 1) in order to be compatible with the 2d assumptions made
+                # in make_weight_cp (only relevant for the effective conv2d case).
+                self.lokr_t2[adapter_name] = nn.Parameter(torch.empty(r, r, shape[2], 1))
                 self.lokr_w2_a[adapter_name] = nn.Parameter(torch.empty(r, shape[0][1]))  # b, 1-mode
                 self.lokr_w2_b[adapter_name] = nn.Parameter(torch.empty(r, shape[1][1]))  # d, 2-mode
             else:
@@ -216,10 +218,7 @@ class LoKrLayer(nn.Module, LycorisLayer):
             # they can be more efficiently handled with the flattened weight representation,
             # similar to how Linear layers work. This optimization reduces computational cost
             # without affecting the mathematical equivalence of the operation.
-            if base_layer.kernel_size == (1, 1):
-                use_effective_conv2d = False
-            else:
-                use_effective_conv2d = use_effective_conv2d
+            use_effective_conv2d = use_effective_conv2d and base_layer.kernel_size != (1, 1)
         elif isinstance(base_layer, nn.Conv1d):
             in_dim, out_dim = base_layer.in_channels, base_layer.out_channels
             k_size = (base_layer.kernel_size[0],)  # Convert to a tuple with single element
@@ -234,10 +233,7 @@ class LoKrLayer(nn.Module, LycorisLayer):
             # as 1x1 Conv2d. Kernel size 1 means no spatial/temporal context, making it equivalent
             # to a Linear layer applied across the channel dimension. Using flattened representation
             # avoids unnecessary reshaping and improves computational efficiency.
-            if base_layer.kernel_size[0] == 1:
-                use_effective_conv2d = False
-            else:
-                use_effective_conv2d = use_effective_conv2d
+            use_effective_conv2d = use_effective_conv2d and base_layer.kernel_size[0] != 1
         else:
             raise TypeError(f"LoKr is not implemented for base layers of type {type(base_layer).__name__}")
 

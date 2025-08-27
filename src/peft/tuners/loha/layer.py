@@ -54,11 +54,11 @@ class LoHaLayer(nn.Module, LycorisLayer):
             self.hada_w2_a[adapter_name] = nn.Parameter(torch.empty(r, shape[0]))  # out_dim, 1-mode
             self.hada_w2_b[adapter_name] = nn.Parameter(torch.empty(r, shape[1]))  # in_dim , 2-mode
         elif len(shape) == 3:  # Conv1d
-            self.hada_t1[adapter_name] = nn.Parameter(torch.empty(r, r, shape[2]))
+            self.hada_t1[adapter_name] = nn.Parameter(torch.empty(r, r, shape[2], 1))
             self.hada_w1_a[adapter_name] = nn.Parameter(torch.empty(r, shape[0]))  # out_dim, 1-mode
             self.hada_w1_b[adapter_name] = nn.Parameter(torch.empty(r, shape[1]))  # in_dim , 2-mode
 
-            self.hada_t2[adapter_name] = nn.Parameter(torch.empty(r, r, shape[2]))
+            self.hada_t2[adapter_name] = nn.Parameter(torch.empty(r, r, shape[2], 1))
             self.hada_w2_a[adapter_name] = nn.Parameter(torch.empty(r, shape[0]))  # out_dim, 1-mode
             self.hada_w2_b[adapter_name] = nn.Parameter(torch.empty(r, shape[1]))  # in_dim , 2-mode
         else:  # Linear
@@ -140,10 +140,7 @@ class LoHaLayer(nn.Module, LycorisLayer):
             # they can be more efficiently handled with the flattened weight representation,
             # similar to how Linear layers work. This optimization reduces computational cost
             # without affecting the mathematical equivalence of the operation.
-            if base_layer.kernel_size == (1, 1):
-                use_effective_conv2d = False
-            else:
-                use_effective_conv2d = use_effective_conv2d
+            use_effective_conv2d = use_effective_conv2d and base_layer.kernel_size != (1, 1)
             if use_effective_conv2d:
                 shape = (base_layer.out_channels, base_layer.in_channels, *base_layer.kernel_size)
             else:
@@ -156,10 +153,7 @@ class LoHaLayer(nn.Module, LycorisLayer):
             # as 1x1 Conv2d. Kernel size 1 means no spatial/temporal context, making it equivalent
             # to a Linear layer applied across the channel dimension. Using flattened representation
             # avoids unnecessary reshaping and improves computational efficiency.
-            if base_layer.kernel_size[0] == 1:
-                use_effective_conv2d = False
-            else:
-                use_effective_conv2d = use_effective_conv2d
+            use_effective_conv2d = use_effective_conv2d and base_layer.kernel_size[0] != 1
             if use_effective_conv2d:
                 shape = (base_layer.out_channels, base_layer.in_channels, base_layer.kernel_size[0])
             else:

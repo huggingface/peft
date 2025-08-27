@@ -144,4 +144,5 @@ wandb
 method_comparison/MetaMathQA/cancelled_results/
 method_comparison/MetaMathQA/temporary_results/
 
+# Coding agents
 **/.claude/settings.local.json

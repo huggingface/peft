@@ -268,6 +268,20 @@ TEST_CASES = [
     ("Conv2d 3 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d"], "use_effective_conv2d": True}),
     ("Conv2d 4 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True}),
     ("Conv1d LOHA", "Conv1d", LoHaConfig, {"target_modules": ["conv1d"]}),
+    ("Conv1d LOHA 1", "Conv1d", LoHaConfig, {"target_modules": ["conv1d"]}),
+    ("Conv1d LOHA 2", "Conv1d", LoHaConfig, {"target_modules": ["conv1d"], "r": 2}),
+    (
+        "Conv1d LOHA 3",
+        "Conv1dBigger",
+        LoHaConfig,
+        {"target_modules": ["conv1d"], "r": 2, "use_effective_conv2d": True},
+    ),
+    (
+        "Conv1d LOHA 4",
+        "Conv1dBigger",
+        LoHaConfig,
+        {"target_modules": ["conv1d"], "r": 2, "use_effective_conv2d": False},
+    ),
     ("Conv2d 1x1 LOHA", "Conv2d1x1", LoHaConfig, {"target_modules": ["conv2d"]}),
     # LoKr
     ("Vanilla MLP 1 LOKR", "MLP", LoKrConfig, {"target_modules": "lin0"}),
@@ -287,11 +301,24 @@ TEST_CASES = [
     ),
     ("Vanilla MLP 7 LOKR", "MLP", LoKrConfig, {"target_modules": "lin0", "rank_dropout": 0.5}),
     ("Vanilla MLP 8 LOKR", "MLP", LoKrConfig, {"target_modules": "lin0", "decompose_both": True, "r": 1, "alpha": 1}),
+    ("Conv1d LOKR 1", "Conv1d", LoKrConfig, {"target_modules": ["conv1d"]}),
+    ("Conv1d LOKR 2", "Conv1d", LoKrConfig, {"target_modules": ["conv1d"], "r": 2}),
+    (
+        "Conv1d LOKR 3",
+        "Conv1dBigger",
+        LoKrConfig,
+        {"target_modules": ["conv1d"], "r": 2, "use_effective_conv2d": True},
+    ),
+    (
+        "Conv1d LOKR 4",
+        "Conv1dBigger",
+        LoKrConfig,
+        {"target_modules": ["conv1d"], "r": 2, "use_effective_conv2d": False},
+    ),
     ("Conv2d 1 LOKR", "Conv2d", LoKrConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 LOKR", "Conv2d", LoKrConfig, {"target_modules": ["conv2d", "lin0"]}),
     ("Conv2d 3 LOKR", "Conv2d", LoKrConfig, {"target_modules": ["conv2d"], "use_effective_conv2d": True}),
     ("Conv2d 4 LOKR", "Conv2d", LoKrConfig, {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True}),
-    ("Conv1d LOKR", "Conv1d", LoKrConfig, {"target_modules": ["conv1d"]}),
     ("Conv2d 1x1 LOKR", "Conv2d1x1", LoKrConfig, {"target_modules": ["conv2d"]}),
     (
         "Conv2d 5 LOKR",
@@ -1193,6 +1220,28 @@ class ModelConv1D(nn.Module):
         return X
 
 
+class ModelConv1DBigger(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1d = nn.Conv1d(64, 16, 2)
+        self.relu = nn.ReLU()
+        self.flat = nn.Flatten()
+        self.lin0 = nn.Linear(144, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
+
+    def forward(self, X):
+        X = X.to(self.dtype)
+        X = X.reshape(-1, 1, 10)
+        X = torch.concat([X] * 64, dim=1)
+        X = self.conv1d(X)
+        X = self.relu(X)
+        X = self.flat(X)
+        X = self.lin0(X)
+        X = self.sm(X)
+        return X
+
+
 class ModelConv2D(nn.Module):
     def __init__(self, bias=True):
         super().__init__()
@@ -1425,6 +1474,9 @@ class MockTransformerWrapper:
 
         if model_id == "Conv1d":
             return ModelConv1D().to(torch_dtype)
+
+        if model_id == "Conv1dBigger":
+            return ModelConv1DBigger().to(torch_dtype)
 
         if model_id == "Conv2d":
             return ModelConv2D().to(torch_dtype)
