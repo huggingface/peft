@@ -179,8 +179,16 @@ def map_cache_to_layer_device_map(model, cache) -> None:
     layer_device_map = get_layer_device_map(model)
     for idx in range(model.config.num_hidden_layers):
         layer_device = layer_device_map[idx]
-        cache.key_cache[idx] = cache.key_cache[idx].to(layer_device)
-        cache.value_cache[idx] = cache.value_cache[idx].to(layer_device)
+        if hasattr(cache, "layers"):
+            # new transformers uses cache.layers (>v4.55)
+            layer = cache.layers[idx]
+            layer.keys = layer.keys.to(layer_device)
+            layer.values = layer.values.to(layer_device)
+        else:
+            # old transformers uses cache.{key,value}_cache (<=v4.55)
+            # TODO: remove if we drop support for transformers <= 4.55
+            cache.key_cache[idx] = cache.key_cache[idx].to(layer_device)
+            cache.value_cache[idx] = cache.value_cache[idx].to(layer_device)
 
 
 ##################################
