@@ -3712,6 +3712,13 @@ class PeftHqqGPUTests(unittest.TestCase):
 class PeftAwqGPUTests(unittest.TestCase):
     r"""
     Awq + peft tests
+
+    Note that AWQ is no longer being maintained:
+
+    https://github.com/casper-hansen/AutoAWQ/blob/88e4c76b20755db275574e6a03c83c84ba3bece5/README.md
+
+    It is therefore expected that more tests will start failing in the future. If this happens, remove AWQ support from
+    PEFT.
     """
 
     def setUp(self):
@@ -3792,8 +3799,8 @@ class PeftAwqGPUTests(unittest.TestCase):
     # TODO remove marker if/once issue is resolved, most likely requiring a fix in AutoAWQ:
     # https://github.com/casper-hansen/AutoAWQ/issues/754
     @pytest.mark.xfail(
-        condition=is_torch_version("==", "2.7.0") or is_torch_version("==", "2.7.1"),
-        reason="Multi-GPU test currently not working with AutoAWQ and PyTorch 2.7",
+        condition=is_torch_version(">=", "2.7.0"),
+        reason="Multi-GPU test currently not working with AutoAWQ and PyTorch 2.7+",
         strict=True,
     )
     @require_torch_multi_accelerator
