@@ -20,6 +20,7 @@ import unittest
 from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Union
 
 import numpy as np
@@ -57,6 +58,7 @@ from transformers.pytorch_utils import Conv1D
 
 from peft import (
     AdaLoraConfig,
+    ArrowConfig,
     EvaConfig,
     LoftQConfig,
     LoraConfig,
@@ -64,8 +66,10 @@ from peft import (
     PrefixTuningConfig,
     PromptEncoderConfig,
     RandLoraConfig,
+    RoadConfig,
     TaskType,
     VeraConfig,
+    create_arrow_model,
     get_peft_model,
     get_peft_model_state_dict,
     initialize_lora_eva_weights,
@@ -81,6 +85,7 @@ from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
 from peft.utils.loftq_utils import NFQuantizer
 from peft.utils.other import fsdp_auto_wrap_policy
+from tests.testing_utils import hub_online_once
 
 from .testing_utils import (
     device_count,
@@ -1700,6 +1705,226 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                     warmup_steps=2,
                     max_steps=3,
                     learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_8bit_road(self):
+        r"""
+        Same as test_causal_lm_training but with RoAd
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+                device_map="auto",
+            )
+
+            tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+            model = prepare_model_for_kbit_training(model)
+
+            config = RoadConfig(
+                variant="road_1",
+                target_modules=["q_proj", "v_proj"],
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("ybelkada/english_quotes_copy")
+            data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=1e-3,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_4bit_road(self):
+        r"""
+        Same as test_causal_lm_training_4bit but with RoAd
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+                device_map="auto",
+            )
+
+            tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+            model = prepare_model_for_kbit_training(model)
+
+            config = RoadConfig(
+                variant="road_1",
+                target_modules=["q_proj", "v_proj"],
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("ybelkada/english_quotes_copy")
+            data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=1e-3,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.multi_gpu_tests
+    def test_causal_lm_training_multi_gpu_8bit_road(self):
+        r"""
+        Same as test_causal_lm_training_multi_gpu but with RoAd
+        """
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
+                quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+            )
+
+            assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
+
+            model = prepare_model_for_kbit_training(model)
+
+            setattr(model, "model_parallel", True)
+            setattr(model, "is_parallelizable", True)
+
+            config = RoadConfig(
+                variant="road_1",
+                target_modules=["q_proj", "v_proj"],
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("Abirate/english_quotes")
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=1e-3,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.multi_gpu_tests
+    def test_causal_lm_training_multi_gpu_4bit_road(self):
+        r"""
+        Same as test_causal_lm_training_multi_gpu_4bit but with RoAd
+        """
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
+                quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+            )
+
+            assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
+
+            model = prepare_model_for_kbit_training(model)
+
+            setattr(model, "model_parallel", True)
+            setattr(model, "is_parallelizable", True)
+
+            config = RoadConfig(
+                variant="road_1",
+                target_modules=["q_proj", "v_proj"],
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("Abirate/english_quotes")
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=1e-3,
                     fp16=True,
                     logging_steps=1,
                     output_dir=tmp_dir,
@@ -4970,3 +5195,98 @@ class TestHotSwapping:
         inductor_config_ctx = torch._inductor.config.patch("triton.cudagraph_support_input_mutation", False)
         with dynamo_config_ctx, inductor_config_ctx:
             self.check_hotswap_diffusion(ranks=ranks, alpha_scalings=ranks, target_modules=target_modules)
+
+
+@pytest.fixture(scope="module")
+def workdir(tmp_path_factory):
+    """Create a temp directory and chdir into it for the module duration."""
+    wd = tmp_path_factory.mktemp("arrow_workdir")
+    old_cwd = os.getcwd()
+    os.chdir(wd)
+    try:
+        yield Path(wd)
+    finally:
+        os.chdir(old_cwd)
+
+
+def _create_and_save_adapter_opt(out_dir: Path, rank: int = 4):
+    """
+    Build a randomly initialized LoRA adapter for OPT-125M and save into `out_dir`. We construct a model from CONFIG
+    (no pretrained weights) to avoid slow downloads here.
+    """
+    model_id = "facebook/opt-125m"
+    # Target all linear layers so the adapter matches whatever we later quantize/load.
+    lora_cfg = LoraConfig(
+        r=rank,
+        lora_alpha=2 * rank,
+        lora_dropout=0.0,
+        bias="none",
+        target_modules="all-linear",
+        task_type="CAUSAL_LM",
+        init_lora_weights=False,  # keep it purely random, as requested
+    )
+    # Create model from config (fast) just to attach/save adapter
+    base_cfg = AutoModelForCausalLM.from_pretrained(model_id, trust_remote_code=False).config
+    base_cfg.tie_word_embeddings = False  # silence warnings for from_config models
+    model = AutoModelForCausalLM.from_config(base_cfg)
+    peft_model = get_peft_model(model, lora_cfg)
+    peft_model.save_pretrained(out_dir)
+
+
+@pytest.fixture(scope="module")
+def ts_adapters_opt(workdir: Path):
+    """
+    Build 3 locally-saved task-specific adapters for OPT-125M and return their absolute paths.
+    """
+    paths = []
+    for i in range(3):
+        sub = workdir / f"ts_expert_{i}"
+        _create_and_save_adapter_opt(sub)
+        paths.append(str(sub))
+    return paths
+
+
+# Test: 4-bit load + Arrow + generate
+class TestArrowQuantized:
+    @pytest.mark.single_gpu_tests
+    def test_arrow_4bit_opt125m_load_and_generate_with_local_adapters(self, ts_adapters_opt):
+        # Skip if CUDA or bitsandbytes isn’t available
+        if not torch.cuda.is_available():
+            pytest.skip("CUDA required for 4-bit bitsandbytes test.")
+
+        model_id = "facebook/opt-125m"
+
+        # Quantization config (nf4, bf16 compute)
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=False,
+        )
+
+        with hub_online_once(model_id):
+            # Load quantized base model
+            base_model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                torch_dtype=torch.bfloat16,
+                device_map="auto",
+                quantization_config=bnb_config,
+            )
+            tok = AutoTokenizer.from_pretrained(model_id, use_fast=True)
+
+        # Build Arrow model from the locally created adapters
+        arrow_cfg = ArrowConfig(top_k=2, router_temperature=1.0, rng_seed=42)
+        model = create_arrow_model(
+            base_model=base_model,
+            task_specific_adapter_paths=ts_adapters_opt,  # local dirs (each has adapter_config.json)
+            arrow_config=arrow_cfg,
+        ).eval()
+
+        # Quick generate smoke test
+        inputs = tok("Hello world", return_tensors="pt")
+        inputs = {k: v.to(model.device) for k, v in inputs.items()}
+        with torch.no_grad():
+            out = model.generate(**inputs, max_new_tokens=8)
+
+        assert out is not None
+        assert out.shape[0] == 1  # batch size 1

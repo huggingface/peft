@@ -585,7 +585,7 @@ Using this feature has some drawbacks, namely:
 
 ## Composing and Reusing LoRA Adapters
 ### Arrow
-[Arrow](https://arxiv.org/abs/2405.11157) is a modular routing algorithm designed to combine multiple pre-trained task-specific LoRA adapters to solve a given task. Rather than merging all adapters naively, Arrow introduces a **gradient-free, token-wise mixture-of-experts (MoE) routing mechanism**. At inference time, it first computes a _prototype_ for each LoRA by extracting the top right singular vector from its SVD decomposition. Each token representation is then compared to these prototypes via cosine similarity to obtain routing coefficients. Tokens are assigned to the top-k most relevant LoRA adapters, with the coefficients normalized through softmax, and their outputs linearly combined. This allows effective reuse of existing LoRA modules for new tasks and leads to stronger zero-shot generalization.
+[Arrow](https://huggingface.co/papers/2405.11157) is a modular routing algorithm designed to combine multiple pre-trained task-specific LoRA adapters to solve a given task. Rather than merging all adapters naively, Arrow introduces a **gradient-free, token-wise mixture-of-experts (MoE) routing mechanism**. At inference time, it first computes a _prototype_ for each LoRA by extracting the top right singular vector from its SVD decomposition. Each token representation is then compared to these prototypes via cosine similarity to obtain routing coefficients. Tokens are assigned to the top-k most relevant LoRA adapters, with the coefficients normalized through softmax, and their outputs linearly combined. This allows effective reuse of existing LoRA modules for new tasks and leads to stronger zero-shot generalization.
 
 In PEFT, Arrow is enabled through ```ArrowConfig``` and ```create_arrow_model```. You can also configure parameters such as ```top_k``` (the number of LoRA adapters combined per token), ```router_temperature``` (the softmax temperature applied to the routing coefficients), and ```rng_seed``` (for reproducibility). 
 
@@ -598,12 +598,11 @@ base_model = AutoModelForCausalLM.from_pretrained("microsoft/Phi-3-mini-4k-instr
 
 # Creating the Arrow config
 arrow_config = ArrowConfig(
-    top_k = 3,
-    router_temperature = 1.0,
-    rng_seed = 42,
+    top_k=3,
+    router_temperature=1.0,
+    rng_seed=42,
 )
 
-# ts_repo_id is the path of directory, where all the task adapters exist there.
 # The provided LoRA adapters below are trained on a clustered Flan dataset. 
 # The clustering is done using MBC method explained in the Arrow paper.
 task_specific_adapter_paths = [
@@ -612,10 +611,9 @@ task_specific_adapter_paths = [
 
 # Creating the Arrow model
 model = create_arrow_model(
-        base_model = base_model,
-        task_specific_adapter_paths = task_specific_adapter_paths,
-        ts_repo_id = "TahaBa/phi3-mini-clustered-flan",
-        arrow_config = arrow_config,
+        base_model=base_model,
+        task_specific_adapter_paths=task_specific_adapter_paths,
+        arrow_config=arrow_config,
     )
 
 # Now the forward path could be called on this model, like a normal PeftModel.
@@ -642,7 +640,7 @@ model.set_adapter('arrow_router')    # Model is ready to be used at inference ti
 ```
 
 ### GenKnowSub
-[GenKnowSub](https://aclanthology.org/2025.acl-short.54/) augments Arrow by purifying task-specific LoRA adapters before routing. The key idea is to subtract general knowledge encoded in LoRA space—based on the [forgetting-via-negation principle](https://arxiv.org/abs/2212.04089)—so that task adapters become more isolated and focused on task-relevant signals. Concretely, GenKnowSub estimates a low-dimensional “general” subspace from a set of general (non task-specific) LoRA adapters and removes this component from each task adapter’s LoRA update prior to Arrow’s token-wise routing. This typically improves compositionality and reduces interference when combining many task adapters.
+[GenKnowSub](https://aclanthology.org/2025.acl-short.54/) augments Arrow by purifying task-specific LoRA adapters before routing. The key idea is to subtract general knowledge encoded in LoRA space—based on the [forgetting-via-negation principle](https://huggingface.co/papers/2212.04089)—so that task adapters become more isolated and focused on task-relevant signals. Concretely, GenKnowSub estimates a low-dimensional “general” subspace from a set of general (non task-specific) LoRA adapters and removes this component from each task adapter’s LoRA update prior to Arrow’s token-wise routing. This typically improves compositionality and reduces interference when combining many task adapters.
 
 In PEFT, enable GenKnowSub by setting ```use_gks=True``` in ArrowConfig, and providing ```gen_repo_id``` and ```general_adapter_paths``` in ```create_arrow_model```:
 
@@ -655,17 +653,16 @@ base_model = AutoModelForCausalLM.from_pretrained("microsoft/Phi-3-mini-4k-instr
 
 # Creating the Arrow config
 arrow_config = ArrowConfig(
-    top_k = 3,
-    router_temperature = 1.0,
-    use_gks = True,
-    rng_seed = 42,
+    top_k=3,
+    router_temperature=1.0,
+    use_gks=True,
+    rng_seed=42,
 )
 
 # Path to task-specific, trained on flan clustered dataset (as we explained before.)
 task_specific_adapter_paths = [
         f"TahaBa/phi3-mini-clustered-flan/ts_expert_{i}" for i in range(10)
     ]
-# gen_repo_id is the path of directory, where all the general adapters exist there.
 # These general adapters are trained on English, German, and French Wikipedia dataset,
 # with causal language modelling objective, each pair like: (507 token tsentence, 5 token completion), and the loss computed on the completion
 general_adapter_paths = [
@@ -676,12 +673,10 @@ general_adapter_paths = [
 
 # Creating the Arrow model
 model = create_arrow_model(
-        base_model = base_model,
-        task_specific_adapter_paths = task_specific_adapter_paths,
-        ts_repo_id = "TahaBa/phi3-mini-clustered-flan",
-        general_adapter_paths = general_adapter_paths,
-        gen_repo_id = "TahaBa/phi3-mini-general-adapters",
-        arrow_config = arrow_config,
+        base_model=base_model,
+        task_specific_adapter_paths=task_specific_adapter_paths,
+        general_adapter_paths=general_adapter_paths,
+        arrow_config=arrow_config,
     )
 
 # Now the forward path could be called on this model, like a normal PeftModel.

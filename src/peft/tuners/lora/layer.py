@@ -861,6 +861,7 @@ class Embedding(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        arrow_config: ArrowConfig = None,
         lora_bias: bool = False,
         **kwargs,
     ) -> None:
@@ -882,6 +883,7 @@ class Embedding(nn.Module, LoraLayer):
             use_rslora=use_rslora,
             use_dora=use_dora,
             lora_bias=lora_bias,
+            arrow_config=arrow_config,
         )
 
     def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
@@ -893,7 +895,16 @@ class Embedding(nn.Module, LoraLayer):
         return DoraEmbeddingVariant()
 
     def update_layer(
-        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora, lora_bias
+        self,
+        adapter_name,
+        r,
+        lora_alpha,
+        lora_dropout,
+        init_lora_weights,
+        use_rslora,
+        use_dora,
+        lora_bias,
+        arrow_config: ArrowConfig = None,
     ):
         # collect the kwargs
         kwargs = locals().copy()
@@ -902,7 +913,7 @@ class Embedding(nn.Module, LoraLayer):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
-        lora_variant = self.resolve_lora_variant(use_dora=use_dora)
+        lora_variant = self.resolve_lora_variant(use_dora=use_dora, arrow_config=arrow_config)
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 
@@ -1133,6 +1144,7 @@ class _ConvNd(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        arrow_config: ArrowConfig = None,
         lora_bias: bool = False,
         **kwargs,
     ) -> None:
@@ -1161,10 +1173,20 @@ class _ConvNd(nn.Module, LoraLayer):
             use_rslora=use_rslora,
             use_dora=use_dora,
             lora_bias=lora_bias,
+            arrow_config=arrow_config,
         )
 
     def update_layer(
-        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora, lora_bias
+        self,
+        adapter_name,
+        r,
+        lora_alpha,
+        lora_dropout,
+        init_lora_weights,
+        use_rslora,
+        use_dora,
+        lora_bias,
+        arrow_config: ArrowConfig = None,
     ):
         # collect the kwargs
         kwargs = locals().copy()
@@ -1180,7 +1202,7 @@ class _ConvNd(nn.Module, LoraLayer):
                 PeftWarning,
             )
 
-        lora_variant = self.resolve_lora_variant(use_dora=use_dora)
+        lora_variant = self.resolve_lora_variant(use_dora=use_dora, arrow_config=arrow_config)
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 
@@ -1863,11 +1885,12 @@ def _register_parameter_or_buffer(module, name, X):
 
 class ParamWrapper(nn.Module, LoraLayer):
     """A LoRA wrapper for `nn.Parameter`. This layer is dispatched if users target a parameter directly with
-    `lora_config.target_parameters` Note:
-    - When accessing the wrapped nn.Parameter directly, e.g. via `module.weight`, the LoRA weights are *not* applied.
-    - It is currently not implemented to target multiple parameters on the same module. To achieve this, it is
-      currently required to create a separate LoRA adapter (with another adapter name) and activate both at the same
-      time.
+    `lora_config.target_parameters`
+        Note:
+        - When accessing the wrapped nn.Parameter directly, e.g. via `module.weight`, the LoRA weights are *not* applied.
+        - It is currently not implemented to target multiple parameters on the same module. To achieve this, it is
+          currently required to create a separate LoRA adapter (with another adapter name) and activate both at the same
+          time.
     """
 
     def __init__(

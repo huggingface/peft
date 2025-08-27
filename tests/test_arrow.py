@@ -31,8 +31,7 @@ from tests.testing_utils import hub_online_once
 @pytest.fixture(scope="module")
 def workdir(tmp_path_factory):
     """
-    Create a temp directory and chdir into it for the duration of the module. This lets us use *relative* adapter paths
-    like 'ts0' so split_repo_and_subfolder() recognises them as LOCAL repo-roots.
+    Create a temp directory and chdir into it for the duration of the module.
     """
     wd = tmp_path_factory.mktemp("arrow_workdir")
     old_cwd = os.getcwd()
@@ -86,12 +85,11 @@ class TestArrowRouting:
         model_id = "hf-internal-testing/tiny-random-gpt2"
         with hub_online_once(model_id):
             base_model_1 = AutoModelForCausalLM.from_pretrained(model_id)
-            base_model_2 = AutoModelForCausalLM.from_pretrained(model_id)
+            base_model_2 = copy.deepcopy(base_model_1)
         cfg_small = ArrowConfig(top_k=2)
         m_small = create_arrow_model(
             base_model=base_model_1,
             task_specific_adapter_paths=ts_adapters[:2],
-            ts_repo_id="/".join(ts_adapters[0].split("/")[:2]),
             arrow_config=cfg_small,
         ).eval()
 
@@ -100,7 +98,6 @@ class TestArrowRouting:
         m_big = create_arrow_model(
             base_model=base_model_2,
             task_specific_adapter_paths=ts_adapters,
-            ts_repo_id="/".join(ts_adapters[0].split("/")[:2]),
             arrow_config=cfg_big,
         ).eval()
 
@@ -116,14 +113,12 @@ class TestArrowRouting:
         model_id = "hf-internal-testing/tiny-random-gpt2"
         with hub_online_once(model_id):
             base_model_1 = AutoModelForCausalLM.from_pretrained(model_id)
-            base_model_2 = AutoModelForCausalLM.from_pretrained(model_id)
+            base_model_2 = copy.deepcopy(base_model_1)
         cfg_big = ArrowConfig(top_k=2, use_gks=True, rng_seed=42)
         m_big = create_arrow_model(
             base_model=base_model_1,
             task_specific_adapter_paths=ts_adapters,
-            ts_repo_id="/".join(ts_adapters[0].split("/")[:2]),
             general_adapter_paths=gen_adapter,
-            gen_repo_id="/".join(gen_adapter[0].split("/")[:2]),
             arrow_config=cfg_big,
         ).eval()
 
@@ -132,9 +127,7 @@ class TestArrowRouting:
         m_small_later_big = create_arrow_model(
             base_model=base_model_2,
             task_specific_adapter_paths=ts_adapters[:2],
-            ts_repo_id="/".join(ts_adapters[0].split("/")[:2]),
             general_adapter_paths=gen_adapter,
-            gen_repo_id="/".join(gen_adapter[0].split("/")[:2]),
             arrow_config=cfg_small_later_big,
         )
 
@@ -143,13 +136,9 @@ class TestArrowRouting:
         m_small_later_big(x)
 
         # Now loading the third expert
-        parts = ts_adapters[-1].split("/")
-        repo_id = "/".join(parts[:2])
-        sub_folder = "/".join(parts[2:])
         m_small_later_big.load_adapter(
-            model_id=repo_id,
+            model_id=ts_adapters[-1],
             adapter_name="new_added_ts_expert",
-            subfolder=sub_folder,
         )
         # Activating the new adapter and run forward path on it
         m_small_later_big.set_adapter("new_added_ts_expert")
@@ -172,14 +161,12 @@ class TestArrowRouting:
         model_id = "hf-internal-testing/tiny-random-gpt2"
         with hub_online_once(model_id):
             base_model_1 = AutoModelForCausalLM.from_pretrained(model_id)
-            base_model_2 = AutoModelForCausalLM.from_pretrained(model_id)
+            base_model_2 = copy.deepcopy(base_model_1)
         cfg_big = ArrowConfig(top_k=2, use_gks=True, rng_seed=42)
         m_big = create_arrow_model(
             base_model=base_model_1,
             task_specific_adapter_paths=ts_adapters,
-            ts_repo_id="/".join(ts_adapters[0].split("/")[:2]),
             general_adapter_paths=gen_adapter,
-            gen_repo_id="/".join(gen_adapter[0].split("/")[:2]),
             arrow_config=cfg_big,
         ).eval()
 
@@ -188,9 +175,7 @@ class TestArrowRouting:
         m_small_later_big = create_arrow_model(
             base_model=base_model_2,
             task_specific_adapter_paths=ts_adapters[:2],
-            ts_repo_id="/".join(ts_adapters[0].split("/")[:2]),
             general_adapter_paths=gen_adapter,
-            gen_repo_id="/".join(gen_adapter[0].split("/")[:2]),
             arrow_config=cfg_small_later_big,
         )
 
@@ -199,13 +184,9 @@ class TestArrowRouting:
         m_small_later_big(x)
 
         # Now loading the third expert
-        parts = ts_adapters[-1].split("/")
-        repo_id = "/".join(parts[:2])
-        sub_folder = "/".join(parts[2:])
         m_small_later_big.load_adapter(
-            model_id=repo_id,
+            model_id=ts_adapters[-1],
             adapter_name="new_added_ts_expert",
-            subfolder=sub_folder,
         )
         # The new adapter is activated
         m_small_later_big.set_adapter("new_added_ts_expert")
@@ -223,14 +204,12 @@ class TestArrowRouting:
         model_id = "hf-internal-testing/tiny-random-gpt2"
         with hub_online_once(model_id):
             base_model_1 = AutoModelForCausalLM.from_pretrained(model_id)
-            base_model_2 = AutoModelForCausalLM.from_pretrained(model_id)
+            base_model_2 = copy.deepcopy(base_model_1)
         cfg_big = ArrowConfig(top_k=2, use_gks=True, rng_seed=42)
         m_big = create_arrow_model(
             base_model=base_model_1,
             task_specific_adapter_paths=ts_adapters,
-            ts_repo_id="/".join(ts_adapters[0].split("/")[:2]),
             general_adapter_paths=gen_adapter,
-            gen_repo_id="/".join(gen_adapter[0].split("/")[:2]),
             arrow_config=cfg_big,
         ).eval()
 
@@ -239,20 +218,14 @@ class TestArrowRouting:
         m_small_later_big = create_arrow_model(
             base_model=base_model_2,
             task_specific_adapter_paths=ts_adapters[:2],
-            ts_repo_id="/".join(ts_adapters[0].split("/")[:2]),
             general_adapter_paths=gen_adapter,
-            gen_repo_id="/".join(gen_adapter[0].split("/")[:2]),
             arrow_config=cfg_small_later_big,
         )
 
         # Now loading the third expert
-        parts = ts_adapters[-1].split("/")
-        repo_id = "/".join(parts[:2])
-        sub_folder = "/".join(parts[2:])
         m_small_later_big.load_adapter(
-            model_id=repo_id,
+            model_id=ts_adapters[-1],
             adapter_name="new_added_ts_expert",
-            subfolder=sub_folder,
         )
         m_small_later_big.eval()
 
@@ -267,12 +240,11 @@ class TestArrowRouting:
         model_id = "hf-internal-testing/tiny-random-gpt2"
         with hub_online_once(model_id):
             base_model_1 = AutoModelForCausalLM.from_pretrained(model_id)
-            base_model_2 = AutoModelForCausalLM.from_pretrained(model_id)
+            base_model_2 = copy.deepcopy(base_model_1)
         cfg_plain = ArrowConfig(top_k=2)
         m_plain = create_arrow_model(
             base_model=base_model_1,
             task_specific_adapter_paths=ts_adapters,
-            ts_repo_id="/".join(ts_adapters[0].split("/")[:2]),
             arrow_config=cfg_plain,
         ).eval()
 
@@ -281,9 +253,7 @@ class TestArrowRouting:
         m_gks = create_arrow_model(
             base_model=base_model_2,
             task_specific_adapter_paths=ts_adapters,
-            ts_repo_id="/".join(ts_adapters[0].split("/")[:2]),
             general_adapter_paths=gen_adapter,
-            gen_repo_id="/".join(gen_adapter[0].split("/")[:2]),
             arrow_config=cfg_gks,
         ).eval()
 
@@ -302,7 +272,6 @@ class TestArrowRouting:
         m_small = create_arrow_model(
             base_model=base_model,
             task_specific_adapter_paths=ts_adapters[:2],
-            ts_repo_id="/".join(ts_adapters[0].split("/")[:2]),
             arrow_config=cfg_small,
         ).eval()
 
@@ -319,11 +288,6 @@ class TestArrowRouting:
         with hub_online_once(model_id):
             base = AutoModelForImageClassification.from_pretrained(model_id)
 
-        # Find a Conv2d module name in the ResNet test model
-        probe = AutoModelForImageClassification.from_pretrained(model_id)
-        conv_names = [n.split(".")[-1] for n, m in probe.named_modules() if isinstance(m, torch.nn.Conv2d)]
-        assert len(conv_names) > 0, "No Conv2d modules found in the ResNet test model."
-
         # Build a LoRA adapter targeting a Conv2d
         cfg = LoraConfig(r=4, target_modules=["convolution"], init_lora_weights=False)
         peft_model = get_peft_model(copy.deepcopy(base), cfg)
@@ -336,7 +300,6 @@ class TestArrowRouting:
             _ = create_arrow_model(
                 base_model=base,
                 task_specific_adapter_paths=[str(conv_dir)],
-                ts_repo_id=str(workdir),
                 arrow_config=ArrowConfig(top_k=1),
             )
 
@@ -358,16 +321,15 @@ class TestArrowRouting:
         model_id = "hf-internal-testing/tiny-random-gpt2"
 
         # Create base in fp16 (no manual assignment to .dtype)
-        base = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float16)
+        with hub_online_once(model_id):
+            base = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float16)
 
         cfg = ArrowConfig(top_k=2)
-        ts_repo_id = "/".join(ts_adapters[0].split("/")[:2])
 
         # Build Arrow model and disable adapter dtype autocast
         model = create_arrow_model(
             base_model=base,
             task_specific_adapter_paths=ts_adapters,
-            ts_repo_id=ts_repo_id,
             arrow_config=cfg,
             autocast_adapter_dtype=False,
             torch_dtype=torch.float16,

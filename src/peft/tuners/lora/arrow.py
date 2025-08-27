@@ -16,6 +16,10 @@ import torch
 from torch import nn
 
 
+TASK_ADAPTER_PREFIX = "task_"
+GKS_ADAPTER_PREFIX = "gks_"
+
+
 class ArrowLoraLinearLayer(nn.Module):
     """
     This class represent the main logic of the arrow routing algorithm for linear layers.

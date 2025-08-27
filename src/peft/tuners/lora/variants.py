@@ -13,6 +13,8 @@
 # limitations under the License.
 from __future__ import annotations
 
+import os
+from copy import deepcopy
 from typing import Any
 
 import torch
@@ -22,7 +24,7 @@ from transformers import PreTrainedModel
 
 from peft.utils.other import transpose
 
-from .arrow import ArrowLoraLinearLayer
+from .arrow import GKS_ADAPTER_PREFIX, TASK_ADAPTER_PREFIX, ArrowLoraLinearLayer
 from .config import ArrowConfig
 from .dora import DoraConv1dLayer, DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer
 from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd
@@ -652,28 +654,46 @@ def check_lora_rank_consistency(model, adapter_names: list[str]) -> int:
     return ref_r
 
 
-def get_subfolder_from_path(path: str, repo_id: str):
+def _resolve_adapter_source(path: str, base_kwargs: dict) -> tuple[str, dict]:
     """
-    Given a Hugging Face path and a repo_id, check if repo_id is in the path. If yes, return the subfolder part;
-    otherwise raise an error.
+    Resolve a user-provided adapter `path` into (model_id, adapter_kwargs).
+
+    Supports:
+      - Local path to a folder that contains `adapter_config.json`
+      - Hub path with subfolder, e.g. "user/repo/ts_expert_0[/more/...]", which becomes:
+            model_id="user/repo", subfolder="ts_expert_0[/more/...]"
+      - Plain Hub repo id "user/repo" (no subfolder)
+
+    `base_kwargs` are copied and `subfolder` is set if needed (not overwritten if already provided).
     """
-    path = path.strip("/")
-    repo_id = repo_id.strip("/")
+    kw = deepcopy(base_kwargs)
 
-    if not path.startswith(repo_id):
-        raise ValueError(f"Repo ID '{repo_id}' not found in path '{path}'.")
+    # Local directory case
+    if os.path.isdir(path):
+        # Expect adapter_config.json directly inside this folder
+        if not os.path.isfile(os.path.join(path, "adapter_config.json")):
+            raise ValueError(f"Local adapter path '{path}' does not contain 'adapter_config.json'.")
+        return path, kw
 
-    remaining = path[len(repo_id) :].strip("/")
-    return remaining if remaining else None
+    # Hub-style path: "namespace/repo[/optional/sub/dir]"
+    parts = path.strip("/").split("/")
+    if len(parts) >= 2:
+        model_id = "/".join(parts[:2])
+        # if there's a subfolder portion beyond "namespace/repo"
+        if len(parts) > 2:
+            subfolder = "/".join(parts[2:])
+            kw.setdefault("subfolder", subfolder)
+        return model_id, kw
+
+    # Fallback (unlikely): treat as model_id as-is
+    return path, kw
 
 
 def create_arrow_model(
     base_model: PreTrainedModel,
     task_specific_adapter_paths: list[str],  # path of task-specific LoRAs
-    ts_repo_id: str,
     arrow_config: ArrowConfig,
     general_adapter_paths: list[str] | None = None,  # path to the trained general-knowledge LoRAs
-    gen_repo_id: str | None = None,
     **adapter_kwargs: Any,
 ):
     if task_specific_adapter_paths is None or len(task_specific_adapter_paths) == 0:
@@ -681,29 +701,24 @@ def create_arrow_model(
 
     from peft import LoraConfig, PeftModel
 
-    TASK_ADAPTER_PREFIX = "task_"
-    GKS_ADAPTER_PREFIX = "gks_"
-
     # Load the first TS expert to get a PeftModel
-    sub_folder = get_subfolder_from_path(task_specific_adapter_paths[0], ts_repo_id)
+    model_id0, kw0 = _resolve_adapter_source(task_specific_adapter_paths[0], adapter_kwargs)
     initial_ts_expert_name = f"{TASK_ADAPTER_PREFIX}0"
     model = PeftModel.from_pretrained(
         base_model,
-        model_id=ts_repo_id,
+        model_id=model_id0,
         adapter_name=initial_ts_expert_name,
-        subfolder=sub_folder,
-        **adapter_kwargs,
+        **kw0,
     )
 
     # Load other task-specific adapters
     for i in range(1, len(task_specific_adapter_paths)):
         ts_expert_name = f"{TASK_ADAPTER_PREFIX}{i}"
-        sub_folder = get_subfolder_from_path(task_specific_adapter_paths[i], ts_repo_id)
+        mid, kw = _resolve_adapter_source(task_specific_adapter_paths[i], adapter_kwargs)
         model.load_adapter(
-            model_id=ts_repo_id,
+            model_id=mid,
             adapter_name=ts_expert_name,
-            subfolder=sub_folder,
-            **adapter_kwargs,
+            **kw,
         )
     arrow_config.task_adapter_names = [f"{TASK_ADAPTER_PREFIX}{i}" for i in range(len(task_specific_adapter_paths))]
 
@@ -713,12 +728,11 @@ def create_arrow_model(
             raise ValueError("You should provide general LoRA paths if you want to use GenKnowSub.")
         for i in range(len(general_adapter_paths)):
             gen_expert_name = f"{GKS_ADAPTER_PREFIX}{i}"
-            sub_folder = get_subfolder_from_path(general_adapter_paths[i], gen_repo_id)
+            mid, kw = _resolve_adapter_source(general_adapter_paths[i], adapter_kwargs)
             model.load_adapter(
-                model_id=gen_repo_id,
+                model_id=mid,
                 adapter_name=gen_expert_name,
-                subfolder=sub_folder,
-                **adapter_kwargs,
+                **kw,
             )
         arrow_config.gks_adapter_names = [f"{GKS_ADAPTER_PREFIX}{i}" for i in range(len(general_adapter_paths))]
     else:
