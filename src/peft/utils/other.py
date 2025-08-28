@@ -890,8 +890,8 @@ def _set_trainable(
 
 def _set_adapter(model, adapter_name):
     def check_adapter_name(adapter_name: str | list[str], module: AuxiliaryTrainingWrapper) -> str | None:
-        # Helper function to check if the adapter(s) can be set. For ModulesToSave, only exactly 0 or 1 active adapters
-        # are allowed.
+        # Helper function to check if the adapter(s) can be set. Right now, only exactly 0 or 1 active adapters are
+        # allowed.
         if isinstance(adapter_name, str):
             return adapter_name
 
@@ -1290,7 +1290,7 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
     Currently trainable tokens and modules to save are considered additional trainable modules.
 
     If `activate_adapter` is set to `False`, the adapter won't be activated. This is typically the case when
-    `model.add_adapter` or `model.load_adapter` is being called.
+    `model.add_adapter` or `model.load_adapter` are being called.
     """
     if getattr(peft_config, "modules_to_save", None) is not None:
         # this may add a new ModulesToSaveWrapper
