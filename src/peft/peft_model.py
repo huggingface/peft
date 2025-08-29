@@ -39,9 +39,10 @@ from transformers.modeling_outputs import QuestionAnsweringModelOutput, Sequence
 from transformers.utils import PushToHubMixin
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
+from peft.utils import AuxiliaryTrainingWrapper
 from peft.utils.constants import DUMMY_MODEL_CONFIG
 from peft.utils.integrations import init_empty_weights
-from peft.utils.other import create_attention_mask, set_additional_trainable_modules
+from peft.utils.other import TrainableTokensWrapper, create_attention_mask, set_additional_trainable_modules
 
 from . import __version__
 from .config import PeftConfig
@@ -3010,7 +3011,11 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
 
     layer_status: list[TunerLayerStatus] = []
     for name, module in base_model.named_modules():
-        if not isinstance(module, BaseTunerLayer):
+        if not isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
+            continue
+        if isinstance(module, TrainableTokensWrapper):
+            # Skip TrainableTokensWrapper, since it wraps TrainableTokensLayer, which is the actual PEFT layer we're
+            # interested in.
             continue
 
         # determine if all submodules/parameters if this module require grad or not
