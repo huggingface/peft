@@ -27,6 +27,8 @@ from peft.utils.other import transpose
 from .layer import LoraLayer, LoraVariant
 
 
+VARIANT_KWARG_KEYS = ["alora_offsets"]
+
 if is_bnb_available():
 
     class Linear8bitLt(torch.nn.Module, LoraLayer):
@@ -40,6 +42,7 @@ if is_bnb_available():
             lora_dropout: float = 0.0,
             init_lora_weights: bool = True,
             use_rslora: bool = False,
+            use_alora: bool = False,
             use_dora: bool = False,
             lora_bias: bool = False,
             **kwargs,
@@ -57,16 +60,20 @@ if is_bnb_available():
                 init_lora_weights=init_lora_weights,
                 use_rslora=use_rslora,
                 use_dora=use_dora,
+                use_alora=use_alora,
                 lora_bias=lora_bias,
             )
 
-        def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
-            if not use_dora:
+        def resolve_lora_variant(self, *, use_dora: bool, use_alora: bool, **kwargs) -> Optional[LoraVariant]:
+            if not use_dora and not use_alora:
                 return None
 
-            from .variants import DoraLinearVariant
+            from .variants import ALoraLinearVariant, DoraLinearVariant
 
-            return DoraLinearVariant()
+            if use_alora:
+                return ALoraLinearVariant()
+            else:
+                return DoraLinearVariant()
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
             """
@@ -178,6 +185,7 @@ if is_bnb_available():
         ) -> torch.Tensor:
             # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
             # extra argument that allows mixing different adapters in the same batch at inference time.
+            variant_kwargs = {k: kwargs.pop(k, None) for k in VARIANT_KWARG_KEYS}  # don't pass these to base_layer
             result = self.base_layer(x, *args, **kwargs)
 
             unique_adapters = set(adapter_names)
@@ -204,23 +212,40 @@ if is_bnb_available():
                 # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
                 # layer output
                 sub_batch = x[sub_batch_indices_list[i]]
-                output = lora_B(lora_A(dropout(sub_batch))) * scaling
-                if requires_conversion:
-                    output = output.to(expected_dtype)
-                result[sub_batch_indices_list[i]] += output
+                if active_adapter not in self.lora_variant:  # vanilla LoRA:
+                    output = lora_B(lora_A(dropout(sub_batch))) * scaling
+                    if requires_conversion:
+                        output = output.to(expected_dtype)
+                    result[sub_batch_indices_list[i]] += output
+                else:
+                    alora_offsets = variant_kwargs.get("alora_offsets", None)
+                    if alora_offsets is not None:
+                        variant_kwargs["alora_offsets"] = [alora_offsets[j] for j in sub_batch_indices_list[i]]
+                    output = self.lora_variant[active_adapter].forward(
+                        self,
+                        active_adapter=active_adapter,
+                        x=sub_batch,
+                        result=result[sub_batch_indices_list[i]],
+                        **variant_kwargs,
+                        **kwargs,
+                    )
+                    if requires_conversion:
+                        output = output.to(expected_dtype)
+                    result[sub_batch_indices_list[i]] = output
 
             return result
 
         def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
             self._check_forward_args(x, *args, **kwargs)
             adapter_names = kwargs.pop("adapter_names", None)
+            variant_kwargs = {k: kwargs.pop(k, None) for k in VARIANT_KWARG_KEYS}  # don't pass these to base_layer
 
             if self.disable_adapters:
                 if self.merged:
                     self.unmerge()
                 result = self.base_layer(x, *args, **kwargs)
             elif adapter_names is not None:
-                result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
+                result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **variant_kwargs, **kwargs)
             elif self.merged:
                 result = self.base_layer(x, *args, **kwargs)
             else:
@@ -249,6 +274,8 @@ if is_bnb_available():
                             active_adapter=active_adapter,
                             x=x,
                             result=result,
+                            **variant_kwargs,
+                            **kwargs,
                         )
                         if requires_conversion:
                             result = result.to(expected_dtype)
@@ -315,13 +342,16 @@ if is_bnb_4bit_available():
                 lora_bias=lora_bias,
             )
 
-        def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
-            if not use_dora:
+        def resolve_lora_variant(self, *, use_dora: bool, use_alora: bool, **kwargs) -> Optional[LoraVariant]:
+            if not use_dora and not use_alora:
                 return None
 
-            from .variants import DoraLinearVariant
+            from .variants import ALoraLinearVariant, DoraLinearVariant
 
-            return DoraLinearVariant()
+            if use_alora:
+                return ALoraLinearVariant()
+            else:
+                return DoraLinearVariant()
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
             """
@@ -431,6 +461,7 @@ if is_bnb_4bit_available():
         ) -> torch.Tensor:
             # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
             # extra argument that allows mixing different adapters in the same batch at inference time.
+            variant_kwargs = {k: kwargs.pop(k, None) for k in VARIANT_KWARG_KEYS}  # don't pass these to base_layer
             result = self.base_layer(x, *args, **kwargs)
 
             unique_adapters = set(adapter_names)
@@ -457,23 +488,40 @@ if is_bnb_4bit_available():
                 # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
                 # layer output
                 sub_batch = x[sub_batch_indices_list[i]]
-                output = lora_B(lora_A(dropout(sub_batch))) * scaling
-                if requires_conversion:
-                    output = output.to(expected_dtype)
-                result[sub_batch_indices_list[i]] += output
+                if active_adapter not in self.lora_variant:  # vanilla LoRA
+                    output = lora_B(lora_A(dropout(sub_batch))) * scaling
+                    if requires_conversion:
+                        output = output.to(expected_dtype)
+                    result[sub_batch_indices_list[i]] += output
+                else:
+                    alora_offsets = variant_kwargs.get("alora_offsets", None)
+                    if alora_offsets is not None:
+                        variant_kwargs["alora_offsets"] = [alora_offsets[j] for j in sub_batch_indices_list[i]]
+                    output = self.lora_variant[active_adapter].forward(
+                        self,
+                        active_adapter=active_adapter,
+                        x=sub_batch,
+                        result=result[sub_batch_indices_list[i]],
+                        **variant_kwargs,
+                        **kwargs,
+                    )
+                    if requires_conversion:
+                        output = output.to(expected_dtype)
+                    result[sub_batch_indices_list[i]] = output
 
             return result
 
         def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
             self._check_forward_args(x, *args, **kwargs)
             adapter_names = kwargs.pop("adapter_names", None)
+            variant_kwargs = {k: kwargs.pop(k, None) for k in VARIANT_KWARG_KEYS}  # don't pass these to base_layer
 
             if self.disable_adapters:
                 if self.merged:
                     self.unmerge()
                 result = self.base_layer(x, *args, **kwargs)
             elif adapter_names is not None:
-                result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
+                result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **variant_kwargs, **kwargs)
             elif self.merged:
                 result = self.base_layer(x, *args, **kwargs)
             else:
@@ -509,6 +557,8 @@ if is_bnb_4bit_available():
                             active_adapter=active_adapter,
                             x=x,
                             result=result,
+                            **variant_kwargs,
+                            **kwargs,
                         )
                         if requires_conversion:
                             result = result.to(expected_dtype)
