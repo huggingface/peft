@@ -22,7 +22,6 @@ import warnings
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass
-from operator import attrgetter
 from typing import Any, Literal, Optional, Union
 
 import packaging.version
@@ -3019,7 +3018,7 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
         # determine if all submodules/parameters if this module require grad or not
         mapping_requires_grad_list: dict[str, list[bool]] = collections.defaultdict(list)
         for adapter_module_name in module.adapter_layer_names:
-            adapter_module = attrgetter(adapter_module_name)(module)
+            adapter_module = getattr(module, adapter_module_name)
             if isinstance(adapter_module, torch.nn.ModuleDict):
                 for key, submodule in adapter_module.items():
                     for param in submodule.parameters():
@@ -3042,7 +3041,7 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
 
         devices_dd = collections.defaultdict(list)
         for adapter_module_name in module.adapter_layer_names + module.other_param_names:
-            adapter_module = attrgetter(adapter_module_name)(module)
+            adapter_module = getattr(module, adapter_module_name)
             if isinstance(adapter_module, torch.nn.ModuleDict):
                 for key, submodule in adapter_module.items():
                     devices_dd[key].extend([param.device.type for param in submodule.parameters()])
