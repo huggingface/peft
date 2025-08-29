@@ -762,6 +762,7 @@ TEST_CASES = [
     ("Vanilla MLP 5 RoAd", "MLP", RoadConfig, {"target_modules": ["lin0"], "variant": "road_2", "group_size": 2}),
     ("Vanilla MLP 6 RoAd", "MLP", RoadConfig, {"target_modules": ["lin0"], "variant": "road_4", "group_size": 2}),
 ]
+ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
 
 # For this test matrix, each tuple consists of:
 # - test name
@@ -1120,12 +1121,12 @@ class MLP2(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, bias=True):
+    def __init__(self, bias=True, size=10):
         super().__init__()
-        self.lin0 = nn.Linear(10, 20, bias=bias)
+        self.lin0 = nn.Linear(size, size, bias=bias)
         self.relu = nn.ReLU()
         self.drop = nn.Dropout(0.5)
-        self.lin1 = nn.Linear(20, 10, bias=bias)
+        self.lin1 = nn.Linear(size, size, bias=bias)
 
     def forward(self, X):
         X = X.float()
@@ -1137,9 +1138,9 @@ class Block(nn.Module):
 
 
 class DeepMLP(nn.Module):
-    def __init__(self, bias=True, num_hidden_layers=12):
+    def __init__(self, bias=True, num_hidden_layers=12, size=10):
         super().__init__()
-        self.layers = nn.ModuleList([Block(bias=bias) for _ in range(num_hidden_layers)])
+        self.layers = nn.ModuleList([Block(bias=bias, size=size) for _ in range(num_hidden_layers)])
         self.out = nn.Linear(10, 2, bias=bias)
         self.sm = nn.LogSoftmax(dim=-1)
 
@@ -2150,6 +2151,8 @@ class TestPeftCustomModel(PeftCommonTester):
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_active_adapter(self, test_name, model_id, config_cls, config_kwargs):
         _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
+        if config_kwargs.get("modules_to_save", []) or config_kwargs.get("trainable_token_indices", []):
+            pytest.skip("Multiple active adapters with modules_to_save/trainable_token_indices is not supported.")
 
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = config_cls(
@@ -2178,6 +2181,261 @@ class TestPeftCustomModel(PeftCommonTester):
         assert model.active_adapters == ["default", "other"]
         # model.active_adapter would not work, thus we have to check the base_model directly
         assert model.base_model.active_adapter == ["default", "other"]
+
+    @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
+    def test_set_adapter_non_overlapping_modules(self, config_cls):
+        # Ensure that when setting multiple adapters, the active adapters are correctly being set, even if
+        # target_modules that only overlap partially. Apart from checking model.set_adapter, also check
+        # model.base_model.set_adapter. Normally, users wouldn't call this, but there are situations where this is
+        # required, e.g. activating multiple adapters at once cannot be done on the PeftModel but works on LoraModel
+        # etc.
+        if config_cls == TrainableTokensConfig:
+            pytest.skip(reason="Model has no embedding layer, skipping TrainableTokensConfig.")
+
+        model = DeepMLP(size=256)  # a size that works with all adapters
+        extra_kwargs = {}
+        if config_cls == IA3Config:
+            extra_kwargs["feedforward_modules"] = []
+        # target_modules overlap partially
+        config0 = config_cls(target_modules=["layers.0.lin0", "layers.1.lin0"], **extra_kwargs)
+        config1 = config_cls(target_modules=["layers.1.lin0", "layers.2.lin0"], **extra_kwargs)
+        model = get_peft_model(model, config0, adapter_name="default")
+        model.add_adapter("other", config1)
+
+        # at this point, 'default' is active
+        assert model.base_model.active_adapters == ["default"]
+        # general note: for adapter layers like LoRA, the active_adapters can be "default" even if that layer has no
+        # adapter called "default", it will be simply ignored in that case
+        assert model.base_model.layers[0].lin0.active_adapters == ["default"]
+        assert model.base_model.layers[1].lin0.active_adapters == ["default"]
+        assert model.base_model.layers[2].lin0.active_adapters == ["default"]
+
+        # activate 'other'
+        model.set_adapter("other")
+        assert model.base_model.active_adapters == ["other"]
+        assert model.base_model.layers[0].lin0.active_adapters == ["other"]
+        assert model.base_model.layers[1].lin0.active_adapters == ["other"]
+        assert model.base_model.layers[2].lin0.active_adapters == ["other"]
+
+        # go back to 'default'
+        model.set_adapter("default")
+        assert model.base_model.active_adapters == ["default"]
+        assert model.base_model.layers[0].lin0.active_adapters == ["default"]
+        assert model.base_model.layers[1].lin0.active_adapters == ["default"]
+        assert model.base_model.layers[2].lin0.active_adapters == ["default"]
+
+        # also ensure that model.base_model.set_adapter works as expected
+        # activate 'other'
+        model.base_model.set_adapter(["other"])
+        assert model.base_model.active_adapters == ["other"]
+        assert model.base_model.layers[0].lin0.active_adapters == ["other"]
+        assert model.base_model.layers[1].lin0.active_adapters == ["other"]
+        assert model.base_model.layers[2].lin0.active_adapters == ["other"]
+
+        # go back to 'default'
+        model.base_model.set_adapter(["default"])
+        assert model.base_model.active_adapters == ["default"]
+        assert model.base_model.layers[0].lin0.active_adapters == ["default"]
+        assert model.base_model.layers[1].lin0.active_adapters == ["default"]
+        assert model.base_model.layers[2].lin0.active_adapters == ["default"]
+
+    @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
+    def test_set_adapter_non_overlapping_modules_to_save(self, config_cls):
+        # This is similar to the previous test, but includes modules_to_save. Specifically, there was a bug where adding
+        # config1 would automatically activate the modules_to_save for 'other'
+        if config_cls == TrainableTokensConfig:
+            pytest.skip(reason="Trainable tokens does not support modules_to_save")
+
+        model = DeepMLP(size=256)  # a size that works with all adapters
+        extra_kwargs = {}
+        if config_cls == IA3Config:
+            extra_kwargs["feedforward_modules"] = []
+        # targeting the same modules with modules_to_save:
+        config0 = config_cls(target_modules=["layers.0.lin0"], **extra_kwargs)
+        config1 = config_cls(target_modules=["layers.0.lin0"], modules_to_save=["layers.0.lin1"], **extra_kwargs)
+        model = get_peft_model(model, config0, adapter_name="default")
+        model.add_adapter("other", config1)
+
+        # at this point, 'default' is active
+        assert model.base_model.active_adapters == ["default"]
+        assert model.base_model.layers[0].lin0.active_adapters == ["default"]
+        assert model.base_model.layers[0].lin1.active_adapters == []
+        assert model.base_model.layers[0].lin1.modules_to_save.other.weight.requires_grad is False
+
+        # activate 'other'
+        model.set_adapter("other")
+        assert model.base_model.active_adapters == ["other"]
+        assert model.base_model.layers[0].lin0.active_adapters == ["other"]
+        assert model.base_model.layers[0].lin1.active_adapters == ["other"]
+        assert model.base_model.layers[0].lin1.modules_to_save.other.weight.requires_grad is True
+
+        # go back to 'default'
+        model.set_adapter("default")
+        assert model.base_model.active_adapters == ["default"]
+        assert model.base_model.layers[0].lin0.active_adapters == ["default"]
+        assert model.base_model.layers[0].lin1.active_adapters == []
+        assert model.base_model.layers[0].lin1.modules_to_save.other.weight.requires_grad is False
+
+        # also ensure that model.base_model.set_adapter works as expected
+        # activate 'other'
+        model.base_model.set_adapter(["other"])
+        assert model.base_model.active_adapters == ["other"]
+        assert model.base_model.layers[0].lin0.active_adapters == ["other"]
+        assert model.base_model.layers[0].lin1.active_adapters == ["other"]
+        assert model.base_model.layers[0].lin1.modules_to_save.other.weight.requires_grad is True
+
+        # go back to 'default'
+        model.base_model.set_adapter(["default"])
+        assert model.base_model.active_adapters == ["default"]
+        assert model.base_model.layers[0].lin0.active_adapters == ["default"]
+        assert model.base_model.layers[0].lin1.active_adapters == []
+        assert model.base_model.layers[0].lin1.modules_to_save.other.weight.requires_grad is False
+
+    def test_set_adapter_non_overlapping_trainable_token_indices(self):
+        # Same test as the previous one, but using trainable_token_indices instead of modules_to_save
+        model = ModelEmbConv1D()
+        # targeting the same modules with modules_to_save:
+        config0 = LoraConfig(target_modules=["lin0"])
+        config1 = LoraConfig(target_modules=["lin0"], trainable_token_indices={"emb": [0]})
+
+        model = get_peft_model(model, config0, adapter_name="default")
+        model.add_adapter("other", config1)
+
+        # at this point, 'default' is active
+        assert model.base_model.active_adapters == ["default"]
+        assert model.base_model.lin0.active_adapters == ["default"]
+        assert model.base_model.emb.active_adapters == []
+        assert model.base_model.model.emb.token_adapter.trainable_tokens_delta.other.requires_grad is False
+
+        # activate 'other'
+        model.set_adapter("other")
+        assert model.base_model.active_adapters == ["other"]
+        assert model.base_model.lin0.active_adapters == ["other"]
+        assert model.base_model.emb.active_adapters == ["other"]
+        assert model.base_model.model.emb.token_adapter.trainable_tokens_delta.other.requires_grad is True
+
+        # go back to 'default'
+        model.set_adapter("default")
+        assert model.base_model.active_adapters == ["default"]
+        assert model.base_model.lin0.active_adapters == ["default"]
+        assert model.base_model.emb.active_adapters == []
+        assert model.base_model.model.emb.token_adapter.trainable_tokens_delta.other.requires_grad is False
+
+        # also ensure that model.base_model.set_adapter works as expected
+        # activate 'other'
+        model.base_model.set_adapter(["other"])
+        assert model.base_model.active_adapters == ["other"]
+        assert model.base_model.lin0.active_adapters == ["other"]
+        assert model.base_model.emb.active_adapters == ["other"]
+        assert model.base_model.model.emb.token_adapter.trainable_tokens_delta.other.requires_grad is True
+
+        # go back to 'default'
+        model.base_model.set_adapter(["default"])
+        assert model.base_model.active_adapters == ["default"]
+        assert model.base_model.lin0.active_adapters == ["default"]
+        assert model.base_model.emb.active_adapters == []
+        assert model.base_model.model.emb.token_adapter.trainable_tokens_delta.other.requires_grad is False
+
+    @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
+    def test_multiple_active_adapters_with_same_modules_to_save_raises(self, config_cls):
+        # When we have multiple adapters each with modules_to_save, we don't allow those to target the same layer, as
+        # module_to_save (unlike LoRA etc) is not additive.
+        if config_cls == TrainableTokensConfig:
+            pytest.skip(reason="Trainable tokens does not support modules_to_save")
+
+        model = DeepMLP(size=256)  # a size that works with all adapters
+        extra_kwargs = {}
+        if config_cls == IA3Config:
+            extra_kwargs["feedforward_modules"] = []
+        # targeting the same modules with modules_to_save:
+        config0 = config_cls(target_modules=["layers.0.lin0"], modules_to_save=["layers.0.lin1"], **extra_kwargs)
+        config1 = config_cls(target_modules=["layers.0.lin0"], modules_to_save=["layers.0.lin1"], **extra_kwargs)
+        model = get_peft_model(model, config0, adapter_name="default")
+        # adding the adapter is fine
+        model.add_adapter("other", config1)
+
+        msg = "Only one adapter can be set at a time for ModulesToSaveWrapper"
+        with pytest.raises(ValueError, match=msg):
+            model.base_model.set_adapter(["default", "other"])
+
+    @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
+    def test_multiple_active_adapters_with_overlapping_modules_to_save_raises(self, config_cls):
+        # same test as the previous one, but targeting multiple modules_to_save, some of which overlap
+        if config_cls == TrainableTokensConfig:
+            pytest.skip(reason="Trainable tokens does not support modules_to_save")
+
+        model = DeepMLP(size=256)  # a size that works with all adapters
+        extra_kwargs = {}
+        if config_cls == IA3Config:
+            extra_kwargs["feedforward_modules"] = []
+        # targeting the overlapping modules with modules_to_save:
+        config0 = config_cls(
+            target_modules=["layers.0.lin0"], modules_to_save=["layers.0.lin1", "layers.1.lin1"], **extra_kwargs
+        )
+        config1 = config_cls(
+            target_modules=["0layers..lin0"], modules_to_save=["layers.2.lin1", "layers.1.lin1"], **extra_kwargs
+        )
+        model = get_peft_model(model, config0, adapter_name="default")
+        # adding the adapter is fine
+        model.add_adapter("other", config1)
+
+        msg = "Only one adapter can be set at a time for ModulesToSaveWrapper"
+        with pytest.raises(ValueError, match=msg):
+            model.base_model.set_adapter(["default", "other"])
+
+    @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
+    def test_multiple_active_adapters_with_different_modules_to_save_works(self, config_cls):
+        # same test as the previous one but targeting distinct modules_to_save; this is fine
+        if config_cls == TrainableTokensConfig:
+            pytest.skip(reason="Trainable tokens does not support modules_to_save")
+
+        model = DeepMLP(size=256)  # a size that works with all adapters
+        extra_kwargs = {}
+        if config_cls == IA3Config:
+            extra_kwargs["feedforward_modules"] = []
+        # targeting the different modules with modules_to_save:
+        config0 = config_cls(target_modules=["layers.0.lin0"], modules_to_save=["layers.0.lin1"], **extra_kwargs)
+        config1 = config_cls(target_modules=["layers.0.lin0"], modules_to_save=["layers.1.lin1"], **extra_kwargs)
+        model = get_peft_model(model, config0, adapter_name="default")
+        # adding the adapter is fine
+        model.add_adapter("other", config1)
+        model.base_model.set_adapter(["default", "other"])  # does not raise
+
+        assert model.base_model.model.layers[0].lin1.active_adapters == ["default"]
+        assert model.base_model.model.layers[1].lin1.active_adapters == ["other"]
+
+    def test_multiple_active_adapters_with_same_trainable_token_indices_raises(self):
+        # Same test as test_multiple_active_adapters_with_same_modules_to_save_raises but with trainable_token_indices
+        # instead of modules_to_save.
+        model = ModelEmbConv1D()
+        # targeting the same modules with modules_to_save:
+        config0 = LoraConfig(target_modules=["lin0"], trainable_token_indices={"emb": [0]})
+        config1 = LoraConfig(target_modules=["lin0"], trainable_token_indices={"emb": [0]})
+        model = get_peft_model(model, config0, adapter_name="default")
+        # adding the adapter is fine
+        model.add_adapter("other", config1)
+
+        msg = "Only one adapter can be set at a time for TrainableTokensWrapper"
+        with pytest.raises(ValueError, match=msg):
+            model.base_model.set_adapter(["default", "other"])
+
+    def test_multiple_active_adapters_with_different_trainable_token_indices_works(self):
+        # Same test as the previous one but targeting different embedding layers should work
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb0 = nn.Embedding(10, 10)
+                self.emb1 = nn.Embedding(10, 10)
+                self.lin0 = nn.Linear(10, 10)
+
+        model = MyModel()
+        # targeting the same modules with modules_to_save:
+        config0 = LoraConfig(target_modules=["lin0"], trainable_token_indices={"emb0": [0]})
+        config1 = LoraConfig(target_modules=["lin0"], trainable_token_indices={"emb1": [0]})
+        model = get_peft_model(model, config0, adapter_name="default")
+        # adding the adapter is fine
+        model.add_adapter("other", config1)
+        model.base_model.set_adapter(["default", "other"])  # does not raise
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_disable_adapters_exiting_context_restores_previous_state(

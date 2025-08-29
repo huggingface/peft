@@ -136,6 +136,7 @@ class PolyModel(BaseTuner):
         self._set_adapter_layers(enabled=False)
 
     def set_adapter(self, adapter_name):
+        self.set_auxiliary_adapters(adapter_name)
         for module in self.model.modules():
             if isinstance(module, PolyLayer):
                 module.set_adapter(adapter_name)

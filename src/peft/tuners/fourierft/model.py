@@ -251,6 +251,7 @@ class FourierFTModel(BaseTuner):
         Args:
             adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
         """
+        self.set_auxiliary_adapters(adapter_name)
         for module in self.model.modules():
             if isinstance(module, FourierFTLayer):
                 if module.merged:

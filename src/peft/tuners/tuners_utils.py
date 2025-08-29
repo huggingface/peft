@@ -39,7 +39,12 @@ from peft.utils.constants import (
     SEQ_CLS_HEAD_NAMES,
 )
 from peft.utils.integrations import init_empty_weights
-from peft.utils.other import AuxiliaryTrainingWrapper, match_target_against_key, set_additional_trainable_modules
+from peft.utils.other import (
+    AuxiliaryTrainingWrapper,
+    _set_adapter,
+    match_target_against_key,
+    set_additional_trainable_modules,
+)
 from peft.utils.peft_types import PeftType, TaskType
 
 from ..config import PeftConfig
@@ -717,6 +722,7 @@ class BaseTuner(nn.Module, ABC):
             peft_config=peft_config,
             model_config=BaseTuner.get_model_config(self),
             adapter_name=adapter_name,
+            activate_adapter=adapter_name in self.active_adapters,
         )
 
     def _inject_parameters(
@@ -831,6 +837,19 @@ class BaseTuner(nn.Module, ABC):
             if isinstance(module, BaseTunerLayer):
                 with onload_layer(module):
                     module.unmerge()
+
+    def set_auxiliary_adapters(self, adapter_name: str | list[str]) -> None:
+        """
+        Sets the active adapter(s) on auxiliary modules.
+
+        If the subclass (e.g. `LoraModel`) supports auxiliary modules like `modules_to_save`, it should call this
+        method in `set_adapter` to ensure that those auxiliary modules are being set correctly.
+
+        Args:
+            adapter_name (`str` or `list[str]`):
+                The name(s) of the adapter to be set as active. The adapters must be loaded first.
+        """
+        _set_adapter(self, adapter_name)
 
     def _delete_auxiliary_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
         for module in self.modules():

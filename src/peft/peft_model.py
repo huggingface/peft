@@ -1437,8 +1437,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             raise ValueError(f"Adapter {adapter_name} not found.")
         self.active_adapter = adapter_name
         if not self.peft_config[adapter_name].is_prompt_learning:
+            # _set_adapter does not need to be called, since it's called through the BaseTuner class.
             self.base_model.set_adapter(adapter_name)
-        _set_adapter(self, adapter_name)
+        else:
+            # handle auxiliary modules
+            _set_adapter(self, adapter_name)
 
     @property
     def base_model_torch_dtype(self):
