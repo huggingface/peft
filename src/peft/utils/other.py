@@ -423,6 +423,13 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         else:
             self._disable_adapters = True
 
+    def check_set_adapter(self, adapter_name: str | list[str]) -> str | None:
+        """Helper function to check if the given adapter(s) can be set.
+
+        Return the name of the adapter to be set or None if no adapter should be set.
+        """
+        raise NotImplementedError
+
     def set_adapter(self, adapter_names: Union[str, list[str]]):
         """Set the active adapter
 
@@ -539,6 +546,31 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         else:
             self.original_module.requires_grad_(True)
             self.modules_to_save.requires_grad_(False)
+
+    def check_set_adapter(self, adapter_name: str | list[str]) -> str | None:
+        """Helper function to check if the given adapter(s) can be set.
+
+        Return the name of the adapter to be set or None if no adapter should be set.
+        """
+        if isinstance(adapter_name, str):
+            return adapter_name
+
+        # adapter_name is a list of str
+        if len(adapter_name) == 0:
+            raise ValueError("Please specify at least one adapter to set")
+
+        adapter_names_in_module = [n for n in adapter_name if n in self.modules_to_save]
+
+        if len(adapter_names_in_module) > 1:
+            raise ValueError(f"Only one adapter can be set at a time for {self}, got {len(adapter_names_in_module)}")
+
+        adapter_name_to_set: str | None
+        if not adapter_names_in_module:
+            adapter_name_to_set = None
+        else:
+            adapter_name_to_set = adapter_names_in_module[0]
+
+        return adapter_name_to_set
 
     def set_adapter(self, adapter_names: Union[str, list[str]]):
         """Set the active adapter
@@ -752,6 +784,32 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
 
         self.token_adapter.enable_adapters(enabled)
 
+    def check_set_adapter(self, adapter_name: str | list[str]) -> str | None:
+        """Helper function to check if the given adapter(s) can be set.
+
+        Return the name of the adapter to be set or None if no adapter should be set.
+        """
+        if isinstance(adapter_name, str):
+            return adapter_name
+
+        # adapter_name is a list of str
+        if len(adapter_name) == 0:
+            raise ValueError("Please specify at least one adapter to set")
+
+        # TODO In theory, multiple active trainable tokens is fine when the indices don't overlap
+        adapter_names_in_module = [n for n in adapter_name if n in self.token_adapter.trainable_tokens_delta]
+
+        if len(adapter_names_in_module) > 1:
+            raise ValueError(f"Only one adapter can be set at a time for {self}, got {len(adapter_names_in_module)}")
+
+        adapter_name_to_set: str | None
+        if not adapter_names_in_module:
+            adapter_name_to_set = None
+        else:
+            adapter_name_to_set = adapter_names_in_module[0]
+
+        return adapter_name_to_set
+
     def set_adapter(self, adapter_names: Union[str, list[str]]):
         super().set_adapter(adapter_names)
         self.token_adapter.set_adapter(adapter_names)
@@ -889,39 +947,10 @@ def _set_trainable(
 
 
 def _set_adapter(model, adapter_name):
-    def check_adapter_name(adapter_name: str | list[str], module: AuxiliaryTrainingWrapper) -> str | None:
-        # Helper function to check if the adapter(s) can be set. Right now, only exactly 0 or 1 active adapters are
-        # allowed.
-        if isinstance(adapter_name, str):
-            return adapter_name
-
-        # adapter_name is a list of str
-        if len(adapter_name) == 0:
-            raise ValueError("Please specify at least one adapter to set")
-
-        adapter_name_to_set: str | None
-        if isinstance(module, TrainableTokensWrapper):
-            # TODO In theory, multiple active trainable tokens is fine when the indices don't overlap
-            adapter_names_in_module = [n for n in adapter_name if n in module.token_adapter.trainable_tokens_delta]
-        elif isinstance(module, ModulesToSaveWrapper):
-            adapter_names_in_module = [n for n in adapter_name if n in module.modules_to_save]
-        else:
-            raise NotImplementedError(f"Please implement the handling for {type(module)}")
-
-        if len(adapter_names_in_module) > 1:
-            raise ValueError(f"Only one adapter can be set at a time for {module}, got {len(adapter_names_in_module)}")
-
-        if not adapter_names_in_module:
-            adapter_name_to_set = None
-        else:
-            adapter_name_to_set = adapter_names_in_module[0]
-
-        return adapter_name_to_set
-
     for module in model.modules():
         if isinstance(module, AuxiliaryTrainingWrapper):
             # only check the adapter_name if we actually encounter a AuxiliaryTrainingWrapper, otherwise we don't care
-            adapter_name_to_set = check_adapter_name(adapter_name, module)
+            adapter_name_to_set = module.check_set_adapter(adapter_name)
 
             # if the adapter is found in this module, set it as the active adapter, else disable the adapters of this
             # module

@@ -842,16 +842,13 @@ class BaseTuner(nn.Module, ABC):
         """
         Sets the active adapter(s) on auxiliary modules.
 
-        The subclass should call this method.
+        If the subclass (e.g. `LoraModel`) supports auxiliary modules like `modules_to_save`, it should call this
+        method in `set_adapter` to ensure that those auxiliary modules are being set correctly.
 
         Args:
             adapter_name (`str` or `list[str]`):
                 The name(s) of the adapter to be set as active. The adapters must be loaded first.
         """
-        # Note: When the user calls peft_model.set_adapter, this already takes care of auxiliary modules, so this call
-        # is redundant (but that shouldn't hurt). However, users may also call `peft_model.base_model.set_adapter` when
-        # they want to activate multiple adapters at the same time. In that case, the PeftModel instance is skipped,
-        # thus auxiliary modules must be set explicitly here.
         _set_adapter(self, adapter_name)
 
     def _delete_auxiliary_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
