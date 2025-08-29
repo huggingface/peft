@@ -25,11 +25,13 @@ from .ln_tuning import LNTuningConfig, LNTuningModel
 from .loha import LoHaConfig, LoHaModel
 from .lokr import LoKrConfig, LoKrModel
 from .lora import (
+    ArrowConfig,
     EvaConfig,
     LoftQConfig,
     LoraConfig,
     LoraModel,
     LoraRuntimeConfig,
+    create_arrow_model,
     get_eva_state_dict,
     initialize_lora_eva_weights,
 )
@@ -55,6 +57,7 @@ __all__ = [
     "AdaLoraModel",
     "AdaptionPromptConfig",
     "AdaptionPromptModel",
+    "ArrowConfig",
     "BOFTConfig",
     "BOFTModel",
     "BoneConfig",
@@ -112,6 +115,7 @@ __all__ = [
     "VeraModel",
     "XLoraConfig",
     "XLoraModel",
+    "create_arrow_model",
     "get_eva_state_dict",
     "initialize_lora_eva_weights",
 ]
