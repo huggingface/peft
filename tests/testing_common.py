@@ -21,6 +21,7 @@ import shutil
 import tempfile
 import warnings
 from dataclasses import replace
+from operator import attrgetter
 
 import pytest
 import torch
@@ -1437,7 +1438,7 @@ class PeftCommonTester:
                     target, "other_param_names", []
                 )
                 for attr in attributes_to_check:
-                    assert adapter_to_delete not in getattr(target, attr)
+                    assert adapter_to_delete not in attrgetter(attr)(target)
 
             # check auxiliary modules
             for module in model.modules():
@@ -1511,7 +1512,7 @@ class PeftCommonTester:
                     target, "other_param_names", []
                 )
                 for attr in attributes_to_check:
-                    assert adapter_to_delete not in getattr(target, attr)
+                    assert adapter_to_delete not in attrgetter(attr)(target)
 
             # check auxiliary modules
             for module in model.modules():

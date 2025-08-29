@@ -22,6 +22,7 @@ import warnings
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass
+from operator import attrgetter
 from typing import Any, Literal, Optional, Union
 
 import packaging.version
@@ -39,9 +40,10 @@ from transformers.modeling_outputs import QuestionAnsweringModelOutput, Sequence
 from transformers.utils import PushToHubMixin
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
+from peft.utils import AuxiliaryTrainingWrapper
 from peft.utils.constants import DUMMY_MODEL_CONFIG
 from peft.utils.integrations import init_empty_weights
-from peft.utils.other import create_attention_mask, set_additional_trainable_modules
+from peft.utils.other import TrainableTokensWrapper, create_attention_mask, set_additional_trainable_modules
 
 from . import __version__
 from .config import PeftConfig
@@ -3007,13 +3009,17 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
 
     layer_status: list[TunerLayerStatus] = []
     for name, module in base_model.named_modules():
-        if not isinstance(module, BaseTunerLayer):
+        if not isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
+            continue
+        if isinstance(module, TrainableTokensWrapper):
+            # Skip TrainableTokensWrapper, since it wraps TrainableTokensLayer, which is the actual PEFT layer we're
+            # interested in.
             continue
 
         # determine if all submodules/parameters if this module require grad or not
         mapping_requires_grad_list: dict[str, list[bool]] = collections.defaultdict(list)
         for adapter_module_name in module.adapter_layer_names:
-            adapter_module = getattr(module, adapter_module_name)
+            adapter_module = attrgetter(adapter_module_name)(module)
             if isinstance(adapter_module, torch.nn.ModuleDict):
                 for key, submodule in adapter_module.items():
                     for param in submodule.parameters():
@@ -3036,7 +3042,7 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
 
         devices_dd = collections.defaultdict(list)
         for adapter_module_name in module.adapter_layer_names + module.other_param_names:
-            adapter_module = getattr(module, adapter_module_name)
+            adapter_module = attrgetter(adapter_module_name)(module)
             if isinstance(adapter_module, torch.nn.ModuleDict):
                 for key, submodule in adapter_module.items():
                     devices_dd[key].extend([param.device.type for param in submodule.parameters()])

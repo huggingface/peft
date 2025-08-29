@@ -224,6 +224,13 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
 
     """
 
+    # All names of layers that may contain adapter (trainable) weights
+    adapter_layer_names: tuple[str, ...] = ()
+    # All names of other parameters that may contain adapter-related parameters
+    other_param_names: tuple[str, ...] = ()
+    # List all merged adapters
+    merged_adapters: list[str] = []
+
     def __init__(self, module_to_save, adapter_name, **kwargs):
         """Extra kwargs will be passed to `self.init_modules` and `self.update`."""
         super().__init__()
@@ -239,6 +246,10 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
 
     def init_modules(self, adapter_name, **kwargs):
         """A place to initialize PyTorch modules in `__init__` before the call to `self.update()`."""
+        raise NotImplementedError
+
+    def _get_available_adapters(self) -> set[str]:
+        """Return all adapter names that can be found on this module."""
         raise NotImplementedError
 
     def _error_message_name(self):
@@ -468,6 +479,9 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
 class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
     """Wraps a module that is supposed to be trained (i.e. `requires_grad_(True)`) and saved after training."""
 
+    # All names of layers that may contain adapter (trainable) weights
+    adapter_layer_names: tuple[str, ...] = ("modules_to_save",)
+
     def __init__(self, module_to_save, adapter_name):
         super().__init__(module_to_save, adapter_name)
 
@@ -647,6 +661,10 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 
         return new_module
 
+    def _get_available_adapters(self) -> set[str]:
+        """Return all adapter names that can be found on this module."""
+        return set(self.modules_to_save.keys())
+
 
 class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
     """Wraps a module (typically an embedding layer) that is supposed to be re-trained selectively (i.e.
@@ -655,6 +673,9 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
     Supports weight-tying to another adapter when passed a `tied_adapter` which is expected to be a
     `TrainableTokensLayer`.
     """
+
+    # All names of layers that may contain adapter (trainable) weights
+    adapter_layer_names: tuple[str, ...] = ("token_adapter.trainable_tokens_delta",)
 
     def __init__(
         self,
@@ -791,6 +812,10 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         if merge:
             self.token_adapter.merge(safe_merge=safe_merge, adapter_names=adapter_names)
         return self.token_adapter.get_base_layer()
+
+    def _get_available_adapters(self) -> set[str]:
+        """Return all adapter names that can be found on this module."""
+        return set(self.token_adapter.trainable_tokens_delta.keys())
 
 
 def _get_input_embeddings_name(model, default=None):
