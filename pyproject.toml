@@ -26,7 +26,6 @@ ignore = [
     "E501", # Line length (handled by ruff-format)
     "F841", # unused variable
     "UP007", # X | Y style Unions
-    "UP045", # X | Y style Optionals
     "C420", # dict.fromkeys
     "UP045", # don't force replacing Optional[X] with X | None
 ]
