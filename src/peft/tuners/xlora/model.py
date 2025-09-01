@@ -382,13 +382,13 @@ class XLoraModel(BaseTuner):
             forward_handle = self.lora_model.model.register_forward_pre_hook(_pre_forward, with_kwargs=True)
 
         # Run the forward pass: first the scaling pass in the hook, and then with the base model
-        yield
-
-        if not self.disabled:
-            # TODO(EricLBuehler): If we get a forward exception, we may have multiple forward hooks.
-            for handle in hook_handles:
-                handle.remove()
-            forward_handle.remove()
+        try:
+            yield
+        finally:
+            if not self.disabled:
+                for handle in hook_handles:
+                    handle.remove()
+                forward_handle.remove()
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
