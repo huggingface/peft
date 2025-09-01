@@ -232,10 +232,10 @@ class TestActivatedLora:
     
         input_ids = torch.tensor([[0, 1, 2, 3]])
         input_embeds = base_model.embed(input_ids)
-        with pytest.warns(UserWarning):
+        with pytest.warns(UserWarning, match="Cannot calculate aLoRA offsets when only inputs_embeds are provided. Disabling aLoRA for this forward pass."):
             kwargs = get_alora_offsets_for_forward(lora_model, inputs_embeds=input_embeds)
         assert kwargs.get("alora_offsets") is None
-        with pytest.warns(UserWarning):
+        with pytest.warns(UserWarning, match="Cannot calculate aLoRA offsets during generate as input_ids are not available. Disabling aLoRA."):
             kwargs = get_alora_offsets_for_generate(lora_model, inputs_embeds=input_embeds)
         assert kwargs.get("alora_offsets") is None
     
