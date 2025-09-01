@@ -249,6 +249,7 @@ class TestActivatedLora:
         lora_model.eval()
     
         input_ids = torch.tensor([[0, 1, 2, 3]])
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError) as e:
             with torch.no_grad():
                 lora_out = lora_model(X=input_ids, num_beams=2, alora_offsets=[3])
+        assert "num_beams is not supported" in str(e.value)
