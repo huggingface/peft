@@ -709,7 +709,7 @@ class BaseTuner(nn.Module, ABC):
         # It's important to set the adapter here (again), because otherwise it can happen that if a 2nd adapter is
         # added, and it targets different layer(s) than the first adapter (which is active), then those different
         # layers will be activated, which we don't want.
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=peft_config.inference_mode)
         self._mark_only_adapters_as_trainable(model)
 
         if self.peft_config[adapter_name].inference_mode:
@@ -838,7 +838,7 @@ class BaseTuner(nn.Module, ABC):
                 with onload_layer(module):
                     module.unmerge()
 
-    def set_auxiliary_adapters(self, adapter_name: str | list[str]) -> None:
+    def set_auxiliary_adapters(self, adapter_name: str | list[str], inference_mode: bool) -> None:
         """
         Sets the active adapter(s) on auxiliary modules.
 
@@ -847,9 +847,11 @@ class BaseTuner(nn.Module, ABC):
 
         Args:
             adapter_name (`str` or `list[str]`):
-                The name(s) of the adapter to be set as active. The adapters must be loaded first.
+                The name(s) of the adapter(s) to be set as active. The adapters must be loaded first.
+            inference_mode (bool, optional):
+                 Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         """
-        _set_adapter(self, adapter_name)
+        _set_adapter(self, adapter_name, inference_mode=inference_mode)
 
     def _delete_auxiliary_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
         for module in self.modules():
@@ -1007,29 +1009,26 @@ class BaseTunerLayer(ABC):
                 layer.requires_grad_(False)
             self._disable_adapters = True
 
-    def set_adapter(self, adapter_names: str | list[str]) -> None:
+    def set_adapter(self, adapter_names: str | list[str], inference_mode: bool = False) -> None:
         """Set the active adapter(s).
 
-        Additionally, this function will set the specified adapters to trainable (i.e., requires_grad=True). If this is
-        not desired, use the following code.
-
-        ```py
-        >>> for name, param in model_peft.named_parameters():
-        ...     if ...:  # some check on name (ex. if 'lora' in name)
-        ...         param.requires_grad = False
-        ```
+        Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True) unless
+        infernce_mode is True.
 
         Args:
-            adapter_name (`str` or `List[str]`): Name of the adapter(s) to be activated.
+            adapter_name (`str` or `list[str]`):
+                 The name(s) of the adapter(s) to set as active.
+            inference_mode (bool, optional):
+                 Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         """
         if isinstance(adapter_names, str):
             adapter_names = [adapter_names]
 
-        # Deactivate grads on the inactive adapter and activate grads on the active adapter
+        # Deactivate grads on the inactive adapter and activate grads on the active adapter (if not in inference mode)
         for layer_name in self.adapter_layer_names:
             module_dict = getattr(self, layer_name)
             for key, layer in module_dict.items():
-                if key in adapter_names:
+                if (key in adapter_names) and (not inference_mode):
                     # Note: It is possible that not a single layer is called with requires_grad_(True) here. This may
                     # happen if a completely different adapter layer is being activated.
                     layer.requires_grad_(True)
