@@ -4851,7 +4851,73 @@ class TestEvaInitializationGPU:
                 f"Mean absolute cosine similarity {mean_cosine_similarity:.4f} "
                 f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
             )
+class TestALoRAInferenceGPU:
+    """GPU inference for Activated LoRA."""
 
+    # Constants for test configuration
+    NUM_SEEDS = 3
+    LORA_DIM = 8
+    LORA_ALPHA = 1
+    DEVICE = infer_device()
+        
+    @pytest.fixture
+    def tokenizer(self):
+        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
+        tokenizer.pad_token = tokenizer.eos_token
+        return tokenizer
+
+    @pytest.fixture
+    def model(self):
+        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        model.model.decoder.layers = model.model.decoder.layers[:2] # truncate to 2 layers
+        return model.to(self.DEVICE)
+
+    @pytest.fixture
+    def model_bnb(self):
+        bnb_config = BitsAndBytesConfig(load_in_4bit=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=bnb_config,
+        )
+        model.model.decoder.layers = model.model.decoder.layers[:2] # truncate to 2 layers
+        model = prepare_model_for_kbit_training(model)
+        return model
+
+    @pytest.fixture
+    def peft_config(self):
+        return LoraConfig(
+            r=self.LORA_DIM,
+            task_type="CAUSAL_LM",
+            lora_alpha=self.LORA_ALPHA,
+            target_modules=["q_proj"],
+            alora_invocation_tokens=[2], #id for </s>
+            init_lora_weights=False,
+        )
+
+    @require_non_cpu
+    @require_bitsandbytes
+    @pytest.mark.single_gpu_tests
+    def test_alora_forward_consistency(self, peft_config):
+        """Test that the forwards of the model with adapter are similar across quantizations."""
+        for seed in range(self.NUM_SEEDS):
+            torch.manual_seed(seed)
+            random.seed(seed)
+            np.random.seed(seed)
+            peft_model = get_peft_model(deepcopy(model), peft_config)
+            torch.manual_seed(seed)
+            random.seed(seed)
+            np.random.seed(seed)
+            peft_model_bnb = get_peft_model(deepcopy(model_bnb), peft_config)
+            peft_model.eval()
+            peft_model_bnb.eval()
+            input_ids = torch.tensor([[0, 1, 2, 3]]).to(DEVICE)
+            with torch.no_grad():
+                peft_out = peft_model(input_ids = input_ids)
+                peft_out_bnb = peft_model_bnb(input_ids = input_ids)
+            a = peft_out.detach().to(torch.float32).cpu()
+            b = peft_out_bnb.detach().to(torch.float32).cpu()
+            assert torch.allclose(a, b, rtol=1e-1, atol=2e-2)
+            
 
 @pytest.mark.multi_gpu_tests
 class TestPrefixTuning:
