@@ -1013,7 +1013,7 @@ class BaseTunerLayer(ABC):
         """Set the active adapter(s).
 
         Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True) unless
-        infernce_mode is True.
+        inference_mode is True.
 
         Args:
             adapter_name (`str` or `list[str]`):

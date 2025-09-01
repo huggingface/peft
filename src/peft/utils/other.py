@@ -579,7 +579,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         """Set the active adapter
 
         Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True) unless
-        infernce_mode is True.
+        inference_mode is True.
 
         Args:
             adapter_names (list[str], str):
