@@ -18,7 +18,6 @@ import random
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Optional, List
-import datetime
 import numpy as np
 import torch
 import transformers
@@ -670,13 +669,14 @@ def train():
                 model1_name="Extracted Residual Model", 
                 model2_name="Reloaded Model"
             )
+            model = reloaded_model_loaded
 
         print("\n🧹 Aggressive Speicherbereinigung vor der Quantisierung...")
         
         if 'peft_model' in locals():
             del peft_model
-        if 'model' in locals():
-            del model
+        # if 'model' in locals():
+        #     del model
         if 'peft_base_model' in locals():
             del peft_base_model
         if 'base_state_dict' in locals():

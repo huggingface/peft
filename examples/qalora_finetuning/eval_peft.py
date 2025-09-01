@@ -97,7 +97,7 @@ def test_model_generation(model, tokenizer, test_prompts=None):
         print(f"Response: '{clean_response}'")
 
 
-def evaluate_with_lm_eval(model, unmodified_base_model, tokenizer, tasks, num_fewshot=5, limit=None, per_device_eval_batch_size=1):
+def evaluate_with_lm_eval(model, tokenizer, tasks, num_fewshot=5, limit=None, per_device_eval_batch_size=1):
     """Evaluate model using lm-eval-harness"""
 
     # Create lm-harness model

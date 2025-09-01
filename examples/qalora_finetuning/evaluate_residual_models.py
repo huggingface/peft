@@ -199,7 +199,7 @@ def evaluate_residual_model(
         quantized_model, _ = load_model_and_tokenizer(None, quantized_model_path)
         
         prefix = "/home/nudel/Documents/peft/visualizations"
-        errors = calculate_reconstruction_errors(adapter_path, quantised_residual_with_LR_model, quantized_model=quantized_model, visualization_path=f"{prefix}/layer_heatmaps_rank_16", svd_visualization_path=f"{prefix}/svd_heatmaps_rank_16")
+        errors = calculate_reconstruction_errors(adapter_path, quantised_residual_with_LR_model, quantized_model=quantized_model, visualization_path=f"{prefix}/layer_heatmaps_rank_128", svd_visualization_path=f"{prefix}/svd_heatmaps_rank_128")
         
         del quantized_model
         torch.cuda.empty_cache()
@@ -440,7 +440,7 @@ def calculate_reconstruction_errors(
             R_true = W_original - W_svd
             W_reconstructed = R_quant + W_svd
 
-            if True:
+            if False:
                 rank = peft_layer.r[adapter_name]  # vorhandener LoRA-Rang
 
                 create_and_save_layer_heatmaps(
