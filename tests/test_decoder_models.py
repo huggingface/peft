@@ -165,6 +165,19 @@ ALL_CONFIGS = [
             "alora_invocation_tokens": [1],
         },
     ),
+    (
+        LoraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "r": 8,
+            "lora_alpha": 32,
+            "target_modules": None,
+            "lora_dropout": 0.05,
+            "bias": "none",
+            # not one test input sequence will ever have this token, this should do nothing at all
+            "alora_invocation_tokens": [1000],
+        },
+    ),
     # LoRA + trainable tokens
     (
         LoraConfig,
@@ -285,6 +298,9 @@ def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
     ]:
         pytest.skip("Skipping AdaLora/BOFT/HRA/OFT/Bone/MiSS for GPT2LMHeadModel")
 
+def _skip_alora_no_activation(config_cls, config_kwargs):
+    if config_cls is LoraConfig and config_kwargs.get("alora_invocation_tokens") == [1000]:
+        pytest.skip("Skipping aLoRA no-activation-case because the test expects changed output which there won't be.")
 
 class TestDecoderModels(PeftCommonTester):
     transformers_class = AutoModelForCausalLM
@@ -424,6 +440,7 @@ class TestDecoderModels(PeftCommonTester):
     def test_mixed_adapter_batches(self, model_id, config_cls, config_kwargs):
         if config_cls != LoraConfig:
             pytest.skip("Mixed adapter batches not supported for this config.")
+        _skip_alora_no_activation(config_cls, config_kwargs)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_mixed_adapter_batches(model_id, config_cls, config_kwargs.copy())
 
@@ -513,6 +530,7 @@ class TestDecoderModels(PeftCommonTester):
     def test_unload_adapter(self, model_id, config_cls, config_kwargs):
         _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls)
         _skip_if_not_conv1d_supported(model_id, config_cls)
+        _skip_alora_no_activation(config_cls, config_kwargs)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_unload_adapter(model_id, config_cls, config_kwargs.copy())
 
@@ -531,6 +549,7 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_disable_adapter(self, model_id, config_cls, config_kwargs):
         _skip_if_not_conv1d_supported(model_id, config_cls)
+        _skip_alora_no_activation(config_cls, config_kwargs)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_disable_adapter(model_id, config_cls, config_kwargs.copy())
 
