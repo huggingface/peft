@@ -471,20 +471,19 @@ class ALoraLinearVariant(LoraVariant):
         dropout = module.lora_dropout[active_adapter]
         scaling = module.scaling[active_adapter]
         x = x.to(lora_A.weight.dtype)
-        if x.dim() == 2:
-            # If x is 2-dimensional (unusual but comes up in certain tests), this means that for all inputs,
-            # there is only 1 token position being processed and we should adapt its weights.
-            result = result + lora_B(lora_A(dropout(x))) * scaling
-        else:  # Typical regime
-            if alora_offsets is not None:
-                for i in range(result.shape[0]):
-                    # If alora_offsets[i] is None, this means that the invocation sequence was not found in the
-                    # input. As a result, the weights should not be activated anywhere (equivalent to base model).
-                    if alora_offsets[i] is not None and alora_offsets[i] > 0:
-                        offset = min(alora_offsets[i], result.shape[1])
-                        result[i, -offset:, :] = (
-                            result[i, -offset:, :] + lora_B(lora_A(dropout(x[i, -offset:, :]))) * scaling
-                        )
+        if alora_offsets is None or all(x is None for x in alora_offsets):
+            # make a cheap dummy calculation to avoid training scenario where we did not match any offset
+            # and therefore won't adapt but are training and expecting gradients (which would lead to an exception).
+            result += (lora_A.weight[0, 0] - lora_A.weight[0, 0]) + (lora_B.weight[0,0] - lora_B.weight[0, 0])
+        else:
+            for i in range(result.shape[0]):
+                # If alora_offsets[i] is None, this means that the invocation sequence was not found in the
+                # input. As a result, the weights should not be activated anywhere (equivalent to base model).
+                if alora_offsets[i] is not None and alora_offsets[i] > 0:
+                    offset = min(alora_offsets[i], result.shape[1])
+                    result[i, -offset:, :] = (
+                        result[i, -offset:, :] + lora_B(lora_A(dropout(x[i, -offset:, :]))) * scaling
+                    )
 
         return result
 
