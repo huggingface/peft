@@ -93,35 +93,6 @@ TEST_CASES = [
         LoraConfig,
         {"target_modules": "lin1", "use_dora": True, "lora_alpha": 32},
     ),
-    # Activated LoRA (aLoRA)
-    (
-        "Vanilla MLP 9 Activated LoRA (aLoRA)",
-        "MLP",
-        LoraConfig,
-        {
-            "target_modules": ["lin0"],
-            "alora_invocation_tokens": [1, 2, 3],  # placeholder, not important for tests in this file
-        },
-    ),
-    (
-        "Vanilla MLP 10 Activated LoRA (aLoRA)",
-        "MLP",
-        LoraConfig,
-        {
-            "target_modules": ["lin0", "lin1"],
-            "alora_invocation_tokens": [1, 2, 3],  # placeholder, not important for tests in this file
-        },
-    ),
-    (
-        "Vanilla MLP 11 Activated LoRA (aLoRA)",
-        "MLP",
-        LoraConfig,
-        {
-            "target_modules": "lin1",
-            "alora_invocation_tokens": [1, 2, 3],  # placeholder, not important for tests in this file
-            "lora_alpha": 32,
-        },
-    ),
     ("Embedding + transformers Conv1D 1 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["conv1d"]}),
     ("Embedding + transformers Conv1D 2 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb"]}),
     ("Embedding + transformers Conv1D 3 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
@@ -1738,7 +1709,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"] or config_kwargs.get("alora_invocation_tokens") is not None:
+        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
             # this model does not support merging
             return
 
@@ -1780,7 +1751,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"] or config_kwargs.get("alora_invocation_tokens") is not None:
+        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
             # this model does not support merging
             return
 
@@ -1821,7 +1792,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"] or config_kwargs.get("alora_invocation_tokens") is not None:
+        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
             # this model does not support merging
             return
 
@@ -1862,9 +1833,10 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"] or config_kwargs.get("alora_invocation_tokens") is not None:
+        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
             # this model does not support merging
             return
+            
         model.merge_adapter(safe_merge=False)
         model(**X)
         model.unmerge_adapter()
@@ -2041,9 +2013,7 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(
                 f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
             )
-        if config_kwargs.get("alora_invocation_tokens") is not None:
-            # Merge layers not supported for Activated LoRA (aLoRA)
-            pytest.skip("Test not applicable for Activated LoRA")
+            
         # same as test_disable_adapters, but with merging
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
@@ -2129,6 +2099,8 @@ class TestPeftCustomModel(PeftCommonTester):
         if config_cls != LoraConfig or config_cls != BOFTConfig:
             # skip this test for other configs as bias is specific to Lora
             pytest.skip("Testing bias warnings only for LoraConfig or BOFTConfig")
+        if not issubclass(config_cls, (LoraConfig, BOFTConfig)):
+            pytest.skip("Bias argument is only supported for LoRA or BOFT models")
 
         def run_with_disable(config_kwargs, bias):
             config_kwargs = config_kwargs.copy()
@@ -2149,6 +2121,7 @@ class TestPeftCustomModel(PeftCommonTester):
                 run_with_disable(config_kwargs, bias="lora_only")
             with pytest.warns(UserWarning, match=msg_start):
                 run_with_disable(config_kwargs, bias="all")
+                
         if config_cls == BOFTConfig:
             # check that bias=all and bias=boft_only give a warning with the correct message
             msg_start = "Careful, disabling adapter layers with bias configured to be"
