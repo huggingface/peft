@@ -471,16 +471,18 @@ class ALoraLinearVariant(LoraVariant):
         dropout = module.lora_dropout[active_adapter]
         scaling = module.scaling[active_adapter]
         x = x.to(lora_A.weight.dtype)
-        if alora_offsets is None or all(x is None for x in alora_offsets):
-            # make a cheap dummy calculation to avoid training scenario where we did not match any offset
-            # and therefore won't adapt but are training and expecting gradients (which would lead to an exception).
-            result += (lora_A.weight[0, 0] - lora_A.weight[0, 0]) + (lora_B.weight[0, 0] - lora_B.weight[0, 0])
+        result_shape = result.shape
+        B = result_shape[0]  # batch
+        if len(result_shape) == 3:
+            T = result_shape[1]  # tokens
         else:
-            result_shape = result.shape
-            T = result_shape[-2]  # tokens
-            D = result_shape[-1]  # dimensions
-            Dx = x.shape[-1]
-            device = result.device
+            T = 1
+        D = result_shape[-1]  # dimensions
+        Dx = x.shape[-1]
+        device = result.device
+        if alora_offsets is None: # use base model only, but ensure 0 gradient
+            mask = torch.zeros((B, T), dtype=torch.bool)
+        else:
             # If alora_offsets[i] is None, this means that the invocation sequence was not found in the
             # input. As a result, the weights should not be activated anywhere (equivalent to base model).
             # Convert None -> 0 and clip to [0, T]
@@ -493,13 +495,13 @@ class ALoraLinearVariant(LoraVariant):
             pos = torch.arange(T, device=device).unsqueeze(0)  # [1, T]
             mask = pos >= (T - offsets).unsqueeze(1)
 
-            # Flatten for vectorization
-            x_flat = x.view(-1, Dx)
-            res_flat = result.view(-1, D)
-            mask_flat = mask.view(-1)
+        # Flatten for vectorization
+        x_flat = x.view(-1, Dx)
+        res_flat = result.view(-1, D)
+        mask_flat = mask.view(-1)
 
-            # Compute adapter on the selected tokens only
-            res_flat[mask_flat] += lora_B(lora_A(dropout(x_flat[mask_flat]))) * scaling
+        # Compute adapter on the selected tokens only
+        res_flat[mask_flat] += lora_B(lora_A(dropout(x_flat[mask_flat]))) * scaling
         return result
 
 
