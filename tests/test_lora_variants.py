@@ -180,7 +180,7 @@ class TestActivatedLora:
         ],
     )
     # Verify alora_offsets are calculated correctly
-    def test_calculate_alora_offsets(self,input_ids, alora_invocation_tokens, expected_offsets):
+    def test_calculate_alora_offsets(self, input_ids, alora_invocation_tokens, expected_offsets):
         config = LoraConfig(alora_invocation_tokens=alora_invocation_tokens)
         peft_config = {"default": config}
 
@@ -197,7 +197,7 @@ class TestActivatedLora:
         ],
     )
     # Verify alora_offsets are correct with adapter names
-    def test_calculate_alora_offsets_with_adapter_names(self,input_ids, alora_invocations, expected_offsets):
+    def test_calculate_alora_offsets_with_adapter_names(self, input_ids, alora_invocations, expected_offsets):
         peft_config = {}
         for alora_name in alora_invocations.keys():
             peft_config[alora_name] = LoraConfig(alora_invocation_tokens=alora_invocations[alora_name])
