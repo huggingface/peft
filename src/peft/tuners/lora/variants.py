@@ -480,14 +480,14 @@ class ALoraLinearVariant(LoraVariant):
         D = result_shape[-1]  # dimensions
         Dx = x.shape[-1]
         device = result.device
-        if alora_offsets is None: # use base model only, but ensure 0 gradient
+        if alora_offsets is None:  # use base model only, but ensure 0 gradient
             mask = torch.zeros((B, T), dtype=torch.bool)
         else:
             # If alora_offsets[i] is None, this means that the invocation sequence was not found in the
             # input. As a result, the weights should not be activated anywhere (equivalent to base model).
             # Convert None -> 0 and clip to [0, T]
             offsets = torch.tensor(
-                [0 if o is None else max(1,min(int(o),T)) for o in alora_offsets],
+                [0 if o is None else max(1, min(int(o), T)) for o in alora_offsets],
                 device=device,
                 dtype=torch.long,
             )
