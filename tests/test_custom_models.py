@@ -1836,7 +1836,7 @@ class TestPeftCustomModel(PeftCommonTester):
         if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
             # this model does not support merging
             return
-            
+
         model.merge_adapter(safe_merge=False)
         model(**X)
         model.unmerge_adapter()
@@ -2013,7 +2013,7 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(
                 f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
             )
-            
+
         # same as test_disable_adapters, but with merging
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
@@ -2121,7 +2121,7 @@ class TestPeftCustomModel(PeftCommonTester):
                 run_with_disable(config_kwargs, bias="lora_only")
             with pytest.warns(UserWarning, match=msg_start):
                 run_with_disable(config_kwargs, bias="all")
-                
+
         if config_cls == BOFTConfig:
             # check that bias=all and bias=boft_only give a warning with the correct message
             msg_start = "Careful, disabling adapter layers with bias configured to be"

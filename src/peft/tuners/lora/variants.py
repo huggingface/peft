@@ -474,19 +474,12 @@ class ALoraLinearVariant(LoraVariant):
         if alora_offsets is None or all(x is None for x in alora_offsets):
             # make a cheap dummy calculation to avoid training scenario where we did not match any offset
             # and therefore won't adapt but are training and expecting gradients (which would lead to an exception).
-            result += (lora_A.weight[0, 0] - lora_A.weight[0, 0]) + (lora_B.weight[0,0] - lora_B.weight[0, 0])
+            result += (lora_A.weight[0, 0] - lora_A.weight[0, 0]) + (lora_B.weight[0, 0] - lora_B.weight[0, 0])
         else:
-            # for i in range(result.shape[0]):
-            #     # If alora_offsets[i] is None, this means that the invocation sequence was not found in the
-            #     # input. As a result, the weights should not be activated anywhere (equivalent to base model).
-            #     if alora_offsets[i] is not None and alora_offsets[i] > 0:
-            #         offset = min(alora_offsets[i], result.shape[1])
-            #         result[i, -offset:, :] = (
-            #             result[i, -offset:, :] + lora_B(lora_A(dropout(x[i, -offset:, :]))) * scaling
-            #         )
             result_shape = result.shape
-            T = result_shape[-2] #tokens
-            D = result_shape[-1] #dimensions
+            T = result_shape[-2]  # tokens
+            D = result_shape[-1]  # dimensions
+            Dx = x.shape[-1]
             device = result.device
             # If alora_offsets[i] is None, this means that the invocation sequence was not found in the
             # input. As a result, the weights should not be activated anywhere (equivalent to base model).
@@ -497,14 +490,14 @@ class ALoraLinearVariant(LoraVariant):
                 dtype=torch.long,
             )
             # Mask True on the last `offsets[i]` positions for each row i
-            pos = torch.arange(T, device=device).unsqueeze(0)          # [1, T]
+            pos = torch.arange(T, device=device).unsqueeze(0)  # [1, T]
             mask = pos >= (T - offsets).unsqueeze(1)
 
             # Flatten for vectorization
-            x_flat = x.view(-1, D)
+            x_flat = x.view(-1, Dx)
             res_flat = result.view(-1, D)
             mask_flat = mask.view(-1)
-            
+
             # Compute adapter on the selected tokens only
             res_flat[mask_flat] += lora_B(lora_A(dropout(x_flat[mask_flat]))) * scaling
         return result

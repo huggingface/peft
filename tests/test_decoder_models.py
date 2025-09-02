@@ -298,9 +298,11 @@ def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
     ]:
         pytest.skip("Skipping AdaLora/BOFT/HRA/OFT/Bone/MiSS for GPT2LMHeadModel")
 
+
 def _skip_alora_no_activation(config_cls, config_kwargs):
     if config_cls is LoraConfig and config_kwargs.get("alora_invocation_tokens") == [1000]:
         pytest.skip("Skipping aLoRA no-activation-case because the test expects changed output which there won't be.")
+
 
 class TestDecoderModels(PeftCommonTester):
     transformers_class = AutoModelForCausalLM

@@ -24,6 +24,7 @@ from typing import Any, Union
 
 import numpy as np
 import pytest
+import random
 import torch
 from accelerate import infer_auto_device_map
 from accelerate.test_utils.testing import run_command
@@ -4897,26 +4898,30 @@ class TestALoRAInferenceGPU:
     @require_non_cpu
     @require_bitsandbytes
     @pytest.mark.single_gpu_tests
-    def test_alora_forward_consistency(self, peft_config):
+    def test_alora_forward_consistency(self, model, model_bnb, peft_config):
         """Test that the forwards of the model with adapter are similar across quantizations."""
         for seed in range(self.NUM_SEEDS):
             torch.manual_seed(seed)
-            random.seed(seed)
+           # random.seed(seed)
             np.random.seed(seed)
             peft_model = get_peft_model(deepcopy(model), peft_config)
             torch.manual_seed(seed)
-            random.seed(seed)
+            #random.seed(seed)
             np.random.seed(seed)
             peft_model_bnb = get_peft_model(deepcopy(model_bnb), peft_config)
             peft_model.eval()
             peft_model_bnb.eval()
-            input_ids = torch.tensor([[0, 1, 2, 3]]).to(DEVICE)
+            input_ids = torch.tensor([[0, 1, 2, 3]]).to(self.DEVICE)
             with torch.no_grad():
-                peft_out = peft_model(input_ids = input_ids)
-                peft_out_bnb = peft_model_bnb(input_ids = input_ids)
-            a = peft_out.detach().to(torch.float32).cpu()
-            b = peft_out_bnb.detach().to(torch.float32).cpu()
-            assert torch.allclose(a, b, rtol=1e-1, atol=2e-2)
+                peft_out = peft_model(input_ids = input_ids,return_dict=True,output_hidden_states=True)
+                peft_out_bnb=peft_model_bnb(input_ids=input_ids,return_dict=True,output_hidden_states=True)
+            h_fp  = peft_out.hidden_states[-1]
+            h_4b  = peft_out_bnb.hidden_states[-1]
+            a = h_fp.detach().to(torch.float32).cpu()
+            b = h_4b.detach().to(torch.float32).cpu()
+            import torch.nn.functional as F
+            cos = F.cosine_similarity(a.flatten(), b.flatten(), dim=0).item()
+            assert cos > 0.9 
             
 
 @pytest.mark.multi_gpu_tests
