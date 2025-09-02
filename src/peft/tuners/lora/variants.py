@@ -510,10 +510,11 @@ def calculate_alora_offsets(
 ) -> list[int]:
     """
     This is a helper function for Activated LoRA (aLoRA) that searches each input token sequence for the last occurence
-    of the appropriate "alora_invocation_tokens" invocation sequence. The calculated alora_offset is the location of the
-    *start* of the invocation tokens, counting backward from the end (will therefore always be >= len(alora_invocation_tokens).
-    If adapter_names is passed, then each input uses the appropriate invocation sequence for the specified adapter for that row.
-    Logic is provided to handle mixed collections of adapters for which not all are aLoRAs (e.g. some base model, some LoRA).
+    of the appropriate "alora_invocation_tokens" invocation sequence. The calculated alora_offset is the location of
+    the *start* of the invocation tokens, counting backward from the end (will therefore always be >=
+    len(alora_invocation_tokens). If adapter_names is passed, then each input uses the appropriate invocation sequence
+    for the specified adapter for that row. Logic is provided to handle mixed collections of adapters for which not all
+    are aLoRAs (e.g. some base model, some LoRA).
     """
     if input_ids is None:
         return []
