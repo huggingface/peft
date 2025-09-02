@@ -164,7 +164,7 @@ class LoraLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+    def resolve_lora_variant(self, *, use_dora: bool, use_kasa: bool, **kwargs) -> Optional[LoraVariant]:
         """Return a matching LoRA variant for this layer type.
 
         Given the init arguments of this layer, return the correct LoRA variant, if any. E.g., if `use_dora=True`, this
@@ -176,7 +176,11 @@ class LoraLayer(BaseTunerLayer):
         convention, and not here.
 
         """
-        return None
+        if not use_kasa:
+            return None
+        
+        from .variants 
+        return KasaLinearVariant
 
     def update_layer(
         self,
@@ -187,6 +191,7 @@ class LoraLayer(BaseTunerLayer):
         init_lora_weights,
         use_rslora,
         use_dora: bool = False,
+        use_kasa: bool = False,
         lora_bias: bool = False,
     ):
         # collect the kwargs
@@ -197,7 +202,7 @@ class LoraLayer(BaseTunerLayer):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
-        lora_variant = self.resolve_lora_variant(use_dora=use_dora)
+        lora_variant = self.resolve_lora_variant(use_dora=use_dora, use_kasa=use_kasa)
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 
@@ -220,6 +225,7 @@ class LoraLayer(BaseTunerLayer):
             self.scaling[adapter_name] = lora_alpha / r
 
         self.use_dora[adapter_name] = use_dora
+        self.use_kasa[adapter_name] = use_kasa
         
         ############ kasa ############# 
         self.lora_diag[adapter_name] = nn.Parameter(torch.randn(r), requires_grad=True)
@@ -587,6 +593,7 @@ class Linear(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        use_kasa: bool = False,
         lora_bias: bool = False,
         **kwargs,
     ) -> None:
@@ -603,6 +610,7 @@ class Linear(nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
+            use_kasa=use_kasa,
             lora_bias=lora_bias,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
@@ -829,7 +837,7 @@ class Embedding(nn.Module, LoraLayer):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
-        lora_variant = self.resolve_lora_variant(use_dora=use_dora)
+        lora_variant = self.resolve_lora_variant(use_dora=use_dora, use_kasa=use_kasa)
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 
