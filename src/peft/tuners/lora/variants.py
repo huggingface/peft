@@ -485,7 +485,7 @@ class ALoraLinearVariant(LoraVariant):
             # input. As a result, the weights should not be activated anywhere (equivalent to base model).
             # Convert None -> 0 and clip to [0, T]
             offsets = torch.tensor(
-                [0 if o is None else min(int(o), T) for o in alora_offsets],
+                [0 if o is None else max(1,min(int(o),T)) for o in alora_offsets],
                 device=device,
                 dtype=torch.long,
             )
