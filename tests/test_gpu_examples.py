@@ -4976,57 +4976,45 @@ class TestHotSwapping:
             self.check_hotswap_diffusion(ranks=ranks, alpha_scalings=ranks, target_modules=target_modules)
 
 
-@pytest.fixture(scope="module")
-def workdir(tmp_path_factory):
-    """Create a temp directory and chdir into it for the module duration."""
-    wd = tmp_path_factory.mktemp("arrow_workdir")
-    old_cwd = os.getcwd()
-    os.chdir(wd)
-    try:
-        yield Path(wd)
-    finally:
-        os.chdir(old_cwd)
-
-
-def _create_and_save_adapter_opt(out_dir: Path, rank: int = 4):
-    """
-    Build a randomly initialized LoRA adapter for OPT-125M and save into `out_dir`. We construct a model from CONFIG
-    (no pretrained weights) to avoid slow downloads here.
-    """
-    model_id = "facebook/opt-125m"
-    # Target all linear layers so the adapter matches whatever we later quantize/load.
-    lora_cfg = LoraConfig(
-        r=rank,
-        lora_alpha=2 * rank,
-        lora_dropout=0.0,
-        bias="none",
-        target_modules="all-linear",
-        task_type="CAUSAL_LM",
-        init_lora_weights=False,  # keep it purely random, as requested
-    )
-    # Create model from config (fast) just to attach/save adapter
-    base_cfg = AutoModelForCausalLM.from_pretrained(model_id, trust_remote_code=False).config
-    base_cfg.tie_word_embeddings = False  # silence warnings for from_config models
-    model = AutoModelForCausalLM.from_config(base_cfg)
-    peft_model = get_peft_model(model, lora_cfg)
-    peft_model.save_pretrained(out_dir)
-
-
-@pytest.fixture(scope="module")
-def ts_adapters_opt(workdir: Path):
-    """
-    Build 3 locally-saved task-specific adapters for OPT-125M and return their absolute paths.
-    """
-    paths = []
-    for i in range(3):
-        sub = workdir / f"ts_expert_{i}"
-        _create_and_save_adapter_opt(sub)
-        paths.append(str(sub))
-    return paths
-
-
 # Test: 4-bit load + Arrow + generate
 class TestArrowQuantized:
+    @pytest.fixture(scope="class")
+    def workdir(self, tmp_path_factory):
+        """Create and return a temp directory path for this class (no chdir)."""
+        wd = tmp_path_factory.mktemp("arrow_workdir")
+        return Path(wd)
+
+    def _create_and_save_adapter_opt(self, out_dir: Path, rank: int = 4):
+        """
+        Build a randomly initialized LoRA adapter for OPT-125M and save into `out_dir`. We construct a model from
+        CONFIG (no pretrained weights) to avoid slow downloads here.
+        """
+        model_id = "facebook/opt-125m"
+        # Target all linear layers so the adapter matches whatever we later quantize/load.
+        lora_cfg = LoraConfig(
+            r=rank,
+            target_modules="all-linear",
+            task_type="CAUSAL_LM",
+            init_lora_weights=False,
+        )
+        # Load the adapter on the model and save it
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+        peft_model = get_peft_model(model, lora_cfg)
+        peft_model.save_pretrained(out_dir)
+
+    @pytest.fixture(scope="class")
+    def ts_adapters_opt(self, workdir: Path):
+        """
+        Build 3 locally-saved task-specific adapters for OPT-125M and return their absolute paths.
+        """
+        paths = []
+        for i in range(3):
+            sub = workdir / f"ts_expert_{i}"
+            self._create_and_save_adapter_opt(sub)
+            paths.append(str(sub))
+        return paths
+
     @pytest.mark.single_gpu_tests
     def test_arrow_4bit_opt125m_load_and_generate_with_local_adapters(self, ts_adapters_opt):
         # Skip if CUDA or bitsandbytes isn’t available

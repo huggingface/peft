@@ -15,6 +15,7 @@
 import copy
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -22,6 +23,7 @@ from transformers import AutoModelForCausalLM, AutoModelForImageClassification
 
 from peft import LoraConfig, get_peft_model
 from peft.tuners.lora import ArrowConfig, create_arrow_model
+from peft.tuners.lora.arrow import _resolve_adapter_source
 from tests.testing_utils import hub_online_once
 
 
@@ -73,10 +75,29 @@ def gen_adapter(workdir: Path):
     return [sub]  # list because create_arrow_model expects list
 
 
-# ─── Tests ────────────────────────────────────────────────────────────
-
-
 class TestArrowRouting:
+    def test_incompatible_rank_raises(self, workdir: Path):
+        """
+        Adding adapters with different ranks must raise a ValueError.
+        """
+        # Create two adapters with different ranks targeting the same modules
+        sub_r4 = workdir / "rank4"
+        sub_r8 = workdir / "rank8"
+        _create_and_save_adapter(sub_r4, rank=4)
+        _create_and_save_adapter(sub_r8, rank=8)
+
+        model_id = "hf-internal-testing/tiny-random-gpt2"
+        with hub_online_once(model_id):
+            base = AutoModelForCausalLM.from_pretrained(model_id)
+
+        # Expect create_arrow_model to raise due to rank mismatch
+        with pytest.raises(ValueError, match=r"rank mismatch"):
+            _ = create_arrow_model(
+                base_model=base,
+                task_specific_adapter_paths=[str(sub_r4), str(sub_r8)],
+                arrow_config=ArrowConfig(top_k=1),
+            )
+
     def test_arrow_differs_with_extra_expert(self, ts_adapters):
         """
         Arrow with 2 experts vs Arrow with 3 experts must produce different logits.
@@ -260,7 +281,7 @@ class TestArrowRouting:
         x = torch.ones(1, 4, dtype=torch.long)
         assert not torch.allclose(m_plain(x).logits, m_gks(x).logits)
 
-    def test_merging_adapters_raise_typeerror_in_arrow(self, ts_adapters):
+    def test_merging_adapters_raise_error_in_arrow(self, ts_adapters):
         """
         Merging/unmerging is not allowed while an ArrowLinearLayer is loaded on the model and active.
         """
@@ -349,3 +370,140 @@ class TestArrowRouting:
 
         with pytest.raises(RuntimeError, match=r"Cannot merge an active Arrow router adapter"):
             _ = model.merge_and_unload()
+
+    def test_prototypes_not_recomputed_on_repeated_forward(self, ts_adapters):
+        """
+        Repeated calls to forward should not recompute prototypes. We verify by spying on
+        ArrowLoraLinearLayer.top_right_singular_vec_from_BA(), which is only called when prototypes are (re)built.
+        """
+        model_id = "hf-internal-testing/tiny-random-gpt2"
+        with hub_online_once(model_id):
+            base = AutoModelForCausalLM.from_pretrained(model_id)
+
+        cfg = ArrowConfig(top_k=2)
+        model = create_arrow_model(
+            base_model=base,
+            task_specific_adapter_paths=ts_adapters,
+            arrow_config=cfg,
+        ).eval()
+
+        # Find one Arrow layer instance on the model
+        arrow_layer = None
+        for _, module in model.named_modules():
+            if hasattr(module, "lora_arrow") and "arrow_router" in module.lora_arrow:
+                arrow_layer = module.lora_arrow["arrow_router"]
+                break
+        assert arrow_layer is not None, "Arrow router layer not found on model"
+
+        x = torch.ones(1, 4, dtype=torch.long)
+
+        # Spy on the internal proto computation; should run once (E calls for E experts)
+        with patch.object(
+            arrow_layer,
+            "top_right_singular_vec_from_BA",
+            wraps=arrow_layer.top_right_singular_vec_from_BA,
+        ) as spy:
+            _ = model(x)
+            first_calls = spy.call_count
+            assert first_calls == len(arrow_layer.task_adapter_names)
+
+            # Call forward again; prototypes should be cached, so no extra calls
+            _ = model(x)
+        assert spy.call_count == first_calls
+
+
+def test_training_updates_when_task_adapter_active(ts_adapters):
+    """
+    Ensure a simple training step works: compute a dummy loss, backward, and take an optimizer step. Verify that
+    task-adapter parameters update.
+    """
+    model_id = "hf-internal-testing/tiny-random-gpt2"
+    with hub_online_once(model_id):
+        base = AutoModelForCausalLM.from_pretrained(model_id)
+
+    # Build Arrow model over two experts
+    cfg = ArrowConfig(top_k=2)
+    model = create_arrow_model(
+        base_model=base,
+        task_specific_adapter_paths=ts_adapters[:2],
+        arrow_config=cfg,
+    )
+    model.train()
+
+    # Switch to a specific task adapter for training (vanilla LoRA)
+    model.set_adapter("task_0")
+
+    # Choose a representative parameter to check updates (task_0 A weight)
+    rep_name = None
+    for n, _ in model.named_parameters():
+        if ".lora_A.task_0.weight" in n:
+            rep_name = n
+            break
+    assert rep_name is not None, "task_0 LoRA A weight not found"
+    rep_param = dict(model.named_parameters())[rep_name]
+    before = rep_param.detach().clone()
+
+    # Optimizer over trainable params (task_0 now active and trainable)
+    opt = torch.optim.SGD([p for p in model.parameters() if p.requires_grad], lr=1e-2)
+
+    # Dummy batch
+    vocab = model.config.vocab_size
+    input_ids = torch.randint(0, vocab, (2, 8))
+    attention_mask = torch.ones_like(input_ids)
+
+    # Compute loss and update
+    opt.zero_grad()
+    out = model(input_ids=input_ids, attention_mask=attention_mask, labels=input_ids)
+    assert hasattr(out, "loss") and out.loss is not None
+    out.loss.backward()
+    opt.step()
+
+    after = rep_param.detach().clone()
+    assert not torch.allclose(before, after), "Active task adapter parameters did not update after optimizer step"
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "local_root",
+        "local_nested",
+        "hub_repo",
+        "hub_with_sub",
+    ],
+)
+def test_resolve_adapter_source_variants(tmp_path: Path, case: str):
+    """
+    Ensure `_resolve_adapter_source` correctly handles:
+      - Local dir (containing adapter_config.json)
+      - Local nested subfolder
+      - Hub repo id "user/repo"
+      - Hub repo with subfolder "user/repo/sub/folder"
+    """
+    if case == "local_root":
+        d = tmp_path / "adapter_local_root"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "adapter_config.json").write_text("{}")
+        model_id, sub = _resolve_adapter_source(str(d))
+        assert model_id == str(d)
+        assert sub is None
+
+    elif case == "local_nested":
+        d = tmp_path / "repo_like" / "sub" / "folder"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "adapter_config.json").write_text("{}")
+        model_id, sub = _resolve_adapter_source(str(d))
+        assert model_id == str(d)
+        assert sub is None
+
+    elif case == "hub_repo":
+        model_id, sub = _resolve_adapter_source("user/repo")
+        assert model_id == "user/repo"
+        assert sub is None
+
+    elif case == "hub_with_sub":
+        model_id, sub = _resolve_adapter_source("user/repo/sub/folder")
+        assert model_id == "user/repo"
+        assert sub == "sub/folder"
+
+    else:
+        raise AssertionError(f"unknown case: {case}")

@@ -603,8 +603,12 @@ arrow_config = ArrowConfig(
     rng_seed=42,
 )
 
-# The provided LoRA adapters below are trained on a clustered Flan dataset. 
-# The clustering is done using MBC method explained in the Arrow paper.
+# The LoRA adapters below were trained on a clustered FLAN dataset.
+# Task clustering was performed using the Model-Based Clustering (MBC) method,
+# as described in the Arrow paper.
+# While one could train a separate LoRA for each task and let Arrow route tokens among them,
+# training LoRAs on clusters of tasks instead provides an indirect optimization for
+# transfer across the multi-task dataset.
 task_specific_adapter_paths = [
         f"TahaBa/phi3-mini-clustered-flan/ts_expert_{i}" for i in range(10)
     ]
@@ -619,7 +623,7 @@ model = create_arrow_model(
 # Now the forward path could be called on this model, like a normal PeftModel.
 ```
 
-Furthermore, you can add or remove adapters after calling ```create_arrow_model```—for example, to fine-tune a new adapter or discard an unnecessary one. Once the adapters are in place, you can activate the ```"arrow_router"``` for inference to use Arrow. Note that if you add a new LoRA adapter after ```create_arrow_model``` and want to fine-tune it, you must explicitly set this adapter as active, since ```"arrow_router"``` is activated by default in ```create_arrow_model```.
+Furthermore, you can add or remove adapters after calling ```create_arrow_model```—for example, to fine-tune a new adapter or discard an unnecessary one. Once the adapters are in place, you can activate the ```"arrow_router"``` for inference to use Arrow. Note that if you add a new LoRA adapter after ```create_arrow_model``` and want to fine-tune it, you must explicitly set the new adapter as active, since ```"arrow_router"``` is activated by default in ```create_arrow_model```.
 
 ```py
 from trl import SFTTrainer, SFTConfig

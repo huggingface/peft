@@ -35,8 +35,21 @@ Implementation details:
 - The base model is quantized to 4-bit using `BitsAndBytesConfig` (nf4, bf16 compute).
 - For Arrow and GKS, task-specific adapters are loaded from the Hugging Face Hub:
     TahaBa/phi3-mini-clustered-flan/ts_expert_i
-- For GKS, general adapters are also loaded from:
+- Task-specific adapters were trained on 10 clusters of FLAN tasks.
+- The clusters were created using Model-Based Clustering (MBC):
+    1. Train a LoRA adapter for each individual task.
+    2. Apply k-means clustering to group tasks based on these adapters.
+    3. Train a LoRA adapter for each resulting cluster.
+For more details, see the Arrow paper: https://huggingface.co/papers/2405.11157
+
+- For GKS, general adapters are loaded from:
     TahaBa/phi3-mini-general-adapters/...
+- These adapters were trained on English, French, and German Wikipedia data
+  using a causal language modeling objective with (507-token context → 5-token completion) pairs.
+- This setup encodes general knowledge into the LoRA space, which can then be
+  subtracted from task-specific adapters during inference to isolate and purify them.
+For more details, see the GenKnowSub paper: https://huggingface.co/papers/2505.10939
+
 - `evaluate_on_multi_choice_batched` handles tokenization, masking context tokens,
   and computing per-choice log-likelihoods for fair comparison.
 - Accuracy is printed at the end for the selected dataset.

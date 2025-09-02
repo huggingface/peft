@@ -11,9 +11,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
+
+import os
+from typing import Any
 
 import torch
 from torch import nn
+from transformers import PreTrainedModel
+
+from .config import ArrowConfig
 
 
 TASK_ADAPTER_PREFIX = "task_"
@@ -273,3 +280,197 @@ class ArrowLoraLinearLayer(nn.Module):
         delta = dropout(delta_flat)
         out_dim = delta_flat.size(-1)
         return delta.view(B, *rest, out_dim)
+
+
+def check_loaded_lora_compatibility_arrow(model, adapter_names: list[str]):
+    """
+    After loading all adapters into `model`, check they share:
+      - the same LoRA rank (r)
+      - identical weight shapes
+      - identical sets of target_modules
+    Returns (sorted list of target module names, agreed rank r).
+    """
+    reference = None  # {'r':…, 'shapes':(Ashape,Bshape), 'modules':set([...])}
+
+    for name in adapter_names:
+        curr_modules = set()
+        curr_r = None
+        curr_shapes = None
+
+        for full_name, module in model.named_modules():
+            if hasattr(module, "lora_A") and name in module.lora_A:
+                A = module.lora_A[name].weight
+                B = module.lora_B[name].weight
+                mod_name = full_name.split(".")[-1]
+                curr_modules.add(mod_name)
+                # A has shape (r, in_features); B has shape (out_features, r)
+                curr_r = A.shape[0]
+                curr_shapes = (A.shape, B.shape)
+
+        if reference is None:
+            reference = {"r": curr_r, "shapes": curr_shapes, "modules": curr_modules}
+        else:
+            if curr_r != reference["r"]:
+                raise ValueError(f"[{name}] rank mismatch: {curr_r} != {reference['r']}")
+            if curr_shapes != reference["shapes"]:
+                raise ValueError(f"[{name}] shape mismatch: {curr_shapes} != {reference['shapes']}")
+            if curr_modules != reference["modules"]:
+                raise ValueError(
+                    f"[{name}] target_modules mismatch:\n"
+                    f"  this adapter -> {sorted(curr_modules)}\n"
+                    f"  reference   -> {sorted(reference['modules'])}"
+                )
+
+    agreed_modules = sorted(reference["modules"])
+    return agreed_modules, int(reference["r"])
+
+
+def ensure_adapters_target_linear_layers_only(model, adapter_names: list[str]):
+    """
+    Validate that every module holding LoRA weights for any of `adapter_names` is Linear-like: nn.Linear,
+    bitsandbytes.nn.Linear4bit, nn.Conv1d, or transformers.models.gpt2.modeling_gpt2.Conv1D. If not, raise.
+    """
+    import torch.nn as nn
+
+    Linear4bit = None
+    try:
+        import bitsandbytes as bnb  # type: ignore
+
+        Linear4bit = bnb.nn.Linear4bit
+    except ImportError:
+        pass
+
+    HFConv1D = None
+    try:
+        from transformers.models.gpt2.modeling_gpt2 import Conv1D as HFConv1D  # type: ignore
+    except ImportError:
+        pass
+
+    allowed_types = (nn.Linear, nn.Conv1d)
+    if Linear4bit is not None:
+        allowed_types = allowed_types + (Linear4bit,)
+    if HFConv1D is not None:
+        allowed_types = allowed_types + (HFConv1D,)
+
+    offenders = []
+
+    for full_name, module in model.named_modules():
+        if hasattr(module, "lora_A"):
+            for name in adapter_names:
+                if name in getattr(module, "lora_A", {}):
+                    base = getattr(module, "base_layer", None) or getattr(module, "original_module", None)
+                    layer_to_check = base if base is not None else module
+
+                    if not isinstance(layer_to_check, allowed_types):
+                        offenders.append((name, full_name, type(layer_to_check).__name__))
+
+    if offenders:
+        lines = [
+            "LoRA adapters must only target Linear-like layers "
+            "(nn.Linear, nn.Conv1d, HF Conv1D, or bitsandbytes.nn.Linear4bit). Found:"
+        ]
+        for name, full_name, tname in offenders:
+            lines.append(f"  - adapter '{name}' on module '{full_name}' of type {tname}")
+        raise TypeError("\n".join(lines))
+
+
+def _resolve_adapter_source(path: str) -> tuple[str, str | None]:
+    """
+    Resolve a user-provided adapter `path` into (model_id, subfolder).
+
+    Supports:
+      - Local path to a folder that contains `adapter_config.json`
+      - Hub path with subfolder, e.g. "user/repo/ts_expert_0[/more/...]", which becomes:
+            model_id="user/repo", subfolder="ts_expert_0[/more/...]"
+      - Plain Hub repo id "user/repo" (no subfolder)
+    """
+    if os.path.isdir(path):
+        if not os.path.isfile(os.path.join(path, "adapter_config.json")):
+            raise ValueError(f"Local adapter path '{path}' does not contain 'adapter_config.json'.")
+        return path, None
+
+    parts = path.strip("/").split("/")
+    if len(parts) >= 2:
+        model_id = "/".join(parts[:2])
+        if len(parts) > 2:
+            subfolder = "/".join(parts[2:])
+            return model_id, subfolder
+        return model_id, None
+
+    return path, None
+
+
+def create_arrow_model(
+    base_model: PreTrainedModel,
+    task_specific_adapter_paths: list[str],
+    arrow_config: ArrowConfig,
+    general_adapter_paths: list[str] | None = None,
+    **adapter_kwargs: Any,
+):
+    if task_specific_adapter_paths is None or len(task_specific_adapter_paths) == 0:
+        raise ValueError("`task_specific_adapter_paths` should contain at least one adapter path")
+
+    from peft import LoraConfig, PeftModel
+
+    model_id0, sub0 = _resolve_adapter_source(task_specific_adapter_paths[0])
+    initial_ts_expert_name = f"{TASK_ADAPTER_PREFIX}0"
+
+    first_kwargs = dict(adapter_kwargs)
+    if sub0 is not None and "subfolder" not in first_kwargs:
+        first_kwargs["subfolder"] = sub0
+
+    model = PeftModel.from_pretrained(
+        base_model,
+        model_id=model_id0,
+        adapter_name=initial_ts_expert_name,
+        **first_kwargs,
+    )
+
+    for i in range(1, len(task_specific_adapter_paths)):
+        ts_expert_name = f"{TASK_ADAPTER_PREFIX}{i}"
+        mid, sub = _resolve_adapter_source(task_specific_adapter_paths[i])
+        more_kwargs = dict(adapter_kwargs)
+        if sub is not None and "subfolder" not in more_kwargs:
+            more_kwargs["subfolder"] = sub
+        model.load_adapter(
+            model_id=mid,
+            adapter_name=ts_expert_name,
+            **more_kwargs,
+        )
+    arrow_config.task_adapter_names = [f"{TASK_ADAPTER_PREFIX}{i}" for i in range(len(task_specific_adapter_paths))]
+
+    if arrow_config.use_gks:
+        if general_adapter_paths is None or len(general_adapter_paths) == 0:
+            raise ValueError("You should provide general LoRA paths if you want to use GenKnowSub.")
+        for i in range(len(general_adapter_paths)):
+            gen_expert_name = f"{GKS_ADAPTER_PREFIX}{i}"
+            mid, sub = _resolve_adapter_source(general_adapter_paths[i])
+            gks_kwargs = dict(adapter_kwargs)
+            if sub is not None and "subfolder" not in gks_kwargs:
+                gks_kwargs["subfolder"] = sub
+            model.load_adapter(
+                model_id=mid,
+                adapter_name=gen_expert_name,
+                **gks_kwargs,
+            )
+        arrow_config.gks_adapter_names = [f"{GKS_ADAPTER_PREFIX}{i}" for i in range(len(general_adapter_paths))]
+    else:
+        arrow_config.gks_adapter_names = []
+
+    target_modules, r = check_loaded_lora_compatibility_arrow(
+        model, adapter_names=arrow_config.task_adapter_names + arrow_config.gks_adapter_names
+    )
+
+    ensure_adapters_target_linear_layers_only(
+        model, adapter_names=arrow_config.task_adapter_names + arrow_config.gks_adapter_names
+    )
+
+    router_cfg = LoraConfig(
+        arrow_config=arrow_config,
+        target_modules=target_modules,
+        r=r,
+    )
+    model.add_adapter(adapter_name="arrow_router", peft_config=router_cfg)
+    model.set_adapter("arrow_router")
+
+    return model

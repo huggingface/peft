@@ -681,16 +681,6 @@ class Linear(nn.Module, LoraLayer):
             # no adapter to merge
             return
 
-        # Check for merging in an Arrow model.
-        # Since Arrow is a Mixture-of-Experts (MoE) approach, merging adapters is not
-        # meaningful or even possible: for each token, the top-k LoRA experts are
-        # dynamically selected and routed. Because of this per-token routing, there is
-        # no single set of weights that can represent a merged adapter.
-        if hasattr(self, "lora_arrow"):  # if model is an arrow_model
-            for active_adapter in adapter_names:
-                if active_adapter in self.lora_arrow:  # if lora router was an active adapter
-                    raise RuntimeError("Cannot merge an active Arrow router adapter. Remove it first.")
-
         for active_adapter in adapter_names:
             if active_adapter in self.lora_A.keys():
                 base_layer = self.get_base_layer()
@@ -744,12 +734,6 @@ class Linear(nn.Module, LoraLayer):
         """
         This method unmerges all merged adapter layers from the base weights.
         """
-
-        # check for unmerging in arrow model
-        if hasattr(self, "lora_arrow"):
-            for name in list(self.merged_adapters):
-                if name in self.lora_arrow:
-                    raise RuntimeError("Cannot unmerge an active Arrow router adapter. Remove it first.")
 
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
@@ -1887,10 +1871,11 @@ class ParamWrapper(nn.Module, LoraLayer):
     """A LoRA wrapper for `nn.Parameter`. This layer is dispatched if users target a parameter directly with
     `lora_config.target_parameters`
         Note:
-        - When accessing the wrapped nn.Parameter directly, e.g. via `module.weight`, the LoRA weights are *not* applied.
+        - When accessing the wrapped nn.Parameter directly, e.g. via `module.weight`, the LoRA weights are *not*
+          applied.
         - It is currently not implemented to target multiple parameters on the same module. To achieve this, it is
-          currently required to create a separate LoRA adapter (with another adapter name) and activate both at the same
-          time.
+          currently required to create a separate LoRA adapter (with another adapter name) and activate both at the
+          same time.
     """
 
     def __init__(
