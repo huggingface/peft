@@ -5226,6 +5226,30 @@ class TestRequiresGrad:
         # this fails, instead with get ...lora_A.default.weight and ...lora_B.default.weight
         assert params_with_grad == expected
 
+    @pytest.mark.xfail(strict=True)
+    @pytest.mark.parametrize("config_cls", [LoraConfig])  # no need to check each method, they all fail
+    def test_loading_model_requires_grad_load_adapter_then_add_adapter(self, config_cls, tmp_path):
+        # When adding a new adapter with model.add_adapter, through the set_adapter call in update_layer, we activate
+        # the gradients of the first adapter, even if it's not desired. Since there is no is_trainable argument on
+        # add_adapter, there is no way to disable that at the moment.
+        # When/If this is fixed, the check can be integrated into test_loading_model_requires_grad_set_correctly and
+        # this test can be deleted.
+        model = DeepMLP(size=256)  # a size that works with all adapters
+        extra_kwargs = {}
+        config = config_cls(target_modules=["layers.0.lin0"])
+        model = get_peft_model(model, config)
+        model.save_pretrained(tmp_path)
+        del model
+
+        model = DeepMLP(size=256)
+        model = PeftModel.from_pretrained(model, tmp_path, is_trainable=False)
+        assert all(not p.requires_grad for p in model.parameters())
+
+        # add a new adapter
+        model.add_adapter(adapter_name="other", peft_config=config)
+        params_with_grad = [n for n, p in model.named_parameters() if p.requires_grad]
+        assert all(not p.requires_grad for p in model.parameters())
+
 
 # this is for PEFT methods that support mixed adapter batches.
 MIXED_ADAPTER_TEST_CASES = [
