@@ -29,7 +29,9 @@ import json
 import sys
 import warnings
 from collections import defaultdict
-
+import os
+import torch
+from safetensors import safe_open
 import transformers
 from accelerate.commands.estimate import create_empty_model
 from accelerate.utils.other import convert_bytes
@@ -204,6 +206,120 @@ def main(model_id, rank, group_size, dtype, sink=print):
     return result
 
 
+
+def load_all_lr_layers(adapter_path):
+    """
+    Lädt einen gespeicherten LoRA-Adapter, extrahiert lora_A und lora_B,
+    berechnet den Skalierungsfaktor und rekonstruiert die Low-Rank-Update-Matrix für alle Layer.
+    """
+    # 1. Pfade zur Konfigurations- und Gewichtsdatei definieren
+    config_path = os.path.join(adapter_path, "adapter_config.json")
+    weights_path = os.path.join(adapter_path, "adapter_model.safetensors")
+
+    if not os.path.exists(config_path) or not os.path.exists(weights_path):
+        print(f"❌ Fehler: Konnte 'adapter_config.json' oder 'adapter_model.safetensors' nicht in {adapter_path} finden.")
+        return
+
+    # 2. Konfiguration laden, um 'r' und 'lora_alpha' zu erhalten
+    print(f"🔍 Lade Konfiguration von: {config_path}")
+    with open(config_path, "r") as f:
+        adapter_config = json.load(f)
+
+    r = adapter_config.get("r")
+    lora_alpha = adapter_config.get("lora_alpha")
+    use_rslora = adapter_config.get("use_rslora", False)
+
+    if r is None or lora_alpha is None:
+        print("❌ Fehler: 'r' oder 'lora_alpha' nicht in der Konfiguration gefunden.")
+        return
+
+    # 3. Den 'scaling'-Parameter berechnen
+    if use_rslora:
+        scaling = lora_alpha / torch.sqrt(torch.tensor(r))
+        print(f"✅ Konfiguration geladen: r={r}, lora_alpha={lora_alpha} (rsLoRA-Skalierung verwendet)")
+    else:
+        scaling = lora_alpha / r
+        print(f"✅ Konfiguration geladen: r={r}, lora_alpha={lora_alpha}")
+    
+    print(f"   Berechneter Skalierungsfaktor: {scaling:.4f}\n")
+
+    # 4. Das State Dictionary des Adapters laden
+    print(f"🔍 Lade Gewichte von: {weights_path}")
+    # Verwende safe_open für safetensors
+    adapter_state_dict = {}
+    lr_layers = {}
+    with safe_open(weights_path, framework="pt") as f:
+        for key in f.keys():
+            adapter_state_dict[key] = f.get_tensor(key)
+    print(f"✅ {len(adapter_state_dict)} Tensoren geladen.\n")
+
+    # 5. Durch alle Layer iterieren und die Low-Rank-Matrix rekonstruieren
+    # Finde alle lora_A Gewichte, um die Layer zu identifizieren
+    lora_a_keys = [key for key in adapter_state_dict if key.endswith(".lora_A.weight")]
+
+    for lora_a_key in lora_a_keys:
+        base_key = lora_a_key.replace(".lora_A.weight", "")
+        lora_b_key = base_key + ".lora_B.weight"
+
+        if lora_b_key in adapter_state_dict:
+            lora_A = adapter_state_dict[lora_a_key]
+            lora_B = adapter_state_dict[lora_b_key]
+            
+            # Dies ist die Kernlogik Ihrer Anfrage
+            # LR = scaling * (B @ A)
+            low_rank_update = scaling * (lora_B @ lora_A)
+            
+            # Speichere im Dict (base_key ist der Layer-Name, z.B. "q_proj")
+            cleaned_keys = base_key + ".base_layer.weight"
+            lr_layers[cleaned_keys] = low_rank_update
+            
+            print(f"--- Rekonstruiert für Layer: {base_key} ---")
+            print(f"  - lora_A Form: {lora_A.shape}")
+            print(f"  - lora_B Form: {lora_B.shape}")
+            print(f"  - Rekonstruierte LR-Matrix Form: {low_rank_update.shape}\n")
+
+    print(f"✅ Alle LR-Layer geladen und in lr_layers gespeichert: {list(lr_layers.keys())}")
+    
+    return lr_layers
+
+def apply_lr_weights(model, lr_layers):
+    """
+    Wendet die Low-Rank-Gewichte auf das Modell an.
+    """
+    for name, param in model.named_parameters():
+        if name in lr_layers:
+            print(f"🔄 Wende LR-Gewichte auf Layer '{name}' an.")
+            param.data = lr_layers[name].to(param.device, dtype=param.dtype)
+
+def compare_weights(model, lr_layers):
+    """
+    Vergleicht die ursprünglichen Gewichte des Modells mit den aktualisierten Gewichten.
+    Gibt die maximale, minimale und durchschnittliche Abweichung aus.
+    """
+    total_error = 0.0
+    total_params = 0
+
+    for name, param in model.named_parameters():
+        if name in lr_layers:
+            original_weights = param.data.clone()
+            updated_weights = original_weights + lr_layers[name].to(param.device, dtype=param.dtype)
+            error = torch.abs(updated_weights - original_weights).sum().item()
+            total_error += error
+            total_params += param.numel()
+
+            print(f"🔍 Layer '{name}':")
+            print(f"  - Max Error: {torch.abs(updated_weights - original_weights).max().item():.6f}")
+            print(f"  - Min Error: {torch.abs(updated_weights - original_weights).min().item():.6f}")
+            print(f"  - Mean Error: {error / param.numel():.6f}\n")
+
+    print(f"✅ Gesamtfehler: {total_error:.6f}")
+    print(f"✅ Durchschnittlicher Fehler pro Parameter: {total_error / total_params:.6f}")
+
+def show_gradients_of_model(model):
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            print(f"❌ Gradient disabled for parameter: {name}")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("model_id", type=str, help="Model name (on Hugging Face)")
@@ -214,3 +330,4 @@ if __name__ == "__main__":
     parser.add_argument("--group_size", type=int, default=8, help="QA_Lora_groupsize")
     args = parser.parse_args()
     main(args.model_id, rank=args.rank, dtype=args.dtype, group_size=args.group_size)
+

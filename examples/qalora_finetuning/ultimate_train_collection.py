@@ -24,6 +24,8 @@ import transformers
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig, GPTQConfig, Trainer
 from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
+from utils import load_all_lr_layers, apply_lr_weights, compare_weights
+from eval_peft import load_model_and_tokenizer
 
 
 IGNORE_INDEX = -100
@@ -82,7 +84,10 @@ class TrainingArguments(transformers.TrainingArguments):
     dataset_field: list[str] = field(default=None, metadata={"help": "Fields of dataset input and output."})
     dataloader_num_proc: int = field(default=16, metadata={"help": "Number of processes to load dataset"})
     bits: int = field(default=4, metadata={"help": "Number of bits to quantize the model. Default is 4."})
-
+    adapter_path: str = field(
+        default=None,
+        metadata={"help": "Pfad zum gespeicherten LoRA-Adapter mit LR-Gewichten."},
+    )
     dataloader_batch_size: int = field(
         default=3000,
         metadata={
@@ -432,7 +437,7 @@ def train():
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
     # Validate training mode
-    valid_modes = ["full", "lora", "qlora", "qalora", "pissa", "corda", "daniel", "pissa_rank_analysis", "daniel_old"]
+    valid_modes = ["full", "lora", "qlora", "qalora", "pissa", "corda", "daniel", "pissa_rank_analysis", "daniel_old", "wave_mode"]
     if script_args.training_mode not in valid_modes:
         raise ValueError(f"Invalid training_mode '{script_args.training_mode}'. Must be one of: {valid_modes}")
 
@@ -447,7 +452,7 @@ def train():
     )
     tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    # Training mode selection
+    # Training mode selectiowave_moden
     if script_args.training_mode == "corda":
         print("🔧 Setting up CorDA training...")
         res_model = transformers.AutoModelForCausalLM.from_pretrained(
@@ -496,7 +501,7 @@ def train():
             target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
             lora_dropout=0.05,
             bias="none",
-            init_lora_weights=f"pissa_niter_{script_args.pissa_niter}",  # PiSSA initialization
+            # init_lora_weights=f"pissa_niter_{script_args.pissa_niter}",  # PiSSA initialization
         )
 
         model = get_peft_model(model, lora_config)
@@ -598,28 +603,17 @@ def train():
             print("Phase 2: Loading original model and setting up PEFT...")
             model = AutoModelForCausalLM.from_pretrained(
                 script_args.model_name_or_path,
-                low_cpu_mem_usage=True,
-                torch_dtype=torch.float32,
-                device_map="cpu",
-            )
-            
-            # Entdecke automatisch alle relevanten Layer-Namen
-            target_modules = find_all_linear_names(model)
-            
-            del model
-            torch.cuda.empty_cache()
-
-            model = AutoModelForCausalLM.from_pretrained(
-                script_args.model_name_or_path,
                 device_map="auto",
                 torch_dtype=torch.float32,
             )
 
             lora_config = LoraConfig(
                 task_type="CAUSAL_LM",
+                use_qalora=True,
+                qalora_group_size=script_args.qalora_group_size,                
                 r=script_args.lora_r,
                 lora_alpha=2 * script_args.lora_r,
-                target_modules=target_modules,
+                target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
                 lora_dropout=0.05,
                 bias="none",
                 init_lora_weights="daniel",
@@ -632,7 +626,7 @@ def train():
             print(f"Phase 3: Saving adapter to: {adapter_path}")
             peft_model.save_pretrained(adapter_path)
 
-            print("🚀 Extracting residual weights using State Dict method...")
+            print("🚀 Extracting residual weights using State Dict method...") # why is that so complicated? We need to clean up the "base_layer" substring model.layers.21.mlp.down_proj.base_layer.weight -> model.layers.21.mlp.down_proj.weight
             peft_base_model = peft_model.get_base_model().to(torch.float32)
             base_state_dict = peft_base_model.state_dict()
             clean_state_dict = {}
@@ -699,8 +693,8 @@ def train():
         # Phase 4: Quantize W_res with different bit configurations
         quantization_configs = [
             {"bits": 2, "group_size": 32},
-            {"bits": 3, "group_size": 32},
-            {"bits": 4, "group_size": 32},
+            # {"bits": 3, "group_size": 32},
+            # {"bits": 4, "group_size": 32},
         ]
         quantized_models_info = []
 
@@ -730,15 +724,8 @@ def train():
             status_emoji = {"created": "✅", "exists": "⏭️", "failed": "❌"}[info["status"]]
             print(f"  {status_emoji} {info['bits']}-bit (gs={info['group_size']}) -> {info['quantized_path']}")
 
-        # Set model to one of the quantized versions for potential continued training
-        if quantized_models_info and quantized_models_info[0]["quantized_path"]:
-            print(f"\nLoading 4-bit quantized model for training continuation...")
-            four_bit_model = [x for x in quantized_models_info if x["bits"] == 4 and x["group_size"] == 32]
-            if four_bit_model:
-                model = AutoModelForCausalLM.from_pretrained(
-                    four_bit_model[0]["quantized_path"], device_map="auto", torch_dtype=torch.float16
-                )
-                model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
+        # model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
+
     elif script_args.training_mode == "full":
         print("🔧 Setting up full finetuning...")
         model = transformers.AutoModelForCausalLM.from_pretrained(
@@ -866,8 +853,11 @@ def train():
         "train_dataset": train_dataset,
         "data_collator": data_collator,
     }
-    # trainer = Trainer(model=model, tokenizer=tokenizer, args=script_args, **data_module)
-    # trainer.train()
+    # for name, param in model.named_parameters():
+    #     if not param.requires_grad:
+    #         print(f"❌ Gradient disabled for parameter: {name}")
+    trainer = Trainer(model=model, tokenizer=tokenizer, args=script_args, **data_module)
+    trainer.train()
     # trainer.save_state()
     model.save_pretrained(os.path.join(script_args.output_dir, "ft"))
     tokenizer.save_pretrained(os.path.join(script_args.output_dir, "ft"))
