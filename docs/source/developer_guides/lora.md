@@ -248,7 +248,10 @@ output = model_alora.generate(**inputs_alora, past_key_values=cache)
 output_text_alora = tokenizer.decode(output[0])
 
 # Note: cache is now tainted with adapter values and cannot be used in base model from here on!
+```
+
 **Pattern 2: aLoRA generation followed by base model (or another aLoRA) with partial context overlap** Here, we prefill the shared context using the base model, and then generate.
+
 ```
 from transformers import DynamicCache
 import copy
