@@ -173,6 +173,108 @@ from peft import LoraConfig
 
 config = LoraConfig(use_rslora=True, ...)
 ```
+### Activated LoRA (aLoRA)
+
+Activated LoRA (aLoRA) is a low rank adapter architecture for Causal LMs that allows for reusing existing base model KV cache for more efficient inference. This approach is best suited for inference pipelines which rely on the base model for most tasks/generations, but use aLoRA adapter(s) to perform specialized task(s) within the chain. For example, checking or correcting generated outputs of the base model. In these settings, inference times can be sped up by an order of magnitude or more. For more information on aLoRA and many example use cases, see https://huggingface.co/papers/2504.12397.
+
+This technique scans for the last occurence of an invocation sequence (`alora_invocation_tokens`) in each input (this can be as short as 1 token), and activates the adapter weights on tokens starting with the beginning of the invocation sequence (any inputs after the invocation sequence are also adapted, and all generated tokens will use the adapted weights). Weights on prior tokens are left un-adapted -- making the cache for those tokens interchangeable with base model cache due to the causal attention mask in Causal LMs. Usage is very similar to standard LoRA, with the key difference that this invocation sequence must be specified when the adapter is created:
+
+```py
+from peft import LoraConfig
+
+config = LoraConfig(alora_invocation_tokens=alora_invocation_tokens, task_type="CAUSAL_LM", ...)
+```
+
+where `alora_invocation_tokens` is a list of integer token ids. Given a desired invocation string, this can be obtained as
+```
+invocation_string = "placeholder"
+alora_invocation_tokens = tokenizer.encode(invocation_string, add_special_tokens=False).
+```
+where the tokenizer is the tokenizer for the base model. Note that we have `add_special_tokens=False` to avoid adding SOS/EOS tokens in our search string (which will most likely cause failure to find).
+
+**Notes**
+* aLoRA is only supported for `task_type=CAUSAL_LM` tasks due to its focus on cache reuse.
+* Since the weights are adapted on fewer tokens, often (not always) aLoRA requires higher rank (`r`) than LoRA. `r=32` can be a good starting point.
+* aLoRA weights cannot be merged into the base model by definition, since the adapter weights are selectively applied to a subset of tokens. Attempts to merge will throw errors.
+* Beam search is not yet supported.
+* It is generally not recommended to add new tokens to the tokenizer that are not present in the base model, as this can complicate the target use case of both the base model and adapter model operating on overlapping context. That said, there is a possible workaround by first efficiently adding [trainable tokens](https://huggingface.co/docs/peft/en/package_reference/trainable_tokens) to the base model prior to training the adapter.
+
+#### Choice of invocation sequence and SFT design 
+
+Each input must have the `alora_invocation_tokens` sequence present, it is not added automatically. To maximize model performance without compromising cache reuse, it is recommended to have the adapter weights activated early, i.e. at the start of any adapter-specific prompting, but after any long inputs such as prior generations or documents. As with any model,
+formatting should be consistent between train and test.
+
+Consider the following example, where the base model has a chat template,
+and the goal is to train the adapter to generate a desired output. 
+
+* Option 1: If there is no task-specific prompt, i.e. the input is a chat history with the `assistant` prompt, then the chat template's `assistant` prompt (e.g. `<|start_of_role|>assistant<|end_of_role|>`) is a natural choice for the invocation string. See the model's chat template to find the prompt for the model.
+* Option 2: If there is a task-specific prompt for the adapter that describes the task the adapter is learning, and that prompt is put as a `user` turn immediately prior to the generation, then the chat template's `user` prompt (e.g. `<|start_of_role|>user<|end_of_role|>`) is a natural choice for the invocation string.
+
+Once deciding on an invocation string, get the model tokenizer and obtain `alora_invocation_tokens` as 
+```
+alora_invocation_tokens = tokenizer.encode(invocation_string, add_special_tokens=False).
+```
+
+An example inference setup is at [alora finetuning](https://github.com/huggingface/peft/blob/main/examples/alora_finetuning/alora_finetuning.py).
+
+**Note** If using custom strings for the invocation string, make sure that the start and end of the string are special tokens to avoid issues with tokenization at the boundaries. 
+
+To see why, imagine that 'a', 'b', 'c', and 'ab' are tokens in your tokenizer (numbers 1, 2, 3, 4 respectively). Suppose that your alora_invocation_tokens = [2, 3]. Now imagine your input string is "abc". Because "ab" is a token, this will get tokenized as [4,3]. So the alora_invocation_tokens will fail to be found, despite the string "bc" being in it. If the start and end of the invocation string are special tokens, however, this failure case will never happen since special tokens are never tokenized into the same token with other characters.
+
+#### Using (and reusing) cache for generation
+The main purpose of Activated LoRA is to make KV cache interchangeable between the base model and aLoRA adapter models **prior to the invocation sequence** since base and adapted KV values are not compatible. Specifically, keys and values stored during one model generation can be used in subsequent generations to avoid expensive prefill operations for context tokens. When sharing cache between the base model and aLoRA adapters, there are 2 main patterns:
+1. The base model has generated something, and an aLoRA adapter is then called to do a followup generation. Example: the base model answers a question, and an aLoRA trained to detect hallucinations checks the base model response.
+2. An aLoRA adapter has generated something, and the base model or a different aLoRA adapter is called to do a followup generation where there is partial context overlap with the original aLoRA. Example: The user provides a query, and an aLoRA rewrites the query to be more self-contained and improve retrieval in a RAG system. Then, documents are retrieved and loaded into context, an aLoRA checks if these documents are indeed relevant to the question, and then the base model generates an answer.
+
+
+To demonstrate the above behaviors when using caching, we're using [DynamicCache](https://huggingface.co/docs/transformers/en/kv_cache) from `transformers`. Care must be taken to ensure that adapted cache values are not mixed with base cache values. In particular, an extra step is required for sharing the cache when there is partial context overlap (pattern 2).
+
+**Pattern 1: Base model followed by aLoRA** Here, the entire input and generation from the base model is input into the aLoRA adapter, along with the invocation sequence:
+```
+from transformers import DynamicCache
+...
+cache = DynamicCache()
+inputs_base = tokenizer(prompt_base, return_tensors="pt")
+# Generate from base model and save cache
+with model_alora.disable_adapter(): 
+    output = model_alora.generate(inputs_base["input_ids"].to(device),attention_mask=inputs_base["attention_mask"].to(device),past_key_values = cache,return_dict_in_generate=True)
+output_text_base = tokenizer.decode(output.sequences[0])
+cache = output.past_key_values
+
+# Generate with aLoRA adapter from cache
+prompt_alora = output_text + INVOCATION_STRING
+inputs_alora = tokenizer(prompt_alora, return_tensors="pt").to(device)
+output = model_alora.generate(**inputs_alora, past_key_values=cache)
+output_text_alora = tokenizer.decode(output[0])
+
+# Note: cache is now tainted with adapter values and cannot be used in base model from here on!
+**Pattern 2: aLoRA generation followed by base model (or another aLoRA) with partial context overlap** Here, we prefill the shared context using the base model, and then generate.
+```
+from transformers import DynamicCache
+import copy
+...
+cache = DynamicCache()
+inputs_shared = tokenizer(prompt_shared, return_tensors="pt").to(device)
+
+# Prefill from base model and save cache
+with model_alora.disable_adapter():
+    with torch.no_grad():
+        model_alora(**inputs_shared, past_key_values=cache)
+cache_copy = copy.deepcopy(cache)
+
+# Generate from aLoRA using prefilled cache
+prompt_alora = prompt_shared + INVOCATION_STRING
+inputs_alora = tokenizer(prompt_alora, return_tensors="pt").to(device)
+output = model_alora.generate(**inputs_alora, past_key_values=cache)
+output_text_alora = tokenizer.decode(output[0])
+
+# Generate from base model using saved cache not tainted by aLoRA KV values
+prompt_base = prompt_shared
+inputs_base = tokenizer(prompt_base, return_tensors="pt").to(device)
+with model_alora.disable_adapter(): 
+    output = model_alora.generate(**inputs_base, past_key_values=cache_copy)
+output_text_base = tokenizer.decode(output[0])
+```
 
 ### Weight-Decomposed Low-Rank Adaptation (DoRA)
 
