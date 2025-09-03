@@ -406,9 +406,9 @@ This solution works most of the time. As long as it is the default value for `fo
 
 ### Using multiple adapters at the same time
 
-PEFT allows you to create more than one adapter on the same model. This can be useful in many situations. For example, for inference, you may want to serve two fine-tunes using the same base model instead of loading the base model once for each fine-tune, which would cost more memory. However, a less well known feature is that multiple adapters can be activated at the same time. This way, the model may leverage the learnings from all those adapters at the same time. As an example, if you have a diffusion model, you may want to use one LoRA adapter to change the style and a different one to change the subject.
+PEFT allows you to create more than one adapter on the same model. This can be useful in many situations. For example, for inference, you may want to serve two fine-tuned models from the same base model instead of loading the base model once for each fine-tuned model, which would cost more memory. However, multiple adapters can be activated at the same time. This way, the model may leverage the learnings from all those adapters at the same time. As an example, if you have a diffusion model, you may want to use one LoRA adapter to change the style and a different one to change the subject.
 
-Activating multiple adapters at the same time is generally possible on all PEFT methods except for prompt learning methds (p-tuning, prefix tuning, etc.). Therefore, it works for LoRA, LoHa, IA³ etc. The following example illustrates how to achieve this:
+Activating multiple adapters at the same time is generally possible on all PEFT methods (LoRA, LoHa, IA³, etc.) except for prompt learning methods (p-tuning, prefix tuning, etc.). The following example illustrates how to achieve this:
 
 ```python
 from transformers import AutoModelForCausalLM
@@ -416,7 +416,7 @@ from peft import PeftModel
 
 model_id = ...
 base_model = AutoModelForCausalLM.from_pretrained(model_id)
-model = PeftModel-from_pretrained(base_model, lora_path_0)  # default adapter_name is 'default'
+model = PeftModel.from_pretrained(base_model, lora_path_0)  # default adapter_name is 'default'
 model.load_adapter(lora_path_1, adapter_name="other")
 # the 'other' adapter was loaded but it's not active yet, so to activate both adapters:
 model.base_model.set_adapter(["default", "other"])
@@ -428,7 +428,7 @@ In the example above, you can see that we need to call `model.base_model.set_ada
 
 </Tip>
 
-Some of you may also want to train two adapters at the same time, e.g. training one LoRA adapter on one loss and the other one on another loss. This is also possible but you should be careful to ensure that the weights of both adapters are known to the optimizer. Otherwise, only one adapter will receive updates.
+It is also possible to train two adapters at the same time, but you should be careful to ensure that the weights of both adapters are known to the optimizer. Otherwise, only one adapter will receive updates.
 
 ```python
 from transformers import AutoModelForCausalLM
@@ -457,7 +457,7 @@ or
 optimizer = torch.optim.AdamW([param for param in model.parameters() if param.requires_grad], ...)
 ```
 
-then the second LoRA adapter (`"other"`) would not be trained. This is because it is inactive at this moment, thus the `requires_grad` attribute on its parameters is set to `False` and the optimizer will ignore it. Therefore, ensure to activate all adapters that should be trained _before_ initializing the optimizer:
+then the second LoRA adapter (`"other"`) would not be trained. This is because it is inactive at this moment, which means the `requires_grad` attribute on its parameters is set to `False` and the optimizer will ignore it. Therefore, make sure to activate all adapters that should be trained _before_ initializing the optimizer:
 
 ```python
 # activate all adapters
