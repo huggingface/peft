@@ -221,6 +221,59 @@ An example inference setup is at [alora finetuning](https://github.com/huggingfa
 
 To see why, imagine that 'a', 'b', 'c', and 'ab' are tokens in your tokenizer (numbers 1, 2, 3, 4 respectively). Suppose that your alora_invocation_tokens = [2, 3]. Now imagine your input string is "abc". Because "ab" is a token, this will get tokenized as [4,3]. So the alora_invocation_tokens will fail to be found, despite the string "bc" being in it. If the start and end of the invocation string are special tokens, however, this failure case will never happen since special tokens are never tokenized into the same token with other characters.
 
+#### Using (and reusing) cache for generation
+The main purpose of Activated LoRA is to make KV cache interchangeable between the base model and aLoRA adapter models **prior to the invocation sequence**. Specifically, keys and values stored during one model generation can be used in subsequent generations to avoid expensive prefill operations for context tokens. When sharing cache between the base model and aLoRA adapters, there are 2 main patterns:
+1. The base model has generated something, and an aLoRA adapter is then called to do a followup generation.
+2. An aLoRA adapter has generated something, and the base model or a different aLoRA adapter is called to do a followup generation where there is partial context overlap with the original aLoRA.
+
+**Important** Note that cache reuse is smoothly and automatically handled in more dedicated/optimized inference libraries, with no need to consider the below. See e.g. PRs in [vLLM](https://github.com/vllm-project/vllm/pull/19710), and [llama.cpp](https://github.com/ggml-org/llama.cpp/pull/15327).
+
+The above behaviors can be demonstrated using [DynamicCache](https://huggingface.co/docs/transformers/en/kv_cache) from `transformers`. Since `DynamicCache` does not cleanly support rewinding the cache to an earlier token position, care must be taken to ensure all cache objects are the correct tokens. In particular, an extra step is required for sharing cache when there is partial context overlap. It is also important to remember that cache for the `alora_invocation_tokens` and following are created with adapted weights and not usable by the base model.
+
+**Pattern 1: Base model followed by aLoRA** Here, the entire input and generation from the base model is input into the aLoRA adapter, along with the invocation sequence:
+```
+from transformers import DynamicCache
+...
+cache = DynamicCache()
+inputs_base = tokenizer(prompt_base, return_tensors="pt")
+# Generate from base model and save cache
+with model_alora.disable_adapter(): 
+    output = model_alora.generate(inputs_base["input_ids"].to(device),attention_mask=inputs_base["attention_mask"].to(device),past_key_values = cache,return_dict_in_generate=True)
+output_text_base = tokenizer.decode(output.sequences[0])
+cache = output.past_key_values
+
+# Generate with aLoRA adapter from cache
+prompt_alora = output_text + INVOCATION_STRING
+inputs_alora = tokenizer(prompt_alora, return_tensors="pt")
+output = model_alora.generate(inputs_alora["input_ids"].to(device),attention_mask=inputs_alora["attention_mask"].to(device), past_key_values=cache,return_dict_in_generate=True)
+output_text_alora = tokenizer.decode(output_alora.sequences[0])
+```
+**Pattern 2: aLoRA generation followed by base model (or another aLoRA) with partial context overlap** Here, we prefill the shared context using the base model, and then generate.
+```
+from transformers import DynamicCache
+import copy
+...
+cache = DynamicCache()
+inputs_shared = tokenizer(prompt_shared, return_tensors="pt")
+# Prefill from base model and save cache
+with model_alora.disable_adapter():
+    with torch.no_grad():
+        cache = model_alora(inputs_shared["input_ids"].to(device), attention_mask=inputs_shared["attention_mask"].to(device), past_key_values=cache).past_key_values
+cache_copy = copy.deepcopy(cache)
+# Generate aLoRA
+prompt_alora = prompt_shared + INVOCATION_STRING
+inputs_alora = tokenizer(prompt_alora, return_tensors="pt")
+output = model_alora.generate(inputs_alora["input_ids"].to(device),attention_mask=inputs_alora["attention_mask"].to(device), past_key_values=cache,return_dict_in_generate=True)
+output_text_alora = tokenizer.decode(output_alora.sequences[0])
+# Generate base
+prompt_base = prompt_shared
+inputs_base = tokenizer(prompt_base, return_tensors="pt")
+# Generate from base model and save cache
+with model_alora.disable_adapter(): 
+    output = model_alora.generate(inputs_base["input_ids"].to(device),attention_mask=inputs_base["attention_mask"].to(device),past_key_values = cache_copy,return_dict_in_generate=True)
+output_text_base = tokenizer.decode(output.sequences[0])
+```
+
 ### Weight-Decomposed Low-Rank Adaptation (DoRA)
 
 This technique decomposes the updates of the weights into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the magnitude is handled by a separate learnable parameter. This can improve the performance of LoRA, especially at low ranks. For more information on DoRA, see  https://huggingface.co/papers/2402.09353.
