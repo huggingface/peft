@@ -227,7 +227,7 @@ The main purpose of Activated LoRA is to make KV cache interchangeable between t
 2. An aLoRA adapter has generated something, and the base model or a different aLoRA adapter is called to do a followup generation where there is partial context overlap with the original aLoRA.
 
 
-The above behaviors can be demonstrated using [DynamicCache](https://huggingface.co/docs/transformers/en/kv_cache) from `transformers`. Since `DynamicCache` does not cleanly support rewinding the cache to an earlier token position, care must be taken to ensure all cache objects are the correct tokens. In particular, an extra step is required for sharing cache when there is partial context overlap. It is also important to remember that cache for the `alora_invocation_tokens` and following are created with adapted weights and not usable by the base model.
+To demonstrate the above behaviors when using caching, we're using [DynamicCache](https://huggingface.co/docs/transformers/en/kv_cache) from `transformers`. Care must be taken to ensure that adapted cache values are not mixed with base cache values. In particular, an extra step is required for sharing the cache when there is partial context overlap (pattern 2).
 
 **Pattern 1: Base model followed by aLoRA** Here, the entire input and generation from the base model is input into the aLoRA adapter, along with the invocation sequence:
 ```
