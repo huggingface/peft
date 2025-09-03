@@ -253,24 +253,26 @@ from transformers import DynamicCache
 import copy
 ...
 cache = DynamicCache()
-inputs_shared = tokenizer(prompt_shared, return_tensors="pt")
+inputs_shared = tokenizer(prompt_shared, return_tensors="pt").to(device)
+
 # Prefill from base model and save cache
 with model_alora.disable_adapter():
     with torch.no_grad():
-        cache = model_alora(inputs_shared["input_ids"].to(device), attention_mask=inputs_shared["attention_mask"].to(device), past_key_values=cache).past_key_values
+        model_alora(**inputs_shared, past_key_values=cache)
 cache_copy = copy.deepcopy(cache)
-# Generate aLoRA
+
+# Generate from aLoRA using prefilled cache
 prompt_alora = prompt_shared + INVOCATION_STRING
-inputs_alora = tokenizer(prompt_alora, return_tensors="pt")
-output = model_alora.generate(inputs_alora["input_ids"].to(device),attention_mask=inputs_alora["attention_mask"].to(device), past_key_values=cache,return_dict_in_generate=True)
-output_text_alora = tokenizer.decode(output_alora.sequences[0])
-# Generate base
+inputs_alora = tokenizer(prompt_alora, return_tensors="pt").to(device)
+output = model_alora.generate(**inputs_alora, past_key_values=cache)
+output_text_alora = tokenizer.decode(output[0])
+
+# Generate from base model using saved cache not tainted by aLoRA KV values
 prompt_base = prompt_shared
-inputs_base = tokenizer(prompt_base, return_tensors="pt")
-# Generate from base model and save cache
+inputs_base = tokenizer(prompt_base, return_tensors="pt").to(device)
 with model_alora.disable_adapter(): 
-    output = model_alora.generate(inputs_base["input_ids"].to(device),attention_mask=inputs_base["attention_mask"].to(device),past_key_values = cache_copy,return_dict_in_generate=True)
-output_text_base = tokenizer.decode(output.sequences[0])
+    output = model_alora.generate(**inputs_base, past_key_values=cache_copy)
+output_text_base = tokenizer.decode(output[0])
 ```
 
 ### Weight-Decomposed Low-Rank Adaptation (DoRA)
