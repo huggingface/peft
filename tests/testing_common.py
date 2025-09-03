@@ -20,6 +20,7 @@ import re
 import shutil
 import tempfile
 import warnings
+from contextlib import nullcontext
 from dataclasses import replace
 
 import pytest
@@ -747,6 +748,10 @@ class PeftCommonTester:
             if model_id == "trl-internal-testing/tiny-Llama4ForCausalLM":
                 # also getting larger errors here, not exactly sure why
                 atol, rtol = 0.3, 0.01
+            if quant_method := getattr(model, "quantization_method", None):
+                if quant_method.value == "quanto":
+                    atol, rtol = 5e-3, 5e-3
+
             assert torch.allclose(logits, logits_merged, atol=atol, rtol=rtol)
             assert torch.allclose(logits, logits_unmerged, atol=atol, rtol=rtol)
             assert torch.allclose(logits, logits_merged_unloaded, atol=atol, rtol=rtol)
@@ -936,6 +941,8 @@ class PeftCommonTester:
         if config_cls not in (LoraConfig,):
             return pytest.skip(f"Mixed adapter batches not supported for {config_cls}")
 
+        from transformers.quantizers.quantizer_quanto import QuantoHfQuantizer
+
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -955,18 +962,27 @@ class PeftCommonTester:
         # ensure that we have at least 3 samples for this test
         dummy_input = {k: torch.cat([v for _ in range(3)]) for k, v in dummy_input.items()}
 
-        with torch.inference_mode():
+        # Using quanto with inference model raises an error:
+        # > RuntimeError: Cannot set version_counter for inference tensor
+        # https://github.com/huggingface/optimum-quanto/issues/304
+        # TODO: remove when/if this is fixed
+        if isinstance(getattr(model, "hf_quantizer", None), QuantoHfQuantizer):
+            inference_mode = nullcontext
+        else:
+            inference_mode = torch.inference_mode
+
+        with inference_mode():
             with model.disable_adapter():
                 output_base = model(**dummy_input)[0]
                 logits_base = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
 
         model.set_adapter("adapter0")
-        with torch.inference_mode():
+        with inference_mode():
             output_adapter0 = model(**dummy_input)[0]
             logits_adapter0 = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
 
         model.set_adapter("adapter1")
-        with torch.inference_mode():
+        with inference_mode():
             output_adapter1 = model(**dummy_input)[0]
             logits_adapter1 = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
 
@@ -985,7 +1001,7 @@ class PeftCommonTester:
         adapters = ["__base__", "adapter0", "adapter1"]
         dummy_input["adapter_names"] = [adapters[i % 3] for i in (range(len(dummy_input["input_ids"])))]
 
-        with torch.inference_mode():
+        with inference_mode():
             output_mixed = model(**dummy_input)[0]
             logits_mixed = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
 
@@ -1556,11 +1572,24 @@ class PeftCommonTester:
                 model.delete_adapter("unknown-adapter")
 
     def _test_unload_adapter(self, model_id, config_cls, config_kwargs):
+        from transformers.quantizers.quantizer_quanto import QuantoHfQuantizer
+
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = model.to(self.torch_device)
+
+        # Using quanto with inference model raises an error:
+        # > RuntimeError: Cannot set version_counter for inference tensor
+        # https://github.com/huggingface/optimum-quanto/issues/304
+        # TODO: remove when/if this is fixed
+        if isinstance(getattr(model, "hf_quantizer", None), QuantoHfQuantizer):
+            inference_mode = nullcontext
+        else:
+            inference_mode = torch.inference_mode
+
         num_params_base = len(model.state_dict())
         dummy_input = self.prepare_inputs_for_testing()
-        with torch.inference_mode():
+        with inference_mode():
             logits_transformers = model(**dummy_input)[0]
 
         config = config_cls(
@@ -1568,7 +1597,6 @@ class PeftCommonTester:
             **config_kwargs,
         )
         model = get_peft_model(model, config)
-        model = model.to(self.torch_device)
 
         if isinstance(config, PromptLearningConfig):
             # prompt learning does not support unloading
@@ -1576,13 +1604,13 @@ class PeftCommonTester:
                 model = model.unload()
         else:
             self.perturb_trainable_token_weights_if_used(model, config_kwargs)
-            with torch.inference_mode():
+            with inference_mode():
                 logits_with_adapter = model(**dummy_input)[0]
 
             model.eval()
             model = model.unload()
             num_params_unloaded = len(model.state_dict())
-            with torch.inference_mode():
+            with inference_mode():
                 logits_unload = model(**dummy_input)[0]
 
             # check that PEFT layers are completely removed

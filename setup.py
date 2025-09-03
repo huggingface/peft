@@ -38,6 +38,7 @@ extras["test"] = extras["dev"] + [
     "scipy",
     "protobuf",
     "sentencepiece",
+    "optimum-quanto",
 ]
 
 setup(

@@ -170,3 +170,10 @@ def is_xpu_available(check_device=False):
 @lru_cache
 def is_diffusers_available():
     return importlib.util.find_spec("diffusers") is not None
+
+
+@lru_cache
+def is_quanto_available():
+    return (importlib.util.find_spec("optimum") is not None) and (
+        importlib.util.find_spec("optimum.quanto") is not None
+    )
