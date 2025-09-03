@@ -422,11 +422,8 @@ model.load_adapter(lora_path_1, adapter_name="other")
 model.base_model.set_adapter(["default", "other"])
 ```
 
-<Tip>
-
-In the example above, you can see that we need to call `model.base_model.set_adapter(["default", "other"])`. Why can we not call `model.set_adapter(["default", "other"])`? This is unfortunately not possible because, as explained earlier, some PEFT methods don't support activating more than one adapter at a time.
-
-</Tip>
+> [!TIP]
+> In the example above, you can see that we need to call `model.base_model.set_adapter(["default", "other"])`. Why can we not call `model.set_adapter(["default", "other"])`? This is unfortunately not possible because, as explained earlier, some PEFT methods don't support activating more than one adapter at a time.
 
 It is also possible to train two adapters at the same time, but you should be careful to ensure that the weights of both adapters are known to the optimizer. Otherwise, only one adapter will receive updates.
 
@@ -465,9 +462,6 @@ model.base_model.set_adapter(["default", "other"])
 trainer = Trainer(model=model,  ...)
 trainer.train()
 ```
-<Tip>
 
-This section deals with using multiple adapters _of the same type_ on the same model, for example, using multiple LoRA adapters at the same time. It does not apply to using _different types_ of adapters on the same model, for example one LoRA adapter and one LoHa adapter. For this, please check [`PeftMixedModel`](https://huggingface.co/docs/peft/developer_guides/mixed_models).
-
-</Tip>
-
+> [!TIP]
+> This section deals with using multiple adapters _of the same type_ on the same model, for example, using multiple LoRA adapters at the same time. It does not apply to using _different types_ of adapters on the same model, for example one LoRA adapter and one LoHa adapter. For this, please check [`PeftMixedModel`](https://huggingface.co/docs/peft/developer_guides/mixed_models).
