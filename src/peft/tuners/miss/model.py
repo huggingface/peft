@@ -335,7 +335,7 @@ class MissModel(BaseTuner):
             progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
         )
 
-    def unload(self) -> torch.nn.Module:
+    def unload2(self) -> torch.nn.Module:
         """
         Gets back the base model by removing all the miss modules without merging. This gives back the original base
         model.

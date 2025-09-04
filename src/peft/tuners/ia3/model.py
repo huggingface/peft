@@ -376,7 +376,7 @@ class IA3Model(BaseTuner):
         """
         return self._unload_and_optionally_merge(safe_merge=safe_merge, adapter_names=adapter_names)
 
-    def unload(self) -> torch.nn.Module:
+    def unload2(self) -> torch.nn.Module:
         """
         Gets back the base model by removing all the IA³ modules without merging. This gives back the original base
         model.

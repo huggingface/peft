@@ -499,7 +499,7 @@ class VeraModel(BaseTuner):
             progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
         )
 
-    def unload(self):
+    def unload2(self):
         """
         Gets back the base model by removing all the Vera modules without merging. This gives back the original base
         model.

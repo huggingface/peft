@@ -228,7 +228,7 @@ class TrainableTokensModel(BaseTuner):
                 module.set_adapter(adapter_name)
         self.active_adapter = adapter_name
 
-    def unload(self) -> torch.nn.Module:
+    def unload2(self) -> torch.nn.Module:
         """
         Gets back the base model by removing all the trainable tokens modules without merging.
         """
