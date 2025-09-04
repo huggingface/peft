@@ -238,7 +238,7 @@ class C3AModel(BaseTuner):
             )
         return peft_config
 
-    def _unload_and_optionally_merge(
+    def _unload_and_optionally_merge2(
         self,
         merge=True,
         progressbar: bool = False,

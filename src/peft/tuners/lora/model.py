@@ -547,7 +547,7 @@ class LoraModel(BaseTuner):
                 raise ValueError("Please specify `target_modules` or `target_parameters`in `peft_config`")
         return peft_config
 
-    def _unload_and_optionally_merge(
+    def _unload_and_optionally_merge2(
         self,
         merge=True,
         progressbar: bool = False,

@@ -256,7 +256,7 @@ class RoadModel(BaseTuner):
         for handle in hook_handles:
             handle.remove()
 
-    def _unload_and_optionally_merge(
+    def _unload_and_optionally_merge2(
         self,
         merge=True,
         progressbar: bool = False,

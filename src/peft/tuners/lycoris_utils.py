@@ -286,7 +286,7 @@ class LycorisTuner(BaseTuner):
             if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
                 module.enable_adapters(enabled)
 
-    def _unload_and_optionally_merge(
+    def _unload_and_optionally_merge2(
         self,
         merge: bool = True,
         progressbar: bool = False,

@@ -300,7 +300,7 @@ class IA3Model(BaseTuner):
             )
         return peft_config
 
-    def _unload_and_optionally_merge(
+    def _unload_and_optionally_merge2(
         self, merge: bool = True, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ):
         r"""

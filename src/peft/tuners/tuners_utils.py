@@ -26,6 +26,7 @@ import torch
 from accelerate.hooks import AlignDevicesHook
 from accelerate.utils import named_module_tensors, offload_state_dict
 from torch import nn
+from tqdm import tqdm
 from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
 
@@ -140,6 +141,7 @@ def _check_lora_target_modules_mamba(peft_config: PeftConfig, model: nn.Module, 
                 f"(model_type='{model.config.model_type}'). Incompatible modules: {incompatible_modules}. "
                 "Please remove it from `target_modules` to avoid compatibility issues."
             )
+
 
 def replace_module(parent: nn.Module, child_name: str, new_module: nn.Module, child: nn.Module, prefix: str) -> None:
     """TODO"""
@@ -462,6 +464,37 @@ class BaseTuner(nn.Module, ABC):
                 "You can untie the embeddings by loading the model with `tie_word_embeddings=False`. For example:"
                 + example_code
             )
+
+    def _unload_and_optionally_merge(
+        self,
+        merge: bool = True,
+        progressbar: bool = False,
+        safe_merge: bool = False,
+        adapter_names: Optional[list[str]] = None,
+    ) -> None:
+        if merge:
+            self._check_merge_allowed()
+
+        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
+        desc = "Unloading " + ("and merging " if merge else "") + "model"
+        for key in tqdm(key_list, disable=not progressbar, desc=desc):
+            try:
+                parent, target, target_name = _get_submodules(self.model, key)
+            except AttributeError:
+                continue
+            with onload_layer(target):
+                if hasattr(target, "unload_and_optionally_merge_module"):
+                    # if layers have special unloading method, like MultiheadAttention, use that
+                    unloaded_module = target.unload_and_optionally_merge_module(
+                        merge=merge, safe_merge=safe_merge, adapter_names=adapter_names
+                    )
+                    self._replace_module(parent, target_name, unloaded_module, target)
+                elif hasattr(target, "base_layer"):
+                    if merge:
+                        target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
+                    self._replace_module(parent, target_name, target.get_base_layer(), target)
+
+        return self.model
 
     def _check_target_module_compatiblity(self, peft_config: PeftConfig, model: nn.Module, target_name: str):
         """

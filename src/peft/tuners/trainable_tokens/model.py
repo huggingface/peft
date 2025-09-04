@@ -254,7 +254,7 @@ class TrainableTokensModel(BaseTuner):
             progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
         )
 
-    def _unload_and_optionally_merge(
+    def _unload_and_optionally_merge2(
         self,
         merge=True,
         progressbar: bool = False,
