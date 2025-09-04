@@ -201,6 +201,7 @@ class LycorisTuner(BaseTuner):
     """
 
     prefix: str
+    base_layer_cls = LycorisLayer
     layers_mapping: dict[type[torch.nn.Module], type[LycorisLayer]]
 
     def __getattr__(self, name: str):
@@ -389,7 +390,7 @@ class LycorisTuner(BaseTuner):
                 module.set_adapter(adapter_name)
         self.active_adapter = adapter_name
 
-    def delete_adapter(self, adapter_name: str) -> None:
+    def delete_adapter2(self, adapter_name: str) -> None:
         """
         Deletes an existing adapter.
 

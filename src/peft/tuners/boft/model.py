@@ -73,6 +73,7 @@ class BOFTModel(BaseTuner):
     """
 
     prefix: str = "boft_"
+    base_layer_cls = BOFTLayer
 
     def _check_new_adapter_config(self, config: BOFTConfig) -> None:
         """
@@ -299,7 +300,7 @@ class BOFTModel(BaseTuner):
 
         return self.model
 
-    def delete_adapter(self, adapter_name: str) -> None:
+    def delete_adapter2(self, adapter_name: str) -> None:
         """
         Deletes an existing adapter.
 

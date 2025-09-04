@@ -63,6 +63,7 @@ class ShiraModel(BaseTuner):
     """
 
     prefix: str = "shira_"
+    base_layer_cls = ShiraLayer
 
     def _check_new_adapter_config(self, config: ShiraConfig) -> None:
         """
@@ -273,7 +274,7 @@ class ShiraModel(BaseTuner):
 
         return self.model
 
-    def delete_adapter(self, adapter_name: str):
+    def delete_adapter2(self, adapter_name: str):
         """
         Deletes an existing adapter.
 

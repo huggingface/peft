@@ -32,6 +32,7 @@ from .layer import Linear, PolyLayer
 
 class PolyModel(BaseTuner):
     prefix: str = "poly_"
+    base_layer_cls = PolyLayer
 
     @staticmethod
     def _check_target_module_exists(poly_config, key):

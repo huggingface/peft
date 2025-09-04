@@ -100,6 +100,7 @@ class RandLoraModel(BaseTuner):
     """
 
     prefix: str = "randlora_"
+    base_layer_cls = RandLoraLayer
 
     def _find_dim(self, config) -> tuple[int, int]:
         """
@@ -503,7 +504,7 @@ class RandLoraModel(BaseTuner):
 
         return self.model
 
-    def delete_adapter(self, adapter_name: str):
+    def delete_adapter2(self, adapter_name: str):
         """
         Deletes an existing adapter.
 

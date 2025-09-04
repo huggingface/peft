@@ -74,6 +74,7 @@ class IA3Model(BaseTuner):
     """
 
     prefix: str = "ia3_"
+    base_layer_cls = IA3Layer
 
     @staticmethod
     def _create_new_module(ia3_config, adapter_name, target, **kwargs):
@@ -382,7 +383,7 @@ class IA3Model(BaseTuner):
         """
         return self._unload_and_optionally_merge(merge=False)
 
-    def delete_adapter(self, adapter_name: str) -> None:
+    def delete_adapter2(self, adapter_name: str) -> None:
         """
         Deletes an existing adapter.
 

@@ -98,6 +98,7 @@ class OFTModel(BaseTuner):
     """
 
     prefix: str = "oft_"
+    base_layer_cls = OFTLayer
 
     def _check_new_adapter_config(self, config: OFTConfig) -> None:
         """
@@ -382,7 +383,7 @@ class OFTModel(BaseTuner):
 
         return self.model
 
-    def delete_adapter(self, adapter_name: str) -> None:
+    def delete_adapter2(self, adapter_name: str) -> None:
         """
         Deletes an existing adapter.
 

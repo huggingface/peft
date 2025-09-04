@@ -49,6 +49,7 @@ class RoadModel(BaseTuner):
     """ """
 
     prefix: str = "road_"
+    base_layer_cls = RoadLayer
 
     @staticmethod
     def _prepare_adapter_config(road_config: RoadConfig, model_config: dict) -> RoadConfig:
@@ -290,7 +291,7 @@ class RoadModel(BaseTuner):
 
         return self.model
 
-    def delete_adapter(self, adapter_name: str) -> None:
+    def delete_adapter2(self, adapter_name: str) -> None:
         """
         Deletes an existing adapter.
 

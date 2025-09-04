@@ -178,7 +178,13 @@ class BaseTuner(nn.Module, ABC):
         targeted_parameter_names (`list[str]`):
             The list of parameter names that were actually adapted. Can be useful to inspect if you want to quickly
             double-check that the `config.target_parameters` were specified correctly.
+        prefix (`str`)
+            The PEFT-method specific unique prefix. E.g. `"lora_"` for LoRA.
     """
+
+    # TODO
+    prefix: str
+    base_layer_cls: BaseTuner
 
     def __init__(
         self,
@@ -346,6 +352,23 @@ class BaseTuner(nn.Module, ABC):
         Enable all adapters in-place
         """
         ...
+
+    def delete_adapter(self, adapter_name: str) -> None:
+        """
+        Deletes an existing adapter.
+
+        Args:
+            adapter_name (str): Name of the adapter to be deleted.
+        """
+        if adapter_name not in list(self.peft_config.keys()):
+            raise ValueError(f"Adapter {adapter_name} does not exist")
+        del self.peft_config[adapter_name]
+
+        new_adapter = delete_adapter(
+            model=self.model, adapter_name=adapter_name, prefix=self.prefix, base_layer_cls=self.base_layer_cls
+        )
+        self.active_adapter = new_adapter or []
+        self._delete_auxiliary_adapter(adapter_name, new_active_adapters=new_adapter)
 
     def _check_new_adapter_config(self, config: PeftConfig) -> None:
         """
@@ -1602,3 +1625,27 @@ def replace_module(parent: nn.Module, child_name: str, new_module: nn.Module, ch
         if prefix in name:
             if not any(p.device == meta for p in module.parameters()):
                 module.to(child.weight.device)
+
+
+def delete_adapter(
+    model: nn.Module, adapter_name: str, prefix: str, base_layer_cls: type[BaseTunerLayer] = BaseTunerLayer
+) -> list[str] | None:
+    """
+    TODO
+
+    Deletes an existing adapter.
+
+    Args:
+        adapter_name (str): Name of the adapter to be deleted.
+    """
+    key_list = [key for key, _ in model.named_modules() if prefix not in key]
+    new_adapter = None
+
+    for key in key_list:
+        _, target, _ = _get_submodules(model, key)
+        if isinstance(target, base_layer_cls):
+            target.delete_adapter(adapter_name)
+            if new_adapter is None:
+                new_adapter = target.active_adapters[:]
+
+    return new_adapter

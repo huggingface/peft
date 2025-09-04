@@ -70,6 +70,7 @@ class VBLoRAModel(BaseTuner):
     """
 
     prefix: str = "vblora_"
+    base_layer_cls = VBLoRALayer
 
     def _init_vblora_vector_bank(self, config: VBLoRAConfig, adapter_name: str) -> None:
         vblora_vector_bank = torch.zeros(config.num_vectors, config.vector_length)
@@ -338,7 +339,7 @@ class VBLoRAModel(BaseTuner):
 
         return self.model
 
-    def delete_adapter(self, adapter_name: str) -> None:
+    def delete_adapter2(self, adapter_name: str) -> None:
         """
         Deletes an existing adapter.
 

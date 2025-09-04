@@ -57,6 +57,7 @@ class FourierFTModel(BaseTuner):
     """
 
     prefix: str = "fourierft_"
+    base_layer_cls = FourierFTLayer
 
     def _check_new_adapter_config(self, config: FourierFTConfig) -> None:
         """
@@ -295,7 +296,7 @@ class FourierFTModel(BaseTuner):
 
         return self.model
 
-    def delete_adapter(self, adapter_name: str):
+    def delete_adapter2(self, adapter_name: str):
         """
         Deletes an existing adapter.
 

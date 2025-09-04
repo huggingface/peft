@@ -143,6 +143,7 @@ class LoraModel(BaseTuner):
     """
 
     prefix: str = "lora_"
+    base_layer_cls = LoraLayer
 
     def _check_new_adapter_config(self, config: LoraConfig) -> None:
         """
@@ -905,7 +906,7 @@ class LoraModel(BaseTuner):
         lora_deltas = [delta.to(dtype) for delta in lora_deltas]
         return lora_deltas
 
-    def delete_adapter(self, adapter_name: str) -> None:
+    def delete_adapter2(self, adapter_name: str) -> None:
         """
         Deletes an existing adapter.
 

@@ -13,9 +13,10 @@
 # limitations under the License.
 """TODO"""
 
-from .tuners_utils import replace_module
+from .tuners_utils import delete_adapter, replace_module
 
 
 __all__ = [
+    "delete_adapter",
     "replace_module",
 ]

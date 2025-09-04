@@ -100,6 +100,7 @@ class VeraModel(BaseTuner):
     """
 
     prefix: str = "vera_lambda_"
+    base_layer_cls = VeraLayer
 
     def _find_dim(self, config) -> tuple[int, int]:
         """
@@ -441,7 +442,7 @@ class VeraModel(BaseTuner):
 
         return self.model
 
-    def delete_adapter(self, adapter_name: str):
+    def delete_adapter2(self, adapter_name: str):
         """
         Deletes an existing adapter.
 

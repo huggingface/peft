@@ -63,7 +63,7 @@ class AdaLoraModel(LoraModel):
         - **peft_config** ([`AdaLoraConfig`]): The configuration of the AdaLora model.
     """
 
-    # Note: don't redefine prefix here, it should be inherited from LoraModel
+    # Note: don't redefine prefix or base_layer_cls here, it should be inherited from LoraModel
 
     def __init__(self, model, config, adapter_name, **kwargs):
         super().__init__(model, config, adapter_name, **kwargs)

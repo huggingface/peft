@@ -54,6 +54,7 @@ class C3AModel(BaseTuner):
     """
 
     prefix: str = "c3a_"
+    base_layer_cls = C3ALayer
 
     def _check_new_adapter_config(self, config: C3AConfig) -> None:
         """
