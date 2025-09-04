@@ -14,7 +14,7 @@
 """Functions that could be useful for non-PeftModel models, e.g. transformers or diffusers integration"""
 
 from peft.mapping import inject_adapter_in_model
-from peft.tuners.tuners_utils import delete_adapter, replace_module, cast_adapter_dtype
+from peft.tuners.tuners_utils import cast_adapter_dtype, delete_adapter, replace_module
 from peft.utils import get_peft_model_state_dict, set_peft_model_state_dict
 
 
