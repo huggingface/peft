@@ -38,6 +38,7 @@ from peft import (
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
+    HiRAConfig,
     HRAConfig,
     IA3Config,
     LNTuningConfig,
@@ -868,6 +869,76 @@ TEST_CASES = [
         DeloraConfig,
         {"target_modules": ["lin0"], "module_dropout": 0.1},
     ),
+    #######
+    # HIRA #
+    #######
+    ("Vanilla MLP 1 HiRA", "MLP", HiRAConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 HiRA", "MLP", HiRAConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 HiRA", "MLP", HiRAConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 HiRA", "MLP", HiRAConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 5 HiRA", "MLP", HiRAConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    (
+        "Vanilla MLP 6 HiRA",
+        "MLP",
+        HiRAConfig,
+        {
+            "target_modules": ["lin0"],
+            "hira_dropout": 0.1,
+        },
+    ),
+    # ("Embedding + transformers Conv1D 1 HiRA", "EmbConv1D", HiRAConfig, {"target_modules": ["conv1d"]}),
+    # ("Embedding + transformers Conv1D 2 HiRA", "EmbConv1D", HiRAConfig, {"target_modules": ["emb"]}),
+    # ("Embedding + transformers Conv1D 3 HiRA", "EmbConv1D", HiRAConfig, {"target_modules": ["emb", "conv1d"]}),
+    # (
+    #     "Embedding + transformers Conv1D 1 LoRA trainable_tokens",
+    #     "EmbConv1D",
+    #     LoraConfig,
+    #     {"target_modules": ["conv1d"], "trainable_token_indices": {"emb": [0, 10]}},
+    # ),
+    # ("Conv1d LoRA", "Conv1d", LoraConfig, {"target_modules": ["conv1d"]}),
+    # ("Conv1d LoRA with DoRA", "Conv1d", LoraConfig, {"target_modules": ["conv1d"], "use_dora": True}),
+    # ("Conv2d 1 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
+    # ("Conv2d 2 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
+    # ("Conv2d 1 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"], "use_dora": True}),
+    # ("Conv2d 2 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"], "use_dora": True}),
+    # ("Conv2d Groups LoRA", "Conv2dGroups", LoraConfig, {"target_modules": ["conv2d"]}),
+    # ("Conv2d Groups2 LoRA", "Conv2dGroups2", LoraConfig, {"target_modules": ["conv2d"]}),
+    # ("Conv2d Groups LoRA with DoRA", "Conv2dGroups", LoraConfig, {"target_modules": ["conv2d"], "use_dora": True}),
+    # ("Conv2d Groups2 LoRA with DoRA", "Conv2dGroups2", LoraConfig, {"target_modules": ["conv2d"], "use_dora": True}),
+    # ("Conv3d 1 LoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d"]}),
+    # ("Conv3d 2 LoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d", "lin0"]}),
+    # ("Conv3d 1 LoRA with DoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d"], "use_dora": True}),
+    # ("Conv3d 2 LoRA with DoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d", "lin0"], "use_dora": True}),
+    # # LoRA with lora_B bias enabled (note: embedding is not supported)
+    # # It's important to set lora_alpha != r to ensure that scaling is taken into account correctly
+    # (
+    #     "Vanilla MLP 1 LoRA with lora_b bias",
+    #     "MLP",
+    #     LoraConfig,
+    #     {"target_modules": ["lin0", "lin1"], "lora_bias": True, "lora_alpha": 32},
+    # ),
+    # (
+    #     "Conv2d 1 LoRA with lora_b bias",
+    #     "Conv2d",
+    #     LoraConfig,
+    #     {"target_modules": ["conv2d"], "lora_bias": True, "lora_alpha": 32},
+    # ),
+    # (
+    #     "Conv3d 1 LoRA with lora_b bias",
+    #     "Conv3d",
+    #     LoraConfig,
+    #     {"target_modules": ["conv3d"], "lora_bias": True, "lora_alpha": 32},
+    # ),
+    # ("MHA 1 LoRA", "MHA", LoraConfig, {"target_modules": ["mha"]}),
+    # ("MHA 2 LoRA", "MHA", LoraConfig, {"target_modules": ["mha", "lin0"]}),
+    # # targeting parameters directly
+    # ("MLP 1 using nn.Parameter LoRA", "MlpUsingParameters", LoraConfig, {"target_parameters": ["lin0.weight"]}),
+    # (
+    #     "MLP 2 using nn.Parameter LoRA",
+    #     "MLP",
+    #     LoraConfig,
+    #     {"target_modules": ["lin0"], "target_parameters": ["lin1.weight"]},
+    # ),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
 
@@ -1166,6 +1237,7 @@ PREFIXES = {
     RandLoraConfig: "randlora_",
     FourierFTConfig: "fourierft_",
     C3AConfig: "c3a_",
+    HiRAConfig: "hira_",
     HRAConfig: "hra_",
     ShiraConfig: "shira_",
     VBLoRAConfig: "vblora_",
