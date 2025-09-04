@@ -143,36 +143,6 @@ def _check_lora_target_modules_mamba(peft_config: PeftConfig, model: nn.Module, 
             )
 
 
-def replace_module(parent: nn.Module, child_name: str, new_module: nn.Module, child: nn.Module, prefix: str) -> None:
-    """TODO"""
-    setattr(parent, child_name, new_module)
-    # It's not necessary to set requires_grad here, as that is handled by
-    # _mark_only_adapters_as_trainable
-
-    # child layer wraps the original module, unpack it
-    if hasattr(child, "base_layer"):
-        child = child.base_layer
-
-    if not hasattr(new_module, "base_layer"):
-        new_module.weight = child.weight
-        if hasattr(child, "bias"):
-            new_module.bias = child.bias
-
-    if getattr(child, "state", None) is not None:
-        if hasattr(new_module, "base_layer"):
-            new_module.base_layer.state = child.state
-        else:
-            new_module.state = child.state
-        new_module.to(child.weight.device)
-
-    meta = torch.device("meta")
-    # dispatch to correct device
-    for name, module in new_module.named_modules():
-        if prefix in name:
-            if not any(p.device == meta for p in module.parameters()):
-                module.to(child.weight.device)
-
-
 class BaseTuner(nn.Module, ABC):
     r"""
     A base tuner model that provides the common methods and attributes for all tuners that are injectable into a
@@ -1602,3 +1572,33 @@ def replicate_layers(model: nn.Module, layer_map: list[tuple[int, int]]):
         raise ValueError("Unexpected model type, need to handle post-processing of layers.")
     if hasattr(model.config, "num_hidden_layers"):  # Common to Llama, Bert, Falcon.
         model.config.num_hidden_layers = len(new_layers)
+
+
+def replace_module(parent: nn.Module, child_name: str, new_module: nn.Module, child: nn.Module, prefix: str) -> None:
+    """TODO"""
+    setattr(parent, child_name, new_module)
+    # It's not necessary to set requires_grad here, as that is handled by
+    # _mark_only_adapters_as_trainable
+
+    # child layer wraps the original module, unpack it
+    if hasattr(child, "base_layer"):
+        child = child.base_layer
+
+    if not hasattr(new_module, "base_layer"):
+        new_module.weight = child.weight
+        if hasattr(child, "bias"):
+            new_module.bias = child.bias
+
+    if getattr(child, "state", None) is not None:
+        if hasattr(new_module, "base_layer"):
+            new_module.base_layer.state = child.state
+        else:
+            new_module.state = child.state
+        new_module.to(child.weight.device)
+
+    meta = torch.device("meta")
+    # dispatch to correct device
+    for name, module in new_module.named_modules():
+        if prefix in name:
+            if not any(p.device == meta for p in module.parameters()):
+                module.to(child.weight.device)
