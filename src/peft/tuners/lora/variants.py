@@ -73,6 +73,7 @@ class ArrowLinearVariant(LoraVariant):
         active_adapter: str,
         x: torch.Tensor,
         result: torch.Tensor,
+        **kwargs,
     ) -> torch.Tensor:
         """
         Parameters mirror those in PEFT’s `LoraVariant.forward`. Called every time the host Linear does a fwd pass.
@@ -99,6 +100,7 @@ class ArrowLinearVariant(LoraVariant):
         arrow.build_prototypes(module.lora_A, module.lora_B)
 
         # A forward path of ArrowLoraLinearLayer is called so routing performs.
+        # Accept and ignore extra variant kwargs (e.g., 'alora_offsets') for compatibility
         delta = arrow(
             x,
             lora_A=module.lora_A,

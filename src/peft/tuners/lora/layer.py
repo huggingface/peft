@@ -227,7 +227,7 @@ class LoraLayer(BaseTunerLayer):
 
         lora_variant = self.resolve_lora_variant(
             use_dora=use_dora,
-            use_alora=use_alora
+            use_alora=use_alora,
             use_qalora=use_qalora,
             qalora_group_size=qalora_group_size,
             arrow_config=arrow_config,
@@ -678,7 +678,9 @@ class Linear(nn.Module, LoraLayer):
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
-    def resolve_lora_variant(self, *, arrow_config: ArrowConfig, use_dora: bool, use_alora: bool, **kwargs) -> Optional[LoraVariant]:
+    def resolve_lora_variant(
+        self, *, arrow_config: ArrowConfig, use_dora: bool, use_alora: bool, **kwargs
+    ) -> Optional[LoraVariant]:
         if arrow_config is not None:
             from .variants import ArrowLinearVariant
 
@@ -923,7 +925,7 @@ class Embedding(nn.Module, LoraLayer):
         use_dora,
         lora_bias,
         arrow_config: ArrowConfig = None,
-        **kwargs
+        **kwargs,
     ):
         # collect the kwargs
         kwargs = locals().copy()
@@ -1209,7 +1211,7 @@ class _ConvNd(nn.Module, LoraLayer):
         use_dora,
         lora_bias,
         arrow_config: ArrowConfig = None,
-        **kwargs
+        **kwargs,
     ):
         # collect the kwargs
         kwargs = locals().copy()
