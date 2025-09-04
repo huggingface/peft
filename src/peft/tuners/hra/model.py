@@ -206,7 +206,7 @@ class HRAModel(BaseTuner):
 
         return new_module
 
-    def __getattr__(self, name: str):
+    def __getattr__2(self, name: str):
         """Forward missing attributes to the wrapped module."""
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
