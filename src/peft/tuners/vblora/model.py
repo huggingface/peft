@@ -14,8 +14,6 @@
 from __future__ import annotations
 
 import warnings
-from dataclasses import asdict
-from enum import Enum
 from typing import Optional
 
 import torch
@@ -242,15 +240,6 @@ class VBLoRAModel(BaseTuner):
             if name == "model":  # see #1892: prevent infinite recursion if class is not initialized
                 raise
             return getattr(self.model, name)
-
-    def get_peft_config_as_dict(self, inference: bool = False):
-        config_dict = {}
-        for key, value in self.peft_config.items():
-            config = {k: v.value if isinstance(v, Enum) else v for k, v in asdict(value).items()}
-            if inference:
-                config["inference_mode"] = True
-        config_dict[key] = config
-        return config
 
     def _set_adapter_layers2(self, enabled: bool = True) -> None:
         for module in self.model.modules():

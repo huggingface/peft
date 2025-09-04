@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import re
 import warnings
-from dataclasses import asdict
-from enum import Enum
 from itertools import chain
 from typing import Optional
 
@@ -177,15 +175,6 @@ class C3AModel(BaseTuner):
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
             return getattr(self.model, name)
-
-    def get_peft_config_as_dict(self, inference: bool = False):
-        config_dict = {}
-        for key, value in self.peft_config.items():
-            config = {k: v.value if isinstance(v, Enum) else v for k, v in asdict(value).items()}
-            if inference:
-                config["inference_mode"] = True
-        config_dict[key] = config
-        return config
 
     def _set_adapter_layers2(self, enabled: bool = True) -> None:
         for module in self.model.modules():
