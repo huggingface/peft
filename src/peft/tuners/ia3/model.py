@@ -196,7 +196,7 @@ class IA3Model(BaseTuner):
             is_feedforward = any(key.endswith(target_key) for target_key in ia3_config.feedforward_modules)
         return is_feedforward
 
-    def _replace_module2(self, parent, child_name, new_module, child):
+    def _replace_module(self, parent, child_name, new_module, child):
         setattr(parent, child_name, new_module)
 
         # child layer wraps the original module, unpack it
