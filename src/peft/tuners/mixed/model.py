@@ -14,16 +14,14 @@
 from __future__ import annotations
 
 import warnings
-from typing import Any, Optional, Union
+from typing import Any, Union
 
 from torch import nn
-from tqdm import tqdm
 
 from peft.tuners import adalora, loha, lokr, lora, oft, shira
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
-    ModulesToSaveWrapper,
     PeftType,
     _get_submodules,
     get_auto_gptq_quant_linear,
@@ -147,28 +145,6 @@ class MixedModel(BaseTuner):
             if "ranknum" in name:
                 module.to(child.weight.device)
 
-    def _mark_only_adapters_as_trainable2(self, model: nn.Module) -> None:
-        for n, p in model.named_parameters():
-            if not any(prefix in n for prefix in PREFIXES):
-                p.requires_grad = False
-
-        for active_adapter in self.active_adapters:
-            bias = getattr(self.peft_config[active_adapter], "bias", "none")
-            if bias == "none":
-                continue
-
-            if bias == "all":
-                for n, p in model.named_parameters():
-                    if "bias" in n:
-                        p.requires_grad = True
-            elif bias == "lora_only":
-                # TODO: check if this is needed for other supported types
-                for m in model.modules():
-                    if isinstance(m, Layers) and hasattr(m, "bias") and m.bias is not None:
-                        m.bias.requires_grad = True
-            else:
-                raise ValueError(f"Requested bias: {bias}, is not implemented.")
-
     @staticmethod
     def _create_new_module(config, adapter_name, target, **kwargs):
         gptq_quantization_config = kwargs.get("gptq_quantization_config", None)
@@ -197,34 +173,6 @@ class MixedModel(BaseTuner):
             raise ValueError(f"Unknown config type {type(config)}, should be one of {COMPATIBLE_TUNER_TYPES}.")
         return new_module
 
-    def __getattr__2(self, name: str):
-        """Forward missing attributes to the wrapped module."""
-        try:
-            return super().__getattr__(name)  # defer to nn.Module's logic
-        except AttributeError:
-            if name == "model":  # see #1892: prevent infinite recursion if class is not initialized
-                raise
-            return getattr(self.model, name)
-
-    def _set_adapter_layers2(self, enabled=True):
-        for module in self.model.modules():
-            if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
-                module.enable_adapters(enabled)
-
-    def enable_adapter_layers2(self):
-        self._set_adapter_layers(enabled=True)
-
-    def disable_adapter_layers2(self):
-        for active_adapter in self.active_adapters:
-            val = getattr(self.peft_config[active_adapter], "bias", "none")
-            if val != "none":
-                msg = (
-                    f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
-                    "output as the base model would without adaption."
-                )
-                warnings.warn(msg)
-        self._set_adapter_layers(enabled=False)
-
     def set_adapter(self, adapter_name: Union[str, list[str]]) -> None:
         for module in self.model.modules():
             if isinstance(module, Layers):
@@ -244,54 +192,6 @@ class MixedModel(BaseTuner):
                 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
             )
         return peft_config
-
-    def _unload_and_optionally_merge2(
-        self,
-        merge=True,
-        progressbar: bool = False,
-        safe_merge: bool = False,
-        adapter_names: Optional[list[str]] = None,
-    ):
-        if merge:
-            if getattr(self.model, "quantization_method", None) == "gptq":
-                raise ValueError("Cannot merge layers when the model is gptq quantized")
-
-        def merge_recursively(module):
-            # helper function to recursively merge the base_layer of the target
-            path = []
-            layer = module
-            while hasattr(layer, "base_layer"):
-                path.append(layer)
-                layer = layer.base_layer
-            for layer_before, layer_after in zip(path[:-1], path[1:]):
-                layer_after.merge(safe_merge=safe_merge, adapter_names=adapter_names)
-                layer_before.base_layer = layer_after.base_layer
-            module.merge(safe_merge=safe_merge, adapter_names=adapter_names)
-
-        key_list = [key for key, _ in self.model.named_modules() if not any(prefix in key for prefix in PREFIXES)]
-        desc = "Unloading " + ("and merging " if merge else "") + "model"
-
-        for key in tqdm(key_list, disable=not progressbar, desc=desc):
-            try:
-                parent, target, target_name = _get_submodules(self.model, key)
-            except AttributeError:
-                continue
-
-            if hasattr(target, "base_layer"):
-                if merge:
-                    merge_recursively(target)
-                self._replace_module(parent, target_name, target.get_base_layer(), target)
-            elif isinstance(target, ModulesToSaveWrapper):
-                # save any additional trainable modules part of `modules_to_save`
-                new_module = target.modules_to_save[target.active_adapter]
-                if hasattr(new_module, "base_layer"):
-                    # check if the module is itself a tuner layer
-                    if merge:
-                        new_module.merge(safe_merge=safe_merge, adapter_names=adapter_names)
-                    new_module = new_module.get_base_layer()
-                setattr(parent, target_name, new_module)
-
-        return self.model
 
     def add_weighted_adapter(self, *args: Any, **kwargs: Any) -> None:
         raise NotImplementedError(f"Weighted adapters are not supported for {self.__class__.__name__} (yet).")
@@ -328,34 +228,6 @@ class MixedModel(BaseTuner):
 
         self.active_adapter = new_adapter or []
         self._delete_auxiliary_adapter(adapter_name, new_active_adapters=new_adapter)
-
-    def merge_and_unload2(
-        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
-    ) -> nn.Module:
-        r"""
-        This method merges the layers into the base model. This is needed if someone wants to use the base model as a
-        standalone model.
-
-        Args:
-            progressbar (`bool`):
-                whether to show a progressbar indicating the unload and merge process
-            safe_merge (`bool`):
-                whether to activate the safe merging check to check if there is any potential Nan in the adapter
-                weights
-            adapter_names (`List[str]`, *optional*):
-                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
-                to `None`.
-        """
-        return self._unload_and_optionally_merge(
-            progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
-        )
-
-    def unload2(self) -> nn.Module:
-        """
-        Gets back the base model by removing all the lora modules without merging. This gives back the original base
-        model.
-        """
-        return self._unload_and_optionally_merge(merge=False)
 
     def generate(self, *args: Any, **kwargs: Any):
         return self.model.generate(*args, **kwargs)

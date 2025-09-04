@@ -25,7 +25,7 @@ __all__ = ["Conv2d", "Conv3d", "IA3Config", "IA3Layer", "IA3Model", "Linear"]
 register_peft_method(name="ia3", config_cls=IA3Config, model_cls=IA3Model, is_mixed_compatible=True)
 
 
-def __getattr__2(name):
+def __getattr__(name):
     if (name == "Linear8bitLt") and is_bnb_available():
         from .bnb import Linear8bitLt
 

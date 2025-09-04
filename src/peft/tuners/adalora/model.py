@@ -231,15 +231,6 @@ class AdaLoraModel(LoraModel):
             ]
         return peft_config
 
-    def __getattr__2(self, name: str):
-        """Forward missing attributes to the wrapped module."""
-        try:
-            return super().__getattr__(name)  # defer to nn.Module's logic
-        except AttributeError:
-            if name == "model":  # see #1892: prevent infinite recursion if class is not initialized
-                raise
-            return getattr(self.model, name)
-
     def forward(self, *args, **kwargs):
         outputs = self.model.forward(*args, **kwargs)
 

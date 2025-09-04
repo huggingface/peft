@@ -16,10 +16,8 @@ from __future__ import annotations
 import re
 import warnings
 from dataclasses import replace
-from typing import Optional
 
 import torch
-from torch import nn
 from transformers.pytorch_utils import Conv1D
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
@@ -147,11 +145,6 @@ class IA3Model(BaseTuner):
     def _check_target_module_exists(ia3_config, key):
         return check_target_module_exists(ia3_config, key)
 
-    def _mark_only_adapters_as_trainable2(self, model: nn.Module) -> None:
-        for n, p in model.named_parameters():
-            if self.prefix not in n:
-                p.requires_grad = False
-
     def _create_and_replace(
         self,
         ia3_config,
@@ -223,34 +216,6 @@ class IA3Model(BaseTuner):
                 if not any(p.device == meta for p in module.parameters()):
                     module.to(child.weight.device)
 
-    def __getattr__2(self, name: str):
-        """Forward missing attributes to the wrapped module."""
-        try:
-            return super().__getattr__(name)  # defer to nn.Module's logic
-        except AttributeError:
-            if name == "model":  # see #1892: prevent infinite recursion if class is not initialized
-                raise
-            return getattr(self.model, name)
-
-    def _set_adapter_layers2(self, enabled=True):
-        for module in self.model.modules():
-            if isinstance(module, (IA3Layer, ModulesToSaveWrapper)):
-                module.enable_adapters(enabled)
-
-    def enable_adapter_layers2(self) -> None:
-        """Enable all adapters.
-
-        Call this if you have previously disabled all adapters and want to re-enable them.
-        """
-        self._set_adapter_layers(enabled=True)
-
-    def disable_adapter_layers2(self) -> None:
-        """Disable all adapters.
-
-        When disabling all adapters, the model output corresponds to the output of the base model.
-        """
-        self._set_adapter_layers(enabled=False)
-
     def set_adapter(self, adapter_name: str | list[str]) -> None:
         """Set the active adapter(s).
 
@@ -290,111 +255,6 @@ class IA3Model(BaseTuner):
                 TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING[model_config["model_type"]]
             )
         return peft_config
-
-    def _unload_and_optionally_merge2(
-        self, merge: bool = True, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
-    ):
-        r"""
-        This method merges the (IA)^3 layers into the base model. This is needed if someone wants to use the base model
-        as a standalone model.
-
-        Args:
-            safe_merge (`bool`, `optional`, defaults to `False`):
-                If True, the merge operation will be performed in a copy of the original weights and check for NaNs
-                before merging the weights. This is useful if you want to check if the merge operation will produce
-                NaNs. Defaults to `False`.
-            adapter_names (`List[str]`, *optional*):
-                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
-                to `None`.
-        """
-        if getattr(self.model, "is_loaded_in_8bit", False):
-            raise ValueError("Cannot merge ia3 layers when the model is loaded in 8-bit mode")
-
-        if getattr(self.model, "is_loaded_in_4bit", False):
-            raise ValueError("Cannot merge ia3 layers when the model is loaded in 4-bit mode")
-
-        self._unloading_checks(adapter_names)
-        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
-        for key in key_list:
-            try:
-                parent, target, target_name = _get_submodules(self.model, key)
-            except AttributeError:
-                continue
-
-            if hasattr(target, "base_layer"):
-                if merge:
-                    target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
-                self._replace_module(parent, target_name, target.get_base_layer(), target)
-            elif isinstance(target, ModulesToSaveWrapper):
-                # save any additional trainable modules part of `modules_to_save`
-                new_module = target.modules_to_save[target.active_adapter]
-                if hasattr(new_module, "base_layer"):
-                    # check if the module is itself a tuner layer
-                    if merge:
-                        new_module.merge(safe_merge=safe_merge, adapter_names=adapter_names)
-                    new_module = new_module.get_base_layer()
-                setattr(parent, target_name, new_module)
-
-        return self.model
-
-    def merge_and_unload2(
-        self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
-    ) -> torch.nn.Module:
-        r"""
-        This method merges the IA³ layers into the base model. This is needed if someone wants to use the base model as
-        a standalone model.
-
-        Args:
-            safe_merge (`bool`):
-                whether to activate the safe merging check to check if there is any potential Nan in the adapter
-                weights
-            adapter_names (`List[str]`, *optional*):
-                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
-                to `None`.
-
-        Example:
-
-        ```py
-        >>> from transformers import AutoModelForCausalLM
-        >>> from peft import PeftModel
-
-        >>> base_model = AutoModelForCausalLM.from_pretrained("tiiuae/falcon-40b")
-        >>> peft_model_id = "smangrul/falcon-40B-int4-peft-lora-sfttrainer-sample"
-        >>> model = PeftModel.from_pretrained(base_model, peft_model_id)
-        >>> merged_model = model.merge_and_unload()
-        ```
-        """
-        return self._unload_and_optionally_merge(safe_merge=safe_merge, adapter_names=adapter_names)
-
-    def unload2(self) -> torch.nn.Module:
-        """
-        Gets back the base model by removing all the IA³ modules without merging. This gives back the original base
-        model.
-        """
-        return self._unload_and_optionally_merge(merge=False)
-
-    def delete_adapter2(self, adapter_name: str) -> None:
-        """
-        Deletes an existing adapter.
-
-        Args:
-            adapter_name (str): Name of the adapter to be deleted.
-        """
-        if adapter_name not in self.peft_config:
-            raise ValueError(f"Adapter {adapter_name} does not exist")
-        del self.peft_config[adapter_name]
-
-        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
-        new_adapter = None
-        for key in key_list:
-            _, target, _ = _get_submodules(self.model, key)
-            if isinstance(target, IA3Layer):
-                target.delete_adapter(adapter_name)
-                if new_adapter is None:
-                    new_adapter = target.active_adapters[:]
-
-        self.active_adapter = new_adapter or []
-        self._delete_auxiliary_adapter(adapter_name, new_active_adapters=new_adapter)
 
     def _check_add_weighted_adapter(self, adapters: list[str]) -> tuple[str, str]:
         """
