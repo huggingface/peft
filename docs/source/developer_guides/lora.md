@@ -687,3 +687,148 @@ Using this feature has some drawbacks, namely:
   - Increase the batch size.
   - Try to avoid having a large number of different adapters in the same batch, prefer homogeneous batches. This can be achieved by buffering samples with the same adapter and only perform inference with a small handful of different adapters.
   - Take a look at alternative implementations such as [LoRAX](https://github.com/predibase/lorax), [punica](https://github.com/punica-ai/punica), or [S-LoRA](https://github.com/S-LoRA/S-LoRA), which are specialized to work with a large number of different adapters.
+
+## Composing and Reusing LoRA Adapters
+### Arrow
+[Arrow](https://huggingface.co/papers/2405.11157) is a modular routing algorithm designed to combine multiple pre-trained task-specific LoRA adapters to solve a given task. Rather than merging all adapters naively, Arrow introduces a **gradient-free, token-wise mixture-of-experts (MoE) routing mechanism**. At inference time, it first computes a _prototype_ for each LoRA by extracting the top right singular vector from its SVD decomposition. Each token representation is then compared to these prototypes via cosine similarity to obtain routing coefficients. Tokens are assigned to the top-k most relevant LoRA adapters, with the coefficients normalized through softmax, and their outputs linearly combined. This allows effective reuse of existing LoRA modules for new tasks and leads to stronger zero-shot generalization.
+
+In PEFT, Arrow is enabled through ```ArrowConfig``` and ```create_arrow_model```. You can also configure parameters such as ```top_k``` (the number of LoRA adapters combined per token), ```router_temperature``` (the softmax temperature applied to the routing coefficients), and ```rng_seed``` (for reproducibility). 
+
+```py
+from peft import create_arrow_model, ArrowConfig
+from transformers import AutoModelForCausalLM
+
+# Loading the model
+base_model = AutoModelForCausalLM.from_pretrained("microsoft/Phi-3-mini-4k-instruct")
+
+# Creating the Arrow config
+arrow_config = ArrowConfig(
+    top_k=3,
+    router_temperature=1.0,
+    rng_seed=42,
+)
+
+# The LoRA adapters below were trained on a clustered FLAN dataset.
+# Task clustering was performed using the Model-Based Clustering (MBC) method,
+# as described in the Arrow paper.
+# While one could train a separate LoRA for each task and let Arrow route tokens among them,
+# training LoRAs on clusters of tasks instead provides an indirect optimization for
+# transfer across the multi-task dataset.
+task_specific_adapter_paths = [
+        f"TahaBa/phi3-mini-clustered-flan/ts_expert_{i}" for i in range(10)
+    ]
+
+# Creating the Arrow model
+model = create_arrow_model(
+        base_model=base_model,
+        task_specific_adapter_paths=task_specific_adapter_paths,
+        arrow_config=arrow_config,
+    )
+
+# Now the forward path could be called on this model, like a normal PeftModel.
+```
+
+Furthermore, you can add or remove adapters after calling ```create_arrow_model```—for example, to fine-tune a new adapter or discard an unnecessary one. Once the adapters are in place, you can activate the ```"arrow_router"``` for inference to use Arrow. Note that if you add a new LoRA adapter after ```create_arrow_model``` and want to fine-tune it, you must explicitly set the new adapter as active, since ```"arrow_router"``` is activated by default in ```create_arrow_model```.
+
+```py
+from trl import SFTTrainer, SFTConfig
+
+# Adding a new adapter and activating it
+model.add_adapter(adapter_name='new_adapter')
+model.set_adapter('new_adapter')
+
+# Now the model could be trained along the `new_adapter`.
+trainer = SFTTrainer(
+        model=model,
+        args=SFTConfig(...),
+        ...
+    )
+
+# Once the training is done, you can activate `arrow_router` and use it in inference
+model.set_adapter('arrow_router')    # Model is ready to be used at inference time now
+```
+
+### GenKnowSub
+[GenKnowSub](https://aclanthology.org/2025.acl-short.54/) augments Arrow by purifying task-specific LoRA adapters before routing. The key idea is to subtract general knowledge encoded in LoRA space—based on the [forgetting-via-negation principle](https://huggingface.co/papers/2212.04089)—so that task adapters become more isolated and focused on task-relevant signals. Concretely, GenKnowSub estimates a low-dimensional “general” subspace from a set of general (non task-specific) LoRA adapters and removes this component from each task adapter’s LoRA update prior to Arrow’s token-wise routing. This typically improves compositionality and reduces interference when combining many task adapters.
+
+In PEFT, enable GenKnowSub by setting ```use_gks=True``` in ArrowConfig, and providing ```general_adapter_paths``` in ```create_arrow_model```:
+
+```py
+from peft import create_arrow_model, ArrowConfig
+from transformers import AutoModelForCausalLM
+
+# Loading the model
+base_model = AutoModelForCausalLM.from_pretrained("microsoft/Phi-3-mini-4k-instruct")
+
+# Creating the Arrow config
+arrow_config = ArrowConfig(
+    top_k=3,
+    router_temperature=1.0,
+    use_gks=True,
+    rng_seed=42,
+)
+
+# Path to task-specific, trained on flan clustered dataset (as we explained before.)
+task_specific_adapter_paths = [
+        f"TahaBa/phi3-mini-clustered-flan/ts_expert_{i}" for i in range(10)
+    ]
+# These general adapters are trained on English, German, and French Wikipedia dataset,
+# with causal language modelling objective, each pair like: (507 token tsentence, 5 token completion), and the loss computed on the completion
+general_adapter_paths = [
+        "TahaBa/phi3-mini-general-adapters/cluster0_batch16_prop1.0_langen/checkpoint-17",
+        "TahaBa/phi3-mini-general-adapters/cluster0_batch16_prop1.0_langfr/checkpoint-35",
+        "TahaBa/phi3-mini-general-adapters/cluster0_batch16_prop1.0_langger/checkpoint-17"
+    ]
+
+# Creating the Arrow model
+model = create_arrow_model(
+        base_model=base_model,
+        task_specific_adapter_paths=task_specific_adapter_paths,
+        general_adapter_paths=general_adapter_paths,
+        arrow_config=arrow_config,
+    )
+
+# Now the forward path could be called on this model, like a normal PeftModel.
+```
+To encode general knowledge, GenKnowSub subtracts the average of the provided general adapters from each task-specific adapter once, before routing begins. Furthermore, the ability to add or remove adapters after calling ```create_arrow_model``` (as described in the Arrow section) is still supported in this case.
+
+<Tip>
+
+**Things to keep in mind when using Arrow + GenKnowSub:**
+
+- All LoRA adapters (task-specific and general) must share the same ```rank``` and ```target_modules```.
+
+- Any inconsistency in these settings will raise an error in ```create_arrow_model```.
+
+- Having different scaling factors (```lora_alpha```) across task adapters is supported — Arrow handles them automatically.
+
+- Merging the ```"arrow_router"``` is not supported, due to its dynamic routing behavior.
+
+- In create_arrow_model, task adapters are loaded as ```task_i``` and general adapters as ```gks_j``` (where ```i``` and ```j``` are indices). The function ensures consistency of ```target_modules```, ```rank```, and whether adapters are applied to ```Linear``` or ```Linear4bit``` layers. It then adds the ```"arrow_router"``` module and activates it. Any customization of this process requires overriding ```create_arrow_model```.
+
+- This implementation is compatible with 4-bit quantization (via bitsandbytes):
+
+    ```py
+    from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+    import torch
+
+    # Quantisation config
+    bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=False,
+        )
+
+    # Loading the model
+    base_model = AutoModelForCausalLM.from_pretrained(
+        "microsoft/Phi-3-mini-4k-instruct",
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+        quantization_config=bnb_config,
+    )
+
+    # Now call create_arrow_model() as we explained before.
+    ```
+
+</Tip>

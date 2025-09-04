@@ -70,6 +70,56 @@ class LoftQConfig:
 
 
 @dataclass
+class ArrowConfig:
+    """
+    This is the sub-configuration class to store the configuration for Arrow and GenKnowSub algorithm. Arrow is a
+    routing algorithm to combine the trained LoRA modules to solve new tasks, proposed in
+    'https://arxiv.org/pdf/2405.11157'. GenKnowSub is a refinement on the trained modules before being combined via
+    Arrow, introduced in 'https://aclanthology.org/2025.acl-short.54/'
+    """
+
+    top_k: int = field(
+        default=3,
+        metadata={"help": "Number of top LoRA modules to combine in Arrow routing."},
+    )
+
+    router_temperature: float = field(
+        default=1.0,
+        metadata={"help": "Softmax temperature for computing Arrow expert coefficients."},
+    )
+
+    use_gks: bool = field(
+        default=False,
+        metadata={"help": "Enable GenKnowSub."},
+    )
+
+    task_adapter_names: Optional[list[str]] = field(
+        default=None,
+        init=False,
+        metadata={"help": "list of task-specific LoRA adapter names. It will be set in create_arrow_model()."},
+    )
+
+    gks_adapter_names: Optional[list[str]] = field(
+        default=None,
+        init=False,
+        metadata={
+            "help": "list of general LoRA adapter names for GenKnowSub. It will be set in create_arrow_model()."
+        },
+    )
+
+    rng_seed: Optional[int] = field(
+        default=None,
+        metadata={"help": "Optional RNG seed for reproducibility. If None, sampling is non-deterministic."},
+    )
+
+    def __post_init__(self):
+        if self.top_k <= 0:
+            raise ValueError("top_k cannot be negative.")
+        if self.router_temperature <= 0:
+            raise ValueError("router_temperature must be greater than 0.")
+
+
+@dataclass
 class EvaConfig:
     """
     This is the sub-configuration class to store the configuration for a data-driven initialization via EVA. EVA was
@@ -610,6 +660,9 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    arrow_config: Optional[ArrowConfig] = field(
+        default=None, metadata={"help": "The necessary config to apply arrow routing on the model."}
+    )
 
     def to_dict(self):
         """
@@ -628,7 +681,6 @@ class LoraConfig(PeftConfig):
         self.exclude_modules = (
             set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
-
         if isinstance(self.target_parameters, str):
             raise TypeError("`target_parameters` must be a list of strings or None.")
 
