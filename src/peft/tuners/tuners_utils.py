@@ -421,35 +421,9 @@ class BaseTuner(nn.Module, ABC):
                 Whether to autocast the adapter dtype. Defaults to `True`.
 
         """
+        cast_adapter_dtype(self.model, adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)
         if not autocast_adapter_dtype:
             return
-
-        dtypes_to_convert_to_fp32 = {torch.float16, torch.bfloat16}
-
-        for module in self.model.modules():
-            if not isinstance(module, BaseTunerLayer):
-                continue
-
-            for submodule in module.modules():
-                if not isinstance(submodule, (nn.ModuleDict, nn.ParameterDict, BufferDict)):
-                    continue
-
-                if adapter_name not in submodule:
-                    continue
-
-                if isinstance(submodule[adapter_name], nn.Parameter):
-                    if submodule[adapter_name].dtype in dtypes_to_convert_to_fp32:
-                        submodule[adapter_name].data = submodule[adapter_name].data.to(torch.float32)
-                    continue
-
-                if isinstance(submodule[adapter_name], torch.Tensor):  # e.g. from a BufferDict
-                    if submodule[adapter_name].dtype in dtypes_to_convert_to_fp32:
-                        submodule[adapter_name] = submodule[adapter_name].to(torch.float32)
-                    continue
-
-                for param in submodule[adapter_name].parameters():
-                    if param.dtype in dtypes_to_convert_to_fp32:
-                        param.data = param.data.to(torch.float32)
 
     def _check_merge_allowed(self):
         """Helper method to check whether the adapter can be merged.
@@ -855,15 +829,6 @@ class BaseTuner(nn.Module, ABC):
             activate_adapter=adapter_name in self.active_adapters,
         )
 
-    def _replace_module(self, parent, child_name, new_module, child):
-        replace_module(
-            parent=parent,
-            child_name=child_name,
-            new_module=new_module,
-            child=child,
-            prefix=self.prefix,
-        )
-
     def _inject_parameters(
         self, peft_config: PeftConfig, model: nn.Module, adapter_name: str, low_cpu_mem_usage: bool
     ) -> None:
@@ -938,6 +903,15 @@ class BaseTuner(nn.Module, ABC):
                         # replacement, since we want to replace the wrapped module.
                         create_and_replace_param(module_name, key, param_name)
                         self.targeted_parameter_names.append(key)
+
+    def _replace_module(self, parent, child_name, new_module, child):
+        replace_module(
+            parent=parent,
+            child_name=child_name,
+            new_module=new_module,
+            child=child,
+            prefix=self.prefix,
+        )
 
     def merge_adapter(self, adapter_names: Optional[list[str]] = None, safe_merge: bool = False) -> None:
         """
@@ -1635,6 +1609,11 @@ def replicate_layers(model: nn.Module, layer_map: list[tuple[int, int]]):
         model.config.num_hidden_layers = len(new_layers)
 
 
+###############################
+# FUNCTIONS FOR functional.py #
+###############################
+
+
 def replace_module(parent: nn.Module, child_name: str, new_module: nn.Module, child: nn.Module, prefix: str) -> None:
     """TODO"""
     setattr(parent, child_name, new_module)
@@ -1687,3 +1666,47 @@ def delete_adapter(
                 new_adapter = target.active_adapters[:]
 
     return new_adapter
+
+
+def cast_adapter_dtype(model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
+    """
+    A helper method to cast the adapter weights to the correct dtype.
+
+    Currently, this only upcasts float16 and bfloat16 to float32.
+
+    Args:
+        adapter_name (`str`):
+            The adapter name.
+        autocast_adapter_dtype (`bool`, *optional*):
+            Whether to autocast the adapter dtype. Defaults to `True`.
+
+    """
+    if not autocast_adapter_dtype:
+        return
+
+    dtypes_to_convert_to_fp32 = {torch.float16, torch.bfloat16}
+
+    for module in model.modules():
+        if not isinstance(module, BaseTunerLayer):
+            continue
+
+        for submodule in module.modules():
+            if not isinstance(submodule, (nn.ModuleDict, nn.ParameterDict, BufferDict)):
+                continue
+
+            if adapter_name not in submodule:
+                continue
+
+            if isinstance(submodule[adapter_name], nn.Parameter):
+                if submodule[adapter_name].dtype in dtypes_to_convert_to_fp32:
+                    submodule[adapter_name].data = submodule[adapter_name].data.to(torch.float32)
+                continue
+
+            if isinstance(submodule[adapter_name], torch.Tensor):  # e.g. from a BufferDict
+                if submodule[adapter_name].dtype in dtypes_to_convert_to_fp32:
+                    submodule[adapter_name] = submodule[adapter_name].to(torch.float32)
+                continue
+
+            for param in submodule[adapter_name].parameters():
+                if param.dtype in dtypes_to_convert_to_fp32:
+                    param.data = param.data.to(torch.float32)

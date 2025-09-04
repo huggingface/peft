@@ -11,12 +11,18 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""TODO"""
+"""Functions that could be useful for non-PeftModel models, e.g. transformers or diffusers integration"""
 
-from .tuners_utils import delete_adapter, replace_module
+from peft.mapping import inject_adapter_in_model
+from peft.tuners.tuners_utils import delete_adapter, replace_module, cast_adapter_dtype
+from peft.utils import get_peft_model_state_dict, set_peft_model_state_dict
 
 
 __all__ = [
+    "cast_adapter_dtype",
     "delete_adapter",
+    "get_peft_model_state_dict",
+    "inject_adapter_in_model",
     "replace_module",
+    "set_peft_model_state_dict",
 ]
