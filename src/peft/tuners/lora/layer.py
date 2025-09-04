@@ -176,11 +176,17 @@ class LoraLayer(BaseTunerLayer):
         convention, and not here.
 
         """
-        if not use_kasa:
-            return None
-        
-        from .variants 
-        return KasaLinearVariant
+        if use_dora and use_kasa:
+            raise ValueError("Cannot use DoRA and KaSA at the same time, please choose only one.")
+
+        variant = None
+        if use_dora:
+            from .variants import DoraLinearVariant
+            variant = DoraLinearVariant()
+        elif use_kasa:
+            pass
+
+        return variant
 
     def update_layer(
         self,
@@ -225,7 +231,6 @@ class LoraLayer(BaseTunerLayer):
             self.scaling[adapter_name] = lora_alpha / r
 
         self.use_dora[adapter_name] = use_dora
-        self.use_kasa[adapter_name] = use_kasa
         
         ############ kasa ############# 
         self.lora_diag[adapter_name] = nn.Parameter(torch.randn(r), requires_grad=True)
