@@ -166,6 +166,7 @@ class LoKrLayer(nn.Module, LycorisLayer):
         use_effective_conv2d: bool,
         decompose_both: bool,
         decompose_factor: int,
+        inference_mode: bool = False,
         **kwargs,
     ) -> None:
         """Internal function to create lokr adapter
@@ -251,7 +252,7 @@ class LoKrLayer(nn.Module, LycorisLayer):
 
         # Move new weights to device
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
         # https://github.com/KohakuBlueleaf/LyCORIS/blob/e4259b870d3354a9615a96be61cb5d07455c58ea/lycoris/modules/lokr.py#L224

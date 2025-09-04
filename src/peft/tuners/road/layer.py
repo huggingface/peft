@@ -81,6 +81,7 @@ class RoadLayer(BaseTunerLayer):
         variant,
         group_size,
         init_weights,
+        inference_mode: bool = False,
     ):
         self.variant[adapter_name] = variant
         self.group_size[adapter_name] = group_size
@@ -107,7 +108,7 @@ class RoadLayer(BaseTunerLayer):
         self.reset_parameters(adapter_name, init_weights)
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def reset_parameters(self, adapter_name, init_weights):
         if init_weights is False:

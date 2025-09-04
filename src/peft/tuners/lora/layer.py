@@ -207,6 +207,7 @@ class LoraLayer(BaseTunerLayer):
         use_qalora: bool = False,
         lora_bias: bool = False,
         qalora_group_size: int = 32,
+        inference_mode: bool = False,
         **kwargs,
     ):
         # collect the kwargs
@@ -277,7 +278,7 @@ class LoraLayer(BaseTunerLayer):
         if adapter_name in self.lora_variant:
             self.lora_variant[adapter_name].init(self, **kwargs)
 
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def reset_lora_parameters(self, adapter_name, init_lora_weights):
         if init_lora_weights is False:
@@ -887,7 +888,17 @@ class Embedding(nn.Module, LoraLayer):
         return DoraEmbeddingVariant()
 
     def update_layer(
-        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora, lora_bias, **kwargs
+        self,
+        adapter_name,
+        r,
+        lora_alpha,
+        lora_dropout,
+        init_lora_weights,
+        use_rslora,
+        use_dora,
+        lora_bias,
+        inference_mode: bool = False,
+        **kwargs,
     ):
         # collect the kwargs
         kwargs = locals().copy()
@@ -933,7 +944,7 @@ class Embedding(nn.Module, LoraLayer):
         if adapter_name in self.lora_variant:
             self.lora_variant[adapter_name].init(self, **kwargs)
 
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -1161,7 +1172,16 @@ class _ConvNd(nn.Module, LoraLayer):
         )
 
     def update_layer(
-        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora, lora_bias, **kwargs
+        self,
+        adapter_name,
+        r,
+        lora_alpha,
+        lora_dropout,
+        init_lora_weights,
+        use_rslora,
+        use_dora,
+        lora_bias,
+        inference_mode: bool = False,
     ):
         # collect the kwargs
         kwargs = locals().copy()
@@ -1220,7 +1240,7 @@ class _ConvNd(nn.Module, LoraLayer):
         if adapter_name in self.lora_variant:
             self.lora_variant[adapter_name].init(self, **kwargs)
 
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def _get_dora_factor_view(self):
         return (-1,) + (1,) * (self._kernel_dim - 1)
@@ -1942,6 +1962,7 @@ class ParamWrapper(nn.Module, LoraLayer):
         use_qalora: bool = False,
         lora_bias: bool = False,
         qalora_group_size: int = 32,
+        inference_mode: bool = False,
         **kwargs,
     ):
         # same method as in lora.Linear but taking into account that there can be multiple experts (3d parameter)
@@ -2009,7 +2030,7 @@ class ParamWrapper(nn.Module, LoraLayer):
         if adapter_name in self.lora_variant:
             self.lora_variant[adapter_name].init(self, **kwargs)
 
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def _move_adapter_to_device_of_base_layer(self, adapter_name: str, device: Optional[torch.device] = None) -> None:
         """

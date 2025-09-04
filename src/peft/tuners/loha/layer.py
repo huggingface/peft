@@ -107,6 +107,7 @@ class LoHaLayer(nn.Module, LycorisLayer):
         module_dropout: float,
         init_weights: bool,
         use_effective_conv2d: bool = False,
+        inference_mode: bool = False,
         **kwargs,
     ) -> None:
         """Internal function to create loha adapter
@@ -175,7 +176,7 @@ class LoHaLayer(nn.Module, LycorisLayer):
 
         # Move new weights to device
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
         # https://github.com/KohakuBlueleaf/LyCORIS/blob/eb460098187f752a5d66406d3affade6f0a07ece/lycoris/modules/loha.py#L178

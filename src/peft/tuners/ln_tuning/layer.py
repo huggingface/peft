@@ -37,8 +37,9 @@ class LNTuningLayer(nn.Module, BaseTunerLayer):
         self._active_adapter = adapter_name
         self.merged_adapters = []
 
-    def update_layer(self, layer: nn.Module, adapter_name: str):
+    def update_layer(self, layer: nn.Module, adapter_name: str, inference_mode: bool = False, **kwargs):
         self.ln_tuning_layers[adapter_name] = deepcopy(layer)
+        self.set_adapter(adapter_name, inference_mode=inference_mode)
 
     def enable_adapters(self, enabled: bool) -> None:
         """Toggle the enabling and disabling of adapters
