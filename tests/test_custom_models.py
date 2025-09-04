@@ -886,15 +886,9 @@ TEST_CASES = [
             "hira_dropout": 0.1,
         },
     ),
-    # ("Embedding + transformers Conv1D 1 HiRA", "EmbConv1D", HiRAConfig, {"target_modules": ["conv1d"]}),
-    # ("Embedding + transformers Conv1D 2 HiRA", "EmbConv1D", HiRAConfig, {"target_modules": ["emb"]}),
-    # ("Embedding + transformers Conv1D 3 HiRA", "EmbConv1D", HiRAConfig, {"target_modules": ["emb", "conv1d"]}),
-    # (
-    #     "Embedding + transformers Conv1D 1 LoRA trainable_tokens",
-    #     "EmbConv1D",
-    #     LoraConfig,
-    #     {"target_modules": ["conv1d"], "trainable_token_indices": {"emb": [0, 10]}},
-    # ),
+    ("Embedding + transformers Conv1D 1 HiRA", "EmbConv1D", HiRAConfig, {"target_modules": ["conv1d"]}),
+    ("Embedding + transformers Conv1D 2 HiRA", "EmbConv1D", HiRAConfig, {"target_modules": ["emb"]}),
+    ("Embedding + transformers Conv1D 3 HiRA", "EmbConv1D", HiRAConfig, {"target_modules": ["emb", "conv1d"]}),
     # ("Conv1d LoRA", "Conv1d", LoraConfig, {"target_modules": ["conv1d"]}),
     # ("Conv1d LoRA with DoRA", "Conv1d", LoraConfig, {"target_modules": ["conv1d"], "use_dora": True}),
     # ("Conv2d 1 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
@@ -2080,7 +2074,7 @@ class TestPeftCustomModel(PeftCommonTester):
 
         model.train()
         lr = 0.5
-        if (config_kwargs.get("use_dora") and model_id == "EmbConv1D") or issubclass(config_cls, VBLoRAConfig):
+        if (config_kwargs.get("use_dora") and model_id == "EmbConv1D") or issubclass(config_cls, VBLoRAConfig) or issubclass(config_cls, HiRAConfig):
             # this high learning rate was found through testing to be necessary to avoid flakiness
             lr = 100
         elif "mha" in model_id.lower():
