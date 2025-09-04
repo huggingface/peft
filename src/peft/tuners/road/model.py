@@ -173,7 +173,7 @@ class RoadModel(BaseTuner):
 
         return new_module
 
-    def _mark_only_adapters_as_trainable(self, model: nn.Module):
+    def _mark_only_adapters_as_trainable2(self, model: nn.Module):
         for n, p in model.named_parameters():
             if self.prefix not in n:
                 p.requires_grad = False

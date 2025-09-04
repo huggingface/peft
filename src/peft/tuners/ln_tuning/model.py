@@ -131,7 +131,7 @@ class LNTuningModel(BaseTuner):
             weight = child.qweight if hasattr(child, "qweight") else child.weight
             module.to(weight.device)
 
-    def _mark_only_adapters_as_trainable(self, model: Module):
+    def _mark_only_adapters_as_trainable2(self, model: Module):
         for n, p in model.named_parameters():
             if self.prefix not in n:
                 p.requires_grad = False

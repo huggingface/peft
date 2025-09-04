@@ -329,7 +329,7 @@ class RandLoraModel(BaseTuner):
                 if not any(p.device == meta for p in module.parameters()):
                     module.to(child.weight.device)
 
-    def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
+    def _mark_only_adapters_as_trainable2(self, model: nn.Module) -> None:
         for n, p in model.named_parameters():
             if self.prefix not in n:
                 p.requires_grad = False

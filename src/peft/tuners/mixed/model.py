@@ -147,7 +147,7 @@ class MixedModel(BaseTuner):
             if "ranknum" in name:
                 module.to(child.weight.device)
 
-    def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
+    def _mark_only_adapters_as_trainable2(self, model: nn.Module) -> None:
         for n, p in model.named_parameters():
             if not any(prefix in n for prefix in PREFIXES):
                 p.requires_grad = False

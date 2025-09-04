@@ -329,15 +329,29 @@ class BaseTuner(nn.Module, ABC):
         """
         ...
 
-    @abstractmethod
-    def _mark_only_adapters_as_trainable(self, model: nn.Module):
-        r"""
-        A helper method to mark only the adapter layers as trainable (i.e. module.requires_grad = False) This needs to
-        be overridden for all tuner classes to match the correct key names.
-
-        Check `peft.tuners.lora.LoraModel._mark_only_adapters_as_trainable` for an example.
+    def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
         """
-        ...
+        A helper method to mark only the adapter layers as trainable (i.e. module.requires_grad = False).
+        """
+        for n, p in model.named_parameters():
+            if self.prefix not in n:
+                p.requires_grad = False
+
+        for active_adapter in self.active_adapters:
+            bias = getattr(self.peft_config[active_adapter], "bias", "none")
+            if bias == "none":
+                continue
+
+            if bias == "all":
+                for n, p in model.named_parameters():
+                    if "bias" in n:
+                        p.requires_grad = True
+            elif bias.endswith("_only"):  # e.g. "lora_only" or "boft_only"
+                for m in model.modules():
+                    if isinstance(m, self.base_layer_cls) and hasattr(m, "bias") and m.bias is not None:
+                        m.bias.requires_grad = True
+            else:
+                raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
 
     @abstractmethod
     def disable_adapter_layers(self) -> None:
