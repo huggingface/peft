@@ -129,6 +129,7 @@ def train(
     lr_scheduler_arg: Optional[Literal["cosine"]],
     use_amp: bool,
     is_adalora: bool,
+    fast_forward: bool,
 ) -> TrainResult:
     accelerator_memory_allocated_log = []
     accelerator_memory_reserved_log = []
@@ -182,6 +183,24 @@ def train(
         bucket_factor=BUCKET_FACTOR,
         delete_cols=["response"],
     )
+
+    if fast_forward:
+        fast_forward_optim_steps = 6
+        fast_forward_ff_steps = 1000
+        fast_forward_params = [n.data for n in model.parameters()]
+
+        fast_forward_validation_batch = ds_valid[torch.randperm(len(ds_valid))[:10]]
+        del fast_forward_validation_batch['response']
+        tokens_per_sample = [len(i) for i in fast_forward_validation_batch["input_ids"]]
+        fast_forward_validation_batch = tokenizer.pad(fast_forward_validation_batch, return_tensors='pt').to(model.device)
+        labels = fast_forward_validation_batch['input_ids'].clone()
+        for i, num_tokens in enumerate(tokens_per_sample):
+            labels[i, num_tokens + 1 :] = -100
+        fast_forward_validation_batch["labels"] = labels
+
+    def get_weight_snapshot():
+        return [n.data.clone() for n in model.parameters()]
+
     try:
         pbar = tqdm(range(1, max_steps + 1))
         for step, batch in zip(pbar, iterator_train):
@@ -190,6 +209,7 @@ def train(
             # create the batch
             tokens_per_sample = [len(i) for i in batch["input_ids"]]
             total_tokens.append(sum(tokens_per_sample) + len(tokens_per_sample))  # add EOS token
+
             batch = tokenizer.pad(batch, return_tensors="pt").to(model.device)
             actual_batch_size = len(batch["input_ids"])
             total_samples += actual_batch_size
@@ -208,6 +228,10 @@ def train(
             batch["labels"] = labels
             num_items_in_batch = batch["attention_mask"].sum().item()
 
+            # Set previous weights to the ones before the update, otherwise W_t-W_tm1 = 0 when fast-forwarding
+            if fast_forward:
+                W_tm1 = get_weight_snapshot()
+
             # train step
             optimizer.zero_grad()
             with autocast_ctx():
@@ -223,6 +247,30 @@ def train(
 
             if is_adalora:
                 model.base_model.update_and_allocate(step)
+
+            # fast forwarding
+            if fast_forward and step > 0 and step % fast_forward_optim_steps == 0:
+                ff_prev_loss = None
+
+                W_t = fast_forward_params
+                dW = [w_t - w_tm1 for w_t, w_tm1 in zip(W_t, W_tm1)]
+
+                for ff_idx in range(fast_forward_ff_steps):
+                    for w_t, dw in zip(W_t, dW):
+                        w_t += dw
+
+                    with autocast_ctx():
+                        ff_outputs = model(
+                            **fast_forward_validation_batch, num_items_in_batch=num_items_in_batch)
+                        ff_loss = ff_outputs.loss
+
+                    print(f'ff train loss: {ff_loss} (Δ:{ff_prev_loss - ff_loss if ff_prev_loss is not None else 0:.3f})')
+
+                    if ff_prev_loss is not None and ff_prev_loss < ff_loss:
+                        print(f"Stopping fast-forward in step {ff_idx}.")
+                        break
+
+                    ff_prev_loss = ff_loss
 
             losses.append(loss.item())
             pbar.set_postfix({"loss": loss.item()})
@@ -335,7 +383,9 @@ def train(
         status = TrainStatus.CANCELED
         error_msg = str(exc)
     except Exception as exc:
+        import traceback
         print_verbose(f"encountered an error: {exc}")
+        print_verbose(traceback.print_exc())
         status = TrainStatus.CANCELED
         error_msg = str(exc)
 
@@ -413,6 +463,7 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         lr_scheduler_arg=train_config.lr_scheduler,
         use_amp=train_config.use_amp,
         is_adalora=isinstance(peft_config, AdaLoraConfig),
+        fast_forward=train_config.fast_forward,
     )
 
     if train_result.status == TrainStatus.FAILED:
