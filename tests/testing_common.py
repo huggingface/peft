@@ -586,10 +586,15 @@ class PeftCommonTester:
                     assert load_result2.missing_keys == []
 
     def _test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig, VBLoRAConfig):
-            # Merge layers only supported for LoRA and IA³
-            return pytest.skip(f"Test not applicable for {config_cls}")
-
+        if (
+            config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig, VBLoRAConfig)
+            or config_kwargs.get("alora_invocation_tokens") is not None
+        ):
+            # Merge layers only supported for LoRA and IA³, and not for Activated LoRA (aLoRA)
+            if config_kwargs.get("alora_invocation_tokens") is None:
+                return pytest.skip(f"Test not applicable for {config_cls}")
+            else:
+                return pytest.skip("Test not applicable for Activated LoRA")
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
 
@@ -611,16 +616,20 @@ class PeftCommonTester:
             _ = model.merge_and_unload()
 
     def _test_merge_layers_nan(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (
-            LoraConfig,
-            IA3Config,
-            AdaLoraConfig,
-            LoHaConfig,
-            LoKrConfig,
-            VeraConfig,
-            FourierFTConfig,
+        if (
+            config_cls
+            not in (
+                LoraConfig,
+                IA3Config,
+                AdaLoraConfig,
+                LoHaConfig,
+                LoKrConfig,
+                VeraConfig,
+                FourierFTConfig,
+            )
+            or config_kwargs.get("alora_invocation_tokens") is not None
         ):
-            # Merge layers only supported for LoRA and IA³
+            # Merge layers only supported for LoRA and IA³, and not for Activated LoRA (aLoRA)
             return
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
@@ -699,6 +708,9 @@ class PeftCommonTester:
 
         if issubclass(config_cls, (OFTConfig, BOFTConfig)):
             return pytest.skip(f"Test not applicable for {config_cls}")
+
+        if config_kwargs.get("alora_invocation_tokens") is not None:
+            return pytest.skip("Merging not applicable to aLoRA")
 
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
@@ -805,7 +817,7 @@ class PeftCommonTester:
             **config_kwargs,
         )
 
-        if config.peft_type not in supported_peft_types:
+        if config.peft_type not in supported_peft_types or config_kwargs.get("alora_invocation_tokens") is not None:
             return
 
         with hub_online_once(model_id):
@@ -867,6 +879,9 @@ class PeftCommonTester:
             assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3)
 
     def _test_merge_layers_is_idempotent(self, model_id, config_cls, config_kwargs):
+        if config_kwargs.get("alora_invocation_tokens") is not None:
+            # Merging not supported for Activated LoRA (aLoRA)
+            return pytest.skip("Test not applicable for Activated LoRA (aLoRA)")
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
             config = config_cls(
@@ -889,6 +904,9 @@ class PeftCommonTester:
             assert torch.allclose(logits_0, logits_1, atol=1e-6, rtol=1e-6)
 
     def _test_safe_merge(self, model_id, config_cls, config_kwargs):
+        if config_kwargs.get("alora_invocation_tokens") is not None:
+            # Merging not supported for Activated LoRA (aLoRA)
+            return pytest.skip("Test not applicable for Activated LoRA (aLoRA)")
         torch.manual_seed(0)
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
@@ -954,7 +972,6 @@ class PeftCommonTester:
         dummy_input = self.prepare_inputs_for_testing()
         # ensure that we have at least 3 samples for this test
         dummy_input = {k: torch.cat([v for _ in range(3)]) for k, v in dummy_input.items()}
-
         with torch.inference_mode():
             with model.disable_adapter():
                 output_base = model(**dummy_input)[0]
@@ -984,7 +1001,6 @@ class PeftCommonTester:
         # alternate between base model, adapter0, and adapter1
         adapters = ["__base__", "adapter0", "adapter1"]
         dummy_input["adapter_names"] = [adapters[i % 3] for i in (range(len(dummy_input["input_ids"])))]
-
         with torch.inference_mode():
             output_mixed = model(**dummy_input)[0]
             logits_mixed = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
@@ -1001,7 +1017,8 @@ class PeftCommonTester:
         # adapter_names argument. See #2283.
         if config_cls not in (LoraConfig,):
             return pytest.skip(f"Mixed adapter batches not supported for {config_cls}")
-
+        if config_kwargs.get("alora_invocation_tokens") is not None:
+            return pytest.skip("Beam search not yet supported for aLoRA")  # beam search not yet fully supported
         if config_kwargs.get("trainable_token_indices", None) is not None:
             # for some configurations this test will fail since the adapter values don't differ.
             # this is probably a problem with the test setup and not with the implementation.
@@ -1030,7 +1047,6 @@ class PeftCommonTester:
             dummy_input = self.prepare_inputs_for_testing()
             # ensure that we have at least 3 samples for this test
             dummy_input = {k: torch.cat([v for _ in range(3)]) for k, v in dummy_input.items()}
-
             gen_kwargs = {**dummy_input, "max_length": 20, "num_beams": 10, "early_stopping": True}
             with torch.inference_mode():
                 with model.disable_adapter():

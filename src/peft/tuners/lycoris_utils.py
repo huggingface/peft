@@ -257,7 +257,7 @@ class LycorisTuner(BaseTuner):
         else:
             target_base_layer = target
 
-        if isinstance(target_base_layer, torch.nn.Conv2d):
+        if isinstance(target_base_layer, (torch.nn.Conv2d, torch.nn.Conv1d)):
             new_module = new_module_cls(target, adapter_name=adapter_name, **kwargs)
         elif isinstance(target_base_layer, torch.nn.Linear):
             new_module = new_module_cls(target, adapter_name=adapter_name, **kwargs)
@@ -404,6 +404,7 @@ class LycorisTuner(BaseTuner):
         Args:
             adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
         """
+        self.set_auxiliary_adapters(adapter_name)
         for module in self.model.modules():
             if isinstance(module, LycorisLayer):
                 if module.merged:
