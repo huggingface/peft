@@ -26,14 +26,14 @@ def _evaluate_node(df, node):
             raise ValueError("Right side of comparison must be a literal (number, string, list).")
 
         operator_map = {
-            ast.Gt: lambda c, v: df[c] > v,
-            ast.GtE: lambda c, v: df[c] >= v,
-            ast.Lt: lambda c, v: df[c] < v,
-            ast.LtE: lambda c, v: df[c] <= v,
-            ast.Eq: lambda c, v: df[c] == v,
+            ast.Gt:    lambda c, v: df[c] > v,
+            ast.GtE:   lambda c, v: df[c] >= v,
+            ast.Lt:    lambda c, v: df[c] < v,
+            ast.LtE:   lambda c, v: df[c] <= v,
+            ast.Eq:    lambda c, v: df[c] == v,
             ast.NotEq: lambda c, v: df[c] != v,
-            ast.In: lambda c, v: df[c].isin(v),
-            ast.NotIn: lambda c, v: ~df[c].isin(v),
+            ast.In:    lambda c, v: df[c].isin(v),
+            ast.NotIn: lambda c, v: ~df[c].isin(v)
         }
         op_type = type(op_node)
         if op_type not in operator_map:
@@ -90,7 +90,7 @@ def parse_and_filter(df, filter_str):
 
     try:
         # 'eval' mode ensures the source is a single expression.
-        tree = ast.parse(filter_str, mode="eval")
+        tree = ast.parse(filter_str, mode='eval')
         expression_node = tree.body
     except (SyntaxError, ValueError) as e:
         raise ValueError(f"Invalid filter syntax: {e}")
