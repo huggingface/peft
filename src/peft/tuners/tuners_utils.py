@@ -353,19 +353,34 @@ class BaseTuner(nn.Module, ABC):
             else:
                 raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
 
-    @abstractmethod
+    def _set_adapter_layers(self, enabled: bool = True) -> None:
+        for module in self.model.modules():
+            if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
+                module.enable_adapters(enabled)
+
     def disable_adapter_layers(self) -> None:
         """
         Disable all adapters in-place.
-        """
-        ...
 
-    @abstractmethod
+        When disabling all adapters, the model output corresponds to the output of the base model.
+        """
+        # TODO: deprecate in favor of enable_adapters
+        for active_adapter in self.active_adapters:
+            bias_val = getattr(self.peft_config[active_adapter], "bias", "none")
+            if bias_val != "none":
+                msg = (
+                    f"Careful, disabling adapter layers with bias configured to be '{bias_val}' does not produce the "
+                    "same output as the base model would without adaption."
+                )
+                warnings.warn(msg)
+        self._set_adapter_layers(enabled=False)
+
     def enable_adapter_layers(self) -> None:
         """
         Enable all adapters in-place
         """
-        ...
+        # TODO: deprecate in favor of enable_adapters
+        self._set_adapter_layers(enabled=True)
 
     def delete_adapter(self, adapter_name: str) -> None:
         """

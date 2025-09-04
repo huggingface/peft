@@ -282,7 +282,7 @@ class LycorisTuner(BaseTuner):
             raise ValueError("Please specify `target_modules` in `peft_config`")
         return peft_config
 
-    def _set_adapter_layers(self, enabled=True):
+    def _set_adapter_layers2(self, enabled=True):
         for module in self.model.modules():
             if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
                 module.enable_adapters(enabled)
@@ -323,14 +323,14 @@ class LycorisTuner(BaseTuner):
 
         return self.model
 
-    def enable_adapter_layers(self) -> None:
+    def enable_adapter_layers2(self) -> None:
         """Enable all adapters.
 
         Call this if you have previously disabled all adapters and want to re-enable them.
         """
         self._set_adapter_layers(enabled=True)
 
-    def disable_adapter_layers(self) -> None:
+    def disable_adapter_layers2(self) -> None:
         """Disable all adapters.
 
         When disabling all adapters, the model output corresponds to the output of the base model.

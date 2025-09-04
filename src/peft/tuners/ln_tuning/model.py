@@ -141,19 +141,19 @@ class LNTuningModel(BaseTuner):
     def _check_target_module_exists(self, peft_config: PeftConfig, key: str) -> bool:
         return check_target_module_exists(peft_config, key)
 
-    def _set_adapter_layers(self, enabled: bool) -> None:
+    def _set_adapter_layers2(self, enabled: bool) -> None:
         for module in self.model.modules():
             if isinstance(module, (LNTuningLayer, ModulesToSaveWrapper)):
                 module.enable_adapters(enabled)
 
-    def enable_adapter_layers(self) -> None:
+    def enable_adapter_layers2(self) -> None:
         """Enable all adapters.
 
         Call this if you have previously disabled all adapters and want to re-enable them.
         """
         self._set_adapter_layers(enabled=True)
 
-    def disable_adapter_layers(self) -> None:
+    def disable_adapter_layers2(self) -> None:
         """Disable all adapters.
 
         When disabling all adapters, the model output corresponds to the output of the base model.

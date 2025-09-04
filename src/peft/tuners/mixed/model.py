@@ -206,15 +206,15 @@ class MixedModel(BaseTuner):
                 raise
             return getattr(self.model, name)
 
-    def _set_adapter_layers(self, enabled=True):
+    def _set_adapter_layers2(self, enabled=True):
         for module in self.model.modules():
             if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
                 module.enable_adapters(enabled)
 
-    def enable_adapter_layers(self):
+    def enable_adapter_layers2(self):
         self._set_adapter_layers(enabled=True)
 
-    def disable_adapter_layers(self):
+    def disable_adapter_layers2(self):
         for active_adapter in self.active_adapters:
             val = getattr(self.peft_config[active_adapter], "bias", "none")
             if val != "none":

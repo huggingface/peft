@@ -284,19 +284,19 @@ class OFTModel(BaseTuner):
         config_dict[key] = config
         return config
 
-    def _set_adapter_layers(self, enabled=True):
+    def _set_adapter_layers2(self, enabled=True):
         for module in self.model.modules():
             if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
                 module.enable_adapters(enabled)
 
-    def enable_adapter_layers(self) -> None:
+    def enable_adapter_layers2(self) -> None:
         """Enable all adapters.
 
         Call this if you have previously disabled all adapters and want to re-enable them.
         """
         self._set_adapter_layers(enabled=True)
 
-    def disable_adapter_layers(self):
+    def disable_adapter_layers2(self):
         for active_adapter in self.active_adapters:
             val = self.peft_config[active_adapter].bias
             if val != "none":

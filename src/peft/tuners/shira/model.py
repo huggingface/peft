@@ -216,15 +216,15 @@ class ShiraModel(BaseTuner):
         config_dict[key] = config
         return config
 
-    def _set_adapter_layers(self, enabled=True):
+    def _set_adapter_layers2(self, enabled=True):
         for module in self.model.modules():
             if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
                 module.enable_adapters(enabled)
 
-    def enable_adapter_layers(self):
+    def enable_adapter_layers2(self):
         self._set_adapter_layers(enabled=True)
 
-    def disable_adapter_layers(self):
+    def disable_adapter_layers2(self):
         self._set_adapter_layers(enabled=False)
 
     def set_adapter(self, adapter_name):

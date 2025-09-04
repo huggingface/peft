@@ -178,15 +178,15 @@ class RoadModel(BaseTuner):
             if self.prefix not in n:
                 p.requires_grad = False
 
-    def _set_adapter_layers(self, enabled: bool = True) -> None:
+    def _set_adapter_layers2(self, enabled: bool = True) -> None:
         for module in self.model.modules():
             if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
                 module.enable_adapters(enabled)
 
-    def disable_adapter_layers(self) -> None:
+    def disable_adapter_layers2(self) -> None:
         self._set_adapter_layers(enabled=False)
 
-    def enable_adapter_layers(self) -> None:
+    def enable_adapter_layers2(self) -> None:
         self._set_adapter_layers(enabled=True)
 
     def set_adapter(self, adapter_name: str | list[str]) -> None:
