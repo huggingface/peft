@@ -17,9 +17,9 @@ This script provides a simple evaluation pipeline for multiple-choice reasoning 
 (e.g., BoolQ, HellaSwag, ARC, OpenBookQA, Winogrande) with different composition strategies.
 
 Usage examples:
-    python evaluate.py --strategy base --ds_name arc-challenge
-    python evaluate.py --strategy arrow --ds_name boolq
-    python evaluate.py --strategy gks --ds_name hswag
+    python arrow_phi3_mini.py --strategy base --ds_name arc-challenge
+    python arrow_phi3_mini.py --strategy arrow --ds_name boolq
+    python arrow_phi3_mini.py --strategy gks --ds_name hswag
 
 Key features:
 - Supports three strategies:

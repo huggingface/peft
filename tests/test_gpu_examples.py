@@ -5015,6 +5015,7 @@ class TestArrowQuantized:
             paths.append(str(sub))
         return paths
 
+    @require_bitsandbytes
     @pytest.mark.single_gpu_tests
     def test_arrow_4bit_opt125m_load_and_generate_with_local_adapters(self, ts_adapters_opt):
         # Skip if CUDA or bitsandbytes isn’t available
@@ -5039,7 +5040,8 @@ class TestArrowQuantized:
                 device_map="auto",
                 quantization_config=bnb_config,
             )
-            tok = AutoTokenizer.from_pretrained(model_id, use_fast=True)
+            with hub_online_once(model_id + "tokenizer"):
+                tok = AutoTokenizer.from_pretrained(model_id, use_fast=True)
 
         # Build Arrow model from the locally created adapters
         arrow_cfg = ArrowConfig(top_k=2, router_temperature=1.0, rng_seed=42)
