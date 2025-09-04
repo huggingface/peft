@@ -2099,7 +2099,6 @@ class TestPeftCustomModel(PeftCommonTester):
         if config_cls != LoraConfig or config_cls != BOFTConfig:
             # skip this test for other configs as bias is specific to Lora
             pytest.skip("Testing bias warnings only for LoraConfig or BOFTConfig")
-
         if not issubclass(config_cls, (LoraConfig, BOFTConfig)):
             pytest.skip("Bias argument is only supported for LoRA or BOFT models")
 
