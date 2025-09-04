@@ -141,6 +141,35 @@ def _check_lora_target_modules_mamba(peft_config: PeftConfig, model: nn.Module, 
                 "Please remove it from `target_modules` to avoid compatibility issues."
             )
 
+def replace_module(parent: nn.Module, child_name: str, new_module: nn.Module, child: nn.Module, prefix: str) -> None:
+    """TODO"""
+    setattr(parent, child_name, new_module)
+    # It's not necessary to set requires_grad here, as that is handled by
+    # _mark_only_adapters_as_trainable
+
+    # child layer wraps the original module, unpack it
+    if hasattr(child, "base_layer"):
+        child = child.base_layer
+
+    if not hasattr(new_module, "base_layer"):
+        new_module.weight = child.weight
+        if hasattr(child, "bias"):
+            new_module.bias = child.bias
+
+    if getattr(child, "state", None) is not None:
+        if hasattr(new_module, "base_layer"):
+            new_module.base_layer.state = child.state
+        else:
+            new_module.state = child.state
+        new_module.to(child.weight.device)
+
+    meta = torch.device("meta")
+    # dispatch to correct device
+    for name, module in new_module.named_modules():
+        if prefix in name:
+            if not any(p.device == meta for p in module.parameters()):
+                module.to(child.weight.device)
+
 
 class BaseTuner(nn.Module, ABC):
     r"""
@@ -723,6 +752,15 @@ class BaseTuner(nn.Module, ABC):
             model_config=BaseTuner.get_model_config(self),
             adapter_name=adapter_name,
             activate_adapter=adapter_name in self.active_adapters,
+        )
+
+    def _replace_module(self, parent, child_name, new_module, child):
+        replace_module(
+            parent=parent,
+            child_name=child_name,
+            new_module=new_module,
+            child=child,
+            prefix=self.prefix,
         )
 
     def _inject_parameters(

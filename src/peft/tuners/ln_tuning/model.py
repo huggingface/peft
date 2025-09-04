@@ -113,7 +113,7 @@ class LNTuningModel(BaseTuner):
             new_module.update_layer(target.base_layer, adapter_name)
         return new_module
 
-    def _replace_module(self, parent: Module, child_name: str, new_module: Module, child: Module) -> None:
+    def _replace_module2(self, parent: Module, child_name: str, new_module: Module, child: Module) -> None:
         setattr(parent, child_name, new_module)
 
         if hasattr(child, "base_layer"):

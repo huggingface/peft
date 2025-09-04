@@ -152,7 +152,7 @@ class TrainableTokensModel(BaseTuner):
 
         return new_module
 
-    def _replace_module(self, parent, child_name, new_module, child):
+    def _replace_module2(self, parent, child_name, new_module, child):
         setattr(parent, child_name, new_module)
         # It's not necessary to set requires_grad here, as that is handled by
         # _mark_only_adapters_as_trainable
