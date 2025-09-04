@@ -751,7 +751,7 @@ model.set_adapter('arrow_router')    # Model is ready to be used at inference ti
 ### GenKnowSub
 [GenKnowSub](https://aclanthology.org/2025.acl-short.54/) augments Arrow by purifying task-specific LoRA adapters before routing. The key idea is to subtract general knowledge encoded in LoRA space—based on the [forgetting-via-negation principle](https://huggingface.co/papers/2212.04089)—so that task adapters become more isolated and focused on task-relevant signals. Concretely, GenKnowSub estimates a low-dimensional “general” subspace from a set of general (non task-specific) LoRA adapters and removes this component from each task adapter’s LoRA update prior to Arrow’s token-wise routing. This typically improves compositionality and reduces interference when combining many task adapters.
 
-In PEFT, enable GenKnowSub by setting ```use_gks=True``` in ArrowConfig, and providing ```gen_repo_id``` and ```general_adapter_paths``` in ```create_arrow_model```:
+In PEFT, enable GenKnowSub by setting ```use_gks=True``` in ArrowConfig, and providing ```general_adapter_paths``` in ```create_arrow_model```:
 
 ```py
 from peft import create_arrow_model, ArrowConfig
