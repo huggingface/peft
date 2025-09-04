@@ -329,7 +329,7 @@ class MixedModel(BaseTuner):
         self.active_adapter = new_adapter or []
         self._delete_auxiliary_adapter(adapter_name, new_active_adapters=new_adapter)
 
-    def merge_and_unload(
+    def merge_and_unload2(
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ) -> nn.Module:
         r"""
@@ -350,7 +350,7 @@ class MixedModel(BaseTuner):
             progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
         )
 
-    def unload(self) -> nn.Module:
+    def unload2(self) -> nn.Module:
         """
         Gets back the base model by removing all the lora modules without merging. This gives back the original base
         model.

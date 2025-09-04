@@ -313,7 +313,7 @@ class HRAModel(BaseTuner):
         self.active_adapter = new_adapter or []
         self._delete_auxiliary_adapter(adapter_name, new_active_adapters=new_adapter)
 
-    def merge_and_unload(
+    def merge_and_unload2(
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ) -> torch.nn.Module:
         r"""

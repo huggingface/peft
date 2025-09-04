@@ -296,7 +296,7 @@ class ShiraModel(BaseTuner):
 
         self.active_adapter = new_adapter or []
 
-    def merge_and_unload(
+    def merge_and_unload2(
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ):
         r"""

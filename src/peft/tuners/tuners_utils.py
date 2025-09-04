@@ -496,6 +496,52 @@ class BaseTuner(nn.Module, ABC):
 
         return self.model
 
+    def merge_and_unload(
+        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
+    ) -> torch.nn.Module:
+        r"""
+        This method merges the adapter layers into the base model.
+
+        This is needed if someone wants to use the base model as a standalone model. The returned model has the same
+        architecture as the original base model.
+
+        It is important to assign the returned model to a variable and use it, this is not an in-place operation!
+
+        Args:
+            progressbar (`bool`):
+                whether to show a progressbar indicating the unload and merge process (default: False).
+            safe_merge (`bool`):
+                whether to activate the safe merging check to check if there is any potential Nan in the adapter
+                weights.
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
+
+        Example:
+
+        ```py
+        >>> from transformers import AutoModelForCausalLM
+        >>> from peft import PeftModel
+
+        >>> model_id = ...
+        >>> base_model = AutoModelForCausalLM.from_pretrained(model_id)
+        >>> peft_model_id = ...
+        >>> model = PeftModel.from_pretrained(base_model, peft_model_id)
+        >>> merged_model = model.merge_and_unload()
+        ```
+        """
+        return self._unload_and_optionally_merge(
+            progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
+        )
+
+    def unload(self) -> torch.nn.Module:
+        """
+        Return the base model by removing all the PEFT modules.
+
+        It is important to assign the returned model to a variable and use it, this is not an in-place operation!
+        """
+        return self._unload_and_optionally_merge(merge=False)
+
     def _check_target_module_compatiblity(self, peft_config: PeftConfig, model: nn.Module, target_name: str):
         """
         Prevent applying LoRA to incompatible modules in specific architectures (e.g., Mamba).

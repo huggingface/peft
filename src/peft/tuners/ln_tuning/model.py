@@ -193,10 +193,10 @@ class LNTuningModel(BaseTuner):
 
         return self.model
 
-    def unload(self):
+    def unload2(self):
         return self._unload_and_optionally_merge(merge=False)
 
-    def merge_and_unload(
+    def merge_and_unload2(
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ) -> nn.Module:
         return self._unload_and_optionally_merge(merge=True)

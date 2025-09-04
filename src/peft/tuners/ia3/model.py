@@ -346,7 +346,9 @@ class IA3Model(BaseTuner):
 
         return self.model
 
-    def merge_and_unload(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> torch.nn.Module:
+    def merge_and_unload2(
+        self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
+    ) -> torch.nn.Module:
         r"""
         This method merges the IA³ layers into the base model. This is needed if someone wants to use the base model as
         a standalone model.

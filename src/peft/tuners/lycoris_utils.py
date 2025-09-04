@@ -336,7 +336,7 @@ class LycorisTuner(BaseTuner):
         """
         self._set_adapter_layers(enabled=False)
 
-    def merge_and_unload(
+    def merge_and_unload2(
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ) -> torch.nn.Module:
         r"""
@@ -358,7 +358,7 @@ class LycorisTuner(BaseTuner):
             progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
         )
 
-    def unload(self) -> torch.nn.Module:
+    def unload2(self) -> torch.nn.Module:
         """
         Gets back the base model by removing all the lora modules without merging. This gives back the original base
         model.
