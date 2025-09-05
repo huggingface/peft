@@ -315,7 +315,6 @@ def get_peft_model_state_dict(
     elif save_embedding_layers:
         warnings.warn("Could not identify embedding layer(s) because the model is not a 🤗 transformers model.")
 
-    foobar = {k.replace(f".{adapter_name}", ""): v for k, v in to_return.items()}
     # REMOVE ADAPTER NAME
     # Ensure not to replace in the middle of the key because a module happens to have the same name as the adapter.
     pattern = re.compile(re.escape(f".{adapter_name}") + r"$")

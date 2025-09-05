@@ -396,7 +396,7 @@ class TestInjectAdapterFromStateDict:
 
 class TestPeftStateDict:
     # Test some edge cases around getting and setting the PEFT state_dict. There are potential sources of errors there
-    # because the adapter_name is removed from/added to the state_dict key.
+    # because the adapter_name is removed from/added to the state_dict keys.
     def test_get_peft_model_state_dict_removes_adapter_name(self):
         # ensure that the adapter name, "default", is removed from the state_dict
         model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
@@ -492,8 +492,8 @@ class TestPeftStateDict:
 
     @pytest.mark.parametrize("nested", [False, True])
     def test_get_and_set_peft_model_state_dict_normal_names(self, nested):
-        # In this test, neither the module names, runs in any type of edge case. Therefore, this test is basically the
-        # "control group" for the subsequent tests (if this test failed, it means the test itself is wrong).
+        # In this test, there is no edge case. Therefore, this test is basically the "control group" for the subsequent
+        # tests (if this test were to fail, it means the testing code itself is wrong).
         class MyModel(nn.Module):
             def __init__(self):
                 super().__init__()

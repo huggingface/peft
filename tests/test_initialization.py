@@ -1110,7 +1110,6 @@ class TestLoraInitialization:
         # path is the same for all of them, so only testing LoRA.
         model = self.get_model()
 
-        # check scaling factor use_rslora=True with rank and alpha pattern
         config = LoraConfig(
             target_modules=["linear"],
             modules_to_save=["foobar"],
