@@ -21,7 +21,7 @@ import torch
 from transformers.pytorch_utils import Conv1D
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
@@ -140,10 +140,6 @@ class IA3Model(BaseTuner):
                 f"Currently, only `torch.nn.Linear`, `torch.nn.Conv2d`, and `Conv1D` are supported."
             )
         return new_module
-
-    @staticmethod
-    def _check_target_module_exists(ia3_config, key):
-        return check_target_module_exists(ia3_config, key)
 
     def _create_and_replace(
         self,

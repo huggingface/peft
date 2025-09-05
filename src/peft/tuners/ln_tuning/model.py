@@ -20,7 +20,7 @@ from torch.nn.modules import Module
 from tqdm import tqdm
 
 from peft.config import PeftConfig
-from peft.tuners.tuners_utils import BaseTuner, _get_submodules, check_target_module_exists
+from peft.tuners.tuners_utils import BaseTuner, _get_submodules
 from peft.utils import TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING
 
 from .layer import LNTuningLayer
@@ -103,9 +103,6 @@ class LNTuningModel(BaseTuner):
             new_module = target
             new_module.update_layer(target.base_layer, adapter_name)
         return new_module
-
-    def _check_target_module_exists(self, peft_config: PeftConfig, key: str) -> bool:
-        return check_target_module_exists(peft_config, key)
 
     def set_adapter(self, adapter_name: str) -> None:
         self.set_auxiliary_adapters(adapter_name)

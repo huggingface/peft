@@ -24,7 +24,7 @@ from torch.nn.init import _calculate_correct_fan
 from transformers.pytorch_utils import Conv1D
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
 )
@@ -178,10 +178,6 @@ class VeraModel(BaseTuner):
                 "VeRA projection weights must be saved for all adapters or none, but got multiple different values: "
                 f"{save_project_unique_values}"
             )
-
-    @staticmethod
-    def _check_target_module_exists(vera_config, key):
-        return check_target_module_exists(vera_config, key)
 
     def _create_and_replace(
         self,

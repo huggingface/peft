@@ -20,7 +20,7 @@ from itertools import chain
 import torch
 from transformers.pytorch_utils import Conv1D
 
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING,
 )
@@ -51,10 +51,6 @@ class FourierFTModel(BaseTuner):
 
     prefix: str = "fourierft_"
     base_layer_cls = FourierFTLayer
-
-    @staticmethod
-    def _check_target_module_exists(fourierft_config, key):
-        return check_target_module_exists(fourierft_config, key)
 
     def _create_and_replace(
         self,

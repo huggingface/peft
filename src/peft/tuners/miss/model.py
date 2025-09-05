@@ -16,7 +16,7 @@ import warnings
 
 import torch
 
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
 )
@@ -76,10 +76,6 @@ class MissModel(BaseTuner):
 
     prefix: str = "miss_"
     base_layer_cls = MissLayer
-
-    @staticmethod
-    def _check_target_module_exists(miss_config, key):
-        return check_target_module_exists(miss_config, key)
 
     def _create_and_replace(
         self,

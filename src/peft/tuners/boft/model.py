@@ -22,7 +22,6 @@ import torch
 from peft.tuners.tuners_utils import (
     BaseTuner,
     BaseTunerLayer,
-    check_target_module_exists,
 )
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
@@ -65,10 +64,6 @@ class BOFTModel(BaseTuner):
 
     prefix: str = "boft_"
     base_layer_cls = BOFTLayer
-
-    @staticmethod
-    def _check_target_module_exists(boft_config, key):
-        return check_target_module_exists(boft_config, key)
 
     def _create_and_replace(
         self,

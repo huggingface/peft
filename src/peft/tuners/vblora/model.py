@@ -19,7 +19,7 @@ import torch
 import torch.nn as nn
 from transformers.pytorch_utils import Conv1D
 
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING
 
 from .config import VBLoRAConfig
@@ -75,10 +75,6 @@ class VBLoRAModel(BaseTuner):
 
     def _pre_injection_hook(self, model: nn.Module, config: VBLoRAConfig, adapter_name: str) -> None:
         self.vblora_vector_bank = nn.ParameterDict({})
-
-    @staticmethod
-    def _check_target_module_exists(vblora_config, key):
-        return check_target_module_exists(vblora_config, key)
 
     def _create_and_replace(
         self,

@@ -280,19 +280,23 @@ class BaseTuner(nn.Module, ABC):
         """
         pass
 
-    @abstractmethod
-    def _check_target_module_exists(peft_config: PeftConfig, key: str) -> bool:
-        r"""
-        A helper private method to check if the passed module's key name matches any of the target modules in the
-        `peft_config.target_modules` list. If it does, return `True`, else return `False`.
+    @staticmethod
+    def _check_target_module_exists(peft_config: PeftConfig, key: str) -> bool | re.Match[str] | None:
+        """
+        A helper method to check if the passed module's key name matches any of the target modules in the
+        adapter_config.
 
         Args:
-            peft_config (`PeftConfig`):
-                The adapter config.
+            config (`PeftConfig`):
+                A config to match target modules from.
             key (`str`):
-                The module's key name.
+                A key to search any matches in config.
+
+        Returns:
+            `bool` | `re.Match[str]` | `None`:
+                True or re.Match object if key matches any target modules from config, False or None if no match found.
         """
-        ...
+        return check_target_module_exists(peft_config, key)
 
     @abstractmethod
     def _create_and_replace(
@@ -1382,12 +1386,14 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
     """A helper method to check if the passed module's key name matches any of the target modules in the adapter_config.
 
     Args:
-        config (`LoraConfig` | `LycorisConfig`): A config to match target modules from
-        key (`str`): A key to search any matches in config
+        config (`PeftConfig`):
+            A config to match target modules from.
+        key (`str`):
+            A key to search any matches in config
 
     Returns:
-        `bool` | `re.Match[str]` | `None`: True of match object if key matches any target modules from config, False or
-        None if no match found
+        `bool` | `re.Match[str]` | `None`:
+            True or re.Match object if key matches any target modules from config, False or None if no match found.
     """
     if hasattr(config, "exclude_modules") and config.exclude_modules:
         if isinstance(config.exclude_modules, str):

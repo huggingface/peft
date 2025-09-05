@@ -23,7 +23,7 @@ import torch.nn as nn
 
 from peft.config import PeftConfig
 
-from .tuners_utils import BaseTuner, BaseTunerLayer, check_adapters_to_merge, check_target_module_exists
+from .tuners_utils import BaseTuner, BaseTunerLayer, check_adapters_to_merge
 
 
 @dataclass
@@ -198,10 +198,6 @@ class LycorisTuner(BaseTuner):
     prefix: str
     base_layer_cls = LycorisLayer
     layers_mapping: dict[type[torch.nn.Module], type[LycorisLayer]]
-
-    @staticmethod
-    def _check_target_module_exists(config, key):
-        return check_target_module_exists(config, key)
 
     @abstractmethod
     def _create_and_replace(

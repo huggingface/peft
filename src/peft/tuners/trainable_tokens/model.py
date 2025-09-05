@@ -19,7 +19,7 @@ import warnings
 import torch.nn as nn
 
 from peft.config import PeftConfig
-from peft.tuners.tuners_utils import BaseTuner, check_target_module_exists
+from peft.tuners.tuners_utils import BaseTuner
 from peft.utils import _get_input_embeddings_name, _get_submodules
 
 from .layer import TrainableTokensLayer
@@ -127,9 +127,6 @@ class TrainableTokensModel(BaseTuner):
         """
         kwargs = peft_config.to_dict()
         self._create_and_replace_dict(kwargs, adapter_name, target, target_name, parent, current_key)
-
-    def _check_target_module_exists(self, peft_config: PeftConfig, key: str) -> bool:
-        return check_target_module_exists(peft_config, key)
 
     @staticmethod
     def _create_new_module(peft_config, adapter_name, target, **kwargs):

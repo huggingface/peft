@@ -19,7 +19,6 @@ import torch
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import (
     BaseTuner,
-    check_target_module_exists,
 )
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
@@ -89,10 +88,6 @@ class OFTModel(BaseTuner):
 
     prefix: str = "oft_"
     base_layer_cls = OFTLayer
-
-    @staticmethod
-    def _check_target_module_exists(oft_config, key):
-        return check_target_module_exists(oft_config, key)
 
     def _create_and_replace(
         self,

@@ -11,15 +11,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Functions that could be useful for non-PeftModel models, e.g. transformers or diffusers integration"""
+"""Functions that could be useful for non-PeftModel models, e.g. transformers or diffusers integration
+
+The functions provided here can be considered "public API" of PEFT and hence are safe to be used by packages that
+provide PEFT integrations.
+
+"""
 
 from peft.mapping import inject_adapter_in_model
-from peft.tuners.tuners_utils import cast_adapter_dtype, delete_adapter, replace_module
+from peft.tuners.tuners_utils import cast_adapter_dtype, check_target_module_exists, delete_adapter, replace_module
 from peft.utils import get_peft_model_state_dict, set_peft_model_state_dict
 
 
 __all__ = [
     "cast_adapter_dtype",
+    "check_target_module_exists",
     "delete_adapter",
     "get_peft_model_state_dict",
     "inject_adapter_in_model",

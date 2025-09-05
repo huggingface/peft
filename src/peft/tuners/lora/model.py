@@ -28,7 +28,6 @@ from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import (
     BaseTuner,
     BaseTunerLayer,
-    check_target_module_exists,
     replicate_layers,
 )
 from peft.utils import (
@@ -141,10 +140,6 @@ class LoraModel(BaseTuner):
 
     prefix: str = "lora_"
     base_layer_cls = LoraLayer
-
-    @staticmethod
-    def _check_target_module_exists(lora_config, key):
-        return check_target_module_exists(lora_config, key)
 
     def _prepare_model(self, peft_config: LoraConfig, model: nn.Module):
         r"""

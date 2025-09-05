@@ -18,7 +18,7 @@ import warnings
 
 import torch
 
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING,
 )
@@ -56,10 +56,6 @@ class ShiraModel(BaseTuner):
 
     prefix: str = "shira_"
     base_layer_cls = ShiraLayer
-
-    @staticmethod
-    def _check_target_module_exists(shira_config, key):
-        return check_target_module_exists(shira_config, key)
 
     def _create_and_replace(
         self,
