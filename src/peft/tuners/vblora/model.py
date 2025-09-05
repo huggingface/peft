@@ -76,22 +76,6 @@ class VBLoRAModel(BaseTuner):
     def _pre_injection_hook(self, model: nn.Module, config: VBLoRAConfig, adapter_name: str) -> None:
         self.vblora_vector_bank = nn.ParameterDict({})
 
-    def _check_new_adapter_config(self, config: VBLoRAConfig) -> None:
-        """
-        A helper method to check the config when a new adapter is being added.
-
-        Raise a ValueError if there is something wrong with the config or if it conflicts with existing adapters.
-
-        """
-        # the below todo is copied from LoRA
-        # TODO: there should be a check if any of the existing adapters actually has bias != "none", or else the check
-        # does not fully correspond to the error message.
-        if (len(self.peft_config) > 1) and (config.bias != "none"):
-            raise ValueError(
-                f"{self.__class__.__name__} supports only 1 adapter with bias. When using multiple adapters, "
-                "set bias to 'none' for all adapters."
-            )
-
     @staticmethod
     def _check_target_module_exists(vblora_config, key):
         return check_target_module_exists(vblora_config, key)

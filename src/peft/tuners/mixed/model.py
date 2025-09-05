@@ -83,13 +83,7 @@ class MixedModel(BaseTuner):
                 f"{self.__class__.__name__} only supports {COMPATIBLE_TUNER_TYPES} configs, but got {type(config)}."
             )
 
-        biases = (getattr(config, "bias", None) for config in self.peft_config)
-        biases = [bias for bias in biases if bias not in (None, "none")]
-        if len(biases) > 1:
-            raise ValueError(
-                f"{self.__class__.__name__} supports only 1 adapter with bias. When using multiple adapters, "
-                "set bias to 'none' for all adapters."
-            )
+        super()._check_new_adapter_config(config)
 
     @staticmethod
     def _check_target_module_exists(config: Configs, key: str):

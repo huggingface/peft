@@ -23,7 +23,6 @@ from peft.utils import (
     TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING,
 )
 
-from .config import ShiraConfig
 from .layer import Linear, ShiraLayer
 
 
@@ -57,18 +56,6 @@ class ShiraModel(BaseTuner):
 
     prefix: str = "shira_"
     base_layer_cls = ShiraLayer
-
-    def _check_new_adapter_config(self, config: ShiraConfig) -> None:
-        """
-        A helper method to check the config when a new adapter is being added.
-
-        Raise a ValueError if there is something wrong with the config or if it conflicts with existing adapters.
-
-        """
-        for existing_config in self.peft_config.values():
-            if existing_config is config:
-                # skip the current config
-                continue
 
     @staticmethod
     def _check_target_module_exists(shira_config, key):

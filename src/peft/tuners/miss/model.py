@@ -21,7 +21,6 @@ from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
 )
 
-from .config import MissConfig
 from .layer import MissLayer, MissLinear
 
 
@@ -77,21 +76,6 @@ class MissModel(BaseTuner):
 
     prefix: str = "miss_"
     base_layer_cls = MissLayer
-
-    def _check_new_adapter_config(self, config: MissConfig) -> None:
-        """
-        A helper method to check the config when a new adapter is being added.
-
-        Raise a ValueError if there is something wrong with the config or if it conflicts with existing adapters.
-
-        """
-        # TODO: there should be a check if any of the existing adapters actually has bias != "none", or else the check
-        # does not fully correspond to the error message.
-        if (len(self.peft_config) > 1) and (config.bias != "none"):
-            raise ValueError(
-                f"{self.__class__.__name__} supports only 1 adapter with bias. When using multiple adapters, "
-                "set bias to 'none' for all adapters."
-            )
 
     @staticmethod
     def _check_target_module_exists(miss_config, key):

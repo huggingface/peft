@@ -401,12 +401,28 @@ class BaseTuner(nn.Module, ABC):
 
     def _check_new_adapter_config(self, config: PeftConfig) -> None:
         """
-        A helper method to check the config when a new adapter is being added.
+        A helper method to check the config of a new adapter being added.
 
         Raise a ValueError if there is something wrong with the config or if it conflicts with existing adapters.
 
         """
-        pass
+        if len(self.peft_config) <= 1:
+            return
+
+        # It is assumed that the config was added to self.peft_config *before* calling this check. We should thus never
+        # encounter the error below. Still, it is better to verify this, or else subsequent checks could be incorrect.
+        if not any(conf is config for conf in self.peft_config.values()):
+            raise ValueError(
+                "_check_new_peft_config was called incorrectly, this should not happen. Please open an issue and "
+                "report the error: https://github.com/huggingface/peft/issues"
+            )
+
+        bias_values = [getattr(conf, "bias", "none") for conf in self.peft_config.values()]
+        if sum(bias_value != "none" for bias_value in bias_values) > 1:
+            raise ValueError(
+                f"{self.__class__.__name__} supports only 1 adapter with bias. When using multiple adapters, "
+                "set bias to 'none' for all adapters."
+            )
 
     def _cast_adapter_dtype(self, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
         """
