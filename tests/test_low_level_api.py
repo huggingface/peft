@@ -20,6 +20,7 @@ import re
 import pytest
 import torch
 from diffusers import StableDiffusionPipeline
+from torch import nn
 from transformers import AutoModel, AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoModelForSequenceClassification
 
 from peft import (
@@ -28,8 +29,10 @@ from peft import (
     LoKrConfig,
     LoraConfig,
     RandLoraConfig,
+    get_peft_model,
     get_peft_model_state_dict,
     inject_adapter_in_model,
+    set_peft_model_state_dict,
 )
 from peft.tuners import lora
 from peft.utils import ModulesToSaveWrapper
@@ -389,3 +392,231 @@ class TestInjectAdapterFromStateDict:
             assert sd_before.keys() == sd_after.keys()
             for key in sd_before.keys():
                 assert sd_before[key].shape == sd_after[key].shape
+
+
+class TestPeftStateDict:
+    # Test some edge cases around getting and setting the PEFT state_dict. There are potential sources of errors there
+    # because the adapter_name is removed from/added to the state_dict key.
+    def test_get_peft_model_state_dict_removes_adapter_name(self):
+        # ensure that the adapter name, "default", is removed from the state_dict
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+
+        # note: lora targets q_proj and v_proj; add in an auxiliary module for good measure
+        model = get_peft_model(model, LoraConfig(modules_to_save=["lm_head"]))
+        sd = get_peft_model_state_dict(model)
+        assert len(sd) > 1  # sanity check
+        assert not any("default" in key for key in sd)
+
+    def test_get_peft_model_state_dict_removes_non_defaul_adapter_name(self):
+        # ensure that the adapter name is removed from the state_dict, even if it's not "default"
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+
+        model = get_peft_model(model, LoraConfig(modules_to_save=["lm_head"]), adapter_name="other")
+        sd = get_peft_model_state_dict(model, adapter_name="other")
+        assert len(sd) > 1  # sanity check
+        assert not any("other" in key for key in sd)
+
+    def test_get_peft_model_state_dict_removes_adapter_name_when_same_as_module_name(self):
+        # here the adapter is named "v_proj", which is the same name as some modules targeted with lora in the model,
+        # which is nefarious
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+
+        model = get_peft_model(model, LoraConfig(modules_to_save=["lm_head"]), adapter_name="v_proj")
+        sd = get_peft_model_state_dict(model, adapter_name="v_proj")
+        assert len(sd) > 1  # sanity check
+        for key in sd:
+            # assert that the adapter_name was indeed removed
+            assert not key.endswith("lora_A.v_proj.weight")
+            assert not key.endswith("lora_B.v_proj.weight")
+            assert not key.endswith("modules_to_save.v_proj.weight")
+            # assert that the module name was not stripped completely from the key
+            assert ("v_proj" in key) or ("q_proj" in key) or ("lm_head") in key
+
+    def check_peft_model_weights_loaded_correctly(self, inner_model_cls, config, nested, adapter_name="default"):
+        # Runs checks that a roundtrip of get_peft_model_state_dict and set_peft_model_state_dict results in the same
+        # model (same outputs and same weights).
+        class Outer(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner = inner_model_cls()
+
+            def forward(self, x):
+                return self.inner(x)
+
+        if nested:
+            # add another layer of nesting
+            model_cls = Outer
+        else:
+            model_cls = inner_model_cls
+
+        x = torch.randn(1, 5)
+
+        torch.manual_seed(0)
+        base_model = model_cls()
+        with torch.inference_mode():
+            base_out = base_model(x)
+
+        torch.manual_seed(42)
+        model = get_peft_model(base_model, config, adapter_name=adapter_name)
+        with torch.inference_mode():
+            peft_out = model(x)
+        # sanity check: peft adapter has an effect
+        assert not torch.allclose(base_out, peft_out, atol=1e-6)
+
+        sd = get_peft_model_state_dict(model, adapter_name=adapter_name)
+
+        torch.manual_seed(0)
+        base_model = model_cls()
+        torch.manual_seed(42 + 1)  # ensure we start with a different, randomly initialized PEFT model
+        model_new = get_peft_model(base_model, config, adapter_name=adapter_name)
+        with torch.inference_mode():
+            peft_new = model_new(x)
+        assert not torch.allclose(peft_out, peft_new, atol=1e-6)
+
+        set_peft_model_state_dict(model_new, sd, adapter_name=adapter_name)
+        with torch.inference_mode():
+            peft_out_loaded = model_new(x)
+        assert torch.allclose(peft_out, peft_out_loaded, atol=1e-6)
+
+        sd_new = get_peft_model_state_dict(model, adapter_name=adapter_name)
+        assert sd.keys() == sd_new.keys()
+        for key, val in sd.items():
+            val_new = sd_new[key]
+            torch.allclose(val, val_new)
+
+    @pytest.mark.parametrize("nested", [False, True])
+    def test_get_and_set_peft_model_state_dict_normal_names(self, nested):
+        # In this test, neither the module names, runs in any type of edge case. Therefore, this test is basically the
+        # "control group" for the subsequent tests (if this test failed, it means the test itself is wrong).
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo_linear = nn.Linear(5, 5)
+                self.foo_baz = nn.Linear(5, 5)
+                self.baz_foo = nn.Linear(5, 5)
+                self.foo_baz_foo = nn.Linear(5, 5)
+                self.baz_foo_baz = nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.foo_linear(x)
+                x = self.foo_baz(x)
+                x = self.baz_foo(x)
+                x = self.foo_baz_foo(x)
+                x = self.baz_foo_baz(x)
+                return x
+
+        config = LoraConfig(
+            target_modules=["foo_linear", "foo_baz", "baz_foo", "foo_baz_foo", "baz_foo_baz"], init_lora_weights=False
+        )
+        self.check_peft_model_weights_loaded_correctly(MyModel, config, nested=nested)
+
+    @pytest.mark.parametrize("nested", [False, True])
+    def test_get_and_set_peft_model_state_dict_peft_prefix_in_module_name(self, nested):
+        # Here we have a model with some modules containing "lora" in their name.
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo_linear = nn.Linear(5, 5)
+                self.foo_lora = nn.Linear(5, 5)
+                self.lora_foo = nn.Linear(5, 5)
+                self.foo_lora_foo = nn.Linear(5, 5)
+                self.lora_foo_lora = nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.foo_linear(x)
+                x = self.foo_lora(x)
+                x = self.lora_foo(x)
+                x = self.foo_lora_foo(x)
+                x = self.lora_foo_lora(x)
+                return x
+
+        config = LoraConfig(
+            target_modules=["foo_linear", "foo_lora", "lora_foo", "foo_lora_foo", "lora_foo_lora"],
+            init_lora_weights=False,
+        )
+        self.check_peft_model_weights_loaded_correctly(MyModel, config, nested=nested)
+
+    @pytest.mark.parametrize("nested", [False, True])
+    def test_get_and_set_peft_model_state_dict_weight_in_module_name(self, nested):
+        # Here we have a model with some modules containing "weight" in their name.
+        # See #2772
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo_linear = nn.Linear(5, 5)
+                self.foo_weight = nn.Linear(5, 5)
+                self.weight_foo = nn.Linear(5, 5)
+                self.foo_weight_foo = nn.Linear(5, 5)
+                self.weight_foo_weight = nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.foo_linear(x)
+                x = self.foo_weight(x)
+                x = self.weight_foo(x)
+                x = self.foo_weight_foo(x)
+                x = self.weight_foo_weight(x)
+                return x
+
+        config = LoraConfig(
+            target_modules=["foo_linear", "foo_weight", "weight_foo", "foo_weight_foo", "weight_foo_weight"],
+            init_lora_weights=False,
+        )
+        self.check_peft_model_weights_loaded_correctly(MyModel, config, nested=nested)
+
+    @pytest.mark.parametrize("nested", [False, True])
+    def test_get_and_set_peft_model_state_dict_bias_in_module_name(self, nested):
+        # Here we have a model with some modules containing "bias" in their name.
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo_linear = nn.Linear(5, 5)
+                self.foo_bias = nn.Linear(5, 5)
+                self.bias_foo = nn.Linear(5, 5)
+                self.foo_bias_foo = nn.Linear(5, 5)
+                self.bias_foo_bias = nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.foo_linear(x)
+                x = self.foo_bias(x)
+                x = self.bias_foo(x)
+                x = self.foo_bias_foo(x)
+                x = self.bias_foo_bias(x)
+                return x
+
+        config = LoraConfig(
+            target_modules=["foo_linear", "foo_bias", "bias_foo", "foo_bias_foo", "bias_foo_bias"],
+            init_lora_weights=False,
+            bias="lora_only",
+        )
+        self.check_peft_model_weights_loaded_correctly(MyModel, config, nested=nested)
+
+    @pytest.mark.parametrize("nested", [False, True])
+    def test_get_and_set_peft_model_state_dict_adapter_name_same_as_module_name(self, nested):
+        # Here we choose a module name that is identical to the name of one of the adapters.
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = nn.Linear(5, 5)
+                self.foo_baz = nn.Linear(5, 5)
+                self.baz_foo = nn.Linear(5, 5)
+                self.foo_baz_foo = nn.Linear(5, 5)
+                self.baz_foo_baz = nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.foo(x)
+                x = self.foo_baz(x)
+                x = self.baz_foo(x)
+                x = self.foo_baz_foo(x)
+                x = self.baz_foo_baz(x)
+                return x
+
+        config = LoraConfig(
+            target_modules=["foo", "foo_baz", "baz_foo", "foo_baz_foo", "baz_foo_baz"], init_lora_weights=False
+        )
+        self.check_peft_model_weights_loaded_correctly(MyModel, config, nested=nested, adapter_name="foo")

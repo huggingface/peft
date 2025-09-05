@@ -877,6 +877,18 @@ def _get_submodules(model, key):
     return parent, target, target_name
 
 
+def _get_submodules_with_grandparent(model, key):
+    parent = model.get_submodule(".".join(key.split(".")[:-1]))
+    try:
+        grandparent = model.get_submodule(".".join(key.split(".")[:-2]))
+    except AttributeError:
+        # no grand parent
+        grandparent = None
+    target_name = key.split(".")[-1]
+    target = model.get_submodule(key)
+    return parent, grandparent, target, target_name
+
+
 def _freeze_adapter(model, adapter_name):
     for n, p in model.named_parameters():
         if adapter_name in n:
@@ -907,6 +919,8 @@ def _set_trainable(
 
     The `active_adapter` flag indicates if this new adapter should be activated.
     """
+    from peft.tuners.tuners_utils import BaseTunerLayer
+
     if wrapper_cls is None:
         wrapper_cls = ModulesToSaveWrapper
 
@@ -923,7 +937,17 @@ def _set_trainable(
     for key in key_list:
         target_module_found = any(key.endswith(target_key) for target_key in module_names)
         if target_module_found:
-            parent, target, target_name = _get_submodules(model, key)
+            parent, grandparent, target, target_name = _get_submodules_with_grandparent(model, key)
+            if isinstance(grandparent, BaseTunerLayer):
+                # This is an extreme edge case: Let's assume that the modules_to_save target key has the same name as
+                # the adapter name, e.g. 'default'. Then a PEFT layer like foo.bar.lora_A.default would match as a
+                # parent. Since this is the nn.ModuleDict, it might even be a valid target. Therefore, we have check the
+                # grandparent (if it exists) to detect this degenerate case.
+                raise ValueError(
+                    f"You are trying to target a module with {wrapper_cls} that is a child of {type(grandparent)}. "
+                    "This is almost certainly not the intended behavior. Please check that your PEFT config is correct."
+                )
+
             if isinstance(target, wrapper_cls):
                 target.update(adapter_name, **wrapper_kwargs)
                 target.set_adapter(target.active_adapter)

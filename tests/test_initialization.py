@@ -1100,6 +1100,43 @@ class TestLoraInitialization:
         assert model.embed.scaling["default"] == expected_scaling["embed"]
         assert model.conv2d.scaling["default"] == expected_scaling["conv2d"]
 
+    def test_modules_to_save_targets_lora_layer_raises(self):
+        # There is no good reason to have auxiliary modules to target a LoRA layer. As auxiliary modules are applied
+        # *after* BaseTunerLayers, a possible way for this to happen accidentally is if the
+        # modules_to_save/trainable_token_indices coincide with the adapter name, e.g. if the adapter name is "foobar",
+        # we can have a module named model.base_model.model.self_attn.lora_A.foobar. If
+        # modules_to_save/trainable_token_indices is also "foobar", there would be a match.
+        # Note: Theoretically, a lot more PEFT methods support modules_to_save, so would have to be tested, but the code
+        # path is the same for all of them, so only testing LoRA.
+        model = self.get_model()
+
+        # check scaling factor use_rslora=True with rank and alpha pattern
+        config = LoraConfig(
+            target_modules=["linear"],
+            modules_to_save=["foobar"],
+        )
+        msg = (
+            "You are trying to target a module with <class 'peft.utils.other.ModulesToSaveWrapper'> that is a child of "
+            "<class 'peft.tuners.lora.layer.Linear'>. This is almost certainly not the intended behavior. Please check "
+            "that your PEFT config is correct."
+        )
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config, adapter_name="foobar")
+
+    def test_trainable_token_indices_targets_lora_layer_raises(self):
+        # Same test as test_modules_to_save_targets_lora_layer_raises, but using trainable_token_indices
+        model = self.get_model()
+
+        # check scaling factor use_rslora=True with rank and alpha pattern
+        config = LoraConfig(target_modules=["embed"], trainable_token_indices={"foobar": [1, 2, 3]})
+        msg = (
+            "You are trying to target a module with <class 'peft.utils.other.TrainableTokensWrapper'> that is a child "
+            "of <class 'peft.tuners.lora.layer.Embedding'>. This is almost certainly not the intended behavior. Please "
+            "check that your PEFT config is correct."
+        )
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config, adapter_name="foobar")
+
     @require_deterministic_for_xpu
     def test_lora_use_dora_linear(self, data):
         # check that dora is a no-op when initialized
@@ -1258,6 +1295,28 @@ class TestLoraInitialization:
 
         assert torch.allclose(merged_mask0, merged_mask1)
         assert mask_type0 == mask_type1
+
+    @pytest.mark.parametrize("bias", ["none", "all", "lora_only", "invalid"])
+    def test_lora_with_bias_argument(self, bias):
+        model = self.get_model()
+        config = LoraConfig(target_modules=["linear", "conv2d"], bias=bias)
+
+        if bias == "invalid":
+            with pytest.raises(NotImplementedError):
+                get_peft_model(model, config)
+            return
+
+        model = get_peft_model(model, config)  # does not raise
+        for name, param in model.named_parameters():
+            if not name.endswith("bias"):
+                continue
+            if bias == "none":
+                assert param.requires_grad is False
+            elif bias == "all":
+                assert param.requires_grad is True
+            elif bias == "lora_only":
+                # only layers targeted with target_modules
+                assert param.requires_grad is ("linear" in name) or ("conv2d" in name)
 
     def test_lora_with_bias_extra_params(self):
         # lora with lora_bias=True
