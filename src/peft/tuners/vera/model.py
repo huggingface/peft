@@ -222,35 +222,6 @@ class VeraModel(BaseTuner):
             self._replace_module(parent, target_name, new_module, target)
 
     @staticmethod
-    def _replace_module(parent, child_name, new_module, child):
-        setattr(parent, child_name, new_module)
-        # It's not necessary to set requires_grad here, as that is handled by
-        # _mark_only_adapters_as_trainable
-
-        # child layer wraps the original module, unpack it
-        if hasattr(child, "base_layer"):
-            child = child.base_layer
-
-        if not hasattr(new_module, "base_layer"):
-            new_module.weight = child.weight
-            if hasattr(child, "bias"):
-                new_module.bias = child.bias
-
-        if getattr(child, "state", None) is not None:
-            if hasattr(new_module, "base_layer"):
-                new_module.base_layer.state = child.state
-            else:
-                new_module.state = child.state
-            new_module.to(child.weight.device)
-
-        meta = torch.device("meta")
-        # dispatch to correct device
-        for name, module in new_module.named_modules():
-            if "vera_" in name:
-                if not any(p.device == meta for p in module.parameters()):
-                    module.to(child.weight.device)
-
-    @staticmethod
     def _create_new_module(vera_config, vera_A, vera_B, adapter_name, target, **kwargs):
         # avoid eager bnb import
         if is_bnb_available():

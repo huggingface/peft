@@ -14,8 +14,6 @@
 
 import warnings
 
-import torch
-
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import (
     BaseTuner,
@@ -144,32 +142,6 @@ class OFTModel(BaseTuner):
                 num_cayley_neumann_terms=oft_config.num_cayley_neumann_terms,
                 init_weights=oft_config.init_weights,
             )
-
-    def _replace_module(self, parent, child_name, new_module, child):
-        setattr(parent, child_name, new_module)
-        # It's not necessary to set requires_grad here, as that is handled by
-        # _mark_only_adapters_as_trainable
-
-        # child layer wraps the original module, unpack it
-        if hasattr(child, "base_layer"):
-            child = child.base_layer
-
-        meta = torch.device("meta")
-        # dispatch to correct device
-        for name, module in new_module.named_modules():
-            if (self.prefix in name) or ("ranknum" in name):
-                if hasattr(child, "qweight"):
-                    weight = child.qweight
-                elif hasattr(child, "W_q"):
-                    weight = child.W_q
-                elif hasattr(child, "weight"):
-                    weight = child.weight
-                elif getattr(child, "in_proj_weight", None) is not None:  # MHA
-                    weight = child.in_proj_weight
-                else:
-                    weight = next(child.parameters())
-                if not any(p.device == meta for p in module.parameters()):
-                    module.to(weight.device)
 
     @staticmethod
     def _create_new_module(oft_config, adapter_name, target, **kwargs):

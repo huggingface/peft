@@ -1662,8 +1662,19 @@ def replace_module(parent: nn.Module, child_name: str, new_module: nn.Module, ch
     # dispatch to correct device
     for name, module in new_module.named_modules():
         if prefix in name:
+            if hasattr(child, "qweight"):
+                weight = child.qweight
+            elif hasattr(child, "W_q"):
+                weight = child.W_q
+            elif hasattr(child, "weight"):
+                weight = child.weight
+            elif getattr(child, "in_proj_weight", None) is not None:  # MHA
+                weight = child.in_proj_weight
+            else:
+                weight = next(child.parameters())
+
             if not any(p.device == meta for p in module.parameters()):
-                module.to(child.weight.device)
+                module.to(weight.device)
 
 
 def delete_adapter(
