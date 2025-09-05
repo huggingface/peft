@@ -184,7 +184,7 @@ class BaseTuner(nn.Module, ABC):
 
     # TODO
     prefix: str
-    base_layer_cls: BaseTuner
+    base_layer_cls: type[BaseTunerLayer]
 
     def __init__(
         self,
