@@ -24,9 +24,7 @@ from peft.tuners.road.config import RoadConfig
 from peft.tuners.tuners_utils import (
     BaseTuner,
 )
-from peft.utils import (
-    TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
-)
+from peft.utils import TRANSFORMERS_MODELS_TO_ROAD_TARGET_MODULES_MAPPING
 
 from .layer import RoadLayer, dispatch_default
 
@@ -42,16 +40,7 @@ class RoadModel(BaseTuner):
 
     prefix: str = "road_"
     base_layer_cls = RoadLayer
-
-    @staticmethod
-    def _prepare_adapter_config(road_config: RoadConfig, model_config: dict) -> RoadConfig:
-        if road_config.target_modules is None:
-            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
-                raise ValueError("Please specify `target_modules` in `peft_config`")
-            road_config.target_modules = set(
-                TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
-            )
-        return road_config
+    target_module_mapping = TRANSFORMERS_MODELS_TO_ROAD_TARGET_MODULES_MAPPING
 
     def _create_and_replace(
         self,

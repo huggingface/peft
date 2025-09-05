@@ -19,7 +19,7 @@ from peft.tuners.tuners_utils import (
     BaseTuner,
 )
 from peft.utils import (
-    TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_OFT_TARGET_MODULES_MAPPING,
     get_quantization_config,
 )
 
@@ -86,6 +86,7 @@ class OFTModel(BaseTuner):
 
     prefix: str = "oft_"
     base_layer_cls = OFTLayer
+    target_module_mapping = TRANSFORMERS_MODELS_TO_OFT_TARGET_MODULES_MAPPING
 
     def _create_and_replace(
         self,
@@ -221,13 +222,3 @@ class OFTModel(BaseTuner):
             raise ValueError("Cannot merge OFT layers when the model is gptq quantized")
         if self.peft_config.get("layer_replication"):
             raise ValueError("Cannot merge OFT layers when base model layers are replicated")
-
-    @staticmethod
-    def _prepare_adapter_config(peft_config, model_config):
-        if peft_config.target_modules is None:
-            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
-                raise ValueError("Please specify `target_modules` in `peft_config`")
-            peft_config.target_modules = set(
-                TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
-            )
-        return peft_config

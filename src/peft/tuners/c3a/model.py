@@ -48,6 +48,7 @@ class C3AModel(BaseTuner):
 
     prefix: str = "c3a_"
     base_layer_cls = C3ALayer
+    target_module_mapping = TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING
 
     def _create_and_replace(
         self,
@@ -110,13 +111,3 @@ class C3AModel(BaseTuner):
                     module.unmerge()
                 module.set_adapter(adapter_name)
         self.active_adapter = adapter_name
-
-    @staticmethod
-    def _prepare_adapter_config(peft_config, model_config):
-        if peft_config.target_modules is None:
-            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING:
-                raise ValueError("Please specify `target_modules` in `peft_config`")
-            peft_config.target_modules = set(
-                TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING[model_config["model_type"]]
-            )
-        return peft_config

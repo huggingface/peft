@@ -67,6 +67,7 @@ class VBLoRAModel(BaseTuner):
 
     prefix: str = "vblora_"
     base_layer_cls = VBLoRALayer
+    target_module_mapping = TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING
 
     def _init_vblora_vector_bank(self, config: VBLoRAConfig, adapter_name: str) -> None:
         vblora_vector_bank = torch.zeros(config.num_vectors, config.vector_length)
@@ -184,16 +185,6 @@ class VBLoRAModel(BaseTuner):
                     module.unmerge()
                 module.set_adapter(adapter_name)
         self.active_adapter = adapter_name
-
-    @staticmethod
-    def _prepare_adapter_config(peft_config, model_config):
-        if peft_config.target_modules is None:
-            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING:
-                raise ValueError("Please specify `target_modules` in `peft_config`")
-            peft_config.target_modules = set(
-                TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
-            )
-        return peft_config
 
     def get_nb_savable_parameters(self, adapter="default") -> tuple[int, int]:
         r"""

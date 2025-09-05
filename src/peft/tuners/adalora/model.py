@@ -64,6 +64,7 @@ class AdaLoraModel(LoraModel):
     """
 
     # Note: don't redefine prefix or base_layer_cls here, it should be inherited from LoraModel
+    target_module_mapping = TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING
 
     def __init__(self, model, config, adapter_name, **kwargs):
         super().__init__(model, config, adapter_name, **kwargs)
@@ -220,16 +221,6 @@ class AdaLoraModel(LoraModel):
             new_module = SVDLinear(target, adapter_name, **kwargs)
 
         return new_module
-
-    @staticmethod
-    def _prepare_adapter_config(peft_config, model_config):
-        if peft_config.target_modules is None:
-            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING:
-                raise ValueError("Please specify `target_modules` in `peft_config`")
-            peft_config.target_modules = TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING[
-                model_config["model_type"]
-            ]
-        return peft_config
 
     def forward(self, *args, **kwargs):
         outputs = self.model.forward(*args, **kwargs)

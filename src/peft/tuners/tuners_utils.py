@@ -185,6 +185,7 @@ class BaseTuner(nn.Module, ABC):
     # TODO
     prefix: str
     base_layer_cls: type[BaseTunerLayer]
+    target_module_mapping: dict[str, list[str]]
 
     def __init__(
         self,
@@ -248,23 +249,33 @@ class BaseTuner(nn.Module, ABC):
         """
         pass
 
-    @abstractmethod
     def _prepare_adapter_config(self, peft_config: PeftConfig, model_config: dict) -> PeftConfig:
         r"""
-        A private method to eventually prepare the adapter config. For transformers based models, if
-        `peft_config.target_modules` is None, we can automatically infer the target modules from the
-        `TRANSFORMERS_MODELS_TO_XXX_TARGET_MODULES_MAPPING`. This method can be further refactored in the future to
-        automatically infer it for all tuner models.
+        A private method to prepare the adapter config.
 
-        Check out `peft.tuner.lora.LoraModel._prepare_adapter_config` for an example.
+        For transformers based models, if `peft_config.target_modules` is None, for some model architectures, we can
+        automatically infer the target modules from the `TRANSFORMERS_MODELS_TO_XXX_TARGET_MODULES_MAPPING`.
 
         Args:
             peft_config (`PeftConfig`):
                 The adapter config.
             model_config (`dict`):
                 The transformers model config, that config should contain the `model_type` key.
+
+        Returns:
+            peft_config (`PeftConfig`):
+                The PEFT config with updated `target_modules`.
+
+        Raises:
+            ValueError:
+                Raises an error if the model type was not recognized.
         """
-        ...
+        if peft_config.target_modules is None:
+            target_modules = self.target_module_mapping.get(model_config["model_type"])
+            if target_modules is None:
+                raise ValueError("Please specify `target_modules` in `peft_config`")
+            peft_config.target_modules = set(target_modules)
+        return peft_config
 
     def _prepare_model(self, peft_config: PeftConfig, model: nn.Module):
         r"""

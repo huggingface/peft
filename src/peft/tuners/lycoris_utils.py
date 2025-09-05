@@ -253,12 +253,6 @@ class LycorisTuner(BaseTuner):
 
         return new_module
 
-    @staticmethod
-    def _prepare_adapter_config(peft_config, model_config):
-        if peft_config.target_modules is None:
-            raise ValueError("Please specify `target_modules` in `peft_config`")
-        return peft_config
-
     def set_adapter(self, adapter_name: str | list[str]) -> None:
         """Set the active adapter(s).
 

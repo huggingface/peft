@@ -19,9 +19,7 @@ import torch
 from torch import nn
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
-from peft.utils import (
-    TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
-)
+from peft.utils import TRANSFORMERS_MODELS_TO_POLY_TARGET_MODULES_MAPPING
 
 from .config import PolyConfig
 from .layer import Linear, PolyLayer
@@ -30,6 +28,7 @@ from .layer import Linear, PolyLayer
 class PolyModel(BaseTuner):
     prefix: str = "poly_"
     base_layer_cls = PolyLayer
+    target_module_mapping = TRANSFORMERS_MODELS_TO_POLY_TARGET_MODULES_MAPPING
 
     def _create_and_replace(
         self,
@@ -73,15 +72,6 @@ class PolyModel(BaseTuner):
         for module in self.model.modules():
             if isinstance(module, PolyLayer):
                 module.set_adapter(adapter_name)
-
-    def _prepare_adapter_config(self, peft_config, model_config):
-        if peft_config.target_modules is None:
-            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
-                raise ValueError("Please specify `target_modules` in `peft_config`")
-            peft_config.target_modules = set(
-                TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
-            )
-        return peft_config
 
     def _register_pre_hooks(self, task_ids):
         """Helper method to register pre hooks."""

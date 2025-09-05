@@ -140,6 +140,7 @@ class LoraModel(BaseTuner):
 
     prefix: str = "lora_"
     base_layer_cls = LoraLayer
+    target_module_mapping = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING
 
     def _prepare_model(self, peft_config: LoraConfig, model: nn.Module):
         r"""
@@ -448,13 +449,10 @@ class LoraModel(BaseTuner):
         if self.peft_config.get("layer_replication"):
             raise ValueError("Cannot merge LORA layers when base model layers are replicated")
 
-    @staticmethod
-    def _prepare_adapter_config(peft_config, model_config):
+    def _prepare_adapter_config(self, peft_config, model_config):
         if peft_config.target_modules is None:
-            if model_config["model_type"] in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
-                peft_config.target_modules = set(
-                    TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
-                )
+            if model_config["model_type"] in self.target_module_mapping:
+                peft_config.target_modules = set(self.target_module_mapping[model_config["model_type"]])
             elif not peft_config.target_parameters:
                 raise ValueError("Please specify `target_modules` or `target_parameters`in `peft_config`")
         return peft_config
