@@ -184,7 +184,8 @@ class LoraLayer(BaseTunerLayer):
             from .variants import DoraLinearVariant
             variant = DoraLinearVariant()
         elif use_kasa:
-            pass
+            from .variants import KasaLinearVariant
+            variant = KasaLinearVariant()
 
         return variant
 
