@@ -430,11 +430,14 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         """
         raise NotImplementedError
 
-    def set_adapter(self, adapter_names: Union[str, list[str]]):
+    def set_adapter(self, adapter_names: Union[str, list[str]], inference_mode: bool = False) -> None:
         """Set the active adapter
 
         Args:
-            adapter_name (str): The name of the adapter to set as active
+            adapter_names (str or list[str]):
+                The name(s) of the adapter(s) to set as active
+            inference_mode (bool, optional):
+                 Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         """
         if isinstance(adapter_names, str):
             self._active_adapter = adapter_names
@@ -572,20 +575,17 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 
         return adapter_name_to_set
 
-    def set_adapter(self, adapter_names: Union[str, list[str]]):
+    def set_adapter(self, adapter_names: Union[str, list[str]], inference_mode: bool = False) -> None:
         """Set the active adapter
 
-        Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True). If this is
-        not desired, use the following code.
-
-        ```py
-        >>> for name, param in model_peft.named_parameters():
-        ...     if ...:  # some check on name (ex. if 'lora' in name)
-        ...         param.requires_grad = False
-        ```
+        Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True) unless
+        inference_mode is True.
 
         Args:
-            adapter_names (list[str], str): The name of the adapter to set as active
+            adapter_names (list[str], str):
+                 The name(s) of the adapter(s) to set as active.
+            inference_mode (bool, optional):
+                 Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         """
         if isinstance(adapter_names, str):
             adapter_names = [adapter_names]
@@ -605,7 +605,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 
         for currently_active_adapter_name in self.active_adapters:
             self.modules_to_save[currently_active_adapter_name].requires_grad_(False)
-        self.modules_to_save[adapter_name].requires_grad_(True)
+        self.modules_to_save[adapter_name].requires_grad_(not inference_mode)
         self._active_adapter = adapter_name
 
     def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
@@ -810,9 +810,9 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
 
         return adapter_name_to_set
 
-    def set_adapter(self, adapter_names: Union[str, list[str]]):
-        super().set_adapter(adapter_names)
-        self.token_adapter.set_adapter(adapter_names)
+    def set_adapter(self, adapter_names: Union[str, list[str]], inference_mode: bool = False) -> None:
+        super().set_adapter(adapter_names, inference_mode=inference_mode)
+        self.token_adapter.set_adapter(adapter_names, inference_mode=inference_mode)
 
     def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
         """
@@ -887,6 +887,7 @@ def _set_trainable(
     model,
     adapter_name,
     module_names,
+    inference_mode: bool,
     strict_module_check: bool = False,
     wrapper_cls: Optional[AuxiliaryTrainingWrapper] = None,
     activate_adapter: bool = True,
@@ -926,13 +927,13 @@ def _set_trainable(
             parent, target, target_name = _get_submodules(model, key)
             if isinstance(target, wrapper_cls):
                 target.update(adapter_name, **wrapper_kwargs)
-                target.set_adapter(target.active_adapter)
+                target.set_adapter(target.active_adapter, inference_mode=inference_mode)
             else:
                 new_module = wrapper_cls(target, adapter_name, **wrapper_kwargs)
                 if activate_adapter:
-                    new_module.set_adapter(adapter_name)
+                    new_module.set_adapter(adapter_name, inference_mode=inference_mode)
                 else:
-                    new_module.set_adapter([])
+                    new_module.set_adapter([], inference_mode=inference_mode)
                 setattr(parent, target_name, new_module)
                 trainable_modules.append(new_module)
             found_modules.add(target_name)
@@ -946,7 +947,7 @@ def _set_trainable(
     return trainable_modules
 
 
-def _set_adapter(model, adapter_name):
+def _set_adapter(model, adapter_name: str | list[str], inference_mode: bool = False):
     for module in model.modules():
         if isinstance(module, AuxiliaryTrainingWrapper):
             # only check the adapter_name if we actually encounter a AuxiliaryTrainingWrapper, otherwise we don't care
@@ -956,10 +957,10 @@ def _set_adapter(model, adapter_name):
             # module
             if adapter_name_to_set in module._adapters:
                 module.enable_adapters(True)
-                module.set_adapter(adapter_name_to_set)
+                module.set_adapter(adapter_name_to_set, inference_mode=inference_mode)
             else:
                 module.enable_adapters(False)
-                module.set_adapter([])
+                module.set_adapter([], inference_mode=inference_mode)
 
 
 def _prepare_prompt_learning_config(peft_config, model_config):
@@ -1326,6 +1327,7 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
         _set_trainable(
             model,
             adapter_name,
+            inference_mode=peft_config.inference_mode,
             module_names=getattr(peft_config, "modules_to_save", None),
             activate_adapter=activate_adapter,
         )
@@ -1351,6 +1353,7 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
             _set_trainable(
                 model,
                 adapter_name,
+                inference_mode=peft_config.inference_mode,
                 module_names=[target_layer],
                 strict_module_check=True,
                 wrapper_cls=TrainableTokensWrapper,
@@ -1374,6 +1377,7 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
             _set_trainable(
                 model,
                 adapter_name,
+                inference_mode=peft_config.inference_mode,
                 module_names=module_keys,
                 strict_module_check=True,
                 wrapper_cls=TrainableTokensWrapper,

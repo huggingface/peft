@@ -57,6 +57,8 @@ class ShiraLayer(BaseTunerLayer):
         mask,
         r,
         init_weights: bool = True,
+        inference_mode: bool = False,
+        **kwargs,
     ):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -95,7 +97,7 @@ class ShiraLayer(BaseTunerLayer):
                 )
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def reset_shira_parameters(self, adapter_name):
         nn.init.zeros_(self.shira_weight[adapter_name])

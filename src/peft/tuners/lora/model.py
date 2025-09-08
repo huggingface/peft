@@ -257,6 +257,7 @@ class LoraModel(BaseTuner):
                 use_dora=lora_config.use_dora,
                 lora_bias=lora_config.lora_bias,
                 arrow_config=lora_config.arrow_config,
+                inference_mode=lora_config.inference_mode,
             )
         else:
             if isinstance(target, ParamWrapper) and (parameter_name == target.parameter_name):
@@ -430,28 +431,22 @@ class LoraModel(BaseTuner):
                 warnings.warn(msg)
         self._set_adapter_layers(enabled=False)
 
-    def set_adapter(self, adapter_name: str | list[str]) -> None:
-        """Set the active adapter(s).
-
-        Additionally, this function will set the specified adapters to trainable (i.e., requires_grad=True). If this is
-        not desired, use the following code.
-
-        ```py
-        >>> for name, param in model_peft.named_parameters():
-        ...     if ...:  # some check on name (ex. if 'lora' in name)
-        ...         param.requires_grad = False
-        ```
+    def set_adapter(self, adapter_name: str | list[str], inference_mode: bool = False) -> None:
+        """Set the active adapter(s)
 
         Args:
-            adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
+            adapter_name (str, list[str]):
+                The name(s) of the adapter(s) to set as active
+            inference_mode (bool, optional):
+                 Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         """
-        self.set_auxiliary_adapters(adapter_name)
+        self.set_auxiliary_adapters(adapter_name, inference_mode=inference_mode)
         for module in self.model.modules():
             if isinstance(module, LoraLayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
-                module.set_adapter(adapter_name)
+                module.set_adapter(adapter_name, inference_mode=inference_mode)
         self.active_adapter = adapter_name
 
     @contextmanager
