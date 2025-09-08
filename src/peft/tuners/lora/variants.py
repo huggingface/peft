@@ -326,11 +326,11 @@ class KasaLinearVariant(LoraVariant):
         svd_rank = module.in_features - module.r[adapter_name]
         weight = weight.to(torch.float32)
         U, S, Vh = torch.linalg.svd(weight, full_matrices=False)
-        U_principal = U[:, :svd_rank]
-        S_principal = S[:svd_rank]
-        Vh_principal = Vh[:svd_rank, :]
+        U_principle = U[:, :svd_rank]
+        S_principle = S[:svd_rank]
+        Vh_principle = Vh[:svd_rank, :]
     
-        module.get_base_layer().weight.data = (U_principal @ torch.diag(S_principal) @ Vh_principal).to(dtype)
+        module.get_base_layer().weight.data = (U_principle @ torch.diag(S_principle) @ Vh_principle).to(dtype)
 
     @staticmethod
     def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
