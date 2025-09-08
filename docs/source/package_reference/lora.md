@@ -30,11 +30,11 @@ The abstract from the paper is:
 
 [[autodoc]] tuners.lora.model.LoraModel
 
-## ArrowConfig
+## Utility
+
+### ArrowConfig
 
 [[autodoc]] tuners.lora.config.ArrowConfig
-
-## Utility
 
 ### LoftQ
 
