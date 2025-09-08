@@ -5087,7 +5087,6 @@ class TestRequiresGrad:
         extra_kwargs = {}
         if config_cls == IA3Config:
             extra_kwargs["feedforward_modules"] = []
-        # targeting the different modules with modules_to_save:
         config = config_cls(target_modules=["layers.0.lin0"], **extra_kwargs)
 
         if config_cls == TrainableTokensConfig:  # TrainbleTokens requires a different base model and config
