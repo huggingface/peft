@@ -24,6 +24,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.integrations import dequantize_bnb_weight
 from peft.utils.other import transpose
 
+from .config import ArrowConfig
 from .layer import LoraLayer, LoraVariant
 
 
@@ -44,6 +45,7 @@ if is_bnb_available():
             use_rslora: bool = False,
             use_alora: bool = False,
             use_dora: bool = False,
+            arrow_config: ArrowConfig = None,
             lora_bias: bool = False,
             **kwargs,
         ) -> None:
@@ -62,9 +64,17 @@ if is_bnb_available():
                 use_dora=use_dora,
                 use_alora=use_alora,
                 lora_bias=lora_bias,
+                arrow_config=arrow_config,
             )
 
-        def resolve_lora_variant(self, *, use_dora: bool, use_alora: bool, **kwargs) -> Optional[LoraVariant]:
+        def resolve_lora_variant(
+            self, *, arrow_config: ArrowConfig, use_dora: bool, use_alora: bool, **kwargs
+        ) -> Optional[LoraVariant]:
+            if arrow_config is not None:
+                from .variants import ArrowLinearVariant
+
+                return ArrowLinearVariant()
+
             if not use_dora and not use_alora:
                 return None
 
@@ -323,6 +333,7 @@ if is_bnb_4bit_available():
             init_lora_weights: bool = True,
             use_rslora: bool = False,
             use_dora: bool = False,
+            arrow_config: ArrowConfig = None,
             lora_bias: bool = False,
             **kwargs,
         ) -> None:
@@ -340,9 +351,17 @@ if is_bnb_4bit_available():
                 use_rslora=use_rslora,
                 use_dora=use_dora,
                 lora_bias=lora_bias,
+                arrow_config=arrow_config,
             )
 
-        def resolve_lora_variant(self, *, use_dora: bool, use_alora: bool, **kwargs) -> Optional[LoraVariant]:
+        def resolve_lora_variant(
+            self, *, arrow_config: ArrowConfig, use_dora: bool, use_alora: bool, **kwargs
+        ) -> Optional[LoraVariant]:
+            if arrow_config is not None:
+                from .variants import ArrowLinearVariant
+
+                return ArrowLinearVariant()
+
             if not use_dora and not use_alora:
                 return None
 

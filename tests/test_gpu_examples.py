@@ -20,6 +20,7 @@ import unittest
 from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Union
 
 import numpy as np
@@ -57,6 +58,7 @@ from transformers.pytorch_utils import Conv1D
 
 from peft import (
     AdaLoraConfig,
+    ArrowConfig,
     EvaConfig,
     LoftQConfig,
     LoraConfig,
@@ -67,6 +69,7 @@ from peft import (
     RoadConfig,
     TaskType,
     VeraConfig,
+    create_arrow_model,
     get_peft_model,
     get_peft_model_state_dict,
     initialize_lora_eva_weights,
@@ -82,6 +85,7 @@ from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
 from peft.utils.loftq_utils import NFQuantizer
 from peft.utils.other import fsdp_auto_wrap_policy
+from tests.testing_utils import hub_online_once
 
 from .testing_utils import (
     device_count,
@@ -5271,3 +5275,88 @@ class TestHotSwapping:
         inductor_config_ctx = torch._inductor.config.patch("triton.cudagraph_support_input_mutation", False)
         with dynamo_config_ctx, inductor_config_ctx:
             self.check_hotswap_diffusion(ranks=ranks, alpha_scalings=ranks, target_modules=target_modules)
+
+
+# Test: 4-bit load + Arrow + generate
+class TestArrowQuantized:
+    @pytest.fixture(scope="class")
+    def workdir(self, tmp_path_factory):
+        """Create and return a temp directory path for this class (no chdir)."""
+        wd = tmp_path_factory.mktemp("arrow_workdir")
+        return Path(wd)
+
+    def _create_and_save_adapter_opt(self, out_dir: Path, rank: int = 4):
+        """
+        Build a randomly initialized LoRA adapter for OPT-125M and save into `out_dir`. We construct a model from
+        CONFIG (no pretrained weights) to avoid slow downloads here.
+        """
+        model_id = "facebook/opt-125m"
+        # Target all linear layers so the adapter matches whatever we later quantize/load.
+        lora_cfg = LoraConfig(
+            r=rank,
+            target_modules="all-linear",
+            task_type="CAUSAL_LM",
+            init_lora_weights=False,
+        )
+        # Load the adapter on the model and save it
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+        peft_model = get_peft_model(model, lora_cfg)
+        peft_model.save_pretrained(out_dir)
+
+    @pytest.fixture(scope="class")
+    def ts_adapters_opt(self, workdir: Path):
+        """
+        Build 3 locally-saved task-specific adapters for OPT-125M and return their absolute paths.
+        """
+        paths = []
+        for i in range(3):
+            sub = workdir / f"ts_expert_{i}"
+            self._create_and_save_adapter_opt(sub)
+            paths.append(str(sub))
+        return paths
+
+    @require_bitsandbytes
+    @pytest.mark.single_gpu_tests
+    def test_arrow_4bit_opt125m_load_and_generate_with_local_adapters(self, ts_adapters_opt):
+        # Skip if CUDA or bitsandbytes isn’t available
+        if not torch.cuda.is_available():
+            pytest.skip("CUDA required for 4-bit bitsandbytes test.")
+
+        model_id = "facebook/opt-125m"
+
+        # Quantization config (nf4, bf16 compute)
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=False,
+        )
+
+        with hub_online_once(model_id):
+            # Load quantized base model
+            base_model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                torch_dtype=torch.bfloat16,
+                device_map="auto",
+                quantization_config=bnb_config,
+            )
+            with hub_online_once(model_id + "tokenizer"):
+                tok = AutoTokenizer.from_pretrained(model_id, use_fast=True)
+
+        # Build Arrow model from the locally created adapters
+        arrow_cfg = ArrowConfig(top_k=2, router_temperature=1.0, rng_seed=42)
+        model = create_arrow_model(
+            base_model=base_model,
+            task_specific_adapter_paths=ts_adapters_opt,  # local dirs (each has adapter_config.json)
+            arrow_config=arrow_cfg,
+        ).eval()
+
+        # Quick generate smoke test
+        inputs = tok("Hello world", return_tensors="pt")
+        inputs = {k: v.to(model.device) for k, v in inputs.items()}
+        with torch.no_grad():
+            out = model.generate(**inputs, max_new_tokens=8)
+
+        assert out is not None
+        assert out.shape[0] == 1  # batch size 1
