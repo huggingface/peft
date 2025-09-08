@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import os
 import re
 import textwrap
@@ -881,6 +882,8 @@ class BaseTuner(nn.Module, ABC):
         model_config = getattr(model, "config", DUMMY_MODEL_CONFIG)
         if hasattr(model_config, "to_dict"):
             model_config = model_config.to_dict()
+        elif dataclasses.is_dataclass(model_config):
+            model_config = dataclasses.asdict(model_config)
         return model_config
 
     def _get_tied_target_modules(self, model: nn.Module) -> list[str]:

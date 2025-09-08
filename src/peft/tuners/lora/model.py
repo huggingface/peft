@@ -221,10 +221,12 @@ class LoraModel(BaseTuner):
             "qalora_group_size": lora_config.qalora_group_size,
             "ephemeral_gpu_offload": lora_config.runtime_config.ephemeral_gpu_offload,
             "lora_bias": lora_config.lora_bias,
+            "arrow_config": lora_config.arrow_config,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
             "parameter_name": parameter_name,
         }
+
         # for torchao merging, we need the get_apply_tensor_subclass from the quantization config
         try:
             kwargs["get_apply_tensor_subclass"] = operator.attrgetter(
@@ -254,6 +256,7 @@ class LoraModel(BaseTuner):
                 use_rslora=lora_config.use_rslora,
                 use_dora=lora_config.use_dora,
                 lora_bias=lora_config.lora_bias,
+                arrow_config=lora_config.arrow_config,
                 inference_mode=lora_config.inference_mode,
             )
         else:
