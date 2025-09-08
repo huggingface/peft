@@ -353,19 +353,12 @@ class KasaLinearVariant(LoraVariant):
         lora_B = module.lora_B[active_adapter]
         dropout = module.lora_dropout[active_adapter]
         scaling = module.scaling[active_adapter]
-
+        
+        diag = torch.diag(module.lora_diag[active_adapter])
+        x = module._cast_input_dtype(x, lora_A.weight.dtype)
         if isinstance(dropout, nn.Identity) or not module.training:
-            base_result = result
-        else:
             x = dropout(x)
-            base_result = None
-
-        result = result + module.lora_magnitude_vector[active_adapter](
-            x,
-            lora_A=lora_A,
-            lora_B=lora_B,
-            scaling=scaling,
-            base_layer=module.get_base_layer(),
-            base_result=base_result,
-        )
-        return result
+    
+        # KaSA calculation
+        lora_output = lora_B(torch.einsum('ijk,kl->ijl', lora_A(x), diag)) * scaling
+        return result + lora_output
