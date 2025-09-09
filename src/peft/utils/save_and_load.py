@@ -61,12 +61,12 @@ def get_peft_model_state_dict(
     Get the state dict of the given adapter of the PEFT model.
 
     This only includes the PEFT parameters, not the parameters of the base model. Thus the returned `state_dict` is
-    generally small compared to the full model size. To retrieve the full `state_dict`, just call `model.state_dict`.
+    generally small compared to the full model size. To retrieve the full `state_dict`, just call `model.state_dict`().
 
     Note that the adapter name is removed from the `state_dict`, is this is just an arbitrary name that can be changed
-    when loading the adapter. So e.g. if the adapter name is 'default' and the original key is
-    'model.q_proj.lora_A.default.weight', the returned key will be 'model.q_proj.lora_A.weight'. Use this function in
-    conjunction with `set_peft_model_state_dict` to take care of the adapter name when loading weights.
+    when loading the adapter. So e.g. if the adapter name is `'default'` and the original key is
+    `'model.q_proj.lora_A.default.weight'`, the returned key will be `'model.q_proj.lora_A.weight'`. Use this function in
+    conjunction with [`set_peft_model_state_dict`] to take care of the adapter name when loading weights.
 
     Args:
         model ([`PeftModel`]): The Peft model. When using torch.nn.DistributedDataParallel, DeepSpeed or FSDP,
@@ -382,12 +382,12 @@ def set_peft_model_state_dict(
     adapter_name="default",
     ignore_mismatched_sizes: bool = False,
     low_cpu_mem_usage: bool = False,
-):
+) -> None:
     """
     Set the state dict of the PEFT model.
 
-    Given a PEFT state_dict (as returned by `get_peft_model_state_dict`), insert the weights into the model. The model
-    needs to have the PEFT adapters already in place (e.g. via `inject_adapter_in_model`).
+    Given a PEFT `state_dict` (as returned by [`get_peft_model_state_dict`]), insert the weights into the model. The
+    model needs to have the PEFT adapters already in place (e.g. via [`inject_adapter_in_model`]).
 
     Setting the adapter weights also takes care of re-inserting the adapter name. This name may be a different name
     than the one originally used to train the adapter.

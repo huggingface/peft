@@ -940,7 +940,7 @@ class BaseTuner(nn.Module, ABC):
                         create_and_replace_param(module_name, key, param_name)
                         self.targeted_parameter_names.append(key)
 
-    def _replace_module(self, parent, child_name, new_module, child):
+    def _replace_module(self, parent, child_name, new_module, child) -> None:
         """
         Replace the sub-module of a given moduel with a new PEFT module.
 
@@ -1049,7 +1049,7 @@ class BaseTuner(nn.Module, ABC):
         _set_adapter(self, adapter_name, inference_mode=inference_mode)
 
     def set_adapter(self, adapter_name: str | list[str], inference_mode: bool = False) -> None:
-        """Set the active adapter(s)
+        """Set the active adapter(s).
 
         Args:
             adapter_name (str, list[str]):
@@ -1712,6 +1712,9 @@ def set_adapter(
     layer_cls: type[BaseTunerLayer] = BaseTunerLayer,
 ) -> None:
     """Set the active PEFT adapter(s) of the model.
+
+    Active adapters are those adapters that participate in the forward pass. Use this function if you want to switch
+    between multiple PEFT adapters.
 
     Args:
         model (`nn.Module`):
