@@ -292,13 +292,3 @@ class VeraModel(BaseTuner):
         )
 
         return new_module
-
-    def set_adapter(self, adapter_name, inference_mode: bool = False):
-        self.set_auxiliary_adapters(adapter_name, inference_mode=inference_mode)
-        for module in self.model.modules():
-            if isinstance(module, VeraLayer):
-                if module.merged:
-                    warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
-                    module.unmerge()
-                module.set_adapter(adapter_name, inference_mode=inference_mode)
-        self.active_adapter = adapter_name

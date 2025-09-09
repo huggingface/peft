@@ -998,6 +998,20 @@ class BaseTuner(nn.Module, ABC):
         """
         _set_adapter(self, adapter_name, inference_mode=inference_mode)
 
+    def set_adapter(self, adapter_name: str | list[str], inference_mode: bool = False) -> None:
+        """Set the active adapter(s)
+
+        Args:
+            adapter_name (str, list[str]):
+                The name(s) of the adapter(s) to set as active
+            inference_mode (bool, optional):
+                 Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
+        """
+        set_adapter(
+            self.model, adapter_name=adapter_name, inference_mode=inference_mode, base_layer_cls=self.base_layer_cls
+        )
+        self.active_adapter = adapter_name
+
     def _delete_auxiliary_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
         for module in self.modules():
             if isinstance(module, AuxiliaryTrainingWrapper):
@@ -1688,6 +1702,31 @@ def replace_module(parent: nn.Module, child_name: str, new_module: nn.Module, ch
 
             if not any(p.device == meta for p in module.parameters()):
                 module.to(weight.device)
+
+
+def set_adapter(
+    model,
+    adapter_name: str | list[str],
+    inference_mode: bool = False,
+    base_layer_cls: type[BaseTunerLayer] = BaseTunerLayer,
+) -> None:
+    """Set the active adapter(s)
+
+    TODO
+
+    Args:
+        adapter_name (str, list[str]):
+            The name(s) of the adapter(s) to set as active
+        inference_mode (bool, optional):
+             Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
+    """
+    _set_adapter(model, adapter_name, inference_mode=inference_mode)
+    for module in model.modules():
+        if isinstance(module, base_layer_cls):
+            if module.merged:
+                warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
+                module.unmerge()
+            module.set_adapter(adapter_name, inference_mode=inference_mode)
 
 
 def delete_adapter(

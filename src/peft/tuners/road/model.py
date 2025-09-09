@@ -124,21 +124,6 @@ class RoadModel(BaseTuner):
 
         return new_module
 
-    def set_adapter(self, adapter_name: str | list[str], inference_mode: bool = False) -> None:
-        """Set the active adapter(s).
-
-        Args:
-            adapter_name (`str` or `list[str]`):
-                Name(s) of the adapter(s) to be activated.
-            inference_mode (bool, optional):
-                 Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
-        """
-        self.set_auxiliary_adapters(adapter_name, inference_mode=inference_mode)
-        for module in self.model.modules():
-            if isinstance(module, RoadLayer):
-                module.set_adapter(adapter_name, inference_mode=inference_mode)
-        self.active_adapter = adapter_name
-
     @contextmanager
     def _enable_peft_forward_hooks(self, *args, **kwargs):
         # If adapter_names is passed as an argument, we inject it into the forward arguments.
