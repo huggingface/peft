@@ -419,7 +419,6 @@ class BaseTuner(nn.Module, ABC):
             model=self.model, adapter_name=adapter_name, prefix=self.prefix, layer_cls=self.tuner_layer_cls
         )
         self.active_adapter = new_adapter or []
-        self._delete_auxiliary_adapter(adapter_name, new_active_adapters=new_adapter)
 
     def _check_new_adapter_config(self, config: PeftConfig) -> None:
         """
@@ -1735,6 +1734,12 @@ def set_adapter(
             module.set_adapter(adapter_name, inference_mode=inference_mode)
 
 
+def _delete_auxiliary_adapter(model, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
+    for module in model.modules():
+        if isinstance(module, AuxiliaryTrainingWrapper):
+            module.delete_adapter(adapter_name, new_active_adapters=new_active_adapters)
+
+
 def delete_adapter(
     model: nn.Module, adapter_name: str, prefix: str, layer_cls: type[BaseTunerLayer] = BaseTunerLayer
 ) -> list[str] | None:
@@ -1770,6 +1775,7 @@ def delete_adapter(
             if new_adapter is None:
                 new_adapter = target.active_adapters[:]
 
+    _delete_auxiliary_adapter(model, adapter_name=adapter_name, new_active_adapters=new_adapter)
     return new_adapter
 
 

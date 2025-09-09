@@ -20,7 +20,7 @@ from torch import nn
 from tqdm import tqdm
 
 from peft.tuners import adalora, loha, lokr, lora, oft, shira
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, _delete_auxiliary_adapter
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
@@ -290,7 +290,7 @@ class MixedModel(BaseTuner):
                         new_adapter = target.active_adapters[:]
 
         self.active_adapter = new_adapter or []
-        self._delete_auxiliary_adapter(adapter_name, new_active_adapters=new_adapter)
+        _delete_auxiliary_adapter(self.model, adapter_name, new_active_adapters=new_adapter)
 
     def generate(self, *args: Any, **kwargs: Any):
         return self.model.generate(*args, **kwargs)
