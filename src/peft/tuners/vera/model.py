@@ -95,7 +95,7 @@ class VeraModel(BaseTuner):
     """
 
     prefix: str = "vera_lambda_"
-    base_layer_cls = VeraLayer
+    tuner_layer_cls = VeraLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING
 
     def _find_dim(self, config) -> tuple[int, int]:

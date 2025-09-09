@@ -55,7 +55,7 @@ class ShiraModel(BaseTuner):
     """
 
     prefix: str = "shira_"
-    base_layer_cls = ShiraLayer
+    tuner_layer_cls = ShiraLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING
 
     def _create_and_replace(

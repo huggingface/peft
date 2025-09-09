@@ -95,7 +95,7 @@ class RandLoraModel(BaseTuner):
     """
 
     prefix: str = "randlora_"
-    base_layer_cls = RandLoraLayer
+    tuner_layer_cls = RandLoraLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING
 
     def _find_dim(self, config) -> tuple[int, int]:

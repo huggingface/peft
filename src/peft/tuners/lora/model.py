@@ -139,7 +139,7 @@ class LoraModel(BaseTuner):
     """
 
     prefix: str = "lora_"
-    base_layer_cls = LoraLayer
+    tuner_layer_cls = LoraLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING
 
     def _prepare_model(self, peft_config: LoraConfig, model: nn.Module):

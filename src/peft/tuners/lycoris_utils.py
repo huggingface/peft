@@ -196,7 +196,7 @@ class LycorisTuner(BaseTuner):
     """
 
     prefix: str
-    base_layer_cls = LycorisLayer
+    tuner_layer_cls = LycorisLayer
     layers_mapping: dict[type[torch.nn.Module], type[LycorisLayer]]
 
     @abstractmethod

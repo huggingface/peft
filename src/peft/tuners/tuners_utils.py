@@ -185,7 +185,7 @@ class BaseTuner(nn.Module, ABC):
 
     # TODO
     prefix: str
-    base_layer_cls: type[BaseTunerLayer]
+    tuner_layer_cls: type[BaseTunerLayer]
     target_module_mapping: dict[str, list[str]]
 
     def __init__(
@@ -364,7 +364,7 @@ class BaseTuner(nn.Module, ABC):
                         p.requires_grad = True
             elif bias.endswith("_only"):  # e.g. "lora_only" or "boft_only"
                 for m in model.modules():
-                    if isinstance(m, self.base_layer_cls) and hasattr(m, "bias") and m.bias is not None:
+                    if isinstance(m, self.tuner_layer_cls) and hasattr(m, "bias") and m.bias is not None:
                         m.bias.requires_grad = True
             else:
                 raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
@@ -410,7 +410,7 @@ class BaseTuner(nn.Module, ABC):
         del self.peft_config[adapter_name]
 
         new_adapter = delete_adapter(
-            model=self.model, adapter_name=adapter_name, prefix=self.prefix, base_layer_cls=self.base_layer_cls
+            model=self.model, adapter_name=adapter_name, prefix=self.prefix, layer_cls=self.tuner_layer_cls
         )
         self.active_adapter = new_adapter or []
         self._delete_auxiliary_adapter(adapter_name, new_active_adapters=new_adapter)
@@ -1008,7 +1008,7 @@ class BaseTuner(nn.Module, ABC):
                  Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         """
         set_adapter(
-            self.model, adapter_name=adapter_name, inference_mode=inference_mode, base_layer_cls=self.base_layer_cls
+            self.model, adapter_name=adapter_name, inference_mode=inference_mode, layer_cls=self.tuner_layer_cls
         )
         self.active_adapter = adapter_name
 
@@ -1700,7 +1700,7 @@ def set_adapter(
     model,
     adapter_name: str | list[str],
     inference_mode: bool = False,
-    base_layer_cls: type[BaseTunerLayer] = BaseTunerLayer,
+    layer_cls: type[BaseTunerLayer] = BaseTunerLayer,
 ) -> None:
     """Set the active adapter(s)
 
@@ -1714,7 +1714,7 @@ def set_adapter(
     """
     _set_adapter(model, adapter_name, inference_mode=inference_mode)
     for module in model.modules():
-        if isinstance(module, base_layer_cls):
+        if isinstance(module, layer_cls):
             if module.merged:
                 warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                 module.unmerge()
@@ -1722,7 +1722,7 @@ def set_adapter(
 
 
 def delete_adapter(
-    model: nn.Module, adapter_name: str, prefix: str, base_layer_cls: type[BaseTunerLayer] = BaseTunerLayer
+    model: nn.Module, adapter_name: str, prefix: str, layer_cls: type[BaseTunerLayer] = BaseTunerLayer
 ) -> list[str] | None:
     """
     TODO
@@ -1737,7 +1737,7 @@ def delete_adapter(
 
     for key in key_list:
         _, target, _ = _get_submodules(model, key)
-        if isinstance(target, base_layer_cls):
+        if isinstance(target, layer_cls):
             target.delete_adapter(adapter_name)
             if new_adapter is None:
                 new_adapter = target.active_adapters[:]

@@ -72,7 +72,7 @@ class MissModel(BaseTuner):
     """
 
     prefix: str = "miss_"
-    base_layer_cls = MissLayer
+    tuner_layer_cls = MissLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_MISS_TARGET_MODULES_MAPPING
 
     def _create_and_replace(

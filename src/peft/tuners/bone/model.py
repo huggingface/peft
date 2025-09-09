@@ -72,7 +72,7 @@ class BoneModel(BaseTuner):
     """
 
     prefix: str = "bone_"
-    base_layer_cls = BoneLayer
+    tuner_layer_cls = BoneLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_BONE_TARGET_MODULES_MAPPING
 
     def _create_and_replace(

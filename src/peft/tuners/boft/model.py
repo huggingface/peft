@@ -61,7 +61,7 @@ class BOFTModel(BaseTuner):
     """
 
     prefix: str = "boft_"
-    base_layer_cls = BOFTLayer
+    tuner_layer_cls = BOFTLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING
 
     def _create_and_replace(

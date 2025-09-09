@@ -84,7 +84,7 @@ class OFTModel(BaseTuner):
     """
 
     prefix: str = "oft_"
-    base_layer_cls = OFTLayer
+    tuner_layer_cls = OFTLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_OFT_TARGET_MODULES_MAPPING
 
     def _create_and_replace(

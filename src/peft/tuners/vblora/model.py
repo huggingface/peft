@@ -66,7 +66,7 @@ class VBLoRAModel(BaseTuner):
     """
 
     prefix: str = "vblora_"
-    base_layer_cls = VBLoRALayer
+    tuner_layer_cls = VBLoRALayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING
 
     def _init_vblora_vector_bank(self, config: VBLoRAConfig, adapter_name: str) -> None:

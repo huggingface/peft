@@ -72,7 +72,7 @@ class HRAModel(BaseTuner):
     """
 
     prefix: str = "hra_"
-    base_layer_cls = HRALayer
+    tuner_layer_cls = HRALayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_HRA_TARGET_MODULES_MAPPING
 
     def _create_and_replace(

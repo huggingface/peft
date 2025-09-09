@@ -25,7 +25,7 @@ from .layer import TrainableTokensLayer
 
 class TrainableTokensModel(BaseTuner):
     prefix: str = "trainable_tokens_"
-    base_layer_cls = TrainableTokensLayer
+    tuner_layer_cls = TrainableTokensLayer
 
     def _prepare_adapter_config(self, peft_config, model_config):
         # target_modules can be none which prompts us to infer the embedding layer name ourselves.

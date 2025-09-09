@@ -62,7 +62,7 @@ class LNTuningModel(BaseTuner):
     """
 
     prefix: str = "ln_tuning_"
-    base_layer_cls = LNTuningLayer
+    tuner_layer_cls = LNTuningLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING
 
     def _create_and_replace(

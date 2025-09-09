@@ -46,7 +46,7 @@ class C3AModel(BaseTuner):
     """
 
     prefix: str = "c3a_"
-    base_layer_cls = C3ALayer
+    tuner_layer_cls = C3ALayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING
 
     def _create_and_replace(

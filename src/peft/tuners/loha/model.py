@@ -83,7 +83,7 @@ class LoHaModel(LycorisTuner):
     """
 
     prefix: str = "hada_"
-    base_layer_cls = LoHaLayer
+    tuner_layer_cls = LoHaLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_LOHA_TARGET_MODULES_MAPPING
     layers_mapping: dict[type[torch.nn.Module], type[LoHaLayer]] = {
         torch.nn.Conv2d: Conv2d,

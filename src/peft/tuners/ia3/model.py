@@ -71,7 +71,7 @@ class IA3Model(BaseTuner):
     """
 
     prefix: str = "ia3_"
-    base_layer_cls = IA3Layer
+    tuner_layer_cls = IA3Layer
 
     @staticmethod
     def _create_new_module(ia3_config, adapter_name, target, **kwargs):

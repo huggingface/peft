@@ -27,7 +27,7 @@ from .layer import Linear, PolyLayer
 
 class PolyModel(BaseTuner):
     prefix: str = "poly_"
-    base_layer_cls = PolyLayer
+    tuner_layer_cls = PolyLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_POLY_TARGET_MODULES_MAPPING
 
     def _create_and_replace(

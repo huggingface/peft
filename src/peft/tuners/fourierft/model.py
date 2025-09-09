@@ -50,7 +50,7 @@ class FourierFTModel(BaseTuner):
     """
 
     prefix: str = "fourierft_"
-    base_layer_cls = FourierFTLayer
+    tuner_layer_cls = FourierFTLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING
 
     def _create_and_replace(
