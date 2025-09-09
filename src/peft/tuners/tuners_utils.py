@@ -454,8 +454,6 @@ class BaseTuner(nn.Module, ABC):
 
         """
         cast_adapter_dtype(self.model, adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)
-        if not autocast_adapter_dtype:
-            return
 
     def _check_merge_allowed(self):
         """Helper method to check whether the adapter can be merged.
