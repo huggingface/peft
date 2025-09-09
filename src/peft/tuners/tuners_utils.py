@@ -183,9 +183,15 @@ class BaseTuner(nn.Module, ABC):
             The PEFT-method specific unique prefix. E.g. `"lora_"` for LoRA.
     """
 
-    # TODO
+    # Required attributes for child classes:
+
+    # The unique prefix for this PEFT method, e.g. 'lora_' for LoRA.
     prefix: str
+    # The class of the tuner layer, e.g. `LoraLayer` for LoRA.
     tuner_layer_cls: type[BaseTunerLayer]
+    # The default target modules for various transformers model architectures, like Llama. This is useful to allow users
+    # to skip specifying the `target_modules` in the config of the PEFT method. The default is often something like
+    # `{'llama': ['q_proj', 'v_proj'], ...}`.
     target_module_mapping: dict[str, list[str]]
 
     def __init__(
@@ -1705,17 +1711,19 @@ def set_adapter(
     inference_mode: bool = False,
     layer_cls: type[BaseTunerLayer] = BaseTunerLayer,
 ) -> None:
-    """Set the active adapter(s)
-
-    TODO
+    """Set the active PEFT adapter(s) of the model.
 
     Args:
+        model (`nn.Module`):
+            The model on which the adapter(s) should be set.
         adapter_name (str, list[str]):
             The name(s) of the adapter(s) to set as active
         inference_mode (bool, optional):
              Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
+        layer_cls (type, optional):
+            The class of the adapter layer. Defaults to `BaseTunerLayer`.
     """
-    _set_adapter(model, adapter_name, inference_mode=inference_mode)
+    _set_adapter(model, adapter_name, inference_mode=inference_mode)  # auxiliary modules
     for module in model.modules():
         if isinstance(module, layer_cls):
             if module.merged:
@@ -1728,12 +1736,26 @@ def delete_adapter(
     model: nn.Module, adapter_name: str, prefix: str, layer_cls: type[BaseTunerLayer] = BaseTunerLayer
 ) -> list[str] | None:
     """
-    TODO
+    Delete an existing PEFT adapter.
 
-    Deletes an existing adapter.
+    Note: This function does not delete the PEFT config on the model, if there is one. It will also not completely
+    purge the PEFT layers if the last PEFT adapter is deleted. For this, consider using `model.unload()` if using a
+    PEFT model instance, or just reloading the base model.
 
     Args:
-        adapter_name (str): Name of the adapter to be deleted.
+        model (`nn.Module`):
+            The model from which the adapter should be deleted.
+        adapter_name (str):
+            The name of the adapter to be deleted.
+        prefix (str):
+            The prefix of the PEFT method, e.g. "lora_" for LoRA.
+        layer_cls (type, optional):
+            The class of the adapter layer. Defaults to `BaseTunerLayer`.
+
+    Returns:
+        new_adapter (list[str] | None):
+            The name of remaining adapter(s) after deletion, or `None` if there are no active adapters left. Use this
+            to set the new active adapter of the model if necessary.
     """
     key_list = [key for key, _ in model.named_modules() if prefix not in key]
     new_adapter = None
@@ -1759,7 +1781,6 @@ def cast_adapter_dtype(model: nn.Module, adapter_name: str, autocast_adapter_dty
             The adapter name.
         autocast_adapter_dtype (`bool`, *optional*):
             Whether to autocast the adapter dtype. Defaults to `True`.
-
     """
     if not autocast_adapter_dtype:
         return

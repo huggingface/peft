@@ -58,7 +58,15 @@ def get_peft_model_state_dict(
     model, state_dict=None, adapter_name="default", unwrap_compiled=False, save_embedding_layers="auto"
 ):
     """
-    Get the state dict of the Peft model.
+    Get the state dict of the given adapter of the PEFT model.
+
+    This only includes the PEFT parameters, not the parameters of the base model. Thus the returned `state_dict` is
+    generally small compared to the full model size. To retrieve the full `state_dict`, just call `model.state_dict`.
+
+    Note that the adapter name is removed from the `state_dict`, is this is just an arbitrary name that can be changed
+    when loading the adapter. So e.g. if the adapter name is 'default' and the original key is
+    'model.q_proj.lora_A.default.weight', the returned key will be 'model.q_proj.lora_A.weight'. Use this function in
+    conjunction with `set_peft_model_state_dict` to take care of the adapter name when loading weights.
 
     Args:
         model ([`PeftModel`]): The Peft model. When using torch.nn.DistributedDataParallel, DeepSpeed or FSDP,
@@ -73,6 +81,7 @@ def get_peft_model_state_dict(
             If `True`, save the embedding layers in addition to adapter weights. If `auto`, checks the common embedding
             layers `peft.utils.other.EMBEDDING_LAYER_NAMES` in config's `target_modules` when available. Based on it
             sets the boolean flag. This only works for 🤗 transformers models.
+
     """
     if unwrap_compiled:
         model = getattr(model, "_orig_mod", model)
@@ -375,7 +384,13 @@ def set_peft_model_state_dict(
     low_cpu_mem_usage: bool = False,
 ):
     """
-    Set the state dict of the Peft model.
+    Set the state dict of the PEFT model.
+
+    Given a PEFT state_dict (as returned by `get_peft_model_state_dict`), insert the weights into the model. The model
+    needs to have the PEFT adapters already in place (e.g. via `inject_adapter_in_model`).
+
+    Setting the adapter weights also takes care of re-inserting the adapter name. This name may be a different name
+    than the one originally used to train the adapter.
 
     Args:
         model ([`PeftModel`]):
