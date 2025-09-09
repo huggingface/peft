@@ -1061,11 +1061,6 @@ class BaseTuner(nn.Module, ABC):
         )
         self.active_adapter = adapter_name
 
-    def _delete_auxiliary_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
-        for module in self.modules():
-            if isinstance(module, AuxiliaryTrainingWrapper):
-                module.delete_adapter(adapter_name, new_active_adapters=new_active_adapters)
-
     @staticmethod
     def get_model_config(model: nn.Module) -> dict:
         """
