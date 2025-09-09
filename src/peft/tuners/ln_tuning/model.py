@@ -94,14 +94,14 @@ class LNTuningModel(BaseTuner):
             new_module.update_layer(target.base_layer, adapter_name)
         return new_module
 
-    def set_adapter(self, adapter_name: str) -> None:
-        self.set_auxiliary_adapters(adapter_name)
+    def set_adapter(self, adapter_name: str, inference_mode: bool = False) -> None:
+        self.set_auxiliary_adapters(adapter_name, inference_mode=inference_mode)
         for module in self.model.modules():
             if isinstance(module, LNTuningLayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
-                module.set_adapter(adapter_name)
+                module.set_adapter(adapter_name, inference_mode=inference_mode)
         self.active_adapter = adapter_name
 
     def _unload_and_optionally_merge(

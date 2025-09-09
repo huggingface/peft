@@ -3685,11 +3685,20 @@ class TestRequiresGrad:
             "base_model.model.lin0.ia3_l.adapter1",
         )
 
+    @pytest.mark.xfail(strict=True)
     def test_requires_grad_adalora_different_targets(self):
         # test two different AdaLora adapters that target different modules
+
+        # Note: This test is expected to fail because first loading one adapter, then the next adapter with
+        # inference_mode=True incorrectly leads to the requires_grad of the first adapter being turned to False. This is
+        # of course not desired but has yet to be fixed. In practice, it's unlikely that a user would pass
+        # inference_mode=True for add_adapter, this flag is mostly being used when calling PeftModel.from_pretrained, so
+        # we accept this issue for now. Note that only for AdaLoRA do we even need to pass inference_mode=True here,
+        # other PEFT methods don't require this.
         config0 = AdaLoraConfig(target_modules=["lin0"], total_step=1)
         peft_model = get_peft_model(MLP(), config0)
 
+        # note: AdaLoRA cannot have more than 1 trainable active adapter, hence enable inference_mode
         config1 = AdaLoraConfig(target_modules=["lin1"], total_step=1, inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
@@ -3731,11 +3740,20 @@ class TestRequiresGrad:
             "base_model.model.lin1.lora_E.adapter1",
         )
 
+    @pytest.mark.xfail(strict=True)
     def test_requires_grad_adalora_same_targets(self):
         # same as previous test, except that AdaLora adapters target the same layer
+
+        # Note: This test is expected to fail because first loading one adapter, then the next adapter with
+        # inference_mode=True incorrectly leads to the requires_grad of the first adapter being turned to False. This is
+        # of course not desired but has yet to be fixed. In practice, it's unlikely that a user would pass
+        # inference_mode=True for add_adapter, this flag is mostly being used when calling PeftModel.from_pretrained, so
+        # we accept this issue for now. Note that only for AdaLoRA do we even need to pass inference_mode=True here,
+        # other PEFT methods don't require this.
         config0 = AdaLoraConfig(target_modules=["lin0"], total_step=1)
         peft_model = get_peft_model(MLP(), config0)
 
+        # note: AdaLoRA cannot have more than 1 trainable active adapter, hence enable inference_mode
         config1 = AdaLoraConfig(target_modules=["lin0"], total_step=1, inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
@@ -3944,7 +3962,7 @@ class TestRequiresGrad:
         config0 = LoHaConfig(target_modules=["lin0"])
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = LoHaConfig(target_modules=["lin1"], inference_mode=True)
+        config1 = LoHaConfig(target_modules=["lin1"])
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -3994,7 +4012,7 @@ class TestRequiresGrad:
         config0 = LoHaConfig(target_modules=["lin0"])
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = LoHaConfig(target_modules=["lin0"], inference_mode=True)
+        config1 = LoHaConfig(target_modules=["lin0"])
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -4045,7 +4063,7 @@ class TestRequiresGrad:
         config0 = LoKrConfig(target_modules=["lin0"])
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = LoKrConfig(target_modules=["lin1"], inference_mode=True)
+        config1 = LoKrConfig(target_modules=["lin1"])
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -4087,7 +4105,7 @@ class TestRequiresGrad:
         config0 = LoKrConfig(target_modules=["lin0"])
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = LoKrConfig(target_modules=["lin0"], inference_mode=True)
+        config1 = LoKrConfig(target_modules=["lin0"])
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -4130,7 +4148,7 @@ class TestRequiresGrad:
         config0 = OFTConfig(target_modules=["lin0"], r=2, oft_block_size=0)
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = OFTConfig(target_modules=["lin1"], r=2, oft_block_size=0, inference_mode=True)
+        config1 = OFTConfig(target_modules=["lin1"], r=2, oft_block_size=0)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -4168,7 +4186,7 @@ class TestRequiresGrad:
         config0 = OFTConfig(target_modules=["lin0"], r=2, oft_block_size=0)
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = OFTConfig(target_modules=["lin0"], r=2, oft_block_size=0, inference_mode=True)
+        config1 = OFTConfig(target_modules=["lin0"], r=2, oft_block_size=0)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -4207,7 +4225,7 @@ class TestRequiresGrad:
         config0 = HRAConfig(target_modules=["lin0"])
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = HRAConfig(target_modules=["lin1"], inference_mode=True)
+        config1 = HRAConfig(target_modules=["lin1"])
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -4245,7 +4263,7 @@ class TestRequiresGrad:
         config0 = HRAConfig(target_modules=["lin0"])
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = HRAConfig(target_modules=["lin0"], inference_mode=True)
+        config1 = HRAConfig(target_modules=["lin0"])
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -4284,7 +4302,7 @@ class TestRequiresGrad:
         config0 = BoneConfig(target_modules=["lin0"], r=2)
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = BoneConfig(target_modules=["lin1"], r=2, inference_mode=True)
+        config1 = BoneConfig(target_modules=["lin1"], r=2)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -4322,7 +4340,7 @@ class TestRequiresGrad:
         config0 = BoneConfig(target_modules=["lin0"], r=2)
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = BoneConfig(target_modules=["lin0"], r=2, inference_mode=True)
+        config1 = BoneConfig(target_modules=["lin0"], r=2)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -4361,7 +4379,7 @@ class TestRequiresGrad:
         config0 = MissConfig(target_modules=["lin0"], r=2)
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = MissConfig(target_modules=["lin1"], r=2, inference_mode=True)
+        config1 = MissConfig(target_modules=["lin1"], r=2)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -4399,7 +4417,7 @@ class TestRequiresGrad:
         config0 = MissConfig(target_modules=["lin0"], r=2)
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = MissConfig(target_modules=["lin0"], r=2, inference_mode=True)
+        config1 = MissConfig(target_modules=["lin0"], r=2)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -4438,7 +4456,7 @@ class TestRequiresGrad:
         config0 = BOFTConfig(target_modules=["lin0"], boft_block_size=2)
         peft_model = get_peft_model(MLP2(), config0)
 
-        config1 = BOFTConfig(target_modules=["lin1"], boft_block_size=2, inference_mode=True)
+        config1 = BOFTConfig(target_modules=["lin1"], boft_block_size=2)
         peft_model.add_adapter("adapter1", config1)
 
         # active pter is still "default"
@@ -4480,7 +4498,7 @@ class TestRequiresGrad:
         config0 = BOFTConfig(target_modules=["lin1"], boft_block_size=2)
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = BOFTConfig(target_modules=["lin1"], boft_block_size=2, inference_mode=True)
+        config1 = BOFTConfig(target_modules=["lin1"], boft_block_size=2)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -4524,10 +4542,7 @@ class TestRequiresGrad:
         )
         peft_model = get_peft_model(MLP_LayerNorm(), config0)
 
-        config1 = LNTuningConfig(
-            target_modules=["layernorm1"],
-            inference_mode=True,
-        )
+        config1 = LNTuningConfig(target_modules=["layernorm1"])
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -4571,7 +4586,7 @@ class TestRequiresGrad:
         )
         peft_model = get_peft_model(MLP_LayerNorm(), config0)
 
-        config1 = LNTuningConfig(target_modules=["layernorm0"], inference_mode=True)
+        config1 = LNTuningConfig(target_modules=["layernorm0"])
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -4990,7 +5005,7 @@ class TestRequiresGrad:
         config0 = FourierFTConfig(n_frequency=10, target_modules=["lin0"])
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = FourierFTConfig(n_frequency=10, target_modules=["lin1"], inference_mode=True)
+        config1 = FourierFTConfig(n_frequency=10, target_modules=["lin1"])
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -5028,7 +5043,7 @@ class TestRequiresGrad:
         config0 = FourierFTConfig(n_frequency=10, target_modules=["lin0"])
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = FourierFTConfig(n_frequency=10, target_modules=["lin0"], inference_mode=True)
+        config1 = FourierFTConfig(n_frequency=10, target_modules=["lin0"])
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -5061,6 +5076,177 @@ class TestRequiresGrad:
             peft_model,
             "base_model.model.lin0.fourierft_spectrum.adapter1",
         )
+
+    @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
+    @pytest.mark.parametrize("is_trainable", [False, True])  # note: default is False
+    def test_loading_model_requires_grad_set_correctly(self, config_cls, is_trainable, tmp_path):
+        # Test that when loading PeftModel and then loading another adapter, the requires_grad is set correctly and
+        # is_trainable is respected.
+        # See #2759
+        model = DeepMLP(size=256)  # a size that works with all adapters
+        extra_kwargs = {}
+        if config_cls == IA3Config:
+            extra_kwargs["feedforward_modules"] = []
+        config = config_cls(target_modules=["layers.0.lin0"], **extra_kwargs)
+
+        if config_cls == TrainableTokensConfig:  # TrainbleTokens requires a different base model and config
+            model = ModelEmbConv1D()
+            config = config_cls(target_modules=["emb"], token_indices=[0, 2, 4])
+
+        model = get_peft_model(model, config)
+        model.save_pretrained(tmp_path)
+        del model
+
+        model = DeepMLP(size=256)
+        if config_cls == TrainableTokensConfig:  # TrainbleTokens requires a different base
+            model = ModelEmbConv1D()
+        model = PeftModel.from_pretrained(model, tmp_path, is_trainable=is_trainable)
+
+        if is_trainable:
+            for name, param in model.named_parameters():
+                if ".default" in name:
+                    assert param.requires_grad
+                else:
+                    assert not param.requires_grad
+        else:
+            assert all(not p.requires_grad for p in model.parameters())
+
+        # load one more adapter; this adapter is not automatically activated
+        model.load_adapter(tmp_path, adapter_name="other", is_trainable=is_trainable)
+        if is_trainable:
+            for name, param in model.named_parameters():
+                if ".default" in name:
+                    assert param.requires_grad
+                else:
+                    assert not param.requires_grad
+        else:
+            assert all(not p.requires_grad for p in model.parameters())
+
+    @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
+    @pytest.mark.parametrize("is_trainable", [False, True])  # note: default is False
+    def test_loading_model_with_modules_to_save_requires_grad_set_correctly(self, config_cls, is_trainable, tmp_path):
+        # Same test as above, but with modules_to_save
+        if config_cls == TrainableTokensConfig:
+            pytest.skip(reason="Trainable tokens does not support modules_to_save")
+
+        model = DeepMLP(size=256)  # a size that works with all adapters
+        extra_kwargs = {}
+        if config_cls == IA3Config:
+            extra_kwargs["feedforward_modules"] = []
+        # targeting the different modules with modules_to_save:
+        config = config_cls(target_modules=["layers.0.lin0"], modules_to_save=["layers.0.lin1"], **extra_kwargs)
+        model = get_peft_model(model, config)
+        model.save_pretrained(tmp_path)
+        del model
+
+        model = DeepMLP(size=256)
+        model = PeftModel.from_pretrained(model, tmp_path, is_trainable=is_trainable)
+
+        if is_trainable:
+            for name, param in model.named_parameters():
+                if ".default" in name:
+                    assert param.requires_grad
+                else:
+                    assert not param.requires_grad
+        else:
+            assert all(not p.requires_grad for p in model.parameters())
+
+        # load one more adapter
+        model.load_adapter(tmp_path, adapter_name="other", is_trainable=is_trainable)
+        if is_trainable:
+            for name, param in model.named_parameters():
+                if ".default" in name:
+                    assert param.requires_grad
+                else:
+                    assert not param.requires_grad
+        else:
+            assert all(not p.requires_grad for p in model.parameters())
+
+    @pytest.mark.parametrize("is_trainable", [False, True])  # note: default is False
+    def test_loading_model_with_trainble_tokens_requires_grad_set_correctly(self, is_trainable, tmp_path):
+        model = ModelEmbConv1D()
+        # targeting the same modules with modules_to_save:
+        config = LoraConfig(target_modules=["lin0"], trainable_token_indices={"emb": [0]})
+        model = get_peft_model(model, config)
+        model.save_pretrained(tmp_path)
+        del model
+
+        model = ModelEmbConv1D()
+        model = PeftModel.from_pretrained(model, tmp_path, is_trainable=is_trainable)
+
+        if is_trainable:
+            for name, param in model.named_parameters():
+                if ".default" in name:
+                    assert param.requires_grad
+                else:
+                    assert not param.requires_grad
+        else:
+            assert all(not p.requires_grad for p in model.parameters())
+
+        # load one more adapter
+        model.load_adapter(tmp_path, adapter_name="other", is_trainable=is_trainable)
+        if is_trainable:
+            for name, param in model.named_parameters():
+                if ".default" in name:
+                    assert param.requires_grad
+                else:
+                    assert not param.requires_grad
+        else:
+            assert all(not p.requires_grad for p in model.parameters())
+
+    @pytest.mark.xfail(strict=True)
+    @pytest.mark.parametrize("config_cls", [LoraConfig])  # no need to check each method, they all fail
+    def test_loading_model_requires_grad_set_correctly_switch_inference_mode(self, config_cls, tmp_path):
+        # Same as test_loading_model_requires_grad_set_correctly but this time we first load with is_trainable=False and
+        # then with is_trainable=True. Loading the second adapter should not affect the requires_grad of the first
+        # adapter, but it does. The reason is that is_training/inference_mode is taken from the current PEFT config, but
+        # that config does not necessarily belong to the active adapter, creating a mismatch.
+        # When/If this is fixed, the check can be integrated into test_loading_model_requires_grad_set_correctly and
+        # this test can be deleted.
+        model = DeepMLP(size=256)  # a size that works with all adapters
+        extra_kwargs = {}
+        config = config_cls(target_modules=["layers.0.lin0"])
+        model = get_peft_model(model, config)
+        model.save_pretrained(tmp_path)
+        del model
+
+        model = DeepMLP(size=256)
+        model = PeftModel.from_pretrained(model, tmp_path, is_trainable=False)
+        assert all(not p.requires_grad for p in model.parameters())
+
+        # load one more adapter; this adapter is not automatically activated
+        model.load_adapter(tmp_path, adapter_name="other", is_trainable=True)
+        params_with_grad = [n for n, p in model.named_parameters() if p.requires_grad]
+        expected = [
+            "base_model.model.layers.0.lin0.lora_A.other.weight",
+            "base_model.model.layers.0.lin0.lora_B.other.weight",
+        ]
+        # this fails, instead with get ...lora_A.default.weight and ...lora_B.default.weight
+        assert params_with_grad == expected
+
+    @pytest.mark.xfail(strict=True)
+    @pytest.mark.parametrize("config_cls", [LoraConfig])  # no need to check each method, they all fail
+    def test_loading_model_requires_grad_load_adapter_then_add_adapter(self, config_cls, tmp_path):
+        # When adding a new adapter with model.add_adapter, through the set_adapter call in update_layer, we activate
+        # the gradients of the first adapter, even if it's not desired. Since there is no is_trainable argument on
+        # add_adapter, there is no way to disable that at the moment.
+        # When/If this is fixed, the check can be integrated into test_loading_model_requires_grad_set_correctly and
+        # this test can be deleted.
+        model = DeepMLP(size=256)  # a size that works with all adapters
+        extra_kwargs = {}
+        config = config_cls(target_modules=["layers.0.lin0"])
+        model = get_peft_model(model, config)
+        model.save_pretrained(tmp_path)
+        del model
+
+        model = DeepMLP(size=256)
+        model = PeftModel.from_pretrained(model, tmp_path, is_trainable=False)
+        assert all(not p.requires_grad for p in model.parameters())
+
+        # add a new adapter
+        model.add_adapter(adapter_name="other", peft_config=config)
+        params_with_grad = [n for n, p in model.named_parameters() if p.requires_grad]
+        assert all(not p.requires_grad for p in model.parameters())
 
 
 # this is for PEFT methods that support mixed adapter batches.

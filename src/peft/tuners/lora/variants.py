@@ -23,9 +23,110 @@ from torch import nn
 
 from peft.utils.other import transpose
 
+from .arrow import ArrowLoraLinearLayer
 from .config import PeftConfig
 from .dora import DoraConv1dLayer, DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer
 from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd
+
+
+class ArrowLinearVariant(LoraVariant):
+    @staticmethod
+    def init(module: Linear, adapter_name: str, **kwargs):
+        """
+        Initialise the ArrowLoraLinearLayer() inside lora_arrow. lora_arrow is nn.ModuleDict(), serving as a container
+        for ArrowLoraLinearLayer(). A layer of the base model with LoRA adapter loaded on it will be like:
+        ----------------------------------------------------
+             (qkv_proj): lora.Linear4bit or lora.Linear(
+                (base_layer): Linear4bit or Linear (lora_dropout): ModuleDict( ... ) (lora_A): ModuleDict( ... )
+                (lora_B): ModuleDict( ... ) (lora_embedding_A): ParameterDict( ... ) (lora_embedding_B): ParameterDict(
+                ... ) (lora_magnitude_vector): ModuleDict( ... ) (lora_arrow): ModuleDict(
+                    (arrow_router): ArrowLoraLinearLayer() )
+            )
+        ----------------------------------------------------
+
+        Args:
+            module (Linear): LoRA Layer of the model, containing base_layer, lora_A, lora_B, etc.
+            adapter_name (str): name of the adapter that will be put in lora_arrow.
+            The adapter_name is "arrow_router" by default, set in create_arrow_model() in ./arrow.py
+        """
+        # Checking for arrow necessary config
+        arrow_config = kwargs.get("arrow_config")
+        if arrow_config is None:
+            raise ValueError("ArrowLinearVariant.init() did not receive an arrow_config")
+
+        # 1-a) build the ArrowLoRALayer
+        arrow_layer = ArrowLoraLinearLayer(
+            in_features=module.in_features,
+            arrow_config=arrow_config,
+        ).to(module.weight.device)
+
+        # 1-b) register a container if it doesn’t exist yet
+        if not hasattr(module, "lora_arrow"):
+            module.lora_arrow = nn.ModuleDict()
+
+        module.lora_arrow[adapter_name] = arrow_layer
+
+    @staticmethod
+    def forward(
+        module: Linear,
+        *,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        """
+        Parameters mirror those in PEFT’s `LoraVariant.forward`. Called every time the host Linear does a fwd pass.
+
+        build_prototypes() and gen_know_sub() should run only once before routing. Both are implemented in
+        ArrowLoraLinearLayer (see ./arrow.py). They are lazily invoked in the forward pass below. Attributes of
+        ArrowLoraLinearLayer() class ensure they execute only a single time.
+
+        Args:
+            module (Linear): LoRA Layer of the model
+            active_adapter (str): name of the arrow route, which should be active to perform arrow.
+            x (torch.Tensor): input to the layer
+            result (torch.Tensor): output of the base layer.
+
+        Return value:
+            output of the base model + delta weight computed by arrow layer.
+        """
+        arrow = module.lora_arrow[active_adapter]  # ArrowLoraLinearLayer
+        # Apply GenKnowSub the 1st time if applcable. By calling arrow/on_adapter_change(),
+        # gen_know_sub() is redone for newly added adapters after arrow.create_arrow_model().
+        arrow.gen_know_sub(module.lora_A, module.lora_B)
+        # lazily build prototypes the 1st time after GenKnowSub. By calling arrow/on_adapter_change(),
+        # build_prototypes() is redone for newly added adapters after arrow.create_arrow_model().
+        arrow.build_prototypes(module.lora_A, module.lora_B)
+
+        # A forward path of ArrowLoraLinearLayer is called so routing performs.
+        # Accept and ignore extra variant kwargs (e.g., 'alora_offsets') for compatibility
+        delta = arrow(
+            x,
+            lora_A=module.lora_A,
+            lora_B=module.lora_B,
+            dropout=module.lora_dropout[active_adapter],
+            scaling=module.scaling,
+        )
+        return result + delta
+
+    """
+    Since Arrow is a Mixture-of-Experts (MoE) approach, merging adapters is not meaningful or even possible: for each
+    token, the top-k LoRA experts are dynamically selected and routed. Because of this per-token routing, there is no
+    single set of weights that can represent a merged adapter.
+    """
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        raise RuntimeError("Cannot merge an active Arrow router adapter. Remove it first.")
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        raise RuntimeError("Cannot merge an active Arrow router adapter. Remove it first.")
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        raise RuntimeError("Cannot unmerge an active Arrow router adapter. Remove it first.")
 
 
 class DoraLinearVariant(LoraVariant):

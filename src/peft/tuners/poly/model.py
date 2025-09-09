@@ -67,11 +67,11 @@ class PolyModel(BaseTuner):
                 "`torch.nn.Linear`."
             )
 
-    def set_adapter(self, adapter_name):
-        self.set_auxiliary_adapters(adapter_name)
+    def set_adapter(self, adapter_name, inference_mode: bool = False):
+        self.set_auxiliary_adapters(adapter_name, inference_mode=inference_mode)
         for module in self.model.modules():
             if isinstance(module, PolyLayer):
-                module.set_adapter(adapter_name)
+                module.set_adapter(adapter_name, inference_mode=inference_mode)
 
     def _register_pre_hooks(self, task_ids):
         """Helper method to register pre hooks."""
