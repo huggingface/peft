@@ -69,8 +69,8 @@ def inject_adapter_in_model(
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
             Create empty adapter weights on meta device. Useful to speed up the loading process.
         state_dict (`dict`, *optional*, defaults to `None`)
-            If a `state_dict` is passed here, the adapters will be injected based on the entries of the state_dict. This
-            can be useful when the exact `target_modules` of the PEFT method is unknown, for instance because the
+            If a `state_dict` is passed here, the adapters will be injected based on the entries of the state_dict.
+            This can be useful when the exact `target_modules` of the PEFT method is unknown, for instance because the
             checkpoint was created without meta data. Note that the values from the `state_dict` are not used, only the
             keys are used to determine the correct layers that should be adapted.
     """

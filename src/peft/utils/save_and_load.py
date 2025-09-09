@@ -65,8 +65,8 @@ def get_peft_model_state_dict(
 
     Note that the adapter name is removed from the `state_dict`, is this is just an arbitrary name that can be changed
     when loading the adapter. So e.g. if the adapter name is `'default'` and the original key is
-    `'model.q_proj.lora_A.default.weight'`, the returned key will be `'model.q_proj.lora_A.weight'`. Use this function in
-    conjunction with [`set_peft_model_state_dict`] to take care of the adapter name when loading weights.
+    `'model.q_proj.lora_A.default.weight'`, the returned key will be `'model.q_proj.lora_A.weight'`. Use this function
+    in conjunction with [`set_peft_model_state_dict`] to take care of the adapter name when loading weights.
 
     Args:
         model ([`PeftModel`]): The Peft model. When using torch.nn.DistributedDataParallel, DeepSpeed or FSDP,
