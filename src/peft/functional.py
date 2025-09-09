@@ -19,13 +19,12 @@ provide PEFT integrations.
 """
 
 from peft.mapping import inject_adapter_in_model
-from peft.tuners.tuners_utils import cast_adapter_dtype, check_target_module_exists, delete_adapter, set_adapter
+from peft.tuners.tuners_utils import cast_adapter_dtype, delete_adapter, set_adapter
 from peft.utils import get_peft_model_state_dict, set_peft_model_state_dict
 
 
 __all__ = [
     "cast_adapter_dtype",
-    "check_target_module_exists",
     "delete_adapter",
     "get_peft_model_state_dict",
     "inject_adapter_in_model",
