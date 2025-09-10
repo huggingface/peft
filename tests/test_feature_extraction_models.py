@@ -20,6 +20,7 @@ from peft import (
     BOFTConfig,
     BoneConfig,
     C3AConfig,
+    DeLoRAConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -74,6 +75,14 @@ ALL_CONFIGS = [
     ),
     (
         MissConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+            "r": 2,
+        },
+    ),
+    (
+        DeLoRAConfig,
         {
             "task_type": "FEATURE_EXTRACTION",
             "target_modules": None,
