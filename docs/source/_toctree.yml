@@ -136,6 +136,8 @@
       title: RoAd
     - local: package_reference/waveft
       title: WaveFT
+    - local: package_reference/delora
+      title: DeLoRA
 
     title: Adapters
   - sections:

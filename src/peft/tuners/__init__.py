@@ -18,6 +18,7 @@ from .boft import BOFTConfig, BOFTModel
 from .bone import BoneConfig, BoneModel
 from .c3a import C3AConfig, C3AModel
 from .cpt import CPTConfig, CPTEmbedding
+from .delora import DeLoRAConfig, DeLoRAModel
 from .fourierft import FourierFTConfig, FourierFTModel
 from .hra import HRAConfig, HRAModel
 from .ia3 import IA3Config, IA3Model
@@ -67,6 +68,8 @@ __all__ = [
     "C3AModel",
     "CPTConfig",
     "CPTEmbedding",
+    "DeLoRAConfig",
+    "DeLoRAModel",
     "EvaConfig",
     "FourierFTConfig",
     "FourierFTModel",

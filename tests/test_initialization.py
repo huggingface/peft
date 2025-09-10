@@ -36,6 +36,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import (
     AdaLoraConfig,
     C3AConfig,
+    DeLoRAConfig,
     EvaConfig,
     IA3Config,
     LoftQConfig,
@@ -2091,6 +2092,98 @@ class TestRoadInitialization:
         msg = "Target module Conv2d(100, 100, kernel_size=(3, 3), stride=(1, 1)) is not supported. Currently, only the following modules are supported: `torch.nn.Linear`."
         with pytest.raises(ValueError, match=re.escape(msg)):
             get_peft_model(model, config)
+
+
+class TestDeLoRAInitialization:
+    """Basic sanity tests for the DeLoRA tuner."""
+
+    torch_device = infer_device()
+
+    def get_model(self, bias=True):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 30, bias=bias)
+                self.lin1 = nn.Linear(30, 2, bias=bias)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                return X
+
+        return MLP(bias=bias).to(self.torch_device).eval()
+
+    @pytest.fixture
+    def data(self):
+        torch.manual_seed(0)
+        return torch.randn(4, 10, device=self.torch_device)
+
+    def test_delora_injection_keeps_output_default(self, data):
+        # With use_residual_init=True (default), initial forward should match base model
+        torch.manual_seed(0)
+        base = self.get_model()
+        y_base = base(data)
+
+        cfg = DeLoRAConfig(target_modules=["lin0"], r=8, alpha=8)
+        model = get_peft_model(base, cfg)
+        y_peft = model(data)
+
+        assert torch.allclose(y_base, y_peft, atol=1e-6, rtol=1e-6)
+
+    def test_delora_param_shapes(self):
+        base = self.get_model()
+        in_f, out_f = base.lin0.in_features, base.lin0.out_features
+        r = 4
+        cfg = DeLoRAConfig(target_modules=["lin0"], r=r, alpha=2)
+        model = get_peft_model(base, cfg)
+
+        layer = model.lin0  # DeLoRALinear wrapper
+        assert hasattr(layer, "delora_A") and hasattr(layer, "delora_B") and hasattr(layer, "delora_alpha")
+        A = layer.delora_A["default"]
+        B = layer.delora_B["default"]
+        alpha = layer.delora_alpha["default"]
+        assert tuple(A.shape) == (r, in_f)
+        assert tuple(B.shape) == (out_f, r)
+        assert tuple(alpha.shape) == (1,)
+
+    def test_disable_enable_no_change(self, data):
+        base = self.get_model()
+        cfg = DeLoRAConfig(target_modules=["lin0"], r=8, alpha=8)
+        model = get_peft_model(base, cfg)
+
+        y0 = model(data)
+        model.disable_adapter_layers()
+        y1 = model(data)
+        model.enable_adapter_layers()
+        y2 = model(data)
+
+        assert torch.allclose(y0, y1, atol=1e-6, rtol=1e-6)
+        assert torch.allclose(y0, y2, atol=1e-6, rtol=1e-6)
+
+    def test_merge_and_unload_same_outputs(self, data):
+        base = self.get_model()
+        cfg = DeLoRAConfig(target_modules=["lin0"], r=8, alpha=8)
+        model = get_peft_model(base, cfg)
+        y_before = model(data)
+
+        merged = model.merge_and_unload()
+        merged.eval()
+        y_after = merged(data)
+        assert torch.allclose(y_before, y_after, atol=1e-6, rtol=1e-6)
+
+    def test_invalid_rank_raises(self):
+        base = self.get_model()
+        with pytest.raises(ValueError):
+            get_peft_model(base, DeLoRAConfig(target_modules=["lin0"], r=0))
+
+    def test_no_use_residual_init_keeps_output(self, data):
+        # With use_residual_init=False, the implementation compensates by subtracting initial delta in get_delta
+        base = self.get_model()
+        y_base = base(data)
+        cfg = DeLoRAConfig(target_modules=["lin0"], r=8, alpha=8, use_residual_init=False)
+        model = get_peft_model(base, cfg)
+        y_peft = model(data)
+        assert torch.allclose(y_base, y_peft, atol=1e-6, rtol=1e-6)
 
 
 class TestNoInfiniteRecursionDeepspeed:

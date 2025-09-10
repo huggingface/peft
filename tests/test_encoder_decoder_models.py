@@ -22,6 +22,7 @@ from peft import (
     BOFTConfig,
     BoneConfig,
     C3AConfig,
+    DeLoRAConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -80,6 +81,14 @@ ALL_CONFIGS = [
             "target_modules": None,
             "r": 2,
             "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        DeLoRAConfig,
+        {
+            "task_type": "SEQ_2_SEQ_LM",
+            "target_modules": None,
+            "r": 2,
         },
     ),
     (
