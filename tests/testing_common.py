@@ -236,11 +236,19 @@ def hub_online_once(model_id: str):
 
 
 def _skip_if_merging_not_supported(model_id, config_cls):
-    """Skip tests for Conv2dGroups models or OSF configs where merging is not supported."""
-    if model_id in ["Conv2dGroups", "Conv2dGroups2"] or issubclass(config_cls, OSFConfig):
+    """Skip tests for cases where adapter merge is unavailable.
+
+    - Conv2dGroups: merge is not supported (by design) — see PR #2403.
+    - OSF: merge/unload are not implemented yet in the tuner.
+    """
+    if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
         pytest.skip(
-            f"Skipping test for {model_id} with {config_cls} as merging is not supported. "
-            "(See https://github.com/huggingface/peft/pull/2403 for details)"
+            f"Skipping test for {model_id} as adapter merging is not supported for Conv2dGroups. "
+            "(See https://github.com/huggingface/peft/pull/2403)"
+        )
+    if issubclass(config_cls, OSFConfig):
+        pytest.skip(
+            f"Skipping test for {model_id} with {config_cls} as OSF adapter merge/unload are not implemented."
         )
 
 

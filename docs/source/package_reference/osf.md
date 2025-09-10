@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # OSF (Orthogonal Subspace Fine-tuning)
 
-Orthogonal Subspace Fine-tuning ([OSF](https://arxiv.org/abs/2504.07097)) is a PEFT method designed for continual learning that constrains parameter updates to be orthogonal to previously important directions. This approach enables full fine-tuning while preventing catastrophic forgetting without requiring additional parameters or storing previous gradients.
+Orthogonal Subspace Fine-tuning ([OSF](https://huggingface.co/papers/2504.07097)) is a PEFT method designed for continual learning that constrains parameter updates to be orthogonal to previously important directions. This approach enables full fine-tuning while preventing catastrophic forgetting without requiring additional parameters or storing previous gradients.
 
 The abstract from the paper is:
 
@@ -94,7 +94,7 @@ Control the decomposition rank:
 # Global rank (applies to all target modules)
 config = OSFConfig(effective_rank=16)
 
-# Automatic rank (50% of min dimension)
+# Automatic rank (50% of the smaller matrix dimension per target)
 config = OSFConfig(effective_rank=None)
 
 # Per-module rank overrides
@@ -111,18 +111,24 @@ config = OSFConfig(
 
 ### Sequential Task Learning
 
-OSF is specifically designed for learning tasks sequentially:
+OSF is specifically designed for learning tasks sequentially. Between tasks, recompute the SVD so the preserved subspace reflects the latest weights. One simple way is to re-wrap the updated base model with OSF again:
 
 ```python
-# Task 1: Train on domain A
-model = get_peft_model(base_model, OSFConfig(effective_rank=8))
+# Task 1: train on domain A with initial preserved subspace
+r = 8  # initial effective rank to preserve
+model = get_peft_model(base_model, OSFConfig(effective_rank=r))
 train_task(model, task_1_data)
 
-# Task 2: Continue training on domain B
-# OSF automatically preserves Task 1 knowledge
+# Task 2: recompute SVD on updated weights and increase preserved subspace
+base_model = model.base_model.model  # unwrap updated base
+r += 4  # grow preserved subspace to include Task 1 knowledge
+model = get_peft_model(base_model, OSFConfig(effective_rank=r))
 train_task(model, task_2_data)
 
-# Task 3: Continue with domain C
+# Task 3: recompute again and expand preserved subspace further
+base_model = model.base_model.model
+r += 4
+model = get_peft_model(base_model, OSFConfig(effective_rank=r))
 train_task(model, task_3_data)
 ```
 
@@ -163,7 +169,7 @@ for task_id in range(n_tasks):
 
 ### Best Practices
 
-1. **Effective Rank Selection**: Start with `effective_rank=None` (automatic 50% rank) and adjust based on task complexity
+1. **Effective Rank Selection**: Start with `effective_rank=None` (auto sets rank to 50% of the smaller weight dimension per target module) and adjust based on task complexity
 2. **Learning Rate**: Use smaller learning rates (1e-5 to 1e-4) compared to standard fine-tuning
 3. **Task Importance**: Use `rank_pattern` to allocate more capacity to critical modules
 4. **Model Architecture**: OSF works best with transformer architectures having clear attention and MLP separations
@@ -201,7 +207,7 @@ OSF can be combined with other techniques:
 # Use with gradient checkpointing for memory efficiency
 model.gradient_checkpointing_enable()
 
-# Apply weight decay selectively
+# Apply weight decay selectively (regularizes low-rank factors to limit drift/overfitting in continual updates; keep small)
 optimizer = torch.optim.AdamW([
     {"params": [p for n, p in model.named_parameters() if "U_low" in n], "weight_decay": 0.01},
     {"params": [p for n, p in model.named_parameters() if "S_low" in n], "weight_decay": 0.001},
@@ -228,13 +234,3 @@ optimizer = torch.optim.AdamW([
 ### Gradient Projection
 
 [[autodoc]] tuners.osf.utils.project_gradient_to_orthogonal_space
-
-### Hook Management
-
-[[autodoc]] tuners.osf.utils.attach_gradient_hooks
-
-[[autodoc]] tuners.osf.utils.detach_gradient_hooks
-
-### Configuration Helpers
-
-[[autodoc]] tuners.osf.utils.auto_generate_target_osf_config

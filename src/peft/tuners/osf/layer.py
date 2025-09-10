@@ -15,16 +15,17 @@ from __future__ import annotations
 
 import warnings
 from typing import Any, Optional
+from functools import partial
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.tuners._buffer_dict import BufferDict
 
 from .utils import (
     decompose_weight_matrix,
-    project_gradient_to_orthogonal_space,
     reconstruct_weight_matrix,
 )
 
@@ -33,16 +34,17 @@ class OSFLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names: tuple[str, ...] = ("osf_svd_params",)
     # All names of other parameters that may contain adapter-related parameters  
-    other_param_names: tuple[str, ...] = ("effective_rank",)
+    other_param_names: tuple[str, ...] = ("_osf_U_high", "_osf_S_high", "_osf_V_high")
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         self.base_layer = base_layer
         self.effective_rank = {}
+        # Map adapter_name -> ParameterDict{"U_low", "S_low", "V_low"}
         self.osf_svd_params = nn.ModuleDict({})
-        # Store high-rank (frozen) components as buffers
-        self._osf_U_high = {}
-        self._osf_S_high = {}
-        self._osf_V_high = {}
+        # Store high-rank (frozen) components as buffers that track device moves
+        self._osf_U_high = BufferDict({})
+        self._osf_S_high = BufferDict({})
+        self._osf_V_high = BufferDict({})
         # Track hook handles for cleanup
         self.hook_handles = []
         # Mark the weight as unmerged  
@@ -51,20 +53,24 @@ class OSFLayer(BaseTunerLayer):
 
         # Get layer dimensions
         base_layer = self.get_base_layer()
-        if isinstance(base_layer, nn.Linear):
+        # Prefer the universally available weight shape when possible.
+        if hasattr(base_layer, "weight") and isinstance(base_layer.weight, torch.Tensor) and base_layer.weight.ndim == 2:
+            # For Linear-like modules, weight is [out_features, in_features]
+            out_features, in_features = base_layer.weight.shape
+        elif isinstance(base_layer, nn.Linear):
             in_features, out_features = base_layer.in_features, base_layer.out_features
         elif hasattr(base_layer, "infeatures") and hasattr(base_layer, "outfeatures"):
             # QuantLinear
             in_features, out_features = base_layer.infeatures, base_layer.outfeatures
         elif hasattr(base_layer, "input_size") and hasattr(base_layer, "output_size"):
-            # Megatron ColumnParallelLinear,RowParallelLinear
+            # Megatron ColumnParallelLinear, RowParallelLinear
             in_features, out_features = base_layer.input_size, base_layer.output_size
         elif hasattr(base_layer, "in_features") and hasattr(base_layer, "out_features"):
             in_features, out_features = base_layer.in_features, base_layer.out_features
         else:
             in_features, out_features = None, None
             warnings.warn(
-                f"Unsupported layer type '{type(base_layer)}' encountered, proceed at your own risk.", UserWarning
+                f"Unsupported layer type '{type(base_layer)}' encountered; could not infer in/out features.", UserWarning
             )
 
         self.in_features = in_features
@@ -88,14 +94,15 @@ class OSFLayer(BaseTunerLayer):
         self._osf_S_high[adapter_name] = svd_dict["S_high"] 
         self._osf_V_high[adapter_name] = svd_dict["V_high"]
         
-        # Create module for trainable low-rank components
-        svd_module = nn.Module()
-        svd_module.U_low = svd_dict["U_low"]
-        svd_module.S_low = svd_dict["S_low"]
-        svd_module.V_low = svd_dict["V_low"]
-        svd_module.rank_high = svd_dict["rank_high"]
-        
-        self.osf_svd_params[adapter_name] = svd_module
+        # Create ParameterDict for trainable low-rank components
+        svd_params = nn.ParameterDict(
+            {
+                "U_low": svd_dict["U_low"],
+                "S_low": svd_dict["S_low"],
+                "V_low": svd_dict["V_low"],
+            }
+        )
+        self.osf_svd_params[adapter_name] = svd_params
         
         # Attach gradient hooks for orthogonal projection
         self._attach_hooks(adapter_name)
@@ -113,21 +120,28 @@ class OSFLayer(BaseTunerLayer):
             "U_high": self._osf_U_high[adapter_name],
             "S_high": self._osf_S_high[adapter_name],
             "V_high": self._osf_V_high[adapter_name],
-            "U_low": svd_module.U_low,
-            "S_low": svd_module.S_low,
-            "V_low": svd_module.V_low,
+            "U_low": svd_module["U_low"],
+            "S_low": svd_module["S_low"],
+            "V_low": svd_module["V_low"],
         }
 
-        def hook(grad):
-            project_gradient_to_orthogonal_space(svd_dict)
+        def hook(grad, name: str):
+            # Project gradient to be orthogonal to high-rank subspace for U_low/V_low
+            if name == "U_low":
+                U_high = svd_dict["U_high"]
+                proj = U_high @ (U_high.transpose(0, 1) @ grad)
+                return grad - proj
+            elif name == "V_low":
+                V_high = svd_dict["V_high"]
+                proj = (grad @ V_high.transpose(0, 1)) @ V_high
+                return grad - proj
             return grad
 
         # Store hook handles for later cleanup
-        handle_u = svd_module.U_low.register_hook(hook)
-        handle_s = svd_module.S_low.register_hook(hook)
-        handle_v = svd_module.V_low.register_hook(hook)
-        
-        self.hook_handles.extend([handle_u, handle_s, handle_v])
+        handle_u = svd_module["U_low"].register_hook(partial(hook, name="U_low"))
+        handle_v = svd_module["V_low"].register_hook(partial(hook, name="V_low"))
+
+        self.hook_handles.extend([handle_u, handle_v])
 
     def _detach_hooks(self):
         """Remove all gradient hooks."""
@@ -145,9 +159,9 @@ class OSFLayer(BaseTunerLayer):
             "U_high": self._osf_U_high[adapter_name],
             "S_high": self._osf_S_high[adapter_name],
             "V_high": self._osf_V_high[adapter_name],
-            "U_low": svd_module.U_low,
-            "S_low": svd_module.S_low,
-            "V_low": svd_module.V_low,
+            "U_low": svd_module["U_low"],
+            "S_low": svd_module["S_low"],
+            "V_low": svd_module["V_low"],
         }
         return reconstruct_weight_matrix(svd_dict)
 
