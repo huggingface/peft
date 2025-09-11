@@ -45,6 +45,7 @@ class PeftType(str, enum.Enum):
     - SHIRA
     - C3A
     - ROAD
+    - DELORA
     """
 
     PROMPT_TUNING = "PROMPT_TUNING"
@@ -74,6 +75,7 @@ class PeftType(str, enum.Enum):
     TRAINABLE_TOKENS = "TRAINABLE_TOKENS"
     SHIRA = "SHIRA"
     C3A = "C3A"
+    DELORA = "DELORA"
 
 
 class TaskType(str, enum.Enum):
