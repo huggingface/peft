@@ -21,6 +21,7 @@ from collections import defaultdict
 from contextlib import contextmanager
 from copy import deepcopy
 from unittest.mock import patch
+import math
 
 import pytest
 import torch
