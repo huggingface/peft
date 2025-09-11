@@ -84,7 +84,9 @@ class DeloraModel(BaseTuner):
             "lambda_": delora_config.lambda_,
             "module_dropout": delora_config.module_dropout,
             "init_weights": delora_config.init_weights,
-            "use_residual_init": (delora_config.use_residual_init if delora_config.init_weights is not False else False),
+            "use_residual_init": (
+                delora_config.use_residual_init if delora_config.init_weights is not False else False
+            ),
         }
 
         if isinstance(target, DeloraLinear):

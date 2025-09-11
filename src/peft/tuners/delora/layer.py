@@ -55,7 +55,9 @@ class DeloraLayer(BaseTunerLayer):
         # store lambdas as tensor buffer (shape [1]) for easier device moves and persistence
         self.delora_initial_lambda = BufferDict({}, persistent=True)
         self.delora_initial_w_norm = BufferDict({}, persistent=True)  # initial base weight norm per adapter
-        self.delora_w_norm = BufferDict({}, persistent=True)  # fixed reference norm per adapter used for delta computation
+        self.delora_w_norm = BufferDict(
+            {}, persistent=True
+        )  # fixed reference norm per adapter used for delta computation
         # Track which adapters had their initial delta subtracted from base weights
         self._initials_applied = set()
         # Track nesting depth of disable->enable toggling to avoid double-adding/subtracting
@@ -103,7 +105,7 @@ class DeloraLayer(BaseTunerLayer):
         # scale by a fixed per-adapter reference base weight norm when available (avoids caching for exact unmerge)
         if adapter in self.delora_w_norm:
             w_norm = self.delora_w_norm[adapter]
-        delta = (delta * w_norm.unsqueeze(0))
+        delta = delta * w_norm.unsqueeze(0)
         return delta
 
     def update_layer(
@@ -163,7 +165,7 @@ class DeloraLayer(BaseTunerLayer):
                 w_norm = torch.norm(w.data, dim=0).detach()
             else:
                 # For meta tensors, we can't compute the norm, so use a default value
-                w_norm = torch.ones(w.shape[1], device=w.device) #, dtype=torch.float32)
+                w_norm = torch.ones(w.shape[1], device=w.device)  # , dtype=torch.float32)
             self.delora_w_norm[adapter_name] = w_norm
             self.delora_initial_w_norm[adapter_name] = w_norm.clone()
 
@@ -172,13 +174,23 @@ class DeloraLayer(BaseTunerLayer):
             if self.delora_A[adapter_name].device.type != "meta":
                 if self.use_residual_init:
                     # For real tensors, copy the actual initialized data
-                    self.delora_initial_A[adapter_name] = (self.delora_A[adapter_name].detach().to(copy=True, non_blocking=False).cpu()) 
-                    self.delora_initial_B[adapter_name] = (self.delora_B[adapter_name].detach().to(copy=True, non_blocking=False).cpu()) 
+                    self.delora_initial_A[adapter_name] = (
+                        self.delora_A[adapter_name].detach().to(copy=True, non_blocking=False).cpu()
+                    )
+                    self.delora_initial_B[adapter_name] = (
+                        self.delora_B[adapter_name].detach().to(copy=True, non_blocking=False).cpu()
+                    )
                 else:
                     # For real tensors, copy to the target device
-                    self.delora_initial_A[adapter_name] = (self.delora_A[adapter_name].detach().to(device=w.device, copy=True))
-                    self.delora_initial_B[adapter_name] = (self.delora_B[adapter_name].detach().to(device=w.device, copy=True))
-                self.delora_initial_lambda[adapter_name] = torch.tensor([float(self.delora_lambda[adapter_name].detach().item())], device=w.device)
+                    self.delora_initial_A[adapter_name] = (
+                        self.delora_A[adapter_name].detach().to(device=w.device, copy=True)
+                    )
+                    self.delora_initial_B[adapter_name] = (
+                        self.delora_B[adapter_name].detach().to(device=w.device, copy=True)
+                    )
+                self.delora_initial_lambda[adapter_name] = torch.tensor(
+                    [float(self.delora_lambda[adapter_name].detach().item())], device=w.device
+                )
             else:
                 # For meta tensors, create meta tensors for initial copies too
                 self.delora_initial_A[adapter_name] = torch.empty_like(self.delora_A[adapter_name], device="meta")
@@ -197,7 +209,7 @@ class DeloraLayer(BaseTunerLayer):
                             self.delora_initial_B[adapter_name].to(w.device),
                             self.delora_initial_lambda[adapter_name].to(w.device),
                             self.r[adapter_name],
-                            self.delora_initial_w_norm[adapter_name].to(w.device)
+                            self.delora_initial_w_norm[adapter_name].to(w.device),
                         )
                         self.get_base_layer().weight.data.sub_(delta0)
                     self._initials_applied.add(adapter_name)
@@ -314,7 +326,7 @@ class DeloraLinear(nn.Module, DeloraLayer):
                             raise ValueError(
                                 f"NaNs detected in merged weights for adapter {active_adapter}; aborting merge"
                             )
-                        
+
                         base_layer.weight.data = orig_weights
                     else:
                         base_layer.weight.data.add_(delta_weight)
@@ -348,7 +360,7 @@ class DeloraLinear(nn.Module, DeloraLayer):
                         self.delora_initial_B[adapter].to(w.device),
                         self.delora_initial_lambda[adapter].to(w.device),
                         self.r[adapter],
-                        self.delora_initial_w_norm[adapter].to(w.device)    
+                        self.delora_initial_w_norm[adapter].to(w.device),
                     )
                     self.get_base_layer().weight.data = self.get_base_layer().weight.data + delta0.to(w.dtype)
                 self._initials_applied.remove(adapter)
@@ -396,7 +408,9 @@ class DeloraLinear(nn.Module, DeloraLayer):
                 # 3. h @ B.T
                 h = nn.functional.linear(h, self.delora_B[adapter])
 
-                if (not self.use_residual_init) and (adapter in self.delora_initial_A and adapter in self.delora_initial_B):
+                if (not self.use_residual_init) and (
+                    adapter in self.delora_initial_A and adapter in self.delora_initial_B
+                ):
                     A0n = torch.clamp(self.delora_initial_A[adapter].norm(dim=1), min=1e-12)
                     B0n = torch.clamp(self.delora_initial_B[adapter].norm(dim=0), min=1e-12)
                     scaling0 = (self.delora_initial_lambda[adapter] / self.r[adapter]) / (A0n * B0n)
@@ -443,7 +457,7 @@ class DeloraLinear(nn.Module, DeloraLayer):
                     self.delora_initial_B[adapter].to(w.device),
                     self.delora_initial_lambda[adapter].to(w.device),
                     self.r[adapter],
-                    self.delora_initial_w_norm[adapter].to(w.device)
+                    self.delora_initial_w_norm[adapter].to(w.device),
                 )
                 total = total + delta0
         if sign > 0:
@@ -564,7 +578,6 @@ class DeloraLinear(nn.Module, DeloraLayer):
                                 self.delora_initial_w_norm[adapter_name].to(w.device),
                             )
                             w.data.sub_(loaded_initial_delta.to(w.dtype))
-
 
     def enable_adapters(self, enabled: bool) -> None:
         """Toggle enabling/disabling of adapters.

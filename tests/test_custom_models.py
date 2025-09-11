@@ -3530,7 +3530,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # The output should match the original base model despite weight changes
         with torch.inference_mode():
             peft_out = peft_model(**X)
-        
+
         # The key test: despite base weights being modified, output should be identical
         # because the initial delta was subtracted from base weights
         assert torch.allclose(peft_out, base_out, atol=1e-5, rtol=1e-5)
@@ -3540,13 +3540,13 @@ class TestPeftCustomModel(PeftCommonTester):
         with torch.no_grad():
             delta0 = lin0.get_delta_weight("default")
             delta1 = lin1.get_delta_weight("default")
-            
+
             # The effective result should equal the original weights
             effective_w0 = lin0.base_layer.weight + delta0
             effective_w1 = lin1.base_layer.weight + delta1
-            
+
             assert torch.allclose(effective_w0, w_lin0, atol=1e-5, rtol=1e-5)
-            assert torch.allclose(effective_w1, w_lin1, atol=1e-5, rtol=1e-5) 
+            assert torch.allclose(effective_w1, w_lin1, atol=1e-5, rtol=1e-5)
 
 
 class TestMultiRankAdapter:
