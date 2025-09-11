@@ -28,11 +28,11 @@ from peft.utils import (
     _get_submodules,
 )
 
-from .config import DeLoRAConfig
-from .layer import DeLoRALayer, DeLoRALinear
+from .config import DeloraConfig
+from .layer import DeloraLayer, DeloraLinear
 
 
-class DeLoRAModel(BaseTuner):
+class DeloraModel(BaseTuner):
     """
     Creates DeLoRA model from a pretrained transformers model.
 
@@ -40,7 +40,7 @@ class DeLoRAModel(BaseTuner):
 
     Args:
         model ([`torch.nn.Module`]): The model to be adapted.
-        config ([`DeLoRAConfig`]): The configuration of the DeLoRA model.
+        config ([`DeloraConfig`]): The configuration of the DeLoRA model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
 
     Returns:
@@ -48,12 +48,12 @@ class DeLoRAModel(BaseTuner):
 
     **Attributes**:
         - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
-        - **peft_config** ([`DeLoRAConfig`]): The configuration of the DeLoRA model.
+        - **peft_config** ([`DeloraConfig`]): The configuration of the DeLoRA model.
     """
 
     prefix: str = "delora_"
 
-    def _check_new_adapter_config(self, config: DeLoRAConfig) -> None:
+    def _check_new_adapter_config(self, config: DeloraConfig) -> None:
         """
         A helper method to check the config when a new adapter is being added.
 
@@ -81,13 +81,13 @@ class DeLoRAModel(BaseTuner):
         # Build constructor/update kwargs from config
         kwargs = {
             "r": delora_config.r,
-            "alpha": delora_config.alpha,
+            "lambda_": delora_config.lambda_,
             "module_dropout": delora_config.module_dropout,
             "init_weights": delora_config.init_weights,
             "use_residual_init": (delora_config.use_residual_init if delora_config.init_weights is not False else False),
         }
 
-        if isinstance(target, DeLoRALinear):
+        if isinstance(target, DeloraLinear):
             target.update_layer(adapter_name, **kwargs)
         else:
             new_module = self._create_new_module(delora_config, adapter_name, target, **kwargs)
@@ -144,7 +144,7 @@ class DeLoRAModel(BaseTuner):
                         p.requires_grad = True
             elif bias == "delora_only":
                 for m in model.modules():
-                    if isinstance(m, DeLoRALayer) and hasattr(m, "bias") and m.bias is not None:
+                    if isinstance(m, DeloraLayer) and hasattr(m, "bias") and m.bias is not None:
                         m.bias.requires_grad = True
             else:
                 raise NotImplementedError(f"Requested bias: {bias}, is not implemented for DeLoRA.")
@@ -157,7 +157,7 @@ class DeLoRAModel(BaseTuner):
             target_base_layer = target
 
         if isinstance(target_base_layer, torch.nn.Linear):
-            new_module = DeLoRALinear(target, adapter_name, **kwargs)
+            new_module = DeloraLinear(target, adapter_name, **kwargs)
 
         return new_module
 
@@ -204,19 +204,14 @@ class DeLoRAModel(BaseTuner):
                 warnings.warn(msg)
         self._set_adapter_layers(enabled=False)
 
-    def set_adapter(self, adapter_name: str | list[str]) -> None:
-        """Set the active adapter(s).
-
-        Args:
-            adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
-        """
-        self.set_auxiliary_adapters(adapter_name)
+    def set_adapter(self, adapter_name: str | list[str], inference_mode: bool = False) -> None:
+        self.set_auxiliary_adapters(adapter_name, inference_mode=inference_mode)
         for module in self.model.modules():
-            if isinstance(module, DeLoRALayer):
+            if isinstance(module, DeloraLayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
-                module.set_adapter(adapter_name)
+                module.set_adapter(adapter_name, inference_mode=inference_mode)
         self.active_adapter = adapter_name
 
     @staticmethod

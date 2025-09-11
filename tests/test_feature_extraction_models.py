@@ -20,7 +20,7 @@ from peft import (
     BOFTConfig,
     BoneConfig,
     C3AConfig,
-    DeLoRAConfig,
+    DeloraConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -82,7 +82,7 @@ ALL_CONFIGS = [
         },
     ),
     (
-        DeLoRAConfig,
+        DeloraConfig,
         {
             "task_type": "FEATURE_EXTRACTION",
             "target_modules": None,
