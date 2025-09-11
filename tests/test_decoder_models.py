@@ -32,7 +32,7 @@ from peft import (
     BoneConfig,
     C3AConfig,
     CPTConfig,
-    DeLoRAConfig,
+    DeloraConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -121,7 +121,7 @@ ALL_CONFIGS = [
         },
     ),
     (
-        DeLoRAConfig,
+        DeloraConfig,
         {
             "task_type": "CAUSAL_LM",
             "target_modules": None,
@@ -299,7 +299,7 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         ShiraConfig,
         C3AConfig,
         MissConfig,
-        DeLoRAConfig,
+        DeloraConfig,
     ]:
         pytest.skip("Skipping BOFT/HRA/OFT/Bone/Road/SHiRA/C3A/MiSS/DeLoRA for GPT2LMHeadModel")
 
@@ -314,7 +314,7 @@ def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
         C3AConfig,
         RoadConfig,
         MissConfig,
-        DeLoRAConfig,
+        DeloraConfig,
     ]:
         pytest.skip("Skipping AdaLora/BOFT/HRA/OFT/Bone/MiSS/DeLoRA for GPT2LMHeadModel")
 

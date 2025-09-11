@@ -27,10 +27,10 @@ The abstract from the paper is:
 
 > Parameter-Efficient FineTuning (PEFT) methods have recently gained significant popularity thanks to the widespread availability of large-scale pretrained models. These methods allow for quick adaptation to downstream tasks with minimal computational cost. However, popular finetuning methods such as LoRA exhibit limited robustness when it comes to hyperparameter choices or extended training regimes, preventing optimal out-of-the-box performance. In contrast, bounded approaches, such as ETHER, provide greater robustness but are limited to extremely low-rank adaptations and fixed-strength transformations, reducing their adaptation expressive power. In this work, we propose Decoupled Low-rank Adaptation (DeLoRA), a novel finetuning method that normalizes and scales learnable low-rank matrices. By bounding the distance of the transformation, DeLoRA effectively decouples the angular learning from the adaptation strength, enhancing robustness without compromising performance. Through evaluations on subject-driven image generation, natural language understanding, and instruction tuning, we show that DeLoRA matches or surpasses performance of competing PEFT methods, while exhibiting stronger robustness. 
 
-## DeLoRAConfig
+## DeloraConfig
 
-[[autodoc]] tuners.delora.config.DeLoRAConfig
+[[autodoc]] tuners.delora.config.DeloraConfig
 
-## DeLoRAModel
+## DeloraModel
 
-[[autodoc]] tuners.delora.model.DeLoRAModel
+[[autodoc]] tuners.delora.model.DeloraModel

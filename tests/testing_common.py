@@ -35,7 +35,7 @@ from peft import (
     BOFTConfig,
     BoneConfig,
     CPTConfig,
-    DeLoRAConfig,
+    DeloraConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -194,7 +194,7 @@ CLASSES_MAPPING = {
     "miss": (MissConfig, CONFIG_TESTING_KWARGS[12]),
     "lora+trainable_tokens": (LoraConfig, CONFIG_TESTING_KWARGS[13]),
     "randlora": (RandLoraConfig, CONFIG_TESTING_KWARGS[14]),
-    "delora": (DeLoRAConfig, CONFIG_TESTING_KWARGS[17]),
+    "delora": (DeloraConfig, CONFIG_TESTING_KWARGS[17]),
 }
 
 DECODER_MODELS_EXTRA = {"cpt": (CPTConfig, CONFIG_TESTING_KWARGS[15])}

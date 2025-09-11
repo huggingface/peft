@@ -36,7 +36,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import (
     AdaLoraConfig,
     C3AConfig,
-    DeLoRAConfig,
+    DeloraConfig,
     EvaConfig,
     IA3Config,
     LoftQConfig,
@@ -2124,7 +2124,7 @@ class TestDeLoRAInitialization:
         base = self.get_model()
         y_base = base(data)
 
-        cfg = DeLoRAConfig(target_modules=["lin0"], r=8, alpha=8)
+        cfg = DeloraConfig(target_modules=["lin0"], r=8, lambda_=8)
         model = get_peft_model(base, cfg)
         y_peft = model(data)
 
@@ -2134,21 +2134,21 @@ class TestDeLoRAInitialization:
         base = self.get_model()
         in_f, out_f = base.lin0.in_features, base.lin0.out_features
         r = 4
-        cfg = DeLoRAConfig(target_modules=["lin0"], r=r, alpha=2)
+        cfg = DeloraConfig(target_modules=["lin0"], r=r, lambda_=2)
         model = get_peft_model(base, cfg)
 
-        layer = model.lin0  # DeLoRALinear wrapper
-        assert hasattr(layer, "delora_A") and hasattr(layer, "delora_B") and hasattr(layer, "delora_alpha")
+        layer = model.lin0  # DeloraLinear wrapper
+        assert hasattr(layer, "delora_A") and hasattr(layer, "delora_B") and hasattr(layer, "delora_lambda")
         A = layer.delora_A["default"]
         B = layer.delora_B["default"]
-        alpha = layer.delora_alpha["default"]
+        lambda_ = layer.delora_lambda["default"]
         assert tuple(A.shape) == (r, in_f)
         assert tuple(B.shape) == (out_f, r)
-        assert tuple(alpha.shape) == (1,)
+        assert tuple(lambda_.shape) == (1,)
 
     def test_disable_enable_no_change(self, data):
         base = self.get_model()
-        cfg = DeLoRAConfig(target_modules=["lin0"], r=8, alpha=8)
+        cfg = DeloraConfig(target_modules=["lin0"], r=8, lambda_=8)
         model = get_peft_model(base, cfg)
 
         y0 = model(data)
@@ -2162,7 +2162,7 @@ class TestDeLoRAInitialization:
 
     def test_merge_and_unload_same_outputs(self, data):
         base = self.get_model()
-        cfg = DeLoRAConfig(target_modules=["lin0"], r=8, alpha=8)
+        cfg = DeloraConfig(target_modules=["lin0"], r=8, lambda_=8)
         model = get_peft_model(base, cfg)
         y_before = model(data)
 
@@ -2174,13 +2174,13 @@ class TestDeLoRAInitialization:
     def test_invalid_rank_raises(self):
         base = self.get_model()
         with pytest.raises(ValueError):
-            get_peft_model(base, DeLoRAConfig(target_modules=["lin0"], r=0))
+            get_peft_model(base, DeloraConfig(target_modules=["lin0"], r=0))
 
     def test_no_use_residual_init_keeps_output(self, data):
         # With use_residual_init=False, the implementation compensates by subtracting initial delta in get_delta
         base = self.get_model()
         y_base = base(data)
-        cfg = DeLoRAConfig(target_modules=["lin0"], r=8, alpha=8, use_residual_init=False)
+        cfg = DeloraConfig(target_modules=["lin0"], r=8, lambda_=8, use_residual_init=False)
         model = get_peft_model(base, cfg)
         y_peft = model(data)
         assert torch.allclose(y_base, y_peft, atol=1e-6, rtol=1e-6)

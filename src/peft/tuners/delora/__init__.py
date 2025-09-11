@@ -13,11 +13,11 @@
 # limitations under the License.
 from peft.utils import register_peft_method
 
-from .config import DeLoRAConfig
-from .layer import DeLoRALayer, DeLoRALinear
-from .model import DeLoRAModel
+from .config import DeloraConfig
+from .layer import DeloraLayer, DeloraLinear
+from .model import DeloraModel
 
 
-__all__ = ["DeLoRAConfig", "DeLoRALayer", "DeLoRALinear", "DeLoRAModel"]
+__all__ = ["DeloraConfig", "DeloraLayer", "DeloraLinear", "DeloraModel"]
 
-register_peft_method(name="delora", model_cls=DeLoRAModel, config_cls=DeLoRAConfig)
+register_peft_method(name="delora", model_cls=DeloraModel, config_cls=DeloraConfig)

@@ -21,15 +21,16 @@ from peft.utils import PeftType
 
 
 @dataclass
-class DeLoRAConfig(PeftConfig):
+class DeloraConfig(PeftConfig):
     """
-    This is the configuration class to store the configuration of a [`DeLoRAModel`].
+    This is the configuration class to store the configuration of a [`DeloraModel`].
 
     Args:
         r (`int`):
-            DeLoRA rank.
-        alpha (`int`):
-            The alpha parameter for DeLoRA boundary.
+            The rank of the DeLoRA adapter.
+        lambda_ (`int`):
+            The initial value of the boundary of the DeLoRA adapter. This variable sets an upper bound to the Frobenius 
+            norm of the weight change, avoiding the finetuned model to deviate too much from the original model.
         module_dropout (`float`):
             The dropout probability for disabling DeLoRA modules during training.
         target_modules (`Optional[Union[List[str], str]]`):
@@ -45,15 +46,18 @@ class DeLoRAConfig(PeftConfig):
             When passing a list of strings, either an exact match will be performed or it is checked if the name of the
             module ends with any of the passed strings.
         bias (`str`):
-            Bias type for DeLoRA. Can be 'none' or 'all'. If 'all', the corresponding biases will be updated during
-            training. Be aware that this means that, even when disabling the adapters, the model will not produce the
-            same output as the base model would have without adaptation.
+            Bias type for DeLoRA. Can be 'none', 'all' or 'delora_only'. If 'all' or 'delora_only', the corresponding biases
+            will be updated during training. Be aware that this means that, even when disabling the adapters, the model
+            will not produce the same output as the base model would have without adaptation.
         init_weights (`bool`):
-                Whether to perform initialization of adapter weights. If `True` (default): adapters are initialized
-                in an identity-preserving way. If `False`: adapters immediately contribute a non-zero delta and force
-                `use_residual_init=False` at injection time. This is generally discouraged for normal use.
+            Whether to perform initialization of adapter weights. If `True` (default): adapters are initialized
+            in an identity-preserving way with kaiming uniform initialization. If `False`: adapters immediately 
+            contribute a non-zero delta and force `use_residual_init=False` with no initial A and B buffers.
+            This is generally discouraged for normal use.
         use_residual_init (`bool`):
-            If `True`, subtract the initial DeLoRA delta from the base weights, so the effective initial delta is zero
+            If False, frozen initial copies of the adapters are subtracted in the forward pass to allow for identity
+            initialization. This requires storing extra buffers on device, and extra computation. If `True`, initial
+            adapters are subtracted from the base weights once after initialization, so the effective initial delta is zero
             without storing extra buffers on device.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
@@ -65,15 +69,20 @@ class DeLoRAConfig(PeftConfig):
         rank_pattern (`dict`):
             The mapping from layer names or regexp expression to ranks which are different from the default rank
             specified by `r`. For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`.
-        alpha_pattern (`dict`):
-            The mapping from layer names or regexp expression to alphas which are different from the default alpha
-            specified by `alpha`. For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`.
+        lambda_pattern (`dict`):
+            The mapping from layer names or regexp expression to lambdas which are different from the default lambda
+            specified by `lambda_`. For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`.
         modules_to_save (`Optional[List[str]]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
     """
-
     r: int = field(default=8, metadata={"help": "DeLoRA rank"})
-    alpha: int = field(default=8, metadata={"help": "DeLoRA alpha"})
+    lambda_: int = field(
+        default=8, 
+        metadata={
+            "help": "The initial value of the boundary of the DeLoRA adapter. This variable sets an upper bound to the "
+            "Frobenius norm of the weight change, avoiding the finetuned model to deviate too much from the original model."
+        },
+    )
     module_dropout: float = field(
         default=0.0, metadata={"help": "The dropout probability for disabling DeLoRA modules during training"}
     )
@@ -93,20 +102,18 @@ class DeLoRAConfig(PeftConfig):
     init_weights: bool = field(
         default=True,
         metadata={
-            "help": (
-                "Whether to initialize the weights of the DeLoRA layers with their default initialization. Don't change "
-                "this setting, except if you know exactly what you're doing."
-            ),
+            "help": "Whether to perform initialization of adapter weights. If `True` (default): adapters are initialized in an "
+            "identity-preserving way with kaiming uniform initialization. If `False`: adapters immediately contribute a non-zero "
+            "delta and force `use_residual_init=False` with no initial A and B buffers. This is generally discouraged for normal use."
         },
     )
     use_residual_init: bool = field(
         default=False,
         metadata={
-            "help": (
-                "If True, subtract the initial DeLoRA delta from the base weights. This avoids storing extra buffers on device, "
-                "and avoids recomputing deltas for frozen initial layers in the forward pass."
-            )
-        },
+            "help": "If False, frozen initial copies of the adapters are subtracted in the forward pass to allow for identity initialization. "
+            "This requires storing extra buffers on device, and extra computation. If `True`, initial adapters are subtracted from the base "
+            "weights once after initialization, so the effective initial delta is zero without storing extra buffers on device."
+        }
     )
     layers_to_transform: Optional[Union[list[int], int]] = field(
         default=None,

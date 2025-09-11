@@ -36,7 +36,7 @@ from peft import (
     BOFTConfig,
     BoneConfig,
     C3AConfig,
-    DeLoRAConfig,
+    DeloraConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -852,15 +852,15 @@ TEST_CASES = [
     ##########
     # DeLoRA #
     ##########
-    ("Vanilla MLP 1 DeLoRA", "MLP", DeLoRAConfig, {"target_modules": "lin0"}),
-    ("Vanilla MLP 2 DeLoRA", "MLP", DeLoRAConfig, {"target_modules": ["lin0"]}),
-    ("Vanilla MLP 3 DeLoRA", "MLP", DeLoRAConfig, {"target_modules": ["lin1"]}),
-    ("Vanilla MLP 4 DeLoRA", "MLP", DeLoRAConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 1 DeLoRA", "MLP", DeloraConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 DeLoRA", "MLP", DeloraConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 DeLoRA", "MLP", DeloraConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 DeLoRA", "MLP", DeloraConfig, {"target_modules": ["lin0", "lin1"]}),
     (
         "Vanilla MLP 5 DeLoRA",
         "MLP",
-        DeLoRAConfig,
-        {"target_modules": ["lin0"], "alpha": 4, "module_dropout": 0.1},
+        DeloraConfig,
+        {"target_modules": ["lin0"], "lambda_": 4, "module_dropout": 0.1},
     ),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
@@ -1135,14 +1135,14 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
     (
         "DeLoRA Same",
         "delora",
-        DeLoRAConfig,
+        DeloraConfig,
         {"target_modules": ["lin0"], "init_weights": False},
         {"target_modules": ["lin0"], "init_weights": False},
     ),
     (
         "DeLoRA Different",
         "delora",
-        DeLoRAConfig,
+        DeloraConfig,
         {"target_modules": ["lin0"], "init_weights": False},
         {"target_modules": ["lin1"], "init_weights": False},
     ),
@@ -1166,7 +1166,7 @@ PREFIXES = {
     BoneConfig: "bone_",
     RoadConfig: "road_",
     MissConfig: "miss_",
-    DeLoRAConfig: "delora_",
+    DeloraConfig: "delora_",
     TrainableTokensConfig: "trainable_tokens_",
     WaveFTConfig: "waveft_",
 }
@@ -3465,7 +3465,7 @@ class TestPeftCustomModel(PeftCommonTester):
         b_lin1 = base.lin1.bias.detach().clone() if base.lin1.bias is not None else None
 
         # Wrap with DeLoRA, explicitly use_residual_init=False so setup does not touch base weights
-        cfg = DeLoRAConfig(target_modules=["lin0", "lin1"], use_residual_init=False)
+        cfg = DeloraConfig(target_modules=["lin0", "lin1"], use_residual_init=False)
         peft_model = get_peft_model(base, cfg).eval()
 
         # Access wrapped base layers
@@ -3509,7 +3509,7 @@ class TestPeftCustomModel(PeftCommonTester):
         b_lin1 = base.lin1.bias.detach().clone() if base.lin1.bias is not None else None
 
         # Wrap with DeLoRA, use_residual_init=True so setup modifies base weights
-        cfg = DeLoRAConfig(target_modules=["lin0", "lin1"], use_residual_init=True)
+        cfg = DeloraConfig(target_modules=["lin0", "lin1"], use_residual_init=True)
         peft_model = get_peft_model(base, cfg).eval()
 
         # Access wrapped base layers
