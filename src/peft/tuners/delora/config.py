@@ -29,7 +29,7 @@ class DeloraConfig(PeftConfig):
         r (`int`):
             The rank of the DeLoRA adapter.
         lambda_ (`int`):
-            The initial value of the boundary of the DeLoRA adapter. This variable sets an upper bound to the Frobenius 
+            The initial value of the boundary of the DeLoRA adapter. This variable sets an upper bound to the Frobenius
             norm of the weight change, avoiding the finetuned model to deviate too much from the original model.
         module_dropout (`float`):
             The dropout probability for disabling DeLoRA modules during training.
@@ -51,7 +51,7 @@ class DeloraConfig(PeftConfig):
             will not produce the same output as the base model would have without adaptation.
         init_weights (`bool`):
             Whether to perform initialization of adapter weights. If `True` (default): adapters are initialized
-            in an identity-preserving way with kaiming uniform initialization. If `False`: adapters immediately 
+            in an identity-preserving way with kaiming uniform initialization. If `False`: adapters immediately
             contribute a non-zero delta and force `use_residual_init=False` with no initial A and B buffers.
             This is generally discouraged for normal use.
         use_residual_init (`bool`):
@@ -75,9 +75,10 @@ class DeloraConfig(PeftConfig):
         modules_to_save (`Optional[List[str]]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
     """
+
     r: int = field(default=8, metadata={"help": "DeLoRA rank"})
     lambda_: int = field(
-        default=8, 
+        default=8,
         metadata={
             "help": "The initial value of the boundary of the DeLoRA adapter. This variable sets an upper bound to the "
             "Frobenius norm of the weight change, avoiding the finetuned model to deviate too much from the original model."
@@ -113,7 +114,7 @@ class DeloraConfig(PeftConfig):
             "help": "If False, frozen initial copies of the adapters are subtracted in the forward pass to allow for identity initialization. "
             "This requires storing extra buffers on device, and extra computation. If `True`, initial adapters are subtracted from the base "
             "weights once after initialization, so the effective initial delta is zero without storing extra buffers on device."
-        }
+        },
     )
     layers_to_transform: Optional[Union[list[int], int]] = field(
         default=None,
