@@ -14,6 +14,7 @@
 
 import copy
 import itertools
+import math
 import platform
 import re
 import warnings
@@ -21,7 +22,6 @@ from collections import defaultdict
 from contextlib import contextmanager
 from copy import deepcopy
 from unittest.mock import patch
-import math
 
 import pytest
 import torch
@@ -3898,35 +3898,36 @@ class TestScaling:
         config = LoraConfig(
             r=rank,
             lora_alpha=lora_alpha,
+            use_rslora=True,
             target_modules=["k_proj"],
         )
         model = get_peft_model(model, config)
         scalings = self.get_scalings(model)
         expected = [lora_alpha / math.sqrt(rank)] * n_layers
         assert scalings == expected
-    
+
         # double
         self.scale_layer(model, 2)
         scalings = self.get_scalings(model)
-        expected = [4.0] * n_layers
+        expected = [2 * lora_alpha / math.sqrt(rank)] * n_layers
         assert scalings == expected
-    
+
         # back to original
         self.unscale_layer(model, None)
         scalings = self.get_scalings(model)
-        expected = [2.0] * n_layers
+        expected = [lora_alpha / math.sqrt(rank)] * n_layers
         assert scalings == expected
-    
+
         # triple
         self.set_scale(model, "default", 3)
         scalings = self.get_scalings(model)
-        expected = [6.0] * n_layers
+        expected = [3 * lora_alpha / math.sqrt(rank)] * n_layers
         assert scalings == expected
-    
+
         # back to original
         self.unscale_layer(model, 3)
         scalings = self.get_scalings(model)
-        expected = [2.0] * n_layers
+        expected = [lora_alpha / math.sqrt(rank)] * n_layers
         assert scalings == expected
 
     def test_scaling_rank_pattern_alpha_pattern(self, model):
