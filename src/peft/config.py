@@ -55,7 +55,7 @@ def _is_dev_version(version: str) -> bool:
 
 
 def _get_commit_hash(pkg_name: str) -> str | None:
-    # If PEFT was installed from a specific commit hash, try to get it. This works e.g. when isntalling PEFT with `pip
+    # If PEFT was installed from a specific commit hash, try to get it. This works e.g. when installing PEFT with `pip
     # install git+https://github.com/huggingface/peft.git@<HASH>`. This works not for other means, like editable
     # installs.
     try:

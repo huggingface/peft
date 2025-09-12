@@ -527,7 +527,7 @@ class TestPeftConfig:
         assert config_loaded.peft_version == expected_version
 
     @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
-    def test_peft_version_is_dev_version_but_coomit_hash_cannot_be_determined(
+    def test_peft_version_is_dev_version_but_commit_hash_cannot_be_determined(
         self, config_class, mandatory_kwargs, monkeypatch, tmp_path
     ):
         # There can be cases where PEFT is using a dev version but the commit hash cannot be determined. In this case,
