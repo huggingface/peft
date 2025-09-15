@@ -28,7 +28,13 @@ from peft.utils import (
     _get_submodules,
 )
 
-from .tuners_utils import BaseTuner, BaseTunerLayer, check_adapters_to_merge, check_target_module_exists
+from .tuners_utils import (
+    BaseTuner,
+    BaseTunerLayer,
+    _get_in_out_features,
+    check_adapters_to_merge,
+    check_target_module_exists,
+)
 
 
 @dataclass
@@ -79,6 +85,10 @@ class LycorisLayer(BaseTunerLayer):
         self.merged_adapters = []
         # flag to enable/disable casting of input to weight dtype during forward call
         self.cast_input_dtype_enabled = True
+
+        in_features, out_features = _get_in_out_features(self.get_base_layer())
+        self.in_features = in_features
+        self.out_features = out_features
 
     @property
     @abstractmethod
