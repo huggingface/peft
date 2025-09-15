@@ -518,7 +518,7 @@ class LoraLayer(BaseTunerLayer):
             self.scaling[adapter] = scale * self.lora_alpha[adapter] / math.sqrt(self.r[adapter])
         else:
             self.scaling[adapter] = scale * self.lora_alpha[adapter] / self.r[adapter]
-    
+
     def scale_layer(self, scale: float | int) -> None:
         """Multiply the current scale of all active adapters by the provided factor"""
         if scale == 1:
@@ -542,9 +542,12 @@ class LoraLayer(BaseTunerLayer):
                 continue
 
             if scale is None:
-                self.scaling[active_adapter] = self.lora_alpha[active_adapter] / self.r[active_adapter]
+                if self.use_rslora.get(active_adapter, False):
+                    self.scaling[active_adapter] = self.lora_alpha[active_adapter] / math.sqrt(self.r[active_adapter])
+                else:
+                    self.scaling[active_adapter] = self.lora_alpha[active_adapter] / self.r[active_adapter]
             else:
-                self.scaling[active_adapter] /= scale
+                self.scaling[active_adapter] = self.scaling[active_adapter] / scale
 
     def _check_forward_args(self, x, *args, **kwargs):
         """Check if the arguments are compatible with the configs and state of the model"""
