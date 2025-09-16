@@ -39,7 +39,7 @@ from .layer import Conv2d, Conv3d, IA3Layer, Linear
 class IA3Model(BaseTuner):
     """
     Creates a Infused Adapter by Inhibiting and Amplifying Inner Activations ((IA)^3) model from a pretrained
-    transformers model. The method is described in detail in https://arxiv.org/abs/2205.05638
+    transformers model. The method is described in detail in https://huggingface.co/papers/2205.05638
 
     Args:
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
@@ -74,9 +74,6 @@ class IA3Model(BaseTuner):
     """
 
     prefix: str = "ia3_"
-
-    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False):
-        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
     @staticmethod
     def _create_new_module(ia3_config, adapter_name, target, **kwargs):
@@ -263,27 +260,22 @@ class IA3Model(BaseTuner):
         """
         self._set_adapter_layers(enabled=False)
 
-    def set_adapter(self, adapter_name: str | list[str]) -> None:
+    def set_adapter(self, adapter_name: str | list[str], inference_mode: bool = False) -> None:
         """Set the active adapter(s).
 
-        Additionally, this function will set the specified adapters to trainable (i.e., requires_grad=True). If this is
-        not desired, use the following code.
-
-        ```py
-        >>> for name, param in model_peft.named_parameters():
-        ...     if ...:  # some check on name (ex. if 'lora' in name)
-        ...         param.requires_grad = False
-        ```
-
         Args:
-            adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
+            adapter_name (`str` or `list[str]`):
+                Name(s) of the adapter(s) to be activated.
+            inference_mode (bool, optional):
+                 Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         """
+        self.set_auxiliary_adapters(adapter_name, inference_mode=inference_mode)
         for module in self.model.modules():
             if isinstance(module, IA3Layer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
-                module.set_adapter(adapter_name)
+                module.set_adapter(adapter_name, inference_mode=inference_mode)
         self.active_adapter = adapter_name
 
     @staticmethod

@@ -251,9 +251,14 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
             self.modules_to_save = set(modules_to_save)
         else:
             self.modules_to_save.update(modules_to_save)
-        _set_trainable(self, adapter_name, module_names=getattr(peft_config, "modules_to_save", None))
+        _set_trainable(
+            self,
+            adapter_name,
+            module_names=getattr(peft_config, "modules_to_save", None),
+            inference_mode=peft_config.inference_mode,
+        )
 
-    def set_adapter(self, adapter_name: Union[str, list[str]]) -> None:
+    def set_adapter(self, adapter_name: Union[str, list[str]], inference_mode: bool = False) -> None:
         """
         Sets the active adapter(s) for the model.
 
@@ -262,18 +267,14 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         order in which the adapters were loaded into the model. The active adapters only determine which adapters are
         active during the forward pass, but not the order in which they are applied.
 
-        Additionally, this function will set the specified adapters to trainable (i.e., requires_grad=True). If this is
-        not desired, use the following code.
-
-        ```py
-        >>> for name, param in model_peft.named_parameters():
-        ...     if ...:  # some check on name (ex. if 'lora' in name)
-        ...         param.requires_grad = False
-        ```
+        Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True) unless
+        inference_mode is True.
 
         Args:
-            adapter_name (`str` or `List[str]`):
-                The name of the adapter(s) to be activated.
+            adapter_name (str, list[str]):
+                The name(s) of the adapter(s) to set as active
+            inference_mode (bool, optional):
+                 Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         """
         if isinstance(adapter_name, str):
             adapter_name = [adapter_name]
@@ -284,8 +285,8 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
                 f"Adapter(s) {sorted(mismatched)} not found, available adapters: {sorted(self.peft_config.keys())}"
             )
 
-        self.base_model.set_adapter(adapter_name)
-        _set_adapter(self, adapter_name)
+        self.base_model.set_adapter(adapter_name, inference_mode=inference_mode)
+        _set_adapter(self, adapter_name, inference_mode=inference_mode)
 
     def delete_adapter(self, adapter_name: Union[str, list[str]]) -> None:
         if isinstance(adapter_name, str):

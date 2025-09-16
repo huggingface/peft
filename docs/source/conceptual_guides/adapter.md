@@ -52,7 +52,7 @@ In principle, LoRA can be applied to any subset of weight matrices in a neural n
 
 ## Mixture of LoRA Experts (X-LoRA)
 
-[X-LoRA](https://arxiv.org/abs/2402.07148) is a mixture of experts method for LoRA which works by using dense or sparse gating to dynamically activate LoRA experts. The LoRA experts as well as the base model are frozen during training, resulting in a low parameter count as only the gating layers must be trained. In particular, the gating layers output scalings which (depending on config) are granular on the layer and token level. Additionally, during inference, X-LoRA dynamically activates LoRA adapters to recall knowledge and effectively mix them:
+[X-LoRA](https://huggingface.co/papers/2402.07148) is a mixture of experts method for LoRA which works by using dense or sparse gating to dynamically activate LoRA experts. The LoRA experts as well as the base model are frozen during training, resulting in a low parameter count as only the gating layers must be trained. In particular, the gating layers output scalings which (depending on config) are granular on the layer and token level. Additionally, during inference, X-LoRA dynamically activates LoRA adapters to recall knowledge and effectively mix them:
 
 The below graphic demonstrates how the scalings change for different prompts for each token. This highlights the activation of different adapters as the generation progresses and the sequence creates new context.
 
@@ -60,7 +60,7 @@ The below graphic demonstrates how the scalings change for different prompts for
 
 For each step, X-LoRA requires the base model to be run twice: first, to get hidden states without any LoRA adapters, and secondly, the hidden states are used to calculate scalings which are applied to the LoRA adapters and the model is run a second time. The output of the second run is the result of the model step.
 
-Ultimately, X-LoRA allows the model to reflect upon it's knowledge because of the dual forward pass scheme, and dynamically reconfigure the architecture.
+Ultimately, X-LoRA allows the model to reflect upon its knowledge because of the dual forward pass scheme, and dynamically reconfigure the architecture.
 
 ## Low-Rank Hadamard Product (LoHa)
 
@@ -85,9 +85,11 @@ OFT preserves the hyperspherical energy by learning an orthogonal transformation
 
 ## Orthogonal Butterfly (BOFT)
 
-[BOFT](https://hf.co/papers/2311.06243) is a method that primarily focuses on preserving a pretrained model's generative performance in the finetuned model. It tries to maintain the same cosine similarity (hyperspherical energy) between all pairwise neurons in a layer because this better captures the semantic information among neurons. This means OFT is more capable at preserving the subject and it is better for controllable generation (similar to [ControlNet](https://huggingface.co/docs/diffusers/using-diffusers/controlnet)).
+[BOFT](https://hf.co/papers/2311.06243) is an improved orthogonal finetuning method that focuses on preserving a pretrained model's generative capabilities while being significantly more parameter-efficient than standard OFT. Like OFT, BOFT maintains the same cosine similarity (hyperspherical energy) between all pairwise neurons in a layer by applying an orthogonal transformation to the pretrained weight matrix, ensuring the semantic relationships among neurons are preserved.
 
-OFT preserves the hyperspherical energy by learning an orthogonal transformation for neurons to keep the cosine similarity between them unchanged. In practice, this means taking the matrix product of an orthogonal matrix with the pretrained weight matrix. However, to be parameter-efficient, the orthogonal matrix is represented as a block-diagonal matrix with rank `r` blocks. Whereas LoRA reduces the number of trainable parameters with low-rank structures, OFT reduces the number of trainable parameters with a sparse block-diagonal matrix structure.
+Instead of using a block-diagonal orthogonal matrix, BOFT factorizes the orthogonal transformation into a product of **sparse butterfly matrices** (originally introduced in the [Cooley–Tukey FFT](https://en.wikipedia.org/wiki/Cooley%E2%80%93Tukey_FFT_algorithm)). Unlike OFT's block-diagonal rotations, which only mix inputs within each block, the butterfly structure guarantees that every input can influence every output, producing a **dense connectivity** with just `O(d log d)` parameters. This factorization preserves expressivity while drastically reducing the parameter count compared to OFT (at the expense of computation time).
+
+In practice, BOFT multiplies each pretrained weight matrix by a sequence of butterfly-structured orthogonal factors, enabling efficient and expressive neuron rotations. This makes BOFT well-suited for controllable generation and tasks where maintaining the pretrained model's subject representation is critical, while also scaling to larger models with lower memory and compute overhead.
 
 ## Adaptive Low-Rank Adaptation (AdaLoRA)
 
@@ -97,9 +99,9 @@ Training with AdaLoRA has three phases: the init phase, the budgeting phase and 
 
 ## Llama-Adapter
 
-[Llama-Adapter](https://hf.co/papers/2303.16199) is a method for adapting Llama into a instruction-following model. To help adapt the model for instruction-following, the adapter is trained with a 52K instruction-output dataset.
+[Llama-Adapter](https://hf.co/papers/2303.16199) is a method for adapting Llama into an instruction-following model. To help adapt the model for instruction-following, the adapter is trained with a 52K instruction-output dataset.
 
-A set of of learnable adaption prompts are prefixed to the input instruction tokens. These are inserted into the upper layers of the model because it is better to learn with the higher-level semantics of the pretrained model. The instruction-output tokens prefixed to the input guide the adaption prompt to generate a contextual response.
+A set of learnable adaption prompts are prefixed to the input instruction tokens. These are inserted into the upper layers of the model because it is better to learn with the higher-level semantics of the pretrained model. The instruction-output tokens prefixed to the input guide the adaption prompt to generate a contextual response.
 
 <div class="flex justify-center">
     <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/llama-adapter.png"/>
@@ -117,17 +119,21 @@ To avoid adding noise to the tokens, the adapter uses zero-initialized attention
 </div>
 <small><a href="https://huggingface.co/papers/2405.17484">Bridging The Gap between Low-rank and Orthogonal Adaptation via Householder Reflection Adaptation</a></small>
 
-HRA constructs a chain of `r` trainable Householder reflections (HRs). Because the Householder reflection matrix is an orthogonal matrix and the product of orthogonal matrices is also an orthogonal matrix, HRA satisfies the theoretical guarantee of Orthogonal Finetuning (OFT). Meanwhile, HRA can also be viewed as an low-rank fine-tuning adapter by rewriting formula. 
+HRA constructs a chain of `r` trainable Householder reflections (HRs). Because the Householder reflection matrix is an orthogonal matrix and the product of orthogonal matrices is also an orthogonal matrix, HRA satisfies the theoretical guarantee of Orthogonal Finetuning (OFT). Meanwhile, HRA can also be viewed as a low-rank fine-tuning adapter by rewriting formula. 
 
 The higher `r`, the more trainable parameters, resulting in a larger model capacity and better performance. Besides, due to the chain structure, the orthogonality of HR planes impacts the capacity and regularity of HRA. To achieve a trade-off between the model capacity and regularity, an orthogonality regularizer of the HR planes is added to the loss function. The weight \\(\lambda\\) can control the strength of the regularizer. 
 
 ## Bone
-[DiSHA](https://huggingface.co/papers/2409.15371) A novel PEFT technique distinct from LoRA, called Dimension-Sharding Adaptation (DiSHA). By dividing the original weights into multiple subspaces that share a single matrix for weight updates, DiSHA simplifies the process by requiring the trainable matrix to be initialized to zero, eliminating the need for complex initialization as in some LoRA variants. Bone and Bat are derivative structures of DiSHA. Bone significantly improves computational efficiency while saving memory, whereas Bat addresses the limitation of Bone's linear update by employing a non-linear update to break through the upper bound.
+[MiSS](https://huggingface.co/papers/2409.15371) New version of paper(MiSS: Balancing LoRA Performance and Efficiency with Simple Shard Sharing)
+If you already have a Bone checkpoint, you can use `/scripts/convert-bone-to-miss.py` to convert it into a MiSS checkpoint and proceed with training using MiSS.
 
-<small><a href="https://huggingface.co/papers/2409.15371">DiSHA: Dimension-Sharding Adaptation with Fast Convergence and Fast Computation</a></small>
+## MiSS
+[MiSS](https://huggingface.co/papers/2409.15371) MiSS (Matrix Shard Sharing) is a novel Parameter-Efficient Fine-Tuning (PEFT) method designed to address the trade-off between adaptability and efficiency in Large Language Models. The core approach of MiSS involves a simple shard-sharing mechanism. It achieves low-rank adaptation by decomposing a weight matrix into multiple fragments and then utilizing a shared, trainable "common fragment." The final low-rank update matrix is constructed by replicating these shared, partitioned shards. (MiSS is a novel PEFT method that adopts a low-rank structure, requires only a single trainable matrix, and introduces a new update mechanism distinct from LoRA, achieving an excellent balance between performance and efficiency.)
 
-Intuitively, the shape of a single trainable matrix in Bone is consistent with `lora_B`, so the `r` parameter in Bone is less than the `r` in LoRA by (`in_feature * r`).
+<small><a href="https://huggingface.co/papers/2409.15371">MiSS: Balancing LoRA Performance and Efficiency with Simple Shard Sharing</a></small>
 
-Note: Bat's r (b) is special and requires that weight W satisfies the conditions `in_features % r == 0` and `out_features % r == 0`. Additionally, when `in_features == out_features` and Bone-r equals LoRA-r, Bone's number of trainable parameters is only half that of LoRA.
+Intuitively, the shape of a single trainable matrix in MiSS is consistent with `lora_B`, so the `r` parameter in MiSS is less than the `r` in LoRA by (`in_feature * r`).
 
-Although the nonlinear updates of Bat bring some performance improvements, they also increase computational overhead. Its main purpose is to provide researchers with a direction for improvement. Therefore, we recommend fine-tuning the comprehensive Bone model instead.
+Note: Bat's r (b) is special and requires that weight W satisfies the conditions `in_features % r == 0` and `out_features % r == 0`. Additionally, when `in_features == out_features` and MiSS-r equals LoRA-r, MiSS's number of trainable parameters is only half that of LoRA.
+
+Although the nonlinear updates of Bat bring some performance improvements, they also increase computational overhead. Its main purpose is to provide researchers with a direction for improvement. Therefore, we recommend fine-tuning the comprehensive MiSS model instead.

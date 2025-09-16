@@ -48,8 +48,9 @@ class DoraLinearLayer(nn.Module):
                 base_layer = deepcopy(base_layer)
 
             weight = dequantize_module_weight(base_layer)
-            if weight.data.ndim >= 4:  # For handling LoRAs applied to Conv layers.
-                lora_weight = torch.mm(lora_B.flatten(start_dim=1), lora_A.flatten(start_dim=1))
+            if weight.data.ndim >= 3:  # For handling LoRAs applied to Conv layers.
+                r = lora_A.shape[0]
+                lora_weight = torch.mm(lora_B.view([-1, r]), lora_A.view([r, -1]))
                 lora_weight = lora_weight.reshape(weight.shape)
             else:
                 lora_weight = lora_B @ lora_A
@@ -76,7 +77,7 @@ class DoraLinearLayer(nn.Module):
         weight = dequantize_module_weight(base_layer)
         weight = weight.to(x.dtype)
         weight_norm = self.get_weight_norm(weight, lora_weight.detach(), scaling)
-        # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
+        # see section 4.3 of DoRA (https://huggingface.co/papers/2402.09353)
         # "[...] we suggest treating ||V +∆V ||_c in
         # Eq. (5) as a constant, thereby detaching it from the gradient
         # graph. This means that while ||V + ∆V ||_c dynamically
@@ -114,7 +115,7 @@ class DoraEmbeddingLayer(DoraLinearLayer):
         magnitude = self.weight
         weight = base_layer.weight
         weight_norm = self.get_weight_norm(weight, lora_weight.detach(), scaling)
-        # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
+        # see section 4.3 of DoRA (https://huggingface.co/papers/2402.09353)
         # "[...] we suggest treating ||V +∆V ||_c in
         # Eq. (5) as a constant, thereby detaching it from the gradient
         # graph. This means that while ||V + ∆V ||_c dynamically
@@ -145,11 +146,12 @@ class _DoraConvNdLayer(DoraLinearLayer):
         output.
         """
         weight = base_layer.weight
-        lora_weight = torch.mm(lora_B.weight.flatten(start_dim=1), lora_A.weight.flatten(start_dim=1))
+        r = lora_A.weight.shape[0]
+        lora_weight = torch.mm(lora_B.weight.view([-1, r]), lora_A.weight.view([r, -1]))
         lora_weight = lora_weight.reshape(weight.shape)
         magnitude = self.weight
         weight_norm = self.get_weight_norm(weight, lora_weight.detach(), scaling)
-        # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
+        # see section 4.3 of DoRA (https://huggingface.co/papers/2402.09353)
         # "[...] we suggest treating ||V +∆V ||_c in
         # Eq. (5) as a constant, thereby detaching it from the gradient
         # graph. This means that while ||V + ∆V ||_c dynamically
@@ -181,6 +183,12 @@ class _DoraConvNdLayer(DoraLinearLayer):
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "lora.dora." + rep
+
+
+class DoraConv1dLayer(_DoraConvNdLayer):
+    def __init__(self, fan_in_fan_out):
+        super().__init__(fan_in_fan_out)
+        self.conv_fn = F.conv1d
 
 
 class DoraConv2dLayer(_DoraConvNdLayer):

@@ -1,0 +1,41 @@
+name: Deploy "method_comparison" Gradio to Spaces
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "method_comparison/**"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+        with:
+          fetch-depth: 0  # full history needed for subtree
+          persist-credentials: false
+
+      - name: Authenticate via ~/.netrc
+        env:
+          HF_TOKEN: ${{ secrets.PEFT_INTERNAL_REPO_READ_WRITE }}
+        run: |
+          # netrc needs BOTH login and password entries
+          printf "machine huggingface.co\nlogin hf\npassword ${HF_TOKEN}\n" >> ~/.netrc
+          chmod 600 ~/.netrc
+
+      - name: Deploy method_comparison app to HF Spaces
+        run: |
+          cd method_comparison
+          git init
+          # Spaces expect requirements.txt
+          mv requirements-app.txt requirements.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add gradio-app https://huggingface.co/spaces/peft-internal-testing/PEFT-method-comparison
+          git add .
+          git commit -m "🚀 Deploy method comparison app from GH action"
+          git push -f gradio-app HEAD:main

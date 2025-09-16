@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # The implementation is based on "Parameter-Efficient Orthogonal Finetuning
-# via Butterfly Factorization" (https://arxiv.org/abs/2311.06243) in ICLR 2024.
+# via Butterfly Factorization" (https://huggingface.co/papers/2311.06243) in ICLR 2024.
 
 from __future__ import annotations
 
@@ -261,7 +261,15 @@ class BOFTLayer(BaseTunerLayer):
             warnings.warn("Unscaling operation for BOFT not supported! Keeping scale to 1.")
 
     def update_layer(
-        self, adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
+        self,
+        adapter_name,
+        boft_block_size,
+        boft_block_num,
+        boft_n_butterfly_factor,
+        boft_dropout,
+        init_weights,
+        inference_mode: bool = False,
+        **kwargs,
     ):
         """
         Update the linear layer with trainable BOFT weights. Override for other layer types.
@@ -360,7 +368,7 @@ class BOFTLayer(BaseTunerLayer):
         self.boft_block_num[adapter_name] = boft_block_num
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def reset_boft_parameters(self, adapter_name, init_weights):
         """
@@ -682,7 +690,15 @@ class Conv2d(nn.Module, BOFTLayer):
         )
 
     def update_layer(
-        self, adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
+        self,
+        adapter_name,
+        boft_block_size,
+        boft_block_num,
+        boft_n_butterfly_factor,
+        boft_dropout,
+        init_weights,
+        inference_mode: bool = False,
+        **kwargs,
     ):
         """
         Update the conv2d layer with trainable BOFT weights.
@@ -787,7 +803,7 @@ class Conv2d(nn.Module, BOFTLayer):
         self.boft_block_num[adapter_name] = boft_block_num
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """

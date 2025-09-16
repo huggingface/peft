@@ -3,3 +3,4 @@ accelerate
 evaluate
 tqdm
 datasets
+torchao

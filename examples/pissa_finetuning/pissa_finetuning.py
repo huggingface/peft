@@ -46,6 +46,7 @@ class ScriptArguments(SFTConfig):
     # dataset configs
     data_path: str = field(default="imdb", metadata={"help": "Path to the training data."})
     dataset_split: str = field(default="train[:1%]", metadata={"help": "(`['train', 'test', 'eval']`):"})
+    dataset_field: list[str] = field(default=None, metadata={"help": "Fields of dataset input and output."})
 
 
 parser = HfArgumentParser(ScriptArguments)
@@ -128,7 +129,7 @@ trainer = SFTTrainer(
     model=peft_model,
     args=script_args,
     train_dataset=dataset,
-    tokenizer=tokenizer,
+    processing_class=tokenizer,
 )
 trainer.train()
 trainer.save_state()

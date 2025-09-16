@@ -35,7 +35,7 @@ from .layer import BoneLayer, BoneLinear
 class BoneModel(BaseTuner):
     """
     Creates Householder reflection adaptation (Bone) model from a pretrained model. The method is described in
-    https://arxiv.org/abs/2409.15371
+    https://huggingface.co/papers/2409.15371
 
     Args:
         model (`torch.nn.Module`): The model to which the adapter tuner layers will be attached.
@@ -234,18 +234,19 @@ class BoneModel(BaseTuner):
             if val != "none":
                 msg = (
                     f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
-                    "output as the the base model would without adaption."
+                    "output as the base model would without adaption."
                 )
                 warnings.warn(msg)
         self._set_adapter_layers(enabled=False)
 
-    def set_adapter(self, adapter_name):
+    def set_adapter(self, adapter_name, inference_mode: bool = False):
+        self.set_auxiliary_adapters(adapter_name, inference_mode=inference_mode)
         for module in self.model.modules():
             if isinstance(module, BoneLayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
-                module.set_adapter(adapter_name)
+                module.set_adapter(adapter_name, inference_mode=inference_mode)
         self.active_adapter = adapter_name
 
     @staticmethod

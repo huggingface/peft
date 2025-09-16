@@ -33,9 +33,6 @@ from .layer import Linear, PolyLayer
 class PolyModel(BaseTuner):
     prefix: str = "poly_"
 
-    def __init__(self, model, config, adapter_name) -> None:
-        super().__init__(model, config, adapter_name)
-
     @staticmethod
     def _check_target_module_exists(poly_config, key):
         return check_target_module_exists(poly_config, key)
@@ -138,10 +135,11 @@ class PolyModel(BaseTuner):
     def disable_adapter_layers(self):
         self._set_adapter_layers(enabled=False)
 
-    def set_adapter(self, adapter_name):
+    def set_adapter(self, adapter_name, inference_mode: bool = False):
+        self.set_auxiliary_adapters(adapter_name, inference_mode=inference_mode)
         for module in self.model.modules():
             if isinstance(module, PolyLayer):
-                module.set_adapter(adapter_name)
+                module.set_adapter(adapter_name, inference_mode=inference_mode)
 
     def _prepare_adapter_config(self, peft_config, model_config):
         if peft_config.target_modules is None:

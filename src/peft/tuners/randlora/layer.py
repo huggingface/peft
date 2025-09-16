@@ -99,6 +99,8 @@ class RandLoraLayer(BaseTunerLayer):
         randlora_alpha,
         randlora_dropout,
         init_weights,
+        inference_mode: bool = False,
+        **kwargs,
     ):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -166,7 +168,7 @@ class RandLoraLayer(BaseTunerLayer):
             self.reset_randlora_parameters(adapter_name)
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def reset_randlora_parameters(self, adapter_name):
         if adapter_name in self.randlora_lambda.keys():
@@ -287,7 +289,7 @@ class Linear(nn.Linear, RandLoraLayer):
             randlora_lambda = randlora_lambda.float()
             randlora_gamma = randlora_gamma.float()
 
-        # The trainable paramters are always applied to randlora_A, the smallest basis.
+        # The trainable parameters are always applied to randlora_A, the smallest basis.
         min_dim, max_dim = min(self.out_features, self.in_features), max(self.out_features, self.in_features)
 
         # As adapted layers may have different shapes and RandLora contains a single shared pair of A and B matrices,
@@ -324,7 +326,6 @@ class Linear(nn.Linear, RandLoraLayer):
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
-
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()

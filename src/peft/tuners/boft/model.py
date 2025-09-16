@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # The implementation is based on "Parameter-Efficient Orthogonal Finetuning
-# via Butterfly Factorization" (https://arxiv.org/abs/2311.06243) in ICLR 2024.
+# via Butterfly Factorization" (https://huggingface.co/papers/2311.06243) in ICLR 2024.
 
 import warnings
 from dataclasses import asdict
@@ -42,8 +42,8 @@ from .layer import BOFTLayer, Conv2d, Linear
 
 class BOFTModel(BaseTuner):
     """
-    Creates BOFT and OFT model from a pretrained transformers model. Paper: https://arxiv.org/abs/2311.06243
-    https://arxiv.org/abs/2306.07280
+    Creates BOFT and OFT model from a pretrained transformers model. Paper: https://huggingface.co/papers/2311.06243
+    https://huggingface.co/papers/2306.07280
 
     Args:
         model ([`transformers.PreTrainedModel`]): The model to be adapted.
@@ -73,9 +73,6 @@ class BOFTModel(BaseTuner):
     """
 
     prefix: str = "boft_"
-
-    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
-        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
 
     def _check_new_adapter_config(self, config: BOFTConfig) -> None:
         """
@@ -243,18 +240,19 @@ class BOFTModel(BaseTuner):
             if val != "none":
                 msg = (
                     f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
-                    "output as the the base model would without adaption."
+                    "output as the base model would without adaption."
                 )
                 warnings.warn(msg)
         self._set_adapter_layers(enabled=False)
 
-    def set_adapter(self, adapter_name):
+    def set_adapter(self, adapter_name, inference_mode: bool = False):
+        self.set_auxiliary_adapters(adapter_name, inference_mode=inference_mode)
         for module in self.model.modules():
             if isinstance(module, BOFTLayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
-                module.set_adapter(adapter_name)
+                module.set_adapter(adapter_name, inference_mode=inference_mode)
         self.active_adapter = adapter_name
 
     @staticmethod

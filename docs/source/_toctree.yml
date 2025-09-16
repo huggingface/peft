@@ -124,6 +124,16 @@
       title: Bone
     - local: package_reference/trainable_tokens
       title: Trainable Tokens
+    - local: package_reference/randlora
+      title: RandLora
+    - local: package_reference/shira
+      title: SHiRA
+    - local: package_reference/c3a
+      title: C3A
+    - local: package_reference/miss
+      title: MiSS
+    - local: package_reference/road
+      title: RoAd
 
     title: Adapters
   - sections:

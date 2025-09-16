@@ -27,11 +27,15 @@ def preprocess(rows, task_name: str, print_fn=print):
         run_info = row["run_info"]
         train_info = row["train_info"]
         meta_info = row["meta_info"]
+        if run_info["peft_config"]:
+            peft_type = run_info["peft_config"]["peft_type"]
+        else:
+            peft_type = "full-finetuning"
         if train_info["status"] != "success":
             skipped += 1
             continue
 
-        test_metrics = train_info["metrics"][-1]
+        train_metrics = train_info["metrics"][-1]
 
         # extract the fields that make most sense
         dct = {
@@ -39,18 +43,18 @@ def preprocess(rows, task_name: str, print_fn=print):
             "experiment_name": run_info["experiment_name"],
             "model_id": run_info["train_config"]["model_id"],
             "train_config": run_info["train_config"],
-            "peft_type": run_info["peft_config"]["peft_type"],
+            "peft_type": peft_type,
             "peft_config": run_info["peft_config"],
-            "cuda_memory_reserved_avg": train_info["cuda_memory_reserved_avg"],
-            "cuda_memory_max": train_info["cuda_memory_max"],
-            "cuda_memory_reserved_99th": train_info["cuda_memory_reserved_99th"],
+            "accelerator_memory_reserved_avg": train_info["accelerator_memory_reserved_avg"],
+            "accelerator_memory_max": train_info["accelerator_memory_max"],
+            "accelerator_memory_reserved_99th": train_info["accelerator_memory_reserved_99th"],
             "total_time": run_info["total_time"],
             "train_time": train_info["train_time"],
             "file_size": train_info["file_size"],
-            "test_accuracy": test_metrics["test accuracy"],
-            "test_loss": test_metrics["train loss"],
-            "train_samples": test_metrics["train samples"],
-            "train_total_tokens": test_metrics["train total tokens"],
+            "test_accuracy": train_metrics["test accuracy"],
+            "train_loss": train_metrics["train loss"],
+            "train_samples": train_metrics["train samples"],
+            "train_total_tokens": train_metrics["train total tokens"],
             "peft_version": meta_info["package_info"]["peft-version"],
             "peft_branch": run_info["peft_branch"],
             "transformers_version": meta_info["package_info"]["transformers-version"],
@@ -89,14 +93,14 @@ def load_df(path, task_name, print_fn=print):
         "train_config": "string",
         "peft_type": "string",
         "peft_config": "string",
-        "cuda_memory_reserved_avg": int,
-        "cuda_memory_max": int,
-        "cuda_memory_reserved_99th": int,
+        "accelerator_memory_reserved_avg": int,
+        "accelerator_memory_max": int,
+        "accelerator_memory_reserved_99th": int,
         "total_time": float,
         "train_time": float,
         "file_size": int,
         "test_accuracy": float,
-        "test_loss": float,
+        "train_loss": float,
         "train_samples": int,
         "train_total_tokens": int,
         "peft_version": "string",
@@ -123,10 +127,10 @@ def load_df(path, task_name, print_fn=print):
         "total_time",
         "train_time",
         "test_accuracy",
-        "test_loss",
-        "cuda_memory_max",
-        "cuda_memory_reserved_99th",
-        "cuda_memory_reserved_avg",
+        "train_loss",
+        "accelerator_memory_max",
+        "accelerator_memory_reserved_99th",
+        "accelerator_memory_reserved_avg",
         "file_size",
         "created_at",
         "task_name",

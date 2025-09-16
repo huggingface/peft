@@ -45,7 +45,9 @@ class AdaLoraLayer(LoraLayer):
         self.lora_B = nn.ParameterDict({})
         self.ranknum = nn.ParameterDict({})
 
-    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
+    def update_layer(
+        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, inference_mode: bool = False, **kwargs
+    ):
         if r < 0:
             # note: r == 0 is allowed for AdaLora, see #1539
             raise ValueError(f"`r` should be a positive integer or 0, but the value passed is {r}")
@@ -74,7 +76,7 @@ class AdaLoraLayer(LoraLayer):
             self.reset_lora_parameters(adapter_name)
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def reset_lora_parameters(self, adapter_name):
         if adapter_name in self.lora_A.keys():

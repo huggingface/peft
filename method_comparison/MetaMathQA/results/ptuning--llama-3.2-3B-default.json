@@ -1,0 +1,348 @@
+{
+  "run_info": {
+    "created_at": "2025-06-19T19:48:53+00:00",
+    "total_time": 1918.2703526590012,
+    "experiment_name": "ptuning/llama-3.2-3B-default",
+    "peft_branch": "main",
+    "train_config": {
+      "model_id": "meta-llama/Llama-3.2-3B",
+      "dtype": "bfloat16",
+      "max_seq_length": 768,
+      "batch_size": 4,
+      "batch_size_eval": 50,
+      "max_steps": 5000,
+      "eval_steps": 250,
+      "compile": false,
+      "query_template": "Question: {query} Think step by step.\nAnswer:",
+      "seed": 0,
+      "grad_norm_clip": 1.0,
+      "optimizer_type": "AdamW",
+      "optimizer_kwargs": {
+        "lr": 0.0001,
+        "weight_decay": 0.1
+      },
+      "lr_scheduler": "cosine",
+      "use_amp": false,
+      "autocast_adapter_dtype": true,
+      "generation_kwargs": {
+        "max_length": 800,
+        "max_new_tokens": 300
+      },
+      "attn_implementation": null
+    },
+    "peft_config": {
+      "task_type": "CAUSAL_LM",
+      "peft_type": "P_TUNING",
+      "auto_mapping": null,
+      "base_model_name_or_path": "meta-llama/Llama-3.2-3B",
+      "revision": null,
+      "inference_mode": false,
+      "num_virtual_tokens": 20,
+      "token_dim": 3072,
+      "num_transformer_submodules": 1,
+      "num_attention_heads": 24,
+      "num_layers": 28,
+      "encoder_reparameterization_type": "MLP",
+      "encoder_hidden_size": 3072,
+      "encoder_num_layers": 2,
+      "encoder_dropout": 0.0
+    },
+    "error_msg": ""
+  },
+  "train_info": {
+    "accelerator_memory_reserved_avg": 11867101593,
+    "accelerator_memory_max": 20937965568,
+    "accelerator_memory_reserved_99th": 17215688540,
+    "train_time": 1707.340225783013,
+    "file_size": 245880,
+    "num_trainable_params": 28382208,
+    "num_total_params": 3241132032,
+    "status": "success",
+    "metrics": [
+      {
+        "step": 250,
+        "valid accuracy": 0.06,
+        "train loss": 0.9461167964935303,
+        "train samples": 1000,
+        "train time": 29.476242057011405,
+        "eval time": 11.075081511000462,
+        "tokens / sec": 7182.699870305862,
+        "mem allocated avg": 7263395393.536,
+        "mem reserved avg": 11910330187.776,
+        "elapsed time": 89.09710205499869
+      },
+      {
+        "step": 500,
+        "valid accuracy": 0.3,
+        "train loss": 0.7913461194038391,
+        "train samples": 2000,
+        "train time": 28.956617519994325,
+        "eval time": 11.047425028998987,
+        "tokens / sec": 7182.986751003671,
+        "mem allocated avg": 7255670497.28,
+        "mem reserved avg": 11810254094.336,
+        "elapsed time": 171.9022758780011
+      },
+      {
+        "step": 750,
+        "valid accuracy": 0.26,
+        "train loss": 0.7562740923166275,
+        "train samples": 3000,
+        "train time": 29.73533859500094,
+        "eval time": 11.056799476999004,
+        "tokens / sec": 7210.309689765724,
+        "mem allocated avg": 7266187038.72,
+        "mem reserved avg": 11954009669.632,
+        "elapsed time": 255.8485612350014
+      },
+      {
+        "step": 1000,
+        "valid accuracy": 0.3,
+        "train loss": 0.7289484927654266,
+        "train samples": 4000,
+        "train time": 29.176458327034197,
+        "eval time": 11.069810884997423,
+        "tokens / sec": 7140.551387861937,
+        "mem allocated avg": 7258589235.2,
+        "mem reserved avg": 11838347542.528,
+        "elapsed time": 338.5030210529985
+      },
+      {
+        "step": 1250,
+        "valid accuracy": 0.4,
+        "train loss": 0.7231850942373276,
+        "train samples": 5000,
+        "train time": 29.15449026899296,
+        "eval time": 11.055301014999714,
+        "tokens / sec": 7152.860436794844,
+        "mem allocated avg": 7257714087.936,
+        "mem reserved avg": 11824925769.728,
+        "elapsed time": 421.85765765199903
+      },
+      {
+        "step": 1500,
+        "valid accuracy": 0.38,
+        "train loss": 0.711922277212143,
+        "train samples": 6000,
+        "train time": 29.099172437985544,
+        "eval time": 11.07098460600173,
+        "tokens / sec": 7193.709733364892,
+        "mem allocated avg": 7259322730.496,
+        "mem reserved avg": 11860233420.8,
+        "elapsed time": 504.97678817400083
+      },
+      {
+        "step": 1750,
+        "valid accuracy": 0.44,
+        "train loss": 0.7051182547807694,
+        "train samples": 7000,
+        "train time": 29.301267419017677,
+        "eval time": 11.044947161997698,
+        "tokens / sec": 7144.912778213831,
+        "mem allocated avg": 7260392302.592,
+        "mem reserved avg": 11872371736.576,
+        "elapsed time": 588.3443257949984
+      },
+      {
+        "step": 2000,
+        "valid accuracy": 0.38,
+        "train loss": 0.7055468891859055,
+        "train samples": 8000,
+        "train time": 29.128185330951965,
+        "eval time": 11.045154800998716,
+        "tokens / sec": 7130.413296955362,
+        "mem allocated avg": 7257253203.968,
+        "mem reserved avg": 11821100564.48,
+        "elapsed time": 671.2971968860002
+      },
+      {
+        "step": 2250,
+        "valid accuracy": 0.3,
+        "train loss": 0.699348534822464,
+        "train samples": 9000,
+        "train time": 29.44214156106318,
+        "eval time": 11.039785496999684,
+        "tokens / sec": 7300.691750095574,
+        "mem allocated avg": 7268387997.696,
+        "mem reserved avg": 11993788448.768,
+        "elapsed time": 755.1838785660002
+      },
+      {
+        "step": 2500,
+        "valid accuracy": 0.4,
+        "train loss": 0.6970288401842117,
+        "train samples": 10000,
+        "train time": 28.56064905500898,
+        "eval time": 11.062792377000733,
+        "tokens / sec": 7211.565801718971,
+        "mem allocated avg": 7253500915.712,
+        "mem reserved avg": 11774535401.472,
+        "elapsed time": 837.4507786270005
+      },
+      {
+        "step": 2750,
+        "valid accuracy": 0.38,
+        "train loss": 0.6885807738304138,
+        "train samples": 11000,
+        "train time": 29.626391561985656,
+        "eval time": 11.040969151999889,
+        "tokens / sec": 7151.765329121947,
+        "mem allocated avg": 7264164755.456,
+        "mem reserved avg": 11929330384.896,
+        "elapsed time": 921.4017121549987
+      },
+      {
+        "step": 3000,
+        "valid accuracy": 0.32,
+        "train loss": 0.6827223267555237,
+        "train samples": 12000,
+        "train time": 29.296160228008375,
+        "eval time": 11.056816091997462,
+        "tokens / sec": 7124.85862909926,
+        "mem allocated avg": 7259324233.728,
+        "mem reserved avg": 11842046918.656,
+        "elapsed time": 1004.5840267519998
+      },
+      {
+        "step": 3250,
+        "valid accuracy": 0.5,
+        "train loss": 0.6894591153860092,
+        "train samples": 13000,
+        "train time": 29.611147850035195,
+        "eval time": 11.049655115999485,
+        "tokens / sec": 7122.351388338677,
+        "mem allocated avg": 7259635709.952,
+        "mem reserved avg": 11876809310.208,
+        "elapsed time": 1088.4846693049985
+      },
+      {
+        "step": 3500,
+        "valid accuracy": 0.42,
+        "train loss": 0.6757243422269821,
+        "train samples": 14000,
+        "train time": 28.982272775025194,
+        "eval time": 8.037888349997957,
+        "tokens / sec": 7237.182591861713,
+        "mem allocated avg": 7260029884.416,
+        "mem reserved avg": 11864100569.088,
+        "elapsed time": 1168.5907526180017
+      },
+      {
+        "step": 3750,
+        "valid accuracy": 0.44,
+        "train loss": 0.6726652181148529,
+        "train samples": 15000,
+        "train time": 29.461453213014465,
+        "eval time": 11.036738884999068,
+        "tokens / sec": 7355.475591552708,
+        "mem allocated avg": 7270358327.296,
+        "mem reserved avg": 12018115411.968,
+        "elapsed time": 1252.6760096750004
+      },
+      {
+        "step": 4000,
+        "valid accuracy": 0.44,
+        "train loss": 0.6872537672519684,
+        "train samples": 16000,
+        "train time": 28.49340438899526,
+        "eval time": 11.04012111100019,
+        "tokens / sec": 7172.642384527876,
+        "mem allocated avg": 7252451676.16,
+        "mem reserved avg": 11753454829.568,
+        "elapsed time": 1334.9961819890013
+      },
+      {
+        "step": 4250,
+        "valid accuracy": 0.46,
+        "train loss": 0.6691881531476974,
+        "train samples": 17000,
+        "train time": 29.36704957404436,
+        "eval time": 11.048986494999554,
+        "tokens / sec": 7198.169481309866,
+        "mem allocated avg": 7262467567.616,
+        "mem reserved avg": 11896405098.496,
+        "elapsed time": 1418.9507249929993
+      },
+      {
+        "step": 4500,
+        "valid accuracy": 0.5,
+        "train loss": 0.6769082483053207,
+        "train samples": 18000,
+        "train time": 29.086171291994106,
+        "eval time": 8.132250926999404,
+        "tokens / sec": 7144.907382746569,
+        "mem allocated avg": 7257195100.16,
+        "mem reserved avg": 11816553938.944,
+        "elapsed time": 1499.0322536989988
+      },
+      {
+        "step": 4750,
+        "valid accuracy": 0.46,
+        "train loss": 0.6686601461172104,
+        "train samples": 19000,
+        "train time": 29.45103387799827,
+        "eval time": 7.564945229998557,
+        "tokens / sec": 7128.408492200246,
+        "mem allocated avg": 7260019183.616,
+        "mem reserved avg": 11863848910.848,
+        "elapsed time": 1579.1494789060016
+      },
+      {
+        "step": 5000,
+        "valid accuracy": 0.48,
+        "train loss": 0.6739867876768112,
+        "train samples": 20000,
+        "train time": 29.24236888399173,
+        "eval time": 6.952750485001161,
+        "tokens / sec": 7122.541980995923,
+        "mem allocated avg": 7256318291.968,
+        "mem reserved avg": 11821469663.232,
+        "elapsed time": 1658.0220765080012
+      },
+      {
+        "step": 5000,
+        "test accuracy": 0.3707354056103108,
+        "train loss": 0.6739867876768112,
+        "train samples": 20000,
+        "train total tokens": 4198051
+      }
+    ]
+  },
+  "meta_info": {
+    "model_info": {
+      "sha": "13afe5124825b4f3751f836b40dafda64c1ed062",
+      "created_at": "2024-09-18T15:23:48+00:00"
+    },
+    "dataset_info": {
+      "metamath": {
+        "sha": "aa4f34d3d2d3231299b5b03d9b3e5a20da45aa18",
+        "created_at": "2023-09-21T17:22:46+00:00"
+      },
+      "gsm8k": {
+        "sha": "e53f048856ff4f594e959d75785d2c2d37b678ee",
+        "created_at": "2022-04-12T10:22:10+00:00"
+      }
+    },
+    "package_info": {
+      "transformers-version": "4.52.4",
+      "transformers-commit-hash": null,
+      "peft-version": "0.15.2.dev0",
+      "peft-commit-hash": "5fe7f8f8abe914d313fc3751f2ea92de7718fbaf",
+      "datasets-version": "3.6.0",
+      "datasets-commit-hash": null,
+      "bitsandbytes-version": "0.46.0",
+      "bitsandbytes-commit-hash": null,
+      "torch-version": "2.7.1+cu126",
+      "torch-commit-hash": null
+    },
+    "system_info": {
+      "system": "Linux",
+      "release": "6.8.0-1029-aws",
+      "version": "#31-Ubuntu SMP Wed Apr 23 18:42:41 UTC 2025",
+      "machine": "x86_64",
+      "processor": "x86_64",
+      "accelerator": "NVIDIA L40S"
+    },
+    "pytorch_info": "PyTorch built with:\n  - GCC 11.2\n  - C++ Version: 201703\n  - Intel(R) oneAPI Math Kernel Library Version 2024.2-Product Build 20240605 for Intel(R) 64 architecture applications\n  - Intel(R) MKL-DNN v3.7.1 (Git Hash 8d263e693366ef8db40acc569cc7d8edf644556d)\n  - OpenMP 201511 (a.k.a. OpenMP 4.5)\n  - LAPACK is enabled (usually provided by MKL)\n  - NNPACK is enabled\n  - CPU capability usage: AVX2\n  - CUDA Runtime 12.6\n  - NVCC architecture flags: -gencode;arch=compute_50,code=sm_50;-gencode;arch=compute_60,code=sm_60;-gencode;arch=compute_70,code=sm_70;-gencode;arch=compute_75,code=sm_75;-gencode;arch=compute_80,code=sm_80;-gencode;arch=compute_86,code=sm_86;-gencode;arch=compute_90,code=sm_90\n  - CuDNN 90.7.1  (built against CUDA 12.8)\n    - Built with CuDNN 90.5.1\n  - Magma 2.6.1\n  - Build settings: BLAS_INFO=mkl, BUILD_TYPE=Release, COMMIT_SHA=e2d141dbde55c2a4370fac5165b0561b6af4798b, CUDA_VERSION=12.6, CUDNN_VERSION=9.5.1, CXX_COMPILER=/opt/rh/gcc-toolset-11/root/usr/bin/c++, CXX_FLAGS= -D_GLIBCXX_USE_CXX11_ABI=1 -fvisibility-inlines-hidden -DUSE_PTHREADPOOL -DNDEBUG -DUSE_KINETO -DLIBKINETO_NOROCTRACER -DLIBKINETO_NOXPUPTI=ON -DUSE_FBGEMM -DUSE_PYTORCH_QNNPACK -DUSE_XNNPACK -DSYMBOLICATE_MOBILE_DEBUG_HANDLE -O2 -fPIC -Wall -Wextra -Werror=return-type -Werror=non-virtual-dtor -Werror=range-loop-construct -Werror=bool-operation -Wnarrowing -Wno-missing-field-initializers -Wno-unknown-pragmas -Wno-unused-parameter -Wno-strict-overflow -Wno-strict-aliasing -Wno-stringop-overflow -Wsuggest-override -Wno-psabi -Wno-error=old-style-cast -fdiagnostics-color=always -faligned-new -Wno-maybe-uninitialized -fno-math-errno -fno-trapping-math -Werror=format -Wno-stringop-overflow, LAPACK_INFO=mkl, PERF_WITH_AVX=1, PERF_WITH_AVX2=1, TORCH_VERSION=2.7.1, USE_CUDA=ON, USE_CUDNN=ON, USE_CUSPARSELT=1, USE_GFLAGS=OFF, USE_GLOG=OFF, USE_GLOO=ON, USE_MKL=ON, USE_MKLDNN=ON, USE_MPI=OFF, USE_NCCL=1, USE_NNPACK=ON, USE_OPENMP=ON, USE_ROCM=OFF, USE_ROCM_KERNEL_ASSERT=OFF, \n"
+  }
+}

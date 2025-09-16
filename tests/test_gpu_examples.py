@@ -20,14 +20,18 @@ import unittest
 from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Union
 
+import numpy as np
 import pytest
 import torch
 from accelerate import infer_auto_device_map
 from accelerate.test_utils.testing import run_command
 from accelerate.utils import patch_environment
+from accelerate.utils.imports import is_bf16_available
 from accelerate.utils.memory import clear_device_cache
+from accelerate.utils.versions import is_torch_version
 from datasets import Audio, Dataset, DatasetDict, load_dataset
 from packaging import version
 from parameterized import parameterized
@@ -54,6 +58,7 @@ from transformers.pytorch_utils import Conv1D
 
 from peft import (
     AdaLoraConfig,
+    ArrowConfig,
     EvaConfig,
     LoftQConfig,
     LoraConfig,
@@ -61,8 +66,10 @@ from peft import (
     PrefixTuningConfig,
     PromptEncoderConfig,
     RandLoraConfig,
+    RoadConfig,
     TaskType,
     VeraConfig,
+    create_arrow_model,
     get_peft_model,
     get_peft_model_state_dict,
     initialize_lora_eva_weights,
@@ -78,6 +85,7 @@ from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
 from peft.utils.loftq_utils import NFQuantizer
 from peft.utils.other import fsdp_auto_wrap_policy
+from tests.testing_utils import hub_online_once
 
 from .testing_utils import (
     device_count,
@@ -89,15 +97,102 @@ from .testing_utils import (
     require_deterministic_for_xpu,
     require_eetq,
     require_hqq,
-    require_multi_accelerator,
     require_non_cpu,
     require_non_xpu,
     require_optimum,
     require_torch_gpu,
+    require_torch_multi_accelerator,
     require_torch_multi_gpu,
     require_torchao,
     torch_device,
 )
+
+
+# Some tests with multi GPU require specific device maps to ensure that the models are loaded in two devices
+DEVICE_MAP_MAP: dict[str, dict[str, int]] = {
+    "facebook/opt-6.7b": {
+        "model.decoder.embed_tokens": 0,
+        "model.decoder.embed_positions": 0,
+        "model.decoder.final_layer_norm": 0,
+        "model.decoder.layers.0": 0,
+        "model.decoder.layers.1": 0,
+        "model.decoder.layers.2": 0,
+        "model.decoder.layers.3": 0,
+        "model.decoder.layers.4": 0,
+        "model.decoder.layers.5": 0,
+        "model.decoder.layers.6": 0,
+        "model.decoder.layers.7": 0,
+        "model.decoder.layers.8": 0,
+        "model.decoder.layers.9": 0,
+        "model.decoder.layers.10": 0,
+        "model.decoder.layers.11": 0,
+        "model.decoder.layers.12": 0,
+        "model.decoder.layers.13": 0,
+        "model.decoder.layers.14": 0,
+        "model.decoder.layers.15": 0,
+        "model.decoder.layers.16": 1,
+        "model.decoder.layers.17": 1,
+        "model.decoder.layers.18": 1,
+        "model.decoder.layers.19": 1,
+        "model.decoder.layers.20": 1,
+        "model.decoder.layers.21": 1,
+        "model.decoder.layers.22": 1,
+        "model.decoder.layers.23": 1,
+        "model.decoder.layers.24": 1,
+        "model.decoder.layers.25": 1,
+        "model.decoder.layers.26": 1,
+        "model.decoder.layers.27": 1,
+        "model.decoder.layers.28": 1,
+        "model.decoder.layers.29": 1,
+        "model.decoder.layers.30": 1,
+        "model.decoder.layers.31": 1,
+        "lm_head": 0,  # tied with embed_tokens
+    },
+    "facebook/opt-125m": {
+        "model.decoder.embed_tokens": 0,
+        "model.decoder.embed_positions": 0,
+        "model.decoder.final_layer_norm": 1,
+        "model.decoder.layers.0": 0,
+        "model.decoder.layers.1": 0,
+        "model.decoder.layers.2": 0,
+        "model.decoder.layers.3": 0,
+        "model.decoder.layers.4": 0,
+        "model.decoder.layers.5": 0,
+        "model.decoder.layers.6": 1,
+        "model.decoder.layers.7": 1,
+        "model.decoder.layers.8": 1,
+        "model.decoder.layers.9": 1,
+        "model.decoder.layers.10": 1,
+        "model.decoder.layers.11": 1,
+        "lm_head": 0,
+    },
+    "marcsun13/opt-350m-gptq-4bit": {
+        "model.decoder.embed_tokens": 0,
+        "model.decoder.embed_positions": 0,
+        "model.decoder.layers.0": 0,
+        "model.decoder.layers.1": 0,
+        "model.decoder.layers.2": 0,
+        "model.decoder.layers.3": 0,
+        "model.decoder.layers.4": 0,
+        "model.decoder.layers.5": 0,
+        "model.decoder.layers.6": 1,
+        "model.decoder.layers.7": 1,
+        "model.decoder.layers.8": 1,
+        "model.decoder.layers.9": 1,
+        "model.decoder.layers.10": 1,
+        "model.decoder.layers.11": 1,
+        "model.decoder.final_layer_norm": 1,
+        "lm_head": 0,  # tied with embed_tokens
+    },
+    "google/flan-t5-base": {
+        "shared": 0,
+        "encoder": 0,
+        "decoder": 1,
+        "final_layer_norm": 1,
+        "decoder.embed_tokens": 0,  # tied with encoder.embed_tokens
+        "lm_head": 0,  # tied with encoder.embed_tokens
+    },
+}
 
 
 # A full testing suite that tests all the necessary features on GPU. The tests should
@@ -302,11 +397,12 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                device_map="auto",
+                device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
                 quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -501,7 +597,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
-    @require_multi_accelerator
+    @require_torch_multi_accelerator
     def test_causal_lm_training_multi_gpu(self):
         r"""
         Test the CausalLM training on a multi-GPU device. This test is a converted version of
@@ -625,7 +721,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
-    @require_multi_accelerator
+    @require_torch_multi_accelerator
     def test_seq2seq_lm_training_multi_gpu(self):
         r"""
         Test the Seq2SeqLM training on a multi-GPU device. This test is a converted version of
@@ -637,10 +733,11 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model = AutoModelForSeq2SeqLM.from_pretrained(
                 self.seq2seq_model_id,
                 quantization_config=BitsAndBytesConfig(load_in_8bit=True),
-                device_map="balanced",
+                device_map=DEVICE_MAP_MAP[self.seq2seq_model_id],
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
             model = prepare_model_for_kbit_training(model)
@@ -920,11 +1017,12 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                device_map="auto",
+                device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
                 quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1037,11 +1135,12 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                device_map="auto",
+                device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
                 quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1144,7 +1243,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
     def test_initialize_dora_with_bnb_on_cpu(self, kbit):
         # 1674
         # The issue is that to initialize DoRA, we need to dequantize the weights. That only works on GPU for bnb.
-        # Therefore, intializing DoRA with bnb on CPU used to fail.
+        # Therefore, initializing DoRA with bnb on CPU used to fail.
         model_id = "facebook/opt-125m"
         if kbit == "4bit":
             bnb_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4")
@@ -1284,11 +1383,12 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                device_map="auto",
+                device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
                 quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1343,11 +1443,12 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                device_map="auto",
+                device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
                 quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1510,11 +1611,12 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                device_map="auto",
+                device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
                 quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1569,11 +1671,12 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                device_map="auto",
+                device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
                 quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1602,6 +1705,226 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                     warmup_steps=2,
                     max_steps=3,
                     learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_8bit_road(self):
+        r"""
+        Same as test_causal_lm_training but with RoAd
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+                device_map="auto",
+            )
+
+            tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+            model = prepare_model_for_kbit_training(model)
+
+            config = RoadConfig(
+                variant="road_1",
+                target_modules=["q_proj", "v_proj"],
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("ybelkada/english_quotes_copy")
+            data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=1e-3,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_4bit_road(self):
+        r"""
+        Same as test_causal_lm_training_4bit but with RoAd
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+                device_map="auto",
+            )
+
+            tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+            model = prepare_model_for_kbit_training(model)
+
+            config = RoadConfig(
+                variant="road_1",
+                target_modules=["q_proj", "v_proj"],
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("ybelkada/english_quotes_copy")
+            data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=1e-3,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.multi_gpu_tests
+    def test_causal_lm_training_multi_gpu_8bit_road(self):
+        r"""
+        Same as test_causal_lm_training_multi_gpu but with RoAd
+        """
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
+                quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+            )
+
+            assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
+
+            model = prepare_model_for_kbit_training(model)
+
+            setattr(model, "model_parallel", True)
+            setattr(model, "is_parallelizable", True)
+
+            config = RoadConfig(
+                variant="road_1",
+                target_modules=["q_proj", "v_proj"],
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("Abirate/english_quotes")
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=1e-3,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.multi_gpu_tests
+    def test_causal_lm_training_multi_gpu_4bit_road(self):
+        r"""
+        Same as test_causal_lm_training_multi_gpu_4bit but with RoAd
+        """
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
+                quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+            )
+
+            assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
+
+            model = prepare_model_for_kbit_training(model)
+
+            setattr(model, "model_parallel", True)
+            setattr(model, "is_parallelizable", True)
+
+            config = RoadConfig(
+                variant="road_1",
+                target_modules=["q_proj", "v_proj"],
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("Abirate/english_quotes")
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=1e-3,
                     fp16=True,
                     logging_steps=1,
                     output_dir=tmp_dir,
@@ -1870,6 +2193,61 @@ class PeftGPTQGPUTests(unittest.TestCase):
             # assert loss is not None
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_gptq_qalora(self):
+        """
+        Test QALoRA with GPTQ quantization. The test would simply fail if the adapters are not set correctly.
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                torch_dtype=torch.float16,
+                device_map="auto",
+                quantization_config=self.quantization_config,
+            )
+
+            model = prepare_model_for_kbit_training(model)
+            config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                target_modules=["q_proj", "v_proj"],
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+                use_qalora=True,
+                qalora_group_size=32,
+            )
+            model = get_peft_model(model, config)
+
+            data = load_dataset_english_quotes()
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_gpu
     def test_causal_lm_training_multi_gpu(self):
@@ -2080,7 +2458,7 @@ class OffloadSaveTests(unittest.TestCase):
         assert torch.allclose(post_unload_merge_olayer, pre_merge_olayer)
 
 
-@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU")
+@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU")
 @pytest.mark.single_gpu_tests
 class TestPiSSA:
     r"""
@@ -2292,7 +2670,7 @@ class TestPiSSA:
         assert not torch.allclose(output_finetuned_pissa, output_converted, atol=tol, rtol=tol)
 
 
-@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU")
+@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU")
 @pytest.mark.single_gpu_tests
 class TestOLoRA:
     r"""
@@ -2831,11 +3209,7 @@ class MixedPrecisionTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        elif is_xpu_available():
-            torch.xpu.empty_cache()
+        clear_device_cache(garbage_collection=True)
         gc.collect()
 
     @pytest.mark.single_gpu_tests
@@ -3096,8 +3470,7 @@ class PeftAqlmGPUTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
     def _check_inference_finite(self, model, batch):
         # try inference without Trainer class
@@ -3182,8 +3555,7 @@ class PeftHqqGPUTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
     @pytest.mark.single_gpu_tests
     @parameterized.expand([False, True])
@@ -3256,6 +3628,7 @@ class PeftHqqGPUTests(unittest.TestCase):
 
         device = "cuda"
         compute_dtype = torch.float16
+        min_correlation = 0.96
 
         # first load the model without HQQ
         model = AutoModelForCausalLM.from_pretrained(
@@ -3277,8 +3650,7 @@ class PeftHqqGPUTests(unittest.TestCase):
         assert torch.isfinite(output_normal).all()
 
         del model
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
         # now load with HQQ
         quant_config = HqqConfig(nbits=4, group_size=64)
@@ -3295,25 +3667,24 @@ class PeftHqqGPUTests(unittest.TestCase):
 
         # check that outputs of HQQ are highly correlated; there are outliers, so don't check for equality
         cc_matrix = torch.corrcoef(torch.stack((output_normal.float().flatten(), output_hqq.float().flatten())))
-        assert cc_matrix.min() > 0.97
+        assert cc_matrix.min() > min_correlation
 
         # check that outputs are the same after merging
         cc_matrix = torch.corrcoef(torch.stack((output_normal.float().flatten(), output_hqq.float().flatten())))
-        assert cc_matrix.min() > 0.97
+        assert cc_matrix.min() > min_correlation
 
         # check outputs are the same after unmerging
         model.unmerge_adapter()
         with torch.inference_mode():
             output_unmerged = model(**inputs).logits
         cc_matrix = torch.corrcoef(torch.stack((output_normal.float().flatten(), output_unmerged.float().flatten())))
-        assert cc_matrix.min() > 0.97
+        assert cc_matrix.min() > min_correlation
 
         # check that the results are the same after saving and loading
         with tempfile.TemporaryDirectory() as tmp_dir:
             model.save_pretrained(tmp_dir)
             del model
-            gc.collect()
-            torch.cuda.empty_cache()
+            clear_device_cache(garbage_collection=True)
 
             quant_config = HqqConfig(nbits=4, group_size=64)
             model = AutoModelForCausalLM.from_pretrained(
@@ -3337,14 +3708,21 @@ class PeftHqqGPUTests(unittest.TestCase):
         cc_matrix = torch.corrcoef(
             torch.stack((output_normal.float().flatten(), output_merged_unloaded.float().flatten()))
         )
-        assert cc_matrix.min() > 0.97
+        assert cc_matrix.min() > min_correlation
 
 
-@require_torch_gpu
+@require_non_cpu
 @require_auto_awq
 class PeftAwqGPUTests(unittest.TestCase):
     r"""
     Awq + peft tests
+
+    Note that AWQ is no longer being maintained:
+
+    https://github.com/casper-hansen/AutoAWQ/blob/88e4c76b20755db275574e6a03c83c84ba3bece5/README.md
+
+    It is therefore expected that more tests will start failing in the future. If this happens, remove AWQ support from
+    PEFT.
     """
 
     def setUp(self):
@@ -3353,11 +3731,10 @@ class PeftAwqGPUTests(unittest.TestCase):
 
     def tearDown(self):
         r"""
-        Efficient mechanism to free GPU memory after each test. Based on
+        Efficient mechanism to free accelerator memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
     def _check_inference_finite(self, model, batch):
         # try inference without Trainer class
@@ -3370,7 +3747,7 @@ class PeftAwqGPUTests(unittest.TestCase):
     @pytest.mark.single_gpu_tests
     def test_causal_lm_training_awq(self):
         r"""
-        Test the CausalLM training on a single GPU device. The test would simply fail if the adapters are not set
+        Test the CausalLM training on a single accelerator. The test would simply fail if the adapters are not set
         correctly.
         """
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -3426,14 +3803,15 @@ class PeftAwqGPUTests(unittest.TestCase):
     # TODO remove marker if/once issue is resolved, most likely requiring a fix in AutoAWQ:
     # https://github.com/casper-hansen/AutoAWQ/issues/754
     @pytest.mark.xfail(
-        reason="Multi-GPU test currently not working with AutoAWQ and PyTorch 2.7",
+        condition=is_torch_version(">=", "2.7.0"),
+        reason="Multi-GPU test currently not working with AutoAWQ and PyTorch 2.7+",
         strict=True,
     )
-    @require_torch_multi_gpu
-    def test_causal_lm_training_multi_gpu(self):
+    @require_torch_multi_accelerator
+    def test_causal_lm_training_multi_accelerator(self):
         r"""
-        Test the CausalLM training on a multi-GPU device. The test would simply fail if the adapters are not set
-        correctly.
+        Test the CausalLM training on a multi-accelerator device. The test would simply fail if the adapters are not
+        set correctly.
         """
         device_map = {
             "model.decoder.embed_tokens": 0,
@@ -3527,8 +3905,7 @@ class PeftEetqGPUTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
     def _check_inference_finite(self, model, batch):
         # try inference without Trainer class
@@ -3607,11 +3984,12 @@ class PeftEetqGPUTests(unittest.TestCase):
 
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                device_map="auto",
+                device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
                 quantization_config=quantization_config,
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert {p.device.index for p in model.parameters()} == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -3658,8 +4036,7 @@ class PeftEetqGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
 
-@require_non_xpu
-@require_torch_gpu
+@require_non_cpu
 @require_torchao
 class PeftTorchaoGPUTests(unittest.TestCase):
     r"""
@@ -3680,7 +4057,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         # torchao breaks with fp16 and if a previous test uses fp16, transformers will set this env var, which affects
         # subsequent tests, therefore the env var needs to be cleared explicitly
         #
-        # TODO: remove this once https://github.com/huggingface/transformers/pull/34886 is merged
+        # TODO: remove this once https://github.com/huggingface/transformers/pull/39483 is merged
         os.environ.pop("ACCELERATE_MIXED_PRECISION", None)
 
     def tearDown(self):
@@ -3688,8 +4065,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
     @parameterized.expand(supported_quant_types)
     @pytest.mark.single_gpu_tests
@@ -3849,8 +4225,8 @@ class PeftTorchaoGPUTests(unittest.TestCase):
 
     @parameterized.expand(supported_quant_types)
     @pytest.mark.multi_gpu_tests
-    @require_torch_multi_gpu
-    def test_causal_lm_training_multi_gpu_torchao(self, quant_type):
+    @require_torch_multi_accelerator
+    def test_causal_lm_training_multi_accelerator_torchao(self, quant_type):
         from transformers import TorchAoConfig
 
         device_map = {
@@ -3929,8 +4305,8 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
-    @require_torch_multi_gpu
-    def test_causal_lm_training_multi_gpu_torchao_int4_raises(self):
+    @require_torch_multi_accelerator
+    def test_causal_lm_training_multi_accelerator_torchao_int4_raises(self):
         # int4_weight_only raises an error:
         # RuntimeError: derivative for aten::_weight_int4pack_mm is not implemented
         # TODO: Once proper torchao support for int4 is added, remove this test and add int4 to supported_quant_types
@@ -4173,9 +4549,7 @@ class TestAutoCast(unittest.TestCase):
         # Prepare dummy inputs
         input_ids = torch.randint(0, 1000, (2, 10)).to(self.device)
         if precision == torch.bfloat16:
-            is_xpu = self.device == "xpu"
-            is_cuda_bf16 = self.device == "cuda" and torch.cuda.is_bf16_supported()
-            if not (is_xpu or is_cuda_bf16):
+            if not is_bf16_available():
                 self.skipTest("Bfloat16 not supported on this device")
 
         # Forward pass with test precision
@@ -4490,11 +4864,84 @@ class TestEvaInitializationGPU:
             )
 
 
+class TestALoRAInferenceGPU:
+    """GPU inference for Activated LoRA."""
+
+    # Constants for test configuration
+    NUM_SEEDS = 3
+    LORA_DIM = 8
+    LORA_ALPHA = 1
+    DEVICE = infer_device()
+
+    @pytest.fixture
+    def tokenizer(self):
+        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
+        tokenizer.pad_token = tokenizer.eos_token
+        return tokenizer
+
+    @pytest.fixture
+    def model(self):
+        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        model.model.decoder.layers = model.model.decoder.layers[:2]  # truncate to 2 layers
+        return model.to(self.DEVICE)
+
+    @pytest.fixture
+    def model_bnb(self):
+        bnb_config = BitsAndBytesConfig(load_in_4bit=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=bnb_config,
+        )
+        model.model.decoder.layers = model.model.decoder.layers[:2]  # truncate to 2 layers
+        model = prepare_model_for_kbit_training(model)
+        return model
+
+    @pytest.fixture
+    def peft_config(self):
+        return LoraConfig(
+            r=self.LORA_DIM,
+            task_type="CAUSAL_LM",
+            lora_alpha=self.LORA_ALPHA,
+            target_modules=["q_proj"],
+            alora_invocation_tokens=[2],  # id for </s>
+            init_lora_weights=False,
+        )
+
+    @require_non_cpu
+    @require_bitsandbytes
+    @pytest.mark.single_gpu_tests
+    def test_alora_forward_consistency(self, model, model_bnb, peft_config):
+        """Test that the forwards of the model with adapter are similar across quantizations."""
+        for seed in range(self.NUM_SEEDS):
+            torch.manual_seed(seed)
+            # random.seed(seed)
+            np.random.seed(seed)
+            peft_model = get_peft_model(deepcopy(model), peft_config)
+            torch.manual_seed(seed)
+            # random.seed(seed)
+            np.random.seed(seed)
+            peft_model_bnb = get_peft_model(deepcopy(model_bnb), peft_config)
+            peft_model.eval()
+            peft_model_bnb.eval()
+            input_ids = torch.tensor([[0, 1, 2, 3]]).to(self.DEVICE)
+            with torch.no_grad():
+                peft_out = peft_model(input_ids=input_ids, return_dict=True, output_hidden_states=True)
+                peft_out_bnb = peft_model_bnb(input_ids=input_ids, return_dict=True, output_hidden_states=True)
+            h_fp = peft_out.hidden_states[-1]
+            h_4b = peft_out_bnb.hidden_states[-1]
+            a = h_fp.detach().to(torch.float32).cpu()
+            b = h_4b.detach().to(torch.float32).cpu()
+            import torch.nn.functional as F
+
+            cos = F.cosine_similarity(a.flatten(), b.flatten(), dim=0).item()
+            assert cos > 0.9
+
+
 @pytest.mark.multi_gpu_tests
 class TestPrefixTuning:
     device = infer_device()
 
-    @require_multi_accelerator
+    @require_torch_multi_accelerator
     def test_prefix_tuning_multiple_devices_decoder_model(self):
         # See issue 2134
         model_id = "hf-internal-testing/tiny-random-MistralForCausalLM"
@@ -4519,7 +4966,7 @@ class TestPrefixTuning:
         model = get_peft_model(model, peft_config)
         model.generate(**inputs)  # does not raise
 
-    @require_multi_accelerator
+    @require_torch_multi_accelerator
     def test_prefix_tuning_multiple_devices_encoder_decoder_model(self):
         # See issue 2134
         model_id = "hf-internal-testing/tiny-random-T5Model"
@@ -4554,9 +5001,7 @@ class TestPrefixTuning:
         model.generate(**inputs)  # does not raise
 
 
-@pytest.mark.skipif(
-    not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a hardware accelerator"
-)
+@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU")
 @pytest.mark.single_gpu_tests
 class TestHotSwapping:
     """
@@ -4641,10 +5086,22 @@ class TestHotSwapping:
             output_after1 = model(inputs).logits
             assert torch.allclose(output1, output_after1, atol=tol, rtol=tol)
 
+            # we need to call forward third time since cudagraphs are not recorded in first call.
+            if do_hotswap:
+                hotswap_adapter(model, os.path.join(tmp_dirname, "adapter0"), adapter_name="default")
+                output_after2 = model(inputs).logits
+                assert torch.allclose(output0, output_after2, atol=tol, rtol=tol)
+
     # it is important to check hotswapping small to large ranks and large to small ranks
     @pytest.mark.parametrize("ranks", [(11, 11), (7, 13), (13, 7)])
     def test_hotswapping_compiled_model_does_not_trigger_recompilation(self, ranks):
-        with torch._dynamo.config.patch(error_on_recompile=True):  # raise an error on recompilation
+        # here we set three configs to ensure no recompilation or cudagraph re-record occurs:
+        # 1. error_on_recompile: raise an error on recompilation
+        # 2. inline_inbuilt_nn_modules: needed to raise an error on static input address changes instead of re-recording
+        # 3. triton.cudagraph_support_input_mutation: same as above
+        dynamo_config_ctx = torch._dynamo.config.patch(error_on_recompile=True, inline_inbuilt_nn_modules=False)
+        inductor_config_ctx = torch._inductor.config.patch("triton.cudagraph_support_input_mutation", False)
+        with dynamo_config_ctx, inductor_config_ctx:
             self.check_hotswap(do_hotswap=True, ranks=ranks, alpha_scalings=ranks)
 
     def test_no_hotswapping_compiled_model_triggers_recompilation(self):
@@ -4691,18 +5148,14 @@ class TestHotSwapping:
         return unet_lora_config
 
     def get_dummy_input(self):
-        # from UNet2DConditionModelTests
-        from diffusers.utils.testing_utils import floats_tensor
-
-        batch_size = 4
-        num_channels = 4
-        sizes = (16, 16)
-
-        noise = floats_tensor((batch_size, num_channels) + sizes).to(self.torch_device)
-        time_step = torch.tensor([10]).to(self.torch_device)
-        encoder_hidden_states = floats_tensor((batch_size, 4, 8)).to(self.torch_device)
-
-        return {"sample": noise, "timestep": time_step, "encoder_hidden_states": encoder_hidden_states}
+        pipeline_inputs = {
+            "prompt": "A painting of a squirrel eating a burger",
+            "num_inference_steps": 5,
+            "guidance_scale": 6.0,
+            "output_type": "np",
+            "return_dict": False,
+        }
+        return pipeline_inputs
 
     def set_lora_device(self, model, adapter_names, device):
         # copied from diffusers LoraBaseMixin.set_lora_device
@@ -4718,48 +5171,91 @@ class TestHotSwapping:
                                 device
                             )
 
-    def check_hotswap_diffusion(self, do_hotswap, ranks, alpha_scalings, target_modules):
+    def check_hotswap_diffusion(self, ranks, alpha_scalings, target_modules):
+        """
+        Check that hotswapping works on a pipeline.
+
+        This is essentially the same test as:
+        https://github.com/huggingface/diffusers/blob/d7dd924ece56cddf261cd8b9dd901cbfa594c62c/tests/pipelines/test_pipelines.py#L2264
+
+        Steps:
+        - create 2 LoRA adapters and save them
+        - load the first adapter
+        - hotswap the second adapter
+        - check that the outputs are correct
+        - optionally compile the model
+
+        Note: We set rank == alpha here because save_lora_adapter does not save the alpha scalings, thus the test would
+        fail if the values are different. Since rank != alpha does not matter for the purpose of this test, this is
+        fine.
+        """
+        from diffusers import StableDiffusionPipeline
+
+        # create 2 adapters with different ranks and alphas
         dummy_input = self.get_dummy_input()
-        unet = self.get_small_unet()
+        pipeline = StableDiffusionPipeline.from_pretrained("hf-internal-testing/tiny-sd-pipe").to(torch_device)
         rank0, rank1 = ranks
         alpha0, alpha1 = alpha_scalings
-        lora_config0 = self.get_unet_lora_config(rank0, alpha0, target_modules=target_modules)
-        lora_config1 = self.get_unet_lora_config(rank1, alpha1, target_modules=target_modules)
-        unet.add_adapter(lora_config0, adapter_name="adapter0")
-        unet.add_adapter(lora_config1, adapter_name="adapter1")
+        max_rank = max([rank0, rank1])
+        lora_config0 = self.get_unet_lora_config(rank0, alpha0, target_modules)
+        lora_config1 = self.get_unet_lora_config(rank1, alpha1, target_modules)
+
+        torch.manual_seed(0)
+        pipeline.unet.add_adapter(lora_config0, adapter_name="adapter0")
+        output0_before = pipeline(**dummy_input, generator=torch.manual_seed(0))[0]
+
+        torch.manual_seed(1)
+        pipeline.unet.add_adapter(lora_config1, adapter_name="adapter1")
+        pipeline.unet.set_adapter("adapter1")
+        output1_before = pipeline(**dummy_input, generator=torch.manual_seed(0))[0]
+
+        # sanity check
+        tol = 1e-3
+        assert not np.allclose(output0_before, output1_before, atol=tol, rtol=tol)
+        assert not (output0_before == 0).all()
+        assert not (output1_before == 0).all()
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
-            unet.save_lora_adapter(os.path.join(tmp_dirname, "0"), safe_serialization=True, adapter_name="adapter0")
-            unet.save_lora_adapter(os.path.join(tmp_dirname, "1"), safe_serialization=True, adapter_name="adapter1")
-            del unet
-
-            unet = self.get_small_unet()
-            file_name0 = os.path.join(os.path.join(tmp_dirname, "0"), "pytorch_lora_weights.safetensors")
-            file_name1 = os.path.join(os.path.join(tmp_dirname, "1"), "pytorch_lora_weights.safetensors")
-            unet.load_lora_adapter(file_name0, safe_serialization=True, adapter_name="adapter0")
-
-            prepare_model_for_compiled_hotswap(
-                unet, config={"adapter0": lora_config0, "adapter1": lora_config1}, target_rank=max(ranks)
+            # save the adapter checkpoints
+            sd0 = get_peft_model_state_dict(pipeline.unet, adapter_name="adapter0")
+            StableDiffusionPipeline.save_lora_weights(
+                save_directory=os.path.join(tmp_dirname, "adapter0"), safe_serialization=True, unet_lora_layers=sd0
             )
-            unet = torch.compile(unet, mode="reduce-overhead")
-            unet(**dummy_input)["sample"]
+            sd1 = get_peft_model_state_dict(pipeline.unet, adapter_name="adapter1")
+            StableDiffusionPipeline.save_lora_weights(
+                save_directory=os.path.join(tmp_dirname, "adapter1"), safe_serialization=True, unet_lora_layers=sd1
+            )
+            del pipeline
 
-            if do_hotswap:
-                unet.load_lora_adapter(file_name1, adapter_name="adapter0", hotswap=True)
-            else:
-                # offloading the old and loading the new adapter will result in recompilation
-                self.set_lora_device(unet, adapter_names=["adapter0"], device="cpu")
-                unet.load_lora_adapter(file_name1, adapter_name="other_name", hotswap=False)
+            # load the first adapter
+            pipeline = StableDiffusionPipeline.from_pretrained("hf-internal-testing/tiny-sd-pipe").to(torch_device)
+            # no need to prepare if the model is not compiled or if the ranks are identical
+            pipeline.enable_lora_hotswap(target_rank=max_rank)
 
-            # we need to call forward to potentially trigger recompilation
-            unet(**dummy_input)["sample"]
+            file_name0 = os.path.join(tmp_dirname, "adapter0", "pytorch_lora_weights.safetensors")
+            file_name1 = os.path.join(tmp_dirname, "adapter1", "pytorch_lora_weights.safetensors")
+
+            pipeline.load_lora_weights(file_name0)
+            pipeline.unet = torch.compile(pipeline.unet, mode="reduce-overhead")
+
+            output0_after = pipeline(**dummy_input, generator=torch.manual_seed(0))[0]
+
+            # sanity check: still same result
+            assert np.allclose(output0_before, output0_after, atol=tol, rtol=tol)
+
+            # hotswap the 2nd adapter
+            pipeline.load_lora_weights(file_name1, hotswap=True, adapter_name="default_0")
+            output1_after = pipeline(**dummy_input, generator=torch.manual_seed(0))[0]
+
+            # sanity check: since it's the same LoRA, the results should be identical
+            assert np.allclose(output1_before, output1_after, atol=tol, rtol=tol)
+
+            # we need to call forward third time since cudagraphs are not recorded in first call.
+            pipeline.load_lora_weights(file_name0, hotswap=True, adapter_name="default_0")
+            output2_after = pipeline(**dummy_input, generator=torch.manual_seed(0))[0]
+            assert np.allclose(output0_before, output2_after, atol=tol, rtol=tol)
 
     @pytest.mark.skipif(not is_diffusers_available(), reason="Test requires diffusers to be installed")
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Requires hotswap to be implemented in diffusers",
-        raises=ValueError,
-    )
     # it is important to check hotswapping small to large ranks and large to small ranks
     @pytest.mark.parametrize("ranks", [(11, 11), (7, 13), (13, 7)])
     @pytest.mark.parametrize(
@@ -4771,7 +5267,96 @@ class TestHotSwapping:
         ],
     )
     def test_hotswapping_compiled_diffusers_model_does_not_trigger_recompilation(self, ranks, target_modules):
-        with torch._dynamo.config.patch(error_on_recompile=True):  # raise an error on recompilation
-            self.check_hotswap_diffusion(
-                do_hotswap=True, ranks=ranks, alpha_scalings=ranks, target_modules=target_modules
+        # here we set three configs to ensure no recompilation or cudagraph re-record occurs:
+        # 1. error_on_recompile: raise an error on recompilation
+        # 2. inline_inbuilt_nn_modules: needed to raise an error on static input address changes instead of re-recording
+        # 3. triton.cudagraph_support_input_mutation: same as above
+        dynamo_config_ctx = torch._dynamo.config.patch(error_on_recompile=True, inline_inbuilt_nn_modules=False)
+        inductor_config_ctx = torch._inductor.config.patch("triton.cudagraph_support_input_mutation", False)
+        with dynamo_config_ctx, inductor_config_ctx:
+            self.check_hotswap_diffusion(ranks=ranks, alpha_scalings=ranks, target_modules=target_modules)
+
+
+# Test: 4-bit load + Arrow + generate
+class TestArrowQuantized:
+    @pytest.fixture(scope="class")
+    def workdir(self, tmp_path_factory):
+        """Create and return a temp directory path for this class (no chdir)."""
+        wd = tmp_path_factory.mktemp("arrow_workdir")
+        return Path(wd)
+
+    def _create_and_save_adapter_opt(self, out_dir: Path, rank: int = 4):
+        """
+        Build a randomly initialized LoRA adapter for OPT-125M and save into `out_dir`. We construct a model from
+        CONFIG (no pretrained weights) to avoid slow downloads here.
+        """
+        model_id = "facebook/opt-125m"
+        # Target all linear layers so the adapter matches whatever we later quantize/load.
+        lora_cfg = LoraConfig(
+            r=rank,
+            target_modules="all-linear",
+            task_type="CAUSAL_LM",
+            init_lora_weights=False,
+        )
+        # Load the adapter on the model and save it
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+        peft_model = get_peft_model(model, lora_cfg)
+        peft_model.save_pretrained(out_dir)
+
+    @pytest.fixture(scope="class")
+    def ts_adapters_opt(self, workdir: Path):
+        """
+        Build 3 locally-saved task-specific adapters for OPT-125M and return their absolute paths.
+        """
+        paths = []
+        for i in range(3):
+            sub = workdir / f"ts_expert_{i}"
+            self._create_and_save_adapter_opt(sub)
+            paths.append(str(sub))
+        return paths
+
+    @require_bitsandbytes
+    @pytest.mark.single_gpu_tests
+    def test_arrow_4bit_opt125m_load_and_generate_with_local_adapters(self, ts_adapters_opt):
+        # Skip if CUDA or bitsandbytes isn’t available
+        if not torch.cuda.is_available():
+            pytest.skip("CUDA required for 4-bit bitsandbytes test.")
+
+        model_id = "facebook/opt-125m"
+
+        # Quantization config (nf4, bf16 compute)
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=False,
+        )
+
+        with hub_online_once(model_id):
+            # Load quantized base model
+            base_model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                torch_dtype=torch.bfloat16,
+                device_map="auto",
+                quantization_config=bnb_config,
             )
+            with hub_online_once(model_id + "tokenizer"):
+                tok = AutoTokenizer.from_pretrained(model_id, use_fast=True)
+
+        # Build Arrow model from the locally created adapters
+        arrow_cfg = ArrowConfig(top_k=2, router_temperature=1.0, rng_seed=42)
+        model = create_arrow_model(
+            base_model=base_model,
+            task_specific_adapter_paths=ts_adapters_opt,  # local dirs (each has adapter_config.json)
+            arrow_config=arrow_cfg,
+        ).eval()
+
+        # Quick generate smoke test
+        inputs = tok("Hello world", return_tensors="pt")
+        inputs = {k: v.to(model.device) for k, v in inputs.items()}
+        with torch.no_grad():
+            out = model.generate(**inputs, max_new_tokens=8)
+
+        assert out is not None
+        assert out.shape[0] == 1  # batch size 1

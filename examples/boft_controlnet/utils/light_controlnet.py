@@ -20,7 +20,7 @@ import torch
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.attention_processor import AttentionProcessor, AttnProcessor
 from diffusers.models.modeling_utils import ModelMixin
-from diffusers.models.unet_2d_blocks import (
+from diffusers.models.unets.unet_2d_blocks import (
     CrossAttnDownBlock2D,
     DownBlock2D,
 )
@@ -40,7 +40,7 @@ class ControlNetOutput(BaseOutput):
 
 class ControlNetConditioningEmbedding(nn.Module):
     """
-    Quoting from https://arxiv.org/abs/2302.05543: "Stable Diffusion uses a pre-processing method similar to VQ-GAN
+    Quoting from https://huggingface.co/papers/2302.05543: "Stable Diffusion uses a pre-processing method similar to VQ-GAN
     [11] to convert the entire dataset of 512 × 512 images into smaller 64 × 64 “latent images” for stabilized
     training. This requires ControlNets to convert image-based conditions to 64 × 64 feature space to match the
     convolution size. We use a tiny network E(·) of four convolution layers with 4 × 4 kernels and 2 × 2 strides

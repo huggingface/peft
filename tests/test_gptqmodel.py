@@ -20,6 +20,7 @@ import unittest
 
 import pytest
 import torch
+from accelerate.utils.memory import clear_device_cache
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -31,6 +32,7 @@ from transformers import (
 from peft import (
     AdaLoraConfig,
     LoraConfig,
+    OFTConfig,
     PeftModel,
     get_peft_model,
     prepare_model_for_kbit_training,
@@ -39,10 +41,11 @@ from peft.tuners.lora import GPTQLoraLinear
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
 
 from .testing_utils import (
+    device_count,
     load_dataset_english_quotes,
     require_gptqmodel,
     require_optimum,
-    require_torch_multi_gpu,
+    require_torch_multi_accelerator,
 )
 
 
@@ -61,10 +64,8 @@ class PeftGPTQModelCommonTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
+        clear_device_cache(garbage_collection=True)
         gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            gc.collect()
 
     def test_lora_gptq_quantization_from_pretrained_safetensors(self):
         r"""
@@ -103,6 +104,43 @@ class PeftGPTQModelCommonTests(unittest.TestCase):
             assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A
             assert "adapter2" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A
 
+    def test_oft_gptq_quantization_from_pretrained_safetensors(self):
+        r"""
+        Tests that the gptqmodel quantization using OFT works as expected with safetensors weights.
+        """
+        from transformers import GPTQConfig
+
+        model_id = "marcsun13/opt-350m-gptq-4bit"
+        quantization_config = GPTQConfig(bits=4, use_exllama=False)
+        kwargs = {
+            "pretrained_model_name_or_path": model_id,
+            "torch_dtype": torch.float16,
+            "device_map": "auto",
+            "quantization_config": quantization_config,
+        }
+        model = AutoModelForCausalLM.from_pretrained(**kwargs)
+        model = prepare_model_for_kbit_training(model)
+
+        config = OFTConfig(task_type="CAUSAL_LM")
+        peft_model = get_peft_model(model, config)
+        peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(peft_model.device))
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            peft_model.save_pretrained(tmp_dir)
+            model = AutoModelForCausalLM.from_pretrained(**kwargs)
+            model = PeftModel.from_pretrained(model, tmp_dir)
+            model = prepare_model_for_kbit_training(model)
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(peft_model.device))
+
+            # loading a 2nd adapter works, #1239
+            model.load_adapter(tmp_dir, "adapter2")
+            model.set_adapter("adapter2")
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(peft_model.device))
+
+            # check that both adapters are in the same layer
+            assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.oft_R
+            assert "adapter2" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.oft_R
+
 
 @require_gptqmodel
 @require_optimum
@@ -123,8 +161,7 @@ class PeftGPTQModelTests(unittest.TestCase):
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_device_cache(garbage_collection=True)
 
     def _check_inference_finite(self, model, batch):
         # try inference without Trainer class
@@ -153,6 +190,58 @@ class PeftGPTQModelTests(unittest.TestCase):
                 lora_alpha=32,
                 target_modules=["q_proj", "v_proj"],
                 lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+            model = get_peft_model(model, config)
+
+            data = load_dataset_english_quotes()
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    def test_oft_causal_lm_training(self):
+        r"""
+        Test the CausalLM training on a single GPU device. The test would simply fail if the adapters are not set
+        correctly.
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                torch_dtype=torch.float16,
+                device_map="auto",
+                quantization_config=self.quantization_config,
+            )
+
+            model = prepare_model_for_kbit_training(model)
+            config = OFTConfig(
+                r=0,
+                oft_block_size=8,
+                target_modules=["q_proj", "v_proj"],
                 bias="none",
                 task_type="CAUSAL_LM",
             )
@@ -254,11 +343,11 @@ class PeftGPTQModelTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
-    @require_torch_multi_gpu
-    def test_causal_lm_training_multi_gpu(self):
+    @require_torch_multi_accelerator
+    def test_causal_lm_training_multi_accelerator(self):
         r"""
-        Test the CausalLM training on a multi-GPU device. The test would simply fail if the adapters are not set
-        correctly.
+        Test the CausalLM training on a multi-accelerator device. The test would simply fail if the adapters are not
+        set correctly.
         """
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -269,7 +358,7 @@ class PeftGPTQModelTests(unittest.TestCase):
                 quantization_config=self.quantization_config,
             )
 
-            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+            assert set(model.hf_device_map.values()) == set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -316,10 +405,108 @@ class PeftGPTQModelTests(unittest.TestCase):
             # assert loss is not None
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
+    @pytest.mark.multi_gpu_tests
+    @require_torch_multi_accelerator
+    def test_oft_causal_lm_training_multi_accelerator(self):
+        r"""
+        Test the CausalLM training on a multi-accelerator device. The test would simply fail if the adapters are not
+        set correctly.
+        """
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                torch_dtype=torch.float16,
+                device_map="auto",
+                quantization_config=self.quantization_config,
+            )
+
+            assert set(model.hf_device_map.values()) == set(range(device_count))
+
+            model = prepare_model_for_kbit_training(model)
+
+            setattr(model, "model_parallel", True)
+            setattr(model, "is_parallelizable", True)
+
+            config = OFTConfig(
+                r=0,
+                oft_block_size=8,
+                target_modules=["q_proj", "v_proj"],
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset_english_quotes()
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
     def test_non_default_adapter_name(self):
         # See issue 1346
         config = LoraConfig(
             r=16,
+            target_modules=["q_proj", "v_proj"],
+            task_type="CAUSAL_LM",
+        )
+
+        # default adapter name
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            torch_dtype=torch.float16,
+            device_map="auto",
+            quantization_config=self.quantization_config,
+        )
+        model = prepare_model_for_kbit_training(model)
+        model = get_peft_model(model, config)
+        n_trainable_default, n_total_default = model.get_nb_trainable_parameters()
+
+        # other adapter name
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            torch_dtype=torch.float16,
+            device_map="auto",
+            quantization_config=self.quantization_config,
+        )
+        model = prepare_model_for_kbit_training(model)
+        model = get_peft_model(model, config, adapter_name="other")
+        n_trainable_other, n_total_other = model.get_nb_trainable_parameters()
+
+        assert n_trainable_other > 0
+        # sanity check
+        assert n_trainable_default == n_trainable_other
+        assert n_total_default == n_total_other
+
+    def test_oft_non_default_adapter_name(self):
+        # See issue 1346
+        config = OFTConfig(
+            r=0,
+            oft_block_size=8,
             target_modules=["q_proj", "v_proj"],
             task_type="CAUSAL_LM",
         )
