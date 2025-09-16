@@ -232,19 +232,7 @@ class LoraLayer(BaseTunerLayer):
             self.scaling[adapter_name] = lora_alpha / r
 
         self.use_dora[adapter_name] = use_dora
-        
-        ############ kasa ############# 
-        self.lora_diag[adapter_name] = nn.Parameter(torch.randn(r), requires_grad=True)
-        
-        weight = self.get_base_layer().weight
-        dtype = weight.dtype
-        svd_rank = self.in_features - r
-        weight = weight.to(torch.float32)
-        U, S, Vh = torch.linalg.svd(weight.data, full_matrices=False)
-        U_principle, S_principle, Vh_principle = U[:, :svd_rank], S[:svd_rank], Vh[:svd_rank, :]
-        self.get_base_layer().weight.data = (U_principle @ torch.diag(S_principle) @ Vh_principle).to(dtype)
-
-        #########################
+        self.use_kasa[adapter_name] = use_kasa
         
         # for inits that require access to the base weight, use gather_param_ctx so that the weight is gathered when using DeepSpeed
         if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
@@ -733,7 +721,12 @@ class Linear(nn.Module, LoraLayer):
             weight_A = weight_A.float()
             weight_B = weight_B.float()
 
-        output_tensor = transpose(weight_B @ weight_A, self.fan_in_fan_out) * self.scaling[adapter]
+        # KaSA handling
+        if self.use_kasa.get(adapter, False):
+            diag = torch.diag(self.lora_diag[adapter])
+            output_tensor = transpose(weight_B @ diag @ weight_A, self.fan_in_fan_out) * self.scaling[adapter]
+        else:
+            output_tensor = transpose(weight_B @ weight_A, self.fan_in_fan_out) * self.scaling[adapter]
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
