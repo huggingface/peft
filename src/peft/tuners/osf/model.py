@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import torch
 import torch.nn as nn
 
 from peft.tuners.tuners_utils import BaseTuner, check_target_module_exists
@@ -16,6 +17,19 @@ class OSFModel(BaseTuner):
 
     def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False):
         super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
+
+    def __getattr__(self, name: str):
+        """Forward missing attributes to the wrapped base model.
+
+        This mirrors the behavior of other tuners (e.g., LoRA), ensuring attributes
+        like `device` resolve to the underlying transformers model.
+        """
+        try:
+            return super().__getattr__(name)  # defer to nn.Module's logic
+        except AttributeError:
+            if name == "model":  # avoid infinite recursion during init
+                raise
+            return getattr(self.model, name)
 
     def _prepare_adapter_config(self, peft_config, model_config):
         # Infer default target modules from mapping if not provided
@@ -109,6 +123,42 @@ class OSFModel(BaseTuner):
 
     def set_adapter(self, adapter_name):
         self.active_adapter = adapter_name
+
+    def _cast_adapter_dtype(self, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
+        """
+        Ensure all OSF adapter components have consistent dtype with the base model.
+
+        Instead of forcing float32, we match the base model's actual dtype for consistency.
+        """
+        if not autocast_adapter_dtype:
+            return
+
+        for module in self.model.modules():
+            if not hasattr(module, 'osf_svd_params'):
+                continue
+
+            # Get target dtype from base layer weight
+            base_layer = getattr(module, 'base_layer', None)
+            if base_layer is None or not hasattr(base_layer, 'weight'):
+                continue
+
+            target_dtype = base_layer.weight.dtype
+
+            # Cast trainable low-rank parameters to match base model dtype
+            if adapter_name in module.osf_svd_params:
+                svd_params = module.osf_svd_params[adapter_name]
+                for param_name, param in svd_params.items():
+                    if param.dtype != target_dtype:
+                        param.data = param.data.to(target_dtype)
+
+            # Cast frozen high-rank buffers to match base model dtype
+            for buffer_dict_name in OSFLayer.other_param_names:
+                if hasattr(module, buffer_dict_name):
+                    buffer_dict = getattr(module, buffer_dict_name)
+                    if adapter_name in buffer_dict:
+                        buffer = buffer_dict[adapter_name]
+                        if buffer.dtype != target_dtype:
+                            buffer_dict[adapter_name] = buffer.to(target_dtype)
 
     def unload(self):
         raise NotImplementedError("OSF models cannot be unloaded yet")
