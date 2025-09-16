@@ -19,7 +19,7 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
-from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
 
 
 class LNTuningLayer(nn.Module, BaseTunerLayer):
@@ -36,6 +36,10 @@ class LNTuningLayer(nn.Module, BaseTunerLayer):
         self.update_layer(self.base_layer, adapter_name)
         self._active_adapter = adapter_name
         self.merged_adapters = []
+
+        in_features, out_features = _get_in_out_features(self.get_base_layer())
+        self.in_features = in_features
+        self.out_features = out_features
 
     def update_layer(self, layer: nn.Module, adapter_name: str, inference_mode: bool = False, **kwargs):
         self.ln_tuning_layers[adapter_name] = deepcopy(layer)

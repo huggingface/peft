@@ -23,7 +23,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from peft.tuners._buffer_dict import BufferDict
-from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
 from peft.utils.integrations import check_deepspeed_zero3_enabled, gather_params_ctx
 
 
@@ -68,6 +68,10 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
 
         # Mark the weight as unmerged
         self.merged_adapters = []
+
+        in_features, out_features = _get_in_out_features(self.get_base_layer())
+        self.in_features = in_features
+        self.out_features = out_features
 
     @property
     def tied_adapter(self):

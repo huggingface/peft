@@ -26,6 +26,7 @@ from typing import Any, Optional, Union, overload
 import torch
 from accelerate.hooks import AlignDevicesHook
 from accelerate.utils import named_module_tensors, offload_state_dict
+from packaging import version
 from torch import nn
 from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
@@ -141,6 +142,68 @@ def _check_lora_target_modules_mamba(peft_config: PeftConfig, model: nn.Module, 
                 f"(model_type='{model.config.model_type}'). Incompatible modules: {incompatible_modules}. "
                 "Please remove it from `target_modules` to avoid compatibility issues."
             )
+
+
+def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, None]:
+    """
+    Get the in_features and out_features of the layer.
+
+    Returns in_features and out_features as a tuple. If they cannot be determined, return a tuple of None and None.
+    This function covers a broad range of layers, some of which the caller might not support. Therefore, just because
+    this function returns a valid result does not imply that the layer type is supported.
+    """
+    if isinstance(module, nn.Linear):
+        torch_supports_dtensor = version.parse(torch.__version__) >= version.parse("2.5.0")
+        if torch_supports_dtensor and isinstance(module.weight, torch.distributed.tensor.DTensor):
+            # If Tensor Parallel is used, the weight is sharded, so we need to get the local shape
+            out_features, in_features = module.weight.to_local().shape
+        else:
+            in_features, out_features = module.in_features, module.out_features
+    elif isinstance(module, nn.Conv1d):
+        in_features, out_features = module.in_channels, module.out_channels
+    elif isinstance(module, nn.Conv2d):
+        in_features, out_features = module.in_channels, module.out_channels
+    elif isinstance(module, nn.Conv3d):
+        in_features, out_features = module.in_channels, module.out_channels
+    elif isinstance(module, nn.Embedding):
+        in_features, out_features = module.num_embeddings, module.embedding_dim
+    elif isinstance(module, Conv1D):
+        in_features, out_features = (
+            module.weight.ds_shape if hasattr(module.weight, "ds_shape") else module.weight.shape
+        )
+    elif isinstance(module, nn.MultiheadAttention):
+        if not module._qkv_same_embed_dim:
+            raise ValueError("Only same dim for query/key/value is supported as of now for MultiheadAttention.")
+        in_features, out_features = module.embed_dim, 3 * module.embed_dim
+    elif hasattr(module, "infeatures") and hasattr(module, "outfeatures"):
+        # QuantLinear
+        in_features, out_features = module.infeatures, module.outfeatures
+    elif hasattr(module, "input_size") and hasattr(module, "output_size"):
+        # Megatron ColumnParallelLinear,RowParallelLinear
+        in_features, out_features = module.input_size, module.output_size
+    elif hasattr(module, "codebooks") and module.__class__.__name__ == "QuantizedLinear":
+        # AQLM QuantLinear
+        in_features, out_features = module.in_features, module.out_features
+    elif hasattr(module, "w_bit") and module.__class__.__name__ == "WQLinear_GEMM":
+        # Awq layers
+        in_features, out_features = module.in_features, module.out_features
+    elif module.__class__.__name__ == "EetqLinear":
+        # Eetq layers
+        in_features, out_features = module.in_features, module.out_features
+    elif hasattr(module, "W_q") and module.__class__.__name__ == "HQQLinear":
+        # HQQ layers
+        in_features, out_features = module.in_features, module.out_features
+    elif module.__class__.__name__ == "PatchedLinear":
+        # INC layers
+        in_features, out_features = module.in_features, module.out_features
+    else:
+        # possibly support user provided custom layer types using dynamic dispatch
+        if hasattr(module, "in_features") and hasattr(module, "out_features"):
+            in_features, out_features = module.in_features, module.out_features
+        else:
+            in_features, out_features = None, None
+        warnings.warn(f"Unsupported layer type '{type(module)}' encountered, proceed at your own risk.", UserWarning)
+    return in_features, out_features
 
 
 class BaseTuner(nn.Module, ABC):
