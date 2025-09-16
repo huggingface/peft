@@ -320,6 +320,8 @@ class KasaLinearVariant(LoraVariant):
         # initialize lora_diag
         module.lora_diag[adapter_name] = nn.Parameter(torch.randn(module.r[adapter_name]), requires_grad=True)
 
+        # see https://github.com/juyongjiang/KaSA/blob/f85e88c22d0fa4cb8ab2923d7c2bf1bbec152da3/peft/src/peft/tuners/lora/layer.py#L132
+        
         # SVD
         weight = module.get_base_layer().weight # original weight
         dtype = weight.dtype
@@ -358,7 +360,8 @@ class KasaLinearVariant(LoraVariant):
         x = module._cast_input_dtype(x, lora_A.weight.dtype)
         if isinstance(dropout, nn.Identity) or not module.training:
             x = dropout(x)
-    
+        
         # KaSA calculation
+        # see https://github.com/juyongjiang/KaSA/blob/f85e88c22d0fa4cb8ab2923d7c2bf1bbec152da3/peft/src/peft/tuners/lora/layer.py#L602C21-L602C110
         lora_output = lora_B(torch.einsum('ijk,kl->ijl', lora_A(x), diag)) * scaling
         return result + lora_output
