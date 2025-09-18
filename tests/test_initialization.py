@@ -2246,7 +2246,7 @@ class TestNamingConflictWarning:
         # No warning should be raised when there is no naming conflict during get_peft_model.
         non_conflict_adapter = "adapter"
         _ = get_peft_model(self.base_model, self.peft_config, adapter_name=non_conflict_adapter)
-        expected_msg = f"Adapter name {non_conflict_adapter} should not be contained in the prefix {self.prefix}."
+        expected_msg = f"Adapter name '{non_conflict_adapter}' should not be contained in the prefix '{self.prefix}'."
         assert not any(expected_msg in str(w.message) for w in recwarn.list)
 
     def test_no_warning_without_naming_conflict_add_adapter(self, recwarn):
@@ -2256,7 +2256,7 @@ class TestNamingConflictWarning:
         model = get_peft_model(self.base_model, self.peft_config, adapter_name=non_conflict_adapter)
         _ = model.add_adapter(other_non_conflict_adapter, self.peft_config)
         expected_msg = (
-            f"Adapter name {other_non_conflict_adapter} should not be contained in the prefix {self.prefix}."
+            f"Adapter name '{other_non_conflict_adapter}' should not be contained in the prefix '{self.prefix}'."
         )
         assert not any(expected_msg in str(w.message) for w in recwarn.list)
 
@@ -2265,14 +2265,16 @@ class TestNamingConflictWarning:
         non_conflict_adapter = "adapter"
         model = get_peft_model(self.base_model, self.peft_config, adapter_name=non_conflict_adapter)
         _ = self._save_and_reload_model(model, non_conflict_adapter, tmp_path)
-        expected_msg = f"Adapter name {non_conflict_adapter} should not be contained in the prefix {self.prefix}."
+        expected_msg = f"Adapter name '{non_conflict_adapter}' should not be contained in the prefix '{self.prefix}'."
         assert not any(expected_msg in str(w.message) for w in recwarn.list)
 
     def test_warning_naming_conflict_get_peft_model(self, recwarn):
         # Warning is raised when the adapter name conflicts with the prefix in get_peft_model.
         conflicting_adapter_name = self.prefix[:-1]
         _ = get_peft_model(self.base_model, self.peft_config, adapter_name=conflicting_adapter_name)
-        expected_msg = f"Adapter name {conflicting_adapter_name} should not be contained in the prefix {self.prefix}."
+        expected_msg = (
+            f"Adapter name '{conflicting_adapter_name}' should not be contained in the prefix '{self.prefix}'."
+        )
         assert any(expected_msg in str(w.message) for w in recwarn.list)
 
     def test_warning_naming_conflict_add_adapter(self, recwarn):
@@ -2281,7 +2283,7 @@ class TestNamingConflictWarning:
         non_conflict_adapter = "adapter"
         model = get_peft_model(self.base_model, self.peft_config, adapter_name=non_conflict_adapter)
         _ = model.add_adapter(conflicting_adapter, self.peft_config)
-        expected_msg = f"Adapter name {conflicting_adapter} should not be contained in the prefix {self.prefix}."
+        expected_msg = f"Adapter name '{conflicting_adapter}' should not be contained in the prefix '{self.prefix}'."
         assert any(expected_msg in str(w.message) for w in recwarn.list)
 
     def test_warning_naming_conflict_save_and_load(self, recwarn, tmp_path):
@@ -2289,7 +2291,7 @@ class TestNamingConflictWarning:
         conflicting_adapter = self.prefix[:-1]
         model = get_peft_model(self.base_model, self.peft_config, adapter_name=conflicting_adapter)
         _ = self._save_and_reload_model(model, conflicting_adapter, tmp_path)
-        expected_msg = f"Adapter name {conflicting_adapter} should not be contained in the prefix {self.prefix}."
+        expected_msg = f"Adapter name '{conflicting_adapter}' should not be contained in the prefix '{self.prefix}'."
         assert any(expected_msg in str(w.message) for w in recwarn.list)
 
 
