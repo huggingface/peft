@@ -201,6 +201,28 @@ class IA3Model(BaseTuner):
             )
         return peft_config
 
+    def _unload_and_optionally_merge(self, *args, **kwargs):
+        r"""
+        This method merges the (IA)^3 layers into the base model. This is needed if someone wants to use the base model
+        as a standalone model.
+
+        Args:
+            safe_merge (`bool`, `optional`, defaults to `False`):
+                If True, the merge operation will be performed in a copy of the original weights and check for NaNs
+                before merging the weights. This is useful if you want to check if the merge operation will produce
+                NaNs. Defaults to `False`.
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
+        """
+        if getattr(self.model, "is_loaded_in_8bit", False):
+            raise ValueError("Cannot merge ia3 layers when the model is loaded in 8-bit mode")
+
+        if getattr(self.model, "is_loaded_in_4bit", False):
+            raise ValueError("Cannot merge ia3 layers when the model is loaded in 4-bit mode")
+
+        super()._unload_and_optionally_merge(*args, **kwargs)
+
     def _check_add_weighted_adapter(self, adapters: list[str]) -> tuple[str, str]:
         """
         Helper function to check if the arguments to add_weighted_adapter are valid and compatible with the underlying

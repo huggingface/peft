@@ -61,9 +61,9 @@ def get_peft_model_state_dict(
     Get the state dict of the given adapter of the PEFT model.
 
     This only includes the PEFT parameters, not the parameters of the base model. Thus the returned `state_dict` is
-    generally small compared to the full model size. To retrieve the full `state_dict`, just call `model.state_dict`().
+    generally small compared to the full model size. To retrieve the full `state_dict`, just call `model.state_dict()`.
 
-    Note that the adapter name is removed from the `state_dict`, is this is just an arbitrary name that can be changed
+    Note that the adapter name is removed from the `state_dict`, as this is just an arbitrary name that can be changed
     when loading the adapter. So e.g. if the adapter name is `'default'` and the original key is
     `'model.q_proj.lora_A.default.weight'`, the returned key will be `'model.q_proj.lora_A.weight'`. Use this function
     in conjunction with [`set_peft_model_state_dict`] to take care of the adapter name when loading weights.
