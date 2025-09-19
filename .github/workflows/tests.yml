@@ -81,8 +81,8 @@ jobs:
           pip install -e .[test]
       - name: Check imports
         run: |
-          python -c "import numpy;print(numpy.__version__);print("success with numpy")"
-          python -c "import torch;print(torch.__version__);print("success with torch")"
+          python -c "import numpy;print(numpy.__version__);print('success with numpy')"
+          python -c "import torch;print(torch.__version__);print('success with torch')"
       - name: Test with pytest
         # MacOS tests are currently too flaky and will fail almost each time. Thus, continue (green checkmark) even if
         # they fail, but add a notice so that the failure is not completely silent
