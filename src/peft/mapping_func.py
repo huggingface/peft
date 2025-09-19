@@ -101,7 +101,7 @@ def get_peft_model(
     prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(peft_config.peft_type)
     if prefix and adapter_name in prefix:
         warnings.warn(
-            f"Adapter name {adapter_name} should not be contained in the prefix {prefix}."
+            f"Adapter name '{adapter_name}' should not be contained in the prefix '{prefix}'. "
             "This may lead to reinitialization of the adapter weights during loading."
         )
 
