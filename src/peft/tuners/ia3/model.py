@@ -221,7 +221,7 @@ class IA3Model(BaseTuner):
         if getattr(self.model, "is_loaded_in_4bit", False):
             raise ValueError("Cannot merge ia3 layers when the model is loaded in 4-bit mode")
 
-        super()._unload_and_optionally_merge(*args, **kwargs)
+        return super()._unload_and_optionally_merge(*args, **kwargs)
 
     def _check_add_weighted_adapter(self, adapters: list[str]) -> tuple[str, str]:
         """
