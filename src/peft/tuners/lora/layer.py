@@ -195,18 +195,7 @@ class LoraLayer(BaseTunerLayer):
         convention, and not here.
 
         """
-        if use_dora and use_kasa:
-            raise ValueError("Cannot use DoRA and KaSA at the same time, please choose only one.")
-
-        variant = None
-        if use_dora:
-            from .variants import DoraLinearVariant
-            variant = DoraLinearVariant()
-        elif use_kasa:
-            from .variants import KasaLinearVariant
-            variant = KasaLinearVariant()
-
-        return variant
+        return None
 
     def update_layer(
         self,
