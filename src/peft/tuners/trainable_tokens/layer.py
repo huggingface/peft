@@ -116,13 +116,18 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         # onto the new values, we would get undefined behavior. By replacing the specific token values we always
         # get defined behavior.
         weight = self.get_base_layer().weight
-        embed_dim = self.get_base_layer().embedding_dim
+        base = self.get_base_layer()
+        embed_dim = getattr(base, "embedding_dim", None)
+        if embed_dim is None:
+            embed_dim = getattr(base, "in_features", None)
+        if embed_dim is None:
+            embed_dim = weight.shape[-1]
 
         if init_weights:
             if check_deepspeed_zero3_enabled():
                 values = self._collect_token_weights(weight, self.token_indices[adapter_name], embed_dim)
             else:
-                values = self.weight[self.token_indices[adapter_name]]
+                values = weight[self.token_indices[adapter_name]]
         else:
             # random init with matching dtype/device
             values = torch.randn(
@@ -230,9 +235,11 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
                 )
             elif isinstance(self.base_layer, torch.nn.Linear):
                 # Probably a tied adapter that wraps an LM head.
+                bias = getattr(self.base_layer, "bias", None)
                 result = F.linear(
                     input=x,
                     weight=W,
+                    bias=bias,
                 )
             else:
                 raise ValueError(

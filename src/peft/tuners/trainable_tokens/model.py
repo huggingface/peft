@@ -41,7 +41,27 @@ class TrainableTokensModel(BaseTuner):
     def _prepare_adapter_config(self, peft_config, model_config):
         # target_modules can be none which prompts us to infer the embedding layer name ourselves.
         if peft_config.target_modules is None:
-            peft_config.target_modules = _get_input_embeddings_name(self.model, "embed_tokens")
+            targets = _get_input_embeddings_name(self.model, "embed_tokens")
+            if isinstance(targets, str):
+                targets = [targets]
+
+            # If embeddings are untied, also include the output embedding (lm head) module name
+            try:
+                tied_cfg = model_config.get("tie_word_embeddings", False)
+                tied_keys = getattr(self.model, "_tied_weights_keys", None)
+                are_tied = bool(tied_cfg and tied_keys is not None)
+            except Exception:
+                are_tied = False
+
+            if not are_tied and hasattr(self.model, "get_output_embeddings"):
+                out_emb = self.model.get_output_embeddings()
+                if out_emb is not None:
+                    for name, module in self.model.named_modules():
+                        if module is out_emb:
+                            targets.append(name)
+                            break
+
+            peft_config.target_modules = list(dict.fromkeys(targets))
 
         return peft_config
 
