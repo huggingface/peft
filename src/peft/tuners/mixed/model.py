@@ -20,7 +20,7 @@ from torch import nn
 from tqdm import tqdm
 
 from peft.tuners import adalora, loha, lokr, lora, oft, shira
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, _delete_auxiliary_adapter
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
@@ -83,17 +83,7 @@ class MixedModel(BaseTuner):
                 f"{self.__class__.__name__} only supports {COMPATIBLE_TUNER_TYPES} configs, but got {type(config)}."
             )
 
-        biases = (getattr(config, "bias", None) for config in self.peft_config)
-        biases = [bias for bias in biases if bias not in (None, "none")]
-        if len(biases) > 1:
-            raise ValueError(
-                f"{self.__class__.__name__} supports only 1 adapter with bias. When using multiple adapters, "
-                "set bias to 'none' for all adapters."
-            )
-
-    @staticmethod
-    def _check_target_module_exists(config: Configs, key: str):
-        return check_target_module_exists(config, key)
+        super()._check_new_adapter_config(config)
 
     def _create_and_replace(
         self,
@@ -196,34 +186,6 @@ class MixedModel(BaseTuner):
         else:
             raise ValueError(f"Unknown config type {type(config)}, should be one of {COMPATIBLE_TUNER_TYPES}.")
         return new_module
-
-    def __getattr__(self, name: str):
-        """Forward missing attributes to the wrapped module."""
-        try:
-            return super().__getattr__(name)  # defer to nn.Module's logic
-        except AttributeError:
-            if name == "model":  # see #1892: prevent infinite recursion if class is not initialized
-                raise
-            return getattr(self.model, name)
-
-    def _set_adapter_layers(self, enabled=True):
-        for module in self.model.modules():
-            if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
-                module.enable_adapters(enabled)
-
-    def enable_adapter_layers(self):
-        self._set_adapter_layers(enabled=True)
-
-    def disable_adapter_layers(self):
-        for active_adapter in self.active_adapters:
-            val = getattr(self.peft_config[active_adapter], "bias", "none")
-            if val != "none":
-                msg = (
-                    f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
-                    "output as the base model would without adaption."
-                )
-                warnings.warn(msg)
-        self._set_adapter_layers(enabled=False)
 
     def set_adapter(self, adapter_name: Union[str, list[str]], inference_mode: bool = False) -> None:
         self.set_auxiliary_adapters(adapter_name, inference_mode=inference_mode)
@@ -328,35 +290,7 @@ class MixedModel(BaseTuner):
                         new_adapter = target.active_adapters[:]
 
         self.active_adapter = new_adapter or []
-        self._delete_auxiliary_adapter(adapter_name, new_active_adapters=new_adapter)
-
-    def merge_and_unload(
-        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
-    ) -> nn.Module:
-        r"""
-        This method merges the layers into the base model. This is needed if someone wants to use the base model as a
-        standalone model.
-
-        Args:
-            progressbar (`bool`):
-                whether to show a progressbar indicating the unload and merge process
-            safe_merge (`bool`):
-                whether to activate the safe merging check to check if there is any potential Nan in the adapter
-                weights
-            adapter_names (`List[str]`, *optional*):
-                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
-                to `None`.
-        """
-        return self._unload_and_optionally_merge(
-            progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
-        )
-
-    def unload(self) -> nn.Module:
-        """
-        Gets back the base model by removing all the lora modules without merging. This gives back the original base
-        model.
-        """
-        return self._unload_and_optionally_merge(merge=False)
+        _delete_auxiliary_adapter(self.model, adapter_name, new_active_adapters=new_adapter)
 
     def generate(self, *args: Any, **kwargs: Any):
         return self.model.generate(*args, **kwargs)
