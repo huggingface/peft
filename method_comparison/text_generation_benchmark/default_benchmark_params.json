@@ -1,0 +1,12 @@
+{
+    "model_id": "meta-llama/Llama-3.2-3B",
+    "dtype": "float16",
+    "seed": 42,
+    "num_inference_runs": 10,
+    "max_new_tokens": 20,
+    "category_generation_params": {
+        "short": {"max_new_tokens": 20},
+        "medium": {"max_new_tokens": 50},
+        "long": {"max_new_tokens": 100}
+    }
+}

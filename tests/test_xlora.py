@@ -157,6 +157,19 @@ class TestXlora:
         )
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
 
+    def test_forward_hooks_are_cleaned_up(self, tokenizer, model):
+        # There was an issue that forward hooks would accumulate during generation, since one hook per forward step was
+        # being registered and generate would call forward multiple times. This is already undesirable, but to make it
+        # worse, only the last hook was removed, resulting in hooks accumulating.
+        # See https://github.com/huggingface/peft/issues/1472#issuecomment-3235817807
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        model.generate(input_ids=inputs.to(self.torch_device), max_new_tokens=10)
+        num_hooks_gen1 = len(model.base_model.model.model.decoder.layers[0].self_attn.k_proj._forward_pre_hooks)
+
+        model.generate(input_ids=inputs.to(self.torch_device), max_new_tokens=10)
+        num_hooks_gen2 = len(model.base_model.model.model.decoder.layers[0].self_attn.k_proj._forward_pre_hooks)
+        assert num_hooks_gen1 == num_hooks_gen2 == 0
+
     def test_scalings_logging_methods(self, tokenizer, model):
         model.enable_scalings_logging()
 

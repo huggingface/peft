@@ -412,6 +412,8 @@ class OFTLayer(BaseTunerLayer):
         init_weights,
         use_cayley_neumann,
         num_cayley_neumann_terms,
+        inference_mode: bool = False,
+        **kwargs,
     ):
         """
         Update the linear layer with trainable OFT weights. Override for other layer types.
@@ -479,7 +481,7 @@ class OFTLayer(BaseTunerLayer):
 
         # Move new weights to device
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def reset_oft_parameters(self, adapter_name, init_weights):
         """
@@ -716,6 +718,8 @@ class Conv2d(nn.Module, OFTLayer):
         init_weights,
         use_cayley_neumann,
         num_cayley_neumann_terms,
+        inference_mode: bool = False,
+        **kwargs,
     ):
         """
         Update the conv2d layer with trainable OFT weights.
@@ -777,7 +781,7 @@ class Conv2d(nn.Module, OFTLayer):
 
         # Move new weights to device
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """

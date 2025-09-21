@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.16.1.dev0"
+__version__ = "0.17.2.dev0"
 
 from .auto import (
     MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
@@ -50,6 +50,7 @@ from .tuners import (
     AdaLoraModel,
     AdaptionPromptConfig,
     AdaptionPromptModel,
+    ArrowConfig,
     BOFTConfig,
     BOFTModel,
     BoneConfig,
@@ -77,6 +78,8 @@ from .tuners import (
     LoraConfig,
     LoraModel,
     LoraRuntimeConfig,
+    MissConfig,
+    MissModel,
     MultitaskPromptTuningConfig,
     MultitaskPromptTuningInit,
     OFTConfig,
@@ -93,6 +96,8 @@ from .tuners import (
     PromptTuningInit,
     RandLoraConfig,
     RandLoraModel,
+    RoadConfig,
+    RoadModel,
     ShiraConfig,
     ShiraModel,
     TrainableTokensConfig,
@@ -103,12 +108,14 @@ from .tuners import (
     VeraModel,
     XLoraConfig,
     XLoraModel,
+    create_arrow_model,
     get_eva_state_dict,
     initialize_lora_eva_weights,
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     PeftType,
+    PeftWarning,
     TaskType,
     bloom_model_postprocess_past_key_value,
     cast_mixed_precision_params,
@@ -131,6 +138,7 @@ __all__ = [
     "AdaLoraModel",
     "AdaptionPromptConfig",
     "AdaptionPromptModel",
+    "ArrowConfig",
     "AutoPeftModel",
     "AutoPeftModelForCausalLM",
     "AutoPeftModelForFeatureExtraction",
@@ -165,6 +173,8 @@ __all__ = [
     "LoraConfig",
     "LoraModel",
     "LoraRuntimeConfig",
+    "MissConfig",
+    "MissModel",
     "MultitaskPromptTuningConfig",
     "MultitaskPromptTuningInit",
     "OFTConfig",
@@ -179,6 +189,7 @@ __all__ = [
     "PeftModelForSequenceClassification",
     "PeftModelForTokenClassification",
     "PeftType",
+    "PeftWarning",
     "PolyConfig",
     "PolyModel",
     "PrefixEncoder",
@@ -192,6 +203,8 @@ __all__ = [
     "PromptTuningInit",
     "RandLoraConfig",
     "RandLoraModel",
+    "RoadConfig",
+    "RoadModel",
     "ShiraConfig",
     "ShiraModel",
     "TaskType",
@@ -206,6 +219,7 @@ __all__ = [
     "XLoraModel",
     "bloom_model_postprocess_past_key_value",
     "cast_mixed_precision_params",
+    "create_arrow_model",
     "get_eva_state_dict",
     "get_layer_status",
     "get_model_status",

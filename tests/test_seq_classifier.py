@@ -24,11 +24,13 @@ from peft import (
     HRAConfig,
     IA3Config,
     LoraConfig,
+    MissConfig,
     OFTConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
     PromptTuningInit,
+    RoadConfig,
     ShiraConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -36,7 +38,8 @@ from peft import (
 )
 from peft.utils.other import ModulesToSaveWrapper
 
-from .testing_common import PeftCommonTester, hub_online_once
+from .testing_common import PeftCommonTester
+from .testing_utils import hub_online_once
 
 
 PEFT_SEQ_CLS_MODELS_TO_TEST = [
@@ -64,6 +67,14 @@ ALL_CONFIGS = [
     ),
     (
         BoneConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+            "r": 2,
+        },
+    ),
+    (
+        MissConfig,
         {
             "task_type": "SEQ_CLS",
             "target_modules": None,
@@ -144,6 +155,14 @@ ALL_CONFIGS = [
         {
             "task_type": "SEQ_CLS",
             "num_virtual_tokens": 10,
+        },
+    ),
+    (
+        RoadConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "variant": "road_1",
+            "group_size": 2,
         },
     ),
     (

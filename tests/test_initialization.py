@@ -14,6 +14,7 @@
 
 import copy
 import itertools
+import math
 import platform
 import re
 import warnings
@@ -50,8 +51,10 @@ from peft import (
     PeftModelForSeq2SeqLM,
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
+    PeftWarning,
     PrefixTuningConfig,
     PromptTuningConfig,
+    RoadConfig,
     VBLoRAConfig,
     VeraConfig,
     get_eva_state_dict,
@@ -85,14 +88,14 @@ class TestLoraInitialization:
         samples = normal.sample(size)
         return samples
 
-    def get_model(self):
+    def get_model(self, bias=True):
         class MyModule(nn.Module):
             def __init__(self):
                 super().__init__()
                 # choose a large weight so that averages are close to expected values
-                self.linear = nn.Linear(1000, 1000)
+                self.linear = nn.Linear(1000, 1000, bias=bias)
                 self.embed = nn.Embedding(1000, 1000)
-                self.conv2d = nn.Conv2d(100, 100, 3)
+                self.conv2d = nn.Conv2d(100, 100, 3, bias=bias)
 
             def forward(self, x):
                 x_int = (100 * x).int()
@@ -1311,6 +1314,20 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match=msg):
             LoraConfig(target_modules=["linear"], lora_bias=True, **extra_kwargs)
 
+    def test_lora_linear_with_bias_when_base_layer_has_no_bias_warns(self):
+        model = self.get_model(bias=False)
+        config = LoraConfig(target_modules=["linear"], lora_bias=True)
+        msg = re.escape("`lora_bias=True` was passed but the targeted layer of type Linear has no bias")
+        with pytest.warns(PeftWarning, match=msg):
+            get_peft_model(model, config)
+
+    def test_lora_conv2d_with_bias_when_base_layer_has_no_bias_warns(self):
+        model = self.get_model(bias=False)
+        config = LoraConfig(target_modules=["conv2d"], lora_bias=True)
+        msg = re.escape("`lora_bias=True` was passed but the targeted layer of type Conv2d has no bias")
+        with pytest.warns(PeftWarning, match=msg):
+            get_peft_model(model, config)
+
     def test_lora_incompatible_mamba_modules(self):
         # Ensure LoRA raises an error when applying to forbidden modules
         # ('out_proj', 'conv1d') in Mamba-based architectures like Falcon-Mamba tiny.
@@ -1406,34 +1423,10 @@ class TestLoraInitialization:
                 self.linear = nn.Linear(10, 10)
 
         base_model = MyModule()
-        config = LoraConfig(target_modules=["linear"], target_parameters=["weight"])
+        config = LoraConfig(target_modules=["linear"], target_parameters=["linear.weight"])
         msg = "Trying to wrap an `nn.Parameter` of layer 'linear' of type Linear, which is not a valid target."
         with pytest.raises(ValueError, match=msg):
             get_peft_model(base_model, config)
-
-    def test_targeting_2_params_on_1_module_raises(self):
-        # It is currently not supported to target multiple parameters on the same module.
-        class ModuleWith2Params(nn.Module):
-            def __init__(self, in_features, out_features):
-                super().__init__()
-                self.weight0 = nn.Parameter(torch.zeros(in_features, out_features))
-                self.weight1 = nn.Parameter(torch.ones(3, out_features, out_features))
-
-        class Outer(nn.Module):
-            def __init__(self, in_features, out_features):
-                super().__init__()
-                self.lin = nn.Linear(in_features, in_features)
-                self.submodule = ModuleWith2Params(in_features, out_features)
-
-        model = Outer(3, 4)
-        config = LoraConfig(target_parameters=["submodule.weight0", "submodule.weight1"], init_lora_weights=False)
-        msg = (
-            "lora.ParamWrapper already has an adapter for parameter 'weight0'. It is currently not possible to apply "
-            "the same adapter to multiple parameters, please add a different adapter to target another parameter of "
-            "the same module."
-        )
-        with pytest.raises(ValueError, match=msg):
-            get_peft_model(model, config)
 
     @pytest.mark.parametrize("target_parameters", [["linear"], ["foobar"], ["foobar.weight"], ["foo", "bar"]])
     @pytest.mark.parametrize("target_modules", [None, [], ""])
@@ -1468,6 +1461,26 @@ class TestLoraInitialization:
         msg = re.escape("target_parameters=['foobar.weight'] were set but no parameter was matched.")
         with pytest.warns(RuntimeWarning, match=msg):
             get_peft_model(model, config)
+
+    def test_adding_multiple_adapters_with_target_parameters_raises(self):
+        model = self.get_model()
+        config = LoraConfig(target_modules=[], target_parameters=["linear.weight"])
+        model = get_peft_model(model, config)
+        msg = re.escape("only one LoRA adapter per model with `target_parameters` is allowed")
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter(adapter_name="other", peft_config=config)
+
+    def test_loading_loading_adapters_with_target_parameters_raises(self, tmp_path):
+        model = self.get_model()
+        config = LoraConfig(target_modules=[], target_parameters=["linear.weight"])
+        model = get_peft_model(model, config)
+        model.save_pretrained(tmp_path)
+
+        model = self.get_model()
+        model = PeftModel.from_pretrained(model, tmp_path)
+        msg = re.escape("only one LoRA adapter per model with `target_parameters` is allowed")
+        with pytest.raises(ValueError, match=msg):
+            model.load_adapter(tmp_path, adapter_name="other")
 
 
 class TestLokrInitialization:
@@ -1757,6 +1770,83 @@ class TestC3AInitialization:
             get_peft_model(model, config)
 
 
+class TestRoadInitialization:
+    torch_device = infer_device()
+
+    def get_model(self):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 30, bias=bias)
+                self.lin1 = nn.Linear(30, 2, bias=bias)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                return X
+
+        return MLP().to(self.torch_device)
+
+    def get_conv2d_model(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                # choose a large weight so that averages are close to expected values
+                self.linear = nn.Linear(1000, 1000)
+                self.embed = nn.Embedding(1000, 1000)
+                self.conv2d = nn.Conv2d(100, 100, 3)
+
+            def forward(self, x):
+                x_int = (100 * x).int()
+                x_4d = x.flatten().reshape(1, 100, 10, 10)
+                return self.linear(x), self.embed(x_int), self.conv2d(x_4d)
+
+        return MyModule().eval().to(self.torch_device)
+
+    def test_road_default_initialization(self):
+        torch.manual_seed(0)
+        model = self.get_model()
+        config = RoadConfig(target_modules=["lin0"], group_size=2)
+        model = get_peft_model(model, config)
+        weight_alpha = model.lin0.road_alpha["default"].data
+        weight_theta = model.lin0.road_theta["default"].data
+        torch.allclose(weight_alpha, torch.ones_like(weight_alpha))
+        torch.allclose(weight_theta, torch.zeros_like(weight_theta))
+
+    def test_road_with_odd_group_size(self):
+        group_size = 3  # odd values are not allowed
+        msg = f"The group_size must be divisible by 2 when using RoadLayer, but got {group_size}."
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            RoadConfig(group_size=group_size)
+
+    def test_road_with_too_large_group_size(self):
+        group_size = 64  # larger than out_features
+        msg = (
+            f"The out_features of the base layer must be divisible by group_size ({group_size}) when using RoadLayer."
+        )
+        model = self.get_model()
+        config = RoadConfig(target_modules=["lin0"], group_size=group_size)
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            get_peft_model(model, config)
+
+    def test_road_with_incompatible_group_size_with_out_features(self):
+        group_size = 4  # even, but 30 does not divide by 4
+        model = self.get_model()
+        config = RoadConfig(target_modules=["lin0"], group_size=group_size)
+        msg = (
+            f"The out_features of the base layer must be divisible by group_size ({group_size}) when using RoadLayer."
+        )
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            get_peft_model(model, config)
+
+    def test_road_with_conv2d_layer(self):
+        model = self.get_conv2d_model()
+        config = RoadConfig(target_modules=["conv2d"], group_size=2)
+        msg = "Target module Conv2d(100, 100, kernel_size=(3, 3), stride=(1, 1)) is not supported. Currently, only the following modules are supported: `torch.nn.Linear`."
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            get_peft_model(model, config)
+
+
 class TestNoInfiniteRecursionDeepspeed:
     # see #1892 for details
     classes = [
@@ -1962,7 +2052,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
     @pytest.mark.parametrize("device", devices)
     def test_load_adapter_low_cpu_mem_usage_works(self, device, inputs, lora_path, lora_config):
@@ -1989,7 +2079,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
     @pytest.mark.parametrize("device", devices)
     def test_get_peft_model_low_cpu_mem_usage_works(self, device, inputs):
@@ -2051,7 +2141,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
     ############################
     # tests for PeftMixedModel #
@@ -2073,7 +2163,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
     @pytest.mark.parametrize("device", devices)
     def test_mixed_model_load_adapter_low_cpu_mem_usage_works(self, device, inputs, lora_path, lora_config):
@@ -2100,7 +2190,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
 
 def test_from_pretrained_missing_keys_warning(recwarn, tmp_path):
@@ -3800,6 +3890,44 @@ class TestScaling:
         self.unscale_layer(model, 3)
         scalings = self.get_scalings(model)
         expected = [2.0] * n_layers
+        assert scalings == expected
+
+    def test_scaling_with_rslora(self, model):
+        n_layers = 5
+        rank, lora_alpha = 8, 16
+        config = LoraConfig(
+            r=rank,
+            lora_alpha=lora_alpha,
+            use_rslora=True,
+            target_modules=["k_proj"],
+        )
+        model = get_peft_model(model, config)
+        scalings = self.get_scalings(model)
+        expected = [lora_alpha / math.sqrt(rank)] * n_layers
+        assert scalings == expected
+
+        # double
+        self.scale_layer(model, 2)
+        scalings = self.get_scalings(model)
+        expected = [2 * lora_alpha / math.sqrt(rank)] * n_layers
+        assert scalings == expected
+
+        # back to original
+        self.unscale_layer(model, None)
+        scalings = self.get_scalings(model)
+        expected = [lora_alpha / math.sqrt(rank)] * n_layers
+        assert scalings == expected
+
+        # triple
+        self.set_scale(model, "default", 3)
+        scalings = self.get_scalings(model)
+        expected = [3 * lora_alpha / math.sqrt(rank)] * n_layers
+        assert scalings == expected
+
+        # back to original
+        self.unscale_layer(model, 3)
+        scalings = self.get_scalings(model)
+        expected = [lora_alpha / math.sqrt(rank)] * n_layers
         assert scalings == expected
 
     def test_scaling_rank_pattern_alpha_pattern(self, model):

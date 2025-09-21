@@ -203,9 +203,6 @@ class LycorisTuner(BaseTuner):
     prefix: str
     layers_mapping: dict[type[torch.nn.Module], type[LycorisLayer]]
 
-    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False):
-        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
-
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
         try:
@@ -260,7 +257,7 @@ class LycorisTuner(BaseTuner):
         else:
             target_base_layer = target
 
-        if isinstance(target_base_layer, torch.nn.Conv2d):
+        if isinstance(target_base_layer, (torch.nn.Conv2d, torch.nn.Conv1d)):
             new_module = new_module_cls(target, adapter_name=adapter_name, **kwargs)
         elif isinstance(target_base_layer, torch.nn.Linear):
             new_module = new_module_cls(target, adapter_name=adapter_name, **kwargs)
@@ -392,27 +389,22 @@ class LycorisTuner(BaseTuner):
         """
         return self._unload_and_optionally_merge(merge=False)
 
-    def set_adapter(self, adapter_name: str | list[str]) -> None:
+    def set_adapter(self, adapter_name: str | list[str], inference_mode: bool = False) -> None:
         """Set the active adapter(s).
 
-        Additionally, this function will set the specified adapters to trainable (i.e., requires_grad=True). If this is
-        not desired, use the following code.
-
-        ```py
-        >>> for name, param in model_peft.named_parameters():
-        ...     if ...:  # some check on name (ex. if 'lora' in name)
-        ...         param.requires_grad = False
-        ```
-
         Args:
-            adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
+            adapter_name (`str` or `list[str]`):
+                Name(s) of the adapter(s) to be activated.
+            inference_mode (bool, optional):
+                 Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         """
+        self.set_auxiliary_adapters(adapter_name, inference_mode=inference_mode)
         for module in self.model.modules():
             if isinstance(module, LycorisLayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
-                module.set_adapter(adapter_name)
+                module.set_adapter(adapter_name, inference_mode=inference_mode)
         self.active_adapter = adapter_name
 
     def delete_adapter(self, adapter_name: str) -> None:

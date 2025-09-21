@@ -24,11 +24,13 @@ from peft import (
     HRAConfig,
     IA3Config,
     LoraConfig,
+    MissConfig,
     OFTConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptLearningConfig,
     PromptTuningConfig,
+    RoadConfig,
     ShiraConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -64,6 +66,14 @@ ALL_CONFIGS = [
     ),
     (
         BoneConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+            "r": 2,
+        },
+    ),
+    (
+        MissConfig,
         {
             "task_type": "FEATURE_EXTRACTION",
             "target_modules": None,
@@ -144,6 +154,14 @@ ALL_CONFIGS = [
         {
             "task_type": "FEATURE_EXTRACTION",
             "num_virtual_tokens": 10,
+        },
+    ),
+    (
+        RoadConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "variant": "road_1",
+            "group_size": 2,
         },
     ),
     (

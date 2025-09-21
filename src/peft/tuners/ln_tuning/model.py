@@ -65,10 +65,6 @@ class LNTuningModel(BaseTuner):
 
     prefix: str = "ln_tuning_"
 
-    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
-        # self.adapter_name = adapter_name
-        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
-
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
         try:
@@ -138,8 +134,6 @@ class LNTuningModel(BaseTuner):
         for n, p in model.named_parameters():
             if self.prefix not in n:
                 p.requires_grad = False
-            else:
-                p.requires_grad = True
 
     def _check_target_module_exists(self, peft_config: PeftConfig, key: str) -> bool:
         return check_target_module_exists(peft_config, key)
@@ -163,13 +157,14 @@ class LNTuningModel(BaseTuner):
         """
         self._set_adapter_layers(enabled=False)
 
-    def set_adapter(self, adapter_name: str) -> None:
+    def set_adapter(self, adapter_name: str, inference_mode: bool = False) -> None:
+        self.set_auxiliary_adapters(adapter_name, inference_mode=inference_mode)
         for module in self.model.modules():
             if isinstance(module, LNTuningLayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
-                module.set_adapter(adapter_name)
+                module.set_adapter(adapter_name, inference_mode=inference_mode)
         self.active_adapter = adapter_name
 
     def _unload_and_optionally_merge(

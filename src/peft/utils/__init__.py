@@ -25,6 +25,8 @@ from .other import (
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_LOHA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_LOKR_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING,
@@ -34,6 +36,7 @@ from .other import (
     WEIGHTS_NAME,
     AuxiliaryTrainingWrapper,
     ModulesToSaveWrapper,
+    TrainableTokensWrapper,
     _freeze_adapter,
     _get_batch_size,
     _get_input_embeddings_name,
@@ -56,6 +59,7 @@ from .other import (
 )
 from .peft_types import PeftType, TaskType, register_peft_method
 from .save_and_load import get_peft_model_state_dict, load_peft_weights, set_peft_model_state_dict
+from .warning import PeftWarning
 
 
 __all__ = [
@@ -69,6 +73,8 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_LOHA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_LOKR_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
     "TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING",
@@ -79,7 +85,9 @@ __all__ = [
     "AuxiliaryTrainingWrapper",
     "ModulesToSaveWrapper",
     "PeftType",
+    "PeftWarning",
     "TaskType",
+    "TrainableTokensWrapper",
     "_freeze_adapter",
     "_get_batch_size",
     "_get_input_embeddings_name",

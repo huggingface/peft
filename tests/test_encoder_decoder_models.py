@@ -26,10 +26,12 @@ from peft import (
     HRAConfig,
     IA3Config,
     LoraConfig,
+    MissConfig,
     OFTConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
+    RoadConfig,
     ShiraConfig,
     TaskType,
     VBLoRAConfig,
@@ -65,6 +67,14 @@ ALL_CONFIGS = [
     ),
     (
         BoneConfig,
+        {
+            "target_modules": None,
+            "r": 2,
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        MissConfig,
         {
             "target_modules": None,
             "r": 2,
@@ -144,6 +154,14 @@ ALL_CONFIGS = [
         {
             "num_virtual_tokens": 10,
             "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        RoadConfig,
+        {
+            "task_type": "SEQ_2_SEQ_LM",
+            "variant": "road_1",
+            "group_size": 2,
         },
     ),
     (

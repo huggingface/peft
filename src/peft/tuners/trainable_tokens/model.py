@@ -31,9 +31,6 @@ from .layer import TrainableTokensLayer
 class TrainableTokensModel(BaseTuner):
     prefix: str = "trainable_tokens_"
 
-    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False):
-        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
-
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
         try:
@@ -49,13 +46,19 @@ class TrainableTokensModel(BaseTuner):
         return peft_config
 
     def inject_adapter(
-        self, model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True, low_cpu_mem_usage: bool = False
+        self,
+        model: nn.Module,
+        adapter_name: str,
+        autocast_adapter_dtype: bool = True,
+        low_cpu_mem_usage: bool = False,
+        **kwargs,
     ) -> None:
         super().inject_adapter(
             model=model,
             adapter_name=adapter_name,
             autocast_adapter_dtype=autocast_adapter_dtype,
             low_cpu_mem_usage=low_cpu_mem_usage,
+            **kwargs,
         )
 
         model_config = self.get_model_config(self)
@@ -201,27 +204,21 @@ class TrainableTokensModel(BaseTuner):
         """
         self._set_adapter_layers(enabled=False)
 
-    def set_adapter(self, adapter_name: str | list[str]) -> None:
+    def set_adapter(self, adapter_name: str | list[str], inference_mode: bool = False) -> None:
         """Set the active adapter(s).
 
-        Additionally, this function will set the specified adapters to trainable (i.e., requires_grad=True). If this is
-        not desired, use the following code.
-
-        ```py
-        >>> for name, param in model_peft.named_parameters():
-        ...     if ...:  # some check on name (ex. if 'lora' in name)
-        ...         param.requires_grad = False
-        ```
-
         Args:
-            adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
+            adapter_name (`str` or `list[str]`):
+                Name(s) of the adapter(s) to be activated.
+            inference_mode (bool, optional):
+                 Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         """
         for module in self.model.modules():
             if isinstance(module, TrainableTokensLayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
-                module.set_adapter(adapter_name)
+                module.set_adapter(adapter_name, inference_mode=inference_mode)
         self.active_adapter = adapter_name
 
     def unload(self) -> torch.nn.Module:
