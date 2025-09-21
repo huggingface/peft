@@ -27,6 +27,7 @@ from peft.utils import (
     ModulesToSaveWrapper,
     _get_submodules,
 )
+from peft.utils.other import get_pattern_key
 
 from .config import DeloraConfig
 from .layer import DeloraLayer, DeloraLinear
@@ -58,9 +59,21 @@ class DeloraModel(BaseTuner):
         A helper method to check the config when a new adapter is being added.
 
         Raise a ValueError if there is something wrong with the config or if it conflicts with existing adapters.
+
         """
-        # No special constraints for DeLoRA at the moment
-        return None
+        # TODO: there should be a check if any of the existing adapters actually has bias != "none", or else the check
+        # does not fully correspond to the error message.
+        if (len(self.peft_config) > 1) and (config.bias != "none"):
+            raise ValueError(
+                f"{self.__class__.__name__} supports only 1 adapter with bias. When using multiple adapters, "
+                "set bias to 'none' for all adapters."
+            )
+        # if there are multiple adapters, residual init cannot be used
+        if (len(self.peft_config) > 1) and (config.use_residual_init):
+            raise ValueError(
+                f"{self.__class__.__name__} supports only 1 adapter with residual init. When using multiple adapters, "
+                "set use_residual_init to False for all adapters."
+            )
 
     @staticmethod
     def _check_target_module_exists(delora_config, key):
@@ -78,10 +91,16 @@ class DeloraModel(BaseTuner):
     ):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
-        # Build constructor/update kwargs from config
+
+        # Regexp matching - Find key which matches current target_name in patterns provided
+        r_key = get_pattern_key(delora_config.rank_pattern.keys(), current_key)
+        lambda_key = get_pattern_key(delora_config.lambda_pattern.keys(), current_key)
+        r = delora_config.rank_pattern.get(r_key, delora_config.r)
+        lambda_ = delora_config.lambda_pattern.get(lambda_key, delora_config.lambda_)
+
         kwargs = {
-            "r": delora_config.r,
-            "lambda_": delora_config.lambda_,
+            "r": r,
+            "lambda_": lambda_,
             "module_dropout": delora_config.module_dropout,
             "init_weights": delora_config.init_weights,
             "use_residual_init": (

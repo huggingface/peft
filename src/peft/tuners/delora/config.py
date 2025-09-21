@@ -130,6 +130,23 @@ class DeloraConfig(PeftConfig):
             "common layers pattern. This should target the `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`."
         },
     )
+    rank_pattern: Optional[dict] = field(
+        default_factory=dict,
+        metadata={
+            "help": (
+                "The mapping from layer names or regexp expression to ranks which are different from the default rank specified by `r`. "
+                "For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`."
+            )
+        },
+    )
+    lambda_pattern: Optional[dict] = field(
+        default_factory=dict,
+        metadata={
+            "help": (
+                "The mapping from layer names or regexp expression to lambdas which are different from the default lambda specified by `lambda`. "
+            )
+        },
+    )
     modules_to_save: Optional[list[str]] = field(
         default=None,
         metadata={
@@ -153,3 +170,7 @@ class DeloraConfig(PeftConfig):
         # check for layers_to_transform and layers_pattern
         if self.layers_pattern and not self.layers_to_transform:
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
+
+        # if init_weights is False, use_residual_init must be False
+        if not self.init_weights and self.use_residual_init:
+            raise ValueError("`use_residual_init` must be False when `init_weights` is False.")
