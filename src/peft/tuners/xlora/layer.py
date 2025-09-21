@@ -73,11 +73,6 @@ class XLoraLayer:
 
             xlora_scalings = xlora_scalings * mask.to(xlora_scalings.dtype)
 
-        if self.config.enable_softmax_topk:
-            nonzero_mask = xlora_scalings != 0
-            softmax_res_nonzero = torch.softmax(xlora_scalings[nonzero_mask], dim=-1)
-            xlora_scalings[nonzero_mask] = softmax_res_nonzero
-
         # Apply per-token normalization to the xLoRA scaling factors using a softmax
         if self.config.enable_softmax_topk:
             nonzero_mask = xlora_scalings != 0
