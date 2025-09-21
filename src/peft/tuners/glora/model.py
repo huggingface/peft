@@ -1,8 +1,7 @@
 import re
-import warnings
 from dataclasses import asdict
 from enum import Enum
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 import torch.nn as nn
 from tqdm import tqdm
@@ -17,7 +16,7 @@ from peft.utils import (
 from peft.utils.peft_types import PeftType
 
 from .config import GLoraConfig
-from .layer import Linear as GLoraLinear
+from .layer import GLoraLinear
 
 
 def mark_only_glora_as_trainable(model: nn.Module, bias: str = "none") -> None:
@@ -49,7 +48,7 @@ class GLoraModel(BaseTuner):
     def __init__(
         self, model: nn.Module, config: Union[GLoraConfig, dict[str, GLoraConfig]], adapter_name: str = "default"
     ):
-        super().__init__()
+        super().__init__(model, config, adapter_name)
         self.model = model
         self.forward = self.model.forward
 
@@ -101,13 +100,19 @@ class GLoraModel(BaseTuner):
 
         in_features, out_features = target.in_features, target.out_features
         kwargs_glora = {
-            "r": glora_config.r,
             "config_A_B": glora_config.config_A_B,
             "config_C": glora_config.config_C,
-            "config_D_E": glora_config.config,
+            "config_D_E": glora_config.config_D_E,
         }
-
-        new_module = GLoraLinear(adapter_name, in_features, out_features, bias=bias, **kwargs_glora)
+        new_module = GLoraLinear(in_features, out_features, bias=bias, **kwargs_glora)
+        # Add the adapter to the new module
+        new_module.add_adapter(
+            adapter_name,
+            glora_config.r,
+            glora_config.config_A_B,
+            glora_config.config_C,
+            glora_config.config_D_E,
+        )
         return new_module
 
     def _find_and_replace(self, adapter_name: str):
@@ -123,8 +128,13 @@ class GLoraModel(BaseTuner):
             parent, target, target_name = _get_submodules(self.model, key)
 
             if isinstance(target, GLoraLinear):
-                warnings.warn(
-                    f"Module {key} is already a GLoraLinear. Skipping replacement for new adapter '{adapter_name}'. Multiple GLORA adapters on the same layer might need explicit support in GLoraLinear."
+                # Add adapter to existing GLoraLinear
+                target.add_adapter(
+                    adapter_name,
+                    glora_config.r,
+                    glora_config.config_A_B,
+                    glora_config.config_C,
+                    glora_config.config_D_E,
                 )
             elif isinstance(target, nn.Linear):
                 new_module = self._create_new_module(glora_config, adapter_name, target)
@@ -166,7 +176,34 @@ class GLoraModel(BaseTuner):
             ]
         return peft_config
 
-    def merge_and_unload(self, progressbar: bool = False):
+    def set_adapter(self, adapter_name_or_list):
+        for module in self.model.modules():
+            if isinstance(module, GLoraLinear):
+                module.set_adapter(adapter_name_or_list)
+        self.active_adapter = adapter_name_or_list
+
+    def enable_adapter_layers(self):
+        for module in self.model.modules():
+            if isinstance(module, GLoraLinear):
+                module.enable_adapters()
+
+    def disable_adapter_layers(self):
+        for module in self.model.modules():
+            if isinstance(module, GLoraLinear):
+                module.disable_adapters()
+
+    def delete_adapter(self, adapter_name: str):
+        if adapter_name not in self.peft_config:
+            raise ValueError(f"Adapter {adapter_name} does not exist")
+        del self.peft_config[adapter_name]
+        for module in self.model.modules():
+            if isinstance(module, GLoraLinear):
+                module.delete_adapter(adapter_name)
+        # Update active_adapter if needed
+        if self.active_adapter == adapter_name:
+            self.active_adapter = next(iter(self.peft_config.keys()), None)
+
+    def merge_and_unload(self, progressbar: bool = False, adapter_names: list[str] = None):
         """
         This method merges the GLora layers into the base model.
         """
@@ -183,17 +220,15 @@ class GLoraModel(BaseTuner):
                 continue
 
             if isinstance(target, GLoraLinear):
-                if target.eval_config is None:
-                    raise ValueError(
-                        f"eval_config not set for GLoraLinear layer {key}. Cannot merge deterministically. Please call model.set_adapter_eval_config(...) before merging."
-                    )
-
-                target.merge()
+                if not target.active_adapters:
+                    continue
+                # Merge all or specified adapters
+                merge_adapters = adapter_names if adapter_names is not None else target.active_adapters
+                target.merge(adapter_names=merge_adapters)
                 new_module = nn.Linear(target.in_features, target.out_features, bias=(target.bias is not None))
                 new_module.weight.data = target.weight.data.clone()  # Get merged weight
                 if target.bias is not None:
                     new_module.bias.data = target.bias.data.clone()  # Get merged bias
-
                 self._replace_module(parent, target_name, new_module.to(target.weight.device), target)
 
             if isinstance(target, ModulesToSaveWrapper):
@@ -211,8 +246,8 @@ class GLoraModel(BaseTuner):
 
         for module in self.model.modules():
             if isinstance(module, GLoraLinear):
-                if module.active_adapter == adapter_name:
-                    module.eval_config = eval_config
+                if adapter_name in module.eval_config:
+                    module.eval_config[adapter_name] = eval_config
                     self.adapters_config_history[adapter_name] = eval_config
 
     def get_peft_config_as_dict(self, inference: bool = False) -> dict[str, Any]:
@@ -226,3 +261,24 @@ class GLoraModel(BaseTuner):
                     config[k] = v.value
             config_dict[adapter_name] = config
         return config_dict
+
+    def _create_and_replace(
+        self,
+        peft_config,
+        adapter_name,
+        target,
+        target_name,
+        parent,
+        current_key,
+        parameter_name: Optional[str] = None,
+    ):
+        new_module = self._create_new_module(peft_config, adapter_name, target)
+        self._replace_module(parent, target_name, new_module, target)
+
+    @staticmethod
+    def _mark_only_adapters_as_trainable(model: nn.Module):
+        mark_only_glora_as_trainable(model)
+
+    @staticmethod
+    def _prepare_adapter_config(peft_config, model_config):
+        return GLoraModel._prepare_glora_config(peft_config, model_config)

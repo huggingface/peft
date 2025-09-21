@@ -16,8 +16,7 @@
 from peft.utils import register_peft_method
 
 from .config import GLoraConfig
-from .layer import GLoraLayer
-from .layer import Linear as GLoraLinear
+from .layer import GLoraLayer, GLoraLinear
 from .model import GLoraModel
 
 
