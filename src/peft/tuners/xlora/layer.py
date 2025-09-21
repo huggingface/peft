@@ -78,6 +78,13 @@ class XLoraLayer:
             softmax_res_nonzero = torch.softmax(xlora_scalings[nonzero_mask], dim=-1)
             xlora_scalings[nonzero_mask] = softmax_res_nonzero
 
+        # Apply per-token normalization to the xLoRA scaling factors using a softmax
+        if self.config.enable_softmax_topk:
+            nonzero_mask = xlora_scalings != 0
+            full = xlora_scalings.masked_fill(~nonzero_mask, float("-inf"))
+            new_scalings = torch.softmax(full, dim=-1)
+            xlora_scalings = new_scalings.masked_fill(~nonzero_mask, 0.0)
+
         return xlora_scalings
 
 
