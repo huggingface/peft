@@ -19,9 +19,8 @@ rendered properly in your Markdown viewer.
 [DeLoRA](https://huggingface.co/papers/2503.18225) is a parameter-efficient fine-tuning technique that leverages effectively decouples the learning of angles and magnitudes.
 
 Note:
-- use larger learning rate than standard LoRA variants, no weight decay on the BA matrices
-- we utilize alpha as the initial value of the boundary parameter. Using different alphas for different weights is possible
-
+- use 10-100x larger learning rate than standard LoRA variants
+- the boundary parameter lambda sets an upper bound to the Frobenius norm of the weight change. Using different lambdas for different layers is possible
 
 The abstract from the paper is:
 
