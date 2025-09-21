@@ -57,7 +57,7 @@ class DeloraLayer(BaseTunerLayer):
         self.delora_initial_w_norm = BufferDict({}, persistent=True)  # initial base weight norm per adapter
         self.delora_w_norm = BufferDict(
             {}, persistent=True
-        )  # fixed reference norm per adapter used for delta computation
+        )  # fixed reference norm per-adapter used for delta computation
         # Track which adapters had their initial delta subtracted from base weights
         self._initials_applied = set()
         # Track nesting depth of disable->enable toggling to avoid double-adding/subtracting
@@ -65,7 +65,6 @@ class DeloraLayer(BaseTunerLayer):
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
-        # No merged delta caching; exact unmerge relies on fixed per-adapter reference norm
         self.kwargs = kwargs
 
         base_layer_mod = self.get_base_layer()
@@ -75,7 +74,7 @@ class DeloraLayer(BaseTunerLayer):
             raise ValueError(f"Unsupported layer type {type(base_layer_mod)}")
 
     @staticmethod
-    def _compute_delta_from_params(
+    def _compute_delta(
         A: torch.Tensor, B: torch.Tensor, lambda_: torch.Tensor, r: int, w_norm: torch.Tensor
     ) -> torch.Tensor:
         """Compute delta = B @ diag(lambda_/r / (||A_i||*||B^j||)) @ A, scaled by provided w_norm (per-input channel)"""
@@ -89,23 +88,24 @@ class DeloraLayer(BaseTunerLayer):
     def get_delta_weight(self, adapter: str) -> torch.Tensor:
         if adapter not in self.delora_A or adapter not in self.delora_B:
             raise ValueError(f"Adapter {adapter} not found.")
-        base_w = self.get_base_layer().weight
-        out_dtype = base_w.dtype
 
-        An = torch.clamp(self.delora_A[adapter].norm(dim=1), min=1e-12)
-        Bn = torch.clamp(self.delora_B[adapter].norm(dim=0), min=1e-12)
-        diag = torch.diag_embed((self.delora_lambda[adapter] / self.r[adapter]) / (An * Bn))  # (r,r)
-        delta = self.delora_B[adapter] @ diag @ self.delora_A[adapter]  # (out,in)
-
+        delta = self._compute_delta(
+            self.delora_A[adapter],
+            self.delora_B[adapter],
+            self.delora_lambda[adapter],
+            self.r[adapter],
+            self.delora_w_norm[adapter],
+        )
+        # When not using residual init, subtract a frozen copy of the initial delta to keep effective identity init
         if (not self.use_residual_init) and (adapter in self.delora_initial_A and adapter in self.delora_initial_B):
-            A0n = torch.clamp(self.delora_initial_A[adapter].norm(dim=1), min=1e-12)
-            B0n = torch.clamp(self.delora_initial_B[adapter].norm(dim=0), min=1e-12)
-            diag0 = torch.diag_embed((self.delora_initial_lambda[adapter] / self.r[adapter]) / (A0n * B0n))
-            delta = delta - (self.delora_initial_B[adapter] @ diag0 @ self.delora_initial_A[adapter])
-        # scale by a fixed per-adapter reference base weight norm when available (avoids caching for exact unmerge)
-        if adapter in self.delora_w_norm:
-            w_norm = self.delora_w_norm[adapter]
-        delta = delta * w_norm.unsqueeze(0)
+            delta0 = self._compute_delta(
+                self.delora_initial_A[adapter],
+                self.delora_initial_B[adapter],
+                self.delora_initial_lambda[adapter],
+                self.r[adapter],
+                self.delora_initial_w_norm[adapter],
+            )
+            delta = delta - delta0
         return delta
 
     def update_layer(
@@ -204,7 +204,7 @@ class DeloraLayer(BaseTunerLayer):
                 if self.delora_initial_A[adapter_name].device.type != "meta" and w.device.type != "meta":
                     with torch.no_grad():
                         # subtract exact initial delta so effective initial effect is zero
-                        delta0 = self._compute_delta_from_params(
+                        delta0 = self._compute_delta(
                             self.delora_initial_A[adapter_name].to(w.device),
                             self.delora_initial_B[adapter_name].to(w.device),
                             self.delora_initial_lambda[adapter_name].to(w.device),
@@ -333,8 +333,15 @@ class DeloraLinear(nn.Module, DeloraLayer):
 
                 self.merged_adapters.append(active_adapter)
 
-    def unmerge(self) -> None:
-        """Unmerge all merged adapter layers from the base weights."""
+    def unmerge(self, unapply_initials=False) -> None:
+        """
+        Unmerge all merged adapter layers from the base weights.
+
+        Args:
+            unapply_initials (`bool`, *optional*, defaults to `False`):
+                If True, and if `use_residual_init=True`, also remove the initial deltas that were subtracted at setup time from the
+                base weights. This effectively reverts the base weights to their original state before wrapping with DeloraLayer.
+        """
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
@@ -344,9 +351,9 @@ class DeloraLinear(nn.Module, DeloraLayer):
                 with torch.no_grad():
                     delta_weight = self.get_delta_weight(active_adapter)
                     self.get_base_layer().weight.data.sub_(delta_weight.to(self.get_base_layer().weight.dtype))
-        # If we had subtracted initial delta(s) at setup, restore them now to get back the original base weights
-        # This should not be done for a model that has just been loaded from a checkpoint, as the state is already correct.
-        if self.use_residual_init and len(self._initials_applied) > 0:
+
+        # Reverting to original base weights, if use_residual_init=True
+        if unapply_initials and self.use_residual_init and len(self._initials_applied) > 0:
             w = self.get_base_layer().weight
             for adapter in self._initials_applied:
                 if (
@@ -355,7 +362,7 @@ class DeloraLinear(nn.Module, DeloraLayer):
                     and (adapter in self.delora_initial_w_norm)
                 ):
                     # add back exact initial delta so effective initial effect is zero
-                    delta0 = self._compute_delta_from_params(
+                    delta0 = self._compute_delta(
                         self.delora_initial_A[adapter].to(w.device),
                         self.delora_initial_B[adapter].to(w.device),
                         self.delora_initial_lambda[adapter].to(w.device),
@@ -387,17 +394,9 @@ class DeloraLinear(nn.Module, DeloraLayer):
 
                 x_d = self.delora_dropout[adapter](x)
 
-                base_w = self.get_base_layer().weight
-
-                if adapter in self.delora_w_norm:
-                    w_norm = self.delora_w_norm[adapter]
-                else:
-                    w = base_w
-                    w_norm = torch.norm(w.data, dim=0).detach()
-
                 # Decomposed delta calculation
                 # 1. (x * w_norm) @ A.T
-                h = nn.functional.linear(x_d * w_norm, self.delora_A[adapter])
+                h = nn.functional.linear(x_d * self.delora_w_norm[adapter], self.delora_A[adapter])
 
                 # 2. h @ diag
                 An = torch.clamp(self.delora_A[adapter].norm(dim=1), min=1e-12)
@@ -408,15 +407,20 @@ class DeloraLinear(nn.Module, DeloraLayer):
                 # 3. h @ B.T
                 h = nn.functional.linear(h, self.delora_B[adapter])
 
+                # When not using residual init, subtract a frozen copy of the initial delta to keep effective identity init
                 if (not self.use_residual_init) and (
                     adapter in self.delora_initial_A and adapter in self.delora_initial_B
                 ):
+                    # 1. (initial)
+                    h0 = nn.functional.linear(
+                        x_d * self.delora_initial_w_norm[adapter], self.delora_initial_A[adapter]
+                    )
+                    # 2. (initial)
                     A0n = torch.clamp(self.delora_initial_A[adapter].norm(dim=1), min=1e-12)
                     B0n = torch.clamp(self.delora_initial_B[adapter].norm(dim=0), min=1e-12)
                     scaling0 = (self.delora_initial_lambda[adapter] / self.r[adapter]) / (A0n * B0n)
-
-                    h0 = nn.functional.linear(x_d * w_norm, self.delora_initial_A[adapter])
                     h0 = h0 * scaling0
+                    # 3. (initial)
                     h0 = nn.functional.linear(h0, self.delora_initial_B[adapter])
                     h = h - h0
 
@@ -452,7 +456,7 @@ class DeloraLinear(nn.Module, DeloraLayer):
                 and (adapter in self.r)
                 and (adapter in self.delora_initial_lambda)
             ):
-                delta0 = self._compute_delta_from_params(
+                delta0 = self._compute_delta(
                     self.delora_initial_A[adapter].to(w.device),
                     self.delora_initial_B[adapter].to(w.device),
                     self.delora_initial_lambda[adapter].to(w.device),
@@ -499,7 +503,7 @@ class DeloraLinear(nn.Module, DeloraLayer):
                                 or self.delora_initial_w_norm[adapter_name].device.type == "meta"
                             ):
                                 continue
-                            fresh_delta = self._compute_delta_from_params(
+                            fresh_delta = self._compute_delta(
                                 self.delora_initial_A[adapter_name].to(w.device),
                                 self.delora_initial_B[adapter_name].to(w.device),
                                 self.delora_initial_lambda[adapter_name].to(w.device),
@@ -570,7 +574,7 @@ class DeloraLinear(nn.Module, DeloraLayer):
                                 or self.delora_initial_w_norm[adapter_name].device.type == "meta"
                             ):
                                 continue
-                            loaded_initial_delta = self._compute_delta_from_params(
+                            loaded_initial_delta = self._compute_delta(
                                 self.delora_initial_A[adapter_name].to(w.device),
                                 self.delora_initial_B[adapter_name].to(w.device),
                                 self.delora_initial_lambda[adapter_name].to(w.device),
@@ -589,12 +593,8 @@ class DeloraLinear(nn.Module, DeloraLayer):
         # Let the base class flip the disable flag
         super().enable_adapters(enabled)
 
-        # If we didn't subtract initials at setup, there's nothing to compensate
-        if not getattr(self, "use_residual_init", False):
-            return
-
-        # Do not interfere with merged state; forward() will handle unmerging as needed
-        if self.merged:
+        # If we didn't subtract initials at setup, or merged state, there's nothing to compensate
+        if not self.use_residual_init or self.merged:
             return
 
         if not enabled:
