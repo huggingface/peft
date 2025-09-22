@@ -45,9 +45,7 @@ class GLoraModel(BaseTuner):
     Creates Generalized Low Rank Adapter (GLora) model from a pretrained transformers model.
     """
 
-    def __init__(
-        self, model: nn.Module, config: GLoraConfig, adapter_name: str = "default"
-    ):
+    def __init__(self, model: nn.Module, config: GLoraConfig, adapter_name: str = "default"):
         super().__init__(model, config, adapter_name)
         self.model = model
         self.forward = self.model.forward
@@ -57,32 +55,42 @@ class GLoraModel(BaseTuner):
         self.peft_type = PeftType.GLORA
         self.adapters_config_history: dict[str, Any] = {}
 
+        # Accept both single config and dict of configs
         if isinstance(config, GLoraConfig):
             self.peft_config[adapter_name] = config
-            self.add_adapter(adapter_name, config)
         elif isinstance(config, dict):
             for name, cfg in config.items():
                 self.peft_config[name] = cfg
-                self.add_adapter(name, cfg)
         else:
             raise TypeError(f"Unsupported config type: {type(config)}")
 
-    def add_adapter(self, adapter_name: str, config: GLoraConfig):
-        if adapter_name in self.peft_config and hasattr(self.peft_config[adapter_name], "_active"):
-            return
+        # Add all adapters after peft_config is set
+        for name, cfg in self.peft_config.items():
+            self.add_adapter(name, cfg)
 
+    def add_adapter(self, adapter_name: str, config: GLoraConfig):
+        # Avoid re-adding if already present
+        if hasattr(self, "_added_adapters") and adapter_name in self._added_adapters:
+            return
+        if not hasattr(self, "_added_adapters"):
+            self._added_adapters = set()
+
+        # Prepare config (resolve target_modules if needed)
         model_config_dict = self.model.config.to_dict() if hasattr(self.model.config, "to_dict") else self.model.config
         current_config = self._prepare_glora_config(config, model_config_dict)
         self.peft_config[adapter_name] = current_config
 
+        # Replace or add adapters in target modules
         self._find_and_replace(adapter_name)
 
-        mark_only_glora_as_trainable(
-            self.model, bias=current_config.bias if hasattr(current_config, "bias") else "none"
-        )
+        # Mark only GLora params as trainable
+        mark_only_glora_as_trainable(self.model, bias=getattr(current_config, "bias", "none"))
 
-        if hasattr(current_config, "inference_mode") and current_config.inference_mode:
+        # Optionally freeze for inference
+        if getattr(current_config, "inference_mode", False):
             _freeze_adapter(self.model, adapter_name)
+
+        self._added_adapters.add(adapter_name)
 
     def _check_target_module_exists(self, glora_config: GLoraConfig, key: str) -> bool:
         if isinstance(glora_config.target_modules, str):
@@ -148,10 +156,12 @@ class GLoraModel(BaseTuner):
 
     def _replace_module(self, parent_module: nn.Module, child_name: str, new_module: nn.Module, old_module: nn.Module):
         setattr(parent_module, child_name, new_module)
-        new_module.weight = old_module.weight
-        if hasattr(old_module, "bias") and old_module.bias is not None:
+        # Copy weights and bias
+        if hasattr(old_module, "weight") and hasattr(new_module, "weight"):
+            new_module.weight = old_module.weight
+        if hasattr(old_module, "bias") and hasattr(new_module, "bias") and old_module.bias is not None:
             new_module.bias = old_module.bias
-
+        # Copy state if present
         if getattr(old_module, "state", None) is not None:
             new_module.state = old_module.state
             new_module.to(old_module.weight.device)
@@ -176,20 +186,30 @@ class GLoraModel(BaseTuner):
             ]
         return peft_config
 
-    def set_adapter(self, adapter_name_or_list):
+    def set_adapter(self, adapter_name_or_list, **kwargs):
+        if self.active_adapter == adapter_name_or_list:
+            print("Adapter already active, no change made.")
+            return
+
+        print("adapter_name_or_list:", adapter_name_or_list)
+
         for module in self.model.modules():
-            if isinstance(module, GLoraLinear):
-                module.set_adapter(adapter_name_or_list)
+            if hasattr(module, "set_adapter"):
+                print("module:", module.__class__)
+
+        for module in self.model.modules():
+            if hasattr(module, "set_adapter"):
+                module.set_adapter(adapter_name_or_list, **kwargs)
         self.active_adapter = adapter_name_or_list
 
     def enable_adapter_layers(self):
         for module in self.model.modules():
-            if isinstance(module, GLoraLinear):
+            if hasattr(module, "enable_adapters"):
                 module.enable_adapters()
 
     def disable_adapter_layers(self):
         for module in self.model.modules():
-            if isinstance(module, GLoraLinear):
+            if hasattr(module, "disable_adapters"):
                 module.disable_adapters()
 
     def delete_adapter(self, adapter_name: str):
@@ -197,7 +217,7 @@ class GLoraModel(BaseTuner):
             raise ValueError(f"Adapter {adapter_name} does not exist")
         del self.peft_config[adapter_name]
         for module in self.model.modules():
-            if isinstance(module, GLoraLinear):
+            if hasattr(module, "delete_adapter"):
                 module.delete_adapter(adapter_name)
         # Update active_adapter if needed
         if self.active_adapter == adapter_name:
