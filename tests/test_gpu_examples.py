@@ -2838,7 +2838,8 @@ class TestLoftQ:
     def get_base_model(self, model_id, device, **kwargs):
         cls = AutoModelForSeq2SeqLM if "t5" in str(model_id) else AutoModelForCausalLM
         model = cls.from_pretrained(model_id, **kwargs).eval()
-        model = model.to(self.device)
+        if not getattr(model, "is_loaded_in_8bit", False):
+            model = model.to(self.device)
         return model
 
     def get_logits(self, model, inputs):
