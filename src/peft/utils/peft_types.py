@@ -38,6 +38,7 @@ class PeftType(str, enum.Enum):
     - LN_TUNING
     - VERA
     - FOURIERFT
+    - GLORA
     - HRA
     - BONE
     - MISS
@@ -63,6 +64,7 @@ class PeftType(str, enum.Enum):
     LN_TUNING = "LN_TUNING"
     VERA = "VERA"
     FOURIERFT = "FOURIERFT"
+    GLORA = "GLORA"
     XLORA = "XLORA"
     HRA = "HRA"
     VBLORA = "VBLORA"
