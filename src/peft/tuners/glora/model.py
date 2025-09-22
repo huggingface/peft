@@ -46,7 +46,7 @@ class GLoraModel(BaseTuner):
     """
 
     def __init__(
-        self, model: nn.Module, config: Union[GLoraConfig, dict[str, GLoraConfig]], adapter_name: str = "default"
+        self, model: nn.Module, config: GLoraConfig, adapter_name: str = "default"
     ):
         super().__init__(model, config, adapter_name)
         self.model = model
@@ -203,7 +203,7 @@ class GLoraModel(BaseTuner):
         if self.active_adapter == adapter_name:
             self.active_adapter = next(iter(self.peft_config.keys()), None)
 
-    def merge_and_unload(self, progressbar: bool = False, adapter_names: list[str] = None):
+    def merge_and_unload(self, progressbar: bool = False, adapter_names: Optional[list[str]] = None):
         """
         This method merges the GLora layers into the base model.
         """
