@@ -29,7 +29,7 @@ class FourierFTLayer(BaseTunerLayer):
     # All names of other parameters that may contain adapter-related parameters
     other_param_names = ("fourierft_n_frequency", "fourierft_scaling", "fourierft_random_loc_seed")
 
-    def __init__(self, base_layer: nn.Module, **kwargs) -> None:
+    def __init__(self, base_layer: nn.Module, alpha, **kwargs) -> None:
         self.base_layer = base_layer
         self.fourierft_n_frequency = {}
         self.fourierft_scaling = {}
@@ -49,7 +49,8 @@ class FourierFTLayer(BaseTunerLayer):
                 base_layer.weight.ds_shape if hasattr(base_layer.weight, "ds_shape") else base_layer.weight.shape
             )
         elif isinstance(base_layer, nn.Conv2d):
-            pass
+            self.in_features = base_layer.in_channels
+            self.out_features = base_layer.out_channels
         else:
             raise ValueError(f"Unsupported layer type {type(base_layer)}")
 
@@ -104,6 +105,7 @@ class FourierFTLinear(nn.Module, FourierFTLayer):
         base_layer,
         adapter_name: str,
         n_frequency: int = 1000,
+        alpha: float = None,
         scaling: float = 150.0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         init_weights: Union[bool, str] = False,
@@ -111,7 +113,12 @@ class FourierFTLinear(nn.Module, FourierFTLayer):
         **kwargs,
     ) -> None:
         super().__init__()
-        FourierFTLayer.__init__(self, base_layer, **kwargs)
+        FourierFTLayer.__init__(self, base_layer, alpha, **kwargs)
+
+        # apply alpha patch
+        if alpha:
+            n_frequency = int(alpha * self.in_features * self.out_features)
+
         self.fan_in_fan_out = fan_in_fan_out
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, n_frequency, scaling, init_weights, random_loc_seed)
@@ -201,6 +208,7 @@ class FourierFTConv2D(nn.Module, FourierFTLayer):
         base_layer,
         adapter_name: str,
         n_frequency: int = 1000,
+        alpha: float = None,
         scaling: float = 150.0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         init_weights: Union[bool, str] = False,
@@ -208,11 +216,14 @@ class FourierFTConv2D(nn.Module, FourierFTLayer):
         **kwargs,
     ) -> None:
         super().__init__()
-        FourierFTLayer.__init__(self, base_layer, **kwargs)
+        FourierFTLayer.__init__(self, base_layer, alpha, **kwargs)
+
+                # apply alpha patch
+        if alpha:
+            n_frequency = int(alpha * self.in_features * self.out_features)
+            
         self.fan_in_fan_out = fan_in_fan_out
         self._active_adapter = adapter_name
-        self.in_features = base_layer.in_channels
-        self.out_features = base_layer.out_channels
         self.kW = base_layer.kernel_size[0]
         self.kH = base_layer.kernel_size[1]
         self.stride = base_layer.stride

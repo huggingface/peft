@@ -185,6 +185,15 @@ class FourierFTConfig(PeftConfig):
         },
     )
 
+    alpha: float = field(
+        default=None,
+        metadata={
+            "help": (
+                "The alpha value dynamically sets the n_frequency = int(alpha * out_features * in_features)"
+            )
+        },
+    )
+
     def __post_init__(self):
         super().__post_init__()
         self.peft_type = PeftType.FOURIERFT
