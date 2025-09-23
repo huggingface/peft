@@ -112,6 +112,7 @@ class LoraLayer(BaseTunerLayer):
         self._disable_adapters = False
         self.merged_adapters = []
         self.use_dora: dict[str, bool] = {}  # not actively used anymore after #2443, keep it for BC
+        self.use_rslora: dict[str, bool] = {}
         self.lora_bias: dict[str, bool] = {}
         self.lora_magnitude_vector = torch.nn.ModuleDict()  # for DoRA
         self._caches: dict[str, Any] = {}
@@ -200,6 +201,8 @@ class LoraLayer(BaseTunerLayer):
             self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
         else:
             self.scaling[adapter_name] = lora_alpha / r
+
+        self.use_rslora[adapter_name] = use_rslora
 
         self.use_dora[adapter_name] = use_dora
 
@@ -474,7 +477,10 @@ class LoraLayer(BaseTunerLayer):
         if adapter not in self.scaling:
             # Ignore the case where the adapter is not in the layer
             return
-        self.scaling[adapter] = scale * self.lora_alpha[adapter] / self.r[adapter]
+        if self.use_rslora.get(adapter, False):
+            self.scaling[adapter] = scale * self.lora_alpha[adapter] / math.sqrt(self.r[adapter])
+        else:
+            self.scaling[adapter] = scale * self.lora_alpha[adapter] / self.r[adapter]
 
     def scale_layer(self, scale: float | int) -> None:
         """Multiply the current scale of all active adapters by the provided factor"""
@@ -499,9 +505,12 @@ class LoraLayer(BaseTunerLayer):
                 continue
 
             if scale is None:
-                self.scaling[active_adapter] = self.lora_alpha[active_adapter] / self.r[active_adapter]
+                if self.use_rslora.get(active_adapter, False):
+                    self.scaling[active_adapter] = self.lora_alpha[active_adapter] / math.sqrt(self.r[active_adapter])
+                else:
+                    self.scaling[active_adapter] = self.lora_alpha[active_adapter] / self.r[active_adapter]
             else:
-                self.scaling[active_adapter] /= scale
+                self.scaling[active_adapter] = self.scaling[active_adapter] / scale
 
     def _check_forward_args(self, x, *args, **kwargs):
         """Check if the arguments are compatible with the configs and state of the model"""
@@ -906,6 +915,8 @@ class Embedding(nn.Module, LoraLayer):
         else:
             self.scaling[adapter_name] = lora_alpha / r
 
+        self.use_rslora[adapter_name] = use_rslora
+
         self.use_dora[adapter_name] = use_dora
 
         if init_lora_weights == "loftq":
@@ -1205,6 +1216,8 @@ class _ConvNd(nn.Module, LoraLayer):
             self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
         else:
             self.scaling[adapter_name] = lora_alpha / r
+
+        self.use_rslora[adapter_name] = use_rslora
 
         self.use_dora[adapter_name] = use_dora
 
@@ -1978,6 +1991,8 @@ class ParamWrapper(nn.Module, LoraLayer):
             self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
         else:
             self.scaling[adapter_name] = lora_alpha / r
+
+        self.use_rslora[adapter_name] = use_rslora
 
         self.use_dora[adapter_name] = use_dora
 
