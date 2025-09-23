@@ -1855,7 +1855,6 @@ class PeftModelForCausalLM(PeftModel):
             and model._tied_weights_keys is not None
             and isinstance(model.get_input_embeddings(), ModulesToSaveWrapper)
         ):
-            print("here")
             # the embedding layer is modified and we want weight tying.
             module_keys = [".".join(n.split(".")[:-1]) for n in model._tied_weights_keys]
 

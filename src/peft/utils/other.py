@@ -523,7 +523,6 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         if adapter_name not in self.modules_to_save:
             with context_manager:
                 if tied_module:
-                    print("here2")
                     new_linear = torch.nn.Linear(*tied_module.weight.shape, bias=False)
                     new_linear.weight = tied_module.weight
 
