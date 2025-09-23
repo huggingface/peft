@@ -676,6 +676,7 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
 
     # All names of layers that may contain adapter (trainable) weights
     adapter_layer_names: tuple[str, ...] = ("token_adapter.trainable_tokens_delta",)
+    other_param_names: tuple[str, ...] = ("token_adapter.token_indices", "token_adapter.trainable_tokens_original")
 
     def __init__(
         self,
