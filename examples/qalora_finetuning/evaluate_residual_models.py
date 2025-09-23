@@ -256,8 +256,7 @@ def create_residual_performance_table(results: List[Dict], output_dir: str):
     """Create LaTeX table matching Overleaf format with WikiText column"""
     
     # Sort and group by rank
-    sorted_results = sorted([r for r in results if r["status"] == "success"],
-                          key=lambda x: (x["model_info"]["rank"], x["model_info"]["bits"], x["model_info"].get("group_size", 0)))
+    sorted_results = sorted([r for r in results if r["status"] == "success"], key=lambda x: (x["model_info"]["rank"], x["model_info"]["bits"], x["model_info"].get("group_size", 0)))
     
     rank_groups = {}
     for r in sorted_results:

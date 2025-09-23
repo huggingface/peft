@@ -35,7 +35,10 @@ from safetensors import safe_open
 import transformers
 from accelerate.commands.estimate import create_empty_model
 from accelerate.utils.other import convert_bytes
-
+import torch.nn as nn
+from transformers import AutoTokenizer
+from datasets import load_dataset
+from tqdm import tqdm
 
 # suppress all warnings and logs
 warnings.filterwarnings("ignore")
@@ -331,3 +334,278 @@ if __name__ == "__main__":
     args = parser.parse_args()
     main(args.model_id, rank=args.rank, dtype=args.dtype, group_size=args.group_size)
 
+
+# =================================================================================
+# 1. DATA LOADING UTILITY (Angepasst von Ihrem Code)
+# =================================================================================
+def get_c4_calibration_data(tokenizer, n_samples=128, seq_len=512):
+    """
+    Lädt das C4-Dataset von Hugging Face und bereitet tokenisierte Samples für die Kalibrierung vor.
+    """
+    print(f" Lade C4 Kalibrierungsdatensatz (bis zu {n_samples} Samples)...")
+    dataset = load_dataset("allenai/c4", "en", split="train", streaming=True)
+    
+    samples = []
+    dataset_iterator = iter(dataset)
+    
+    with tqdm(total=n_samples, desc="Lade Daten") as pbar:
+        while len(samples) < n_samples:
+            try:
+                row = next(dataset_iterator)
+                text = row['text']
+                # Tokenizer direkt auf dem Gerät anwenden, um Zeit zu sparen, wenn device bekannt ist.
+                tokens = tokenizer(text, return_tensors="pt", max_length=seq_len, truncation=True)
+                if tokens.input_ids.shape[1] == seq_len:
+                    samples.append(tokens)
+                    pbar.update(1)
+            except StopIteration:
+                print("Warnung: Ende des Datasets erreicht, bevor n_samples gefüllt wurden.")
+                break
+    print(f"✅ {len(samples)} Kalibrierungssamples geladen.")
+    return samples
+
+# =================================================================================
+# 2. CORE FUNCTION: Outlier Calculation using Hessian Diagonal Approximation
+# =================================================================================
+def calculate_hessian_outliers(
+    model: nn.Module,
+    tokenizer: AutoTokenizer,
+    outlier_percentage: float = 0.001,
+    n_samples: int = 128,
+    seq_len: int = 512,
+    target_modules_substrings: list = ["mlp.gate_proj", "mlp.up_proj", "mlp.down_proj", "self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj"]
+) -> dict:
+    # ... (Docstring and initial setup)
+    print(f"🔬 Starting Saliency Calculation (GPTQ method) for Top {outlier_percentage*100:.3f}% Outliers...")
+    device = next(model.parameters()).device
+    model.eval()
+
+    calibration_data = get_c4_calibration_data(tokenizer, n_samples=n_samples, seq_len=seq_len)
+
+    hessian_diag_approximations = {} 
+    sample_counts = defaultdict(int)
+    hook_handles = []
+    target_layer_modules = {}
+
+    def create_hook(name):
+        def capture_inputs_hook(module, args, output):
+            x = args[0]
+            # CORRECTED LINE HERE
+            x_flat = x.view(-1, x.shape[-1]) 
+            
+            hessian_diag_batch = torch.sum(x_flat.float()**2, dim=0)
+            
+            if name not in hessian_diag_approximations:
+                hessian_diag_approximations[name] = hessian_diag_batch
+            else:
+                hessian_diag_approximations[name] += hessian_diag_batch
+                
+            sample_counts[name] += x_flat.shape[0]
+        return capture_inputs_hook
+
+    print("   -> Registering forward hooks for target modules...")
+    for name, module in model.named_modules():
+        if any(substring in name for substring in target_modules_substrings) and isinstance(module, nn.Linear):
+            target_layer_modules[name] = module
+            handle = module.register_forward_hook(create_hook(name))
+            hook_handles.append(handle)
+
+    print(f"   -> Running {len(calibration_data)} calibration samples through the model...")
+    with torch.no_grad():
+        for batch in tqdm(calibration_data, desc="Calibration Forward Pass"):
+            model(batch.input_ids.to(device))
+
+    for handle in hook_handles:
+        handle.remove()
+
+    # ... (The rest of the function remains unchanged and is correct)
+    all_saliencies = []
+    layer_param_info = [] 
+    
+    print("   -> Calculating saliency scores for all target layers...")
+    for name, module in target_layer_modules.items():
+        if sample_counts[name] == 0:
+            print(f"Warning: Layer {name} received no activations.")
+            continue
+            
+        H_diag = hessian_diag_approximations[name] / sample_counts[name]
+        W = module.weight.data
+        saliency_matrix = (W.float()**2) * H_diag.unsqueeze(0) / 2.0
+        
+        all_saliencies.append(saliency_matrix.view(-1))
+        layer_param_info.append({"name": name, "num_params": saliency_matrix.numel()})
+
+    all_scores_tensor = torch.cat(all_saliencies)
+    
+    num_total_params = all_scores_tensor.numel()
+    num_outliers_to_keep = int(num_total_params * outlier_percentage)
+    
+    print(f"   -> Finding global threshold for top {num_outliers_to_keep} of {num_total_params} parameters...")
+    if num_outliers_to_keep > 0:
+        threshold = torch.kthvalue(all_scores_tensor, num_total_params - num_outliers_to_keep).values
+    else:
+        threshold = torch.finfo(torch.float32).max
+
+    del all_saliencies, all_scores_tensor
+    torch.cuda.empty_cache()
+
+    outlier_results = {}
+    print("   -> Extracting outliers based on global threshold...")
+    
+    total_extracted_count = 0
+    for name, module in target_layer_modules.items():
+        if sample_counts[name] == 0:
+            continue
+        
+        H_diag = hessian_diag_approximations[name] / sample_counts[name]
+        W = module.weight.data
+        saliency_matrix = (W.float()**2) * H_diag.unsqueeze(0) / 2.0
+        outlier_mask = saliency_matrix >= threshold
+        outlier_indices_flat = outlier_mask.view(-1).nonzero().squeeze(-1)
+
+        if outlier_indices_flat.numel() > 0:
+            outlier_weights = module.weight.data.view(-1)[outlier_indices_flat].clone().to(torch.bfloat16)
+            outlier_results[name] = (outlier_weights, outlier_indices_flat)
+            total_extracted_count += outlier_indices_flat.numel()
+
+    print(f"✅ Extraction complete. Extracted a total of {total_extracted_count} outliers from {len(outlier_results)} layers.")
+    return outlier_results
+
+    
+    
+import torch
+import torch.nn as nn
+from collections import defaultdict
+from typing import Dict, List, Tuple, Optional
+
+@torch.no_grad()
+def quantize_uniform_symmetric_grouped(W: torch.Tensor, bits: int = 3, group_size: int = 16, axis: int = 1) -> torch.Tensor:
+    assert 2 <= bits <= 8
+    qmax = (1 << (bits - 1)) - 1
+    qmin = -qmax
+
+    W_perm = W.transpose(axis, -1).contiguous()
+    orig_shape = W_perm.shape
+    C = orig_shape[-1]
+    G = (C + group_size - 1) // group_size
+    pad = G * group_size - C
+    if pad > 0:
+        W_pad = torch.nn.functional.pad(W_perm, (0, pad))
+    else:
+        W_pad = W_perm
+
+    Wg = W_pad.view(-1, G, group_size)
+    max_abs = Wg.abs().amax(dim=-1, keepdim=True).clamp_min(1e-12)
+    scale = max_abs / qmax
+    Q = torch.clamp(torch.round(Wg / scale), qmin, qmax)
+    Wg_q = Q * scale
+
+    W_pad_q = Wg_q.view(*orig_shape[:-1], G * group_size)
+    if pad > 0:
+        W_q = W_pad_q[..., :C]
+    else:
+        W_q = W_pad_q
+    return W_q.transpose(-1, axis).contiguous()
+
+@torch.no_grad()
+def spqr_extract_outliers(
+    model: nn.Module,
+    calibration_batches: List[Dict[str, torch.Tensor]],
+    target_module_name_substrings: Optional[List[str]] = None,
+    outlier_threshold: float = 0.2,
+    bits: int = 3,
+    group_size: int = 16,
+    percdamp: float = 1.0,  # small damping for H_diag
+    device: Optional[torch.device] = None,
+) -> Dict[str, Tuple[torch.Tensor, torch.Tensor]]:
+    """
+    Returns: dict[layer_name] = (outlier_values_bf16, outlier_flat_indices)
+    Threshold is applied to squared Hessian-weighted error:
+        (W - Q(W))^2 * H_diag > outlier_threshold
+    which mirrors SpQR's normalized error thresholding up to a constant.
+    """
+    if device is None:
+        device = next(model.parameters()).device
+    model.eval()
+
+    # 1) Register hooks to accumulate sum of squares of inputs per Linear
+    h_sums: Dict[str, torch.Tensor] = {}
+    counts: Dict[str, int] = defaultdict(int)
+    linears: Dict[str, nn.Linear] = {}
+
+    def make_hook(name: str):
+        def hook(module: nn.Module, inputs, output):
+            x = inputs[0]  # inputs is a tuple
+            x = x.to(dtype=torch.float32)
+            x_flat = x.reshape(-1, x.shape[-1])  # [..., C_in] -> [N, C_in]
+            s = (x_flat * x_flat).sum(dim=0)  # [C_in]
+            if name not in h_sums:
+                h_sums[name] = s.clone()
+            else:
+                h_sums[name] += s
+            counts[name] += x_flat.shape[0]
+        return hook
+
+    handles = []
+    for name, module in model.named_modules():
+        if isinstance(module, nn.Linear):
+            if target_module_name_substrings is not None:
+                if not any(sub in name for sub in target_module_name_substrings):
+                    continue
+            linears[name] = module
+            handles.append(module.register_forward_hook(make_hook(name)))
+
+    # 2) Run calibration forward to collect activations
+    with torch.no_grad():
+        for batch in calibration_batches:
+            # Expect HF-style batch dict with "input_ids" at minimum
+            inputs = {k: v.to(device) for k, v in batch.items()}
+            model(**inputs) if "input_ids" in inputs else model(inputs)
+
+    for h in handles:
+        h.remove()
+
+    # 3) Compute outliers using grouped quantization and H_diag
+    results: Dict[str, Tuple[torch.Tensor, torch.Tensor]] = {}
+    for name, lin in linears.items():
+        if counts[name] == 0:
+            continue
+        W = lin.weight.data  # [C_out, C_in]
+        H_diag = (h_sums[name] / counts[name]).to(W.device).to(torch.float32)  # [C_in]
+        H_diag = H_diag + percdamp  # damping for stability
+
+        Wq = quantize_uniform_symmetric_grouped(W, bits=bits, group_size=group_size, axis=1)
+        diff2 = (W - Wq).to(torch.float32).pow(2)  # [C_out, C_in]
+        # Hessian-weighted squared error per weight (proportional to SpQR's criterion)
+        weighted_err = diff2 * H_diag.unsqueeze(0)  # [C_out, C_in]
+
+        mask = weighted_err > float(outlier_threshold)
+        idx = mask.view(-1).nonzero(as_tuple=False).squeeze(-1)  # flat indices
+        if idx.numel() > 0:
+            vals = W.view(-1)[idx].detach().clone().to(torch.bfloat16)
+            results[name] = (vals, idx)
+
+    return results
+
+@torch.no_grad()
+def build_calibration_batches(
+    tokenizer,
+    texts: List[str],
+    n_samples: int = 128,
+    seq_len: int = 512,
+) -> List[Dict[str, torch.Tensor]]:
+    """
+    Tokenize texts into a list of small dicts: {'input_ids': ..., 'attention_mask': ...}
+    Batches are single-sequence to keep memory small; concatenate outside if you want larger batches.
+    """
+    batches: List[Dict[str, torch.Tensor]] = []
+    for t in texts[:n_samples]:
+        enc = tokenizer(
+            t,
+            truncation=True,
+            max_length=seq_len,
+            return_tensors="pt",
+            padding=False,
+        )
+        batches.append({k: v.squeeze(0) for k, v in enc.items()})  # squeeze batch dim for HF CausalLM
+    return batches
