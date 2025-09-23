@@ -38,6 +38,7 @@ from peft import (
     LoraConfig,
     MissConfig,
     OFTConfig,
+    OSFConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
@@ -275,6 +276,12 @@ ALL_CONFIGS = [
             "task_type": "CAUSAL_LM",
             "n_frequency": 8,
             "target_modules": None,
+        },
+    ),
+    (
+        OSFConfig,
+        {
+            "task_type": "CAUSAL_LM",
         },
     ),
 ]
