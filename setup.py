@@ -56,7 +56,7 @@ setup(
     packages=find_packages("src"),
     package_data={"peft": ["py.typed", "tuners/boft/fbd/fbd_cuda.cpp", "tuners/boft/fbd/fbd_cuda_kernel.cu"]},
     entry_points={},
-    python_requires=">=3.9.0",
+    python_requires=">=3.10.0",
     install_requires=[
         "numpy>=1.17",
         "packaging>=20.0",
@@ -78,10 +78,10 @@ setup(
         "License :: OSI Approved :: Apache Software License",
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
 )
