@@ -48,6 +48,7 @@ from . import __version__
 from .config import PeftConfig
 from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING, PEFT_TYPE_TO_PREFIX_MAPPING, PEFT_TYPE_TO_TUNER_MAPPING
 from .utils import (
+    ModulesToSaveWrapper,
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     WEIGHTS_NAME,
@@ -1846,6 +1847,30 @@ class PeftModelForCausalLM(PeftModel):
     ) -> None:
         super().__init__(model, peft_config, adapter_name, **kwargs)
         self.base_model_prepare_inputs_for_generation = self.base_model.prepare_inputs_for_generation
+
+        model_config = BaseTuner.get_model_config(self)
+
+        if (
+            model_config.get("tie_word_embeddings", False)
+            and model._tied_weights_keys is not None
+            and isinstance(model.get_input_embeddings(), ModulesToSaveWrapper)
+        ):
+            print("here")
+            # the embedding layer is modified and we want weight tying.
+            module_keys = [".".join(n.split(".")[:-1]) for n in model._tied_weights_keys]
+
+            # Get the original reference of the input embedding ModulesToSaveWrapper
+            tied_module = getattr(model.get_input_embeddings().modules_to_save, adapter_name)
+
+            _set_trainable(
+                model,
+                adapter_name,
+                inference_mode=peft_config.inference_mode,
+                module_names=module_keys,
+                strict_module_check=True,
+                wrapper_cls=ModulesToSaveWrapper,
+                tied_module=tied_module,
+            )
 
     def forward(
         self,

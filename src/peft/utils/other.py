@@ -478,10 +478,10 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
 class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
     """Wraps a module that is supposed to be trained (i.e. `requires_grad_(True)`) and saved after training."""
 
-    def __init__(self, module_to_save, adapter_name):
-        super().__init__(module_to_save, adapter_name)
+    def __init__(self, module_to_save, adapter_name, tied_module=None):
+        super().__init__(module_to_save, adapter_name, tied_module=tied_module)
 
-    def init_modules(self, adapter_name):
+    def init_modules(self, adapter_name, **kwargs):
         # we treat each adapter separately, so we have multiple adapters, same (copied) module for each
         self.modules_to_save = torch.nn.ModuleDict({})
 
@@ -518,9 +518,18 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
                 context_manager = deepspeed.zero.GatheredParameters(self.original_module.parameters(), modifier_rank=0)
                 break
 
+        tied_module = kwargs.get("tied_module", None)
+
         if adapter_name not in self.modules_to_save:
             with context_manager:
-                self.modules_to_save[adapter_name] = copy.deepcopy(self.original_module)
+                if tied_module:
+                    print("here2")
+                    new_linear = torch.nn.Linear(*tied_module.weight.shape, bias=False)
+                    new_linear.weight = tied_module.weight
+
+                    self.modules_to_save[adapter_name] = new_linear
+                else:
+                    self.modules_to_save[adapter_name] = copy.deepcopy(self.original_module)
 
         if hasattr(self.modules_to_save[adapter_name], "_hf_hook"):
             old_hook = self.modules_to_save[adapter_name]._hf_hook
