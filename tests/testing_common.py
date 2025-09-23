@@ -43,6 +43,7 @@ from peft import (
     LoraConfig,
     MissConfig,
     OFTConfig,
+    OSFConfig,
     PeftModel,
     PeftType,
     PrefixTuningConfig,
@@ -189,6 +190,76 @@ CLASSES_MAPPING = {
 }
 
 DECODER_MODELS_EXTRA = {"cpt": (CPTConfig, CONFIG_TESTING_KWARGS[15])}
+
+
+@contextmanager
+def hub_online_once(model_id: str):
+    """Set env[HF_HUB_OFFLINE]=1 (and patch transformers/hugging_face_hub to think that it was always that way)
+    for model ids that were seen already so that the hub is not contacted twice for the same model id in said context.
+    The cache (`HUB_MODEL_ACCESSES`) also tracks the number of cache hits per model id.
+
+    The reason for doing a context manager and not patching specific methods (e.g., `from_pretrained`) is that there
+    are a lot of places (`PeftConfig.from_pretrained`, `get_peft_state_dict`, `load_adapter`, ...) that possibly
+    communicate with the hub to download files / check versions / etc.
+
+    Note that using this context manager can cause problems when used in code sections that access different resources.
+    Example:
+
+    ```
+    def test_something(model_id, config_kwargs):
+        with hub_online_once(model_id):
+            model = ...from_pretrained(model_id)
+            self.do_something_specific_with_model(model)
+    ```
+    It is assumed that `do_something_specific_with_model` is an absract method that is implement by several tests.
+    Imagine the first test simply does `model.generate([1,2,3])`. The second call from another test suite however uses
+    a tokenizer (`AutoTokenizer.from_pretrained(model_id)`) - this will fail since the first pass was online but didn't
+    use the tokenizer and we're now in offline mode and cannot fetch the tokenizer. The recommended workaround is to
+    extend the cache key (`model_id` passed to `hub_online_once` in this case) by something in case the tokenizer is
+    used, so that these tests don't share a cache pool with the tests that don't use a tokenizer.
+    """
+    global HUB_MODEL_ACCESSES
+    override = {}
+
+    try:
+        if model_id in HUB_MODEL_ACCESSES:
+            override = {"HF_HUB_OFFLINE": "1"}
+            HUB_MODEL_ACCESSES[model_id] += 1
+        else:
+            if model_id not in HUB_MODEL_ACCESSES:
+                HUB_MODEL_ACCESSES[model_id] = 0
+        with (
+            # strictly speaking it is not necessary to set the environment variable since most code that's out there
+            # is evaluating it at import time and we'd have to reload the modules for it to take effect. It's
+            # probably still a good idea to have it if there's some dynamic code that checks it.
+            mock.patch.dict(os.environ, override),
+            mock.patch("huggingface_hub.constants.HF_HUB_OFFLINE", override.get("HF_HUB_OFFLINE", False) == "1"),
+            mock.patch("transformers.utils.hub._is_offline_mode", override.get("HF_HUB_OFFLINE", False) == "1"),
+        ):
+            yield
+    except Exception:
+        # in case of an error we have to assume that we didn't access the model properly from the hub
+        # for the first time, so the next call cannot be considered cached.
+        if HUB_MODEL_ACCESSES.get(model_id) == 0:
+            del HUB_MODEL_ACCESSES[model_id]
+        raise
+
+
+def _skip_if_merging_not_supported(model_id, config_cls):
+    """Skip tests for cases where adapter merge is unavailable.
+
+    - Conv2dGroups: merge is not supported (by design) — see PR #2403.
+    - OSF: merge/unload are not implemented yet in the tuner.
+    """
+    if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
+        pytest.skip(
+            f"Skipping test for {model_id} as adapter merging is not supported for Conv2dGroups. "
+            "(See https://github.com/huggingface/peft/pull/2403)"
+        )
+    if issubclass(config_cls, OSFConfig):
+        pytest.skip(
+            f"Skipping test for {model_id} with {config_cls} as OSF adapter merge/unload are not implemented."
+        )
 
 
 class PeftCommonTester:
@@ -586,6 +657,8 @@ class PeftCommonTester:
                     assert load_result2.missing_keys == []
 
     def _test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
+        
         if (
             config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig, VBLoRAConfig)
             or config_kwargs.get("alora_invocation_tokens") is not None
@@ -616,6 +689,8 @@ class PeftCommonTester:
             _ = model.merge_and_unload()
 
     def _test_merge_layers_nan(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
+        
         if (
             config_cls
             not in (
@@ -703,6 +778,8 @@ class PeftCommonTester:
                 model = model.merge_and_unload(safe_merge=True)
 
     def _test_merge_layers(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
+        
         if issubclass(config_cls, PromptLearningConfig):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
@@ -791,6 +868,8 @@ class PeftCommonTester:
             assert torch.allclose(logits_merged, logits_merged_from_pretrained, atol=atol, rtol=rtol)
 
     def _test_merge_layers_multi(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
+        
         supported_peft_types = [
             PeftType.LORA,
             PeftType.LOHA,
@@ -879,6 +958,8 @@ class PeftCommonTester:
             assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3)
 
     def _test_merge_layers_is_idempotent(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
+        
         if config_kwargs.get("alora_invocation_tokens") is not None:
             # Merging not supported for Activated LoRA (aLoRA)
             return pytest.skip("Test not applicable for Activated LoRA (aLoRA)")
@@ -904,6 +985,8 @@ class PeftCommonTester:
             assert torch.allclose(logits_0, logits_1, atol=1e-6, rtol=1e-6)
 
     def _test_safe_merge(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
+        
         if config_kwargs.get("alora_invocation_tokens") is not None:
             # Merging not supported for Activated LoRA (aLoRA)
             return pytest.skip("Test not applicable for Activated LoRA (aLoRA)")

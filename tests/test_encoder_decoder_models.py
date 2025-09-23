@@ -28,6 +28,7 @@ from peft import (
     LoraConfig,
     MissConfig,
     OFTConfig,
+    OSFConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
@@ -202,6 +203,12 @@ ALL_CONFIGS = [
             "task_type": "SEQ_2_SEQ_LM",
             "block_size": 1,
             "target_modules": None,
+        },
+    ),
+    (
+        OSFConfig,
+        {
+            "task_type": "SEQ_2_SEQ_LM",
         },
     ),
 ]
