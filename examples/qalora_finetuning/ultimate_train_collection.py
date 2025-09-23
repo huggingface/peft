@@ -121,6 +121,10 @@ class TrainingArguments(transformers.TrainingArguments):
     # Keep legacy flags for backwards compatibility
     corda_mode: bool = field(default=None, metadata={"help": "Deprecated: use --training_mode=corda instead"})
     use_qalora: bool = field(default=None, metadata={"help": "Deprecated: use --training_mode=qalora instead"})
+    outlier_percentage: float = field(
+        default=0.1,
+        metadata={"help": "Percentage of outliers to identify for Outlier-Aware QA-LoRA."},
+    )
 
 
 def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str):
@@ -219,95 +223,134 @@ class DataCollatorForSupervisedDataset:
 
 
 def load_or_quantize_model(
-    base_model: str, tokenizer, qalora_group_size=32, bits: int = 4, cache_dir: str = "./quantized_models"
+    model_or_path,
+    tokenizer,
+    qalora_group_size=32,
+    bits: int = 4,
+    cache_dir: str = "./quantized_models",
+    cache_key: str = None,
 ) -> AutoModelForCausalLM:
     """
     Load a pre-quantized model from cache or quantize and cache a new one.
-    Automatically detects if the model is already GPTQ-quantized.
+    Can also quantize a pre-loaded model object in-memory, with caching.
 
     Args:
-        base_model: Model identifier or path
-        tokenizer: Tokenizer for the model
-        qalora_group_size: Group size for quantization (default: 32)
-        bits: Bit-width for quantization (default: 4)
-        cache_dir: Directory to store quantized models
+        model_or_path: Model identifier (str) or a pre-loaded model object (torch.nn.Module).
+        tokenizer: Tokenizer for the model.
+        qalora_group_size: Group size for quantization.
+        bits: Bit-width for quantization.
+        cache_dir: Directory to store quantized models.
+        cache_key: A unique key for caching in-memory modified models.
 
     Returns:
-        The loaded (quantized) model
+        The loaded (quantized) model.
     """
-    # First, check if the model is already GPTQ-quantized by trying to load it
+    is_model_object = isinstance(model_or_path, torch.nn.Module)
+    os.makedirs(cache_dir, exist_ok=True)
+
+    # --- Path for in-memory model object ---
+    if is_model_object:
+        # If a cache key is provided, use the caching mechanism
+        if cache_key:
+            quantized_model_path = os.path.join(cache_dir, cache_key)
+            if os.path.exists(quantized_model_path) and os.path.exists(os.path.join(quantized_model_path, "config.json")):
+                print(f"✅ Loading pre-quantized (modified) model from cache: {quantized_model_path}")
+                try:
+                    return AutoModelForCausalLM.from_pretrained(quantized_model_path, device_map="auto")
+                except Exception as e:
+                    print(f"Failed to load cached model: {e}. Will re-quantize.")
+                    import shutil
+                    shutil.rmtree(quantized_model_path)
+        else:
+            # If no cache key, we can't save it permanently, so we use a temp dir
+            quantized_model_path = os.path.join(cache_dir, "temp_model_for_quantization")
+
+        print("Quantizing a pre-loaded model object in-memory...")
+        model_to_quantize = model_or_path
+
+        # Configure GPTQ for quantization
+        gptq_config = GPTQConfig(
+            bits=bits,
+            dataset="c4",
+            tokenizer=tokenizer,
+            group_size=qalora_group_size,
+            desc_act=False,
+            sym=False,
+        )
+
+        # The from_pretrained method with a quantization_config expects a path.
+        # We save the temporary model and reload it for quantization.
+        print(f"Temporarily saving model to '{quantized_model_path}' to apply quantization...")
+        model_to_quantize.save_pretrained(quantized_model_path)
+
+        # Now load from the temporary/cache directory and quantize
+        quantized_model = AutoModelForCausalLM.from_pretrained(
+            quantized_model_path, device_map="auto", quantization_config=gptq_config, torch_dtype=torch.float16
+        )
+
+        # If we used a cache_key, we overwrite the saved model with the final quantized version.
+        if cache_key:
+            print(f"Saving quantized model to cache: {quantized_model_path}")
+            quantized_model.save_pretrained(quantized_model_path)
+            tokenizer.save_pretrained(quantized_model_path)
+        else:
+            # If it was just a temp dir, clean it up.
+            import shutil
+            shutil.rmtree(quantized_model_path)
+
+        print("✅ In-memory model quantized successfully.")
+        return quantized_model
+    
+    # --- Path for model identifier string (existing logic) ---
+    base_model = model_or_path
     print(f"Checking if {base_model} is already GPTQ-quantized...")
     try:
-        # Try to load the model and check if it has GPTQ quantization
         test_model = AutoModelForCausalLM.from_pretrained(
             base_model,
             device_map="auto",
             torch_dtype=torch.float16,
-            trust_remote_code=True,  # Some GPTQ models might need this
+            trust_remote_code=True,
         )
-
-        # Check if the model has GPTQ quantization attributes
-        has_gptq = False
-        for module in test_model.modules():
-            if hasattr(module, "qweight") or hasattr(module, "qzeros") or "gptq" in str(type(module)).lower():
-                has_gptq = True
-                break
-
+        has_gptq = any(hasattr(module, "qweight") or "gptq" in str(type(module)).lower() for module in test_model.modules())
         if has_gptq:
             print(f"✅ Model {base_model} is already GPTQ-quantized. Using directly.")
             return test_model
         else:
             print(f"Model {base_model} is not GPTQ-quantized. Will quantize it with {bits}-bit.")
-            # Clen up the test model to free memory
             del test_model
             torch.cuda.empty_cache() if torch.cuda.is_available() else None
-
     except Exception as e:
         print(f"Could not load model {base_model} directly: {e}")
         print(f"Will attempt to quantize it with {bits}-bit...")
 
-    # If we get here, the model needs to be quantized
     os.makedirs(cache_dir, exist_ok=True)
-    model_id = base_model.replace("/", "_").replace("\\", "_")  # Handle Windows paths too
+    model_id = base_model.replace("/", "_").replace("\\", "_")
     quantized_model_path = os.path.join(cache_dir, f"{model_id}_gptq_{bits}bit_groupsize_{qalora_group_size}")
 
-    # Check if we already have a cached quantized version with the exact same settings
     if os.path.exists(quantized_model_path) and os.path.exists(os.path.join(quantized_model_path, "config.json")):
         print(f"Loading pre-quantized model from cache: {quantized_model_path}")
         try:
             return AutoModelForCausalLM.from_pretrained(quantized_model_path, device_map="auto")
         except Exception as e:
-            print(f"Failed to load cached model: {e}")
-            print("Will re-quantize the model...")
+            print(f"Failed to load cached model: {e}. Will re-quantize.")
             import shutil
+            shutil.rmtree(quantized_model_path)
 
-            shutil.rmtree(quantized_model_path)  # Remove corrupted cache
-
-    print(
-        f"Quantizing model with {bits}-bit and group size {qalora_group_size}, saving to cache: {quantized_model_path}"
-    )
-
-    # Configure GPTQ for first-time quantization with the specified bits
+    print(f"Quantizing model with {bits}-bit and group size {qalora_group_size}, saving to cache: {quantized_model_path}")
     gptq_config = GPTQConfig(
-        bits=bits,  # Use the bits parameter from function arguments
+        bits=bits,
         dataset="c4",
         tokenizer=tokenizer,
         group_size=qalora_group_size,
         desc_act=False,
         sym=False,
     )
-
-    # Load and quantize the model
-    print(f"Loading model for {bits}-bit quantization...")
     model = AutoModelForCausalLM.from_pretrained(
         base_model, device_map="auto", quantization_config=gptq_config, torch_dtype=torch.float16
     )
-
-    # Save the quantized model to cache
     print(f"Saving {bits}-bit quantized model to {quantized_model_path}")
     model.save_pretrained(quantized_model_path)
     tokenizer.save_pretrained(quantized_model_path)
-
     print(f"✅ Model quantized to {bits}-bit with group size {qalora_group_size} and cached successfully")
     return model
 
@@ -436,12 +479,7 @@ def train():
         # --- END OF BLOCK ---
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-    # Validate training mode
-    valid_modes = ["full", "lora", "qlora", "qalora", "pissa", "corda", "daniel", "pissa_rank_analysis", "daniel_old", "wave_mode"]
-    if script_args.training_mode not in valid_modes:
-        raise ValueError(f"Invalid training_mode '{script_args.training_mode}'. Must be one of: {valid_modes}")
 
-    print(f"🏃 Training mode: {script_args.training_mode.upper()}")
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         script_args.model_name_or_path,
@@ -463,7 +501,6 @@ def train():
         model = PeftModel.from_pretrained(
             res_model, script_args.model_name_or_path, subfolder="corda_init", is_trainable=True
         )
-
     elif script_args.training_mode == "qalora":
         print("🔧 Setting up QA-LoRA training...")
         model = load_or_quantize_model(
@@ -485,7 +522,154 @@ def train():
         )
 
         model = get_peft_model(model, lora_config)
+    elif script_args.training_mode == "outlier_aware_qalora": # Empfehlung: Eigener Modus-Name
+        print("🚀 Setting up Outlier-Aware QA-LoRA training...")
+        model_name_clean = script_args.model_name_or_path.replace("/", "_").replace("\\", "_")
 
+        # =======================================================================
+        # SCHRITT 1 & 2: Hochpräzises Modell laden & Outlier analysieren
+        # =======================================================================
+        print("Step 1/6: Loading high-precision base model for Hessian analysis...")
+        outlier_percentage_str = str(script_args.outlier_percentage).replace(".", "p")
+        cache_dir = "./hessian_cache"
+        os.makedirs(cache_dir, exist_ok=True)
+        outlier_cache_path = os.path.join(cache_dir, f"{model_name_clean}_outliers_{outlier_percentage_str}pct.pt")
+
+        if os.path.exists(outlier_cache_path):
+            print(f"✅ Loading cached Hessian outliers from: {outlier_cache_path}")
+            outlier_data = torch.load(outlier_cache_path, map_location="cpu")
+            print(f"Found outliers in {len(outlier_data)} layers.")
+        else:
+            print("🔥 No cached outlier data found. Starting Hessian calculation...")
+            # =======================================================================
+            # SCHRITT 1 & 2: Hochpräzises Modell laden & Outlier analysieren
+            # =======================================================================
+            print("Step 1/6: Loading high-precision base model for Hessian analysis...")
+            # Wichtig: Laden Sie das Modell in voller Präzision (z.B. bfloat16)
+            model = AutoModelForCausalLM.from_pretrained(
+                script_args.model_name_or_path,
+                torch_dtype=torch.bfloat16, # Oder float16
+                device_map="auto"
+            )
+
+            print("Step 2/6: Calculating Hessian saliency to find outliers...")
+            from utils import calculate_hessian_outliers
+            outlier_data = calculate_hessian_outliers(model, tokenizer, outlier_percentage=script_args.outlier_percentage)
+
+            # from utils import spqr_extract_outliers, get_c4_calibration_data
+
+            print("Step 2/6: Calculating Hessian saliency to find outliers...")
+
+            # calibration_samples = get_c4_calibration_data(
+            #     tokenizer,
+            #     n_samples= 128,
+            #     seq_len=2048,
+            # )
+
+            # calibration_batches = [dict(sample) for sample in calibration_samples]
+
+            # outlier_data = spqr_extract_outliers(
+            #     model,
+            #     calibration_batches=calibration_batches,
+            #     target_module_name_substrings=[
+            #         "mlp.gate_proj", "mlp.up_proj", "mlp.down_proj",
+            #         "self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj", "self_attn.o_proj",
+            #     ],
+            #     # Entweder globaler Anteil …
+            #     # outlier_percentage=script_args.outlier_percentage,  # z.B. 0.001 für 0.1%
+            #     # … oder feste Schwelle wie in SpQR (dann obige Zeile auskommentieren):
+            #     # outlier_threshold=script_args.outlier_threshold,  # z.B. 0.2
+            #     bits=2,
+            #     group_size=32,
+            #     percdamp=1.0,    # leichte Dämpfung für Stabilität
+            # )
+            print(f"Found outliers in {len(outlier_data)} layers.")
+
+            # Speichere die berechneten Outlier für das nächste Mal in den Cache
+            print(f"💾 Caching Hessian outliers to: {outlier_cache_path}")
+            torch.save(outlier_data, outlier_cache_path)
+
+            # Wichtig: Geben Sie den Speicher des hochpräzisen Modells frei
+            del model
+            torch.cuda.empty_cache()
+
+
+        # =======================================================================
+        # SCHRITT 3 & 4: Modell bereinigen und dann quantisieren
+        # =======================================================================
+        print("Step 3/6: Loading model again to create a cleaned version for quantization...")
+        # Wir laden das Modell erneut, um sicherzugehen, dass wir einen sauberen Start haben
+        model_for_quant = AutoModelForCausalLM.from_pretrained(
+            script_args.model_name_or_path,
+            torch_dtype=torch.bfloat16,
+            device_map="auto"
+        )
+        
+        print("Step 4/6: Zeroing out outliers before quantization...")
+        for name, module in model_for_quant.named_modules():
+            if name in outlier_data:
+                # Holen Sie nur die Indizes, wir brauchen die Gewichte hier nicht
+                _, outlier_indices = outlier_data[name]
+                # Stellen Sie sicher, dass das Attribut 'weight' existiert und veränderbar ist
+                if hasattr(module, 'weight') and isinstance(module.weight, torch.nn.Parameter):
+                    with torch.no_grad():
+                        # Setze die Gewichte an den Outlier-Positionen auf Null
+                        module.weight.data.view(-1)[outlier_indices] = 0.0
+
+        print("Step 5/6: Quantizing the cleaned model...")
+        # Nutzen Sie Ihre bestehende Funktion, um das *bereinigte* Modell zu quantisieren.
+        # Diese Funktion ersetzt die nn.Linear-Schichten durch Ihre QuantLinear-Schichten.
+        cache_key = f"{model_name_clean}_outlier_aware_{outlier_percentage_str}_pct_gptq_{script_args.bits}bit_gs{script_args.qalora_group_size}"
+        quantized_model = load_or_quantize_model(
+            model_for_quant, # Übergeben Sie das modifizierte Modell
+            tokenizer,
+            qalora_group_size=script_args.qalora_group_size,
+            bits=script_args.bits,
+            cache_key=cache_key,
+            # Wichtig: Stellen Sie sicher, dass diese Funktion das Modell nicht neu von der Festplatte lädt,
+            # sondern das übergebene Objekt verwendet.
+        )
+        
+        # Geben Sie den Speicher des bereinigten Modells frei
+        del model_for_quant
+        torch.cuda.empty_cache()
+
+        from gptqmodel.nn_modules.qlinear import BaseQuantLinear
+        # =======================================================================
+        # SCHRITT 5: Outlier als Buffer in das quantisierte Modell injizieren
+        # =======================================================================
+        print("Step 6/6: Injecting high-precision outliers into the quantized model...")
+        for name, module in quantized_model.named_modules():
+            # Stellen Sie sicher, dass Sie den richtigen Klassentyp Ihrer quantisierten Schicht prüfen
+            if isinstance(module, BaseQuantLinear): # z.B. GPTQLinear, QuantLinear, etc.
+                if name in outlier_data:
+                    outlier_weights, outlier_indices = outlier_data[name]
+                    
+                    # Registrieren der Outlier als nicht-trainierbare Buffer
+                    module.register_buffer('outlier_weights', outlier_weights.to(torch.bfloat16))
+                    module.register_buffer('outlier_indices', outlier_indices.to(torch.long))
+
+
+        # =======================================================================
+        # SCHRITT 6: PEFT anwenden (wie bei normalem QA-LoRA)
+        # =======================================================================
+        print("🔧 Applying PEFT with QA-LoRA config...")
+        lora_config = LoraConfig(
+            task_type="CAUSAL_LM",
+            use_qalora=True,
+            qalora_group_size=script_args.qalora_group_size,
+            r=script_args.lora_r,
+            lora_alpha=2 * script_args.lora_r,
+            target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
+            lora_dropout=0.05,
+            bias="none",
+        )
+
+        # Hier passiert die Magie: PEFT wird auf das vorbereitete, hybride Modell angewendet.
+        # Ihre modifizierte `forward`-Methode in QALoraLinearVariant wird den Rest erledigen.
+        model = get_peft_model(quantized_model, lora_config)
+
+        print("\n✅ Outlier-Aware QA-LoRA model is ready for training!")
     elif script_args.training_mode == "pissa":
         print("🔧 Setting up PiSSA training...")
         model = transformers.AutoModelForCausalLM.from_pretrained(
@@ -505,7 +689,6 @@ def train():
         )
 
         model = get_peft_model(model, lora_config)
-
     elif script_args.training_mode == "lora":
         print("🔧 Setting up LoRA training...")
         model = transformers.AutoModelForCausalLM.from_pretrained(
@@ -566,7 +749,6 @@ def train():
         model.gradient_checkpointing_enable()
 
         print(f"✅ QLoRA model loaded with 4-bit quantization")
-
     elif script_args.training_mode == "pissa_rank_analysis":
         print("🔧 Setting up rank analysis with multiple quantization configurations...")
 
@@ -609,8 +791,8 @@ def train():
 
             lora_config = LoraConfig(
                 task_type="CAUSAL_LM",
-                use_qalora=True,
-                qalora_group_size=script_args.qalora_group_size,                
+                # use_qalora=True,
+                # qalora_group_size=script_args.qalora_group_size,                
                 r=script_args.lora_r,
                 lora_alpha=2 * script_args.lora_r,
                 target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
@@ -725,7 +907,6 @@ def train():
             print(f"  {status_emoji} {info['bits']}-bit (gs={info['group_size']}) -> {info['quantized_path']}")
 
         # model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
-
     elif script_args.training_mode == "full":
         print("🔧 Setting up full finetuning...")
         model = transformers.AutoModelForCausalLM.from_pretrained(
@@ -859,8 +1040,8 @@ def train():
     trainer = Trainer(model=model, tokenizer=tokenizer, args=script_args, **data_module)
     trainer.train()
     # trainer.save_state()
-    model.save_pretrained(os.path.join(script_args.output_dir, "ft"))
-    tokenizer.save_pretrained(os.path.join(script_args.output_dir, "ft"))
+    model.save_pretrained(os.path.join(script_args.output_dir, "ft/adapter"))
+    tokenizer.save_pretrained(os.path.join(script_args.output_dir, "ft/adapter"))
 
 
 if __name__ == "__main__":

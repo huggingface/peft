@@ -179,7 +179,7 @@ train_model() {
     export CUDA_VISIBLE_DEVICES=$CUDA_DEVICE
     export PYTHONPATH="/home/nudel/Documents/peft:${PYTHONPATH}"
     
-    python "$SCRIPT_DIR/corda_finetuning.py" \
+    python "$SCRIPT_DIR/ultimate_train_collection.py" \
         --model_name_or_path="$MODEL_NAME_OR_PATH" \
         --output_dir="$output_dir" \
         --data_path="$DATA_PATH" \
@@ -196,7 +196,7 @@ train_model() {
         --logging_steps=10 \
         --save_steps=5000 \
         --eval_steps=500 \
-        --training_mode="pissa_rank_analysis" \
+        --training_mode="qalora" \
         --dataloader_pin_memory=False \
         --remove_unused_columns=False \
         --report_to="none"
