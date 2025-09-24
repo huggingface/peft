@@ -8,6 +8,7 @@ on:
 
 env:
   TRANSFORMERS_IS_CI: 1
+  HF_TOKEN: ${{ secrets.HF_TOKEN }}
 
 permissions: {}
 

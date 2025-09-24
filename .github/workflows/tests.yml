@@ -11,6 +11,7 @@ on:
 
 env:
   HF_HOME: .cache/huggingface
+  HF_TOKEN: ${{ secrets.HF_TOKEN }}
   TRANSFORMERS_IS_CI: 1
 
 permissions: {}
