@@ -11,7 +11,6 @@ on:
 
 env:
   HF_HOME: .cache/huggingface
-  TRANSFORMERS_IS_CI: 1
 
 permissions: {}
 
@@ -92,6 +91,7 @@ jobs:
         shell: bash
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          TRANSFORMERS_IS_CI: 1
         run: |
           set +e
           make test

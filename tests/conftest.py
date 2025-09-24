@@ -12,14 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
 import platform
 import re
 
 import pytest
-
-
-assert "HF_TOKEN" in os.environ
 
 
 def pytest_addoption(parser):
