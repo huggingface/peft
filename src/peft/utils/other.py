@@ -939,13 +939,17 @@ def _set_trainable(
         if target_module_found:
             parent, grandparent, target, target_name = _get_submodules_with_grandparent(model, key)
             if isinstance(grandparent, BaseTunerLayer):
-                # This is an extreme edge case: Let's assume that the modules_to_save target key has the same name as
-                # the adapter name, e.g. 'default'. Then a PEFT layer like foo.bar.lora_A.default would match as a
-                # parent. Since this is the nn.ModuleDict, it might even be a valid target. Therefore, we have check the
-                # grandparent (if it exists) to detect this degenerate case.
+                # This is an extreme edge case: Let's assume that there is a PEFT config with
+                # modules_to_save=["default"], which is the same name as the adapter name. The PEFT method's adapter
+                # (e.g. LoRA) is applied first. Then, when the modules_to_save matching is performed, the LoRA layer
+                # would be considered a valid target. Assuming that the name is "foo.bar.lora_A.default", it would
+                # match, with "default" being an nn.Linear and the parent, "lora_A", being an nn.ModuleDict. This by
+                # itself is not enough to prove that this is an unintended match. Thererfore, we also need to check the
+                # grandparent, "bar", that would be a lora.LoraLayer. When we see this, we should raise an error.
                 raise ValueError(
                     f"You are trying to target a module with {wrapper_cls} that is a child of {type(grandparent)}. "
-                    "This is almost certainly not the intended behavior. Please check that your PEFT config is correct."
+                    "This is almost certainly not the intended behavior. Please ensure that the adapter name, "
+                    f"'{adapter_name}', does not conflict with any of the targeted modules."
                 )
 
             if isinstance(target, wrapper_cls):

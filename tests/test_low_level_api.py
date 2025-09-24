@@ -427,7 +427,8 @@ class TestPeftStateDict:
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
 
-        model = get_peft_model(model, LoraConfig(modules_to_save=["lm_head"]), adapter_name="v_proj")
+        config = LoraConfig(modules_to_save=["lm_head"], target_modules=["v_proj"])
+        model = get_peft_model(model, config, adapter_name="v_proj")
         sd = get_peft_model_state_dict(model, adapter_name="v_proj")
         assert len(sd) > 1  # sanity check
         for key in sd:

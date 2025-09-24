@@ -1116,8 +1116,8 @@ class TestLoraInitialization:
         )
         msg = (
             "You are trying to target a module with <class 'peft.utils.other.ModulesToSaveWrapper'> that is a child of "
-            "<class 'peft.tuners.lora.layer.Linear'>. This is almost certainly not the intended behavior. Please check "
-            "that your PEFT config is correct."
+            "<class 'peft.tuners.lora.layer.Linear'>. This is almost certainly not the intended behavior. Please "
+            "ensure that the adapter name, 'foobar', does not conflict with any of the targeted modules."
         )
         with pytest.raises(ValueError, match=msg):
             get_peft_model(model, config, adapter_name="foobar")
@@ -1131,7 +1131,7 @@ class TestLoraInitialization:
         msg = (
             "You are trying to target a module with <class 'peft.utils.other.TrainableTokensWrapper'> that is a child "
             "of <class 'peft.tuners.lora.layer.Embedding'>. This is almost certainly not the intended behavior. Please "
-            "check that your PEFT config is correct."
+            "ensure that the adapter name, 'foobar', does not conflict with any of the targeted modules."
         )
         with pytest.raises(ValueError, match=msg):
             get_peft_model(model, config, adapter_name="foobar")
