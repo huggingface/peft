@@ -13,16 +13,14 @@
 # limitations under the License.
 from __future__ import annotations
 
-import warnings
 from typing import Optional
 
-from torch import nn
 from torch.nn.modules import Module
 from tqdm import tqdm
 
 from peft.config import PeftConfig
-from peft.tuners.tuners_utils import BaseTuner, _get_submodules, check_target_module_exists
-from peft.utils import TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING, ModulesToSaveWrapper
+from peft.tuners.tuners_utils import BaseTuner, _get_submodules
+from peft.utils import TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING
 
 from .layer import LNTuningLayer
 
@@ -64,26 +62,8 @@ class LNTuningModel(BaseTuner):
     """
 
     prefix: str = "ln_tuning_"
-
-    def __getattr__(self, name: str):
-        """Forward missing attributes to the wrapped module."""
-        try:
-            return super().__getattr__(name)  # defer to nn.Module's logic
-        except AttributeError:
-            if name == "model":  # see #1892: prevent infinite recursion if class is not initialized
-                raise
-            return getattr(self.model, name)
-
-    # TODO: here need to handle the modules_to_save rather than the target_modules
-    @staticmethod
-    def _prepare_adapter_config(peft_config: PeftConfig, model_config: dict) -> PeftConfig:
-        if peft_config.target_modules is None:
-            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING:
-                raise ValueError("Please specify `target_modules` in `peft_config`")
-            peft_config.target_modules = set(
-                TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING[model_config["model_type"]]
-            )
-        return peft_config
+    tuner_layer_cls = LNTuningLayer
+    target_module_mapping = TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING
 
     def _create_and_replace(
         self,
@@ -113,60 +93,13 @@ class LNTuningModel(BaseTuner):
             new_module.update_layer(target.base_layer, adapter_name)
         return new_module
 
-    def _replace_module(self, parent: Module, child_name: str, new_module: Module, child: Module) -> None:
-        setattr(parent, child_name, new_module)
-
-        if hasattr(child, "base_layer"):
-            child = child.base_layer
-
-        if getattr(child, "state", None) is not None:
-            if hasattr(new_module, "base_layer"):
-                new_module.base_layer.state = child.state
-            else:
-                new_module.state = child.state
-            new_module.to(child.weight.device)
-
-        for name, module in new_module.named_modules():
-            weight = child.qweight if hasattr(child, "qweight") else child.weight
-            module.to(weight.device)
-
-    def _mark_only_adapters_as_trainable(self, model: Module):
-        for n, p in model.named_parameters():
-            if self.prefix not in n:
-                p.requires_grad = False
-            else:
-                p.requires_grad = True
-
-    def _check_target_module_exists(self, peft_config: PeftConfig, key: str) -> bool:
-        return check_target_module_exists(peft_config, key)
-
-    def _set_adapter_layers(self, enabled: bool) -> None:
-        for module in self.model.modules():
-            if isinstance(module, (LNTuningLayer, ModulesToSaveWrapper)):
-                module.enable_adapters(enabled)
-
-    def enable_adapter_layers(self) -> None:
-        """Enable all adapters.
-
-        Call this if you have previously disabled all adapters and want to re-enable them.
-        """
-        self._set_adapter_layers(enabled=True)
-
-    def disable_adapter_layers(self) -> None:
-        """Disable all adapters.
-
-        When disabling all adapters, the model output corresponds to the output of the base model.
-        """
-        self._set_adapter_layers(enabled=False)
-
-    def set_adapter(self, adapter_name: str) -> None:
-        for module in self.model.modules():
-            if isinstance(module, LNTuningLayer):
-                if module.merged:
-                    warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
-                    module.unmerge()
-                module.set_adapter(adapter_name)
-        self.active_adapter = adapter_name
+    def _unloading_checks(self, adapter_names: Optional[list[str]]):
+        adapters_to_consider = adapter_names or self.active_adapters
+        is_modules_to_save_available = any(
+            self.peft_config[adapter].modules_to_save for adapter in adapters_to_consider
+        )
+        if is_modules_to_save_available and len(adapters_to_consider) > 1:
+            raise ValueError("Cannot unload multiple adapters that specify `modules_to_save`.")
 
     def _unload_and_optionally_merge(
         self,
@@ -191,14 +124,6 @@ class LNTuningModel(BaseTuner):
                 self._replace_module(parent, target_name, target.get_base_layer(), target)
 
         return self.model
-
-    def unload(self):
-        return self._unload_and_optionally_merge(merge=False)
-
-    def merge_and_unload(
-        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
-    ) -> nn.Module:
-        return self._unload_and_optionally_merge(merge=True)
 
     def _cast_adapter_dtype(self, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
         # Note: LN Tuning does not add adapter layers, instead it creates copies of the original layer. For this reason,

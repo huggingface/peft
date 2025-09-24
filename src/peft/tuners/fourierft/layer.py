@@ -51,7 +51,9 @@ class FourierFTLayer(BaseTunerLayer):
         else:
             raise ValueError(f"Unsupported layer type {type(base_layer)}")
 
-    def update_layer(self, adapter_name, n_frequency, scaling, init_weights, random_loc_seed):
+    def update_layer(
+        self, adapter_name, n_frequency, scaling, init_weights, random_loc_seed, inference_mode: bool = False, **kwargs
+    ):
         if n_frequency <= 0:
             raise ValueError(f"`n_frequency` should be a positive integer value but the value passed is {n_frequency}")
         if n_frequency > self.in_features * self.out_features:
@@ -76,7 +78,7 @@ class FourierFTLayer(BaseTunerLayer):
             self.reset_fourier_parameters(adapter_name)
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     @torch.no_grad()
     def reset_fourier_parameters(self, adapter_name):

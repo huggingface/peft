@@ -132,6 +132,8 @@
       title: C3A
     - local: package_reference/miss
       title: MiSS
+    - local: package_reference/road
+      title: RoAd
 
     title: Adapters
   - sections:
@@ -141,5 +143,7 @@
       title: Helpers
     - local: package_reference/hotswap
       title: Hotswapping adapters
+    - local: package_reference/functional
+      title: Functions for PEFT integration
     title: Utilities
   title: API reference

@@ -32,6 +32,10 @@ The abstract from the paper is:
 
 ## Utility
 
+### ArrowConfig
+
+[[autodoc]] tuners.lora.config.ArrowConfig
+
 ### LoftQ
 
 [[autodoc]] utils.loftq_utils.replace_lora_weights_loftq

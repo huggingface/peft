@@ -148,7 +148,8 @@ class BufferDict(Module):
         child_lines = []
         for k, p in self._buffers.items():
             size_str = "x".join(str(size) for size in p.size())
-            device_str = "" if not p.is_cuda else f" (GPU {p.get_device()})"
+            device_type = p.device.type
+            device_str = "" if device_type == "cpu" else f" ({device_type.upper()} {p.get_device()})"
             parastr = f"Buffer containing: [{torch.typename(p)} of size {size_str}{device_str}]"
             child_lines.append("  (" + k + "): " + parastr)
         tmpstr = "\n".join(child_lines)

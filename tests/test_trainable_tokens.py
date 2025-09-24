@@ -23,8 +23,9 @@ from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokeni
 
 from peft import AutoPeftModel, LoraConfig, PeftModel, TrainableTokensConfig, get_peft_model
 from peft.tuners.trainable_tokens.layer import TrainableTokensLayer
-from peft.utils import get_peft_model_state_dict
-from peft.utils.other import TrainableTokensWrapper
+from peft.utils import TrainableTokensWrapper, get_peft_model_state_dict
+
+from .testing_utils import hub_online_once
 
 
 class ModelEmb(torch.nn.Module):
@@ -103,7 +104,10 @@ class TestTrainableTokens:
 
     @pytest.fixture
     def model(self, model_id):
-        return AutoModelForCausalLM.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            # This must not be a yield fixture so that we don't carry the hub_online_once
+            # behavior over to the rest of the test that uses this fixture
+            return AutoModelForCausalLM.from_pretrained(model_id)
 
     @pytest.fixture
     def tokenizer(self, model_id):

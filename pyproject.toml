@@ -27,6 +27,7 @@ ignore = [
     "F841", # unused variable
     "UP007", # X | Y style Unions
     "C420", # dict.fromkeys
+    "UP045", # don't force replacing Optional[X] with X | None
 ]
 
 [tool.ruff.lint.isort]

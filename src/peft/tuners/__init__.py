@@ -25,11 +25,13 @@ from .ln_tuning import LNTuningConfig, LNTuningModel
 from .loha import LoHaConfig, LoHaModel
 from .lokr import LoKrConfig, LoKrModel
 from .lora import (
+    ArrowConfig,
     EvaConfig,
     LoftQConfig,
     LoraConfig,
     LoraModel,
     LoraRuntimeConfig,
+    create_arrow_model,
     get_eva_state_dict,
     initialize_lora_eva_weights,
 )
@@ -42,6 +44,7 @@ from .poly import PolyConfig, PolyModel
 from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
 from .prompt_tuning import PromptEmbedding, PromptTuningConfig, PromptTuningInit
 from .randlora import RandLoraConfig, RandLoraModel
+from .road import RoadConfig, RoadModel
 from .shira import ShiraConfig, ShiraModel
 from .trainable_tokens import TrainableTokensConfig, TrainableTokensModel
 from .vblora import VBLoRAConfig, VBLoRAModel
@@ -55,6 +58,7 @@ __all__ = [
     "AdaLoraModel",
     "AdaptionPromptConfig",
     "AdaptionPromptModel",
+    "ArrowConfig",
     "BOFTConfig",
     "BOFTModel",
     "BoneConfig",
@@ -100,6 +104,8 @@ __all__ = [
     "PromptTuningInit",
     "RandLoraConfig",
     "RandLoraModel",
+    "RoadConfig",
+    "RoadModel",
     "ShiraConfig",
     "ShiraModel",
     "TrainableTokensConfig",
@@ -112,6 +118,7 @@ __all__ = [
     "WaveFTModel",
     "XLoraConfig",
     "XLoraModel",
+    "create_arrow_model",
     "get_eva_state_dict",
     "initialize_lora_eva_weights",
 ]

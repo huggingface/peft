@@ -41,7 +41,7 @@ trainer = SFTTrainer(
     model=peft_model,
     args=training_args,
     train_dataset=dataset,
-    tokenizer=tokenizer,
+    processing_class=tokenizer,
 )
 trainer.train()
 peft_model.save_pretrained("miss-llama-2-7b")

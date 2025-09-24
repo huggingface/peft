@@ -99,12 +99,13 @@ Now you can use the merged model as an instruction-tuned model to write ad copy 
 <hfoption id="instruct">
 
 ```py
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
 messages = [
     {"role": "user", "content": "Write an essay about Generative AI."},
 ]
 text = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
 inputs = tokenizer(text, return_tensors="pt")
-inputs = {k: v.to("cuda") for k, v in inputs.items()}
+inputs = {k: v.to(device) for k, v in inputs.items()}
 outputs = model.generate(**inputs, max_new_tokens=256, do_sample=True, top_p=0.95, temperature=0.2, repetition_penalty=1.2, eos_token_id=tokenizer.eos_token_id)
 print(tokenizer.decode(outputs[0]))
 ```
@@ -113,13 +114,14 @@ print(tokenizer.decode(outputs[0]))
 <hfoption id="ad copy">
 
 ```py
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
 messages = [
     {"role": "system", "content": "Create a text ad given the following product and description."},
     {"role": "user", "content": "Product: Sony PS5 PlayStation Console\nDescription: The PS5 console unleashes new gaming possibilities that you never anticipated."},
 ]
 text = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
 inputs = tokenizer(text, return_tensors="pt")
-inputs = {k: v.to("cuda") for k, v in inputs.items()}
+inputs = {k: v.to(device) for k, v in inputs.items()}
 outputs = model.generate(**inputs, max_new_tokens=128, do_sample=True, top_p=0.95, temperature=0.2, repetition_penalty=1.2, eos_token_id=tokenizer.eos_token_id)
 print(tokenizer.decode(outputs[0]))
 ```
@@ -128,13 +130,15 @@ print(tokenizer.decode(outputs[0]))
 <hfoption id="SQL">
 
 ```py
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
+
 text = """Table: 2-11365528-2
 Columns: ['Team', 'Head Coach', 'President', 'Home Ground', 'Location']
 Natural Query: Who is the Head Coach of the team whose President is Mario Volarevic?
 SQL Query:"""
 
 inputs = tokenizer(text, return_tensors="pt")
-inputs = {k: v.to("cuda") for k, v in inputs.items()}
+inputs = {k: v.to(device) for k, v in inputs.items()}
 outputs = model.generate(**inputs, max_new_tokens=64, repetition_penalty=1.1, eos_token_id=tokenizer("</s>").input_ids[-1])
 print(tokenizer.decode(outputs[0]))
 ```

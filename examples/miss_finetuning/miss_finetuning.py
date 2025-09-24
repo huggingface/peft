@@ -92,7 +92,7 @@ trainer = SFTTrainer(
     model=peft_model,
     args=script_args,
     train_dataset=dataset,
-    tokenizer=tokenizer,
+    processing_class=tokenizer,
 )
 trainer.train()
 trainer.save_state()

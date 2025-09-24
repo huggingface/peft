@@ -21,7 +21,7 @@ from peft.tuners.lycoris_utils import LycorisConfig, LycorisTuner
 from peft.utils import TRANSFORMERS_MODELS_TO_LOHA_TARGET_MODULES_MAPPING
 from peft.utils.other import get_pattern_key
 
-from .layer import Conv2d, Linear, LoHaLayer
+from .layer import Conv1d, Conv2d, Linear, LoHaLayer
 
 
 class LoHaModel(LycorisTuner):
@@ -83,8 +83,11 @@ class LoHaModel(LycorisTuner):
     """
 
     prefix: str = "hada_"
+    tuner_layer_cls = LoHaLayer
+    target_module_mapping = TRANSFORMERS_MODELS_TO_LOHA_TARGET_MODULES_MAPPING
     layers_mapping: dict[type[torch.nn.Module], type[LoHaLayer]] = {
         torch.nn.Conv2d: Conv2d,
+        torch.nn.Conv1d: Conv1d,
         torch.nn.Linear: Linear,
     }
 
@@ -111,13 +114,3 @@ class LoHaModel(LycorisTuner):
         else:
             new_module = self._create_new_module(config, adapter_name, target, **kwargs)
             self._replace_module(parent, target_name, new_module, target)
-
-    @staticmethod
-    def _prepare_adapter_config(peft_config, model_config):
-        if peft_config.target_modules is None:
-            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LOHA_TARGET_MODULES_MAPPING:
-                raise ValueError("Please specify `target_modules` in `peft_config`")
-            peft_config.target_modules = set(
-                TRANSFORMERS_MODELS_TO_LOHA_TARGET_MODULES_MAPPING[model_config["model_type"]]
-            )
-        return peft_config

@@ -197,7 +197,9 @@ The models that are quantized using Half-Quadratic Quantization of Large Machine
 ```python
 from hqq.engine.hf import HQQModelForCausalLM
 
-quantized_model = HQQModelForCausalLM.from_quantized(save_dir_or_hfhub, device='cuda')
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
+
+quantized_model = HQQModelForCausalLM.from_quantized(save_dir_or_hfhub, device=device)
 peft_config = LoraConfig(...)
 quantized_model = get_peft_model(quantized_model, peft_config)
 ```
