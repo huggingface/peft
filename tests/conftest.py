@@ -19,7 +19,7 @@ import re
 import pytest
 
 
-assert 'HF_TOKEN' in os.environ
+assert "HF_TOKEN" in os.environ
 
 
 def pytest_addoption(parser):
