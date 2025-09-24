@@ -6,9 +6,6 @@ on:
     paths-ignore:
         - 'docs/**'
 
-env:
-  TRANSFORMERS_IS_CI: 1
-
 permissions: {}
 
 jobs:
@@ -31,6 +28,9 @@ jobs:
           pip install -U git+https://github.com/huggingface/transformers.git
           pip install -e .[test]
       - name: Test with pytest
+        env:
+          TRANSFORMERS_IS_CI: 1
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           make test
       - name: Post to Slack
