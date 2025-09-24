@@ -15,7 +15,8 @@ MODEL_NAME_OR_PATH="Qwen/Qwen3-4B"
 MODEL_SHORT_NAME="Qwen3-4B"  # Used for directory naming
 SCRIPT_DIR="/home/nudel/Documents/peft/examples/qalora_finetuning"
 BASE_OUTPUT_DIR="/home/nudel/Documents/peft/train_results_debugger"
-LORA_RANKS=(1 2 4 8 16 32 64 256 512)
+LORA_RANKS=(32 64 128 256 512)
+TRAINING_MODES=("qalora" "qlora") # Modes to iterate over
 
 CUDA_DEVICE="0"
 
@@ -96,16 +97,17 @@ FOUND_RESIDUAL_DIR=""
 find_actual_residual_dir() {
     local base_dir="$1"
     local rank="$2"
+    local training_mode="$3"
     local model_name_safe=$(get_model_name_safe)
     
     FOUND_RESIDUAL_DIR=""  # Reset global variable
     
-    log_info "Searching for rank $rank models for $model_name_safe..."
+    log_info "Searching for rank $rank, mode $training_mode models for $model_name_safe..."
     
     # Possible directory structures
     local possible_dirs=(
-        "$base_dir/quantized_residuals_r${rank}"
-        "$base_dir/quantized_residuals_r${rank}/quantized_residuals_r${rank}"
+        "$base_dir/${training_mode}_quantized_residuals_r${rank}"
+        "$base_dir/${training_mode}_quantized_residuals_r${rank}/${training_mode}_quantized_residuals_r${rank}"
     )
     
     for dir in "${possible_dirs[@]}"; do
@@ -141,7 +143,7 @@ find_actual_residual_dir() {
         fi
     done
     
-    log_error "Could not find valid residual models directory for rank $rank and model $model_name_safe"
+    log_error "Could not find valid residual models directory for rank $rank, mode $training_mode and model $model_name_safe"
     log_error "Searched in: ${possible_dirs[*]}"
     return 1
 }
@@ -168,9 +170,10 @@ debug_list_directory() {
 # Function to train model with specific rank
 train_model() {
     local rank=$1
+    local training_mode=$2
     local output_dir="$BASE_OUTPUT_DIR"
     
-    log_info "Starting training for rank $rank..."
+    log_info "Starting training for rank $rank with mode $training_mode..."
     log_info "Model: $MODEL_NAME_OR_PATH"
     log_info "Output directory: $output_dir"
     
@@ -196,16 +199,16 @@ train_model() {
         --logging_steps=10 \
         --save_steps=5000 \
         --eval_steps=500 \
-        --training_mode="qalora" \
+        --training_mode="$training_mode" \
         --dataloader_pin_memory=False \
         --remove_unused_columns=False \
         --report_to="none"
     
     if [[ $? -eq 0 ]]; then
-        log_success "Training completed for rank $rank"
+        log_success "Training completed for rank $rank with mode $training_mode"
         
         # Verify what was created
-        local created_dir="$BASE_OUTPUT_DIR/quantized_residuals_r${rank}"
+        local created_dir="$BASE_OUTPUT_DIR/${training_mode}_quantized_residuals_r${rank}"
         log_info "Expected training output in: $created_dir"
         
         if [[ -d "$created_dir" ]]; then
@@ -219,7 +222,7 @@ train_model() {
                 log_info "Found adapter at: $found_adapter"
                 fix_adapter_config "$found_adapter"
             else
-                log_warning "No adapter found for rank $rank and model $model_name_safe"
+                log_warning "No adapter found for rank $rank, mode $training_mode and model $model_name_safe"
                 log_info "Available adapters:"
                 find "$created_dir" -name "daniel_adapter_*" -type d 2>/dev/null || echo "  None found"
             fi
@@ -228,7 +231,7 @@ train_model() {
             return 1
         fi
     else
-        log_error "Training failed for rank $rank"
+        log_error "Training failed for rank $rank with mode $training_mode"
         return 1
     fi
 }
@@ -236,13 +239,14 @@ train_model() {
 # Function to evaluate model with specific rank
 evaluate_model() {
     local rank=$1
-    local eval_output_dir="./residual_evaluation_results_${MODEL_SHORT_NAME}_r${rank}"
+    local training_mode=$2
+    local eval_output_dir="./residual_evaluation_results_${MODEL_SHORT_NAME}_${training_mode}_r${rank}"
     
-    log_info "Starting evaluation for rank $rank..."
+    log_info "Starting evaluation for rank $rank from mode $training_mode..."
     
     # Find the actual residual models directory
-    if ! find_actual_residual_dir "$BASE_OUTPUT_DIR" "$rank"; then
-        log_error "Could not find residual models directory for rank $rank"
+    if ! find_actual_residual_dir "$BASE_OUTPUT_DIR" "$rank" "$training_mode"; then
+        log_error "Could not find residual models directory for rank $rank and mode $training_mode"
         return 1
     fi
     
@@ -268,10 +272,10 @@ evaluate_model() {
         --generate_latex
     
     if [[ $? -eq 0 ]]; then
-        log_success "Evaluation completed for rank $rank"
+        log_success "Evaluation completed for rank $rank from mode $training_mode"
         log_info "Results saved to: $eval_output_dir"
     else
-        log_error "Evaluation failed for rank $rank"
+        log_error "Evaluation failed for rank $rank from mode $training_mode"
         return 1
     fi
 }
@@ -284,12 +288,14 @@ create_combined_summary() {
     mkdir -p "$summary_dir"
     
     # Copy all individual results
-    for rank in "${LORA_RANKS[@]}"; do
-        local eval_dir="./residual_evaluation_results_${MODEL_SHORT_NAME}_r${rank}"
-        if [[ -d "$eval_dir" ]]; then
-            cp -r "$eval_dir" "$summary_dir/rank_${rank}_results"
-            log_info "Copied results for rank $rank"
-        fi
+    for training_mode in "${TRAINING_MODES[@]}"; do
+        for rank in "${LORA_RANKS[@]}"; do
+            local eval_dir="./residual_evaluation_results_${MODEL_SHORT_NAME}_${training_mode}_r${rank}"
+            if [[ -d "$eval_dir" ]]; then
+                cp -r "$eval_dir" "$summary_dir/${training_mode}_rank_${rank}_results"
+                log_info "Copied results for mode $training_mode, rank $rank"
+            fi
+        done
     done
     
     # Create a master summary file
@@ -302,9 +308,9 @@ Generated on: $(date)
 - Model: $MODEL_NAME_OR_PATH
 - Model Short Name: $MODEL_SHORT_NAME
 - Model Name Safe: $(get_model_name_safe)
-- Training Mode: PiSSA Rank Analysis
+- Training Modes Tested: ${TRAINING_MODES[*]}
 - LoRA Ranks Tested: ${LORA_RANKS[*]}
-- Quantization Bits: 2, 3, 4 (with various group sizes)
+- Quantization Bits: 2, 3, 4 (with various group sizes, evaluated by evaluate_residual_models.py)
 - Evaluation Tasks: $EVAL_TASKS
 - Few-shot Examples: $NUM_FEWSHOT
 - Sample Limit: $EVAL_LIMIT
@@ -319,8 +325,11 @@ Generated on: $(date)
 ## Directory Structure
 EOF
     
-    for rank in "${LORA_RANKS[@]}"; do
-        echo "- \`rank_${rank}_results/\`: Results for LoRA rank $rank" >> "$summary_dir/README.md"
+    for training_mode in "${TRAINING_MODES[@]}"; do
+        echo "### Training Mode: $training_mode" >> "$summary_dir/README.md"
+        for rank in "${LORA_RANKS[@]}"; do
+            echo "- \`${training_mode}_rank_${rank}_results/\`: Results for LoRA rank $rank" >> "$summary_dir/README.md"
+        done
     done
     
     log_success "Combined summary created in: $summary_dir"
@@ -332,6 +341,7 @@ print_config() {
     echo "  Model: $MODEL_NAME_OR_PATH"
     echo "  Model Short Name: $MODEL_SHORT_NAME"
     echo "  Model Name Safe: $(get_model_name_safe)"
+    echo "  Training Modes: ${TRAINING_MODES[*]}"
     echo "  LoRA Ranks: ${LORA_RANKS[*]}"
     echo "  Data: $DATA_PATH ($DATASET_SPLIT)"
     echo "  Training: $NUM_TRAIN_EPOCHS epochs, batch_size=$PER_DEVICE_TRAIN_BATCH_SIZE, lr=$LEARNING_RATE"
@@ -349,15 +359,17 @@ cleanup_old_models() {
     local model_name_safe=$(get_model_name_safe)
     log_info "Cleaning up models that don't match current model ($model_name_safe)..."
     
-    for rank in "${LORA_RANKS[@]}"; do
-        local rank_dir="$BASE_OUTPUT_DIR/quantized_residuals_r${rank}"
-        if [[ -d "$rank_dir" ]]; then
-            # Check if directory contains files for different model
-            if ! (find "$rank_dir" -name "*${model_name_safe}*" | head -1 | grep -q .); then
-                log_warning "Found non-matching model files in $rank_dir, backing up..."
-                mv "$rank_dir" "${rank_dir}_backup_$(date +%Y%m%d_%H%M%S)"
+    for training_mode in "${TRAINING_MODES[@]}"; do
+        for rank in "${LORA_RANKS[@]}"; do
+            local rank_dir="$BASE_OUTPUT_DIR/${training_mode}_quantized_residuals_r${rank}"
+            if [[ -d "$rank_dir" ]]; then
+                # Check if directory contains files for different model
+                if ! (find "$rank_dir" -name "*${model_name_safe}*" | head -1 | grep -q .); then
+                    log_warning "Found non-matching model files in $rank_dir, backing up..."
+                    mv "$rank_dir" "${rank_dir}_backup_$(date +%Y%m%d_%H%M%S)"
+                fi
             fi
-        fi
+        done
     done
 }
 
@@ -367,8 +379,8 @@ main() {
     print_config
     
     # Check if required directories exist
-    if [[ ! -f "$SCRIPT_DIR/corda_finetuning.py" ]]; then
-        log_error "Training script not found: $SCRIPT_DIR/corda_finetuning.py"
+    if [[ ! -f "$SCRIPT_DIR/ultimate_train_collection.py" ]]; then
+        log_error "Training script not found: $SCRIPT_DIR/ultimate_train_collection.py"
         exit 1
     fi
     
@@ -383,94 +395,102 @@ main() {
     # Cleanup old models if requested
     cleanup_old_models "$1"
     
-    # Phase 1: Check for existing models OR train new ones
-    log_info "===== PHASE 1: CHECKING FOR EXISTING MODELS ====="
-    successful_training=()
-    need_training=()
+    local total_experiments=$((${#LORA_RANKS[@]} * ${#TRAINING_MODES[@]}))
+    local completed_experiments=0
     
-    for rank in "${LORA_RANKS[@]}"; do
-        if find_actual_residual_dir "$BASE_OUTPUT_DIR" "$rank"; then
-            log_success "Found existing models for rank $rank at: $FOUND_RESIDUAL_DIR"
-            successful_training+=($rank)
-            
-            # Fix adapter config if needed
-            local model_name_safe=$(get_model_name_safe)
-            local found_adapter=$(find "$FOUND_RESIDUAL_DIR" -name "daniel_adapter_r${rank}_*${model_name_safe}*" -type d 2>/dev/null | head -1)
-            
-            if [[ -n "$found_adapter" ]]; then
-                log_info "Found adapter at: $found_adapter"
-                fix_adapter_config "$found_adapter"
-            else
-                log_warning "Adapter not found for rank $rank"
-            fi
-        else
-            log_warning "No existing models found for rank $rank"
-            need_training+=($rank)
-        fi
-    done
-    
-    log_info "Found existing models for ranks: ${successful_training[*]}"
-    log_info "Need training for ranks: ${need_training[*]}"
-    
-    # Phase 1b: Train missing models if any
-    if [[ ${#need_training[@]} -gt 0 ]]; then
-        log_info "===== PHASE 1b: TRAINING MISSING MODELS ====="
+    for training_mode in "${TRAINING_MODES[@]}"; do
+        log_info "===== PROCESSING TRAINING MODE: $training_mode ====="
         
-        for rank in "${need_training[@]}"; do
-            log_info "Training rank $rank (${#successful_training[@]}/${#LORA_RANKS[@]} total completed)"
-            
-            if train_model $rank; then
+        # Phase 1: Check for existing models OR train new ones
+        log_info "===== PHASE 1: CHECKING FOR EXISTING MODELS ($training_mode) ====="
+        successful_training=()
+        need_training=()
+        
+        for rank in "${LORA_RANKS[@]}"; do
+            if find_actual_residual_dir "$BASE_OUTPUT_DIR" "$rank" "$training_mode"; then
+                log_success "Found existing models for rank $rank at: $FOUND_RESIDUAL_DIR"
                 successful_training+=($rank)
-                log_success "✅ Training successful for rank $rank"
+                
+                # Fix adapter config if needed
+                local model_name_safe=$(get_model_name_safe)
+                local found_adapter=$(find "$FOUND_RESIDUAL_DIR" -name "daniel_adapter_r${rank}_*${model_name_safe}*" -type d 2>/dev/null | head -1)
+                
+                if [[ -n "$found_adapter" ]]; then
+                    log_info "Found adapter at: $found_adapter"
+                    fix_adapter_config "$found_adapter"
+                else
+                    log_warning "Adapter not found for rank $rank"
+                fi
             else
-                log_error "❌ Training failed for rank $rank"
+                log_warning "No existing models found for rank $rank"
+                need_training+=($rank)
+            fi
+        done
+        
+        log_info "Found existing models for ranks: ${successful_training[*]}"
+        log_info "Need training for ranks: ${need_training[*]}"
+        
+        # Phase 1b: Train missing models if any
+        if [[ ${#need_training[@]} -gt 0 ]]; then
+            log_info "===== PHASE 1b: TRAINING MISSING MODELS ($training_mode) ====="
+            
+            for rank in "${need_training[@]}"; do
+                log_info "Training rank $rank ($training_mode) (${completed_experiments}/${total_experiments} total completed)"
+                
+                if train_model $rank $training_mode; then
+                    successful_training+=($rank)
+                    log_success "✅ Training successful for rank $rank ($training_mode)"
+                else
+                    log_error "❌ Training failed for rank $rank ($training_mode)"
+                fi
+                
+                # Small delay between training runs
+                sleep 5
+            done
+        fi
+        
+        # Phase 2: Evaluation
+        log_info "===== PHASE 2: EVALUATING MODELS ($training_mode) ====="
+        failed_evaluation=()
+        successful_evaluation=()
+        
+        # Sort successful_training array to ensure consistent order
+        IFS=$'\n' successful_training=($(sort -n <<<"${successful_training[*]}"))
+        unset IFS
+
+        for rank in "${successful_training[@]}"; do
+            log_info "Evaluating rank $rank ($training_mode) (${completed_experiments}/${total_experiments} completed)"
+            
+            if evaluate_model $rank $training_mode; then
+                successful_evaluation+=($rank)
+                completed_experiments=$((completed_experiments + 1))
+                log_success "✅ Evaluation successful for rank $rank ($training_mode)"
+            else
+                failed_evaluation+=($rank)
+                log_error "❌ Evaluation failed for rank $rank ($training_mode)"
             fi
             
-            # Small delay between training runs
+            # Small delay between evaluation runs
             sleep 5
         done
-    fi
-    
-    # Phase 2: Evaluation
-    log_info "===== PHASE 2: EVALUATING MODELS ====="
-    failed_evaluation=()
-    successful_evaluation=()
-    
-    for rank in "${successful_training[@]}"; do
-        log_info "Evaluating rank $rank (${#successful_evaluation[@]}/${#successful_training[@]} completed)"
         
-        if evaluate_model $rank; then
-            successful_evaluation+=($rank)
-            log_success "✅ Evaluation successful for rank $rank"
-        else
-            failed_evaluation+=($rank)
-            log_error "❌ Evaluation failed for rank $rank"
+        # Evaluation summary for this mode
+        log_info "===== EVALUATION SUMMARY FOR MODE: $training_mode ====="
+        log_success "Successful evaluation: ${successful_evaluation[*]}"
+        if [[ ${#failed_evaluation[@]} -gt 0 ]]; then
+            log_error "Failed evaluation: ${failed_evaluation[*]}"
         fi
-        
-        # Small delay between evaluation runs
-        sleep 5
     done
     
-    # Evaluation summary
-    log_info "===== EVALUATION SUMMARY ====="
-    log_success "Successful evaluation: ${successful_evaluation[*]}"
-    if [[ ${#failed_evaluation[@]} -gt 0 ]]; then
-        log_error "Failed evaluation: ${failed_evaluation[*]}"
-    fi
-    
     # Phase 3: Create combined summary
-    if [[ ${#successful_evaluation[@]} -gt 0 ]]; then
-        log_info "===== PHASE 3: CREATING COMBINED SUMMARY ====="
-        create_combined_summary
-    fi
+    log_info "===== PHASE 3: CREATING COMBINED SUMMARY ====="
+    create_combined_summary
     
     # Final summary
     log_info "===== PIPELINE COMPLETED ====="
-    log_success "Successfully processed ranks: ${successful_evaluation[*]}"
-    log_info "Total models available: ${#successful_training[@]}/${#LORA_RANKS[@]}"
-    log_info "Total models evaluated: ${#successful_evaluation[@]}/${#successful_training[@]}"
+    log_info "Total experiments completed: ${completed_experiments}/${total_experiments}"
     
-    if [[ ${#successful_evaluation[@]} -eq ${#LORA_RANKS[@]} ]]; then
+    if [[ $completed_experiments -eq $total_experiments ]]; then
         log_success "🎉 All models processed successfully!"
     else
         log_warning "⚠️  Some models failed. Check logs above for details."
