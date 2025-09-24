@@ -543,11 +543,11 @@ class TestPeftConfig:
         monkeypatch.setattr(config, "_get_commit_hash", fake_commit_hash)
 
         peft_config = config_class(**mandatory_kwargs)
-        assert peft_config.peft_version == version
+        assert peft_config.peft_version == version + "@UNKNOWN"
 
         peft_config.save_pretrained(tmp_path)
         config_loaded = PeftConfig.from_pretrained(tmp_path)
-        assert config_loaded.peft_version == version
+        assert config_loaded.peft_version == version + "@UNKNOWN"
 
     @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
     def test_peft_version_warn_when_commit_hash_errors(self, config_class, mandatory_kwargs, monkeypatch, tmp_path):
@@ -560,11 +560,11 @@ class TestPeftConfig:
         monkeypatch.setattr(config, "__version__", version)
 
         def fake_commit_hash_raises(pkg_name):
-            1 / 0
+            raise Exception("Error for testing purpose")
 
         monkeypatch.setattr(config, "_get_commit_hash", fake_commit_hash_raises)
 
         msg = "A dev version of PEFT is used but there was an error while trying to determine the commit hash"
         with pytest.warns(UserWarning, match=msg):
             peft_config = config_class(**mandatory_kwargs)
-        assert peft_config.peft_version == version
+        assert peft_config.peft_version == version + "@UNKNOWN"

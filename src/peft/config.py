@@ -21,6 +21,7 @@ import warnings
 from dataclasses import asdict, dataclass, field
 from typing import Optional, Union
 
+import packaging.version
 from huggingface_hub import hf_hub_download
 from transformers.utils import PushToHubMixin, http_user_agent
 
@@ -50,8 +51,7 @@ def _check_and_remove_unused_kwargs(cls, kwargs):
 
 def _is_dev_version(version: str) -> bool:
     # check if the given version is a dev version
-    _, _, patch = version.rpartition(".")
-    return patch.startswith("dev")
+    return packaging.version.Version(version).dev is not None
 
 
 def _get_commit_hash(pkg_name: str) -> str | None:
@@ -111,15 +111,16 @@ class PeftConfigMixin(PushToHubMixin):
 
         try:
             git_hash = _get_commit_hash("peft")
+            if git_hash is None:
+                git_hash = "UNKNOWN"
         except Exception:
             # Broad exception: We never want to break user code just because the git_hash could not be determined
             warnings.warn(
                 "A dev version of PEFT is used but there was an error while trying to determine the commit hash. "
                 "Please open an issue: https://github.com/huggingface/peft/issues"
             )
-            git_hash = None
-        if git_hash:
-            version = version + f"@{git_hash}"
+            git_hash = "UNKNOWN"
+        version = version + f"@{git_hash}"
         return version
 
     def to_dict(self) -> dict:
