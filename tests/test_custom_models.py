@@ -1040,7 +1040,8 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         WaveFTConfig,
         {"target_modules": ["lin0"], "init_weights": False, "n_frequency": 8},
         {"target_modules": ["lin1"], "init_weights": False, "n_frequency": 8},
-
+    ),
+    (
         "RoAd Same",
         "road",
         RoadConfig,
