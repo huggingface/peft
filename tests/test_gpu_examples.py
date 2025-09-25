@@ -611,7 +611,6 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 quantization_config=BitsAndBytesConfig(load_in_8bit=True),
                 device_map="auto",
             )
-            print(f"device map: {model.hf_device_map}")
             assert set(model.hf_device_map.values()) == set(range(device_count))
 
             tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
@@ -2823,23 +2822,22 @@ class TestLoftQ:
     Tests for LoftQ to ensure that it reduces the quantization error compared to normal LoRA quantization.
     """
 
-    # The error factor indicates by how much the quantization error should be decreased when using LoftQ compared to
-    # quantization without LoftQ. Thus 1.03 means that the error should be decreased by 3% at least. This is a very
-    # conservative value to prevent flakiness, in practice most gains are > 1.5
-    device = infer_device()
-    error_factor = 1.005 if device in ("xpu", "cpu") else 1.03
+    def get_error_factor(self, device):
+        # The error factor indicates by how much the quantization error should be decreased when using LoftQ compared to
+        # quantization without LoftQ. Thus 1.03 means that the error should be decreased by 3% at least. This is a very
+        # conservative value to prevent flakiness, in practice most gains are > 1.5
+        error_factor = 1.005 if device in ("xpu", "cpu") else 1.03
+        return error_factor
 
     def get_input(self, model_id, device):
         tokenizer = AutoTokenizer.from_pretrained(model_id)
         inputs = tokenizer("All I want is", padding=True, return_tensors="pt")
-        inputs = inputs.to(self.device)
+        inputs = inputs.to(device)
         return inputs
 
     def get_base_model(self, model_id, device, **kwargs):
         cls = AutoModelForSeq2SeqLM if "t5" in str(model_id) else AutoModelForCausalLM
-        model = cls.from_pretrained(model_id, **kwargs).eval()
-        if not getattr(model, "is_loaded_in_8bit", False):
-            model = model.to(self.device)
+        model = cls.from_pretrained(model_id, device_map=device, **kwargs).eval()
         return model
 
     def get_logits(self, model, inputs):
@@ -2883,7 +2881,7 @@ class TestLoftQ:
             raise ValueError("bits must be 4 or 8")
 
         quantized_model = get_peft_model(
-            self.get_base_model(model_id, device=None, **kwargs),
+            self.get_base_model(model_id, device, **kwargs),
             lora_config,
         )
         torch.manual_seed(0)
@@ -2902,10 +2900,10 @@ class TestLoftQ:
         )
         model = self.get_base_model(model_id, device)
         if device != "cpu":
-            model = model.to(torch_device)
+            model = model.to(device)
         loftq_model = get_peft_model(model, lora_config)
         if device != "cpu":
-            loftq_model = loftq_model.to(torch_device)
+            loftq_model = loftq_model.to(device)
 
         # save LoRA weights, they should be initialized such that they minimize the quantization error
         loftq_model.base_model.peft_config["default"].init_lora_weights = True
@@ -2918,7 +2916,7 @@ class TestLoftQ:
         clear_device_cache(garbage_collection=True)
 
         # now load quantized model and apply LoftQ-initialized weights on top
-        base_model = self.get_base_model(tmp_path / "base_model", device=None, **kwargs, torch_dtype=torch.float32)
+        base_model = self.get_base_model(tmp_path / "base_model", device=device, **kwargs, torch_dtype=torch.float32)
         loftq_model = PeftModel.from_pretrained(base_model, tmp_path / "loftq_model", is_trainable=True)
 
         # TODO sanity check: model is quantized
@@ -2967,8 +2965,9 @@ class TestLoftQ:
         assert mse_loftq > 0.0
 
         # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
-        assert mse_loftq < (mse_quantized / self.error_factor)
-        assert mae_loftq < (mae_quantized / self.error_factor)
+        error_factor = self.get_error_factor(device)
+        assert mse_loftq < (mse_quantized / error_factor)
+        assert mae_loftq < (mae_quantized / error_factor)
 
     @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_bloomz_loftq_8bit(self, device, tmp_path):
@@ -2982,8 +2981,9 @@ class TestLoftQ:
         assert mse_loftq > 0.0
 
         # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
-        assert mse_loftq < (mse_quantized / self.error_factor)
-        assert mae_loftq < (mae_quantized / self.error_factor)
+        error_factor = self.get_error_factor(device)
+        assert mse_loftq < (mse_quantized / error_factor)
+        assert mae_loftq < (mae_quantized / error_factor)
 
     @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_bloomz_loftq_8bit_iter_5(self, device, tmp_path):
@@ -2999,8 +2999,9 @@ class TestLoftQ:
         assert mse_loftq > 0.0
 
         # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
-        assert mse_loftq < (mse_quantized / self.error_factor)
-        assert mae_loftq < (mae_quantized / self.error_factor)
+        error_factor = self.get_error_factor(device)
+        assert mse_loftq < (mse_quantized / error_factor)
+        assert mae_loftq < (mae_quantized / error_factor)
 
     @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_t5_loftq_4bit(self, device, tmp_path):
@@ -3014,8 +3015,9 @@ class TestLoftQ:
         assert mse_loftq > 0.0
 
         # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
-        assert mse_loftq < (mse_quantized / self.error_factor)
-        assert mae_loftq < (mae_quantized / self.error_factor)
+        error_factor = self.get_error_factor(device)
+        assert mse_loftq < (mse_quantized / error_factor)
+        assert mae_loftq < (mae_quantized / error_factor)
 
     @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_t5_loftq_8bit(self, device, tmp_path):
@@ -3029,8 +3031,9 @@ class TestLoftQ:
         assert mse_loftq > 0.0
 
         # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
-        assert mse_loftq < (mse_quantized / self.error_factor)
-        assert mae_loftq < (mae_quantized / self.error_factor)
+        error_factor = self.get_error_factor(device)
+        assert mse_loftq < (mse_quantized / error_factor)
+        assert mae_loftq < (mae_quantized / error_factor)
 
     @pytest.mark.xfail  # failing for now, but having DoRA pass is only a nice-to-have, not a must, so we're good
     @pytest.mark.parametrize("device", [torch_device, "cpu"])
@@ -3064,8 +3067,9 @@ class TestLoftQ:
         assert mse_loftq > 0.0
 
         # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
-        assert mae_loftq < (mae_quantized / self.error_factor)
-        assert mse_loftq < (mse_quantized / self.error_factor)
+        error_factor = self.get_error_factor(device)
+        assert mae_loftq < (mae_quantized / error_factor)
+        assert mse_loftq < (mse_quantized / error_factor)
 
     def test_replace_lora_weights_with_loftq_using_callable(self):
         """
