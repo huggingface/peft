@@ -34,6 +34,7 @@ from peft import (
     ShiraConfig,
     VBLoRAConfig,
     VeraConfig,
+    WaveFTConfig,
     get_peft_model,
 )
 from peft.utils.other import ModulesToSaveWrapper
@@ -202,6 +203,14 @@ ALL_CONFIGS = [
         {
             "task_type": "SEQ_CLS",
             "block_size": 1,
+            "target_modules": None,
+        },
+    ),
+    (
+        WaveFTConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "n_frequency": 8,
             "target_modules": None,
         },
     ),

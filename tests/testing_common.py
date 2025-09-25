@@ -1587,6 +1587,24 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
+
+        if config.peft_type not in (
+            "LORA",
+            "ADALORA",
+            "IA3",
+            "BOFT",
+            "OFT",
+            "VERA",
+            "FOURIERFT",
+            "HRA",
+            "VBLORA",
+            "RANDLORA",
+            "SHIRA",
+            "BONE",
+            "C3A",
+            "WAVEFT",
+            "MISS",
+        ):
         if isinstance(config, PromptLearningConfig):
             # prompt learning does not support unloading
             with pytest.raises(AttributeError):

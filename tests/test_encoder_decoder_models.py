@@ -36,6 +36,7 @@ from peft import (
     TaskType,
     VBLoRAConfig,
     VeraConfig,
+    WaveFTConfig,
     get_peft_model,
 )
 
@@ -201,6 +202,14 @@ ALL_CONFIGS = [
         {
             "task_type": "SEQ_2_SEQ_LM",
             "block_size": 1,
+            "target_modules": None,
+        },
+    ),
+    (
+        WaveFTConfig,
+        {
+            "task_type": "SEQ_2_SEQ_LM",
+            "n_frequency": 8,
             "target_modules": None,
         },
     ),

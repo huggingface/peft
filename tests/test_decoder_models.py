@@ -46,6 +46,7 @@ from peft import (
     ShiraConfig,
     VBLoRAConfig,
     VeraConfig,
+    WaveFTConfig,
     get_peft_model,
 )
 
@@ -265,6 +266,14 @@ ALL_CONFIGS = [
         {
             "task_type": "CAUSAL_LM",
             "block_size": 1,  # Some test cases contain shapes of prime numbers where `block_size` must be 1
+            "target_modules": None,
+        },
+    ),
+    (
+        WaveFTConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "n_frequency": 8,
             "target_modules": None,
         },
     ),
