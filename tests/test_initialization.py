@@ -2056,6 +2056,22 @@ class TestWaveFTInitialization:
         assert hasattr(waveft_layer, 'waveft_n_frequency')
         assert waveft_layer.waveft_n_frequency['default'] == 100
 
+    def test_waveft_layers_pattern_without_layers_to_transform_raises(self):
+        # Test that when layers_pattern is specified, layers_to_transform must also be specified
+        msg = "When `layers_pattern` is specified, `layers_to_transform` must also be specified."
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            WaveFTConfig(
+                target_modules=["linear"],
+                layers_pattern=["layers"],
+                layers_to_transform=None
+            )
+
+    def test_waveft_invalid_wavelet_family_raises(self):
+        # Test that invalid wavelet families raise appropriate errors
+        invalid_family = "invalid_wavelet"
+        msg = f"Wavelet family {invalid_family} not supported. Supported wavelet families are:"
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            WaveFTConfig(target_modules=["linear"], wavelet_family=invalid_family)
 
 class TestNoInfiniteRecursionDeepspeed:
     # see #1892 for details
