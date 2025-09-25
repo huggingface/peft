@@ -174,6 +174,17 @@ class FourierFTConfig(PeftConfig):
             )
         },
     )
+
+    ifft2_norm: Optional[str] = field(
+        default_factory='backward',
+        metadata={
+            "help": (
+                "The normalization applied for the ifft2 operation."
+                "It has to be either `backward`, `forward` or `ortho`. See the pytorch documentation for the ifft2 function for more details"
+                "The default value is `backward`."
+            )
+        },
+    )
     init_weights: bool = field(
         default=False,
         metadata={

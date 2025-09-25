@@ -74,12 +74,14 @@ class FourierFTModel(BaseTuner):
         n_frequency = fourierft_config.n_frequency_pattern.get(target_name_key, fourierft_config.n_frequency)
         scaling = fourierft_config.scaling
         alpha = fourierft_config.alpha
+        ifft2_norm = fourierft_config.ifft2_norm
         random_loc_seed = fourierft_config.random_loc_seed
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "n_frequency": n_frequency,
             "alpha": alpha,
             "scaling": scaling,
+            "ifft2_norm": ifft2_norm,
             "fan_in_fan_out": fourierft_config.fan_in_fan_out,
             "init_weights": fourierft_config.init_weights,
             "random_loc_seed": fourierft_config.random_loc_seed,
