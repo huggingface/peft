@@ -37,9 +37,6 @@ from .layer import WaveFTLayer, WaveFTLinear
 class WaveFTModel(BaseTuner):
     prefix: str = "waveft_"
 
-    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False, state_dict: Optional[dict[str, torch.Tensor]] = None) -> None:
-        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage, state_dict=state_dict)
-
     def _check_new_adapter_config(self, config: WaveFTConfig) -> None:
         """
         A helper method to check the config when a new adapter is being added.
