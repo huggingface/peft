@@ -497,3 +497,96 @@ class TestPeftConfig:
         )
         assert config.layers_to_transform is None
         assert config.layers_pattern is None
+
+    @pytest.mark.parametrize("version", ["0.10", "0.17.0", "1"])
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
+    def test_peft_version_is_stored(self, version, config_class, mandatory_kwargs, monkeypatch, tmp_path):
+        # Check that the PEFT version is automatically stored in/restored from the config file.
+        from peft import config
+
+        monkeypatch.setattr(config, "__version__", version)
+
+        peft_config = config_class(**mandatory_kwargs)
+        assert peft_config.peft_version == version
+
+        peft_config.save_pretrained(tmp_path)
+        with open(tmp_path / "adapter_config.json") as f:
+            config_dict = json.load(f)
+        assert config_dict["peft_version"] == version
+
+        # ensure that the version from the config is being loaded, not just the current version
+        monkeypatch.setattr(config, "__version__", "0.1.another-version")
+
+        # load from config
+        config_loaded = PeftConfig.from_pretrained(tmp_path)
+        assert config_loaded.peft_version == version
+
+        # load from json
+        config_path = tmp_path / "adapter_config.json"
+        config_json = PeftConfig.from_json_file(str(config_path))
+        assert config_json["peft_version"] == version
+
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
+    def test_peft_version_is_dev_version(self, config_class, mandatory_kwargs, monkeypatch, tmp_path):
+        # When a dev version of PEFT is installed, the actual state of PEFT is ambiguous. Therefore, try to determine
+        # the commit hash too and store it as part of the version string.
+        from peft import config
+
+        version = "0.15.0.dev7"
+        monkeypatch.setattr(config, "__version__", version)
+
+        def fake_commit_hash(pkg_name):
+            return "abcdef012345"
+
+        monkeypatch.setattr(config, "_get_commit_hash", fake_commit_hash)
+
+        peft_config = config_class(**mandatory_kwargs)
+        expected_version = f"{version}@{fake_commit_hash('peft')}"
+        assert peft_config.peft_version == expected_version
+
+        peft_config.save_pretrained(tmp_path)
+        config_loaded = PeftConfig.from_pretrained(tmp_path)
+        assert config_loaded.peft_version == expected_version
+
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
+    def test_peft_version_is_dev_version_but_commit_hash_cannot_be_determined(
+        self, config_class, mandatory_kwargs, monkeypatch, tmp_path
+    ):
+        # There can be cases where PEFT is using a dev version but the commit hash cannot be determined. In this case,
+        # just store the dev version string.
+        from peft import config
+
+        version = "0.15.0.dev7"
+        monkeypatch.setattr(config, "__version__", version)
+
+        def fake_commit_hash(pkg_name):
+            return None
+
+        monkeypatch.setattr(config, "_get_commit_hash", fake_commit_hash)
+
+        peft_config = config_class(**mandatory_kwargs)
+        assert peft_config.peft_version == version + "@UNKNOWN"
+
+        peft_config.save_pretrained(tmp_path)
+        config_loaded = PeftConfig.from_pretrained(tmp_path)
+        assert config_loaded.peft_version == version + "@UNKNOWN"
+
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
+    def test_peft_version_warn_when_commit_hash_errors(self, config_class, mandatory_kwargs, monkeypatch, tmp_path):
+        # We try to get the PEFT commit hash if a dev version is installed. But in case there is any kind of error
+        # there, we don't want user code to break. Instead, the code should run and a version without commit hash should
+        # be recorded. In addition, there should be a warning.
+        from peft import config
+
+        version = "0.15.0.dev7"
+        monkeypatch.setattr(config, "__version__", version)
+
+        def fake_commit_hash_raises(pkg_name):
+            raise Exception("Error for testing purpose")
+
+        monkeypatch.setattr(config, "_get_commit_hash", fake_commit_hash_raises)
+
+        msg = "A dev version of PEFT is used but there was an error while trying to determine the commit hash"
+        with pytest.warns(UserWarning, match=msg):
+            peft_config = config_class(**mandatory_kwargs)
+        assert peft_config.peft_version == version + "@UNKNOWN"
