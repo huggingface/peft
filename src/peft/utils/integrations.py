@@ -96,12 +96,13 @@ def dequantize_bnb_weight(weight: torch.nn.Parameter, state=None):
     if state.SCB is None:
         state.SCB = weight.SCB
 
-    # BNB requires CUDA weights
+    # BNB requires accelerator weights
     device = weight.device
     is_cpu = device.type == torch.device("cpu").type
     if is_cpu:
         if torch.cuda.is_available():
             weight = weight.to(torch.device("cuda"))
+            state.SCB = state.SCB.to(torch.device("cuda"))
         elif is_xpu_available():
             weight = weight.to(torch.device("xpu"))
             state.SCB = state.SCB.to(torch.device("xpu"))
