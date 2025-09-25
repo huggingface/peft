@@ -611,6 +611,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 quantization_config=BitsAndBytesConfig(load_in_8bit=True),
                 device_map="auto",
             )
+            print(f"device map: {model.hf_device_map}")
             assert set(model.hf_device_map.values()) == set(range(device_count))
 
             tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
