@@ -1025,6 +1025,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin1"], "init_weights": False, "boft_block_size": 2},
     ),
     (
+        "WaveFT Same",
+        "waveft",
+        WaveFTConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "n_frequency": 8},
+        {"target_modules": ["lin0"], "init_weights": False, "n_frequency": 8},
+    ),
+    (
+        "WaveFT Different",
+        "waveft",
+        WaveFTConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "n_frequency": 8},
+        {"target_modules": ["lin1"], "init_weights": False, "n_frequency": 8},
+    ),
+    (
         "RoAd Same",
         "road",
         RoadConfig,
