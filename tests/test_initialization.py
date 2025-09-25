@@ -2025,17 +2025,38 @@ class TestWaveFTInitialization:
         # Different use_idwt settings should produce different results
         assert not torch.allclose(output1, output2, atol=1e-6)
 
-    def test_waveft_invalid_n_frequency(self):
-        # Test that invalid n_frequency values raise appropriate errors
+    def test_waveft_non_positive_n_frequency_raises(self):
+        # Test that n_frequency <= 0 raises appropriate error
         model = self.get_model()
-
-        # n_frequency should be positive
-        with pytest.raises(ValueError):
-            config = WaveFTConfig(target_modules=["linear"], n_frequency=0)
+        
+        # Test with n_frequency = 0
+        n_frequency = 0
+        msg = f"`n_frequency` should be a positive integer value but the value passed is {n_frequency}"
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            config = WaveFTConfig(target_modules=["linear"], n_frequency=n_frequency)
+            get_peft_model(model, config)
+        
+        # Test with negative n_frequency
+        n_frequency = -1
+        msg = f"`n_frequency` should be a positive integer value but the value passed is {n_frequency}"
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            config = WaveFTConfig(target_modules=["linear"], n_frequency=n_frequency)
             get_peft_model(model, config)
 
-        with pytest.raises(ValueError):
-            config = WaveFTConfig(target_modules=["linear"], n_frequency=-1)
+    def test_waveft_excessive_n_frequency_raises(self):
+        # Test that n_frequency > in_features * out_features raises appropriate error
+        model = self.get_model()
+        
+        # The model has a linear layer with 1000 in_features and 1000 out_features
+        # So the maximum n_frequency should be 1000 * 1000 = 1,000,000
+        max_allowed = 1000 * 1000
+        n_frequency = max_allowed + 1
+        msg = (
+            f"`n_frequency` should be less than or equal to the product of the input and output dimensions "
+            f"but the value passed is {n_frequency} and the product is {max_allowed}"
+        )
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            config = WaveFTConfig(target_modules=["linear"], n_frequency=n_frequency)
             get_peft_model(model, config)
 
     def test_waveft_n_frequency_pattern(self, data):
