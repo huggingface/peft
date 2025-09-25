@@ -130,7 +130,6 @@ class FourierFTModel(BaseTuner):
         else:
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
-                "`torch.nn.Linear`"
-                "`torch.nn.Conv2d`"
+                "`torch.nn.Linear`, `torch.nn.Conv2d`"
             )
         return new_module
