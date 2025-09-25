@@ -56,7 +56,7 @@ class WaveFTModel(BaseTuner):
     def _check_target_module_exists(waveft_config, key):
         return check_target_module_exists(waveft_config, key)
 
-    def _calculate_proportional_parameters(self, model: torch.nn.Module, waveft_config, adapter_name: str):
+    def _calculate_proportional_parameters(self, model: torch.nn.Module, waveft_config):
         """Calculate proportional parameter allocation for all target modules."""
         target_modules_info = []
         for name, module in model.named_modules():
@@ -92,10 +92,7 @@ class WaveFTModel(BaseTuner):
             n_freq = round(layer_ratio * total_budget)
             n_frequency_dict[name] = n_freq
 
-        # Store the results on the model instance using adapter-specific key
-        if not hasattr(self, '_proportional_params_cache'):
-            self._proportional_params_cache = {}
-        self._proportional_params_cache[adapter_name] = n_frequency_dict
+        return n_frequency_dict
 
     def _create_and_replace(
         self,
@@ -115,7 +112,8 @@ class WaveFTModel(BaseTuner):
             if not hasattr(self, '_proportional_params_cache'):
                 self._proportional_params_cache = {}
             if adapter_name not in self._proportional_params_cache:
-                self._calculate_proportional_parameters(self.model, waveft_config, adapter_name)
+                n_frequency_dict = self._calculate_proportional_parameters(self.model, waveft_config)
+                self._proportional_params_cache[adapter_name] = n_frequency_dict
 
         # Determine n_frequency: Priority order:
         # 1. From proportional parameter cache (if proportional_parameters=True)
