@@ -141,6 +141,8 @@
       title: Model merge
     - local: package_reference/helpers
       title: Helpers
+    - local: package_reference/osf_utils
+      title: OSF utilities
     - local: package_reference/hotswap
       title: Hotswapping adapters
     - local: package_reference/functional
