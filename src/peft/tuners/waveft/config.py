@@ -85,7 +85,9 @@ class WaveFTConfig(PeftConfig):
             If `False`, coefficients are initialized from a standard normal distribution scaled by a small factor.
         proportional_parameters (`bool`):
             If `True`, `n_frequency` is allocated proportionally to each layer's
-            `input_dim * output_dim`. Default is `False`.
+            `input_dim * output_dim`. Default is `False`. Note: This option is included 
+            for experimental thoroughness to allow researchers to reproduce paper results, 
+            rather than for practical utility, as no beneficial scenarios have been identified.
     """
 
     n_frequency: int = field(
@@ -220,7 +222,9 @@ class WaveFTConfig(PeftConfig):
         metadata={
             "help": (
                 "If True, 'n_frequency' is allocated proportionally to each layer's "
-                "input_dim * output_dim. Default is False."
+                "input_dim * output_dim. Default is False. Note: This option is included "
+                "for experimental thoroughness to allow researchers to reproduce paper results, "
+                "rather than for practical utility, as no beneficial scenarios have been identified."
             )
         },
     )
