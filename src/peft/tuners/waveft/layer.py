@@ -64,12 +64,6 @@ class WaveFTLayer(BaseTunerLayer):
                 f"`n_frequency` should be less than or equal to the product of the input and output dimensions "
                 f"but the value passed is {n_frequency} and the product is {self.in_features * self.out_features}"
             )
-        if wavelet_family not in WAVELET_REDUCTIONS:
-            supported_wavelets = list(WAVELET_REDUCTIONS.keys())
-            raise ValueError(
-                f"Unsupported wavelet family: {wavelet_family}. "
-                f"Supported wavelet families: {supported_wavelets}"
-            )
 
         self.waveft_n_frequency[adapter_name] = n_frequency
         self.waveft_random_loc_seed[adapter_name] = random_loc_seed
