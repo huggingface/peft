@@ -917,6 +917,18 @@ def _get_submodules(model, key):
     return parent, target, target_name
 
 
+def _get_submodules_with_grandparent(model, key):
+    parent = model.get_submodule(".".join(key.split(".")[:-1]))
+    try:
+        grandparent = model.get_submodule(".".join(key.split(".")[:-2]))
+    except AttributeError:
+        # no grand parent
+        grandparent = None
+    target_name = key.split(".")[-1]
+    target = model.get_submodule(key)
+    return parent, grandparent, target, target_name
+
+
 def _freeze_adapter(model, adapter_name):
     for n, p in model.named_parameters():
         if adapter_name in n:
@@ -948,6 +960,8 @@ def _set_trainable(
 
     The `active_adapter` flag indicates if this new adapter should be activated.
     """
+    from peft.tuners.tuners_utils import BaseTunerLayer
+
     if wrapper_cls is None:
         wrapper_cls = ModulesToSaveWrapper
 
@@ -964,7 +978,21 @@ def _set_trainable(
     for key in key_list:
         target_module_found = any(key.endswith(target_key) for target_key in module_names)
         if target_module_found:
-            parent, target, target_name = _get_submodules(model, key)
+            parent, grandparent, target, target_name = _get_submodules_with_grandparent(model, key)
+            if isinstance(grandparent, BaseTunerLayer):
+                # This is an extreme edge case: Let's assume that there is a PEFT config with
+                # modules_to_save=["default"], which is the same name as the adapter name. The PEFT method's adapter
+                # (e.g. LoRA) is applied first. Then, when the modules_to_save matching is performed, the LoRA layer
+                # would be considered a valid target. Assuming that the name is "foo.bar.lora_A.default", it would
+                # match, with "default" being an nn.Linear and the parent, "lora_A", being an nn.ModuleDict. This by
+                # itself is not enough to prove that this is an unintended match. Thererfore, we also need to check the
+                # grandparent, "bar", that would be a lora.LoraLayer. When we see this, we should raise an error.
+                raise ValueError(
+                    f"You are trying to target a module with {wrapper_cls} that is a child of {type(grandparent)}. "
+                    "This is almost certainly not the intended behavior. Please ensure that the adapter name, "
+                    f"'{adapter_name}', does not conflict with any of the targeted modules."
+                )
+
             if isinstance(target, wrapper_cls):
                 target.update(adapter_name, **wrapper_kwargs)
                 target.set_adapter(target.active_adapter, inference_mode=inference_mode)
