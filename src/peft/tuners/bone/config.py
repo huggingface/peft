@@ -96,7 +96,7 @@ class BoneConfig(PeftConfig):
             "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
         },
     )
-    bias: str = field(default="none", metadata={"help": "Bias type for Bone. Can be 'none', 'all' or 'Bone_only'"})
+    bias: str = field(default="none", metadata={"help": "Bias type for Bone. Can be 'none', 'all' or 'bone_only'"})
     modules_to_save: Optional[list[str]] = field(
         default=None,
         metadata={

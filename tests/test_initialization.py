@@ -14,6 +14,7 @@
 
 import copy
 import itertools
+import math
 import platform
 import re
 import warnings
@@ -1480,6 +1481,26 @@ class TestLoraInitialization:
         msg = re.escape("only one LoRA adapter per model with `target_parameters` is allowed")
         with pytest.raises(ValueError, match=msg):
             model.load_adapter(tmp_path, adapter_name="other")
+
+    def test_multiple_configs_with_bias_raises(self, tmp_path):
+        # There cannot be more than one config with bias != "none".
+        # Note: This would need to be tested for all PEFT methods that support the bias parameter, but as this method
+        # comes from BaseTuner, it's fine to only check LoRA.
+        model = self.get_model()
+        config0 = LoraConfig(target_modules=["linear"], bias="all")
+        model = get_peft_model(model, config0)
+
+        config1 = LoraConfig(target_modules=["linear"], bias="lora_only")
+        msg = "supports only 1 adapter with bias. When using multiple adapters"
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("other", config1)
+
+        # the invalid peft config was not added
+        assert len(model.peft_config) == 1
+
+        # it's okay to add a config with bias="none" (the default)
+        config2 = LoraConfig(target_modules=["linear"], bias="none")
+        model.add_adapter("other", config2)  # does not raise
 
 
 class TestLokrInitialization:
@@ -3889,6 +3910,44 @@ class TestScaling:
         self.unscale_layer(model, 3)
         scalings = self.get_scalings(model)
         expected = [2.0] * n_layers
+        assert scalings == expected
+
+    def test_scaling_with_rslora(self, model):
+        n_layers = 5
+        rank, lora_alpha = 8, 16
+        config = LoraConfig(
+            r=rank,
+            lora_alpha=lora_alpha,
+            use_rslora=True,
+            target_modules=["k_proj"],
+        )
+        model = get_peft_model(model, config)
+        scalings = self.get_scalings(model)
+        expected = [lora_alpha / math.sqrt(rank)] * n_layers
+        assert scalings == expected
+
+        # double
+        self.scale_layer(model, 2)
+        scalings = self.get_scalings(model)
+        expected = [2 * lora_alpha / math.sqrt(rank)] * n_layers
+        assert scalings == expected
+
+        # back to original
+        self.unscale_layer(model, None)
+        scalings = self.get_scalings(model)
+        expected = [lora_alpha / math.sqrt(rank)] * n_layers
+        assert scalings == expected
+
+        # triple
+        self.set_scale(model, "default", 3)
+        scalings = self.get_scalings(model)
+        expected = [3 * lora_alpha / math.sqrt(rank)] * n_layers
+        assert scalings == expected
+
+        # back to original
+        self.unscale_layer(model, 3)
+        scalings = self.get_scalings(model)
+        expected = [lora_alpha / math.sqrt(rank)] * n_layers
         assert scalings == expected
 
     def test_scaling_rank_pattern_alpha_pattern(self, model):

@@ -70,6 +70,56 @@ class LoftQConfig:
 
 
 @dataclass
+class ArrowConfig:
+    """
+    This is the sub-configuration class to store the configuration for Arrow and GenKnowSub algorithm. Arrow is a
+    routing algorithm to combine the trained LoRA modules to solve new tasks, proposed in
+    'https://arxiv.org/pdf/2405.11157'. GenKnowSub is a refinement on the trained modules before being combined via
+    Arrow, introduced in 'https://aclanthology.org/2025.acl-short.54/'
+    """
+
+    top_k: int = field(
+        default=3,
+        metadata={"help": "Number of top LoRA modules to combine in Arrow routing."},
+    )
+
+    router_temperature: float = field(
+        default=1.0,
+        metadata={"help": "Softmax temperature for computing Arrow expert coefficients."},
+    )
+
+    use_gks: bool = field(
+        default=False,
+        metadata={"help": "Enable GenKnowSub."},
+    )
+
+    task_adapter_names: Optional[list[str]] = field(
+        default=None,
+        init=False,
+        metadata={"help": "list of task-specific LoRA adapter names. It will be set in create_arrow_model()."},
+    )
+
+    gks_adapter_names: Optional[list[str]] = field(
+        default=None,
+        init=False,
+        metadata={
+            "help": "list of general LoRA adapter names for GenKnowSub. It will be set in create_arrow_model()."
+        },
+    )
+
+    rng_seed: Optional[int] = field(
+        default=None,
+        metadata={"help": "Optional RNG seed for reproducibility. If None, sampling is non-deterministic."},
+    )
+
+    def __post_init__(self):
+        if self.top_k <= 0:
+            raise ValueError("top_k cannot be negative.")
+        if self.router_temperature <= 0:
+            raise ValueError("router_temperature must be greater than 0.")
+
+
+@dataclass
 class EvaConfig:
     """
     This is the sub-configuration class to store the configuration for a data-driven initialization via EVA. EVA was
@@ -301,6 +351,17 @@ class LoraConfig(PeftConfig):
             ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger overhead than pure
             LoRA, so it is recommended to merge weights for inference. For more information, see
             https://huggingface.co/papers/2402.09353.
+        alora_invocation_tokens (`List[int]`):
+            If not None, enable <a href='https://huggingface.co/papers/2504.12397'>'Activated LoRA' (aLoRA)</a>, with
+            alora_invocation_tokens being the tokenized invocation string for the adapter (must be present in all model
+            input strings). This technique selectively activates the adapter weights only on tokens during and after
+            the alora_invocation_tokens. When used in a CausalLM, this means that the KV cache prior to invocation is
+            interchangeable with that of the base model (and other aLoRA adapters operating this way). As a result, in
+            inference pipelines involving switching between base model inference and adapter inference (e.g. agentic
+            pipelines, see paper for examples), significant savings are realized (relative to LoRA) by saving prefill
+            operations. Overall adapter inference speedups of an order of magnitude or more can occur on vLLM,
+            depending on the length of the shared context. Note that merging is not possible due to the selective
+            application of the weights.
         layer_replication (`List[Tuple[int, int]]`):
             Build a new stack of layers by stacking the original model layers according to the ranges specified. This
             allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
@@ -510,6 +571,23 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    alora_invocation_tokens: Optional[list[int]] = field(
+        default=None,
+        metadata={
+            "help": (
+                "If not None, enable <a href='https://huggingface.co/papers/2504.12397'>'Activated LoRA' (aLoRA)</a>, with "
+                "alora_invocation_tokens being the tokenized invocation string for the adapter (must be present in all model "
+                "input strings). This technique selectively activates the adapter weights only on tokens during and after "
+                "the alora_invocation_tokens. When used in a CausalLM, this means that the KV cache prior to invocation is "
+                "interchangeable with that of the base model (and other aLoRA adapters operating this way). As a result, in "
+                "inference pipelines involving switching between base model inference and adapter inference (e.g. agentic "
+                "pipelines, see paper for examples), significant savings are realized (relative to LoRA) by saving prefill "
+                "operations. Overall adapter inference speedups of an order of magnitude or more can occur on vLLM, "
+                "depending on the length of the shared context. Note that merging is not possible due to the selective "
+                "application of the weights."
+            )
+        },
+    )
     use_qalora: bool = field(
         default=False,
         metadata={
@@ -582,6 +660,9 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    arrow_config: Optional[ArrowConfig] = field(
+        default=None, metadata={"help": "The necessary config to apply arrow routing on the model."}
+    )
 
     def to_dict(self):
         """
@@ -600,7 +681,6 @@ class LoraConfig(PeftConfig):
         self.exclude_modules = (
             set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
-
         if isinstance(self.target_parameters, str):
             raise TypeError("`target_parameters` must be a list of strings or None.")
 
@@ -656,6 +736,9 @@ class LoraConfig(PeftConfig):
                 )
             if self.use_dora:
                 raise ValueError("The argument lora_bias=True is not supported for DoRA, please pass use_dora=False")
+
+        if self.alora_invocation_tokens is not None and self.task_type != "CAUSAL_LM":
+            warnings.warn("aLoRA is currently only supported for CAUSAL_LM task.")
 
         # Using post training conversion of modified base weights to restore their initial values PiSSA/CorDA/OLoRA cannot
         # be correctly done when using rslora + rank_pattern/alpha_pattern. We can't really know if the user intends

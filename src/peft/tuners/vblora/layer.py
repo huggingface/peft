@@ -68,6 +68,8 @@ class VBLoRALayer(BaseTunerLayer):
         vector_length: float,
         vblora_dropout: float = 0.0,
         init_logits_std: float = 0.01,
+        inference_mode: bool = False,
+        **kwargs,
     ):
         if r <= 0:
             raise ValueError(f"`r` {r} should be a positive integer value")
@@ -97,7 +99,7 @@ class VBLoRALayer(BaseTunerLayer):
         self.vblora_vector_bank = vblora_vector_bank
         self.reset_vblora_logits(adapter_name, init_logits_std)
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def reset_vblora_logits(self, adapter_name, init_logits_std):
         if adapter_name in self.vblora_logits_A.keys():

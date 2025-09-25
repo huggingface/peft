@@ -20,6 +20,7 @@ import unittest
 from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Union
 
 import numpy as np
@@ -57,6 +58,7 @@ from transformers.pytorch_utils import Conv1D
 
 from peft import (
     AdaLoraConfig,
+    ArrowConfig,
     EvaConfig,
     LoftQConfig,
     LoraConfig,
@@ -67,6 +69,7 @@ from peft import (
     RoadConfig,
     TaskType,
     VeraConfig,
+    create_arrow_model,
     get_peft_model,
     get_peft_model_state_dict,
     initialize_lora_eva_weights,
@@ -82,6 +85,7 @@ from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
 from peft.utils.loftq_utils import NFQuantizer
 from peft.utils.other import fsdp_auto_wrap_policy
+from tests.testing_utils import hub_online_once
 
 from .testing_utils import (
     device_count,
@@ -3712,6 +3716,13 @@ class PeftHqqGPUTests(unittest.TestCase):
 class PeftAwqGPUTests(unittest.TestCase):
     r"""
     Awq + peft tests
+
+    Note that AWQ is no longer being maintained:
+
+    https://github.com/casper-hansen/AutoAWQ/blob/88e4c76b20755db275574e6a03c83c84ba3bece5/README.md
+
+    It is therefore expected that more tests will start failing in the future. If this happens, remove AWQ support from
+    PEFT.
     """
 
     def setUp(self):
@@ -3792,8 +3803,8 @@ class PeftAwqGPUTests(unittest.TestCase):
     # TODO remove marker if/once issue is resolved, most likely requiring a fix in AutoAWQ:
     # https://github.com/casper-hansen/AutoAWQ/issues/754
     @pytest.mark.xfail(
-        condition=is_torch_version("==", "2.7.0") or is_torch_version("==", "2.7.1"),
-        reason="Multi-GPU test currently not working with AutoAWQ and PyTorch 2.7",
+        condition=is_torch_version(">=", "2.7.0"),
+        reason="Multi-GPU test currently not working with AutoAWQ and PyTorch 2.7+",
         strict=True,
     )
     @require_torch_multi_accelerator
@@ -4853,6 +4864,79 @@ class TestEvaInitializationGPU:
             )
 
 
+class TestALoRAInferenceGPU:
+    """GPU inference for Activated LoRA."""
+
+    # Constants for test configuration
+    NUM_SEEDS = 3
+    LORA_DIM = 8
+    LORA_ALPHA = 1
+    DEVICE = infer_device()
+
+    @pytest.fixture
+    def tokenizer(self):
+        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
+        tokenizer.pad_token = tokenizer.eos_token
+        return tokenizer
+
+    @pytest.fixture
+    def model(self):
+        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        model.model.decoder.layers = model.model.decoder.layers[:2]  # truncate to 2 layers
+        return model.to(self.DEVICE)
+
+    @pytest.fixture
+    def model_bnb(self):
+        bnb_config = BitsAndBytesConfig(load_in_4bit=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=bnb_config,
+        )
+        model.model.decoder.layers = model.model.decoder.layers[:2]  # truncate to 2 layers
+        model = prepare_model_for_kbit_training(model)
+        return model
+
+    @pytest.fixture
+    def peft_config(self):
+        return LoraConfig(
+            r=self.LORA_DIM,
+            task_type="CAUSAL_LM",
+            lora_alpha=self.LORA_ALPHA,
+            target_modules=["q_proj"],
+            alora_invocation_tokens=[2],  # id for </s>
+            init_lora_weights=False,
+        )
+
+    @require_non_cpu
+    @require_bitsandbytes
+    @pytest.mark.single_gpu_tests
+    def test_alora_forward_consistency(self, model, model_bnb, peft_config):
+        """Test that the forwards of the model with adapter are similar across quantizations."""
+        for seed in range(self.NUM_SEEDS):
+            torch.manual_seed(seed)
+            # random.seed(seed)
+            np.random.seed(seed)
+            peft_model = get_peft_model(deepcopy(model), peft_config)
+            torch.manual_seed(seed)
+            # random.seed(seed)
+            np.random.seed(seed)
+            peft_model_bnb = get_peft_model(deepcopy(model_bnb), peft_config)
+            peft_model.eval()
+            peft_model_bnb.eval()
+            input_ids = torch.tensor([[0, 1, 2, 3]]).to(self.DEVICE)
+            with torch.no_grad():
+                peft_out = peft_model(input_ids=input_ids, return_dict=True, output_hidden_states=True)
+                peft_out_bnb = peft_model_bnb(input_ids=input_ids, return_dict=True, output_hidden_states=True)
+            h_fp = peft_out.hidden_states[-1]
+            h_4b = peft_out_bnb.hidden_states[-1]
+            a = h_fp.detach().to(torch.float32).cpu()
+            b = h_4b.detach().to(torch.float32).cpu()
+            import torch.nn.functional as F
+
+            cos = F.cosine_similarity(a.flatten(), b.flatten(), dim=0).item()
+            assert cos > 0.9
+
+
 @pytest.mark.multi_gpu_tests
 class TestPrefixTuning:
     device = infer_device()
@@ -5191,3 +5275,88 @@ class TestHotSwapping:
         inductor_config_ctx = torch._inductor.config.patch("triton.cudagraph_support_input_mutation", False)
         with dynamo_config_ctx, inductor_config_ctx:
             self.check_hotswap_diffusion(ranks=ranks, alpha_scalings=ranks, target_modules=target_modules)
+
+
+# Test: 4-bit load + Arrow + generate
+class TestArrowQuantized:
+    @pytest.fixture(scope="class")
+    def workdir(self, tmp_path_factory):
+        """Create and return a temp directory path for this class (no chdir)."""
+        wd = tmp_path_factory.mktemp("arrow_workdir")
+        return Path(wd)
+
+    def _create_and_save_adapter_opt(self, out_dir: Path, rank: int = 4):
+        """
+        Build a randomly initialized LoRA adapter for OPT-125M and save into `out_dir`. We construct a model from
+        CONFIG (no pretrained weights) to avoid slow downloads here.
+        """
+        model_id = "facebook/opt-125m"
+        # Target all linear layers so the adapter matches whatever we later quantize/load.
+        lora_cfg = LoraConfig(
+            r=rank,
+            target_modules="all-linear",
+            task_type="CAUSAL_LM",
+            init_lora_weights=False,
+        )
+        # Load the adapter on the model and save it
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+        peft_model = get_peft_model(model, lora_cfg)
+        peft_model.save_pretrained(out_dir)
+
+    @pytest.fixture(scope="class")
+    def ts_adapters_opt(self, workdir: Path):
+        """
+        Build 3 locally-saved task-specific adapters for OPT-125M and return their absolute paths.
+        """
+        paths = []
+        for i in range(3):
+            sub = workdir / f"ts_expert_{i}"
+            self._create_and_save_adapter_opt(sub)
+            paths.append(str(sub))
+        return paths
+
+    @require_bitsandbytes
+    @pytest.mark.single_gpu_tests
+    def test_arrow_4bit_opt125m_load_and_generate_with_local_adapters(self, ts_adapters_opt):
+        # Skip if CUDA or bitsandbytes isn’t available
+        if not torch.cuda.is_available():
+            pytest.skip("CUDA required for 4-bit bitsandbytes test.")
+
+        model_id = "facebook/opt-125m"
+
+        # Quantization config (nf4, bf16 compute)
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=False,
+        )
+
+        with hub_online_once(model_id):
+            # Load quantized base model
+            base_model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                torch_dtype=torch.bfloat16,
+                device_map="auto",
+                quantization_config=bnb_config,
+            )
+            with hub_online_once(model_id + "tokenizer"):
+                tok = AutoTokenizer.from_pretrained(model_id, use_fast=True)
+
+        # Build Arrow model from the locally created adapters
+        arrow_cfg = ArrowConfig(top_k=2, router_temperature=1.0, rng_seed=42)
+        model = create_arrow_model(
+            base_model=base_model,
+            task_specific_adapter_paths=ts_adapters_opt,  # local dirs (each has adapter_config.json)
+            arrow_config=arrow_cfg,
+        ).eval()
+
+        # Quick generate smoke test
+        inputs = tok("Hello world", return_tensors="pt")
+        inputs = {k: v.to(model.device) for k, v in inputs.items()}
+        with torch.no_grad():
+            out = model.generate(**inputs, max_new_tokens=8)
+
+        assert out is not None
+        assert out.shape[0] == 1  # batch size 1

@@ -660,7 +660,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         # TODO: theoretically, we could allow this if it's the same target layer
         config1 = LoHaConfig(target_modules=["lin0"], modules_to_save=["lin1"])
         peft_model.add_adapter("adapter1", config1)
-        with pytest.raises(ValueError, match="Only one adapter can be set at a time for modules_to_save"):
+        with pytest.raises(ValueError, match="Only one adapter can be set at a time for ModulesToSaveWrapper"):
             peft_model.set_adapter(["adapter0", "adapter1"])
 
     def test_get_nb_trainable_parameters(self):

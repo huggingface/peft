@@ -38,6 +38,7 @@ from transformers import Cache, DynamicCache, EncoderDecoderCache, PreTrainedMod
 from transformers.modeling_outputs import QuestionAnsweringModelOutput, SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
 
+from peft.tuners.lora.variants import get_alora_offsets_for_forward, get_alora_offsets_for_generate
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import AuxiliaryTrainingWrapper
 from peft.utils.constants import DUMMY_MODEL_CONFIG
@@ -116,7 +117,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self.peft_type = peft_config.peft_type
         # These args are special PEFT arguments that users can pass. They need to be removed before passing them to
         # forward.
-        self.special_peft_forward_args = {"adapter_names"}
+        self.special_peft_forward_args = {"adapter_names", "alora_offsets"}
 
         self._is_prompt_learning = peft_config.is_prompt_learning
         if self._is_prompt_learning:
@@ -787,14 +788,30 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 past_key_values = new_cache
             elif peft_config.num_transformer_submodules == 1:
                 # Dont' apply this to encoder-decoder models and not to models requiring special processing.
-                past_key_values = DynamicCache.from_legacy_cache(past_key_values)
+                # TODO: remove from_legacy_cache once transformers < 4.56 is dropped
+                transformers_lt_4_56 = packaging.version.parse(transformers.__version__) < packaging.version.parse(
+                    "4.56.0.dev0"
+                )
+                if transformers_lt_4_56:
+                    past_key_values = DynamicCache.from_legacy_cache(past_key_values)
+                else:
+                    past_key_values = DynamicCache(past_key_values)
+
             elif (peft_config.num_transformer_submodules == 2) and getattr(
                 self.base_model, "_supports_cache_class", True
             ):
                 # Dont' apply this to encoder-decoder models that don't support new Cache format yet
                 # If we don't apply this, prefix-tuning fails to update cross-attn cache
                 # TODO: remove check for _supports_cache_class once transformers 4.53 is no longer supported
-                past_key_values = EncoderDecoderCache.from_legacy_cache(past_key_values)
+                # TODO: remove from_legacy_cache once transformers < 4.56 is dropped
+                transformers_lt_4_56 = packaging.version.parse(transformers.__version__) < packaging.version.parse(
+                    "4.56.0.dev0"
+                )
+                if transformers_lt_4_56:
+                    past_key_values = EncoderDecoderCache.from_legacy_cache(past_key_values)
+                else:
+                    past_key_values = EncoderDecoderCache(past_key_values)
+
                 past_key_values.cross_attention_cache = DynamicCache()
                 # invalidate the cross attention cache, since we add virtual tokens to the encoder
                 for key in past_key_values.is_updated.keys():
@@ -1438,8 +1455,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             raise ValueError(f"Adapter {adapter_name} not found.")
         self.active_adapter = adapter_name
         if not self.peft_config[adapter_name].is_prompt_learning:
+            # _set_adapter does not need to be called, since it's called through the BaseTuner class.
             self.base_model.set_adapter(adapter_name)
-        _set_adapter(self, adapter_name)
+        else:
+            # handle auxiliary modules
+            _set_adapter(self, adapter_name)
 
     @property
     def base_model_torch_dtype(self):
@@ -1605,7 +1625,12 @@ class PeftModelForSequenceClassification(PeftModel):
                     break
 
         # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
-        _set_trainable(self, adapter_name, module_names=getattr(peft_config, "modules_to_save", None))
+        _set_trainable(
+            self,
+            adapter_name,
+            module_names=getattr(peft_config, "modules_to_save", None),
+            inference_mode=peft_config.inference_mode,
+        )
 
     def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """
@@ -1836,7 +1861,10 @@ class PeftModelForCausalLM(PeftModel):
         **kwargs,
     ):
         peft_config = self.active_peft_config
+
         if not peft_config.is_prompt_learning:
+            # Adds alora_offsets to kwargs if relevant. No other modifications.
+            kwargs = get_alora_offsets_for_forward(self, input_ids, inputs_embeds, **kwargs)
             if self.base_model.config.model_type == "mpt":
                 if inputs_embeds is not None:
                     raise AssertionError("forward in MPTForCausalLM does not support inputs_embeds")
@@ -1976,6 +2004,8 @@ class PeftModelForCausalLM(PeftModel):
             self.base_model.generation_config = self.generation_config
         try:
             if not peft_config.is_prompt_learning:
+                # Adds alora_offsets to kwargs if relevant. No other changes.
+                kwargs = get_alora_offsets_for_generate(self, *args, **kwargs)
                 with self._enable_peft_forward_hooks(*args, **kwargs):
                     kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
                     outputs = self.base_model.generate(*args, **kwargs)
@@ -2451,7 +2481,12 @@ class PeftModelForTokenClassification(PeftModel):
                 break
 
         # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
-        _set_trainable(self, adapter_name, module_names=getattr(peft_config, "modules_to_save", None))
+        _set_trainable(
+            self,
+            adapter_name,
+            module_names=getattr(peft_config, "modules_to_save", None),
+            inference_mode=peft_config.inference_mode,
+        )
 
     def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """
@@ -2667,7 +2702,12 @@ class PeftModelForQuestionAnswering(PeftModel):
                 break
 
         # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
-        _set_trainable(self, adapter_name, module_names=getattr(peft_config, "modules_to_save", None))
+        _set_trainable(
+            self,
+            adapter_name,
+            module_names=getattr(peft_config, "modules_to_save", None),
+            inference_mode=peft_config.inference_mode,
+        )
 
     def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
         """

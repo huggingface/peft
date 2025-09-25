@@ -14,6 +14,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import dataclasses
 import re
 import unittest
 from copy import deepcopy
@@ -1488,6 +1489,11 @@ class MockModelConfig:
         return self.config
 
 
+@dataclasses.dataclass
+class MockModelDataclassConfig:
+    mock_key: str
+
+
 class ModelWithConfig(nn.Module):
     def __init__(self):
         self.config = MockModelConfig()
@@ -1496,6 +1502,11 @@ class ModelWithConfig(nn.Module):
 class ModelWithDictConfig(nn.Module):
     def __init__(self):
         self.config = MockModelConfig.config
+
+
+class ModelWithDataclassConfig(nn.Module):
+    def __init__(self):
+        self.config = MockModelDataclassConfig(**MockModelConfig().to_dict())
 
 
 class ModelWithNoConfig(nn.Module):
@@ -1514,6 +1525,10 @@ class TestBaseTunerGetModelConfig(unittest.TestCase):
     def test_get_model_config_with_no_config(self):
         config = BaseTuner.get_model_config(ModelWithNoConfig())
         assert config == DUMMY_MODEL_CONFIG
+
+    def test_get_model_config_with_dataclass(self):
+        config = BaseTuner.get_model_config(ModelWithDataclassConfig())
+        assert config == MockModelConfig.config
 
 
 class TestBaseTunerWarnForTiedEmbeddings:

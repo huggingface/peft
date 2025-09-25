@@ -42,16 +42,23 @@ from .constants import (
     INCLUDE_LINEAR_LAYERS_SHORTHAND,
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_BONE_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_HRA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LOHA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LOKR_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_MISS_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_OFT_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_POLY_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_ROAD_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
@@ -74,16 +81,23 @@ __all__ = [
     "INCLUDE_LINEAR_LAYERS_SHORTHAND",
     "SAFETENSORS_WEIGHTS_NAME",
     "TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_BONE_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_HRA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LOHA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LOKR_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_MISS_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_OFT_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_POLY_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
     "TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_ROAD_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING",
@@ -434,11 +448,21 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         else:
             self._disable_adapters = True
 
-    def set_adapter(self, adapter_names: Union[str, list[str]]):
+    def check_set_adapter(self, adapter_name: str | list[str]) -> str | None:
+        """Helper function to check if the given adapter(s) can be set.
+
+        Return the name of the adapter to be set or None if no adapter should be set.
+        """
+        raise NotImplementedError
+
+    def set_adapter(self, adapter_names: Union[str, list[str]], inference_mode: bool = False) -> None:
         """Set the active adapter
 
         Args:
-            adapter_name (str): The name of the adapter to set as active
+            adapter_names (str or list[str]):
+                The name(s) of the adapter(s) to set as active
+            inference_mode (bool, optional):
+                 Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         """
         if isinstance(adapter_names, str):
             self._active_adapter = adapter_names
@@ -548,25 +572,48 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 
         if enabled:
             self.original_module.requires_grad_(False)
-            self.modules_to_save[self.active_adapter].requires_grad_(True)
+            for adapter_name in self.active_adapters:
+                self.modules_to_save[adapter_name].requires_grad_(True)
         else:
             self.original_module.requires_grad_(True)
             self.modules_to_save.requires_grad_(False)
 
-    def set_adapter(self, adapter_names: Union[str, list[str]]):
+    def check_set_adapter(self, adapter_name: str | list[str]) -> str | None:
+        """Helper function to check if the given adapter(s) can be set.
+
+        Return the name of the adapter to be set or None if no adapter should be set.
+        """
+        if isinstance(adapter_name, str):
+            return adapter_name
+
+        # adapter_name is a list of str
+        if len(adapter_name) == 0:
+            raise ValueError("Please specify at least one adapter to set")
+
+        adapter_names_in_module = [n for n in adapter_name if n in self.modules_to_save]
+
+        if len(adapter_names_in_module) > 1:
+            raise ValueError(f"Only one adapter can be set at a time for {self}, got {len(adapter_names_in_module)}")
+
+        adapter_name_to_set: str | None
+        if not adapter_names_in_module:
+            adapter_name_to_set = None
+        else:
+            adapter_name_to_set = adapter_names_in_module[0]
+
+        return adapter_name_to_set
+
+    def set_adapter(self, adapter_names: Union[str, list[str]], inference_mode: bool = False) -> None:
         """Set the active adapter
 
-        Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True). If this is
-        not desired, use the following code.
-
-        ```py
-        >>> for name, param in model_peft.named_parameters():
-        ...     if ...:  # some check on name (ex. if 'lora' in name)
-        ...         param.requires_grad = False
-        ```
+        Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True) unless
+        inference_mode is True.
 
         Args:
-            adapter_names (list[str], str): The name of the adapter to set as active
+            adapter_names (list[str], str):
+                 The name(s) of the adapter(s) to set as active.
+            inference_mode (bool, optional):
+                 Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         """
         if isinstance(adapter_names, str):
             adapter_names = [adapter_names]
@@ -574,13 +621,19 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         if len(adapter_names) > 1:
             raise ValueError(f"Attempted to set multiple ({adapter_names}) adapters at once for modules_to_save.")
 
+        if len(adapter_names) == 0:
+            # when calling model.add_adapter, the new adapter is not automatically active
+            self._active_adapter = []
+            return
+
         adapter_name = adapter_names[0]
 
         if adapter_name not in self._adapters:
             raise ValueError(f"Adapter {adapter_name} not found in {self._adapters}")
 
-        self.modules_to_save[self.active_adapters[0]].requires_grad_(False)
-        self.modules_to_save[adapter_name].requires_grad_(True)
+        for currently_active_adapter_name in self.active_adapters:
+            self.modules_to_save[currently_active_adapter_name].requires_grad_(False)
+        self.modules_to_save[adapter_name].requires_grad_(not inference_mode)
         self._active_adapter = adapter_name
 
     def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
@@ -767,9 +820,35 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
 
         self.token_adapter.enable_adapters(enabled)
 
-    def set_adapter(self, adapter_names: Union[str, list[str]]):
-        super().set_adapter(adapter_names)
-        self.token_adapter.set_adapter(adapter_names)
+    def check_set_adapter(self, adapter_name: str | list[str]) -> str | None:
+        """Helper function to check if the given adapter(s) can be set.
+
+        Return the name of the adapter to be set or None if no adapter should be set.
+        """
+        if isinstance(adapter_name, str):
+            return adapter_name
+
+        # adapter_name is a list of str
+        if len(adapter_name) == 0:
+            raise ValueError("Please specify at least one adapter to set")
+
+        # TODO In theory, multiple active trainable tokens is fine when the indices don't overlap
+        adapter_names_in_module = [n for n in adapter_name if n in self.token_adapter.trainable_tokens_delta]
+
+        if len(adapter_names_in_module) > 1:
+            raise ValueError(f"Only one adapter can be set at a time for {self}, got {len(adapter_names_in_module)}")
+
+        adapter_name_to_set: str | None
+        if not adapter_names_in_module:
+            adapter_name_to_set = None
+        else:
+            adapter_name_to_set = adapter_names_in_module[0]
+
+        return adapter_name_to_set
+
+    def set_adapter(self, adapter_names: Union[str, list[str]], inference_mode: bool = False) -> None:
+        super().set_adapter(adapter_names, inference_mode=inference_mode)
+        self.token_adapter.set_adapter(adapter_names, inference_mode=inference_mode)
 
     def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
         """
@@ -848,8 +927,10 @@ def _set_trainable(
     model,
     adapter_name,
     module_names,
-    strict_module_check=False,
+    inference_mode: bool,
+    strict_module_check: bool = False,
     wrapper_cls: Optional[AuxiliaryTrainingWrapper] = None,
+    activate_adapter: bool = True,
     **wrapper_kwargs,
 ):
     """Wraps modules that are supposed to be re-trained either normally, i.e. marking them to require gradients and
@@ -864,6 +945,8 @@ def _set_trainable(
 
     If `strict_module_check` is set, this method raises an ValueError, similar to BaseTuner.inject_adapter when none of
     the requested modules in `module_names` is not found in the model.
+
+    The `active_adapter` flag indicates if this new adapter should be activated.
     """
     if wrapper_cls is None:
         wrapper_cls = ModulesToSaveWrapper
@@ -884,10 +967,13 @@ def _set_trainable(
             parent, target, target_name = _get_submodules(model, key)
             if isinstance(target, wrapper_cls):
                 target.update(adapter_name, **wrapper_kwargs)
-                target.set_adapter(target.active_adapter)
+                target.set_adapter(target.active_adapter, inference_mode=inference_mode)
             else:
                 new_module = wrapper_cls(target, adapter_name, **wrapper_kwargs)
-                new_module.set_adapter(adapter_name)
+                if activate_adapter:
+                    new_module.set_adapter(adapter_name, inference_mode=inference_mode)
+                else:
+                    new_module.set_adapter([], inference_mode=inference_mode)
                 setattr(parent, target_name, new_module)
                 trainable_modules.append(new_module)
             found_modules.add(target_name)
@@ -901,31 +987,20 @@ def _set_trainable(
     return trainable_modules
 
 
-def _set_adapter(model, adapter_name):
-    def check_adapter_name(adapter_name):
-        if isinstance(adapter_name, str):
-            return adapter_name
-
-        # adapter_name is a list of str
-        if len(adapter_name) > 1:
-            raise ValueError("Only one adapter can be set at a time for modules_to_save")
-        elif len(adapter_name) == 0:
-            raise ValueError("Please specify at least one adapter to set")
-        adapter_name = adapter_name[0]
-        return adapter_name
-
+def _set_adapter(model, adapter_name: str | list[str], inference_mode: bool = False):
     for module in model.modules():
         if isinstance(module, AuxiliaryTrainingWrapper):
             # only check the adapter_name if we actually encounter a AuxiliaryTrainingWrapper, otherwise we don't care
-            adapter_name = check_adapter_name(adapter_name)
+            adapter_name_to_set = module.check_set_adapter(adapter_name)
 
             # if the adapter is found in this module, set it as the active adapter, else disable the adapters of this
             # module
-            if adapter_name in module._adapters:
+            if adapter_name_to_set in module._adapters:
                 module.enable_adapters(True)
-                module.set_adapter(adapter_name)
+                module.set_adapter(adapter_name_to_set, inference_mode=inference_mode)
             else:
                 module.enable_adapters(False)
+                module.set_adapter([], inference_mode=inference_mode)
 
 
 def _prepare_prompt_learning_config(peft_config, model_config):
@@ -1278,15 +1353,24 @@ def get_pattern_key(pattern_keys: Sequence[str], key_to_match: str) -> str:
     return key_to_match
 
 
-def set_additional_trainable_modules(model, peft_config, model_config, adapter_name):
+def set_additional_trainable_modules(model, peft_config, model_config, adapter_name, activate_adapter: bool = True):
     """Handle the resolution of additional trainable modules (also called AuxiliaryTrainingWrapper)
     by checking the config if such modules are requested and adding them to the model.
 
     Currently trainable tokens and modules to save are considered additional trainable modules.
+
+    If `activate_adapter` is set to `False`, the adapter won't be activated. This is typically the case when
+    `model.add_adapter` or `model.load_adapter` are being called.
     """
     if getattr(peft_config, "modules_to_save", None) is not None:
         # this may add a new ModulesToSaveWrapper
-        _set_trainable(model, adapter_name, module_names=getattr(peft_config, "modules_to_save", None))
+        _set_trainable(
+            model,
+            adapter_name,
+            inference_mode=peft_config.inference_mode,
+            module_names=getattr(peft_config, "modules_to_save", None),
+            activate_adapter=activate_adapter,
+        )
 
     if getattr(peft_config, "trainable_token_indices", None) is not None:
         if isinstance(peft_config.trainable_token_indices, dict):
@@ -1309,10 +1393,12 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
             _set_trainable(
                 model,
                 adapter_name,
+                inference_mode=peft_config.inference_mode,
                 module_names=[target_layer],
                 strict_module_check=True,
                 wrapper_cls=TrainableTokensWrapper,
                 token_indices=token_indices,
+                activate_adapter=activate_adapter,
             )
 
         # There might be the possibility that we have output weights that are tied to the input weights.
@@ -1331,6 +1417,7 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
             _set_trainable(
                 model,
                 adapter_name,
+                inference_mode=peft_config.inference_mode,
                 module_names=module_keys,
                 strict_module_check=True,
                 wrapper_cls=TrainableTokensWrapper,

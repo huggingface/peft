@@ -51,7 +51,7 @@ class PolyLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
-    def update_layer(self, adapter_name, poly_config):
+    def update_layer(self, adapter_name, poly_config, inference_mode: bool = False, **kwargs):
         if poly_config.r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {poly_config.r}")
 
@@ -82,7 +82,7 @@ class PolyLayer(BaseTunerLayer):
         self.reset_poly_parameters(adapter_name, init_weights=poly_config.init_weights)
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def reset_poly_parameters(self, adapter_name, init_weights):
         if adapter_name in self.poly_lora_A.keys():
