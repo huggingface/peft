@@ -20,6 +20,7 @@ from accelerate.utils.imports import is_xpu_available
 from torch import nn
 
 from peft.utils.other import transpose
+import torch.nn.functional as F
 
 from .dora import DoraConv1dLayer, DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer
 from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd
@@ -475,7 +476,10 @@ class QALoraLinearVariant(LoraVariant):
 
     @staticmethod
     def forward(module: Linear, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
-        lora_A_weight = module.lora_A[active_adapter].weight  # Keep original size: [r, in_features]
+        # ================================================================= #
+        # TEIL 1: Bestehender QA-LoRA Code (bleibt 100% identisch)
+        # ================================================================= #
+        lora_A_weight = module.lora_A[active_adapter].weight
         lora_B_weight = module.lora_B[active_adapter].weight
         dropout = module.lora_dropout[active_adapter]
         lora_scaling_coefficient = module.scaling[active_adapter]
@@ -484,7 +488,6 @@ class QALoraLinearVariant(LoraVariant):
         x_dropped = dropout(x) if module.training and not isinstance(dropout, nn.Identity) else x
         orig_shape = x_dropped.shape
 
-        # Reshape to 2D (memory efficient way)
         if len(orig_shape) > 2:
             x_flat = x_dropped.view(-1, module.in_features)
         else:
@@ -493,24 +496,77 @@ class QALoraLinearVariant(LoraVariant):
         batch_size, in_features = x_flat.shape
         pooled_features = in_features // group_size
 
-        # Memory efficient pooling (from working code)
         x_pooled = x_flat.view(batch_size, pooled_features, group_size).mean(dim=2)
-
-        # Calculate paper_scaling_factor
         paper_scaling_factor = in_features / group_size
         x_pooled_scaled = x_pooled * paper_scaling_factor
 
-        # NOW: Apply pooling to LoRA_A weights in a memory-efficient way
-        # Instead of reshaping the entire weight matrix, we compute the pooled result directly
         lora_A_weight_reshaped = lora_A_weight.view(lora_A_weight.shape[0], pooled_features, group_size)
-        lora_A_pooled_weight = lora_A_weight_reshaped.mean(dim=2)  # [r, pooled_features]
+        lora_A_pooled_weight = lora_A_weight_reshaped.mean(dim=2)
 
-        # Apply LoRA with pooled dimensions
-        intermediate = x_pooled_scaled @ lora_A_pooled_weight.t()  # [batch, r]
-        delta = intermediate @ lora_B_weight.t() * lora_scaling_coefficient  # [batch, out_features]
+        intermediate = x_pooled_scaled @ lora_A_pooled_weight.t()
+        delta = intermediate @ lora_B_weight.t() * lora_scaling_coefficient
 
-        # Reshape back to original shape
         if len(orig_shape) > 2:
             delta = delta.view(orig_shape[:-1] + (delta.size(-1),))
+            
+        # Das 'result' hier ist der Output der quantisierten Basisschicht.
+        # 'delta' ist der Beitrag von QA-LoRA.
+        final_result = result + delta
+        
+        # ================================================================= #
+        # TEIL 2: IHR NEUER CODE - DER OUTLIER-BEITRAG (KORRIGIERTE LOGIK)
+        # ================================================================= #
+        # Prüfen, ob die Outlier-Attribute existieren, die wir injiziert haben.
+        if hasattr(module.base_layer, "outlier_weights") and module.base_layer.outlier_indices.numel() > 0:
+            
+            input_tensor = x_dropped 
+            
+            # --- 1. Hochpräzisen Beitrag berechnen ---
+            # Erstelle eine temporäre Matrix in der Form (out, in), für die die Indizes gelten.
+            # WICHTIG: Leite dtype und device direkt von den outlier_weights ab, um den Fehler zu vermeiden.
+            temp_hp_matrix = torch.zeros(
+                (module.base_layer.out_features, module.base_layer.in_features),
+                device=module.base_layer.outlier_weights.device,
+                dtype=module.base_layer.outlier_weights.dtype
+            )
+            
+            # Jetzt stimmen die Datentypen überein.
+            temp_hp_matrix.view(-1).scatter_(
+                0,
+                module.base_layer.outlier_indices,
+                module.base_layer.outlier_weights
+            )
+            
+            # Transponiere sie zur (in, out) Form für die Multiplikation
+            sparse_outlier_matrix_hp = temp_hp_matrix.t()
+            
+            # Direkte Multiplikation: input @ weight
+            outlier_contribution_hp = input_tensor @ sparse_outlier_matrix_hp
 
-        return result + delta
+            # --- 2. Niedrigpräzisen Beitrag der Outlier berechnen ---
+            dequantized_weight_lp = module.base_layer.dequantize_weight() # Shape: (in_features, out_features)
+            
+            # Erstelle eine temporäre (out, in) Matrix
+            temp_lp_matrix = torch.zeros(
+                (module.base_layer.out_features, module.base_layer.in_features),
+                device=dequantized_weight_lp.device,
+                dtype=dequantized_weight_lp.dtype # Leite dtype von der dequantisierten Matrix ab
+            )
+            
+            # Extrahiere die LP-Werte aus der (transponierten) dequantisierten Matrix
+            lp_outlier_values = dequantized_weight_lp.t().contiguous().view(-1)[module.base_layer.outlier_indices]
+            
+            # Fülle die temporäre Matrix
+            temp_lp_matrix.view(-1).scatter_(0, module.base_layer.outlier_indices, lp_outlier_values)
+
+            # Transponiere sie zur (in, out) Form
+            sparse_outlier_matrix_lp = temp_lp_matrix.t()
+
+            # Direkte Multiplikation: input @ weight
+            outlier_contribution_lp = input_tensor @ sparse_outlier_matrix_lp.to(dtype=input_tensor.dtype)
+            
+            # --- 3. Das Ergebnis korrigieren ---
+            # Addiere den hochpräzisen Beitrag und subtrahiere den niedrigpräzisen Beitrag.
+            final_result = final_result + outlier_contribution_hp - outlier_contribution_lp
+                
+        return final_result

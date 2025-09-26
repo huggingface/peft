@@ -1,20 +1,20 @@
 #!/bin/bash
 
 # Configuration from launch.json
-BASE_MODEL="HuggingFaceTB/SmolLM2-1.7B"
+BASE_MODEL="TinyLlama/TinyLlama_v1.1"
 DATASET="yahma/alpaca-cleaned"
-DATASET_SPLIT="train[:10000]"
+DATASET_SPLIT="train[:1]"
 
 # Training parameters from launch.json
 LEARNING_RATE="1e-4"
-BATCH_SIZE=4
+BATCH_SIZE=8
 GRAD_ACCUM=1
 NUM_EPOCHS=2
 MAX_LENGTH=2048
 
 # Training mode selection
-TRAINING_MODE="pissa"  # Options: full, lora, qlora, qalora, pissa, corda
-LORA_R=4
+TRAINING_MODE="qalora"  # Options: full, lora, qlora, qalora, pissa, corda
+LORA_R=256
 QALORA_GROUP_SIZE=32
 PISSA_NITER=4
 
@@ -66,7 +66,7 @@ fi
 
 # Phase 1: Training
 echo "📚 Phase 1: Training with $TRAINING_MODE..."
-python corda_finetuning.py \
+python ultimate_train_collection.py \
     --model_name_or_path="$BASE_MODEL" \
     --training_mode="$TRAINING_MODE" \
     --lora_r="$LORA_R" \
@@ -90,7 +90,7 @@ python corda_finetuning.py \
     --dataloader_pin_memory="$DATALOADER_PIN_MEMORY" \
     --remove_unused_columns="$REMOVE_UNUSED_COLUMNS" \
     --report_to="$REPORT_TO" \
-    --bits="2"
+    --bits="3"
 
 if [ $? -ne 0 ]; then
     echo "❌ Training failed!"
@@ -105,7 +105,7 @@ sleep 2
 # Phase 2: Evaluation
 echo "📊 Phase 2: Evaluation on multiple benchmarks..."
 python eval_peft.py \
-    --model_name_or_path="/home/gap/Documents/peft/examples/qalora_finetuning/train_results_alpaca_cleaned_qlora/ft" \
+    --model_name_or_path="/home/nudel/Documents/peft/examples/qalora_finetuning/train_results_alpaca_cleaned_qalora_r_4_group_32/ft/adapter" \
     --base_model="$BASE_MODEL" \
     --tasks="$EVAL_TASKS" \
     --num_fewshot="$NUM_FEWSHOT" \
@@ -113,8 +113,7 @@ python eval_peft.py \
     --test_generation \
     --output_dir="$EVAL_DIR" \
     --limit="$EVAL_LIMIT" \
-    --apply_gptq_post_quant \
-    --bits="2"
+    --bits="3"
     
 
 

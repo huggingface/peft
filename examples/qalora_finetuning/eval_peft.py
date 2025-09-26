@@ -14,6 +14,7 @@ from lm_eval.models.huggingface import HFLM
 from transformers import AutoModelForCausalLM, AutoTokenizer, GPTQConfig
 from gptqmodel import GPTQModel
 from peft import PeftModel
+from lm_eval.loggers import WandbLogger
 
 
 datasets.config.HF_DATASETS_TRUST_REMOTE_CODE = True
@@ -127,7 +128,11 @@ def evaluate_with_lm_eval(model, tokenizer, tasks, num_fewshot=5, limit=None, pe
         limit=limit,
         batch_size=per_device_eval_batch_size,
     )
-
+    wandb_logger = WandbLogger()  # or empty if wandb.init(...) already called before
+    wandb_logger.post_init(results)
+    wandb_logger.log_eval_result()
+    wandb_logger.log_eval_samples(results["samples"])  # if log_samples
+    
     # Clean up
     del lm_harness_model
     torch.cuda.empty_cache()
@@ -149,6 +154,118 @@ def print_results(results):
             if isinstance(value, (int, float)):
                 print(f"  {metric_name}: {value:.4f}")
 
+def generate_response(model, tokenizer, instruction: str, max_new_tokens: int = 256) -> str:
+    """
+    Generates a response from the model given an instruction.
+    """
+    # Format the instruction using the same prompt template as in training
+    PROMPT = (
+        "Below is an instruction that describes a task. "
+        "Write a response that appropriately completes the request.\n\n"
+        "### Instruction:\n{instruction}\n\n### Response:"
+    )
+    prompt = PROMPT.format_map({"instruction": instruction})
+
+    # Tokenize the formatted prompt
+    inputs = tokenizer(prompt, return_tensors="pt")
+    input_ids = inputs.input_ids.to(model.device)
+
+    # Generate text using the model
+    with torch.no_grad():
+        generation_output = model.generate(
+            input_ids=input_ids,
+            max_new_tokens=max_new_tokens,
+            do_sample=True,
+            top_k=50,
+            top_p=0.95,
+            temperature=0.7,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+
+    # Decode the generated tokens, skipping special tokens
+    # The output contains the prompt, so we slice it off
+    response = tokenizer.decode(generation_output[0][len(input_ids[0]):], skip_special_tokens=True)
+    return response.strip()
+
+import datasets
+import json
+import pandas as pd
+
+def generate_alpaca_response(model, tokenizer, training_mode, lora_r, output_dir):
+    eval_set = datasets.load_dataset("tatsu-lab/alpaca_eval", "alpaca_eval")["eval"]
+
+    # --- START OF CHANGE ---
+    # Prepare a unique subset of the evaluation data
+    # max_eval_samples = 10
+    # print(f"Filtering evaluation set to {max_eval_samples} unique instructions...")
+    df = eval_set.to_pandas()
+    unique_df = df.drop_duplicates(subset=['instruction'])
+
+    # # If there are more unique instructions than requested, sample them to avoid bias
+    # if len(unique_df) > max_eval_samples:
+    #     unique_df = unique_df.sample(n=max_eval_samples, random_state=script_args.seed)
+        
+    eval_subset = datasets.Dataset.from_pandas(unique_df)
+    print(f"Proceeding with {len(eval_subset)} samples for generation.")
+
+    outputs = []
+    total_to_generate = 10
+
+    for i, example in enumerate(eval_subset):
+        print(f"Generating for example {i + 1}/{total_to_generate}...")
+        
+        output = generate_response(model, tokenizer, example["instruction"])
+        outputs.append({
+            **example,
+            "output": output,
+            "generator": f"{training_mode}_r{lora_r}",
+        })
+        if i == total_to_generate:
+            break
+    # --- END OF CHANGE ---
+
+    # Save the results to a JSON file
+    output_eval_file = os.path.join(output_dir, "alpaca_eval_results.json")
+    with open(output_eval_file, "w") as f:
+        json.dump(outputs, f, indent=4)
+
+    print(f"\n✅ Alpaca evaluation finished. Results saved to {output_eval_file}")
+    # --- END: Generation and Evaluation Logic ---
+
+def run_lm_harness_and_print_results(model, tokenizer, tasks, num_fewshot, limit, per_device_eval_batch_size, output_dir):
+    # Run evaluation
+    results = evaluate_with_lm_eval(
+        model=model,
+        tokenizer=tokenizer,
+        tasks=tasks,
+        num_fewshot=num_fewshot,
+        limit=limit,
+        per_device_eval_batch_size=per_device_eval_batch_size,
+    )
+
+    # Print results
+    print_results(results)
+
+    # Save results if requested
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, "eval_results.json")
+
+        # Remove samples to reduce file size
+        results_clean = results.copy()
+        if "samples" in results_clean:
+            del results_clean["samples"]
+
+        with open(output_path, "w") as f:
+            json.dump(results_clean, f, indent=2, default=str)
+
+        print(f"📁 Results saved to: {output_path}")
+
+    # Clean up
+    del model
+    torch.cuda.empty_cache()
+
+    print("✅ Evaluation complete!") 
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate PEFT model using lm-eval-harness")
@@ -200,39 +317,8 @@ def main():
             torch_dtype=torch.bfloat16,
         )
 
-    # Run evaluation
-    results = evaluate_with_lm_eval(
-        model=model,
-        tokenizer=tokenizer,
-        tasks=args.tasks,
-        num_fewshot=args.num_fewshot,
-        limit=args.limit,
-        per_device_eval_batch_size=args.per_device_eval_batch_size,
-    )
+    run_lm_harness_and_print_results(model, tokenizer, args.tasks, args.num_fewshot, args.limit, args.per_device_eval_batch_size, args.output_dir)
 
-    # Print results
-    print_results(results)
-
-    # Save results if requested
-    if args.output_dir:
-        os.makedirs(args.output_dir, exist_ok=True)
-        output_path = os.path.join(args.output_dir, "eval_results.json")
-
-        # Remove samples to reduce file size
-        results_clean = results.copy()
-        if "samples" in results_clean:
-            del results_clean["samples"]
-
-        with open(output_path, "w") as f:
-            json.dump(results_clean, f, indent=2, default=str)
-
-        print(f"📁 Results saved to: {output_path}")
-
-    # Clean up
-    del model
-    torch.cuda.empty_cache()
-
-    print("✅ Evaluation complete!")
 
 
 if __name__ == "__main__":

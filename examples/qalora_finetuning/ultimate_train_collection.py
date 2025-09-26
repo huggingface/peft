@@ -124,8 +124,11 @@ class TrainingArguments(transformers.TrainingArguments):
     outlier_percentage: float = field(
         default=0.1,
         metadata={"help": "Percentage of outliers to identify for Outlier-Aware QA-LoRA."},
+    )   
+    report_to: str = field(
+        default="wandb",
+        metadata={"help": "The integration to report the results and logs to."},
     )
-
 
 def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str):
     """Collects the state dict and dump to disk."""
@@ -276,6 +279,7 @@ def load_or_quantize_model(
             group_size=qalora_group_size,
             desc_act=False,
             sym=False,
+            backend="auto_trainable"
         )
 
         # The from_pretrained method with a quantization_config expects a path.
@@ -333,8 +337,8 @@ def load_or_quantize_model(
             return AutoModelForCausalLM.from_pretrained(quantized_model_path, device_map="auto")
         except Exception as e:
             print(f"Failed to load cached model: {e}. Will re-quantize.")
-            import shutil
-            shutil.rmtree(quantized_model_path)
+            # import shutil
+            # shutil.rmtree(quantized_model_path)
 
     print(f"Quantizing model with {bits}-bit and group size {qalora_group_size}, saving to cache: {quantized_model_path}")
     gptq_config = GPTQConfig(
@@ -344,6 +348,7 @@ def load_or_quantize_model(
         group_size=qalora_group_size,
         desc_act=False,
         sym=False,
+        backend="auto_trainable"
     )
     model = AutoModelForCausalLM.from_pretrained(
         base_model, device_map="auto", quantization_config=gptq_config, torch_dtype=torch.float16
@@ -445,6 +450,7 @@ def check_cached_quantize(model_path, model_to_quantize, tokenizer, bits, group_
         static_groups=False,
         true_sequential=True,
         actorder=True,
+        backend="auto_trainable"
     )
 
     print(f"Loading residual model for {bits}-bit quantization...")
@@ -516,7 +522,8 @@ def train():
             qalora_group_size=script_args.qalora_group_size,
             r=script_args.lora_r,
             lora_alpha=2 * script_args.lora_r,
-            target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
+            target_modules=["q_proj", "o_proj", "k_proj", "v_proj"],
+            # target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
             lora_dropout=0.05,
             bias="none",
         )
@@ -1006,7 +1013,9 @@ def train():
         model = get_peft_model(model, lora_config)
         print("  -> PEFT-Modell erfolgreich erstellt. PiSSA-Initialisierung wird beim Trainingsstart ausgelöst.")
     else:
-        raise ValueError(f"Unknown training mode: {script_args.training_mode}")
+        model = AutoModelForCausalLM.from_pretrained(script_args.model_name_or_path, device_map="auto", torch_dtype=torch.float16, trust_remote_code=True)
+        # raise ValueError(f"Unknown training mode: {script_args.training_mode}")
+
 
     trainable_params, all_param = get_nb_trainable_parameters(model)
     print(
@@ -1037,12 +1046,28 @@ def train():
     # for name, param in model.named_parameters():
     #     if not param.requires_grad:
     #         print(f"❌ Gradient disabled for parameter: {name}")
+    import wandb
+    wandb.init()
     trainer = Trainer(model=model, tokenizer=tokenizer, args=script_args, **data_module)
     trainer.train()
     # trainer.save_state()
     model.save_pretrained(os.path.join(script_args.output_dir, "ft/adapter"))
     tokenizer.save_pretrained(os.path.join(script_args.output_dir, "ft/adapter"))
 
+    # --- START: Generation and Evaluation Logic ---
+    print("\n🚀 Starting Alpaca evaluation...")
+    # Put the model in evaluation mode
+    model.eval()
+
+    subfolder_name = f"mode_{script_args.training_mode}_bits_{script_args.bits}_rank_{script_args.lora_r}_group_{script_args.qalora_group_size}"
+    output_dir_eval = os.path.join(script_args.output_dir, subfolder_name)
+    os.makedirs(output_dir_eval, exist_ok=True)
+
+    from eval_peft import generate_alpaca_response, run_lm_harness_and_print_results
+    generate_alpaca_response(model, tokenizer, script_args.training_mode, script_args.lora_r, output_dir_eval)
+    tasks="wikitext,piqa,tinyArc,tinyHellaswag,tinyGSM8k,tinyMMLU"
+    run_lm_harness_and_print_results(model=model, tokenizer=tokenizer, tasks=tasks, num_fewshot=1, limit=100, per_device_eval_batch_size=2, output_dir=output_dir_eval)
+    print("eval lm_harness")
 
 if __name__ == "__main__":
     train()
