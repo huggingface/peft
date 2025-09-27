@@ -27,7 +27,12 @@ class FourierFTLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names = ("fourierft_spectrum",)
     # All names of other parameters that may contain adapter-related parameters
-    other_param_names = ("fourierft_n_frequency", "fourierft_scaling", "fourierft_random_loc_seed", "fourierft_ifft2_norm")
+    other_param_names = (
+        "fourierft_n_frequency",
+        "fourierft_scaling",
+        "fourierft_random_loc_seed",
+        "fourierft_ifft2_norm",
+    )
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         self.base_layer = base_layer
@@ -39,7 +44,7 @@ class FourierFTLayer(BaseTunerLayer):
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
-        self.fourierft_ifft2_norm = kwargs['ifft2_norm']
+        self.fourierft_ifft2_norm = kwargs["ifft2_norm"]
         self.kwargs = kwargs
 
         base_layer = self.get_base_layer()
@@ -60,7 +65,7 @@ class FourierFTLayer(BaseTunerLayer):
     ):
         if n_frequency <= 0:
             raise ValueError(f"`n_frequency` should be a positive integer value but the value passed is {n_frequency}")
-        
+
         if isinstance(self, FourierFTLinear):
             max_freqs = self.in_features * self.out_features
         else:
@@ -97,9 +102,11 @@ class FourierFTLayer(BaseTunerLayer):
         indices = self.indices[adapter].to(spectrum.device)
         dense_spectrum = torch.zeros(self.out_features, self.in_features, device=spectrum.device)
         dense_spectrum[indices[0, :], indices[1, :]] = spectrum.float()
-        delta_weight = torch.fft.ifft2(dense_spectrum, norm=self.fourierft_ifft2_norm).real * self.fourierft_scaling[adapter]
+        delta_weight = (
+            torch.fft.ifft2(dense_spectrum, norm=self.fourierft_ifft2_norm).real * self.fourierft_scaling[adapter]
+        )
         return delta_weight.to(spectrum.dtype)
-    
+
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
@@ -149,7 +156,7 @@ class FourierFTLayer(BaseTunerLayer):
             if active_adapter in self.fourierft_spectrum.keys():
                 self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
 
-    def set_indices(self, adapter_name : str, n_frequency : int):
+    def set_indices(self, adapter_name: str, n_frequency: int):
         self.indices[adapter_name] = torch.randperm(
             self.out_features * self.in_features,
             generator=torch.Generator().manual_seed(self.fourierft_random_loc_seed[adapter_name]),
@@ -213,7 +220,7 @@ class FourierFTLinear(nn.Module, FourierFTLayer):
         rep = super().__repr__()
         return "fourierft." + rep
 
-    def set_indices(self, adapter_name : str, n_frequency : int):
+    def set_indices(self, adapter_name: str, n_frequency: int):
         super().set_indices(adapter_name, n_frequency)
 
 
@@ -233,7 +240,7 @@ class FourierFTConv2D(nn.Module, FourierFTLayer):
     ) -> None:
         super().__init__()
         FourierFTLayer.__init__(self, base_layer, **kwargs)
-            
+
         self.fan_in_fan_out = fan_in_fan_out
         self._active_adapter = adapter_name
         kW = base_layer.kernel_size[0]
@@ -244,7 +251,7 @@ class FourierFTConv2D(nn.Module, FourierFTLayer):
             n_frequency = int(alpha * self.in_features * self.out_features * kW * kH)
         self.update_layer(adapter_name, n_frequency, scaling, init_weights, random_loc_seed)
 
-    def set_indices(self, adapter_name : str, n_frequency : int):
+    def set_indices(self, adapter_name: str, n_frequency: int):
         kW = self.base_layer.kernel_size[0]
         kH = self.base_layer.kernel_size[1]
         self.indices[adapter_name] = torch.randperm(
@@ -252,7 +259,11 @@ class FourierFTConv2D(nn.Module, FourierFTLayer):
             generator=torch.Generator().manual_seed(self.fourierft_random_loc_seed[adapter_name]),
         )[:n_frequency]
         self.indices[adapter_name] = torch.stack(
-            [self.indices[adapter_name] // (self.in_features * kW), self.indices[adapter_name] % (self.in_features * kW)], dim=0
+            [
+                self.indices[adapter_name] // (self.in_features * kW),
+                self.indices[adapter_name] % (self.in_features * kW),
+            ],
+            dim=0,
         )
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
@@ -260,9 +271,11 @@ class FourierFTConv2D(nn.Module, FourierFTLayer):
         kH = self.base_layer.kernel_size[1]
         spectrum = self.fourierft_spectrum[adapter]
         indices = self.indices[adapter].to(spectrum.device)
-        dense_spectrum = torch.zeros(self.out_features*kH, self.in_features*kW, device=spectrum.device)
+        dense_spectrum = torch.zeros(self.out_features * kH, self.in_features * kW, device=spectrum.device)
         dense_spectrum[indices[0, :], indices[1, :]] = spectrum.float()
-        delta_weight = torch.fft.ifft2(dense_spectrum, norm=self.fourierft_ifft2_norm).real * self.fourierft_scaling[adapter]
+        delta_weight = (
+            torch.fft.ifft2(dense_spectrum, norm=self.fourierft_ifft2_norm).real * self.fourierft_scaling[adapter]
+        )
         return torch.reshape(delta_weight, (self.out_features, self.in_features, kW, kH))
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:

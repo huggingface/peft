@@ -664,26 +664,25 @@ TEST_CASES = [
         },
     ),
     (
-        "Conv2d 1 FourierFT", 
-        "Conv2d", 
+        "Conv2d 1 FourierFT",
+        "Conv2d",
         FourierFTConfig,
         {
             "target_modules": ["conv2d"],
             "n_frequency": 1000,
-        }
-    ), 
+        },
+    ),
     (
-        "Conv2d 2 FourierFT", 
-        "Conv2d", 
-        FourierFTConfig, 
+        "Conv2d 2 FourierFT",
+        "Conv2d",
+        FourierFTConfig,
         {
             "target_modules": ["conv2d", "lin0"],
-            "alpha" : 0.01,
+            "alpha": 0.01,
             "init_weights": True,
             "ifft2_norm": "ortho",
-        }
-    ), 
-    
+        },
+    ),
     ##########
     # VBLoRA #
     ##########

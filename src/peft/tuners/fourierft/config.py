@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Union, Literal
+from typing import Literal, Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
@@ -176,7 +176,7 @@ class FourierFTConfig(PeftConfig):
     )
 
     ifft2_norm: Optional[Literal["backward", "forward", "ortho"]] = field(
-        default_factory='backward',
+        default_factory="backward",
         metadata={
             "help": (
                 "The normalization applied for the ifft2 operation."
@@ -199,9 +199,7 @@ class FourierFTConfig(PeftConfig):
     alpha: float = field(
         default=None,
         metadata={
-            "help": (
-                "The alpha value dynamically sets the n_frequency = int(alpha * out_features * in_features)"
-            )
+            "help": ("The alpha value dynamically sets the n_frequency = int(alpha * out_features * in_features)")
         },
     )
 
@@ -224,9 +222,9 @@ class FourierFTConfig(PeftConfig):
         # check for layers_to_transform and layers_pattern
         if self.layers_pattern and not self.layers_to_transform:
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
-        
+
         if (self.alpha is not None) and (self.n_frequency != 1000):
             raise ValueError("Don't set both alpha and n_frequency, as alpha overrides ...")
-        
+
         if (self.alpha is not None) and (self.n_frequency_pattern != {}):
             raise ValueError("Don't set both alpha and n_frequency_pattern, as alpha overrides ...")

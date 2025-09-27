@@ -18,16 +18,15 @@ import warnings
 from itertools import chain
 
 import torch
-from transformers.pytorch_utils import Conv1D
 from torch.nn import Conv2d
+from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING,
 )
 
-from .config import FourierFTConfig
-from .layer import FourierFTLayer, FourierFTLinear, FourierFTConv2D
+from .layer import FourierFTConv2D, FourierFTLayer, FourierFTLinear
 
 
 class FourierFTModel(BaseTuner):
