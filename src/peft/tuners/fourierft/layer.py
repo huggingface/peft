@@ -27,7 +27,7 @@ class FourierFTLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names = ("fourierft_spectrum",)
     # All names of other parameters that may contain adapter-related parameters
-    other_param_names = ("fourierft_n_frequency", "fourierft_scaling", "fourierft_random_loc_seed")
+    other_param_names = ("fourierft_n_frequency", "fourierft_scaling", "fourierft_random_loc_seed", "fourierft_ifft2_norm")
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         self.base_layer = base_layer
@@ -39,6 +39,7 @@ class FourierFTLayer(BaseTunerLayer):
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
+        self.fourierft_ifft2_norm = kwargs['ifft2_norm']
         self.kwargs = kwargs
 
         base_layer = self.get_base_layer()
@@ -96,7 +97,7 @@ class FourierFTLayer(BaseTunerLayer):
         indices = self.indices[adapter].to(spectrum.device)
         dense_spectrum = torch.zeros(self.out_features, self.in_features, device=spectrum.device)
         dense_spectrum[indices[0, :], indices[1, :]] = spectrum.float()
-        delta_weight = torch.fft.ifft2(dense_spectrum, norm=self.kwargs['ifft2_norm']).real * self.fourierft_scaling[adapter]
+        delta_weight = torch.fft.ifft2(dense_spectrum, norm=self.fourierft_ifft2_norm).real * self.fourierft_scaling[adapter]
         return delta_weight.to(spectrum.dtype)
     
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -261,7 +262,7 @@ class FourierFTConv2D(nn.Module, FourierFTLayer):
         indices = self.indices[adapter].to(spectrum.device)
         dense_spectrum = torch.zeros(self.out_features*kH, self.in_features*kW, device=spectrum.device)
         dense_spectrum[indices[0, :], indices[1, :]] = spectrum.float()
-        delta_weight = torch.fft.ifft2(dense_spectrum, norm=self.kwargs['ifft2_norm']).real * self.fourierft_scaling[adapter]
+        delta_weight = torch.fft.ifft2(dense_spectrum, norm=self.fourierft_ifft2_norm).real * self.fourierft_scaling[adapter]
         return torch.reshape(delta_weight, (self.out_features, self.in_features, kW, kH))
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
