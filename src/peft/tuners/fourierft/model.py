@@ -18,6 +18,7 @@ import warnings
 from itertools import chain
 
 import torch
+from torch.nn import Conv2d
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
@@ -25,7 +26,7 @@ from peft.utils import (
     TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING,
 )
 
-from .layer import FourierFTLayer, FourierFTLinear
+from .layer import FourierFTConv2D, FourierFTLayer, FourierFTLinear
 
 
 class FourierFTModel(BaseTuner):
@@ -71,11 +72,15 @@ class FourierFTModel(BaseTuner):
 
         n_frequency = fourierft_config.n_frequency_pattern.get(target_name_key, fourierft_config.n_frequency)
         scaling = fourierft_config.scaling
+        alpha = fourierft_config.alpha
+        ifft2_norm = fourierft_config.ifft2_norm
         random_loc_seed = fourierft_config.random_loc_seed
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "n_frequency": n_frequency,
+            "alpha": alpha,
             "scaling": scaling,
+            "ifft2_norm": ifft2_norm,
             "fan_in_fan_out": fourierft_config.fan_in_fan_out,
             "init_weights": fourierft_config.init_weights,
             "random_loc_seed": fourierft_config.random_loc_seed,
@@ -110,6 +115,7 @@ class FourierFTModel(BaseTuner):
                     "Setting fan_in_fan_out to False."
                 )
                 kwargs["fan_in_fan_out"] = fourierft_config.fan_in_fan_out = False
+            new_module = FourierFTLinear(target, adapter_name, **kwargs)
         elif isinstance(target_base_layer, Conv1D):
             kwargs["is_target_conv_1d_layer"] = True
             if not kwargs["fan_in_fan_out"]:
@@ -117,12 +123,12 @@ class FourierFTModel(BaseTuner):
                     "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
                 )
                 kwargs["fan_in_fan_out"] = fourierft_config.fan_in_fan_out = True
+            new_module = FourierFTLinear(target, adapter_name, **kwargs)
+        elif isinstance(target_base_layer, Conv2d):
+            new_module = FourierFTConv2D(target, adapter_name, **kwargs)
         else:
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
-                "`torch.nn.Linear`."
+                "`torch.nn.Linear`, `torch.nn.Conv2d`"
             )
-
-        new_module = FourierFTLinear(target, adapter_name, **kwargs)
-
         return new_module
