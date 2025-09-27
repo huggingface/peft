@@ -529,6 +529,26 @@ def train():
         )
 
         model = get_peft_model(model, lora_config)
+    elif script_args.training_mode == "gptq_lora":
+        print("🔧 Setting up QA-LoRA training...")
+        model = load_or_quantize_model(
+            script_args.model_name_or_path,
+            tokenizer,
+            qalora_group_size=script_args.qalora_group_size,
+            bits=script_args.bits,
+        )
+
+        lora_config = LoraConfig(
+            task_type="CAUSAL_LM",
+            r=script_args.lora_r,
+            lora_alpha=2 * script_args.lora_r,
+            target_modules=["q_proj", "o_proj", "k_proj", "v_proj"],
+            # target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
+            lora_dropout=0.05,
+            bias="none",
+        )
+
+        model = get_peft_model(model, lora_config)
     elif script_args.training_mode == "outlier_aware_qalora": # Empfehlung: Eigener Modus-Name
         print("🚀 Setting up Outlier-Aware QA-LoRA training...")
         model_name_clean = script_args.model_name_or_path.replace("/", "_").replace("\\", "_")
@@ -578,7 +598,7 @@ def train():
             # outlier_data = spqr_extract_outliers(
             #     model,
             #     calibration_batches=calibration_batches,
-            #     target_module_name_substrings=[
+            #     aaaaaaaaaaaaaaaaaaaaaaaaaaaaa=[
             #         "mlp.gate_proj", "mlp.up_proj", "mlp.down_proj",
             #         "self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj", "self_attn.o_proj",
             #     ],
@@ -1050,7 +1070,7 @@ def train():
     wandb.init()
     trainer = Trainer(model=model, tokenizer=tokenizer, args=script_args, **data_module)
     trainer.train()
-    # trainer.save_state()
+    # # trainer.save_state()
     model.save_pretrained(os.path.join(script_args.output_dir, "ft/adapter"))
     tokenizer.save_pretrained(os.path.join(script_args.output_dir, "ft/adapter"))
 

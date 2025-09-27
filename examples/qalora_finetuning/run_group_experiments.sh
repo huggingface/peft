@@ -17,7 +17,7 @@ SCRIPT_DIR="/home/nudel/Documents/peft/examples/qalora_finetuning"
 BASE_OUTPUT_DIR="/home/nudel/Documents/peft/train_results_group_exp"
 
 # --- Iteration Parameters ---
-TRAINING_MODES=("qalora" "qlora") 
+TRAINING_MODES=("qalora") 
 LORA_RANKS=(16 128 256)
 
 # --- Training Configuration ---
@@ -36,8 +36,8 @@ BF16="True"
 # --- Mode-Specific Parameters ---
 QALORA_GROUP_SIZE=32
 PISSA_NITER=4
-BITS=2 # Used for QALoRA, PiSSA, and post-training quantization
-
+BITS=3 # Used for QALoRA, PiSSA, and post-training quantization
+BASE_OUTPUT_DIR="${BASE_OUTPUT_DIR}_${BITS}"
 # --- Evaluation Configuration ---
 # EVAL_TASKS="hellaswag,piqa,winogrande,arc_easy,arc_challenge,boolq,openbookqa,wikitext"
 EVAL_TASKS="wikitext,piqa"
