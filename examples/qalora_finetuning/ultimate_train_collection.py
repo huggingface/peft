@@ -129,6 +129,9 @@ class TrainingArguments(transformers.TrainingArguments):
         default="wandb",
         metadata={"help": "The integration to report the results and logs to."},
     )
+    skip_training: bool = field(
+        default=None
+    )
 
 def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str):
     """Collects the state dict and dump to disk."""
@@ -1068,18 +1071,19 @@ def train():
     #         print(f"❌ Gradient disabled for parameter: {name}")
     import wandb
     wandb.init()
-    trainer = Trainer(model=model, tokenizer=tokenizer, args=script_args, **data_module)
-    trainer.train()
-    # # trainer.save_state()
-    model.save_pretrained(os.path.join(script_args.output_dir, "ft/adapter"))
-    tokenizer.save_pretrained(os.path.join(script_args.output_dir, "ft/adapter"))
+    if not script_args.skip_training: 
+        trainer = Trainer(model=model, tokenizer=tokenizer, args=script_args, **data_module)
+        trainer.train()
+        # # trainer.save_state()
+        model.save_pretrained(os.path.join(script_args.output_dir, "ft/adapter"))
+        tokenizer.save_pretrained(os.path.join(script_args.output_dir, "ft/adapter"))
 
     # --- START: Generation and Evaluation Logic ---
     print("\n🚀 Starting Alpaca evaluation...")
     # Put the model in evaluation mode
     model.eval()
 
-    subfolder_name = f"mode_{script_args.training_mode}_bits_{script_args.bits}_rank_{script_args.lora_r}_group_{script_args.qalora_group_size}"
+    subfolder_name = f"mode_{script_args.training_mode}_bits_{script_args.bits}_rank_{script_args.lora_r}_group_{script_args.qalora_group_size}_training_skip_{script_args.skip_training}"
     output_dir_eval = os.path.join(script_args.output_dir, subfolder_name)
     os.makedirs(output_dir_eval, exist_ok=True)
 
