@@ -36,6 +36,7 @@ from .layer import WaveFTLayer, WaveFTLinear
 
 class WaveFTModel(BaseTuner):
     prefix: str = "waveft_"
+    tuner_layer_cls: type[BaseTunerLayer] = WaveFTLayer
 
     def _check_new_adapter_config(self, config: WaveFTConfig) -> None:
         """
@@ -313,13 +314,16 @@ class WaveFTModel(BaseTuner):
             adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
             inference_mode (`bool`): Whether to set the adapter in inference mode.
         """
+        # Call parent class set_adapter to handle auxiliary modules (like ModulesToSaveWrapper)
+        super().set_adapter(adapter_name, inference_mode=inference_mode)
+
+        # Handle WaveFT-specific logic
         for module in self.model.modules():
             if isinstance(module, WaveFTLayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
                 module.set_adapter(adapter_name, inference_mode=inference_mode)
-        self.active_adapter = adapter_name
 
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
