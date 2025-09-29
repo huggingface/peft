@@ -22,11 +22,8 @@ The PEFT library is designed to help you quickly train large models on free or l
 
 ## PEFT configurations
 
-<Tip>
-
-Learn more about the parameters you can configure for each PEFT method in their respective API reference page.
-
-</Tip>
+> [!TIP]
+> Learn more about the parameters you can configure for each PEFT method in their respective API reference page.
 
 A configuration stores important parameters that specify how a particular PEFT method should be applied.
 
@@ -158,15 +155,12 @@ model = AutoModelForCausalLM.from_pretrained(config.base_model_name_or_path)
 lora_model = PeftModel.from_pretrained(model, "ybelkada/opt-350m-lora")
 ```
 
-<Tip>
-
-By default, the [`PeftModel`] is set for inference, but if you'd like to train the adapter some more you can set `is_trainable=True`.
-
-```py
-lora_model = PeftModel.from_pretrained(model, "ybelkada/opt-350m-lora", is_trainable=True)
-```
-
-</Tip>
+> [!TIP]
+> By default, the [`PeftModel`] is set for inference, but if you'd like to train the adapter some more you can set `is_trainable=True`.
+>
+> ```py
+> lora_model = PeftModel.from_pretrained(model, "ybelkada/opt-350m-lora", is_trainable=True)
+> ```
 
 The [`PeftModel.from_pretrained`] method is the most flexible way to load a [`PeftModel`] because it doesn't matter what model framework was used (Transformers, timm, a generic PyTorch model). Other classes, like [`AutoPeftModel`], are just a convenient wrapper around the base [`PeftModel`], and makes it easier to load PEFT models directly from the Hub or locally where the PEFT weights are stored.
 

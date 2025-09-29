@@ -22,11 +22,8 @@ This guide will give you a brief overview of the adapter methods supported by PE
 
 ## Low-Rank Adaptation (LoRA)
 
-<Tip>
-
-LoRA is one of the most popular PEFT methods and a good starting point if you're just getting started with PEFT. It was originally developed for large language models but it is a tremendously popular training method for diffusion models because of its efficiency and effectiveness.
-
-</Tip>
+> [!TIP]
+> LoRA is one of the most popular PEFT methods and a good starting point if you're just getting started with PEFT. It was originally developed for large language models but it is a tremendously popular training method for diffusion models because of its efficiency and effectiveness.
 
 As mentioned briefly earlier, [LoRA](https://hf.co/papers/2106.09685) is a technique that accelerates finetuning large models while consuming less memory.
 
