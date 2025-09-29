@@ -67,7 +67,7 @@ setup(
         "tqdm",
         "accelerate>=0.21.0",
         "safetensors",
-        "huggingface_hub>=0.25.0",
+        "huggingface_hub==1.0.0.rc2",
     ],
     extras_require=extras,
     classifiers=[
