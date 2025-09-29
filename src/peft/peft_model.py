@@ -40,9 +40,10 @@ from transformers.utils import PushToHubMixin
 
 from peft.tuners.lora.variants import get_alora_offsets_for_forward, get_alora_offsets_for_generate
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
+from peft.utils import AuxiliaryTrainingWrapper
 from peft.utils.constants import DUMMY_MODEL_CONFIG
 from peft.utils.integrations import init_empty_weights
-from peft.utils.other import create_attention_mask, set_additional_trainable_modules
+from peft.utils.other import TrainableTokensWrapper, create_attention_mask, set_additional_trainable_modules
 
 from . import __version__
 from .config import PeftConfig
@@ -579,10 +580,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
             prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(config.peft_type)
             if prefix and adapter_name in prefix:
-                warn_message += (
-                    f"Adapter name {adapter_name} should not be contained in the prefix {prefix}."
-                    "This could be the potential reason for missing adapter keys."
-                )
+                warn_message = (
+                    f"Adapter name '{adapter_name}' should not be contained in the prefix '{prefix}'. "
+                    "This could be the potential reason for missing adapter keys. "
+                ) + warn_message
 
             warnings.warn(warn_message)
 
@@ -1000,7 +1001,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(peft_config.peft_type)
         if prefix and adapter_name in prefix:
             warnings.warn(
-                f"Adapter name {adapter_name} should not be contained in the prefix {prefix}."
+                f"Adapter name '{adapter_name}' should not be contained in the prefix '{prefix}'. "
                 "This may lead to reinitialization of the adapter weights during loading."
             )
 
@@ -3069,7 +3070,11 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
 
     layer_status: list[TunerLayerStatus] = []
     for name, module in base_model.named_modules():
-        if not isinstance(module, BaseTunerLayer):
+        if not isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
+            continue
+        if isinstance(module, TrainableTokensWrapper):
+            # Skip TrainableTokensWrapper, since it wraps TrainableTokensLayer, which is the actual PEFT layer we're
+            # interested in.
             continue
 
         # determine if all submodules/parameters if this module require grad or not

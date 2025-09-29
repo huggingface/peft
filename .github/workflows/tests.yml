@@ -11,7 +11,6 @@ on:
 
 env:
   HF_HOME: .cache/huggingface
-  TRANSFORMERS_IS_CI: 1
 
 permissions: {}
 
@@ -90,6 +89,9 @@ jobs:
         # they fail, but add a notice so that the failure is not completely silent
         continue-on-error: ${{ matrix.os == 'macos-13' }}
         shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          TRANSFORMERS_IS_CI: 1
         run: |
           set +e
           make test

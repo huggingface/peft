@@ -14,6 +14,7 @@
 
 import copy
 import itertools
+import math
 import platform
 import re
 import warnings
@@ -1481,6 +1482,26 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match=msg):
             model.load_adapter(tmp_path, adapter_name="other")
 
+    def test_multiple_configs_with_bias_raises(self, tmp_path):
+        # There cannot be more than one config with bias != "none".
+        # Note: This would need to be tested for all PEFT methods that support the bias parameter, but as this method
+        # comes from BaseTuner, it's fine to only check LoRA.
+        model = self.get_model()
+        config0 = LoraConfig(target_modules=["linear"], bias="all")
+        model = get_peft_model(model, config0)
+
+        config1 = LoraConfig(target_modules=["linear"], bias="lora_only")
+        msg = "supports only 1 adapter with bias. When using multiple adapters"
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("other", config1)
+
+        # the invalid peft config was not added
+        assert len(model.peft_config) == 1
+
+        # it's okay to add a config with bias="none" (the default)
+        config2 = LoraConfig(target_modules=["linear"], bias="none")
+        model.add_adapter("other", config2)  # does not raise
+
 
 class TestLokrInitialization:
     torch_device = infer_device()
@@ -2246,7 +2267,7 @@ class TestNamingConflictWarning:
         # No warning should be raised when there is no naming conflict during get_peft_model.
         non_conflict_adapter = "adapter"
         _ = get_peft_model(self.base_model, self.peft_config, adapter_name=non_conflict_adapter)
-        expected_msg = f"Adapter name {non_conflict_adapter} should not be contained in the prefix {self.prefix}."
+        expected_msg = f"Adapter name '{non_conflict_adapter}' should not be contained in the prefix '{self.prefix}'."
         assert not any(expected_msg in str(w.message) for w in recwarn.list)
 
     def test_no_warning_without_naming_conflict_add_adapter(self, recwarn):
@@ -2256,7 +2277,7 @@ class TestNamingConflictWarning:
         model = get_peft_model(self.base_model, self.peft_config, adapter_name=non_conflict_adapter)
         _ = model.add_adapter(other_non_conflict_adapter, self.peft_config)
         expected_msg = (
-            f"Adapter name {other_non_conflict_adapter} should not be contained in the prefix {self.prefix}."
+            f"Adapter name '{other_non_conflict_adapter}' should not be contained in the prefix '{self.prefix}'."
         )
         assert not any(expected_msg in str(w.message) for w in recwarn.list)
 
@@ -2265,14 +2286,16 @@ class TestNamingConflictWarning:
         non_conflict_adapter = "adapter"
         model = get_peft_model(self.base_model, self.peft_config, adapter_name=non_conflict_adapter)
         _ = self._save_and_reload_model(model, non_conflict_adapter, tmp_path)
-        expected_msg = f"Adapter name {non_conflict_adapter} should not be contained in the prefix {self.prefix}."
+        expected_msg = f"Adapter name '{non_conflict_adapter}' should not be contained in the prefix '{self.prefix}'."
         assert not any(expected_msg in str(w.message) for w in recwarn.list)
 
     def test_warning_naming_conflict_get_peft_model(self, recwarn):
         # Warning is raised when the adapter name conflicts with the prefix in get_peft_model.
         conflicting_adapter_name = self.prefix[:-1]
         _ = get_peft_model(self.base_model, self.peft_config, adapter_name=conflicting_adapter_name)
-        expected_msg = f"Adapter name {conflicting_adapter_name} should not be contained in the prefix {self.prefix}."
+        expected_msg = (
+            f"Adapter name '{conflicting_adapter_name}' should not be contained in the prefix '{self.prefix}'."
+        )
         assert any(expected_msg in str(w.message) for w in recwarn.list)
 
     def test_warning_naming_conflict_add_adapter(self, recwarn):
@@ -2281,7 +2304,7 @@ class TestNamingConflictWarning:
         non_conflict_adapter = "adapter"
         model = get_peft_model(self.base_model, self.peft_config, adapter_name=non_conflict_adapter)
         _ = model.add_adapter(conflicting_adapter, self.peft_config)
-        expected_msg = f"Adapter name {conflicting_adapter} should not be contained in the prefix {self.prefix}."
+        expected_msg = f"Adapter name '{conflicting_adapter}' should not be contained in the prefix '{self.prefix}'."
         assert any(expected_msg in str(w.message) for w in recwarn.list)
 
     def test_warning_naming_conflict_save_and_load(self, recwarn, tmp_path):
@@ -2289,7 +2312,7 @@ class TestNamingConflictWarning:
         conflicting_adapter = self.prefix[:-1]
         model = get_peft_model(self.base_model, self.peft_config, adapter_name=conflicting_adapter)
         _ = self._save_and_reload_model(model, conflicting_adapter, tmp_path)
-        expected_msg = f"Adapter name {conflicting_adapter} should not be contained in the prefix {self.prefix}."
+        expected_msg = f"Adapter name '{conflicting_adapter}' should not be contained in the prefix '{self.prefix}'."
         assert any(expected_msg in str(w.message) for w in recwarn.list)
 
 
@@ -3889,6 +3912,44 @@ class TestScaling:
         self.unscale_layer(model, 3)
         scalings = self.get_scalings(model)
         expected = [2.0] * n_layers
+        assert scalings == expected
+
+    def test_scaling_with_rslora(self, model):
+        n_layers = 5
+        rank, lora_alpha = 8, 16
+        config = LoraConfig(
+            r=rank,
+            lora_alpha=lora_alpha,
+            use_rslora=True,
+            target_modules=["k_proj"],
+        )
+        model = get_peft_model(model, config)
+        scalings = self.get_scalings(model)
+        expected = [lora_alpha / math.sqrt(rank)] * n_layers
+        assert scalings == expected
+
+        # double
+        self.scale_layer(model, 2)
+        scalings = self.get_scalings(model)
+        expected = [2 * lora_alpha / math.sqrt(rank)] * n_layers
+        assert scalings == expected
+
+        # back to original
+        self.unscale_layer(model, None)
+        scalings = self.get_scalings(model)
+        expected = [lora_alpha / math.sqrt(rank)] * n_layers
+        assert scalings == expected
+
+        # triple
+        self.set_scale(model, "default", 3)
+        scalings = self.get_scalings(model)
+        expected = [3 * lora_alpha / math.sqrt(rank)] * n_layers
+        assert scalings == expected
+
+        # back to original
+        self.unscale_layer(model, 3)
+        scalings = self.get_scalings(model)
+        expected = [lora_alpha / math.sqrt(rank)] * n_layers
         assert scalings == expected
 
     def test_scaling_rank_pattern_alpha_pattern(self, model):

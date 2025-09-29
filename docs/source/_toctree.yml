@@ -143,5 +143,7 @@
       title: Helpers
     - local: package_reference/hotswap
       title: Hotswapping adapters
+    - local: package_reference/functional
+      title: Functions for PEFT integration
     title: Utilities
   title: API reference

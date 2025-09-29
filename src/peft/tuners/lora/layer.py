@@ -21,12 +21,11 @@ from typing import Any, Optional, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from packaging import version
 from torch import svd_lowrank
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners._buffer_dict import BufferDict
-from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
 from peft.utils.integrations import (
     dequantize_module_weight,
     gather_params_ctx,
@@ -113,6 +112,7 @@ class LoraLayer(BaseTunerLayer):
         self._disable_adapters = False
         self.merged_adapters = []
         self.use_dora: dict[str, bool] = {}  # not actively used anymore after #2443, keep it for BC
+        self.use_rslora: dict[str, bool] = {}
         self.lora_bias: dict[str, bool] = {}
         self.lora_magnitude_vector = torch.nn.ModuleDict()  # for DoRA
         self._caches: dict[str, Any] = {}
@@ -123,60 +123,7 @@ class LoraLayer(BaseTunerLayer):
         self.kwargs = kwargs
 
         base_layer = self.get_base_layer()
-        if isinstance(base_layer, nn.Linear):
-            torch_supports_dtensor = version.parse(torch.__version__) >= version.parse("2.5.0")
-            if torch_supports_dtensor and isinstance(self.base_layer.weight, torch.distributed.tensor.DTensor):
-                # If Tensor Parallel is used, the weight is sharded, so we need to get the local shape
-                out_features, in_features = self.base_layer.weight.to_local().shape
-            else:
-                in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif isinstance(base_layer, nn.Conv1d):
-            in_features, out_features = base_layer.in_channels, base_layer.out_channels
-        elif isinstance(base_layer, nn.Conv2d):
-            in_features, out_features = base_layer.in_channels, base_layer.out_channels
-        elif isinstance(base_layer, nn.Conv3d):
-            in_features, out_features = base_layer.in_channels, base_layer.out_channels
-        elif isinstance(base_layer, nn.Embedding):
-            in_features, out_features = base_layer.num_embeddings, base_layer.embedding_dim
-        elif isinstance(base_layer, Conv1D):
-            in_features, out_features = (
-                base_layer.weight.ds_shape if hasattr(base_layer.weight, "ds_shape") else base_layer.weight.shape
-            )
-        elif isinstance(base_layer, nn.MultiheadAttention):
-            if not base_layer._qkv_same_embed_dim:
-                raise ValueError(f"Only same dim for query/key/value is supported as of now for {self.__class__}.")
-            in_features, out_features = base_layer.embed_dim, 3 * base_layer.embed_dim
-        elif hasattr(base_layer, "infeatures") and hasattr(base_layer, "outfeatures"):
-            # QuantLinear
-            in_features, out_features = base_layer.infeatures, base_layer.outfeatures
-        elif hasattr(base_layer, "input_size") and hasattr(base_layer, "output_size"):
-            # Megatron ColumnParallelLinear,RowParallelLinear
-            in_features, out_features = base_layer.input_size, base_layer.output_size
-        elif hasattr(base_layer, "codebooks") and base_layer.__class__.__name__ == "QuantizedLinear":
-            # AQLM QuantLinear
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif hasattr(base_layer, "w_bit") and base_layer.__class__.__name__ == "WQLinear_GEMM":
-            # Awq layers
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif base_layer.__class__.__name__ == "EetqLinear":
-            # Eetq layers
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif hasattr(base_layer, "W_q") and base_layer.__class__.__name__ == "HQQLinear":
-            # HQQ layers
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif base_layer.__class__.__name__ == "PatchedLinear":
-            # INC layers
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        else:
-            # possibly support user provided custom layer types using dynamic dispatch
-            if hasattr(base_layer, "in_features") and hasattr(base_layer, "out_features"):
-                in_features, out_features = base_layer.in_features, base_layer.out_features
-            else:
-                in_features, out_features = None, None
-            warnings.warn(
-                f"Unsupported layer type '{type(base_layer)}' encountered, proceed at your own risk.", UserWarning
-            )
-
+        in_features, out_features = _get_in_out_features(base_layer)
         self.in_features = in_features
         self.out_features = out_features
 
@@ -254,6 +201,8 @@ class LoraLayer(BaseTunerLayer):
             self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
         else:
             self.scaling[adapter_name] = lora_alpha / r
+
+        self.use_rslora[adapter_name] = use_rslora
 
         self.use_dora[adapter_name] = use_dora
 
@@ -528,7 +477,10 @@ class LoraLayer(BaseTunerLayer):
         if adapter not in self.scaling:
             # Ignore the case where the adapter is not in the layer
             return
-        self.scaling[adapter] = scale * self.lora_alpha[adapter] / self.r[adapter]
+        if self.use_rslora.get(adapter, False):
+            self.scaling[adapter] = scale * self.lora_alpha[adapter] / math.sqrt(self.r[adapter])
+        else:
+            self.scaling[adapter] = scale * self.lora_alpha[adapter] / self.r[adapter]
 
     def scale_layer(self, scale: float | int) -> None:
         """Multiply the current scale of all active adapters by the provided factor"""
@@ -553,9 +505,12 @@ class LoraLayer(BaseTunerLayer):
                 continue
 
             if scale is None:
-                self.scaling[active_adapter] = self.lora_alpha[active_adapter] / self.r[active_adapter]
+                if self.use_rslora.get(active_adapter, False):
+                    self.scaling[active_adapter] = self.lora_alpha[active_adapter] / math.sqrt(self.r[active_adapter])
+                else:
+                    self.scaling[active_adapter] = self.lora_alpha[active_adapter] / self.r[active_adapter]
             else:
-                self.scaling[active_adapter] /= scale
+                self.scaling[active_adapter] = self.scaling[active_adapter] / scale
 
     def _check_forward_args(self, x, *args, **kwargs):
         """Check if the arguments are compatible with the configs and state of the model"""
@@ -960,6 +915,8 @@ class Embedding(nn.Module, LoraLayer):
         else:
             self.scaling[adapter_name] = lora_alpha / r
 
+        self.use_rslora[adapter_name] = use_rslora
+
         self.use_dora[adapter_name] = use_dora
 
         if init_lora_weights == "loftq":
@@ -1259,6 +1216,8 @@ class _ConvNd(nn.Module, LoraLayer):
             self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
         else:
             self.scaling[adapter_name] = lora_alpha / r
+
+        self.use_rslora[adapter_name] = use_rslora
 
         self.use_dora[adapter_name] = use_dora
 
@@ -2032,6 +1991,8 @@ class ParamWrapper(nn.Module, LoraLayer):
             self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
         else:
             self.scaling[adapter_name] = lora_alpha / r
+
+        self.use_rslora[adapter_name] = use_rslora
 
         self.use_dora[adapter_name] = use_dora
 

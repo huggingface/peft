@@ -1669,6 +1669,20 @@ class TestPeftCustomModel(PeftCommonTester):
         self._test_peft_model_device_map(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_in_features_out_features_exposed(self, test_name, model_id, config_cls, config_kwargs):
+        # the PEFT layer should expose the .in_features and .out_features attributes
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        for module in model.modules():
+            if isinstance(module, BaseTunerLayer):
+                assert hasattr(module, "in_features")
+                assert hasattr(module, "out_features")
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_forward_output_finite(self, test_name, model_id, config_cls, config_kwargs):
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
