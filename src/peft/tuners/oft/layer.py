@@ -114,6 +114,7 @@ class OFTRotationModule(nn.Module):
         vec = matrix[:, self.rows, self.cols]
         return vec
 
+    @torch.compile
     def _cayley_batch(
         self, Q: torch.Tensor, block_size: int, use_cayley_neumann: bool = True, num_neumann_terms: int = 5
     ) -> torch.Tensor:
@@ -139,9 +140,11 @@ class OFTRotationModule(nn.Module):
                     R.add_(Q_squared, alpha=2.0)
 
                     Q_power = Q_squared
-                    for i in range(3, num_neumann_terms):
+                    for _ in range(3, num_neumann_terms - 1):
                         Q_power = torch.bmm(Q_power, Q_skew)
                         R.add_(Q_power, alpha=2.0)
+                    Q_power = torch.bmm(Q_power, Q_skew)
+                    R.add_(Q_power)
         else:
             id_mat = (
                 torch.eye(Q_skew.shape[-1], device=Q_skew.device)
@@ -247,6 +250,10 @@ class OFTRotationModule(nn.Module):
         required_dtype = x.dtype
         if required_dtype != self.weight.dtype:
             x = x.to(self.weight.dtype)
+
+        if self.rows.device != self.weight.device:
+            self.rows = self.rows.to(self.weight.device)
+            self.cols = self.cols.to(self.weight.device)
 
         orig_shape = x.shape
 
