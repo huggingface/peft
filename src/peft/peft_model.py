@@ -1848,17 +1848,15 @@ class PeftModelForCausalLM(PeftModel):
         super().__init__(model, peft_config, adapter_name, **kwargs)
         self.base_model_prepare_inputs_for_generation = self.base_model.prepare_inputs_for_generation
 
-        model_config = BaseTuner.get_model_config(self)
-
+        # Condition to check if embedding layer (`embed_tokens`) is added 
+        # in `modules_to_save` and we want to ensure the `lm_head` 
+        # does not diverge from the `embed_tokens` layer
         if (
-            model_config.get("tie_word_embeddings", False)
-            and model._tied_weights_keys is not None
-            and isinstance(model.get_input_embeddings(), ModulesToSaveWrapper)
+            peft_config.task_type == "CAUSAL_LM"
+            and hasattr(model.get_input_embeddings(), "modules_to_save")
+            and getattr(peft_config, "ensure_weight_tieing")
         ):
-            # the embedding layer is modified and we want weight tying.
-            module_keys = [".".join(n.split(".")[:-1]) for n in model._tied_weights_keys]
-
-            # Get the original reference of the input embedding ModulesToSaveWrapper
+            module_keys = BaseTuner._get_tied_modules_to_save(self, model)
             tied_module = getattr(model.get_input_embeddings().modules_to_save, adapter_name)
 
             _set_trainable(

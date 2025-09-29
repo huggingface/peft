@@ -663,6 +663,15 @@ class LoraConfig(PeftConfig):
     arrow_config: Optional[ArrowConfig] = field(
         default=None, metadata={"help": "The necessary config to apply arrow routing on the model."}
     )
+    ensure_weight_tieing: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Whether to tie weights or not after peft initialization."
+                "Only supported for `task_type` == CAUSAL_LM"
+            )
+        }
+        )
 
     def to_dict(self):
         """

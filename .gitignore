@@ -145,3 +145,4 @@ method_comparison/MetaMathQA/cancelled_results/
 method_comparison/MetaMathQA/temporary_results/
 
 .peft/
+test.py

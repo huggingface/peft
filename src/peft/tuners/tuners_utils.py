@@ -49,7 +49,7 @@ from peft.utils.other import (
 from peft.utils.peft_types import PeftType, TaskType
 
 from ..config import PeftConfig
-from ..utils import _get_submodules
+from ..utils import _get_submodules, ModulesToSaveWrapper
 from ._buffer_dict import BufferDict
 
 
@@ -898,6 +898,26 @@ class BaseTuner(nn.Module, ABC):
                     tied_target_modules.append(target_module)
         return tied_target_modules
 
+    def _get_tied_modules_to_save(self, model: nn.Module) -> list[str]:
+        """
+        Get the list of modules that needs to be tied
+
+        For example:
+        For models which have `embed_tokens` and `lm_head` as the tied keys
+        this function will return [`lm_head`]
+        """
+        model_config = self.get_model_config(model)
+        if (
+            model_config.get("tie_word_embeddings", False)
+            and model._tied_weights_keys is not None
+            and isinstance(model.get_input_embeddings(), ModulesToSaveWrapper)
+        ):
+            # Get the original reference of the `ModulesToSaveWrapper` for the embedding layer
+            module_keys = [".".join(n.split(".")[:-1]) for n in model._tied_weights_keys]
+
+            return module_keys
+
+        return []
 
 class BaseTunerLayer(ABC):
     r"""
