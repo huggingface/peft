@@ -78,12 +78,6 @@ jobs:
           pip install setuptools
           # cpu version of pytorch
           pip install -e .[test]
-      - name: Downgrade numpy on MacOS and Windows
-        # TODO: remove numpy downgrade on MacOS & Windows once torch fixes numpy 2.0 issue
-        shell: bash
-        if: matrix.os == 'windows-latest' || matrix.os == 'macos-13'
-        run: |
-          pip install --force-reinstall -U "numpy<2.0.0"
       - name: Test with pytest
         # MacOS tests are currently too flaky and will fail almost each time. Thus, continue (green checkmark) even if
         # they fail, but add a notice so that the failure is not completely silent
