@@ -49,7 +49,7 @@ from peft.utils.other import (
 from peft.utils.peft_types import PeftType, TaskType
 
 from ..config import PeftConfig
-from ..utils import _get_submodules, ModulesToSaveWrapper
+from ..utils import ModulesToSaveWrapper, _get_submodules
 from ._buffer_dict import BufferDict
 
 
@@ -902,9 +902,8 @@ class BaseTuner(nn.Module, ABC):
         """
         Get the list of modules that needs to be tied
 
-        For example:
-        For models which have `embed_tokens` and `lm_head` as the tied keys
-        this function will return [`lm_head`]
+        For example: For models which have `embed_tokens` and `lm_head` as the tied keys this function will return
+        [`lm_head`]
         """
         model_config = self.get_model_config(model)
         if (
@@ -918,6 +917,7 @@ class BaseTuner(nn.Module, ABC):
             return module_keys
 
         return []
+
 
 class BaseTunerLayer(ABC):
     r"""

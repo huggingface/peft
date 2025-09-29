@@ -48,10 +48,10 @@ from . import __version__
 from .config import PeftConfig
 from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING, PEFT_TYPE_TO_PREFIX_MAPPING, PEFT_TYPE_TO_TUNER_MAPPING
 from .utils import (
-    ModulesToSaveWrapper,
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     WEIGHTS_NAME,
+    ModulesToSaveWrapper,
     PeftType,
     TaskType,
     _get_batch_size,
@@ -1848,8 +1848,8 @@ class PeftModelForCausalLM(PeftModel):
         super().__init__(model, peft_config, adapter_name, **kwargs)
         self.base_model_prepare_inputs_for_generation = self.base_model.prepare_inputs_for_generation
 
-        # Condition to check if embedding layer (`embed_tokens`) is added 
-        # in `modules_to_save` and we want to ensure the `lm_head` 
+        # Condition to check if embedding layer (`embed_tokens`) is added
+        # in `modules_to_save` and we want to ensure the `lm_head`
         # does not diverge from the `embed_tokens` layer
         if (
             peft_config.task_type == "CAUSAL_LM"

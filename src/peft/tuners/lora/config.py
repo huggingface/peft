@@ -667,11 +667,10 @@ class LoraConfig(PeftConfig):
         default=False,
         metadata={
             "help": (
-                "Whether to tie weights or not after peft initialization."
-                "Only supported for `task_type` == CAUSAL_LM"
+                "Whether to tie weights or not after peft initialization.Only supported for `task_type` == CAUSAL_LM"
             )
-        }
-        )
+        },
+    )
 
     def to_dict(self):
         """
