@@ -124,9 +124,6 @@ class LoraLayer(BaseTunerLayer):
         self.lora_variant: dict[str, LoraVariant] = {}
         self.kwargs = kwargs
 
-        # Diag value
-        self.lora_diag = nn.ParameterDict({})
-
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
             torch_supports_dtensor = version.parse(torch.__version__) >= version.parse("2.5.0")
@@ -266,7 +263,6 @@ class LoraLayer(BaseTunerLayer):
         self.use_rslora[adapter_name] = use_rslora
 
         self.use_dora[adapter_name] = use_dora
-        self.use_kasa[adapter_name] = use_kasa
 
         # for inits that require access to the base weight, use gather_param_ctx so that the weight is gathered when using DeepSpeed
         if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
@@ -828,13 +824,6 @@ class Linear(nn.Module, LoraLayer):
         if cast_to_fp32:
             weight_A = weight_A.float()
             weight_B = weight_B.float()
-
-        # KaSA handling
-        if self.use_kasa.get(adapter, False):
-            diag = torch.diag(self.lora_diag[adapter])
-            output_tensor = transpose(weight_B @ diag @ weight_A, self.fan_in_fan_out) * self.scaling[adapter]
-        else:
-            output_tensor = transpose(weight_B @ weight_A, self.fan_in_fan_out) * self.scaling[adapter]
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
