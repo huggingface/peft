@@ -438,18 +438,19 @@ class DoraConv3dVariant(_DoraConvNdVariant):
         dora_layer = DoraConv3dLayer(fan_in_fan_out=False)
         _DoraConvNdVariant.init_convd_variant(module, adapter_name, dora_layer=dora_layer)
 
+
 class KasaLinearVariant(LoraVariant):
     @staticmethod
     def init(module: Linear, adapter_name: str, **kwargs: Any) -> None:
         if not module.lora_diag:
             module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_diag",)
-        
+
         # Initialize lora_diag
         module.lora_diag[adapter_name] = nn.Parameter(torch.randn(module.r[adapter_name]), requires_grad=True)
 
         # see https://github.com/juyongjiang/KaSA/blob/f85e88c22d0fa4cb8ab2923d7c2bf1bbec152da3/peft/src/peft/tuners/lora/layer.py#L132
-        
-         # SVD
+
+        # SVD
         weight = module.get_base_layer().weight
         dtype = weight.dtype
         svd_rank = module.in_features - module.r[adapter_name]
@@ -457,7 +458,7 @@ class KasaLinearVariant(LoraVariant):
         U, S, Vh = torch.linalg.svd(weight.data, full_matrices=False)
         U_principle, S_principle, Vh_principle = U[:, :svd_rank], S[:svd_rank], Vh[:svd_rank, :]
         module.get_base_layer().weight.data = (U_principle @ torch.diag(S_principle) @ Vh_principle).to(dtype)
-        
+
     @staticmethod
     def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
         delta_weight = module.get_delta_weight(active_adapter)
@@ -480,15 +481,12 @@ class KasaLinearVariant(LoraVariant):
         dropout = module.lora_dropout[active_adapter]
         scaling = module.scaling[active_adapter]
         diag = torch.diag(module.lora_diag[active_adapter])
-        
-        x = module._cast_input_dtype(x, lora_A.weight.dtype)
-        if isinstance(dropout, nn.Identity) or not module.training:
-            x = dropout(x)
-        
+
         # KASA calculation
         # see https://github.com/juyongjiang/KaSA/blob/f85e88c22d0fa4cb8ab2923d7c2bf1bbec152da3/peft/src/peft/tuners/lora/layer.py#L602C21-L602C110
-        lora_output = lora_B(torch.einsum('ijk,kl->ijl', lora_A(x), diag)) * scaling
+        lora_output = lora_B(torch.einsum("ijk,kl->ijl", lora_A(x), diag)) * scaling
         return result + lora_output
+
 
 class QALoraLinearVariant(LoraVariant):
     @staticmethod
