@@ -71,12 +71,9 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
     This class does not support loading/saving, and it shouldn't usually be initialized directly. Instead, use
     `get_peft_model` with the argument `mixed=True`.
 
-    <Tip>
-
-    Read the [Mixed adapter types](https://huggingface.co/docs/peft/en/developer_guides/mixed_models) guide to learn
-    more about using different adapter types.
-
-    </Tip>
+    > [!TIP]
+    > Read the [Mixed adapter types](https://huggingface.co/docs/peft/en/developer_guides/mixed_models) guide to learn
+    > more about using different adapter types.
 
     Example:
 
@@ -224,12 +221,9 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
                 Create empty adapter weights on meta device. Useful to speed up the process when loading saved
                 adapters.
 
-                <Tip>
-
-                Don't use `low_cpu_mem_usage=True` when creating a new PEFT adapter for training (training is untested
-                and discouraged for PeftMixedModel in general).
-
-                </Tip>
+                > [!TIP]
+                > Don't use `low_cpu_mem_usage=True` when creating a new PEFT adapter for training (training is untested
+                > and discouraged for PeftMixedModel in general).
         """
         _check_config_compatible(peft_config)
 
