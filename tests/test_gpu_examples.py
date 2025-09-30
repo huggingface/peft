@@ -2817,6 +2817,7 @@ class TestOLoRA:
 @pytest.mark.skipif(
     not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a hardware accelerator"
 )
+@pytest.mark.single_gpu_tests
 @require_bitsandbytes
 class TestLoftQ:
     r"""
