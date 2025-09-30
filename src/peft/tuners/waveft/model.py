@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import warnings
-from typing import Optional
 
 import torch
 from transformers.pytorch_utils import Conv1D
@@ -22,12 +21,10 @@ from transformers.pytorch_utils import Conv1D
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING,
-    ModulesToSaveWrapper,
     _get_submodules,
 )
 from peft.utils.other import get_pattern_key
 
-from .config import WaveFTConfig
 from .layer import WaveFTLayer, WaveFTLinear
 
 
