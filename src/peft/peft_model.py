@@ -83,11 +83,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
             Create empty adapter weights on meta device. Useful to speed up the loading loading process.
 
-            <Tip>
-
-            Don't use `low_cpu_mem_usage=True` when creating a new PEFT adapter for training.
-
-            </Tip>
+            > [!TIP] > Don't use `low_cpu_mem_usage=True` when creating a new PEFT adapter for training.
 
     **Attributes**:
         - **base_model** ([`torch.nn.Module`]) -- The base transformer model used for Peft.
