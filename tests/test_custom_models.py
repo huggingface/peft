@@ -753,6 +753,49 @@ TEST_CASES = [
             "init_weights": True,
         },
     ),
+    ##########
+    # WaveFT #
+    ##########
+    ("Vanilla MLP 1 WaveFT", "MLP", WaveFTConfig, {"target_modules": "lin0", "n_frequency": 8}),
+    ("Vanilla MLP 2 WaveFT", "MLP", WaveFTConfig, {"target_modules": ["lin0"], "n_frequency": 8}),
+    ("Vanilla MLP 3 WaveFT", "MLP", WaveFTConfig, {"target_modules": ["lin1"], "n_frequency": 8}),
+    ("Vanilla MLP 4 WaveFT", "MLP", WaveFTConfig, {"target_modules": ["lin0", "lin1"], "n_frequency": 8}),
+    (
+        "Vanilla MLP 5 WaveFT",
+        "MLP",
+        WaveFTConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "n_frequency": 8},
+    ),
+    (
+        "Vanilla MLP 6 WaveFT",
+        "MLP",
+        WaveFTConfig,
+        {
+            "target_modules": ["lin0"],
+            "n_frequency": 8,
+            "scaling": 25.0,
+            "wavelet_family": "db1",
+        },
+    ),
+    ("Vanilla MLP 7 WaveFT", "MLP", WaveFTConfig, {"target_modules": "lin1", "n_frequency": 8, "use_idwt": False}),
+    (
+        "Vanilla MLP 8 WaveFT",
+        "MLP",
+        WaveFTConfig,
+        {"target_modules": "lin0", "n_frequency": 16, "wavelet_family": "sym2"},
+    ),
+    (
+        "Vanilla MLP 9 WaveFT",
+        "MLP",
+        WaveFTConfig,
+        {"target_modules": "lin0", "n_frequency": 16, "wavelet_family": "sym2", "use_idwt": False},
+    ),
+    (
+        "Vanilla MLP 10 WaveFT",
+        "MLP",
+        WaveFTConfig,
+        {"target_modules": "lin0", "n_frequency": 16, "wavelet_family": "db1", "proportional_parameters": True},
+    ),
     ########
     # RoAd #
     ########
@@ -773,7 +816,7 @@ TEST_CASES = [
         "Vanilla MLP 5 WaveFT",
         "MLP",
         WaveFTConfig,
-        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "n_frequency": 8}
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "n_frequency": 8},
     ),
     (
         "Vanilla MLP 6 WaveFT",
@@ -786,12 +829,7 @@ TEST_CASES = [
             "wavelet_family": "db1",
         },
     ),
-    (
-        "Vanilla MLP 7 WaveFT",
-        "MLP",
-        WaveFTConfig,
-        {"target_modules": "lin1", "n_frequency": 8, "use_idwt": False}
-    ),
+    ("Vanilla MLP 7 WaveFT", "MLP", WaveFTConfig, {"target_modules": "lin1", "n_frequency": 8, "use_idwt": False}),
     (
         "Vanilla MLP 8 WaveFT",
         "MLP",

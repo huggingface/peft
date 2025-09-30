@@ -85,13 +85,13 @@ class WaveFTConfig(PeftConfig):
             If `False`, coefficients are initialized from a standard normal distribution scaled by a small factor.
         proportional_parameters (`bool`):
             If `True`, `n_frequency` is allocated proportionally to each layer's
-            `input_dim * output_dim`. Default is `False`. Note: This option is included 
-            for experimental thoroughness to allow researchers to reproduce paper results, 
+            `input_dim * output_dim`. Default is `False`. Note: This option is included
+            for experimental thoroughness to allow researchers to reproduce paper results,
             rather than for practical utility, as no beneficial scenarios have been identified.
     """
 
     n_frequency: int = field(
-        default=2592, # Default value might need adjustment based on common use cases or paper findings
+        default=2592,  # Default value might need adjustment based on common use cases or paper findings
         metadata={
             "help": (
                 "Number of learnable wavelet coefficients for the Discrete Wavelet Transform (DWT). "
@@ -104,7 +104,7 @@ class WaveFTConfig(PeftConfig):
         },
     )
     scaling: float = field(
-        default=25.0, # Default value seems low based on typical examples, might need adjustment
+        default=25.0,  # Default value seems low based on typical examples, might need adjustment
         metadata={
             "help": (
                 "The scaling factor applied to the reconstructed delta W matrix. This is a crucial "
@@ -213,7 +213,7 @@ class WaveFTConfig(PeftConfig):
         metadata={
             "help": (
                 "A dictionary mapping layer names (or regex) to specific `n_frequency` values, "
-                "overriding the global `n_frequency`. Example: {\"model.decoder.layers.0.encoder_attn.k_proj\": 1000}."
+                'overriding the global `n_frequency`. Example: {"model.decoder.layers.0.encoder_attn.k_proj": 1000}.'
             )
         },
     )
@@ -260,4 +260,6 @@ class WaveFTConfig(PeftConfig):
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
 
         if self.wavelet_family not in WAVELET_REDUCTIONS:
-            raise ValueError(f"Wavelet family {self.wavelet_family} not supported. Supported wavelet families are: {list(WAVELET_REDUCTIONS.keys())}")
+            raise ValueError(
+                f"Wavelet family {self.wavelet_family} not supported. Supported wavelet families are: {list(WAVELET_REDUCTIONS.keys())}"
+            )

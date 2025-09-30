@@ -77,6 +77,7 @@ class PeftType(str, enum.Enum):
     C3A = "C3A"
     WAVEFT = "WAVEFT"
 
+
 class TaskType(str, enum.Enum):
     """
     Enum class for the different types of tasks supported by PEFT.

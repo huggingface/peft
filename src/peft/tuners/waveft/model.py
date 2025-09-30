@@ -86,7 +86,7 @@ class WaveFTModel(BaseTuner):
 
         # Calculate proportional parameters if needed (only once per adapter)
         if waveft_config.proportional_parameters:
-            if not hasattr(self, '_proportional_params_cache'):
+            if not hasattr(self, "_proportional_params_cache"):
                 self._proportional_params_cache = {}
             if adapter_name not in self._proportional_params_cache:
                 n_frequency_dict = self._calculate_proportional_parameters(self.model, waveft_config)
@@ -98,9 +98,11 @@ class WaveFTModel(BaseTuner):
         # 3. From n_frequency_pattern in config
         # 4. From default n_frequency in config
         n_frequency = None
-        if (waveft_config.proportional_parameters and
-            hasattr(self, '_proportional_params_cache') and
-            adapter_name in self._proportional_params_cache):
+        if (
+            waveft_config.proportional_parameters
+            and hasattr(self, "_proportional_params_cache")
+            and adapter_name in self._proportional_params_cache
+        ):
             n_frequency = self._proportional_params_cache[adapter_name].get(current_key)
 
         if n_frequency is None and "n_frequency" in optional_kwargs:
@@ -128,7 +130,7 @@ class WaveFTModel(BaseTuner):
             "fan_in_fan_out": waveft_config.fan_in_fan_out,
             "init_weights": waveft_config.init_weights,
             "random_loc_seed": waveft_config.random_loc_seed,
-            "wavelet_family": wavelet_family, # Use determined wavelet family
+            "wavelet_family": wavelet_family,  # Use determined wavelet family
         }
         kwargs["bias"] = bias
 
@@ -139,8 +141,8 @@ class WaveFTModel(BaseTuner):
                 scaling,
                 waveft_config.init_weights,
                 random_loc_seed,
-                wavelet_family=wavelet_family, # Pass determined wavelet family
-                use_idwt=waveft_config.use_idwt
+                wavelet_family=wavelet_family,  # Pass determined wavelet family
+                use_idwt=waveft_config.use_idwt,
             )
         else:
             new_module = self._create_new_module(waveft_config, adapter_name, target, **kwargs)
@@ -193,8 +195,7 @@ class WaveFTModel(BaseTuner):
             kwargs["is_target_conv_1d_layer"] = True
             if not kwargs["fan_in_fan_out"]:
                 warnings.warn(
-                    "fan_in_fan_out is set to False but the target module is `Conv1D`. "
-                    "Setting fan_in_fan_out to True."
+                    "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
                 )
                 kwargs["fan_in_fan_out"] = waveft_config.fan_in_fan_out = True
         else:
@@ -221,7 +222,7 @@ class WaveFTModel(BaseTuner):
         del self.peft_config[adapter_name]
 
         # Clean up proportional parameters cache
-        if hasattr(self, '_proportional_params_cache') and adapter_name in self._proportional_params_cache:
+        if hasattr(self, "_proportional_params_cache") and adapter_name in self._proportional_params_cache:
             del self._proportional_params_cache[adapter_name]
 
         # we cannot use self.prefix as we want to include non-trainable waveft parameters
@@ -235,4 +236,3 @@ class WaveFTModel(BaseTuner):
                     new_adapter = target.active_adapter[:]
 
         self.active_adapter = new_adapter or []
-

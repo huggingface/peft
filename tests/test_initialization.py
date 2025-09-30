@@ -1849,83 +1849,6 @@ class TestC3AInitialization:
             get_peft_model(model, config)
 
 
-class TestRoadInitialization:
-    torch_device = infer_device()
-
-    def get_model(self):
-        class MLP(nn.Module):
-            def __init__(self, bias=True):
-                super().__init__()
-                self.lin0 = nn.Linear(10, 30, bias=bias)
-                self.lin1 = nn.Linear(30, 2, bias=bias)
-
-            def forward(self, X):
-                X = self.lin0(X)
-                X = self.lin1(X)
-                return X
-
-        return MLP().to(self.torch_device)
-
-    def get_conv2d_model(self):
-        class MyModule(nn.Module):
-            def __init__(self):
-                super().__init__()
-                # choose a large weight so that averages are close to expected values
-                self.linear = nn.Linear(1000, 1000)
-                self.embed = nn.Embedding(1000, 1000)
-                self.conv2d = nn.Conv2d(100, 100, 3)
-
-            def forward(self, x):
-                x_int = (100 * x).int()
-                x_4d = x.flatten().reshape(1, 100, 10, 10)
-                return self.linear(x), self.embed(x_int), self.conv2d(x_4d)
-
-        return MyModule().eval().to(self.torch_device)
-
-    def test_road_default_initialization(self):
-        torch.manual_seed(0)
-        model = self.get_model()
-        config = RoadConfig(target_modules=["lin0"], group_size=2)
-        model = get_peft_model(model, config)
-        weight_alpha = model.lin0.road_alpha["default"].data
-        weight_theta = model.lin0.road_theta["default"].data
-        torch.allclose(weight_alpha, torch.ones_like(weight_alpha))
-        torch.allclose(weight_theta, torch.zeros_like(weight_theta))
-
-    def test_road_with_odd_group_size(self):
-        group_size = 3  # odd values are not allowed
-        msg = f"The group_size must be divisible by 2 when using RoadLayer, but got {group_size}."
-        with pytest.raises(ValueError, match=re.escape(msg)):
-            RoadConfig(group_size=group_size)
-
-    def test_road_with_too_large_group_size(self):
-        group_size = 64  # larger than out_features
-        msg = (
-            f"The out_features of the base layer must be divisible by group_size ({group_size}) when using RoadLayer."
-        )
-        model = self.get_model()
-        config = RoadConfig(target_modules=["lin0"], group_size=group_size)
-        with pytest.raises(ValueError, match=re.escape(msg)):
-            get_peft_model(model, config)
-
-    def test_road_with_incompatible_group_size_with_out_features(self):
-        group_size = 4  # even, but 30 does not divide by 4
-        model = self.get_model()
-        config = RoadConfig(target_modules=["lin0"], group_size=group_size)
-        msg = (
-            f"The out_features of the base layer must be divisible by group_size ({group_size}) when using RoadLayer."
-        )
-        with pytest.raises(ValueError, match=re.escape(msg)):
-            get_peft_model(model, config)
-
-    def test_road_with_conv2d_layer(self):
-        model = self.get_conv2d_model()
-        config = RoadConfig(target_modules=["conv2d"], group_size=2)
-        msg = "Target module Conv2d(100, 100, kernel_size=(3, 3), stride=(1, 1)) is not supported. Currently, only the following modules are supported: `torch.nn.Linear`."
-        with pytest.raises(ValueError, match=re.escape(msg)):
-            get_peft_model(model, config)
-
-
 class TestWaveFTInitialization:
     """Test class to check the initialization of WaveFT adapters."""
 
@@ -2065,27 +1988,20 @@ class TestWaveFTInitialization:
 
         model = self.get_model()
         config = WaveFTConfig(
-            target_modules=["linear"],
-            n_frequency=50,
-            n_frequency_pattern={"linear": 100},
-            init_weights=True
+            target_modules=["linear"], n_frequency=50, n_frequency_pattern={"linear": 100}, init_weights=True
         )
         model = get_peft_model(model, config)
 
         # Check that the pattern was applied
         waveft_layer = model.base_model.model.linear
-        assert hasattr(waveft_layer, 'waveft_n_frequency')
-        assert waveft_layer.waveft_n_frequency['default'] == 100
+        assert hasattr(waveft_layer, "waveft_n_frequency")
+        assert waveft_layer.waveft_n_frequency["default"] == 100
 
     def test_waveft_layers_pattern_without_layers_to_transform_raises(self):
         # Test that when layers_pattern is specified, layers_to_transform must also be specified
         msg = "When `layers_pattern` is specified, `layers_to_transform` must also be specified."
         with pytest.raises(ValueError, match=re.escape(msg)):
-            WaveFTConfig(
-                target_modules=["linear"],
-                layers_pattern=["layers"],
-                layers_to_transform=None
-            )
+            WaveFTConfig(target_modules=["linear"], layers_pattern=["layers"], layers_to_transform=None)
 
     def test_waveft_invalid_wavelet_family_raises(self):
         # Test that invalid wavelet families raise appropriate errors
@@ -2093,6 +2009,84 @@ class TestWaveFTInitialization:
         msg = f"Wavelet family {invalid_family} not supported. Supported wavelet families are:"
         with pytest.raises(ValueError, match=re.escape(msg)):
             WaveFTConfig(target_modules=["linear"], wavelet_family=invalid_family)
+
+
+class TestRoadInitialization:
+    torch_device = infer_device()
+
+    def get_model(self):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 30, bias=bias)
+                self.lin1 = nn.Linear(30, 2, bias=bias)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                return X
+
+        return MLP().to(self.torch_device)
+
+    def get_conv2d_model(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                # choose a large weight so that averages are close to expected values
+                self.linear = nn.Linear(1000, 1000)
+                self.embed = nn.Embedding(1000, 1000)
+                self.conv2d = nn.Conv2d(100, 100, 3)
+
+            def forward(self, x):
+                x_int = (100 * x).int()
+                x_4d = x.flatten().reshape(1, 100, 10, 10)
+                return self.linear(x), self.embed(x_int), self.conv2d(x_4d)
+
+        return MyModule().eval().to(self.torch_device)
+
+    def test_road_default_initialization(self):
+        torch.manual_seed(0)
+        model = self.get_model()
+        config = RoadConfig(target_modules=["lin0"], group_size=2)
+        model = get_peft_model(model, config)
+        weight_alpha = model.lin0.road_alpha["default"].data
+        weight_theta = model.lin0.road_theta["default"].data
+        torch.allclose(weight_alpha, torch.ones_like(weight_alpha))
+        torch.allclose(weight_theta, torch.zeros_like(weight_theta))
+
+    def test_road_with_odd_group_size(self):
+        group_size = 3  # odd values are not allowed
+        msg = f"The group_size must be divisible by 2 when using RoadLayer, but got {group_size}."
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            RoadConfig(group_size=group_size)
+
+    def test_road_with_too_large_group_size(self):
+        group_size = 64  # larger than out_features
+        msg = (
+            f"The out_features of the base layer must be divisible by group_size ({group_size}) when using RoadLayer."
+        )
+        model = self.get_model()
+        config = RoadConfig(target_modules=["lin0"], group_size=group_size)
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            get_peft_model(model, config)
+
+    def test_road_with_incompatible_group_size_with_out_features(self):
+        group_size = 4  # even, but 30 does not divide by 4
+        model = self.get_model()
+        config = RoadConfig(target_modules=["lin0"], group_size=group_size)
+        msg = (
+            f"The out_features of the base layer must be divisible by group_size ({group_size}) when using RoadLayer."
+        )
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            get_peft_model(model, config)
+
+    def test_road_with_conv2d_layer(self):
+        model = self.get_conv2d_model()
+        config = RoadConfig(target_modules=["conv2d"], group_size=2)
+        msg = "Target module Conv2d(100, 100, kernel_size=(3, 3), stride=(1, 1)) is not supported. Currently, only the following modules are supported: `torch.nn.Linear`."
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            get_peft_model(model, config)
+
 
 class TestNoInfiniteRecursionDeepspeed:
     # see #1892 for details

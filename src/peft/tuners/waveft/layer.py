@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import warnings
-from typing import Any, List, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -30,7 +30,14 @@ class WaveFTLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names = ("waveft_spectrum",)
     # All names of other parameters that may contain adapter-related parameters
-    other_param_names = ("waveft_n_frequency", "waveft_scaling", "waveft_random_loc_seed", "waveft_wavelet_family", "waveft_indices", "waveft_use_idwt")
+    other_param_names = (
+        "waveft_n_frequency",
+        "waveft_scaling",
+        "waveft_random_loc_seed",
+        "waveft_wavelet_family",
+        "waveft_indices",
+        "waveft_use_idwt",
+    )
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         self.base_layer = base_layer
@@ -56,7 +63,9 @@ class WaveFTLayer(BaseTunerLayer):
         else:
             raise ValueError(f"Unsupported layer type {type(base_layer)}")
 
-    def update_layer(self, adapter_name, n_frequency, scaling, init_weights, random_loc_seed, wavelet_family="db1", use_idwt=True):
+    def update_layer(
+        self, adapter_name, n_frequency, scaling, init_weights, random_loc_seed, wavelet_family="db1", use_idwt=True
+    ):
         if n_frequency <= 0:
             raise ValueError(f"`n_frequency` should be a positive integer value but the value passed is {n_frequency}")
         if n_frequency > self.in_features * self.out_features:
@@ -90,7 +99,7 @@ class WaveFTLayer(BaseTunerLayer):
         if init_weights:
             # Initialize with zeros later using reset_wave_parameters
             self.waveft_spectrum[adapter_name] = nn.Parameter(torch.empty(n_frequency), requires_grad=True)
-            self.reset_wave_parameters(adapter_name) # Initialize to zeros now
+            self.reset_wave_parameters(adapter_name)  # Initialize to zeros now
         else:
             # Initialize with randn scaled by a small std dev to prevent explosion
             std_dev = 0.01  # Using a small std dev for initial random weights
@@ -125,8 +134,9 @@ class WaveFTLayer(BaseTunerLayer):
                 padded_in_features += 1
 
             # Create the padded dense spectrum matrix
-            dense_spectrum = torch.zeros(padded_out_features, padded_in_features,
-                                        device=spectrum.device, dtype=spectrum.dtype)
+            dense_spectrum = torch.zeros(
+                padded_out_features, padded_in_features, device=spectrum.device, dtype=spectrum.dtype
+            )
 
             # Calculate padding offsets to center the original data in the padded matrix
             row_offset = (padded_out_features - self.out_features) // 2
@@ -149,10 +159,10 @@ class WaveFTLayer(BaseTunerLayer):
             # Split into four sub-bands
             H, W = dense_spectrum.shape
             H2, W2 = H // 2, W // 2
-            cA = dense_spectrum[:H2, :W2]      # top-left
-            cH = dense_spectrum[:H2, W2:]      # top-right
-            cV = dense_spectrum[H2:, :W2]      # bottom-left
-            cD = dense_spectrum[H2:, W2:]      # bottom-right
+            cA = dense_spectrum[:H2, :W2]  # top-left
+            cH = dense_spectrum[:H2, W2:]  # top-right
+            cV = dense_spectrum[H2:, :W2]  # bottom-left
+            cD = dense_spectrum[H2:, W2:]  # bottom-right
 
             # Construct wavelet-coefficient tuple
             coeffs = (cA, (cH, cV, cD))
@@ -168,12 +178,13 @@ class WaveFTLayer(BaseTunerLayer):
 
                 # Slice to the exact output size needed
                 delta_weight = delta_weight[
-                    start_row:start_row + self.out_features,
-                    start_col:start_col + self.in_features
+                    start_row : start_row + self.out_features, start_col : start_col + self.in_features
                 ]
         else:
             # Simple direct use of spectrum without IDWT
-            dense_spectrum = torch.zeros(self.out_features, self.in_features, device=spectrum.device, dtype=spectrum.dtype)
+            dense_spectrum = torch.zeros(
+                self.out_features, self.in_features, device=spectrum.device, dtype=spectrum.dtype
+            )
             dense_spectrum[indices[0, :], indices[1, :]] = spectrum
             delta_weight = dense_spectrum * self.waveft_scaling[adapter]
 
@@ -201,7 +212,7 @@ class WaveFTLinear(nn.Module, WaveFTLayer):
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, n_frequency, scaling, init_weights, random_loc_seed, wavelet_family, use_idwt)
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 

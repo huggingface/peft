@@ -25,9 +25,8 @@ class WaveletDetailTuple2d(NamedTuple):
     vertical: torch.Tensor
     diagonal: torch.Tensor
 
-WaveletCoeff2d: TypeAlias = tuple[
-    torch.Tensor, Unpack[tuple[WaveletDetailTuple2d, ...]]
-]
+
+WaveletCoeff2d: TypeAlias = tuple[torch.Tensor, Unpack[tuple[WaveletDetailTuple2d, ...]]]
 WaveletDetailDict: TypeAlias = dict[str, torch.Tensor]
 WaveletCoeffNd: TypeAlias = tuple[torch.Tensor, Unpack[tuple[WaveletDetailDict, ...]]]
 
@@ -40,9 +39,7 @@ class Wavelet(Protocol):
     rec_hi: Sequence[float]
     dec_len: int
     rec_len: int
-    filter_bank: tuple[
-        Sequence[float], Sequence[float], Sequence[float], Sequence[float]
-    ]
+    filter_bank: tuple[Sequence[float], Sequence[float], Sequence[float], Sequence[float]]
 
     def __len__(self) -> int:
         return len(self.dec_lo)
@@ -63,14 +60,17 @@ class WaveletTensorTuple(NamedTuple):
             torch.tensor(wavelet.rec_hi, dtype=dtype),
         )
 
+
 def _as_wavelet(wavelet: Union[Wavelet, str]) -> Wavelet:
     if isinstance(wavelet, str):
         return minimal_wavelet(wavelet)
     else:
         return wavelet
 
+
 def _is_dtype_supported(dtype: torch.dtype) -> bool:
     return dtype in [torch.float16, torch.bfloat16, torch.float32, torch.float64]
+
 
 def _outer(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     a_flat = torch.reshape(a, [-1])
@@ -79,27 +79,34 @@ def _outer(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     b_mul = torch.unsqueeze(b_flat, dim=0)
     return a_mul * b_mul
 
+
 def _check_if_tensor(array: Any) -> torch.Tensor:
     if not isinstance(array, torch.Tensor):
         raise ValueError("First element of coeffs must be the approximation coefficient tensor.")
     return array
 
+
 def _check_axes_argument(axes: Sequence[int]) -> None:
     if len(set(axes)) != len(axes):
         raise ValueError("Cant transform the same axis twice.")
+
 
 def _check_same_device(tensor: torch.Tensor, torch_device: torch.device) -> torch.Tensor:
     if torch_device != tensor.device:
         raise ValueError("coefficients must be on the same device")
     return tensor
 
+
 def _check_same_dtype(tensor: torch.Tensor, torch_dtype: torch.dtype) -> torch.Tensor:
     if torch_dtype != tensor.dtype:
         raise ValueError("coefficients must have the same dtype")
     return tensor
 
+
 @overload
-def _coeff_tree_map(coeffs: list[torch.Tensor], function: Callable[[torch.Tensor], torch.Tensor]) -> list[torch.Tensor]: ...
+def _coeff_tree_map(
+    coeffs: list[torch.Tensor], function: Callable[[torch.Tensor], torch.Tensor]
+) -> list[torch.Tensor]: ...
 @overload
 def _coeff_tree_map(coeffs: WaveletCoeff2d, function: Callable[[torch.Tensor], torch.Tensor]) -> WaveletCoeff2d: ...
 @overload
@@ -125,23 +132,29 @@ def _coeff_tree_map(coeffs, function):
         cast_result_lst = cast(Union[list[WaveletDetailDict], list[WaveletDetailTuple2d]], result_lst)
         return (approx, *cast_result_lst)
 
-def _check_same_device_dtype(coeffs: Union[list[torch.Tensor], WaveletCoeff2d, WaveletCoeffNd]) -> tuple[torch.device, torch.dtype]:
+
+def _check_same_device_dtype(
+    coeffs: Union[list[torch.Tensor], WaveletCoeff2d, WaveletCoeffNd],
+) -> tuple[torch.device, torch.dtype]:
     c = _check_if_tensor(coeffs[0])
     torch_device, torch_dtype = c.device, c.dtype
     _coeff_tree_map(coeffs, partial(_check_same_device, torch_device=torch_device))
     _coeff_tree_map(coeffs, partial(_check_same_dtype, torch_dtype=torch_dtype))
     return torch_device, torch_dtype
 
+
 def _get_transpose_order(axes: Sequence[int], data_shape: Sequence[int]) -> tuple[list[int], list[int]]:
-    axes = list(map(lambda a: a + len(data_shape) if a < 0 else a, axes))
+    axes = [a + len(data_shape) if a < 0 else a for a in axes]
     all_axes = list(range(len(data_shape)))
     remove_transformed = list(filter(lambda a: a not in axes, all_axes))
     return remove_transformed, axes
+
 
 def _swap_axes(data: torch.Tensor, axes: Sequence[int]) -> torch.Tensor:
     _check_axes_argument(axes)
     front, back = _get_transpose_order(axes, list(data.shape))
     return torch.permute(data, front + back)
+
 
 def _undo_swap_axes(data: torch.Tensor, axes: Sequence[int]) -> torch.Tensor:
     _check_axes_argument(axes)
@@ -149,12 +162,15 @@ def _undo_swap_axes(data: torch.Tensor, axes: Sequence[int]) -> torch.Tensor:
     restore_sorted = torch.argsort(torch.tensor(front + back)).tolist()
     return torch.permute(data, restore_sorted)
 
+
 def _fold_axes(data: torch.Tensor, keep_no: int) -> tuple[torch.Tensor, list[int]]:
     dshape = list(data.shape)
     return (torch.reshape(data, [int(np.prod(dshape[:-keep_no]))] + dshape[-keep_no:]), dshape)
 
+
 def _unfold_axes(data: torch.Tensor, ds: list[int], keep_no: int) -> torch.Tensor:
     return torch.reshape(data, ds[:-keep_no] + list(data.shape[-keep_no:]))
+
 
 def _preprocess_coeffs(coeffs, ndim: int, axes, add_channel_dim: bool = False):
     if isinstance(axes, int):
@@ -181,6 +197,7 @@ def _preprocess_coeffs(coeffs, ndim: int, axes, add_channel_dim: bool = False):
         coeffs = _coeff_tree_map(coeffs, lambda x: x.unsqueeze(1))
     return coeffs, ds
 
+
 def _postprocess_coeffs(coeffs, ndim: int, ds: list[int], axes):
     if isinstance(axes, int):
         axes = (axes,)
@@ -201,7 +218,10 @@ def _postprocess_coeffs(coeffs, ndim: int, ds: list[int], axes):
             coeffs = _coeff_tree_map(coeffs, undo_swap_fn)
     return coeffs
 
-def _postprocess_tensor(data: torch.Tensor, ndim: int, ds: list[int], axes: Union[tuple[int, ...], int]) -> torch.Tensor:
+
+def _postprocess_tensor(
+    data: torch.Tensor, ndim: int, ds: list[int], axes: Union[tuple[int, ...], int]
+) -> torch.Tensor:
     return _postprocess_coeffs(coeffs=[data], ndim=ndim, ds=ds, axes=axes)[0]
 
 
@@ -226,14 +246,14 @@ def _get_filter_tensors(
         )
     return filters
 
-def _adjust_padding_at_reconstruction(
-    tensor_len: int, coeff_len: int, padr: int, padl: int
-) -> tuple[int, int]:
+
+def _adjust_padding_at_reconstruction(tensor_len: int, coeff_len: int, padr: int, padl: int) -> tuple[int, int]:
     if 2 * coeff_len - tensor_len == 1:
         padr += 1
     elif 2 * coeff_len - tensor_len != 0:
         raise ValueError("incorrect padding")
     return padr, padl
+
 
 def _construct_2d_filt(lo: torch.Tensor, hi: torch.Tensor) -> torch.Tensor:
     ll = _outer(lo, lo)
@@ -244,6 +264,7 @@ def _construct_2d_filt(lo: torch.Tensor, hi: torch.Tensor) -> torch.Tensor:
     filt = filt.unsqueeze(1)
     return filt
 
+
 def waverec2d(
     coeffs: WaveletCoeff2d,
     wavelet: Union[Wavelet, str],
@@ -252,9 +273,7 @@ def waverec2d(
     coeffs, ds = _preprocess_coeffs(coeffs, ndim=2, axes=axes)
     torch_device, torch_dtype = _check_same_device_dtype(coeffs)
 
-    _, _, rec_lo, rec_hi = _get_filter_tensors(
-        wavelet, flip=False, device=torch_device, dtype=torch_dtype
-    )
+    _, _, rec_lo, rec_hi = _get_filter_tensors(wavelet, flip=False, device=torch_device, dtype=torch_dtype)
     filt_len = rec_lo.shape[-1]
     rec_filt = _construct_2d_filt(lo=rec_lo, hi=rec_hi)
 
@@ -277,13 +296,21 @@ def waverec2d(
         padt = (2 * filt_len - 3) // 2
         padb = (2 * filt_len - 3) // 2
         if c_pos < len(coeffs) - 2:
-            padr, padl = _adjust_padding_at_reconstruction(res_ll.shape[-1], coeffs[c_pos + 2][0].shape[-1], padr, padl)
-            padb, padt = _adjust_padding_at_reconstruction(res_ll.shape[-2], coeffs[c_pos + 2][0].shape[-2], padb, padt)
+            padr, padl = _adjust_padding_at_reconstruction(
+                res_ll.shape[-1], coeffs[c_pos + 2][0].shape[-1], padr, padl
+            )
+            padb, padt = _adjust_padding_at_reconstruction(
+                res_ll.shape[-2], coeffs[c_pos + 2][0].shape[-2], padb, padt
+            )
 
-        if padt > 0: res_ll = res_ll[..., padt:, :]
-        if padb > 0: res_ll = res_ll[..., :-padb, :]
-        if padl > 0: res_ll = res_ll[..., padl:]
-        if padr > 0: res_ll = res_ll[..., :-padr]
+        if padt > 0:
+            res_ll = res_ll[..., padt:, :]
+        if padb > 0:
+            res_ll = res_ll[..., :-padb, :]
+        if padl > 0:
+            res_ll = res_ll[..., padl:]
+        if padr > 0:
+            res_ll = res_ll[..., :-padr]
 
     res_ll = _postprocess_tensor(res_ll, ndim=2, ds=ds, axes=axes)
     return res_ll
