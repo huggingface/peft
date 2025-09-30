@@ -325,7 +325,31 @@ def get_peft_model_state_dict(
         warnings.warn("Could not identify embedding layer(s) because the model is not a 🤗 transformers model.")
 
     # REMOVE ADAPTER NAME
-    to_return = {k.replace(f".{adapter_name}", ""): v for k, v in to_return.items()}
+    # Ensure not to replace in the middle of the key because a module happens to have the same name as the adapter.
+    pattern = re.compile(re.escape(f".{adapter_name}") + r"$")
+
+    def remove_adapter_name(key):
+        if "." not in key:
+            # nothing to do
+            return key
+
+        if key.endswith(f".{adapter_name}"):
+            # comes from an nn.Parameter, so no .weight suffix, the adapter name is directly at the end
+            return key.removesuffix(f".{adapter_name}")
+
+        # comes from an nn.Module, i.e. the adapter name is the 2nd to last element, e.g. v_proj.lora_A.default.weight
+        key, _, suffix = key.rpartition(".")  # split, e.g. v_proj.lora_A.default + weight
+
+        if (config.peft_type == PeftType.VBLORA) and suffix.startswith(f"{adapter_name}_"):
+            # special case: VBLoRA creates keys that require this replacement:
+            # base_model.model.lin0.vblora_logits_A.default_topk_indices =>
+            # base_model.model.lin0.vblora_logits_A_topk_indices
+            return key + "_" + suffix.removeprefix(f"{adapter_name}_")
+
+        key = pattern.sub("", key)  # remove adapter name, e.g. v_proj.lora_A
+        return f"{key}.{suffix}"  # stitch the suffix back, e.g, v_proj.lora_A.weight
+
+    to_return = {remove_adapter_name(k): v for k, v in to_return.items()}
     return to_return
 
 
@@ -364,10 +388,12 @@ def _insert_adapter_name_into_state_dict(
     peft_model_state_dict = {}
     for key, val in state_dict.items():
         if parameter_prefix in key:
-            suffix = key.split(parameter_prefix)[1]
+            _, _, suffix = key.rpartition(parameter_prefix)
             if "." in suffix:
                 suffix_to_replace = ".".join(suffix.split(".")[1:])
-                key = key.replace(suffix_to_replace, f"{adapter_name}.{suffix_to_replace}")
+                # only replace the substring if the key ends on the substring to avoid accidental replacement inside of
+                # the key if a module happens to have a name that contains the substring
+                key = re.sub(re.escape(suffix_to_replace) + r"$", f"{adapter_name}.{suffix_to_replace}", key)
             else:
                 key = f"{key}.{adapter_name}"
             peft_model_state_dict[key] = val
