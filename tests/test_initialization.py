@@ -27,8 +27,6 @@ import pytest
 import torch
 from datasets import Dataset
 from huggingface_hub import snapshot_download
-from huggingface_hub.errors import HfHubHTTPError, LocalEntryNotFoundError
-from huggingface_hub.utils import reset_sessions
 from safetensors.torch import load_file
 from scipy import stats
 from torch import nn
@@ -71,6 +69,13 @@ from peft.utils import infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
 
 from .testing_utils import load_dataset_english_quotes, require_deterministic_for_xpu
+
+
+try:
+    from huggingface_hub.utils import reset_sessions
+except ImportError:
+    # this function was removed in hfh v1.0.0
+    reset_sessions = None
 
 
 class TestLoraInitialization:
@@ -1986,13 +1991,19 @@ class TestLoadAdapterOfflineMode:
     def hub_offline_ctx(self):
         # this is required to simulate offline mode, setting the env var dynamically inside the test does not work
         # because the value is checked only once at the start of the session
-        with patch("huggingface_hub.constants.HF_HUB_OFFLINE", True):
-            reset_sessions()
-            yield
-        reset_sessions()
 
-    # TODO remove when/if Hub is more stable
-    @pytest.mark.xfail(reason="Test is flaky on CI", raises=HfHubHTTPError)
+        if reset_sessions is None:
+            # this means we're using huggingface_hub >= 1.0.0, there is no need to call reset_sessions() anymore
+            with patch("huggingface_hub.constants.HF_HUB_OFFLINE", True):
+                yield
+        else:
+            # in huggingface_hub < 1.0.0, it's necessary to reset the session
+            # TODO: remove once huggingface_hub < 1.0.0 is no longer supported
+            with patch("huggingface_hub.constants.HF_HUB_OFFLINE", True):
+                reset_sessions()
+                yield
+            reset_sessions()
+
     def test_load_from_hub_then_offline_model(self):
         # this uses LoRA but it's the same mechanism for other methods
         base_model = AutoModelForCausalLM.from_pretrained(self.base_model)
@@ -2019,8 +2030,6 @@ class TestLoadAdapterOfflineMode:
         snapshot_download(self.base_model, cache_dir=cache_dir)
         snapshot_download(self.peft_model_id, cache_dir=cache_dir)
 
-    # TODO remove when/if Hub is more stable
-    @pytest.mark.xfail(reason="Test is flaky on CI", raises=LocalEntryNotFoundError)
     def test_load_checkpoint_offline_non_default_cache_dir(self, changed_default_cache_dir, tmp_path):
         # See #2373 for context
         self.load_checkpoints(tmp_path)
