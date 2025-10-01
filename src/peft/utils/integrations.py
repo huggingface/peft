@@ -93,14 +93,19 @@ def dequantize_bnb_weight(weight: torch.nn.Parameter, state=None):
     """
     import bitsandbytes as bnb
 
-    # BNB requires CUDA weights
+    if state.SCB is None:
+        state.SCB = weight.SCB
+
+    # BNB requires accelerator weights
     device = weight.device
     is_cpu = device.type == torch.device("cpu").type
     if is_cpu:
         if torch.cuda.is_available():
             weight = weight.to(torch.device("cuda"))
+            state.SCB = state.SCB.to(torch.device("cuda"))
         elif is_xpu_available():
             weight = weight.to(torch.device("xpu"))
+            state.SCB = state.SCB.to(torch.device("xpu"))
 
     cls_name = weight.__class__.__name__
     if cls_name == "Params4bit":
@@ -108,9 +113,6 @@ def dequantize_bnb_weight(weight: torch.nn.Parameter, state=None):
         if is_cpu:
             dequantized = dequantized.to(device)
         return dequantized
-
-    if state.SCB is None:
-        state.SCB = weight.SCB
 
     if hasattr(bnb.functional, "int8_vectorwise_dequant"):
         # Use bitsandbytes API if available (requires v0.45.0+)
@@ -121,6 +123,7 @@ def dequantize_bnb_weight(weight: torch.nn.Parameter, state=None):
 
     if is_cpu:
         dequantized = dequantized.to(device)
+        state.SCB = state.SCB.to(device)
     return dequantized
 
 
