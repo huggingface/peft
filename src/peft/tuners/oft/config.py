@@ -20,6 +20,8 @@ from typing import Literal, Optional, Union
 from peft.config import PeftConfig
 from peft.utils import PeftType
 
+import packaging.version
+import warnings
 
 @dataclass
 class OFTConfig(PeftConfig):
@@ -193,4 +195,12 @@ class OFTConfig(PeftConfig):
                 "with the latest version of OFT. Please retrain your adapter weights with newer PEFT versions. "
                 "Alternatively, downgrade PEFT to version 0.13.0 to use the old adapter weights."
             )
+        if kwargs["use_caylay_neumann"]:
+            peft_version = kwargs.get("peft_version", "unknown")
+            parsed_version = packaging.version.Version(peft_version)
+            min_version = packaging.version.Version("0.18.0")
+            # note: config.peft_version was added in 0.18.0, so if it's missing, it means we're below min version
+            if (peft_version == "unknown") or (parsed_version < min_version):
+                msg = "warning message that explains what is happening"
+                warnings.warn(msg)
         return super().check_kwargs(**kwargs)

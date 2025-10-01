@@ -82,6 +82,7 @@ class OFTRotationModule(nn.Module):
         kernel_size=(0, 0),
         use_cayley_neumann=True,
         num_cayley_neumann_terms=5,
+        device=None,
     ):
         super().__init__()
         self.r = r
@@ -89,6 +90,7 @@ class OFTRotationModule(nn.Module):
         self.block_size = block_size
         self.in_features = in_features
         self.weight = nn.Parameter(torch.empty(r, n_elements))
+        self.weight.to(device)
         self.coft = coft
         self.eps = eps
         self.block_share = block_share
@@ -98,6 +100,8 @@ class OFTRotationModule(nn.Module):
         self.num_cayley_neumann_terms = num_cayley_neumann_terms
         # Create indices for upper triangle (excluding diagonal)
         self.rows, self.cols = torch.triu_indices(block_size, block_size, 1)
+        self.rows.to(device)
+        self.cols.to(device)
 
     def _pytorch_skew_symmetric(self, vec, block_size):
         batch_size = vec.shape[0]
@@ -114,7 +118,6 @@ class OFTRotationModule(nn.Module):
         vec = matrix[:, self.rows, self.cols]
         return vec
 
-    @torch.compile
     def _cayley_batch(
         self, Q: torch.Tensor, block_size: int, use_cayley_neumann: bool = True, num_neumann_terms: int = 5
     ) -> torch.Tensor:
@@ -250,10 +253,6 @@ class OFTRotationModule(nn.Module):
         required_dtype = x.dtype
         if required_dtype != self.weight.dtype:
             x = x.to(self.weight.dtype)
-
-        if self.rows.device != self.weight.device:
-            self.rows = self.rows.to(self.weight.device)
-            self.cols = self.cols.to(self.weight.device)
 
         orig_shape = x.shape
 
@@ -477,6 +476,7 @@ class OFTLayer(BaseTunerLayer):
             block_share=block_share,
             use_cayley_neumann=use_cayley_neumann,
             num_cayley_neumann_terms=num_cayley_neumann_terms,
+            device=self.weight.device,
         )
 
         # Initialize weights
@@ -777,6 +777,7 @@ class Conv2d(nn.Module, OFTLayer):
             kernel_size=base_layer.kernel_size,
             use_cayley_neumann=use_cayley_neumann,
             num_cayley_neumann_terms=num_cayley_neumann_terms,
+            device=self.weight.device,
         )
 
         # Initialize weights
