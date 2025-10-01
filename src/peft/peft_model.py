@@ -1469,8 +1469,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         Note: Not supported for prompt learning methods like prompt tuning.
 
         Args:
-            model (`nn.Module`):
-                The model from which the adapter should be deleted.
             adapter_name (`str` or `Sequence[str]`):
                 The name of the adapter(s) whose gradients should be enabled/disabled.
             requires_grad (`bool`, *optional*)
@@ -1478,7 +1476,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         if self.active_peft_config.is_prompt_learning:
             raise TypeError(
-                f"Setting `requires_grad` is not supported for prompt learning methods like {self.active_peft_config.peft_type}"
+                "Setting `requires_grad` is not supported for prompt learning methods like "
+                f"{self.active_peft_config.peft_type.value}."
             )
 
         self.base_model.set_requires_grad(adapter_names=adapter_names, requires_grad=requires_grad)

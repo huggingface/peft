@@ -2669,13 +2669,6 @@ class TestPeftCustomModel(PeftCommonTester):
         model = DeepMLP(size=256)  # a size that works with all adapters
         model = get_peft_model(model, config0, adapter_name="adapter0").eval()
 
-        if config0.is_prompt_learning:
-            # prompt learning does not support this method (yet), so just check for the error and return
-            msg = "TODO"
-            with pytest.raises(TypeError, match=msg):
-                model.set_requires_grad(adapter_names="adpater0")
-            return
-
         # check that it works with a single adapter
         self._check_requires_grad(model.base_model.model.layers[0].lin0, adapter_name="adapter0", requires_grad=True)
 
