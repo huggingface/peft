@@ -422,15 +422,15 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
 
         # load the config
         if config is None:
-            kwargs = {
+            hf_kwargs = {
                 "subfolder": kwargs.get("subfolder", None),
                 "revision": kwargs.get("revision", None),
                 "cache_dir": kwargs.get("cache_dir", None),
                 "token": kwargs.get("token", None),
             }
             if use_auth_token := kwargs.get("use_auth_token", None):
-                kwargs["use_auth_token"] = use_auth_token
-            config = PEFT_TYPE_TO_CONFIG_MAPPING[PeftConfig._get_peft_type(model_id, **kwargs)].from_pretrained(
+                hf_kwargs["use_auth_token"] = use_auth_token
+            config = PEFT_TYPE_TO_CONFIG_MAPPING[PeftConfig._get_peft_type(model_id, **hf_kwargs)].from_pretrained(
                 model_id, **kwargs
             )
         elif isinstance(config, PeftConfig):
