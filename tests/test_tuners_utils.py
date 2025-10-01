@@ -771,6 +771,14 @@ class TestModelAndLayerStatus:
         expected = [{"default": False, "other": True}, {"default": False}, {"other": True}, {"default": False}]
         assert result == expected
 
+        # change requires grad, is now inconsistent with active/inactive adapter
+        large_model.set_requires_grad("default", requires_grad=True)
+        large_model.set_requires_grad("other", requires_grad=False)
+        layer_status = large_model.get_layer_status()
+        result = [status.requires_grad for status in layer_status]
+        expected = [{"default": True, "other": False}, {"default": True}, {"other": False}, {"default": True}]
+        assert result == expected
+
     def test_requires_grad_irregular(self, large_model):
         # inject an embedding layer with requires_grad=False
         # this is an invalid state, but we should still test it
@@ -1113,6 +1121,12 @@ class TestModelAndLayerStatus:
         large_model.set_adapter("other")
         model_status = large_model.get_model_status()
         assert model_status.requires_grad == {"default": False, "other": True}
+
+        # change requires grad, is now inconsistent with active/inactive adapter
+        large_model.set_requires_grad("default", requires_grad=True)
+        large_model.set_requires_grad("other", requires_grad=False)
+        model_status = large_model.get_model_status()
+        assert model_status.requires_grad == {"default": True, "other": False}
 
     def test_model_requires_grad_model_irregular(self, large_model):
         # inject an embedding layer with requires_grad=False

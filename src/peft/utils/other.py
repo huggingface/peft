@@ -21,6 +21,7 @@ import re
 import warnings
 from collections.abc import Sequence
 from contextlib import nullcontext
+from operator import attrgetter
 from typing import Any, Optional, Union
 
 import accelerate
@@ -477,6 +478,28 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
     def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
         """Delete an adapter from the layer, set a new active adapter if necessary"""
         raise NotImplementedError
+
+    def set_requires_grad(self, adapter_names: str | Sequence[str], requires_grad: bool = True) -> None:
+        """
+        Enable or disable gradients on the given adapter(s).
+
+        Args:
+            adapter_name (`str` or `Sequence[str]`):
+                The name of the adapter(s) whose gradients should be enabled/disabled.
+            requires_grad (`bool`, *optional*)
+                Whether to enable (`True`, default) or disable (`False`).
+        """
+        if isinstance(adapter_names, str):
+            adapter_names_set = {adapter_names}
+        else:
+            adapter_names_set = set(adapter_names)
+
+        for layer_name in self.adapter_layer_names:
+            # use attrgetter, as it resolves `.` in the attribute name
+            module_dict = attrgetter(layer_name)(self)
+            for key, layer in module_dict.items():
+                if key in adapter_names_set:
+                    layer.requires_grad_(requires_grad)
 
     def adapter_state_dict(self, adapter_name):
         """Return the state dict of this module for a given adapter."""

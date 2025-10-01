@@ -2640,6 +2640,108 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
 
+    @staticmethod
+    def _check_requires_grad(module, adapter_name, requires_grad):
+        # a bit of a clumsy way to test requires_grad on the PEFT parameters
+        for name in module.adapter_layer_names:
+            module_dict = getattr(module, name)
+            if adapter_name not in module_dict:
+                continue
+            attr = module_dict[adapter_name]
+            if isinstance(attr, nn.Module):
+                for param in attr.parameters():
+                    assert param.requires_grad == requires_grad
+            else:  # it's an nn.Parameter
+                assert attr.requires_grad == requires_grad
+
+    @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
+    def test_set_requires_grad(self, config_cls):
+        # checks that the model.set_requires_grad method works as expected
+        if config_cls == TrainableTokensConfig:
+            pytest.skip(
+                "TrainableTokensConfig has a separate test for set_requires_grad, as it needs a different model."
+            )
+
+        config_kwargs = {"target_modules": ["layers.0.lin0"]}
+        if config_cls == IA3Config:
+            config_kwargs["feedforward_modules"] = []
+        config0 = config_cls(**config_kwargs)
+        model = DeepMLP(size=256)  # a size that works with all adapters
+        model = get_peft_model(model, config0, adapter_name="adapter0").eval()
+
+        if config0.is_prompt_learning:
+            # prompt learning does not support this method (yet), so just check for the error and return
+            msg = "TODO"
+            with pytest.raises(TypeError, match=msg):
+                model.set_requires_grad(adapter_names="adpater0")
+            return
+
+        # check that it works with a single adapter
+        self._check_requires_grad(model.base_model.model.layers[0].lin0, adapter_name="adapter0", requires_grad=True)
+
+        # add another adapter with two target modules and with modules_to_save
+        config_kwargs["target_modules"] = ["layers.0.lin0", "layers.1.lin0"]
+        config_kwargs["modules_to_save"] = ["layers.2.lin0"]
+        config1 = config_cls(**config_kwargs)
+        model.add_adapter("adapter1", config1)
+
+        # adapter0 still has requires_grad=True, adapter1 has requires_grad=False
+        self._check_requires_grad(model.base_model.model.layers[0].lin0, adapter_name="adapter0", requires_grad=True)
+        self._check_requires_grad(model.base_model.model.layers[0].lin0, adapter_name="adapter1", requires_grad=False)
+        self._check_requires_grad(model.base_model.model.layers[1].lin0, adapter_name="adapter1", requires_grad=False)
+        self._check_requires_grad(model.base_model.model.layers[2].lin0, adapter_name="adapter1", requires_grad=False)
+
+        # enable grad for adapter1; adapter0 is unaffected
+        model.set_requires_grad(adapter_names="adapter1")
+        self._check_requires_grad(model.base_model.model.layers[0].lin0, adapter_name="adapter0", requires_grad=True)
+        self._check_requires_grad(model.base_model.model.layers[0].lin0, adapter_name="adapter1", requires_grad=True)
+        self._check_requires_grad(model.base_model.model.layers[1].lin0, adapter_name="adapter1", requires_grad=True)
+        self._check_requires_grad(model.base_model.model.layers[2].lin0, adapter_name="adapter1", requires_grad=True)
+
+        # disable adapter for both
+        model.set_requires_grad(adapter_names=["adapter0", "adapter1"], requires_grad=False)
+        self._check_requires_grad(model.base_model.model.layers[0].lin0, adapter_name="adapter0", requires_grad=False)
+        self._check_requires_grad(model.base_model.model.layers[0].lin0, adapter_name="adapter1", requires_grad=False)
+        self._check_requires_grad(model.base_model.model.layers[1].lin0, adapter_name="adapter1", requires_grad=False)
+
+    def test_set_requires_grad_trainable_tokens(self):
+        # same as test_set_requires_grad for trainable tokens
+        class EmbModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb0 = nn.Embedding(10, 10)
+                self.emb1 = nn.Embedding(10, 10)
+
+        config_kwargs = {"target_modules": ["emb0"], "token_indices": [0, 2, 4]}
+        config0 = TrainableTokensConfig(**config_kwargs)
+        model = EmbModel()
+        model = get_peft_model(model, config0, adapter_name="adapter0").eval()
+
+        # check that it works with a single adapter
+        self._check_requires_grad(model.base_model.model.emb0, adapter_name="adapter0", requires_grad=True)
+
+        # add another adapter which targets 2 embedding layers
+        config_kwargs["target_modules"] = ["emb0", "emb1"]
+        config1 = TrainableTokensConfig(**config_kwargs)
+        model.add_adapter("adapter1", config1)
+
+        # adapter0 still has requires_grad=True, adapter1 has requires_grad=False
+        self._check_requires_grad(model.base_model.model.emb0, adapter_name="adapter0", requires_grad=True)
+        self._check_requires_grad(model.base_model.model.emb0, adapter_name="adapter1", requires_grad=False)
+        self._check_requires_grad(model.base_model.model.emb1, adapter_name="adapter1", requires_grad=False)
+
+        # enable grad for adapter1; adapter0 is unaffected
+        model.set_requires_grad(adapter_names="adapter1")
+        self._check_requires_grad(model.base_model.model.emb0, adapter_name="adapter0", requires_grad=True)
+        self._check_requires_grad(model.base_model.model.emb0, adapter_name="adapter1", requires_grad=True)
+        self._check_requires_grad(model.base_model.model.emb1, adapter_name="adapter1", requires_grad=True)
+
+        # disable adapter for both
+        model.set_requires_grad(adapter_names=["adapter0", "adapter1"], requires_grad=False)
+        self._check_requires_grad(model.base_model.model.emb0, adapter_name="adapter0", requires_grad=False)
+        self._check_requires_grad(model.base_model.model.emb0, adapter_name="adapter1", requires_grad=False)
+        self._check_requires_grad(model.base_model.model.emb1, adapter_name="adapter1", requires_grad=False)
+
     def test_weight_bias_attributes(self):
         model = MLP()
         config = LoraConfig(target_modules=["lin0"])
