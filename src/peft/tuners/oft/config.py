@@ -14,14 +14,15 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
+
+import packaging.version
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
 
-import packaging.version
-import warnings
 
 @dataclass
 class OFTConfig(PeftConfig):
