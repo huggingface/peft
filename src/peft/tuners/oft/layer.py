@@ -90,7 +90,7 @@ class OFTRotationModule(nn.Module):
         self.block_size = block_size
         self.in_features = in_features
         self.weight = nn.Parameter(torch.empty(r, n_elements))
-        self.weight.to(device)
+        self.weight = self.weight.to(device)
         self.coft = coft
         self.eps = eps
         self.block_share = block_share
@@ -100,8 +100,8 @@ class OFTRotationModule(nn.Module):
         self.num_cayley_neumann_terms = num_cayley_neumann_terms
         # Create indices for upper triangle (excluding diagonal)
         self.rows, self.cols = torch.triu_indices(block_size, block_size, 1)
-        self.rows.to(device)
-        self.cols.to(device)
+        self.rows = self.rows.to(device)
+        self.cols = self.cols.to(device)
 
     def _pytorch_skew_symmetric(self, vec, block_size):
         batch_size = vec.shape[0]
@@ -476,7 +476,7 @@ class OFTLayer(BaseTunerLayer):
             block_share=block_share,
             use_cayley_neumann=use_cayley_neumann,
             num_cayley_neumann_terms=num_cayley_neumann_terms,
-            device=self.weight.device,
+            device=self.get_base_layer().weight.device,
         )
 
         # Initialize weights
@@ -777,7 +777,7 @@ class Conv2d(nn.Module, OFTLayer):
             kernel_size=base_layer.kernel_size,
             use_cayley_neumann=use_cayley_neumann,
             num_cayley_neumann_terms=num_cayley_neumann_terms,
-            device=self.weight.device,
+            device=self.get_base_layer().weight.device,
         )
 
         # Initialize weights
