@@ -198,6 +198,8 @@ class OFTConfig(PeftConfig):
             )
         if kwargs.get("use_cayley_neumann", False):
             peft_version = kwargs.get("peft_version", "0.0.0")  # if not present, set a low dummy version
+            # remove commit hash, if present
+            peft_version = peft_version.partition("@")[0]
             parsed_version = packaging.version.Version(peft_version)
             min_version = packaging.version.Version("0.18.0")
             # note: config.peft_version was added in 0.18.0, so if it's missing, it means we're below min version
