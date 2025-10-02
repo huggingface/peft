@@ -12,10 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Dimensional reduction amounts for different wavelet families during wavelet transforms
-Each tuple (rows, cols) represents the reduction in matrix dimensions that occurs when
-applying wavelet decomposition/reconstruction due to boundary effects and filter sizes.
-These values are used to pre-pad matrices before wavelet processing to ensure the
+Dimensional reduction amounts for different wavelet families during wavelet transforms Each tuple (rows, cols)
+represents the reduction in matrix dimensions that occurs when applying wavelet decomposition/reconstruction due to
+boundary effects and filter sizes. These values are used to pre-pad matrices before wavelet processing to ensure the
 reconstructed matrix maintains the original target dimensions.
 """
 

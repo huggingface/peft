@@ -22,7 +22,6 @@ from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
 
 from peft import (
-    PeftModel,
     WaveFTConfig,
     get_peft_model,
 )
