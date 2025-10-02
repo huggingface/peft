@@ -134,11 +134,6 @@ def train(
     trainer.train()
     model.save_pretrained(output_dir)
 
-    # Delete the model and load it again from the checkpoint.
-    del model
-    model = AutoModelForCausalLM.from_pretrained(base_model, **model_kwargs)
-    model = PeftModel.from_pretrained(model, output_dir)
-
 
 def generate_prompt(example):
     return f"""Below is an instruction that describes a task. Write a response that appropriately completes the request.
