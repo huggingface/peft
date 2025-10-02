@@ -57,7 +57,7 @@ def train(
     # Set seed
     if seed is not None:
         set_seed(seed)
-    model_kwargs = {"torch_dtype": getattr(torch, torch_dtype), "device_map": device_map}
+    model_kwargs = {"dtype": getattr(torch, torch_dtype), "device_map": device_map}
     model = AutoModelForCausalLM.from_pretrained(base_model, **model_kwargs)
 
     tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
