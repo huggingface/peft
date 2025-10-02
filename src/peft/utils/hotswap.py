@@ -597,17 +597,15 @@ def hotswap_adapter(model, model_name_or_path, adapter_name, torch_device=None, 
     ############################
     # LOAD CONFIG AND VALIDATE #
     ############################
-
-    config_cls = PEFT_TYPE_TO_CONFIG_MAPPING[
-        PeftConfig._get_peft_type(
-            model_name_or_path,
-            subfolder=kwargs.get("subfolder", None),
-            revision=kwargs.get("revision", None),
-            cache_dir=kwargs.get("cache_dir", None),
-            use_auth_token=kwargs.get("use_auth_token", None),
-            token=kwargs.get("token", None),
-        )
-    ]
+    hf_kwargs = {
+        "subfolder": kwargs.get("subfolder", None),
+        "revision": kwargs.get("revision", None),
+        "cache_dir": kwargs.get("cache_dir", None),
+        "token": kwargs.get("token", None),
+    }
+    if use_auth_token := kwargs.get("use_auth_token", None):
+        hf_kwargs["use_auth_token"] = use_auth_token
+    config_cls = PEFT_TYPE_TO_CONFIG_MAPPING[PeftConfig._get_peft_type(model_name_or_path, **hf_kwargs)]
     config = config_cls.from_pretrained(model_name_or_path, **kwargs)
     # config keys that could affect the model output besides what is determined by the state_dict
     check_hotswap_configs_compatible(model.active_peft_config, config)

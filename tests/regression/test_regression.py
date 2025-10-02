@@ -95,13 +95,7 @@ def setup_tearndown():
     # provide such a feature
 
     # download regression artifacts from Hugging Face Hub at the start
-    snapshot_download(
-        repo_id=HF_REPO,
-        local_dir=REGRESSION_DIR,
-        # Don't use symlink, because this prevents us from properly cleaning up the files once finished
-        local_dir_use_symlinks=False,
-    )
-
+    snapshot_download(repo_id=HF_REPO, local_dir=REGRESSION_DIR)
     yield
 
     # delete regression artifacts at the end of the test session; optionally, upload them first if in creation mode
