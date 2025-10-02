@@ -29,7 +29,7 @@ from peft import (
 
 
 def train(
-    base_model: str = "path/to/model",
+    base_model: str,
     data_path: str = "yahma/alpaca-cleaned",
     output_dir: str = "waveft",
     batch_size: int = 16,
