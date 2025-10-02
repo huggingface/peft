@@ -152,7 +152,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base_model", type=str, default="path/to/model")
+    parser.add_argument("--base_model", type=str)
     parser.add_argument("--data_path", type=str, default="yahma/alpaca-cleaned")
     parser.add_argument("--output_dir", type=str, default="waveft")
     parser.add_argument("--batch_size", type=int, default=16)
