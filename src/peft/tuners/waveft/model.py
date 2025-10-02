@@ -183,29 +183,14 @@ class WaveFTModel(BaseTuner):
 
         return new_module
 
-    def delete_adapter(self, adapter_name: str):
+    def delete_adapter(self, adapter_name: str) -> None:
         """
         Deletes an existing adapter.
 
         Args:
             adapter_name (str): Name of the adapter to be deleted.
         """
-        if adapter_name not in list(self.peft_config.keys()):
-            raise ValueError(f"Adapter {adapter_name} does not exist")
-        del self.peft_config[adapter_name]
-
+        super().delete_adapter(adapter_name)
         # Clean up proportional parameters cache
         if hasattr(self, "_proportional_params_cache") and adapter_name in self._proportional_params_cache:
             del self._proportional_params_cache[adapter_name]
-
-        # we cannot use self.prefix as we want to include non-trainable waveft parameters
-        key_list = [key for key, _ in self.model.named_modules() if "waveft" not in key]
-        new_adapter = None
-        for key in key_list:
-            _, target, _ = _get_submodules(self.model, key)
-            if isinstance(target, WaveFTLayer):
-                target.delete_adapter(adapter_name)
-                if new_adapter is None:
-                    new_adapter = target.active_adapter[:]
-
-        self.active_adapter = new_adapter or []
