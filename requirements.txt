@@ -13,3 +13,7 @@ pyyaml
 datasets
 psutil
 setuptools
+pandas
+seaborn
+matplotlib
+wandb

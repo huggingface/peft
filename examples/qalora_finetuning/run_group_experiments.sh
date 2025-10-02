@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ============================================================================
-# Group Experiment - Training & Evaluation Pipeline
+# Runnerscript_Group Experiment - Training & Evaluation Pipeline
 # ============================================================================
 # This script trains models with different training modes and ranks,
 # then evaluates them using the eval_peft.py script.
@@ -17,8 +17,8 @@ SCRIPT_DIR="/home/nudel/Documents/peft/examples/qalora_finetuning"
 BASE_OUTPUT_DIR="/home/nudel/Documents/peft/train_results_group_exp"
 
 # --- Iteration Parameters ---
-TRAINING_MODES=("qalora") 
-LORA_RANKS=(16 128 256)
+TRAINING_MODES=("post_quantization") 
+LORA_RANKS=(16)
 
 # --- Training Configuration ---
 DATA_PATH="yahma/alpaca-cleaned"
@@ -36,7 +36,7 @@ BF16="True"
 # --- Mode-Specific Parameters ---
 QALORA_GROUP_SIZE=32
 PISSA_NITER=4
-BITS=3 # Used for QALoRA, PiSSA, and post-training quantization
+BITS=2 # Used for QALoRA, PiSSA, and post-training quantization
 BASE_OUTPUT_DIR="${BASE_OUTPUT_DIR}_${BITS}"
 # --- Evaluation Configuration ---
 # EVAL_TASKS="hellaswag,piqa,winogrande,arc_easy,arc_challenge,boolq,openbookqa,wikitext"

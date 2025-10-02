@@ -11,10 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 
 import torch
-
+import torch.nn as nn
 from peft.import_utils import is_gptqmodel_available
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
@@ -23,7 +23,11 @@ from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
 from .layer import LoraVariant
 
-from .layer import LoraVariant
+# Try to import Triton dequant kernel from GPTQModel
+try:
+    from gptqmodel.nn_modules.triton_utils.dequant import QuantLinearFunction
+except Exception:
+    QuantLinearFunction = None
 
 
 class GPTQLoraLinear(torch.nn.Module, LoraLayer):
@@ -121,7 +125,7 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weight
                 else:
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
-                        orig_dtype = base_layer.weight.dtype
+                        orig_dtype = base_layer.dequantize_weights().dtype
                         base_layer.weight.data += self.get_delta_weight(active_adapter).to(orig_dtype)
                     else:
                         self.lora_variant[active_adapter].merge_unsafe(self, active_adapter, base_layer)
@@ -173,6 +177,7 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
     #         torch.nn.init.zeros_(self.lora_B[adapter_name].weight)
 
 
+
 def dispatch_gptq(
     target: torch.nn.Module,
     adapter_name: str,
@@ -201,3 +206,93 @@ def dispatch_gptq(
             target.qweight = target_base_layer.qweight
 
     return new_module
+
+def _dequantize_tritonv2_weight_to_out_in(module: torch.nn.Module, *, dtype: torch.dtype) -> Optional[torch.Tensor]:
+    """
+    For a GPTQModel TritonV2QuantLinear, reconstruct the full-precision weight matrix
+    and return it with shape (out_features, in_features).
+    Uses the Triton dequant kernel with an identity input (memory efficient enough per-layer).
+    """
+    try:
+        from gptqmodel.nn_modules.qlinear.tritonv2 import TritonV2QuantLinear
+    except Exception:
+        TritonV2QuantLinear = None
+
+    base = module.get_base_layer() if isinstance(module, BaseTunerLayer) else module
+    if TritonV2QuantLinear is None or not isinstance(base, TritonV2QuantLinear):
+        return None
+    if QuantLinearFunction is None:
+        raise RuntimeError("QuantLinearFunction not available. Install GPTQModel with triton extras.")
+
+    dev = base.qweight.device
+    in_features, out_features = base.in_features, base.out_features
+
+    # Identity trick: I @ W_deq = W_deq. This yields W_deq in shape (in_features, out_features).
+    eye = torch.eye(in_features, device=dev, dtype=dtype)
+    W_in_out = QuantLinearFunction.apply(
+        eye, base.qweight, base.scales, base.qzeros, base.g_idx,
+        base.bits, base.pack_dtype_bits, base.maxq
+    )
+    # Return transposed to match nn.Linear.weight shape (out, in)
+    return W_in_out.T.contiguous()
+
+def _tritonv2_to_float_linear(module: torch.nn.Module, *, dtype: torch.dtype) -> Optional[nn.Linear]:
+    W_out_in = _dequantize_tritonv2_weight_to_out_in(module, dtype=dtype)
+    if W_out_in is None:
+        return None
+
+    base = module.get_base_layer() if isinstance(module, BaseTunerLayer) else module
+    lin = nn.Linear(base.in_features, base.out_features, bias=(base.bias is not None), device=W_out_in.device, dtype=dtype)
+    lin.weight.data.copy_(W_out_in.to(dtype))
+    if base.bias is not None:
+        lin.bias.data.copy_(base.bias.detach().to(dtype))
+    return lin
+
+# ...existing code...
+def _delta_weight_vanilla_lora(mod: "GPTQLoraLinear", adapter: str, dtype: torch.dtype) -> torch.Tensor:
+    """
+    Fallback delta computation for vanilla LoRA:
+      deltaW = scaling * (B.weight @ A.weight)  -> shape (out, in)
+    """
+    A = mod.lora_A[adapter].weight   # (r, in)
+    B = mod.lora_B[adapter].weight   # (out, r)
+    scale = mod.scaling[adapter]
+    delta = (B @ A) * scale
+    return delta.to(dtype)
+
+def merge_gptq_lora_to_linear(model: nn.Module, adapter_names: Optional[list[str]] = None, dtype: torch.dtype = torch.bfloat16) -> nn.Module:
+    """
+    Dequantize TritonV2QuantLinear to float nn.Linear and merge LoRA weights.
+    Works even if LoraLayer.get_delta_weight is not available.
+    """
+    def get_parent(root: nn.Module, name: str) -> Tuple[nn.Module, str]:
+        parts = name.split(".")
+        parent = root
+        for p in parts[:-1]:
+            parent = getattr(parent, p)
+        return parent, parts[-1]
+
+    for full_name, module in list(model.named_modules()):
+        if isinstance(module, GPTQLoraLinear):
+            float_lin = _tritonv2_to_float_linear(module, dtype=dtype)
+            if float_lin is None:
+                continue
+
+            names_to_merge = check_adapters_to_merge(module, adapter_names)
+            for an in names_to_merge:
+                if an not in module.lora_A:
+                    continue
+
+                # If a variant (e.g. QALoRA) is active on this adapter, delegate to its merge_unsafe
+                if hasattr(module, "lora_variant") and (an in module.lora_variant):
+                    # Let the variant write into float_lin.weight in-place
+                    module.lora_variant[an].merge_unsafe(module, an, float_lin)
+                else:
+                    # Vanilla LoRA: compute delta directly (no dependency on get_delta_weight)
+                    delta = _delta_weight_vanilla_lora(module, an, dtype)
+                    float_lin.weight.data.add_(delta)
+
+            parent, child = get_parent(model, full_name)
+            setattr(parent, child, float_lin)
+
+    return model

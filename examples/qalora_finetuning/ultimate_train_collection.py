@@ -236,130 +236,45 @@ def load_or_quantize_model(
     cache_dir: str = "./quantized_models",
     cache_key: str = None,
 ) -> AutoModelForCausalLM:
-    """
-    Load a pre-quantized model from cache or quantize and cache a new one.
-    Can also quantize a pre-loaded model object in-memory, with caching.
-
-    Args:
-        model_or_path: Model identifier (str) or a pre-loaded model object (torch.nn.Module).
-        tokenizer: Tokenizer for the model.
-        qalora_group_size: Group size for quantization.
-        bits: Bit-width for quantization.
-        cache_dir: Directory to store quantized models.
-        cache_key: A unique key for caching in-memory modified models.
-
-    Returns:
-        The loaded (quantized) model.
-    """
     is_model_object = isinstance(model_or_path, torch.nn.Module)
     os.makedirs(cache_dir, exist_ok=True)
 
-    # --- Path for in-memory model object ---
     if is_model_object:
-        # If a cache key is provided, use the caching mechanism
-        if cache_key:
-            quantized_model_path = os.path.join(cache_dir, cache_key)
-            if os.path.exists(quantized_model_path) and os.path.exists(os.path.join(quantized_model_path, "config.json")):
-                print(f"✅ Loading pre-quantized (modified) model from cache: {quantized_model_path}")
-                try:
-                    return AutoModelForCausalLM.from_pretrained(quantized_model_path, device_map="auto")
-                except Exception as e:
-                    print(f"Failed to load cached model: {e}. Will re-quantize.")
-                    import shutil
-                    shutil.rmtree(quantized_model_path)
-        else:
-            # If no cache key, we can't save it permanently, so we use a temp dir
-            quantized_model_path = os.path.join(cache_dir, "temp_model_for_quantization")
+        key = cache_key or "in_memory_model"
+        quantized_model_path = os.path.join(cache_dir, f"{key}_gptq_{bits}bit_groupsize_{qalora_group_size}")
+        if os.path.exists(os.path.join(quantized_model_path, "config.json")):
+            print(f"Cache hit: {quantized_model_path}")
+            return AutoModelForCausalLM.from_pretrained(
+                quantized_model_path, device_map="auto", torch_dtype=torch.float16, trust_remote_code=True
+            )
+        raise ValueError("Quantizing an in-memory model is not implemented here. Pass a model name/path string.")
 
-        print("Quantizing a pre-loaded model object in-memory...")
-        model_to_quantize = model_or_path
-
-        # Configure GPTQ for quantization
-        gptq_config = GPTQConfig(
-            bits=bits,
-            dataset="c4",
-            tokenizer=tokenizer,
-            group_size=qalora_group_size,
-            desc_act=False,
-            sym=False,
-            backend="auto_trainable"
-        )
-
-        # The from_pretrained method with a quantization_config expects a path.
-        # We save the temporary model and reload it for quantization.
-        print(f"Temporarily saving model to '{quantized_model_path}' to apply quantization...")
-        model_to_quantize.save_pretrained(quantized_model_path)
-
-        # Now load from the temporary/cache directory and quantize
-        quantized_model = AutoModelForCausalLM.from_pretrained(
-            quantized_model_path, device_map="auto", quantization_config=gptq_config, torch_dtype=torch.float16
-        )
-
-        # If we used a cache_key, we overwrite the saved model with the final quantized version.
-        if cache_key:
-            print(f"Saving quantized model to cache: {quantized_model_path}")
-            quantized_model.save_pretrained(quantized_model_path)
-            tokenizer.save_pretrained(quantized_model_path)
-        else:
-            # If it was just a temp dir, clean it up.
-            import shutil
-            shutil.rmtree(quantized_model_path)
-
-        print("✅ In-memory model quantized successfully.")
-        return quantized_model
-    
-    # --- Path for model identifier string (existing logic) ---
     base_model = model_or_path
-    print(f"Checking if {base_model} is already GPTQ-quantized...")
-    try:
-        test_model = AutoModelForCausalLM.from_pretrained(
-            base_model,
-            device_map="auto",
-            torch_dtype=torch.float16,
-            trust_remote_code=True,
-        )
-        has_gptq = any(hasattr(module, "qweight") or "gptq" in str(type(module)).lower() for module in test_model.modules())
-        if has_gptq:
-            print(f"✅ Model {base_model} is already GPTQ-quantized. Using directly.")
-            return test_model
-        else:
-            print(f"Model {base_model} is not GPTQ-quantized. Will quantize it with {bits}-bit.")
-            del test_model
-            torch.cuda.empty_cache() if torch.cuda.is_available() else None
-    except Exception as e:
-        print(f"Could not load model {base_model} directly: {e}")
-        print(f"Will attempt to quantize it with {bits}-bit...")
-
-    os.makedirs(cache_dir, exist_ok=True)
     model_id = base_model.replace("/", "_").replace("\\", "_")
     quantized_model_path = os.path.join(cache_dir, f"{model_id}_gptq_{bits}bit_groupsize_{qalora_group_size}")
 
-    if os.path.exists(quantized_model_path) and os.path.exists(os.path.join(quantized_model_path, "config.json")):
-        print(f"Loading pre-quantized model from cache: {quantized_model_path}")
-        try:
-            return AutoModelForCausalLM.from_pretrained(quantized_model_path, device_map="auto")
-        except Exception as e:
-            print(f"Failed to load cached model: {e}. Will re-quantize.")
-            # import shutil
-            # shutil.rmtree(quantized_model_path)
+    if os.path.exists(os.path.join(quantized_model_path, "config.json")):
+        print(f"Cache hit: {quantized_model_path}")
+        return AutoModelForCausalLM.from_pretrained(
+            quantized_model_path, device_map="auto", torch_dtype=torch.float16, trust_remote_code=True
+        )
 
-    print(f"Quantizing model with {bits}-bit and group size {qalora_group_size}, saving to cache: {quantized_model_path}")
+    print(f"Quantizing base model {base_model} with {bits}-bit, group_size={qalora_group_size}")
     gptq_config = GPTQConfig(
         bits=bits,
-        dataset="c4",
+        dataset="alpaca-cleaned",
         tokenizer=tokenizer,
         group_size=qalora_group_size,
         desc_act=False,
         sym=False,
-        backend="auto_trainable"
+        backend="auto_trainable",
     )
     model = AutoModelForCausalLM.from_pretrained(
-        base_model, device_map="auto", quantization_config=gptq_config, torch_dtype=torch.float16
+        base_model, device_map="auto", quantization_config=gptq_config, torch_dtype=torch.float16, trust_remote_code=True
     )
-    print(f"Saving {bits}-bit quantized model to {quantized_model_path}")
     model.save_pretrained(quantized_model_path)
     tokenizer.save_pretrained(quantized_model_path)
-    print(f"✅ Model quantized to {bits}-bit with group size {qalora_group_size} and cached successfully")
+    print(f"✅ Cached GPTQ model at {quantized_model_path}")
     return model
 
 
@@ -437,40 +352,100 @@ def compare_models(model1, model2, model1_name="Model 1", model2_name="Model 2",
             print(f"  ... und {len(mismatched_params) - 10} weitere.")
         return False
 
-def check_cached_quantize(model_path, model_to_quantize, tokenizer, bits, group_size):
+def ensure_gptq_artifact(model_path, model_to_quantize, tokenizer, bits, group_size):
+    """
+    Ensure a GPTQ-quantized artifact exists at `model_path`. If it doesn't, quantize
+    the model found at `model_to_quantize` and save it to `model_path`.
+
+    Args:
+        model_path: Target directory for the quantized artifact.
+        model_to_quantize: Source model (usually a directory) to quantize.
+        tokenizer: Tokenizer to save alongside the model.
+        bits: Quantization bit width.
+        group_size: Group size for GPTQ.
+
+    Returns:
+        None. Writes artifacts to disk.
+    """
     if os.path.exists(model_path) and os.path.exists(os.path.join(model_path, "config.json")):
-        print("quantization not needed, model is in cache already")
+        print(f"Cache hit: {model_path} – skip quantization")
         return
 
-    # Configure GPTQ with current settings
-    gptq_config = GPTQConfig(
+    os.makedirs(model_path, exist_ok=True)
+    print(f"Quantizing {model_to_quantize} -> {model_path} with {bits}-bit, group_size={group_size}")
+    gptq_cfg = GPTQConfig(
         bits=bits,
-        dataset="c4",
+        dataset="alpaca-cleaned",
         tokenizer=tokenizer,
         group_size=group_size,
         desc_act=False,
         sym=False,
-        static_groups=False,
-        true_sequential=True,
-        actorder=True,
-        backend="auto_trainable"
+        backend="auto_trainable",
     )
-
-    print(f"Loading residual model for {bits}-bit quantization...")
-    quantized_model = AutoModelForCausalLM.from_pretrained(
-        model_to_quantize, device_map="auto", quantization_config=gptq_config, torch_dtype=torch.float16
+    model = AutoModelForCausalLM.from_pretrained(
+        model_to_quantize,
+        device_map="auto",
+        torch_dtype=torch.float16,
+        quantization_config=gptq_cfg,
+        trust_remote_code=True,
     )
-
-    print(f"Saving {bits}-bit quantized W_res to: {model_path}")
-    quantized_model.save_pretrained(model_path)
+    model.save_pretrained(model_path)
     tokenizer.save_pretrained(model_path)
+    del model
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    print(f"✅ Saved quantized artifact to {model_path}")
 
-    # Clean up memory
-    del quantized_model
-    torch.cuda.empty_cache()
-
-    print(f"✅ {bits}-bit quantization complete!")
-    
+def load_residual_with_adapter(
+    residual_or_quantized_path: str,
+    adapter_path: str,
+    *,
+    is_trainable: bool = False,
+    device_map: str = "auto",
+    dtype: torch.dtype = torch.float16,
+):
+    """
+    Load a residual (FP) or GPTQ-quantized residual model and attach the matching LoRA adapter.
+    """
+    tok = transformers.AutoTokenizer.from_pretrained(
+        residual_or_quantized_path, use_fast=True, padding_side="right", trust_remote_code=True
+    )
+    base = AutoModelForCausalLM.from_pretrained(
+        residual_or_quantized_path, device_map=device_map, torch_dtype=dtype, trust_remote_code=True
+    )
+    model = PeftModel.from_pretrained(base, adapter_path, is_trainable=is_trainable)
+    if is_trainable:
+        # ✅ CRITICAL: Set model to training mode
+        model.train()
+        
+        # ✅ Enable gradient checkpointing if available
+        if hasattr(model, 'gradient_checkpointing_enable'):
+            model.gradient_checkpointing_enable()
+        
+        # ✅ CRITICAL: Enable input gradients for PEFT + gradient checkpointing
+        if hasattr(model, 'enable_input_require_grads'):
+            model.enable_input_require_grads()
+            
+        # ✅ Disable cache during training (required for gradient computation)
+        model.config.use_cache = False
+        
+        # ✅ Verify trainable parameters
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        total_params = sum(p.numel() for p in model.parameters())
+        print(f"Trainable parameters: {trainable_params:,}")
+        print(f"Total parameters: {total_params:,}")
+        print(f"Trainable %: {100 * trainable_params / total_params:.2f}%")
+        
+        # ✅ Debug: Verify adapter parameters are trainable
+        adapter_params = [name for name, param in model.named_parameters() if param.requires_grad]
+        if adapter_params:
+            print(f"✅ Found {len(adapter_params)} trainable adapter parameters")
+        else:
+            print("❌ NO TRAINABLE PARAMETERS FOUND!")
+            
+    else:
+        model.eval()
+    return model, tok
 
 def train():
     parser = transformers.HfArgumentParser(TrainingArguments)
@@ -821,8 +796,8 @@ def train():
 
             lora_config = LoraConfig(
                 task_type="CAUSAL_LM",
-                # use_qalora=True,
-                # qalora_group_size=script_args.qalora_group_size,                
+                use_qalora=True,
+                qalora_group_size=script_args.qalora_group_size,
                 r=script_args.lora_r,
                 lora_alpha=2 * script_args.lora_r,
                 target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
@@ -875,9 +850,9 @@ def train():
                 model1_name="Extracted Residual Model", 
                 model2_name="Reloaded Model"
             )
-            model = reloaded_model_loaded
+            model = reloaded_model_loaded # residual model is in FP16 still
 
-        print("\n🧹 Aggressive Speicherbereinigung vor der Quantisierung...")
+        print("\n🧹 Clear memory before quantizing...")
         
         if 'peft_model' in locals():
             del peft_model
@@ -901,42 +876,40 @@ def train():
         print("✅ Speicherbereinigung abgeschlossen. Starte Quantisierung...")
 
         # --- CACHING LOGIC END ---
+        # Vorher: Mehrfach-Quantisierung (quantization_configs) -> entfernen.
+        # Jetzt: Optional genau EINE Quantisierung auf Basis von script_args.bits und script_args.qalora_group_size
+        bits = script_args.bits
+        group_size = script_args.qalora_group_size
+        print(f"\n{'=' * 60}")
+        print(f"Quantizing residual once: {bits}-bit, group_size={group_size}")
+        print(f"{'=' * 60}")
 
-        # Phase 4: Quantize W_res with different bit configurations
-        quantization_configs = [
-            {"bits": 2, "group_size": 32},
-            # {"bits": 3, "group_size": 32},
-            # {"bits": 4, "group_size": 32},
-        ]
-        quantized_models_info = []
+        quantized_name = f"w_res_{model_name_clean}_r{script_args.lora_r}_daniel_{bits}bit_gs{group_size}"
+        quantized_path = os.path.join(base_output_dir, quantized_name)
 
-        for i, qconfig in enumerate(quantization_configs):
-            bits = qconfig["bits"]
-            group_size = qconfig["group_size"]
+        ensure_gptq_artifact(
+            quantized_path,
+            full_precision_residual_path,
+            tokenizer=tokenizer,
+            bits=bits,
+            group_size=group_size
+        )
 
-            print(f"\n{'=' * 60}")
-            print(f"Quantizing W_res [{i + 1}/{len(quantization_configs)}]: {bits}-bit, group_size={group_size}")
-            print(f"{'=' * 60}")
-
-            # Create unique name for this quantization
-            quantized_name = f"w_res_{model_name_clean}_r{script_args.lora_r}_daniel_{bits}bit_gs{group_size}"
-            quantized_path = os.path.join(base_output_dir, quantized_name)
-
-            check_cached_quantize(quantized_path, full_precision_residual_path, tokenizer=tokenizer, bits=bits, group_size=group_size)
-            load_or_quantize_model(script_args.model_name_or_path, tokenizer=tokenizer, qalora_group_size=group_size, bits=bits)
-            
-
+        print(f"✅ Residual quantized (or loaded from cache): {quantized_path}")
+        
+        model, tok = load_residual_with_adapter(
+            residual_or_quantized_path=quantized_path,
+            adapter_path=adapter_path,
+            is_trainable=True,
+            dtype=torch.float16,       # oder torch.bfloat16, falls so gespeichert
+        )
         print(f"\n{'=' * 60}")
         print("🎉 QUANTIZATION SUMMARY")
         print(f"{'=' * 60}")
         print(f"Base model: {script_args.model_name_or_path}")
         print(f"LoRA rank: {script_args.lora_r}")
         print(f"Adapter saved to: {adapter_path}")
-        for info in quantized_models_info:
-            status_emoji = {"created": "✅", "exists": "⏭️", "failed": "❌"}[info["status"]]
-            print(f"  {status_emoji} {info['bits']}-bit (gs={info['group_size']}) -> {info['quantized_path']}")
 
-        # model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
     elif script_args.training_mode == "full":
         print("🔧 Setting up full finetuning...")
         model = transformers.AutoModelForCausalLM.from_pretrained(
@@ -1035,8 +1008,27 @@ def train():
 
         model = get_peft_model(model, lora_config)
         print("  -> PEFT-Modell erfolgreich erstellt. PiSSA-Initialisierung wird beim Trainingsstart ausgelöst.")
-    else:
-        model = AutoModelForCausalLM.from_pretrained(script_args.model_name_or_path, device_map="auto", torch_dtype=torch.float16, trust_remote_code=True)
+    elif script_args.training_mode == "post_quantization":
+        print("🔧 Setting up post_quantization training...")
+        model = load_or_quantize_model(
+            script_args.model_name_or_path,
+            tokenizer,
+            qalora_group_size=script_args.qalora_group_size,
+            bits=script_args.bits,
+        )
+
+        lora_config = LoraConfig(
+            task_type="CAUSAL_LM",
+            r=script_args.lora_r,
+            lora_alpha=2 * script_args.lora_r,
+            target_modules=["q_proj", "o_proj", "k_proj", "v_proj"],
+            # target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
+            lora_dropout=0.05,
+            bias="none",
+        )
+
+        model = get_peft_model(model, lora_config)
+        # model = AutoModelForCausalLM.from_pretrained(script_args.model_name_or_path, device_map="auto", torch_dtype=torch.float16, trust_remote_code=True)
         # raise ValueError(f"Unknown training mode: {script_args.training_mode}")
 
 
@@ -1078,6 +1070,38 @@ def train():
         model.save_pretrained(os.path.join(script_args.output_dir, "ft/adapter"))
         tokenizer.save_pretrained(os.path.join(script_args.output_dir, "ft/adapter"))
 
+    if script_args.training_mode == "post_quantization":
+        print("Applying GPTQ post-quantization...")
+        # Configure 4-bit quantization for QLoRA
+        from peft.tuners.lora.gptq import merge_gptq_lora_to_linear
+
+        # This will dequantize-and-merge in-place (returns the same object for convenience)
+        model = merge_gptq_lora_to_linear(model, adapter_names=None, dtype=torch.bfloat16)
+
+        # model = model.dequantize()
+        # model = model.merge_and_unload()
+        temp_model_path = "./temp_merged_model"
+
+        model.save_pretrained(temp_model_path)
+        
+        gptq_config = GPTQConfig(
+            bits=script_args.bits,
+            dataset="c4",
+            tokenizer=tokenizer,
+            group_size=32,
+            desc_act=False,
+            sym=False,
+        )
+        # post quantization gptq
+        model = AutoModelForCausalLM.from_pretrained(
+            temp_model_path,
+            quantization_config=gptq_config,
+            device_map=None,
+            torch_dtype=torch.bfloat16,
+        )  
+        if torch.cuda.is_available():
+            model.to("cuda") 
+        
     # --- START: Generation and Evaluation Logic ---
     print("\n🚀 Starting Alpaca evaluation...")
     # Put the model in evaluation mode

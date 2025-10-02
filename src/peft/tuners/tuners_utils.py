@@ -37,8 +37,6 @@ from peft.utils.constants import (
     MIN_TARGET_MODULES_FOR_OPTIMIZATION,
     SEQ_CLS_HEAD_NAMES,
 )
-from pytorch_wavelets import DWTForward, DWTInverse
-import pywt 
 
 from peft.utils.integrations import init_empty_weights
 from peft.utils.other import AuxiliaryTrainingWrapper, set_additional_trainable_modules
