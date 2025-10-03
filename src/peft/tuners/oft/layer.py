@@ -82,7 +82,6 @@ class OFTRotationModule(nn.Module):
         kernel_size=(0, 0),
         use_cayley_neumann=True,
         num_cayley_neumann_terms=5,
-        device=None,
     ):
         super().__init__()
         self.r = r
@@ -98,9 +97,9 @@ class OFTRotationModule(nn.Module):
         self.use_cayley_neumann = use_cayley_neumann
         self.num_cayley_neumann_terms = num_cayley_neumann_terms
         # Create indices for upper triangle (excluding diagonal)
-        self.rows, self.cols = torch.triu_indices(block_size, block_size, 1)
-        self.rows = self.rows.to(device)
-        self.cols = self.cols.to(device)
+        rows, cols = torch.triu_indices(block_size, block_size, 1)
+        self.register_buffer('rows', rows, persistent=False)
+        self.register_buffer('cols', cols, persistent=False)
 
     def _pytorch_skew_symmetric(self, vec, block_size):
         batch_size = vec.shape[0]
@@ -465,7 +464,6 @@ class OFTLayer(BaseTunerLayer):
 
         # Create weights with provided shape
         n_elements = oft_block_size * (oft_block_size - 1) // 2
-        device = self.get_base_layer().weight.device
         self.oft_R[adapter_name] = OFTRotationModule(
             r if not block_share else 1,
             n_elements,
@@ -476,7 +474,6 @@ class OFTLayer(BaseTunerLayer):
             block_share=block_share,
             use_cayley_neumann=use_cayley_neumann,
             num_cayley_neumann_terms=num_cayley_neumann_terms,
-            device=device if device.type != "meta" else None,
         )
 
         # Initialize weights
@@ -766,7 +763,6 @@ class Conv2d(nn.Module, OFTLayer):
 
         # Create weights with provided shape
         n_elements = oft_block_size * (oft_block_size - 1) // 2
-        device = self.get_base_layer().weight.device
         self.oft_R[adapter_name] = OFTRotationModule(
             r if not block_share else 1,
             n_elements,
@@ -778,7 +774,6 @@ class Conv2d(nn.Module, OFTLayer):
             kernel_size=base_layer.kernel_size,
             use_cayley_neumann=use_cayley_neumann,
             num_cayley_neumann_terms=num_cayley_neumann_terms,
-            device=device if device.type != "meta" else None,
         )
 
         # Initialize weights
