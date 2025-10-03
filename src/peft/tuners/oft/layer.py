@@ -90,7 +90,6 @@ class OFTRotationModule(nn.Module):
         self.block_size = block_size
         self.in_features = in_features
         self.weight = nn.Parameter(torch.empty(r, n_elements))
-        self.weight = self.weight.to(device)
         self.coft = coft
         self.eps = eps
         self.block_share = block_share
@@ -466,6 +465,7 @@ class OFTLayer(BaseTunerLayer):
 
         # Create weights with provided shape
         n_elements = oft_block_size * (oft_block_size - 1) // 2
+        device = self.get_base_layer().weight.device
         self.oft_R[adapter_name] = OFTRotationModule(
             r if not block_share else 1,
             n_elements,
@@ -476,7 +476,7 @@ class OFTLayer(BaseTunerLayer):
             block_share=block_share,
             use_cayley_neumann=use_cayley_neumann,
             num_cayley_neumann_terms=num_cayley_neumann_terms,
-            device=self.get_base_layer().weight.device,
+            device=device if device.type != "meta" else None,
         )
 
         # Initialize weights
@@ -766,6 +766,7 @@ class Conv2d(nn.Module, OFTLayer):
 
         # Create weights with provided shape
         n_elements = oft_block_size * (oft_block_size - 1) // 2
+        device = self.get_base_layer().weight.device
         self.oft_R[adapter_name] = OFTRotationModule(
             r if not block_share else 1,
             n_elements,
@@ -777,7 +778,7 @@ class Conv2d(nn.Module, OFTLayer):
             kernel_size=base_layer.kernel_size,
             use_cayley_neumann=use_cayley_neumann,
             num_cayley_neumann_terms=num_cayley_neumann_terms,
-            device=self.get_base_layer().weight.device,
+            device=device if device.type != "meta" else None,
         )
 
         # Initialize weights
