@@ -228,9 +228,13 @@ class LoraLayer(BaseTunerLayer):
 
         # for inits that require access to the base weight, use gather_param_ctx so that the weight is gathered when using DeepSpeed
         if isinstance(init_lora_weights, str) and init_lora_weights.startswith("daniel"):
-            with gather_params_ctx(self.get_base_layer().weight):
-                self.daniel_init(adapter_name, init_lora_weights)
-            print("Init layer adapter with daniel")
+            base_layer = self.get_base_layer() # if it got init already do not init it again. If we load it with a quantized layer it should not init it again since we have init it already before
+            if hasattr(base_layer, "weight"):
+                with gather_params_ctx(self.base_layer.weight):
+                    self.daniel_init(adapter_name, init_lora_weights)
+                print("Init layer adapter with daniel")
+            else:
+                print("Not init with daniel")
         elif isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
             with gather_params_ctx(self.get_base_layer().weight):
                 self.pissa_init(adapter_name, init_lora_weights)

@@ -132,6 +132,10 @@ class TrainingArguments(transformers.TrainingArguments):
     skip_training: bool = field(
         default=None
     )
+    calibration_dataset: str = field(
+        default="c4",
+        metadata={"help": "GPTQ calibration_dataset"},
+    )
 
 def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str):
     """Collects the state dict and dump to disk."""
@@ -352,7 +356,8 @@ def compare_models(model1, model2, model1_name="Model 1", model2_name="Model 2",
             print(f"  ... und {len(mismatched_params) - 10} weitere.")
         return False
 
-def ensure_gptq_artifact(model_path, model_to_quantize, tokenizer, bits, group_size):
+
+def ensure_gptq_artifact(model_path, model_to_quantize, calibration_set, tokenizer, bits, group_size):
     """
     Ensure a GPTQ-quantized artifact exists at `model_path`. If it doesn't, quantize
     the model found at `model_to_quantize` and save it to `model_path`.
@@ -375,12 +380,13 @@ def ensure_gptq_artifact(model_path, model_to_quantize, tokenizer, bits, group_s
     print(f"Quantizing {model_to_quantize} -> {model_path} with {bits}-bit, group_size={group_size}")
     gptq_cfg = GPTQConfig(
         bits=bits,
-        dataset="alpaca-cleaned",
+        # dataset="alpaca-cleaned",
+        dataset=calibration_set,
         tokenizer=tokenizer,
         group_size=group_size,
         desc_act=False,
         sym=False,
-        backend="auto_trainable",
+        # backend="auto_trainable",
     )
     model = AutoModelForCausalLM.from_pretrained(
         model_to_quantize,
@@ -395,6 +401,7 @@ def ensure_gptq_artifact(model_path, model_to_quantize, tokenizer, bits, group_s
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     print(f"✅ Saved quantized artifact to {model_path}")
+
 
 def load_residual_with_adapter(
     residual_or_quantized_path: str,
@@ -463,7 +470,6 @@ def train():
         # --- END OF BLOCK ---
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         script_args.model_name_or_path,
@@ -598,7 +604,6 @@ def train():
             del model
             torch.cuda.empty_cache()
 
-
         # =======================================================================
         # SCHRITT 3 & 4: Modell bereinigen und dann quantisieren
         # =======================================================================
@@ -609,7 +614,7 @@ def train():
             torch_dtype=torch.bfloat16,
             device_map="auto"
         )
-        
+
         print("Step 4/6: Zeroing out outliers before quantization...")
         for name, module in model_for_quant.named_modules():
             if name in outlier_data:
@@ -634,7 +639,7 @@ def train():
             # Wichtig: Stellen Sie sicher, dass diese Funktion das Modell nicht neu von der Festplatte lädt,
             # sondern das übergebene Objekt verwendet.
         )
-        
+
         # Geben Sie den Speicher des bereinigten Modells frei
         del model_for_quant
         torch.cuda.empty_cache()
@@ -649,11 +654,10 @@ def train():
             if isinstance(module, BaseQuantLinear): # z.B. GPTQLinear, QuantLinear, etc.
                 if name in outlier_data:
                     outlier_weights, outlier_indices = outlier_data[name]
-                    
+
                     # Registrieren der Outlier als nicht-trainierbare Buffer
                     module.register_buffer('outlier_weights', outlier_weights.to(torch.bfloat16))
                     module.register_buffer('outlier_indices', outlier_indices.to(torch.long))
-
 
         # =======================================================================
         # SCHRITT 6: PEFT anwenden (wie bei normalem QA-LoRA)
@@ -765,7 +769,7 @@ def train():
 
         adapter_name = f"daniel_adapter_r{script_args.lora_r}_{model_name_clean}"
         adapter_path = os.path.join(base_output_dir, adapter_name)
-        
+
         full_precision_residual_path = os.path.join(script_args.output_dir, f"{model_name_clean}_residual_base_r{script_args.lora_r}_fp16")
 
         # Prüfe, ob sowohl der Adapter als auch das Residual-Modell bereits existieren
@@ -773,7 +777,7 @@ def train():
             print(f"⏭️  Found cached adapter at: {adapter_path}")
             print(f"⏭️  Found cached residual model at: {full_precision_residual_path}")
             print("    Skipping model initialization and residual extraction.")
-            
+
             # Lade die target_modules aus der Adapter-Konfiguration für die spätere Verwendung
             from peft import PeftConfig
             try:
@@ -785,7 +789,7 @@ def train():
                 target_modules = []
         else:
             print("🔥 No cached artifacts found. Starting full initialization process...")
-            
+
             # Phase 2: Lade das Originalmodell und richte PEFT ein
             print("Phase 2: Loading original model and setting up PEFT...")
             model = AutoModelForCausalLM.from_pretrained(
@@ -817,32 +821,32 @@ def train():
             peft_base_model = peft_model.get_base_model().to(torch.float32)
             base_state_dict = peft_base_model.state_dict()
             clean_state_dict = {}
-            
+
             for key, value in base_state_dict.items():
                 if "base_layer.weight" in key:
                     clean_key = key.replace(".base_layer.weight", ".weight")
                     clean_state_dict[clean_key] = value.clone()
                 elif "weight" in key and "lora" not in key and "base_layer" not in key:
                     clean_state_dict[key] = value.clone()
-            
+
             # Füge den lm_head manuell hinzu, da get_base_model() ihn oft auslässt
             if "lm_head.weight" in peft_model.state_dict():
                 print("🧠 Adding lm_head.weight to the clean state_dict.")
                 clean_state_dict["lm_head.weight"] = peft_model.state_dict()["lm_head.weight"].clone()
 
             print(f"📋 Extracted: {len(clean_state_dict)} clean weights")
-            
+
             residual_model = AutoModelForCausalLM.from_pretrained(
                 script_args.model_name_or_path, torch_dtype=torch.float32
             )
-            
+
             residual_model.load_state_dict(clean_state_dict, strict=False)
-            
+
             print(f"💾 Saving clean residual model to: {full_precision_residual_path}")
             residual_model.save_pretrained(full_precision_residual_path)
             tokenizer.save_pretrained(full_precision_residual_path)
             print("✅ Clean residual model saved.")
-            
+
             # Verifiziere den Speicher-/Ladevorgang
             reloaded_model_loaded = AutoModelForCausalLM.from_pretrained(full_precision_residual_path, torch_dtype=torch.float32)
             compare_models(
@@ -853,7 +857,7 @@ def train():
             model = reloaded_model_loaded # residual model is in FP16 still
 
         print("\n🧹 Clear memory before quantizing...")
-        
+
         if 'peft_model' in locals():
             del peft_model
         # if 'model' in locals():
@@ -868,11 +872,11 @@ def train():
             del residual_model
         if 'reloaded_model_loaded' in locals():
             del reloaded_model_loaded
-        
+
         # Leere den CUDA-Cache, um den Speicher wirklich freizugeben
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        
+
         print("✅ Speicherbereinigung abgeschlossen. Starte Quantisierung...")
 
         # --- CACHING LOGIC END ---
@@ -884,24 +888,30 @@ def train():
         print(f"Quantizing residual once: {bits}-bit, group_size={group_size}")
         print(f"{'=' * 60}")
 
-        quantized_name = f"w_res_{model_name_clean}_r{script_args.lora_r}_daniel_{bits}bit_gs{group_size}"
+        calibration_dataset = script_args.calibration_dataset
+
+        quantized_name = (
+            f"w_res_{model_name_clean}_r{script_args.lora_r}_daniel_{bits}bit_gs{group_size}_{calibration_dataset}"
+        )
         quantized_path = os.path.join(base_output_dir, quantized_name)
 
         ensure_gptq_artifact(
             quantized_path,
             full_precision_residual_path,
+            calibration_dataset,
             tokenizer=tokenizer,
             bits=bits,
-            group_size=group_size
+            group_size=group_size,
         )
 
         print(f"✅ Residual quantized (or loaded from cache): {quantized_path}")
-        
+
         model, tok = load_residual_with_adapter(
             residual_or_quantized_path=quantized_path,
+            # residual_or_quantized_path=full_precision_residual_path,
             adapter_path=adapter_path,
             is_trainable=True,
-            dtype=torch.float16,       # oder torch.bfloat16, falls so gespeichert
+            dtype=torch.float16,  # oder torch.bfloat16, falls so gespeichert
         )
         print(f"\n{'=' * 60}")
         print("🎉 QUANTIZATION SUMMARY")
@@ -1031,7 +1041,6 @@ def train():
         # model = AutoModelForCausalLM.from_pretrained(script_args.model_name_or_path, device_map="auto", torch_dtype=torch.float16, trust_remote_code=True)
         # raise ValueError(f"Unknown training mode: {script_args.training_mode}")
 
-
     trainable_params, all_param = get_nb_trainable_parameters(model)
     print(
         f"trainable params: {trainable_params:,d} || all params: {all_param:,d} || trainable%: {100 * trainable_params / all_param:.2f}%"
@@ -1066,7 +1075,7 @@ def train():
     if not script_args.skip_training: 
         trainer = Trainer(model=model, tokenizer=tokenizer, args=script_args, **data_module)
         trainer.train()
-        # # trainer.save_state()
+        # trainer.save_state()
         model.save_pretrained(os.path.join(script_args.output_dir, "ft/adapter"))
         tokenizer.save_pretrained(os.path.join(script_args.output_dir, "ft/adapter"))
 
@@ -1083,12 +1092,12 @@ def train():
         temp_model_path = "./temp_merged_model"
 
         model.save_pretrained(temp_model_path)
-        
+
         gptq_config = GPTQConfig(
             bits=script_args.bits,
-            dataset="c4",
+            dataset=script_args.calibration_dataset,
             tokenizer=tokenizer,
-            group_size=32,
+            group_size=script_args.qalora_group_size,
             desc_act=False,
             sym=False,
         )
@@ -1101,20 +1110,30 @@ def train():
         )  
         if torch.cuda.is_available():
             model.to("cuda") 
-        
+
     # --- START: Generation and Evaluation Logic ---
     print("\n🚀 Starting Alpaca evaluation...")
     # Put the model in evaluation mode
     model.eval()
 
-    subfolder_name = f"mode_{script_args.training_mode}_bits_{script_args.bits}_rank_{script_args.lora_r}_group_{script_args.qalora_group_size}_training_skip_{script_args.skip_training}"
-    output_dir_eval = os.path.join(script_args.output_dir, subfolder_name)
+    file_name = f"mode_{script_args.training_mode}_bits_{script_args.bits}_rank_{script_args.lora_r}_group_{script_args.qalora_group_size}_training_skip_{script_args.skip_training}"
+    output_dir_eval = os.path.join(script_args.output_dir, "eval_results")
     os.makedirs(output_dir_eval, exist_ok=True)
 
     from eval_peft import generate_alpaca_response, run_lm_harness_and_print_results
-    generate_alpaca_response(model, tokenizer, script_args.training_mode, script_args.lora_r, output_dir_eval)
-    tasks="wikitext,piqa,tinyArc,tinyHellaswag,tinyGSM8k,tinyMMLU"
-    run_lm_harness_and_print_results(model=model, tokenizer=tokenizer, tasks=tasks, num_fewshot=1, limit=100, per_device_eval_batch_size=2, output_dir=output_dir_eval)
+    # generate_alpaca_response(model, tokenizer, script_args.training_mode, script_args.lora_r, output_dir_eval)
+    # tasks="wikitext,piqa,tinyArc,tinyHellaswag,tinyGSM8k,tinyMMLU"
+    tasks = "wikitext"
+    run_lm_harness_and_print_results(
+        model=model,
+        tokenizer=tokenizer,
+        tasks=tasks,
+        num_fewshot=1,
+        limit=30,
+        per_device_eval_batch_size=2,
+        output_dir=output_dir_eval,
+        file_name=file_name,
+    )
     print("eval lm_harness")
 
 if __name__ == "__main__":

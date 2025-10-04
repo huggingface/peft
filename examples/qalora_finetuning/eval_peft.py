@@ -12,7 +12,6 @@ import lm_eval
 import torch
 from lm_eval.models.huggingface import HFLM
 from transformers import AutoModelForCausalLM, AutoTokenizer, GPTQConfig
-from gptqmodel import GPTQModel
 from peft import PeftModel
 from lm_eval.loggers import WandbLogger
 
@@ -204,7 +203,7 @@ def generate_alpaca_response(model, tokenizer, training_mode, lora_r, output_dir
     # # If there are more unique instructions than requested, sample them to avoid bias
     # if len(unique_df) > max_eval_samples:
     #     unique_df = unique_df.sample(n=max_eval_samples, random_state=script_args.seed)
-        
+
     eval_subset = datasets.Dataset.from_pandas(unique_df)
     print(f"Proceeding with {len(eval_subset)} samples for generation.")
 
@@ -213,7 +212,7 @@ def generate_alpaca_response(model, tokenizer, training_mode, lora_r, output_dir
 
     for i, example in enumerate(eval_subset):
         print(f"Generating for example {i + 1}/{total_to_generate}...")
-        
+
         output = generate_response(model, tokenizer, example["instruction"])
         outputs.append({
             **example,
@@ -232,7 +231,10 @@ def generate_alpaca_response(model, tokenizer, training_mode, lora_r, output_dir
     print(f"\n✅ Alpaca evaluation finished. Results saved to {output_eval_file}")
     # --- END: Generation and Evaluation Logic ---
 
-def run_lm_harness_and_print_results(model, tokenizer, tasks, num_fewshot, limit, per_device_eval_batch_size, output_dir):
+
+def run_lm_harness_and_print_results(
+    model, tokenizer, tasks, num_fewshot, limit, per_device_eval_batch_size, output_dir, file_name
+):
     # Run evaluation
     results = evaluate_with_lm_eval(
         model=model,
@@ -249,7 +251,7 @@ def run_lm_harness_and_print_results(model, tokenizer, tasks, num_fewshot, limit
     # Save results if requested
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
-        output_path = os.path.join(output_dir, "eval_results.json")
+        output_path = os.path.join(output_dir, f"{file_name}.json")
 
         # Remove samples to reduce file size
         results_clean = results.copy()
@@ -266,6 +268,7 @@ def run_lm_harness_and_print_results(model, tokenizer, tasks, num_fewshot, limit
     torch.cuda.empty_cache()
 
     print("✅ Evaluation complete!") 
+
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate PEFT model using lm-eval-harness")
@@ -317,9 +320,9 @@ def main():
             torch_dtype=torch.bfloat16,
         )
 
-    run_lm_harness_and_print_results(model, tokenizer, args.tasks, args.num_fewshot, args.limit, args.per_device_eval_batch_size, args.output_dir)
-
-
+    run_lm_harness_and_print_results(
+        model, tokenizer, args.tasks, args.num_fewshot, args.limit, args.per_device_eval_batch_size, args.output_dir
+    )
 
 if __name__ == "__main__":
     main()
