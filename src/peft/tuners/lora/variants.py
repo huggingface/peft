@@ -460,6 +460,15 @@ class KasaLinearVariant(LoraVariant):
         module.get_base_layer().weight.data = (U_principle @ torch.diag(S_principle) @ Vh_principle).to(dtype)
 
     @staticmethod
+    def _get_delta_weight(weight_A, weight_B, lora_diag, scaling, fan_in_fan_out):
+        diag = torch.diag(lora_diag)
+        delta = weight_B @ diag @ weight_A
+        if fan_in_fan_out:
+            delta = delta.transpose(0, 1)
+        delta = delta * scaling
+        return delta
+            
+    @staticmethod
     def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
         delta_weight = module.get_delta_weight(active_adapter)
         return orig_weight + delta_weight
