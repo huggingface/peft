@@ -12,9 +12,13 @@ set -e # Exit on any error
 # CONFIGURATION - Edit these variables for different experiments
 # ============================================================================
 MODEL_NAME_OR_PATH="HuggingFaceTB/SmolLM2-1.7B"
-MODEL_SHORT_NAME="SmolLM2-1.7B" # Used for directory naming
-SCRIPT_DIR="/home/nudel/Documents/peft/examples/qalora_finetuning"
-BASE_OUTPUT_DIR="/home/nudel/Documents/peft/train_results_group_exp"
+# If not set externally, derive short name from model id
+MODEL_SHORT_NAME="${MODEL_SHORT_NAME:-${MODEL_NAME_OR_PATH##*/}}" # Used for directory naming
+# Resolve script directory and repo root dynamically
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# Allow overriding BASE_OUTPUT_DIR via environment; default near repo root
+BASE_OUTPUT_DIR="${BASE_OUTPUT_DIR:-$REPO_ROOT/train_results_group_exp}"
 
 # --- Iteration Parameters ---
 TRAINING_MODES=("qalora" "pissa_rank_analysis") 
