@@ -1,0 +1,20 @@
+{
+  "task_type": null,
+  "peft_type": "OSF",
+  "auto_mapping": null,
+  "base_model_name_or_path": "meta-llama/Llama-3.2-3B",
+  "revision": null,
+  "inference_mode": false,
+  "effective_rank": null,
+  "target_modules": [
+    "q_proj",
+    "k_proj",
+    "v_proj",
+    "o_proj",
+    "gate_proj",
+    "down_proj",
+    "up_proj"
+  ],
+  "rank_pattern": null
+}
+
