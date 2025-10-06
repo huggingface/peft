@@ -17,8 +17,8 @@ SCRIPT_DIR="/home/nudel/Documents/peft/examples/qalora_finetuning"
 BASE_OUTPUT_DIR="/home/nudel/Documents/peft/train_results_group_exp"
 
 # --- Iteration Parameters ---
-TRAINING_MODES=("post_quantization") 
-LORA_RANKS=(16)
+TRAINING_MODES=("qalora" "pissa_rank_analysis") 
+LORA_RANKS=(1 2 4)
 
 # --- Training Configuration ---
 DATA_PATH="yahma/alpaca-cleaned"
@@ -36,18 +36,14 @@ BF16="True"
 # --- Mode-Specific Parameters ---
 QALORA_GROUP_SIZE=32
 PISSA_NITER=4
-BITS=2 # Used for QALoRA, PiSSA, and post-training quantization
-BASE_OUTPUT_DIR="${BASE_OUTPUT_DIR}_${BITS}"
-# --- Evaluation Configuration ---
-# EVAL_TASKS="hellaswag,piqa,winogrande,arc_easy,arc_challenge,boolq,openbookqa,wikitext"
-EVAL_TASKS="wikitext,piqa"
-NUM_FEWSHOT=1
-EVAL_LIMIT=100
-EVAL_BATCH_SIZE=2
-APPLY_GPTQ_POST_QUANT="True"
+# Sweep over multiple bit-widths and calibration datasets
+# Example defaults; edit as needed
+BITS_LIST=(2 3)
+CALIBRATION_DATASETS=("c4" "alpaca-cleaned")
+# BASE_OUTPUT_DIR will be kept as root; per-run directories will include bit and dataset tags
 
 # --- System Configuration ---
-CUDA_DEVICE="0"
+# (no per-run CUDA_DEVICE here; rely on device_map in training script)
 
 # ============================================================================
 
@@ -97,71 +93,76 @@ main() {
     mkdir -p "$BASE_OUTPUT_DIR"
     cd "$SCRIPT_DIR" || exit 1
 
-    total_experiments=$((${#TRAINING_MODES[@]} * ${#LORA_RANKS[@]}))
+    total_experiments=$((${#TRAINING_MODES[@]} * ${#LORA_RANKS[@]} * ${#BITS_LIST[@]} * ${#CALIBRATION_DATASETS[@]}))
     current_experiment=0
 
     for mode in "${TRAINING_MODES[@]}"; do
         for rank in "${LORA_RANKS[@]}"; do
-            current_experiment=$((current_experiment + 1))
-            log_info "===== Running Experiment ${current_experiment}/${total_experiments}: MODE=${mode} RANK=${rank} ====="
+            for bits in "${BITS_LIST[@]}"; do
+                for dataset in "${CALIBRATION_DATASETS[@]}"; do
+                    current_experiment=$((current_experiment + 1))
+                    log_info "===== Running Experiment ${current_experiment}/${total_experiments}: MODE=${mode} RANK=${rank} BITS=${bits} DATASET=${dataset} ====="
 
-            # --- 1. Set up experiment name and directories ---
-            EXPERIMENT_NAME="${MODEL_SHORT_NAME}_${mode}_r${rank}"
-            if [ "$mode" = "qalora" ]; then
-                EXPERIMENT_NAME="${EXPERIMENT_NAME}_group${QALORA_GROUP_SIZE}"
-            elif [ "$mode" = "pissa" ]; then
-                EXPERIMENT_NAME="${EXPERIMENT_NAME}_niter${PISSA_NITER}"
-            fi
+                    # --- 1. Set up experiment name and directories ---
+                    EXPERIMENT_NAME="${MODEL_SHORT_NAME}_${mode}_r${rank}_b${bits}_d${dataset}"
+                    if [ "$mode" = "qalora" ]; then
+                        EXPERIMENT_NAME="${EXPERIMENT_NAME}_group${QALORA_GROUP_SIZE}"
+                    elif [ "$mode" = "pissa" ]; then
+                        EXPERIMENT_NAME="${EXPERIMENT_NAME}_niter${PISSA_NITER}"
+                    fi
 
-            TRAIN_OUTPUT_DIR="${BASE_OUTPUT_DIR}/${EXPERIMENT_NAME}"
-            ADAPTER_DIR="${TRAIN_OUTPUT_DIR}/ft/adapter"
-            EVAL_OUTPUT_DIR="${BASE_OUTPUT_DIR}/eval_results/${EXPERIMENT_NAME}"
+                    TRAIN_OUTPUT_DIR="${BASE_OUTPUT_DIR}/${EXPERIMENT_NAME}"
+                    ADAPTER_DIR="${TRAIN_OUTPUT_DIR}/ft/adapter"
+                    EVAL_OUTPUT_DIR="${BASE_OUTPUT_DIR}/eval_results/${EXPERIMENT_NAME}"
 
-            # --- 2. Training Phase ---
-            if [ -d "$ADAPTER_DIR" ]; then
-                log_warning "Adapter already exists at $ADAPTER_DIR. Skipping training."
-            else
-                log_info "Starting training for $EXPERIMENT_NAME"
-                python ultimate_train_collection.py \
-                    --model_name_or_path="$MODEL_NAME_OR_PATH" \
-                    --training_mode="$mode" \
-                    --output_dir="$TRAIN_OUTPUT_DIR" \
-                    --data_path="$DATA_PATH" \
-                    --dataset_split="$DATASET_SPLIT" \
-                    --dataset_field "instruction" "output" \
-                    --lora_r="$rank" \
-                    --qalora_group_size="$QALORA_GROUP_SIZE" \
-                    --pissa_niter="$PISSA_NITER" \
-                    --bits="$BITS" \
-                    --num_train_epochs="$NUM_TRAIN_EPOCHS" \
-                    --per_device_train_batch_size="$PER_DEVICE_TRAIN_BATCH_SIZE" \
-                    --learning_rate="$LEARNING_RATE" \
-                    --lr_scheduler_type="$LR_SCHEDULER_TYPE" \
-                    --warmup_ratio="$WARMUP_RATIO" \
-                    --bf16="$BF16" \
-                    --logging_steps="$LOGGING_STEPS" \
-                    --save_steps="$SAVE_STEPS" \
-                    --model_max_length="$MAX_LENGTH" \
-                    --dataloader_pin_memory=False \
-                    --remove_unused_columns=False \
-                    --report_to="wandb" \
-                    --gradient_accumulation_steps=1 \
-                    --eval_steps=50 \
+                    # --- 2. Training Phase ---
+                    if [ -d "$ADAPTER_DIR" ]; then
+                        log_warning "Adapter already exists at $ADAPTER_DIR. Skipping training."
+                    else
+                        log_info "Starting training for $EXPERIMENT_NAME"
+                        python ultimate_train_collection.py \
+                            --model_name_or_path="$MODEL_NAME_OR_PATH" \
+                            --training_mode="$mode" \
+                            --output_dir="$TRAIN_OUTPUT_DIR" \
+                            --data_path="$DATA_PATH" \
+                            --dataset_split="$DATASET_SPLIT" \
+                            --dataset_field "instruction" "output" \
+                            --lora_r="$rank" \
+                            --qalora_group_size="$QALORA_GROUP_SIZE" \
+                            --pissa_niter="$PISSA_NITER" \
+                            --bits="$bits" \
+                            --calibration_dataset="$dataset" \
+                            --num_train_epochs="$NUM_TRAIN_EPOCHS" \
+                            --per_device_train_batch_size="$PER_DEVICE_TRAIN_BATCH_SIZE" \
+                            --learning_rate="$LEARNING_RATE" \
+                            --lr_scheduler_type="$LR_SCHEDULER_TYPE" \
+                            --warmup_ratio="$WARMUP_RATIO" \
+                            --bf16="$BF16" \
+                            --logging_steps="$LOGGING_STEPS" \
+                            --save_steps="$SAVE_STEPS" \
+                            --model_max_length="$MAX_LENGTH" \
+                            --dataloader_pin_memory=False \
+                            --remove_unused_columns=False \
+                            --report_to="wandb" \
+                            --gradient_accumulation_steps=1 \
+                            --eval_steps=50 \
 
-                if [ $? -ne 0 ]; then
-                    log_error "❌ Training failed for $EXPERIMENT_NAME. Skipping to next experiment."
-                    continue
-                fi
-                log_success "✅ Training completed for $EXPERIMENT_NAME"
-            fi
+                        if [ $? -ne 0 ]; then
+                            log_error "❌ Training failed for $EXPERIMENT_NAME. Skipping to next experiment."
+                            continue
+                        fi
+                        log_success "✅ Training completed for $EXPERIMENT_NAME"
+                    fi
 
-            # --- 3. Fix Adapter Config ---
-            if ! fix_adapter_config "$ADAPTER_DIR"; then
-                log_error "❌ Failed to fix adapter config for $EXPERIMENT_NAME. Skipping evaluation."
-                continue
-            fi
-            # Small delay between runs
-            sleep 5
+                    # --- 3. Fix Adapter Config ---
+                    if ! fix_adapter_config "$ADAPTER_DIR"; then
+                        log_error "❌ Failed to fix adapter config for $EXPERIMENT_NAME. Skipping evaluation."
+                        continue
+                    fi
+                    # Small delay between runs
+                    sleep 5
+                done
+            done
         done
     done
 

@@ -239,6 +239,7 @@ def load_or_quantize_model(
     bits: int = 4,
     cache_dir: str = "./quantized_models",
     cache_key: str = None,
+    calibration_dataset: str = "c4",
 ) -> AutoModelForCausalLM:
     is_model_object = isinstance(model_or_path, torch.nn.Module)
     os.makedirs(cache_dir, exist_ok=True)
@@ -255,7 +256,7 @@ def load_or_quantize_model(
 
     base_model = model_or_path
     model_id = base_model.replace("/", "_").replace("\\", "_")
-    quantized_model_path = os.path.join(cache_dir, f"{model_id}_gptq_{bits}bit_groupsize_{qalora_group_size}")
+    quantized_model_path = os.path.join(cache_dir, f"{model_id}_gptq_{bits}bit_groupsize_{qalora_group_size}_calibration_dataset_{calibration_dataset}")
 
     if os.path.exists(os.path.join(quantized_model_path, "config.json")):
         print(f"Cache hit: {quantized_model_path}")
@@ -266,7 +267,7 @@ def load_or_quantize_model(
     print(f"Quantizing base model {base_model} with {bits}-bit, group_size={qalora_group_size}")
     gptq_config = GPTQConfig(
         bits=bits,
-        dataset="alpaca-cleaned",
+        dataset=calibration_dataset,
         tokenizer=tokenizer,
         group_size=qalora_group_size,
         desc_act=False,
@@ -498,6 +499,7 @@ def train():
             tokenizer,
             qalora_group_size=script_args.qalora_group_size,
             bits=script_args.bits,
+            calibration_dataset=script_args.calibration_dataset
         )
 
         lora_config = LoraConfig(
@@ -506,8 +508,8 @@ def train():
             qalora_group_size=script_args.qalora_group_size,
             r=script_args.lora_r,
             lora_alpha=2 * script_args.lora_r,
-            target_modules=["q_proj", "o_proj", "k_proj", "v_proj"],
-            # target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
+            # target_modules=["q_proj", "o_proj", "k_proj", "v_proj"],
+            target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
             lora_dropout=0.05,
             bias="none",
         )
@@ -526,8 +528,8 @@ def train():
             task_type="CAUSAL_LM",
             r=script_args.lora_r,
             lora_alpha=2 * script_args.lora_r,
-            target_modules=["q_proj", "o_proj", "k_proj", "v_proj"],
-            # target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
+            # target_modules=["q_proj", "o_proj", "k_proj", "v_proj"],
+            target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
             lora_dropout=0.05,
             bias="none",
         )
@@ -636,6 +638,7 @@ def train():
             qalora_group_size=script_args.qalora_group_size,
             bits=script_args.bits,
             cache_key=cache_key,
+            calibration_dataset=script_args.calibration_dataset
             # Wichtig: Stellen Sie sicher, dass diese Funktion das Modell nicht neu von der Festplatte lädt,
             # sondern das übergebene Objekt verwendet.
         )
@@ -1116,20 +1119,20 @@ def train():
     # Put the model in evaluation mode
     model.eval()
 
-    file_name = f"mode_{script_args.training_mode}_bits_{script_args.bits}_rank_{script_args.lora_r}_group_{script_args.qalora_group_size}_training_skip_{script_args.skip_training}"
+    file_name = f"mode_{script_args.training_mode}_bits_{script_args.bits}_rank_{script_args.lora_r}_group_{script_args.qalora_group_size}_training_skip_{script_args.skip_training}_calibration_dataset_{script_args.calibration_dataset}"
     output_dir_eval = os.path.join(script_args.output_dir, "eval_results")
     os.makedirs(output_dir_eval, exist_ok=True)
 
     from eval_peft import generate_alpaca_response, run_lm_harness_and_print_results
-    # generate_alpaca_response(model, tokenizer, script_args.training_mode, script_args.lora_r, output_dir_eval)
-    # tasks="wikitext,piqa,tinyArc,tinyHellaswag,tinyGSM8k,tinyMMLU"
-    tasks = "wikitext"
+    generate_alpaca_response(model, tokenizer, script_args.training_mode, script_args.lora_r, output_dir_eval, file_name)
+    tasks="wikitext,piqa,tinyArc,tinyHellaswag,tinyGSM8k,tinyMMLU"
+    # tasks = "wikitext"
     run_lm_harness_and_print_results(
         model=model,
         tokenizer=tokenizer,
         tasks=tasks,
         num_fewshot=1,
-        limit=30,
+        limit=100,
         per_device_eval_batch_size=2,
         output_dir=output_dir_eval,
         file_name=file_name,

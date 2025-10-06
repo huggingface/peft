@@ -190,7 +190,7 @@ import datasets
 import json
 import pandas as pd
 
-def generate_alpaca_response(model, tokenizer, training_mode, lora_r, output_dir):
+def generate_alpaca_response(model, tokenizer, training_mode, lora_r, output_dir, file_name):
     eval_set = datasets.load_dataset("tatsu-lab/alpaca_eval", "alpaca_eval")["eval"]
 
     # --- START OF CHANGE ---
@@ -224,7 +224,7 @@ def generate_alpaca_response(model, tokenizer, training_mode, lora_r, output_dir
     # --- END OF CHANGE ---
 
     # Save the results to a JSON file
-    output_eval_file = os.path.join(output_dir, "alpaca_eval_results.json")
+    output_eval_file = os.path.join(output_dir, f"{file_name}_alpaca_eval_results.json")
     with open(output_eval_file, "w") as f:
         json.dump(outputs, f, indent=4)
 
