@@ -204,6 +204,10 @@ class OFTConfig(PeftConfig):
             min_version = packaging.version.Version("0.18.0")
             # note: config.peft_version was added in 0.18.0, so if it's missing, it means we're below min version
             if parsed_version < min_version:
-                msg = "The cayley-neumann parameterization has been slightly changed to be more numerically stable in PEFT 0.18.0. Please retrain your adapter weights with newer PEFT versions. Alternatively, downgrade PEFT to version 0.17.0 to use the old parameterization."
+                msg = (
+                    "The cayley-neumann parameterization has been slightly changed to be more numerically stable in "
+                    "PEFT 0.18.0. Please retrain your adapter weights with newer PEFT versions. Alternatively, "
+                    "downgrade PEFT to version 0.17.0 to use the old parameterization."
+                )
                 warnings.warn(msg)
         return super().check_kwargs(**kwargs)

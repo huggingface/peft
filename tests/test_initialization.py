@@ -1784,14 +1784,14 @@ class TestOft:
             config_json = json.load(f)
 
         if peft_version is None:
-            del config_json["peft_version"]
+            config_json.pop("peft_version", None)
         else:
             config_json["peft_version"] = peft_version
 
         with open(tmp_path / "adapter_config.json", "w") as f:
             json.dump(config_json, f)
 
-        msg = "TODO"  # <= replace with final warning message
+        msg = "The cayley-neumann parameterization has been slightly changed to be more numerically stable in PEFT 0.18.0."
         PeftModel.from_pretrained(self.get_model(), tmp_path)
 
         warn_messages = [str(w.message) for w in recwarn.list]
