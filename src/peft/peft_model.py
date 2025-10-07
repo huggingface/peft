@@ -1858,6 +1858,10 @@ class PeftModelForCausalLM(PeftModel):
             and getattr(peft_config, "ensure_weight_tieing")
         ):
             module_keys = BaseTuner._get_tied_modules_to_save(self, model)
+
+            if not module_keys:
+                warnings.warn("You have requested ensure_weight_tieing, but no tied modules were found")
+
             tied_module = getattr(model.get_input_embeddings().modules_to_save, adapter_name)
 
             _set_trainable(
