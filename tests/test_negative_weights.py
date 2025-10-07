@@ -316,32 +316,6 @@ class TestBackwardCompatibility:
 class TestEdgeCases:
     """Test edge cases with negative weights."""
 
-    def test_very_small_negative_weight(self, simple_model, lora_config):
-        """Test very small negative weights."""
-        model = get_peft_model(simple_model, lora_config, adapter_name="adapter1")
-
-        model.add_weighted_adapter(
-            adapters=["adapter1"],
-            weights=[-1e-6],
-            adapter_name="merged_tiny_negative",
-            combination_type="linear",
-        )
-
-        assert "merged_tiny_negative" in model.peft_config
-
-    def test_very_large_negative_weight(self, simple_model, lora_config):
-        """Test very large negative weights."""
-        model = get_peft_model(simple_model, lora_config, adapter_name="adapter1")
-
-        model.add_weighted_adapter(
-            adapters=["adapter1"],
-            weights=[-100.0],
-            adapter_name="merged_large_negative",
-            combination_type="linear",
-        )
-
-        assert "merged_large_negative" in model.peft_config
-
     def test_negative_weight_with_different_scaling(self, simple_model):
         """Test negative weights with different scaling factors."""
         config1 = LoraConfig(

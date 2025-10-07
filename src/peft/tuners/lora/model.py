@@ -541,8 +541,7 @@ class LoraModel(BaseTuner):
                 List of adapter names to be merged.
             weights (`list`):
                 List of weights for each adapter. Weights can be positive or negative, allowing for both addition
-                and subtraction of adapter effects. Negative weights enable task arithmetic and adapter negation as
-                described in the LoRA Hub and Task Arithmetic papers.
+                and subtraction of adapter effects.
             adapter_name (`str`):
                 Name of the new adapter.
             combination_type (`str`):
