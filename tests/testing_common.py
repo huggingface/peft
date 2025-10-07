@@ -1831,6 +1831,7 @@ class PeftCommonTester:
 
         adapter_list = ["adapter1", "adapter_2", "adapter_3"]
         weight_list = [0.5, 1.5, 1.5]
+        negative_weight_list = [0.5, -0.8, 1.2]
         # Initialize the config
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -1847,8 +1848,10 @@ class PeftCommonTester:
 
             if isinstance(config, LoraConfig):
                 self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, weight_list)
+                self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, negative_weight_list)
             elif isinstance(config, IA3Config):
                 self._test_weighted_combination_of_adapters_ia3(model, config, adapter_list, weight_list)
+                self._test_weighted_combination_of_adapters_ia3(model, config, adapter_list, negative_weight_list)
             else:
                 pytest.skip(f"Test not applicable for {config}")
 
