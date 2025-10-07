@@ -17,3 +17,4 @@ pandas
 seaborn
 matplotlib
 wandb
+lm_eval
