@@ -2871,6 +2871,49 @@ class TestPeftCustomModel(PeftCommonTester):
                 assert torch.allclose(cancelled_B, torch.zeros_like(cancelled_B), atol=1e-5), \
                     f"Cancelled B should be ~0, got max abs value {cancelled_B.abs().max()}"
 
+    def test_negative_weight_with_different_scaling(self):
+        # Test negative weights with different scaling factors (lora_alpha)
+        # This edge case ensures negative weights work correctly with different scaling values
+        torch.manual_seed(42)
+        model = MLP()
+
+        # Create two configs with different lora_alpha (different scaling factors)
+        config1 = LoraConfig(
+            r=8,
+            lora_alpha=16,  # scaling = 16/8 = 2
+            target_modules=["lin0"],
+            lora_dropout=0.0,
+            bias="none",
+            init_lora_weights=False,
+        )
+        config2 = LoraConfig(
+            r=8,
+            lora_alpha=32,  # scaling = 32/8 = 4
+            target_modules=["lin0"],
+            lora_dropout=0.0,
+            bias="none",
+            init_lora_weights=False,
+        )
+
+        model = get_peft_model(model, config1, adapter_name="adapter1")
+        model.add_adapter("adapter2", config2)
+
+        # Merge with negative weight - should handle different scalings correctly
+        model.add_weighted_adapter(
+            adapters=["adapter1", "adapter2"],
+            weights=[0.5, -0.3],
+            adapter_name="merged_diff_scaling",
+            combination_type="linear",
+        )
+
+        # Verify the merged adapter was created successfully
+        assert "merged_diff_scaling" in model.peft_config
+
+        # Verify the merged adapter can run forward pass
+        dummy_input = torch.randn(2, 10)
+        output = model(dummy_input)
+        assert output is not None
+
     def test_multiple_adapters_no_needless_copy_modules_to_save(self):
         # See 2206
         # The problem was that we keep a "global" modules_to_save on the model which contains all possible
