@@ -55,6 +55,7 @@ from peft import (
     RoadConfig,
     VBLoRAConfig,
     VeraConfig,
+    WaveFTConfig,
     get_eva_state_dict,
     get_peft_model,
     initialize_lora_eva_weights,
@@ -1851,6 +1852,168 @@ class TestC3AInitialization:
         msg = f"The block size should be a factor of the output size. However, the output size is {model.lin1.out_features} and the block size is {block_size}"
         with pytest.raises(ValueError, match=msg):
             get_peft_model(model, config)
+
+
+class TestWaveFTInitialization:
+    """Test class to check the initialization of WaveFT adapters."""
+
+    torch_device = infer_device()
+
+    def get_model(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Choose a large weight so that averages are close to expected values.
+                self.linear = nn.Linear(1000, 1000)
+                self.conv2d = nn.Conv2d(100, 100, 3)
+
+            def forward(self, x):
+                x_4d = x.flatten().reshape(1, 100, 10, 10)
+                return self.linear(x), self.conv2d(x_4d)
+
+        return MyModule().eval().to(self.torch_device)
+
+    @pytest.fixture
+    def data(self):
+        return torch.rand(10, 1000).to(self.torch_device)
+
+    @require_deterministic_for_xpu
+    def test_waveft_linear_init_default(self, data):
+        # Default initialization should result in no change to output (zeros initialization)
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        output_before = model(data)[0]
+        config = WaveFTConfig(target_modules=["linear"], n_frequency=100, init_weights=True)
+        model = get_peft_model(model, config)
+        output_after = model(data)[0]
+
+        assert torch.allclose(output_before, output_after, atol=1e-6)
+
+    def test_waveft_linear_init_false(self, data):
+        # With init_weights=False, output should change (random initialization)
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        output_before = model(data)[0]
+        config = WaveFTConfig(target_modules=["linear"], n_frequency=100, init_weights=False)
+        model = get_peft_model(model, config)
+        output_after = model(data)[0]
+
+        assert not torch.allclose(output_before, output_after, atol=1e-6)
+
+    @require_deterministic_for_xpu
+    def test_waveft_linear_with_scaling(self, data):
+        # Test that scaling parameter affects output correctly
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        output_before = model(data)[0]
+        config = WaveFTConfig(target_modules=["linear"], n_frequency=100, init_weights=False, scaling=10.0)
+        model = get_peft_model(model, config)
+        output_after = model(data)[0]
+
+        assert not torch.allclose(output_before, output_after, atol=1e-6)
+
+    @require_deterministic_for_xpu
+    def test_waveft_different_wavelet_families(self, data):
+        # Test different wavelet families
+        torch.manual_seed(0)
+
+        model1 = self.get_model()
+        config1 = WaveFTConfig(target_modules=["linear"], n_frequency=100, wavelet_family="db1", init_weights=False)
+        model1 = get_peft_model(model1, config1)
+        output1 = model1(data)[0]
+
+        torch.manual_seed(0)
+        model2 = self.get_model()
+        config2 = WaveFTConfig(target_modules=["linear"], n_frequency=100, wavelet_family="sym2", init_weights=False)
+        model2 = get_peft_model(model2, config2)
+        output2 = model2(data)[0]
+
+        # Different wavelet families should produce different results
+        assert not torch.allclose(output1, output2, atol=1e-6)
+
+    @require_deterministic_for_xpu
+    def test_waveft_use_idwt_flag(self, data):
+        # Test use_idwt flag
+        torch.manual_seed(0)
+
+        model1 = self.get_model()
+        config1 = WaveFTConfig(target_modules=["linear"], n_frequency=100, use_idwt=True, init_weights=False)
+        model1 = get_peft_model(model1, config1)
+        output1 = model1(data)[0]
+
+        torch.manual_seed(0)
+        model2 = self.get_model()
+        config2 = WaveFTConfig(target_modules=["linear"], n_frequency=100, use_idwt=False, init_weights=False)
+        model2 = get_peft_model(model2, config2)
+        output2 = model2(data)[0]
+
+        # Different use_idwt settings should produce different results
+        assert not torch.allclose(output1, output2, atol=1e-6)
+
+    def test_waveft_non_positive_n_frequency_raises(self):
+        # Test that n_frequency <= 0 raises appropriate error
+        model = self.get_model()
+
+        # Test with n_frequency = 0
+        n_frequency = 0
+        msg = f"`n_frequency` should be a positive integer value but the value passed is {n_frequency}"
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            config = WaveFTConfig(target_modules=["linear"], n_frequency=n_frequency)
+            get_peft_model(model, config)
+
+        # Test with negative n_frequency
+        n_frequency = -1
+        msg = f"`n_frequency` should be a positive integer value but the value passed is {n_frequency}"
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            config = WaveFTConfig(target_modules=["linear"], n_frequency=n_frequency)
+            get_peft_model(model, config)
+
+    def test_waveft_excessive_n_frequency_raises(self):
+        # Test that n_frequency > in_features * out_features raises appropriate error
+        model = self.get_model()
+
+        # The model has a linear layer with 1000 in_features and 1000 out_features
+        # So the maximum n_frequency should be 1000 * 1000 = 1,000,000
+        max_allowed = 1000 * 1000
+        n_frequency = max_allowed + 1
+        msg = (
+            f"`n_frequency` should be less than or equal to the product of the input and output dimensions "
+            f"but the value passed is {n_frequency} and the product is {max_allowed}"
+        )
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            config = WaveFTConfig(target_modules=["linear"], n_frequency=n_frequency)
+            get_peft_model(model, config)
+
+    def test_waveft_n_frequency_pattern(self, data):
+        # Test n_frequency_pattern functionality
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        config = WaveFTConfig(
+            target_modules=["linear"], n_frequency=50, n_frequency_pattern={"linear": 100}, init_weights=True
+        )
+        model = get_peft_model(model, config)
+
+        # Check that the pattern was applied
+        waveft_layer = model.base_model.model.linear
+        assert hasattr(waveft_layer, "waveft_n_frequency")
+        assert waveft_layer.waveft_n_frequency["default"] == 100
+
+    def test_waveft_layers_pattern_without_layers_to_transform_raises(self):
+        # Test that when layers_pattern is specified, layers_to_transform must also be specified
+        msg = "When `layers_pattern` is specified, `layers_to_transform` must also be specified."
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            WaveFTConfig(target_modules=["linear"], layers_pattern=["layers"], layers_to_transform=None)
+
+    def test_waveft_invalid_wavelet_family_raises(self):
+        # Test that invalid wavelet families raise appropriate errors
+        invalid_family = "invalid_wavelet"
+        msg = f"Wavelet family {invalid_family} not supported. Supported wavelet families are:"
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            WaveFTConfig(target_modules=["linear"], wavelet_family=invalid_family)
 
 
 class TestRoadInitialization:

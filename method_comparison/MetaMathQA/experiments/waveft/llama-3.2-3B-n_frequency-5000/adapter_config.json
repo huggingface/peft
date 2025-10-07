@@ -1,0 +1,26 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "bias": "none",
+  "exclude_modules": null,
+  "fan_in_fan_out": false,
+  "inference_mode": false,
+  "init_weights": true,
+  "layers_pattern": null,
+  "layers_to_transform": null,
+  "modules_to_save": null,
+  "n_frequency": 5000,
+  "n_frequency_pattern": {},
+  "peft_type": "WAVEFT",
+  "proportional_parameters": false,
+  "random_loc_seed": 777,
+  "revision": null,
+  "scaling": 25.0,
+  "target_modules": [
+    "q_proj",
+    "v_proj"
+  ],
+  "task_type": "CAUSAL_LM",
+  "use_idwt": true,
+  "wavelet_family": "db1"
+}
