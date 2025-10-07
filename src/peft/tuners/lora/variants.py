@@ -470,17 +470,35 @@ class KasaLinearVariant(LoraVariant):
             
     @staticmethod
     def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
-        delta_weight = module.get_delta_weight(active_adapter)
+        delta_weight = KasaLinearVariant._get_delta_weight(
+            module.lora_A[active_adapter].weight, 
+            module.lora_B[active_adapter].weight, 
+            module.lora_diag[active_adapter], 
+            module.scaling[active_adapter], 
+            module.fan_in_fan_out
+        )
         return orig_weight + delta_weight
 
     @staticmethod
     def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
-        delta_weight = module.get_delta_weight(active_adapter)
+        delta_weight = KasaLinearVariant._get_delta_weight(
+            module.lora_A[active_adapter].weight,
+            module.lora_B[active_adapter].weight,
+            module.lora_diag[active_adapter],
+            module.scaling[active_adapter],
+            module.fan_in_fan_out,
+        )
         orig_weight.data += delta_weight
 
     @staticmethod
     def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
-        delta_weight = module.get_delta_weight(active_adapter)
+        delta_weight = KasaLinearVariant._get_delta_weight(
+            module.lora_A[active_adapter].weight,
+            module.lora_B[active_adapter].weight,
+            module.lora_diag[active_adapter],
+            module.scaling[active_adapter],
+            module.fan_in_fan_out,
+        )
         return orig_weight - delta_weight
 
     @staticmethod
