@@ -2800,7 +2800,7 @@ class TestPeftCustomModel(PeftCommonTester):
             ["default", "other"], weights=[1.0, 1.0], adapter_name="merged", combination_type="cat"
         )
 
-    def test_negative_weight_negates_adapter(self):
+    def test_add_weighted_adapter_negative_weight_negates_adapter(self):
         # Test that weight=-1.0 properly negates an adapter
         torch.manual_seed(42)
         model = MLP()
@@ -2837,19 +2837,17 @@ class TestPeftCustomModel(PeftCommonTester):
                 assert torch.allclose(neg_A, -pos_A, atol=1e-6), "A matrices should be negated"
                 assert torch.allclose(neg_B, -pos_B, atol=1e-6), "B matrices should be negated"
 
-    def test_subtraction_with_negative_weights(self):
+    def test_add_weighted_adapter_subtraction_with_negative_weights(self):
         # Test that merging two identical adapters with weights [1.0, -1.0] results in approximately zero weights
-        torch.manual_seed(42)
         model = MLP()
         config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+
+        # Create two identical adapters by using the same seed
+        torch.manual_seed(42)
         model = get_peft_model(model, config, adapter_name="adapter1")
 
-        # Create a second identical adapter by copying the first
+        torch.manual_seed(42)
         model.add_adapter("adapter2", config)
-        for name, module in model.named_modules():
-            if hasattr(module, "lora_A") and "adapter1" in module.lora_A:
-                module.lora_A["adapter2"].weight.data = module.lora_A["adapter1"].weight.data.clone()
-                module.lora_B["adapter2"].weight.data = module.lora_B["adapter1"].weight.data.clone()
 
         # Merge with weights [1.0, -1.0] - should cancel out exactly
         model.add_weighted_adapter(
@@ -2871,7 +2869,7 @@ class TestPeftCustomModel(PeftCommonTester):
                 assert torch.allclose(cancelled_B, torch.zeros_like(cancelled_B), atol=1e-5), \
                     f"Cancelled B should be ~0, got max abs value {cancelled_B.abs().max()}"
 
-    def test_negative_weight_with_different_scaling(self):
+    def test_add_weighted_adapter_negative_weight_with_different_scaling(self):
         # Test negative weights with different scaling factors (lora_alpha)
         # This edge case ensures negative weights work correctly with different scaling values
         torch.manual_seed(42)
@@ -2906,10 +2904,8 @@ class TestPeftCustomModel(PeftCommonTester):
             combination_type="linear",
         )
 
-        # Verify the merged adapter was created successfully
-        assert "merged_diff_scaling" in model.peft_config
-
         # Verify the merged adapter can run forward pass
+        model.set_adapter("merged_diff_scaling")
         dummy_input = torch.randn(2, 10)
         output = model(dummy_input)
         assert output is not None

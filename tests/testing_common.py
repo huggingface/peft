@@ -1831,7 +1831,7 @@ class PeftCommonTester:
 
         adapter_list = ["adapter1", "adapter_2", "adapter_3"]
         weight_list = [0.5, 1.5, 1.5]
-        negative_weight_list = [0.5, -0.8, 1.2]
+        negative_weight_list = [-0.5, -0.8, -1.2]
         # Initialize the config
         config = config_cls(
             base_model_name_or_path=model_id,
