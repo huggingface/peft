@@ -69,7 +69,7 @@ class PromptEmbedding(torch.nn.Module):
 
             # Randomly sample tokens from the tokenizer's vocab
             vocab_size = word_embeddings.num_embeddings
-            init_token_ids = np.random.randint(0,vocab_size,total_virtual_tokens)
+            init_token_ids = np.random.randint(0, vocab_size, total_virtual_tokens)
             init_token_ids = torch.LongTensor(init_token_ids).to(word_embeddings.weight.device)
             with gather_params_ctx(word_embeddings.parameters()):
                 word_embedding_weights = word_embeddings(init_token_ids).detach().clone()
