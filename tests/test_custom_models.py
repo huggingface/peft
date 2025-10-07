@@ -159,6 +159,8 @@ TEST_CASES = [
         LoraConfig,
         {"target_modules": ["lin0"], "target_parameters": ["lin1.weight"]},
     ),
+    ("Vanilla MLP 7 LoRA with KaSA", "MLP", LoraConfig, {"target_modules": ["lin0"], "use_kasa": True}),
+    ("Vanilla MLP 8 LoRA with KaSA", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"], "use_kasa": True})
     #######
     # IA³ #
     #######
