@@ -71,12 +71,8 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
     This class does not support loading/saving, and it shouldn't usually be initialized directly. Instead, use
     `get_peft_model` with the argument `mixed=True`.
 
-    <Tip>
-
-    Read the [Mixed adapter types](https://huggingface.co/docs/peft/en/developer_guides/mixed_models) guide to learn
-    more about using different adapter types.
-
-    </Tip>
+    > [!TIP] > Read the [Mixed adapter types](https://huggingface.co/docs/peft/en/developer_guides/mixed_models) guide
+    to learn > more about using different adapter types.
 
     Example:
 
@@ -224,12 +220,8 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
                 Create empty adapter weights on meta device. Useful to speed up the process when loading saved
                 adapters.
 
-                <Tip>
-
-                Don't use `low_cpu_mem_usage=True` when creating a new PEFT adapter for training (training is untested
-                and discouraged for PeftMixedModel in general).
-
-                </Tip>
+                > [!TIP] > Don't use `low_cpu_mem_usage=True` when creating a new PEFT adapter for training (training
+                is untested > and discouraged for PeftMixedModel in general).
         """
         _check_config_compatible(peft_config)
 
@@ -430,15 +422,17 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
 
         # load the config
         if config is None:
-            config = PEFT_TYPE_TO_CONFIG_MAPPING[
-                PeftConfig._get_peft_type(
-                    model_id,
-                    subfolder=kwargs.get("subfolder", None),
-                    revision=kwargs.get("revision", None),
-                    cache_dir=kwargs.get("cache_dir", None),
-                    use_auth_token=kwargs.get("use_auth_token", None),
-                )
-            ].from_pretrained(model_id, **kwargs)
+            hf_kwargs = {
+                "subfolder": kwargs.get("subfolder", None),
+                "revision": kwargs.get("revision", None),
+                "cache_dir": kwargs.get("cache_dir", None),
+                "token": kwargs.get("token", None),
+            }
+            if use_auth_token := kwargs.get("use_auth_token", None):
+                hf_kwargs["use_auth_token"] = use_auth_token
+            config = PEFT_TYPE_TO_CONFIG_MAPPING[PeftConfig._get_peft_type(model_id, **hf_kwargs)].from_pretrained(
+                model_id, **kwargs
+            )
         elif isinstance(config, PeftConfig):
             config.inference_mode = not is_trainable
         else:

@@ -119,11 +119,8 @@ initialize_lora_eva_weights(peft_model, dataloader)
 ```
 EVA works out of the box with bitsandbytes. Simply initialize the model with `quantization_config` and call [`initialize_lora_eva_weights`] as usual.
 
-<Tip>
-
-For further instructions on using EVA, please refer to our [documentation](https://github.com/huggingface/peft/tree/main/examples/eva_finetuning).
-
-</Tip>
+> [!TIP]
+> For further instructions on using EVA, please refer to our [documentation](https://github.com/huggingface/peft/tree/main/examples/eva_finetuning).
 
 ### LoftQ
 
@@ -158,11 +155,8 @@ At the moment, `replace_lora_weights_loftq` has these additional limitations:
 - Model files must be stored as a `safetensors` file.
 - Only bitsandbytes 4bit quantization is supported.
 
-<Tip>
-
-Learn more about how PEFT works with quantization in the [Quantization](quantization) guide.
-
-</Tip>
+> [!TIP]
+> Learn more about how PEFT works with quantization in the [Quantization](quantization) guide.
 
 ### Rank-stabilized LoRA
 
@@ -570,11 +564,8 @@ model.add_weighted_adapter(
 model.set_adapter(weighted_adapter_name)
 ```
 
-<Tip>
-
-There are several supported methods for `combination_type`. Refer to the [documentation](../package_reference/lora#peft.LoraModel.add_weighted_adapter) for more details. Note that "svd" as the `combination_type` is not supported when using `torch.float16` or `torch.bfloat16` as the datatype.
-
-</Tip>
+> [!TIP]
+> There are several supported methods for `combination_type`. Refer to the [documentation](../package_reference/lora#peft.LoraModel.add_weighted_adapter) for more details. Note that "svd" as the `combination_type` is not supported when using `torch.float16` or `torch.bfloat16` as the datatype.
 
 Now, perform inference:
 
@@ -792,43 +783,40 @@ model = create_arrow_model(
 ```
 To encode general knowledge, GenKnowSub subtracts the average of the provided general adapters from each task-specific adapter once, before routing begins. Furthermore, the ability to add or remove adapters after calling ```create_arrow_model``` (as described in the Arrow section) is still supported in this case.
 
-<Tip>
-
-**Things to keep in mind when using Arrow + GenKnowSub:**
-
-- All LoRA adapters (task-specific and general) must share the same ```rank``` and ```target_modules```.
-
-- Any inconsistency in these settings will raise an error in ```create_arrow_model```.
-
-- Having different scaling factors (```lora_alpha```) across task adapters is supported — Arrow handles them automatically.
-
-- Merging the ```"arrow_router"``` is not supported, due to its dynamic routing behavior.
-
-- In create_arrow_model, task adapters are loaded as ```task_i``` and general adapters as ```gks_j``` (where ```i``` and ```j``` are indices). The function ensures consistency of ```target_modules```, ```rank```, and whether adapters are applied to ```Linear``` or ```Linear4bit``` layers. It then adds the ```"arrow_router"``` module and activates it. Any customization of this process requires overriding ```create_arrow_model```.
-
-- This implementation is compatible with 4-bit quantization (via bitsandbytes):
-
-    ```py
-    from transformers import AutoModelForCausalLM, BitsAndBytesConfig
-    import torch
-
-    # Quantisation config
-    bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,
-            bnb_4bit_use_double_quant=False,
-        )
-
-    # Loading the model
-    base_model = AutoModelForCausalLM.from_pretrained(
-        "microsoft/Phi-3-mini-4k-instruct",
-        torch_dtype=torch.bfloat16,
-        device_map="auto",
-        quantization_config=bnb_config,
-    )
-
-    # Now call create_arrow_model() as we explained before.
-    ```
-
-</Tip>
+> [!TIP]
+> **Things to keep in mind when using Arrow + GenKnowSub:**
+>
+> - All LoRA adapters (task-specific and general) must share the same ```rank``` and ```target_modules```.
+>
+> - Any inconsistency in these settings will raise an error in ```create_arrow_model```.
+>
+> - Having different scaling factors (```lora_alpha```) across task adapters is supported — Arrow handles them automatically.
+>
+> - Merging the ```"arrow_router"``` is not supported, due to its dynamic routing behavior.
+>
+> - In create_arrow_model, task adapters are loaded as ```task_i``` and general adapters as ```gks_j``` (where ```i``` and ```j``` are indices). The function ensures consistency of ```target_modules```, ```rank```, and whether adapters are applied to ```Linear``` or ```Linear4bit``` layers. It then adds the ```"arrow_router"``` module and activates it. Any customization of this process requires overriding ```create_arrow_model```.
+>
+> - This implementation is compatible with 4-bit quantization (via bitsandbytes):
+>
+>     ```py
+>     from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+>     import torch
+>
+>     # Quantisation config
+>     bnb_config = BitsAndBytesConfig(
+>             load_in_4bit=True,
+>             bnb_4bit_quant_type="nf4",
+>             bnb_4bit_compute_dtype=torch.bfloat16,
+>             bnb_4bit_use_double_quant=False,
+>         )
+>
+>     # Loading the model
+>     base_model = AutoModelForCausalLM.from_pretrained(
+>         "microsoft/Phi-3-mini-4k-instruct",
+>         torch_dtype=torch.bfloat16,
+>         device_map="auto",
+>         quantization_config=bnb_config,
+>     )
+>
+>     # Now call create_arrow_model() as we explained before.
+>     ```

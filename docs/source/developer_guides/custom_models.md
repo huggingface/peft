@@ -48,12 +48,9 @@ class MLP(nn.Module):
 
 This is a straightforward multilayer perceptron with an input layer, a hidden layer, and an output layer.
 
-<Tip>
-
-For this toy example, we choose an exceedingly large number of hidden units to highlight the efficiency gains
-from PEFT, but those gains are in line with more realistic examples.
-
-</Tip>
+> [!TIP]
+> For this toy example, we choose an exceedingly large number of hidden units to highlight the efficiency gains
+> from PEFT, but those gains are in line with more realistic examples.
 
 There are a few linear layers in this model that could be tuned with LoRA. When working with common 🤗 Transformers
 models, PEFT will know which layers to apply LoRA to, but in this case, it is up to us as a user to choose the layers.
@@ -272,11 +269,8 @@ peft_model = get_peft_model(base_model, config)
 # do training
 ```
 
-<Tip>
-
-When you call [`get_peft_model`], you will see a warning because PEFT does not recognize the targeted module type. In this case, you can ignore this warning.
-
-</Tip>
+> [!TIP]
+> When you call [`get_peft_model`], you will see a warning because PEFT does not recognize the targeted module type. In this case, you can ignore this warning.
 
 By supplying a custom mapping, PEFT first checks the base model's layers against the custom mapping and dispatches to the custom LoRA layer type if there is a match. If there is no match, PEFT checks the built-in LoRA layer types for a match.
 
