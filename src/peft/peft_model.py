@@ -19,6 +19,7 @@ import copy
 import inspect
 import os
 import warnings
+from collections.abc import Sequence
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass
@@ -1457,6 +1458,26 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         else:
             # handle auxiliary modules
             _set_adapter(self, adapter_name)
+
+    def set_requires_grad(self, adapter_names: str | Sequence[str], requires_grad: bool = True) -> None:
+        """
+        Enable or disable gradients on the given adapter(s).
+
+        Note: Not supported for prompt learning methods like prompt tuning.
+
+        Args:
+            adapter_name (`str` or `Sequence[str]`):
+                The name of the adapter(s) whose gradients should be enabled/disabled.
+            requires_grad (`bool`, *optional*)
+                Whether to enable (`True`, default) or disable (`False`).
+        """
+        if self.active_peft_config.is_prompt_learning:
+            raise TypeError(
+                "Setting `requires_grad` is not supported for prompt learning methods like "
+                f"{self.active_peft_config.peft_type.value}."
+            )
+
+        self.base_model.set_requires_grad(adapter_names=adapter_names, requires_grad=requires_grad)
 
     @property
     def base_model_torch_dtype(self):
