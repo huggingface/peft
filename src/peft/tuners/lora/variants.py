@@ -509,9 +509,9 @@ class KasaLinearVariant(LoraVariant):
         scaling = module.scaling[active_adapter]
         diag = torch.diag(module.lora_diag[active_adapter])
 
-        # KASA calculation
+        # KaSA calculation
         # see https://github.com/juyongjiang/KaSA/blob/f85e88c22d0fa4cb8ab2923d7c2bf1bbec152da3/peft/src/peft/tuners/lora/layer.py#L602C21-L602C110
-        lora_output = lora_B(torch.einsum("ijk,kl->ijl", lora_A(x), diag)) * scaling
+        lora_output = lora_B(torch.einsum("ijk,kl->ijl", lora_A(dropout(x)), diag)) * scaling
         return result + lora_output
 
 
