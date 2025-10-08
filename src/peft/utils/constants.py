@@ -100,6 +100,8 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "gemma3_text": ["q_proj", "v_proj"],
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
+    "rwkv": ["key", "value", "receptance", "output"],
+    "rwkv7": ["r_proj", "k_proj", "v_proj", "o_proj", "key", "value"],
 }
 
 # target module mappings that are identical to LORA
