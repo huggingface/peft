@@ -16,6 +16,7 @@ import os
 from functools import wraps
 
 import huggingface_hub
+import numpy as np
 import pytest
 import torch
 from safetensors.torch import load_file
@@ -381,3 +382,126 @@ class TestXlora:
         w1 = sd["base_model.model.model.decoder.layers.0.self_attn.q_proj.lora_A.weight"]
 
         assert torch.allclose(w0, w1)
+
+    def test_scalings_storage(self, tokenizer, model):
+        model.enable_scalings_logging()
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        outputs = model.generate(
+            input_ids=inputs.to(self.torch_device),
+            max_new_tokens=10,
+        )
+
+        latest_scalings = model.get_latest_scalings()
+        assert latest_scalings is not None, "get_latest_scalings() should not return None after generation"
+        assert isinstance(latest_scalings, torch.Tensor)
+        assert torch.isfinite(latest_scalings).all(), "Scalings should contain finite values"
+
+    def test_per_token_normalization_with_softmax_topk(self, tokenizer, model):
+        captured_data = []
+
+        model.internal_xlora_classifier.config.top_k_lora = 2
+        model.internal_xlora_classifier.config.enable_softmax = False
+        model.internal_xlora_classifier.config.enable_softmax_topk = True
+
+        monkeypatches = []
+
+        def wrap_decoder_layers():
+            wrapped_count = 0
+
+            decoder_layers = model.base_model.lora_model.model.model.decoder.layers
+            for layer_idx, decoder_layer in enumerate(decoder_layers):
+                attention_layers = [
+                    ("q_proj", decoder_layer.self_attn.q_proj),
+                    ("k_proj", decoder_layer.self_attn.k_proj),
+                    ("v_proj", decoder_layer.self_attn.v_proj),
+                ]
+
+                for proj_name, proj_layer in attention_layers:
+                    if (
+                        hasattr(proj_layer, "forward")
+                        and hasattr(proj_layer.forward, "__self__")
+                        and type(proj_layer.forward.__self__).__name__ == "XLoraLinearLayer"
+                    ):
+                        xlora_wrapper = proj_layer.forward.__self__
+                        original_forward = proj_layer.forward
+
+                        def create_wrapped_forward(orig_forward, layer_idx, name, xlora_wrapper):
+                            def wrapped_forward(*args, **kwargs):
+                                if (
+                                    hasattr(model, "internal_xlora_scalings")
+                                    and model.internal_xlora_scalings is not None
+                                ):
+                                    result = orig_forward(*args, **kwargs)
+
+                                    scalings = kwargs.get("scalings", None)
+                                    normalized_scalings = None
+                                    if scalings is not None and hasattr(xlora_wrapper, "get_maybe_topk_scalings"):
+                                        normalized_scalings = xlora_wrapper.get_maybe_topk_scalings(scalings)
+
+                                    capture_info = {
+                                        "layer": layer_idx,
+                                        "projection": name,
+                                        "result_shape": result.shape if hasattr(result, "shape") else "unknown",
+                                        "timestamp": len(captured_data),
+                                        "normalized_scalings": normalized_scalings,
+                                    }
+                                    captured_data.append(capture_info)
+                                    return result
+                                else:
+                                    return orig_forward(*args, **kwargs)
+
+                            return wrapped_forward
+
+                        wrapper = create_wrapped_forward(original_forward, layer_idx, proj_name, xlora_wrapper)
+
+                        mp = pytest.MonkeyPatch()
+                        mp.setattr(proj_layer, "forward", wrapper)
+                        monkeypatches.append(mp)
+                        wrapped_count += 1
+
+            return wrapped_count
+
+        total_wrapped = wrap_decoder_layers()
+        assert total_wrapped > 0, "No X-LoRA layers were wrapped for testing."
+
+        try:
+            model.enable_scalings_logging()
+            inputs = tokenizer.encode("Test per token normalization", add_special_tokens=False, return_tensors="pt")
+            outputs = model.generate(
+                input_ids=inputs.to(self.torch_device),
+                max_new_tokens=1,
+            )
+
+            assert len(captured_data) > 0, "No scaling data was captured during forward pass."
+
+            for data in captured_data:
+                normalized_scalings = data.get("normalized_scalings")
+                if normalized_scalings is None:
+                    assert normalized_scalings is not None, (
+                        f"Missing normalized_scalings in layer {data['layer']} {data['projection']}"
+                    )
+                    continue
+
+                if hasattr(normalized_scalings, "cpu"):
+                    scalings_np = normalized_scalings.cpu().detach().numpy()
+                else:
+                    scalings_np = normalized_scalings
+
+                # expected shape: (batch, seq_len, num_loras) or (batch, seq_len, top_k)
+                assert scalings_np.ndim == 3, (
+                    f"Unexpected scalings shape {scalings_np.shape} in layer {data['layer']} {data['projection']}"
+                )
+
+                batch_size, seq_len, num_experts = scalings_np.shape
+                for b in range(batch_size):
+                    for t in range(seq_len):
+                        weights = scalings_np[b, t, :]
+                        weight_sum = weights.sum()
+                        assert np.isclose(weight_sum, 1.0, atol=1e-5), (
+                            f"Per-token scaling not normalized in layer {data['layer']} {data['projection']}, "
+                            f"batch={b}, token={t}: sum={weight_sum:.6f}, weights={weights}"
+                        )
+
+        finally:
+            for mp in monkeypatches:
+                mp.undo()
