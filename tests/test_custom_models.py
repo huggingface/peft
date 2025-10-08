@@ -2864,10 +2864,12 @@ class TestPeftCustomModel(PeftCommonTester):
                 cancelled_B = module.lora_B["cancelled"].weight.data
 
                 # The weights should be approximately zero (they cancel out)
-                assert torch.allclose(cancelled_A, torch.zeros_like(cancelled_A), atol=1e-5), \
+                assert torch.allclose(cancelled_A, torch.zeros_like(cancelled_A), atol=1e-5), (
                     f"Cancelled A should be ~0, got max abs value {cancelled_A.abs().max()}"
-                assert torch.allclose(cancelled_B, torch.zeros_like(cancelled_B), atol=1e-5), \
+                )
+                assert torch.allclose(cancelled_B, torch.zeros_like(cancelled_B), atol=1e-5), (
                     f"Cancelled B should be ~0, got max abs value {cancelled_B.abs().max()}"
+                )
 
     def test_add_weighted_adapter_negative_weight_with_different_scaling(self):
         # Test negative weights with different scaling factors (lora_alpha)

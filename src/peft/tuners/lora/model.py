@@ -540,8 +540,8 @@ class LoraModel(BaseTuner):
             adapters (`list`):
                 List of adapter names to be merged.
             weights (`list`):
-                List of weights for each adapter. Weights can be positive or negative, allowing for both addition
-                and subtraction of adapter effects.
+                List of weights for each adapter. Weights can be positive or negative, allowing for both addition and
+                subtraction of adapter effects.
             adapter_name (`str`):
                 Name of the new adapter.
             combination_type (`str`):
