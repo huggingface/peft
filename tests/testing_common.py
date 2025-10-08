@@ -1775,6 +1775,8 @@ class PeftCommonTester:
                     if "single" in adapter_name:
                         new_delta_weight = target.get_delta_weight(adapter_name)
                         weighted_original_delta_weights = target.get_delta_weight(adapter_list[0]) * weight_list[0]
+                        sign = 1 if weight_list[0] > 0 else -1
+                        weighted_original_delta_weights = sign * weighted_original_delta_weights
                         assert torch.allclose(new_delta_weight, weighted_original_delta_weights, atol=1e-4, rtol=1e-4)
                     elif "svd" in adapter_name:
                         assert target.r[adapter_name] == 20
