@@ -32,8 +32,10 @@ def pytest_configure(config):
     class ErrorOnDeprecation(logging.Handler):
         def emit(self, record):
             msg = record.getMessage().lower()
-            if "deprecat" in msg or "future" in msg.lower():
-                raise AssertionError(f"**Transformers Deprecation**: {msg}")
+            if "deprecat" in msg or "future" in msg:
+                if "torch_dtype" not in msg:
+                    # let's ignore the torch_dtype => dtype deprecation for now
+                    raise AssertionError(f"**Transformers Deprecation**: {msg}")
 
     # Add our handler
     handler = ErrorOnDeprecation()
