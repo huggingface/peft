@@ -134,6 +134,8 @@
       title: MiSS
     - local: package_reference/road
       title: RoAd
+    - local: package_reference/waveft
+      title: WaveFT
 
     title: Adapters
   - sections:
