@@ -663,11 +663,11 @@ class LoraConfig(PeftConfig):
     arrow_config: Optional[ArrowConfig] = field(
         default=None, metadata={"help": "The necessary config to apply arrow routing on the model."}
     )
-    ensure_weight_tieing: bool = field(
+    ensure_weight_tying: bool = field(
         default=False,
         metadata={
             "help": (
-                "Whether to tie weights or not after peft initialization.Only supported for `task_type` == CAUSAL_LM"
+                "Whether to tie weights or not after peft initialization. Only supported for `task_type` == CAUSAL_LM"
             )
         },
     )
@@ -689,6 +689,10 @@ class LoraConfig(PeftConfig):
         self.exclude_modules = (
             set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
+
+        if self.ensure_weight_tying:
+            self.modules_to_tie = {}
+
         if isinstance(self.target_parameters, str):
             raise TypeError("`target_parameters` must be a list of strings or None.")
 

@@ -52,7 +52,6 @@ from .utils import (
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     WEIGHTS_NAME,
-    ModulesToSaveWrapper,
     PeftType,
     TaskType,
     _get_batch_size,
@@ -1845,31 +1844,6 @@ class PeftModelForCausalLM(PeftModel):
     ) -> None:
         super().__init__(model, peft_config, adapter_name, **kwargs)
         self.base_model_prepare_inputs_for_generation = self.base_model.prepare_inputs_for_generation
-
-        # Condition to check if embedding layer (`embed_tokens`) is added
-        # in `modules_to_save` and we want to ensure the `lm_head`
-        # does not diverge from the `embed_tokens` layer
-        if (
-            peft_config.task_type == "CAUSAL_LM"
-            and hasattr(model.get_input_embeddings(), "modules_to_save")
-            and getattr(peft_config, "ensure_weight_tieing")
-        ):
-            module_keys = BaseTuner._get_tied_modules_to_save(self, model)
-
-            if not module_keys:
-                warnings.warn("You have requested ensure_weight_tieing, but no tied modules were found")
-
-            tied_module = getattr(model.get_input_embeddings().modules_to_save, adapter_name)
-
-            _set_trainable(
-                model,
-                adapter_name,
-                inference_mode=peft_config.inference_mode,
-                module_names=module_keys,
-                strict_module_check=True,
-                wrapper_cls=ModulesToSaveWrapper,
-                tied_module=tied_module,
-            )
 
     def forward(
         self,

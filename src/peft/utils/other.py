@@ -1410,6 +1410,17 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
             activate_adapter=activate_adapter,
         )
 
+    if getattr(peft_config, "modules_to_tie", None) is not None:
+        tied_module = getattr(model.get_input_embeddings().modules_to_save, adapter_name)
+        _set_trainable(
+            model,
+            adapter_name,
+            inference_mode=peft_config.inference_mode,
+            module_names=getattr(peft_config, "modules_to_tie", None),
+            activate_adapter=activate_adapter,
+            tied_module=tied_module,
+        )
+
     if getattr(peft_config, "trainable_token_indices", None) is not None:
         if isinstance(peft_config.trainable_token_indices, dict):
             target_layers = peft_config.trainable_token_indices

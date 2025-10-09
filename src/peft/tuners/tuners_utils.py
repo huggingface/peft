@@ -51,7 +51,7 @@ from peft.utils.other import (
 from peft.utils.peft_types import PeftType, TaskType
 
 from ..config import PeftConfig
-from ..utils import ModulesToSaveWrapper, _get_submodules
+from ..utils import _get_submodules
 from ._buffer_dict import BufferDict
 
 
@@ -690,6 +690,35 @@ class BaseTuner(nn.Module, ABC):
         # in a bad (half-initialized) state.
         self._check_new_adapter_config(peft_config)
 
+        modules_to_save = (
+            set(getattr(peft_config, "modules_to_save", [])) if getattr(peft_config, "modules_to_save", []) else set()
+        )
+        is_embedding_to_save = [m for m in modules_to_save if m in EMBEDDING_LAYER_NAMES]
+
+        tied_weight_keys = self._get_tied_weight_keys(model)
+
+        # Condition to check if embedding layer is added
+        # in `modules_to_save` and the model has tied keys
+        if is_embedding_to_save and tied_weight_keys and peft_config.peft_type == PeftType.LORA:
+            missing_keys = set(tied_weight_keys) - modules_to_save
+
+            if getattr(peft_config, "ensure_weight_tying", False):
+                peft_config.modules_to_tie = missing_keys
+            elif not getattr(peft_config, "ensure_weight_tying", False):
+                msg = (
+                    f"Model has `tie_word_embeddings=True` and the {tied_weight_keys=} are part of the adapter, "
+                    "but `ensure_weight_tying` is not set to True."
+                    "This can lead to complications, for example when merging the adapter "
+                    "or converting your model to formats other than safetensors. "
+                )
+                warnings.warn(msg)
+        elif (
+            getattr(peft_config, "ensure_weight_tying", False)
+            and not tied_weight_keys
+            and peft_config.peft_type == PeftType.LORA
+        ):
+            warnings.warn("You have requested ensure_weight_tying, but no tied modules were found in the model")
+
         model_config = self.get_model_config(model)
 
         peft_config = self._prepare_adapter_config(peft_config, model_config)
@@ -1154,25 +1183,29 @@ class BaseTuner(nn.Module, ABC):
                     tied_target_modules.append(target_module)
         return tied_target_modules
 
-    def _get_tied_modules_to_save(self, model: nn.Module) -> list[str]:
+    def _get_tied_weight_keys(self, model: nn.Module, prefix="") -> list[str]:
         """
         Get the list of modules that needs to be tied
 
         For example: For models which have `embed_tokens` and `lm_head` as the tied keys this function will return
         [`lm_head`]
+
+        From: https://github.com/huggingface/transformers/blob/v4.57.0/src/transformers/modeling_utils.py#L563
         """
-        model_config = self.get_model_config(model)
-        if (
-            model_config.get("tie_word_embeddings", False)
-            and model._tied_weights_keys is not None
-            and isinstance(model.get_input_embeddings(), ModulesToSaveWrapper)
-        ):
-            # Get the original reference of the `ModulesToSaveWrapper` for the embedding layer
-            module_keys = [".".join(n.split(".")[:-1]) for n in model._tied_weights_keys]
+        tied_weight_keys = []
+        if getattr(model, "_tied_weights_keys", None) is not None:
+            names = [f"{prefix}.{k}" if prefix else k for k in model._tied_weights_keys]
+            tied_weight_keys.extend(names)
+        if getattr(model, "_dynamic_tied_weights_keys", None) is not None:
+            names = [f"{prefix}.{k}" if prefix else k for k in model._dynamic_tied_weights_keys]
+            tied_weight_keys.extend(names)
+        for name, submodule in model.named_children():
+            local_prefix = f"{prefix}.{name}" if prefix else name
+            tied_weight_keys.extend(self._get_tied_weight_keys(submodule, prefix=local_prefix))
 
-            return module_keys
+        tied_weight_keys = [".".join(n.split(".")[:-1]) for n in tied_weight_keys]
 
-        return []
+        return tied_weight_keys
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""

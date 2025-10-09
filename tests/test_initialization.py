@@ -1607,8 +1607,8 @@ class TestLoraInitialization:
         config2 = LoraConfig(target_modules=["linear"], bias="none")
         model.add_adapter("other", config2)  # does not raise
 
-    def test_weight_tieing_tied_model(self):
-        # If weight tieing is enabled and `embed_tokens`
+    def test_weight_tying_tied_model(self):
+        # If weight tying is enabled and `embed_tokens`
         # is passed as a `modules_to_save`, it needs to be ensured
         # that lm_head is tied to the adapter added to `embed_tokens`
 
@@ -1619,7 +1619,7 @@ class TestLoraInitialization:
             task_type="CAUSAL_LM",
             modules_to_save=["embed_tokens"],
             target_modules=["linear"],
-            ensure_weight_tieing=True,
+            ensure_weight_tying=True,
         )
         model = get_peft_model(model, embed_token_config)
 
@@ -1638,7 +1638,7 @@ class TestLoraInitialization:
             assert torch.allclose(embed_np[k], lm_head_np[k])
             assert embed_np[k] is lm_head_np[k]
 
-    def test_weight_tieing_non_tied_model(self):
+    def test_weight_tying_non_tied_model(self):
         from peft.utils.other import ModulesToSaveWrapper
 
         model = self.get_lm_model(tie_weights=False)
@@ -1646,7 +1646,7 @@ class TestLoraInitialization:
             task_type="CAUSAL_LM",
             modules_to_save=["embed_tokens"],
             target_modules=["linear"],
-            ensure_weight_tieing=True,
+            ensure_weight_tying=True,
         )
         model = get_peft_model(model, embed_token_config)
 
@@ -1657,7 +1657,7 @@ class TestLoraInitialization:
             "LM head is not of type nn.linear"
         )
 
-    def test_not_weight_tieing_tied_model(self):
+    def test_not_weight_tying_tied_model(self):
         from peft.utils.other import ModulesToSaveWrapper
 
         model = self.get_lm_model()
@@ -1665,7 +1665,7 @@ class TestLoraInitialization:
             task_type="CAUSAL_LM",
             modules_to_save=["embed_tokens"],
             target_modules=["linear"],
-            ensure_weight_tieing=False,
+            ensure_weight_tying=False,
         )
         model = get_peft_model(model, embed_token_config)
 
