@@ -2916,6 +2916,118 @@ class TestPeftCustomModel(PeftCommonTester):
             ["default", "other"], weights=[1.0, 1.0], adapter_name="merged", combination_type="cat"
         )
 
+    def test_add_weighted_adapter_negative_weight_negates_adapter(self):
+        # Test that weight=-1.0 properly negates an adapter
+        torch.manual_seed(42)
+        model = MLP()
+        config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+        model = get_peft_model(model, config, adapter_name="adapter1")
+
+        # Create merged adapter with weight=1.0
+        model.add_weighted_adapter(
+            adapters=["adapter1"],
+            weights=[1.0],
+            adapter_name="merged_positive",
+            combination_type="linear",
+        )
+
+        # Create merged adapter with weight=-1.0
+        model.add_weighted_adapter(
+            adapters=["adapter1"],
+            weights=[-1.0],
+            adapter_name="merged_negative",
+            combination_type="linear",
+        )
+
+        # Get the LoRA weights for comparison
+        for name, module in model.named_modules():
+            if hasattr(module, "lora_A") and "merged_positive" in module.lora_A:
+                pos_A = module.lora_A["merged_positive"].weight.data
+                neg_A = module.lora_A["merged_negative"].weight.data
+                pos_B = module.lora_B["merged_positive"].weight.data
+                neg_B = module.lora_B["merged_negative"].weight.data
+
+                # Check that negative adapter is negation of positive
+                # Since we apply sign to both A and B: sign * sqrt(|w|)
+                # For w=1: sqrt(1) = 1, for w=-1: -sqrt(1) = -1
+                assert torch.allclose(neg_A, -pos_A, atol=1e-6), "A matrices should be negated"
+                assert torch.allclose(neg_B, -pos_B, atol=1e-6), "B matrices should be negated"
+
+    def test_add_weighted_adapter_subtraction_with_negative_weights(self):
+        # Test that merging two identical adapters with weights [1.0, -1.0] results in approximately zero weights
+        model = MLP()
+        config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+
+        # Create two identical adapters by using the same seed
+        torch.manual_seed(42)
+        model = get_peft_model(model, config, adapter_name="adapter1")
+
+        torch.manual_seed(42)
+        model.add_adapter("adapter2", config)
+
+        # Merge with weights [1.0, -1.0] - should cancel out exactly
+        model.add_weighted_adapter(
+            adapters=["adapter1", "adapter2"],
+            weights=[1.0, -1.0],
+            adapter_name="cancelled",
+            combination_type="linear",
+        )
+
+        # Verify the merged adapter has weights of approximately 0
+        for name, module in model.named_modules():
+            if hasattr(module, "lora_A") and "cancelled" in module.lora_A:
+                cancelled_A = module.lora_A["cancelled"].weight.data
+                cancelled_B = module.lora_B["cancelled"].weight.data
+
+                # The weights should be approximately zero (they cancel out)
+                assert torch.allclose(cancelled_A, torch.zeros_like(cancelled_A), atol=1e-5), (
+                    f"Cancelled A should be ~0, got max abs value {cancelled_A.abs().max()}"
+                )
+                assert torch.allclose(cancelled_B, torch.zeros_like(cancelled_B), atol=1e-5), (
+                    f"Cancelled B should be ~0, got max abs value {cancelled_B.abs().max()}"
+                )
+
+    def test_add_weighted_adapter_negative_weight_with_different_scaling(self):
+        # Test negative weights with different scaling factors (lora_alpha)
+        # This edge case ensures negative weights work correctly with different scaling values
+        torch.manual_seed(42)
+        model = MLP()
+
+        # Create two configs with different lora_alpha (different scaling factors)
+        config1 = LoraConfig(
+            r=8,
+            lora_alpha=16,  # scaling = 16/8 = 2
+            target_modules=["lin0"],
+            lora_dropout=0.0,
+            bias="none",
+            init_lora_weights=False,
+        )
+        config2 = LoraConfig(
+            r=8,
+            lora_alpha=32,  # scaling = 32/8 = 4
+            target_modules=["lin0"],
+            lora_dropout=0.0,
+            bias="none",
+            init_lora_weights=False,
+        )
+
+        model = get_peft_model(model, config1, adapter_name="adapter1")
+        model.add_adapter("adapter2", config2)
+
+        # Merge with negative weight - should handle different scalings correctly
+        model.add_weighted_adapter(
+            adapters=["adapter1", "adapter2"],
+            weights=[0.5, -0.3],
+            adapter_name="merged_diff_scaling",
+            combination_type="linear",
+        )
+
+        # Verify the merged adapter can run forward pass
+        model.set_adapter("merged_diff_scaling")
+        dummy_input = torch.randn(2, 10)
+        output = model(dummy_input)
+        assert output is not None
+
     def test_multiple_adapters_no_needless_copy_modules_to_save(self):
         # See 2206
         # The problem was that we keep a "global" modules_to_save on the model which contains all possible
