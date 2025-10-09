@@ -870,6 +870,42 @@ class Embedding(nn.Module, LoraLayer):
 
         return DoraEmbeddingVariant()
 
+    def _get_embed_scale(self):
+        """
+        Extract embed_scale from base layer if present and valid.
+
+        Some embedding layers (e.g., Gemma3TextScaledWordEmbedding) apply scaling to embeddings in their forward
+        method. This method checks for the presence of an `embed_scale` attribute and validates its shape.
+
+        Returns:
+            torch.Tensor or None: The embed_scale tensor if found and valid, None otherwise.
+        """
+        base_layer = self.get_base_layer()
+        if not hasattr(base_layer, "embed_scale"):
+            return None
+
+        embed_scale = base_layer.embed_scale
+
+        # Convert scalar values to tensors
+        if isinstance(embed_scale, (int, float)):
+            return torch.tensor(embed_scale, device=base_layer.weight.device, dtype=base_layer.weight.dtype)
+
+        # Validate tensor shape - must be scalar (0-d) or 1-element tensor for proper broadcasting
+        if isinstance(embed_scale, torch.Tensor):
+            if embed_scale.numel() == 1:
+                return embed_scale
+            else:
+                # Log warning but don't fail - this maintains backward compatibility
+                warnings.warn(
+                    f"Found embed_scale attribute with shape {embed_scale.shape}, expected scalar. "
+                    "Embedding scaling will not be applied. If this is unexpected, please open an issue at "
+                    "https://github.com/huggingface/peft/issues",
+                    PeftWarning,
+                )
+                return None
+
+        return None
+
     def update_layer(
         self,
         adapter_name,
@@ -1035,6 +1071,10 @@ class Embedding(nn.Module, LoraLayer):
         # extra argument that allows mixing different adapters in the same batch at inference time.
         result = self.base_layer(x, *args, **kwargs)
 
+        # Some embedding layers (e.g., Gemma3TextScaledWordEmbedding) apply scaling in their forward method.
+        # Since base_layer(x) already includes this scaling, we need to apply it to LoRA contributions too.
+        embed_scale = self._get_embed_scale()
+
         unique_adapters = set(adapter_names)
         sub_batch_indices_list = []
         for adapter in unique_adapters:
@@ -1054,7 +1094,13 @@ class Embedding(nn.Module, LoraLayer):
             # layer output
             sub_batch = x[sub_batch_indices_list[i]]
             after_A = self._embed(sub_batch, embedding_A)
-            result[sub_batch_indices_list[i]] += (after_A @ embedding_B) * scaling
+            adapter_output = (after_A @ embedding_B) * scaling
+
+            # Apply embed_scale to match the base layer's scaling
+            if embed_scale is not None:
+                adapter_output = adapter_output * embed_scale.to(adapter_output.dtype)
+
+            result[sub_batch_indices_list[i]] += adapter_output
 
         return result
 
@@ -1086,6 +1132,11 @@ class Embedding(nn.Module, LoraLayer):
         else:
             result = self.base_layer(x, *args, **kwargs)
             torch_result_dtype = result.dtype
+
+            # Some embedding layers (e.g., Gemma3TextScaledWordEmbedding) apply scaling in their forward method.
+            # Since base_layer(x) already includes this scaling, we need to apply it to LoRA contributions too.
+            embed_scale = self._get_embed_scale()
+
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.lora_embedding_A:
                     continue
@@ -1095,7 +1146,13 @@ class Embedding(nn.Module, LoraLayer):
                     embedding_B = self.lora_embedding_B[active_adapter].T
                     scaling = self.scaling[active_adapter]
                     after_A = self._embed(x, embedding_A)
-                    result = result + (after_A @ embedding_B) * scaling
+                    adapter_output = (after_A @ embedding_B) * scaling
+
+                    # Apply embed_scale to match the base layer's scaling
+                    if embed_scale is not None:
+                        adapter_output = adapter_output * embed_scale.to(adapter_output.dtype)
+
+                    result = result + adapter_output
                 else:
                     result = self.lora_variant[active_adapter].forward(
                         self,

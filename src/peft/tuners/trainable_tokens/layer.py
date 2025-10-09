@@ -79,6 +79,42 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             return self._tied_adapter[0]
         return None
 
+    def _get_embed_scale(self):
+        """
+        Extract embed_scale from base layer if present and valid.
+
+        Some embedding layers (e.g., Gemma3TextScaledWordEmbedding) apply scaling to embeddings in their forward
+        method. This method checks for the presence of an `embed_scale` attribute and validates its shape.
+
+        Returns:
+            torch.Tensor or None: The embed_scale tensor if found and valid, None otherwise.
+        """
+        base_layer = self.get_base_layer()
+        if not hasattr(base_layer, "embed_scale"):
+            return None
+
+        embed_scale = base_layer.embed_scale
+
+        # Convert scalar values to tensors
+        if isinstance(embed_scale, (int, float)):
+            return torch.tensor(embed_scale, device=base_layer.weight.device, dtype=base_layer.weight.dtype)
+
+        # Validate tensor shape - must be scalar (0-d) or 1-element tensor for proper broadcasting
+        if isinstance(embed_scale, torch.Tensor):
+            if embed_scale.numel() == 1:
+                return embed_scale
+            else:
+                # Log warning but don't fail - this maintains backward compatibility
+                warnings.warn(
+                    f"Found embed_scale attribute with shape {embed_scale.shape}, expected scalar. "
+                    "Embedding scaling will not be applied. If this is unexpected, please open an issue at "
+                    "https://github.com/huggingface/peft/issues",
+                    UserWarning,
+                )
+                return None
+
+        return None
+
     def _collect_token_weights(self, weight: torch.Tensor, rows: torch.Tensor, embed_dim: int) -> torch.Tensor:
         """DeepSpeed zero3 specific code to initialize trainable tokens.
 
@@ -232,6 +268,11 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
                     scale_grad_by_freq=self.base_layer.scale_grad_by_freq,
                     sparse=self.base_layer.sparse,
                 )
+                # Some embedding layers (e.g., Gemma3TextScaledWordEmbedding) apply scaling in their forward method.
+                # Since we're using F.embedding directly, we need to apply this scaling manually.
+                embed_scale = self._get_embed_scale()
+                if embed_scale is not None:
+                    result = result * embed_scale.to(result.dtype)
             elif isinstance(self.base_layer, torch.nn.Linear):
                 # Probably a tied adapter that wraps an LM head.
                 result = F.linear(
