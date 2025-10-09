@@ -667,7 +667,9 @@ class LoraConfig(PeftConfig):
         default=False,
         metadata={
             "help": (
-                "Whether to tie weights or not after peft initialization. Only supported for `task_type` == CAUSAL_LM"
+                "Whether to tie weights or not after peft initialization. "
+                "This will ensure that the adapters added to the tied layers "
+                "are also tied."
             )
         },
     )
@@ -691,7 +693,7 @@ class LoraConfig(PeftConfig):
         )
 
         if self.ensure_weight_tying:
-            self.modules_to_tie = {}
+            self.modules_to_tie = None
 
         if isinstance(self.target_parameters, str):
             raise TypeError("`target_parameters` must be a list of strings or None.")

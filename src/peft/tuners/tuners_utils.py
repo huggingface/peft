@@ -706,10 +706,11 @@ class BaseTuner(nn.Module, ABC):
                 peft_config.modules_to_tie = missing_keys
             elif not getattr(peft_config, "ensure_weight_tying", False):
                 msg = (
-                    f"Model has `tie_word_embeddings=True` and the {tied_weight_keys=} are part of the adapter, "
-                    "but `ensure_weight_tying` is not set to True."
+                    "Model has `tie_word_embeddings=True` and the tied layer is part of the adapter, "
+                    "but `ensure_weight_tying` is not set to True. "
                     "This can lead to complications, for example when merging the adapter "
                     "or converting your model to formats other than safetensors. "
+                    "See for discussion: https://github.com/huggingface/peft/issues/2777"
                 )
                 warnings.warn(msg)
         elif (
