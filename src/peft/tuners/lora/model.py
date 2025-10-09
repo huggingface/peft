@@ -540,7 +540,8 @@ class LoraModel(BaseTuner):
             adapters (`list`):
                 List of adapter names to be merged.
             weights (`list`):
-                List of weights for each adapter.
+                List of weights for each adapter. Weights can be positive or negative, allowing for both addition and
+                subtraction of adapter effects.
             adapter_name (`str`):
                 Name of the new adapter.
             combination_type (`str`):
@@ -742,7 +743,10 @@ class LoraModel(BaseTuner):
                 current_adapter_lora_B = target.lora_embedding_B[adapter]
             else:
                 continue
-            valid_weights.append(math.sqrt(weight * target.scaling[adapter]))
+            # Support negative weights: take absolute value for sqrt, then apply sign
+            weight_with_scaling = weight * target.scaling[adapter]
+            sign = 1 if weight_with_scaling >= 0 else -1
+            valid_weights.append(sign * math.sqrt(abs(weight_with_scaling)))
             lora_A_deltas.append(current_adapter_lora_A.data)
             lora_B_deltas.append(current_adapter_lora_B.data)
         valid_weights = torch.tensor(valid_weights).to(lora_A_deltas[0].device)

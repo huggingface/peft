@@ -1775,6 +1775,8 @@ class PeftCommonTester:
                     if "single" in adapter_name:
                         new_delta_weight = target.get_delta_weight(adapter_name)
                         weighted_original_delta_weights = target.get_delta_weight(adapter_list[0]) * weight_list[0]
+                        sign = 1 if weight_list[0] > 0 else -1
+                        weighted_original_delta_weights = sign * weighted_original_delta_weights
                         assert torch.allclose(new_delta_weight, weighted_original_delta_weights, atol=1e-4, rtol=1e-4)
                     elif "svd" in adapter_name:
                         assert target.r[adapter_name] == 20
@@ -1831,6 +1833,7 @@ class PeftCommonTester:
 
         adapter_list = ["adapter1", "adapter_2", "adapter_3"]
         weight_list = [0.5, 1.5, 1.5]
+        negative_weight_list = [-0.5, -0.8, -1.2]
         # Initialize the config
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -1847,8 +1850,10 @@ class PeftCommonTester:
 
             if isinstance(config, LoraConfig):
                 self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, weight_list)
+                self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, negative_weight_list)
             elif isinstance(config, IA3Config):
                 self._test_weighted_combination_of_adapters_ia3(model, config, adapter_list, weight_list)
+                self._test_weighted_combination_of_adapters_ia3(model, config, adapter_list, negative_weight_list)
             else:
                 pytest.skip(f"Test not applicable for {config}")
 
