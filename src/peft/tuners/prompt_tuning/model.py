@@ -64,20 +64,18 @@ class PromptEmbedding(torch.nn.Module):
 
         total_virtual_tokens = config.num_virtual_tokens * config.num_transformer_submodules
         self.embedding = torch.nn.Embedding(total_virtual_tokens, config.token_dim)
-        if config.prompt_tuning_init == PromptTuningInit.RANDOM_DISCRETE and not config.inference_mode:
-            import numpy as np
-
+        if config.prompt_tuning_init == PromptTuningInit.SAMPLE_VOCAB and not config.inference_mode:
             # Randomly sample tokens from the tokenizer's vocab
             vocab_size = word_embeddings.num_embeddings
-            init_token_ids = np.random.randint(0, vocab_size, total_virtual_tokens)
-            init_token_ids = torch.LongTensor(init_token_ids).to(word_embeddings.weight.device)
+            init_token_ids = torch.randint(0, vocab_size, (total_virtual_tokens,), dtype=torch.long).to(
+                word_embeddings.weight.device
+            )
             with gather_params_ctx(word_embeddings.parameters()):
                 word_embedding_weights = word_embeddings(init_token_ids).detach().clone()
             word_embedding_weights = word_embedding_weights.to(torch.float32)
             self.embedding.weight = torch.nn.Parameter(word_embedding_weights)
 
         elif config.prompt_tuning_init == PromptTuningInit.TEXT and not config.inference_mode:
-            import numpy as np
             from transformers import AutoTokenizer
 
             tokenizer_kwargs = config.tokenizer_kwargs or {}

@@ -380,6 +380,18 @@ class TestDecoderModels(PeftCommonTester):
         expected_call = call(model_id, trust_remote_code=True, foo="bar")
         assert mock.call_args == expected_call
 
+    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_prompt_tuning_sample_vocab_prepare_for_training(self, model_id, config_cls, config_kwargs):
+        if config_cls != PromptTuningConfig:
+            pytest.skip(f"This test does not apply to {config_cls}")
+
+        config_kwargs = config_kwargs.copy()
+        config_kwargs["prompt_tuning_init"] = PromptTuningInit.SAMPLE_VOCAB
+        config_kwargs["tokenizer_name_or_path"] = model_id
+
+        self._test_prepare_for_training(model_id, config_cls, config_kwargs.copy())
+
     def test_prompt_tuning_config_invalid_args(self):
         # Raise an error when tokenizer_kwargs is used with prompt_tuning_init!='TEXT', because this argument has no
         # function in that case

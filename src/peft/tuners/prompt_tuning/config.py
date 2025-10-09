@@ -22,7 +22,7 @@ from peft.utils import PeftType
 
 class PromptTuningInit(str, enum.Enum):
     TEXT = "TEXT"
-    RANDOM_DISCRETE = "RANDOM_DISCRETE"
+    SAMPLE_VOCAB = "SAMPLE_VOCAB"
     RANDOM = "RANDOM"
 
 
@@ -33,9 +33,9 @@ class PromptTuningConfig(PromptLearningConfig):
 
     Args:
         prompt_tuning_init (Union[[`PromptTuningInit`], `str`]):
-            The initialization of the prompt embedding. `TEXT` will initialize with your text. `RANDOM_DISCRETE` will
-            initialize with randomly sampled discrete, hard tokens. `RANDOM` will initialize with randomly sampled
-            continuous, soft tokens (warning: sampled soft tokens may fall outside of embedding manifold)
+            The initialization of the prompt embedding. `TEXT` will initialize with your text. `SAMPLE_VOCAB` will
+            initialize with randomly sampled tokens from the model's vocabulary. `RANDOM` will initialize with randomly
+            sampled continuous, soft tokens (warning: sampled soft tokens may fall outside of embedding manifold)
         prompt_tuning_init_text (`str`, *optional*):
             The text to initialize the prompt embedding. Only used if `prompt_tuning_init` is `TEXT`.
         tokenizer_name_or_path (`str`, *optional*):
