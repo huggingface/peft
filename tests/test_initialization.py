@@ -115,9 +115,7 @@ class TestLoraInitialization:
             def __init__(self):
                 super().__init__()
 
-                self.linear = nn.Linear(1000, 1000, bias=bias)
                 self.embed_tokens = nn.Embedding(1000, 1000)
-                self.conv2d = nn.Conv2d(100, 100, 3, bias=bias)
 
             def forward(self, x):
                 x_int = (x * 100).int()
