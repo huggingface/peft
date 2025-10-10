@@ -23,8 +23,6 @@ import torch
 import transformers
 from torch import nn
 
-from peft.import_utils import is_xpu_available
-
 
 def check_deepspeed_zero3_enabled() -> bool:
     if packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.33.0"):
