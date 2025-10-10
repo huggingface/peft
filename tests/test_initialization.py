@@ -119,6 +119,7 @@ class TestLoraInitialization:
                 super().__init__()
 
                 self.embed_tokens = nn.Embedding(1000, 1000)
+                self.linear = nn.Linear(1000, 1000, bias=bias)
 
             def forward(self, x):
                 return
@@ -1678,8 +1679,7 @@ class TestLoraInitialization:
             ensure_weight_tying=True,
         )
 
-        with pytest.warns(None):
-            model = get_peft_model(model, embed_token_config)
+        model = get_peft_model(model, embed_token_config)
 
         assert isinstance(model.base_model.model.model.embed_tokens, torch.nn.modules.Embedding)
         assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear)
