@@ -710,7 +710,7 @@ class BaseTuner(nn.Module, ABC):
                     "but `ensure_weight_tying` is not set to True. "
                     "This can lead to complications, for example when merging the adapter "
                     "or converting your model to formats other than safetensors. "
-                    "See for discussion: https://github.com/huggingface/peft/issues/2777"
+                    "Check the discussion here: https://github.com/huggingface/peft/issues/2777"
                 )
                 warnings.warn(msg)
         elif (
