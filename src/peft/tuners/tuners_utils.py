@@ -693,7 +693,7 @@ class BaseTuner(nn.Module, ABC):
         modules_to_save = (
             set(getattr(peft_config, "modules_to_save", [])) if getattr(peft_config, "modules_to_save", []) else set()
         )
-        is_embedding_to_save = [m for m in modules_to_save if m in EMBEDDING_LAYER_NAMES]
+        is_embedding_to_save = any(m in EMBEDDING_LAYER_NAMES for m in modules_to_save)
 
         tied_weight_keys = self._get_tied_weight_keys(model)
 
@@ -710,7 +710,7 @@ class BaseTuner(nn.Module, ABC):
                     "but `ensure_weight_tying` is not set to True. "
                     "This can lead to complications, for example when merging the adapter "
                     "or converting your model to formats other than safetensors. "
-                    "See for discussion: https://github.com/huggingface/peft/issues/2777"
+                    "Check the discussion here: https://github.com/huggingface/peft/issues/2777"
                 )
                 warnings.warn(msg)
         elif (
