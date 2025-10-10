@@ -919,70 +919,31 @@ class TestTrainableTokens:
         else:
             assert not contains_embedding
 
-    def test_scaled_embedding_support(self):
+    def test_embed_scale_is_applied(self):
         """Test that TrainableTokens correctly handles embeddings with scaling (e.g., Gemma3)."""
+        model_id = "hf-internal-testing/tiny-random-Gemma3ForCausalLM"
+        with hub_online_once(model_id):
+            base_model = AutoModelForCausalLM.from_pretrained(model_id)
+            orig_embedding = base_model.get_input_embeddings()
 
-        # Create a mock scaled embedding layer similar to Gemma3TextScaledWordEmbedding
-        class ScaledEmbedding(torch.nn.Embedding):
-            def __init__(self, num_embeddings, embedding_dim, embed_scale=2.0):
-                super().__init__(num_embeddings, embedding_dim)
-                self.register_buffer("embed_scale", torch.tensor(embed_scale), persistent=False)
+            peft_config = TrainableTokensConfig(target_modules=["embed_tokens"], token_indices=[0, 1, 3])
+            peft_model = get_peft_model(base_model, peft_config)
 
-            def forward(self, input_ids):
-                return super().forward(input_ids) * self.embed_scale
+            # sanity check: with the default embed_scale, the embedding output should be reasonably sized
+            peft_embedding = peft_model.base_model.model.get_input_embeddings()
+            max_embedding_output = peft_embedding(torch.arange(10)).abs().max(0)[0]
+            assert (max_embedding_output < 100.0).all()
 
-        # Create a model with scaled embedding
-        class ModelWithScaledEmb(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.emb = ScaledEmbedding(100, 10, embed_scale=3.0)
-                self.lin0 = torch.nn.Linear(10, 1)
+            # set embed_scale to an absurdly high value, then check that the embedding output is also scaled to a high
+            # value
+            orig_embedding.embed_scale.fill_(10000.0)
+            max_embedding_output = peft_embedding(torch.arange(10)).abs().max(0)[0]
+            assert (max_embedding_output > 100.0).all()
 
-            def forward(self, x):
-                return self.lin0(self.emb(x))
-
-            def get_input_embeddings(self):
-                return self.emb
-
-        base_model = ModelWithScaledEmb()
-        peft_config = TrainableTokensConfig(target_modules=["emb"], token_indices=[0, 1, 2])
-        peft_model = get_peft_model(base_model, peft_config)
-
-        # Test input
-        x = torch.tensor([[0, 1, 2, 3]])
-
-        # Get outputs from base model and peft model
-        base_output = base_model(x)
-        peft_output = peft_model(x)
-
-        # The outputs should be scaled - let's verify the embeddings are scaled
-        base_embeddings = base_model.emb(x)
-        peft_embeddings = peft_model.model.emb(x)
-
-        # Check that both apply the same scaling factor
-        assert hasattr(peft_model.model.emb, "_get_embed_scale")
-        embed_scale = peft_model.model.emb._get_embed_scale()
-        assert embed_scale is not None
-        assert torch.allclose(embed_scale, torch.tensor(3.0))
-
-        # Before training, outputs should be identical (within numerical precision)
-        assert torch.allclose(base_embeddings, peft_embeddings, atol=1e-6)
-
-        # Simulate training
-        self.simulate_training(peft_model.model.emb)
-
-        # After "training", the scaled embeddings for modified tokens should differ
-        peft_embeddings_trained = peft_model.model.emb(x)
-
-        # Modified tokens (0, 1, 2) should be different from base
-        base_emb_modified = base_embeddings[0, :3]
-        peft_emb_modified = peft_embeddings_trained[0, :3]
-        assert not torch.allclose(base_emb_modified, peft_emb_modified)
-
-        # Unmodified token (3) should be the same
-        base_emb_unmodified = base_embeddings[0, 3]
-        peft_emb_unmodified = peft_embeddings_trained[0, 3]
-        assert torch.allclose(base_emb_unmodified, peft_emb_unmodified, atol=1e-6)
+            # set embed_scale to zero, then check that the embedding output is also zero
+            orig_embedding.embed_scale.fill_(0)
+            embedding_output = peft_embedding(torch.arange(10))
+            assert (embedding_output == 0.0).all()
 
     def test_scaled_embedding_with_lora(self):
         """Test that TrainableTokens works with LoRA on scaled embeddings."""
@@ -1008,13 +969,14 @@ class TestTrainableTokens:
                 return self.emb
 
         base_model = ModelWithScaledEmb()
+        x = torch.tensor([[0, 1, 2, 3]])
+
+        # Get base embeddings before applying PEFT
+        base_embeddings = base_model.emb(x)
+
         peft_config = LoraConfig(target_modules=["lin0"], trainable_token_indices={"emb": [0, 1, 2]})
         peft_model = get_peft_model(base_model, peft_config)
 
-        x = torch.tensor([[0, 1, 2, 3]])
-
         # Verify embed_scale detection works in combined mode
-        assert hasattr(peft_model.model.emb.token_adapter, "_get_embed_scale")
-        embed_scale = peft_model.model.emb.token_adapter._get_embed_scale()
-        assert embed_scale is not None
-        assert torch.allclose(embed_scale, torch.tensor(3.0))
+        peft_embeddings = peft_model.base_model.model.emb(x)
+        assert torch.allclose(base_embeddings, peft_embeddings, atol=1e-6)
