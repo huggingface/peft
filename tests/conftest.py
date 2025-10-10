@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 import platform
 import re
 
@@ -24,6 +25,22 @@ def pytest_addoption(parser):
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "regression: mark regression tests")
+
+    # Errors from transformers deprecations
+    logger = logging.getLogger("transformers")
+
+    class ErrorOnDeprecation(logging.Handler):
+        def emit(self, record):
+            msg = record.getMessage().lower()
+            if "deprecat" in msg or "future" in msg:
+                if "torch_dtype" not in msg:
+                    # let's ignore the torch_dtype => dtype deprecation for now
+                    raise AssertionError(f"**Transformers Deprecation**: {msg}")
+
+    # Add our handler
+    handler = ErrorOnDeprecation()
+    logger.addHandler(handler)
+    logger.setLevel(logging.WARNING)
 
 
 def pytest_collection_modifyitems(config, items):

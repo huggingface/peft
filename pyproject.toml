@@ -49,3 +49,8 @@ markers = [
     "regression: whether to run regression suite test",
     "bitsandbytes: select bitsandbytes integration tests"
 ]
+
+filterwarnings = [
+    "error::DeprecationWarning:transformers",
+    "error::FutureWarning:transformers",
+]
