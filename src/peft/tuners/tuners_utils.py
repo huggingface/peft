@@ -1208,7 +1208,7 @@ class BaseTunerLayer(ABC):
 
         Some embedding layers (e.g., Gemma3TextScaledWordEmbedding) apply scaling to embeddings in their forward
         method. This method checks for the presence of an `embed_scale` attribute. If it exists, it is assumed to be
-        a scalar and validates its shape accordingly.
+        a scalar. Its shape is validated accordingly.
 
         Returns:
             torch.Tensor or None: The embed_scale tensor if found and valid, None otherwise.
