@@ -24,8 +24,6 @@ import transformers
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig, GPTQConfig, Trainer
 from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
-from utils import load_all_lr_layers, apply_lr_weights, compare_weights
-from eval_peft import load_model_and_tokenizer
 
 
 IGNORE_INDEX = -100
@@ -80,7 +78,7 @@ def get_nb_trainable_parameters(model) -> tuple[int, int]:
 class TrainingArguments(transformers.TrainingArguments):
     model_name_or_path: Optional[str] = field(default="facebook/opt-125m")
     data_path: str = field(default=None, metadata={"help": "Path to the training data."})
-    dataset_split: str = field(default="train[:100000]", metadata={"help": "(`['train', 'test', 'eval']`):"})
+    dataset_split: str = field(default="train[:100000]", metadata={"help": "(['train', 'test', 'eval']):"})
     dataset_field: list[str] = field(default=None, metadata={"help": "Fields of dataset input and output."})
     dataloader_num_proc: int = field(default=16, metadata={"help": "Number of processes to load dataset"})
     bits: int = field(default=4, metadata={"help": "Number of bits to quantize the model. Default is 4."})
@@ -501,20 +499,48 @@ def train():
             bits=script_args.bits,
             calibration_dataset=script_args.calibration_dataset
         )
+        
+        print("📥 Loading original model for error-svd initialization...")
+        og_model = AutoModelForCausalLM.from_pretrained(
+            script_args.model_name_or_path,
+            torch_dtype=torch.bfloat16,
+            device_map="auto"
+        )
+        
+        # Erstelle eine Map mit Layer-Name -> Gewicht
+        original_weights_map = {}
+        target_modules = ["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"]
+        
+        for name, module in og_model.named_modules():
+            if hasattr(module, 'weight') and isinstance(module.weight, torch.nn.Parameter):
+                # Speichere nur die relevanten Layer
+                if any(target in name for target in target_modules):
+                    original_weights_map[name] = module.weight.data.clone().to(torch.float32)
+        
+        print(f"📊 Gespeichert: {len(original_weights_map)} Original-Gewichte für error-svd")
 
         lora_config = LoraConfig(
             task_type="CAUSAL_LM",
             use_qalora=True,
             qalora_group_size=script_args.qalora_group_size,
             r=script_args.lora_r,
-            lora_alpha=2 * script_args.lora_r,
-            # target_modules=["q_proj", "o_proj", "k_proj", "v_proj"],
-            target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
-            lora_dropout=0.05,
+            lora_alpha=script_args.lora_r,
+            target_modules=target_modules,
+            lora_dropout=0,
             bias="none",
+            init_lora_weights={
+                "method": "error-svd", 
+                "original_weights_map": original_weights_map,
+                "group_size": script_args.qalora_group_size
+            }
         )
 
         model = get_peft_model(model, lora_config)
+        
+        # Cleanup
+        del og_model
+        torch.cuda.empty_cache()
+        print("🧹 Original model freed from memory")
     elif script_args.training_mode == "gptq_lora":
         print("🔧 Setting up QA-LoRA training...")
         model = load_or_quantize_model(
@@ -647,7 +673,11 @@ def train():
         del model_for_quant
         torch.cuda.empty_cache()
 
-        from gptqmodel.nn_modules.qlinear import BaseQuantLinear
+        try:
+            from gptqmodel.nn_modules.qlinear import BaseQuantLinear  # type: ignore
+        except Exception:
+            class BaseQuantLinear(torch.nn.Module):  # fallback for type checking
+                pass
         # =======================================================================
         # SCHRITT 5: Outlier als Buffer in das quantisierte Modell injizieren
         # =======================================================================
@@ -695,8 +725,9 @@ def train():
             r=script_args.lora_r,
             lora_alpha=script_args.lora_r,
             target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
-            lora_dropout=0.05,
+            lora_dropout=0,
             bias="none",
+            init_lora_weights="pissa"
             # init_lora_weights=f"pissa_niter_{script_args.pissa_niter}",  # PiSSA initialization
         )
 
@@ -806,9 +837,9 @@ def train():
                 use_qalora=True,
                 qalora_group_size=script_args.qalora_group_size,
                 r=script_args.lora_r,
-                lora_alpha=2 * script_args.lora_r,
+                lora_alpha=script_args.lora_r,
                 target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
-                lora_dropout=0.05,
+                lora_dropout=0,
                 bias="none",
                 init_lora_weights="daniel",
             )
