@@ -68,6 +68,7 @@ from peft.tuners.lora.corda import preprocess_corda
 from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
+from peft.utils.other import ModulesToSaveWrapper
 
 from .testing_utils import load_dataset_english_quotes, require_deterministic_for_xpu
 
@@ -111,6 +112,8 @@ class TestLoraInitialization:
         return MyModule().eval().to(self.torch_device)
 
     def get_lm_model(self, bias=True, tie_weights=True):
+        # Mimicking a LM with embed_tokens and lm_head layers
+        # to test weight tying of adapters
         class MyModule(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -120,10 +123,7 @@ class TestLoraInitialization:
                 self.conv2d = nn.Conv2d(100, 100, 3, bias=bias)
 
             def forward(self, x):
-                x_int = (x * 100).int()
-                x_4d = x.reshape(1, 100, 10, 10)
-
-                return self.linear(x), self.embed(x_int), self.conv2d(x_4d)
+                return
 
         class CausalLM(nn.Module):
             if tie_weights:
@@ -141,7 +141,7 @@ class TestLoraInitialization:
                     self.lm_head = nn.Linear(1000, 1000, bias=bias)
 
             def forward(self, x):
-                return self.model(x)
+                return
 
             def prepare_inputs_for_generation(self):
                 return
@@ -1612,8 +1612,6 @@ class TestLoraInitialization:
         # is passed as a `modules_to_save`, it needs to be ensured
         # that lm_head is tied to the adapter added to `embed_tokens`
 
-        from peft.utils.other import ModulesToSaveWrapper
-
         model = self.get_lm_model()
         embed_token_config = LoraConfig(
             modules_to_save=["embed_tokens"],
@@ -1676,17 +1674,14 @@ class TestLoraInitialization:
         )
 
     def test_weight_tying_tied_model_no_embed(self):
-        # If weight tying is enabled and `embed_tokens`
-        # is passed as a `modules_to_save`, it needs to be ensured
-        # that lm_head is tied to the adapter added to `embed_tokens`
-
         model = self.get_lm_model()
         embed_token_config = LoraConfig(
             target_modules=["linear"],
             ensure_weight_tying=True,
         )
 
-        model = get_peft_model(model, embed_token_config)
+        with pytest.warns(None):
+            model = get_peft_model(model, embed_token_config)
 
         assert isinstance(model.base_model.model.model.embed_tokens, torch.nn.modules.Embedding)
         assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear)

@@ -535,7 +535,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
     def _getattr_wrapped(self, name, modules):
         return getattr(modules["modules_to_save"][self.active_adapters[0]], name)
 
-    def update(self, adapter_name, **kwargs):
+    def update(self, adapter_name, tied_module=None, **kwargs):
         super().update(adapter_name)
 
         context_manager = nullcontext()
@@ -547,8 +547,6 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 
                 context_manager = deepspeed.zero.GatheredParameters(self.original_module.parameters(), modifier_rank=0)
                 break
-
-        tied_module = kwargs.get("tied_module", None)
 
         if adapter_name not in self.modules_to_save:
             with context_manager:
@@ -1411,6 +1409,9 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
         )
 
     if getattr(peft_config, "modules_to_tie", None) is not None:
+        # Tie the modules if any tied layer is passed in `modules_to_save`.
+        # This should always be called after
+        # `_set_trainable` is called for `modules_to_save`.
         tied_module = getattr(model.get_input_embeddings().modules_to_save, adapter_name)
         _set_trainable(
             model,
