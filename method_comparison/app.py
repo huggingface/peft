@@ -33,6 +33,7 @@ metric_preferences = {
     "file_size": "lower",
     "test_accuracy": "higher",
     "train_loss": "lower",
+    "num_trainable_params": "lower",
 }
 
 
