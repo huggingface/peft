@@ -503,7 +503,7 @@ class KasaLinearVariant(LoraVariant):
         return orig_weight - delta_weight
 
     @staticmethod
-    def forward(module: Linear, active_adapter: str, x: torch.Tensor, result: torch.Tensor) -> torch.Tensor:
+    def forward(module: Linear, active_adapter: str, x: torch.Tensor, result: torch.Tensor, **kwargs) -> torch.Tensor:
         lora_A = module.lora_A[active_adapter]
         lora_B = module.lora_B[active_adapter]
         dropout = module.lora_dropout[active_adapter]
