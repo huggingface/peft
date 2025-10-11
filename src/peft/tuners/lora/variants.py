@@ -512,7 +512,12 @@ class KasaLinearVariant(LoraVariant):
 
         # KaSA calculation
         # see https://github.com/juyongjiang/KaSA/blob/f85e88c22d0fa4cb8ab2923d7c2bf1bbec152da3/peft/src/peft/tuners/lora/layer.py#L602C21-L602C110
-        lora_output = lora_B(torch.einsum("ijk,kl->ijl", lora_A(dropout(x)), diag)) * scaling
+        if x.ndim == 3:
+            lora_output = lora_B(torch.einsum("ijk,kl->ijl", lora_A(dropout(x)), diag)) * scaling
+        elif x.ndim == 2:
+            lora_output = lora_B(lora_A(dropout(x)) @ diag) * scaling
+        else:
+            raise ValueError(f"Using KaSA with inputs of shape {x.ndim} is not supported, only 2 or 3 dims.")
         return result + lora_output
 
 
