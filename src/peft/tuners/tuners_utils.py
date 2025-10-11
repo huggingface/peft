@@ -1186,7 +1186,7 @@ class BaseTuner(nn.Module, ABC):
         Updates the `peft_config.modules_to_tie` with any layers that needs to be tied
         """
         modules_to_save = (
-            set(getattr(peft_config, "modules_to_save", [])) if getattr(peft_config, "modules_to_save", []) else set()
+            set(getattr(peft_config, "modules_to_save", []) or [])
         )
         is_embedding_to_save = any(m in EMBEDDING_LAYER_NAMES for m in modules_to_save)
 
