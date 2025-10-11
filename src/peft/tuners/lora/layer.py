@@ -701,13 +701,15 @@ class Linear(nn.Module, LoraLayer):
 
             return ArrowLinearVariant()
 
-        if not use_dora and not use_alora:
+        if not use_dora and not use_alora and not use_kasa:
             return None
 
-        from .variants import ALoraLinearVariant, DoraLinearVariant
+        from .variants import ALoraLinearVariant, DoraLinearVariant, KasaLinearVariant
 
         if use_alora:
             return ALoraLinearVariant()
+        elif use_kasa:
+            return KasaLinearVariant()
         else:
             return DoraLinearVariant()
 
