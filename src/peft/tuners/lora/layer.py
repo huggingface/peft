@@ -826,6 +826,8 @@ class Linear(nn.Module, LoraLayer):
             weight_A = weight_A.float()
             weight_B = weight_B.float()
 
+        output_tensor = transpose(weight_B @ weight_A, self.fan_in_fan_out) * self.scaling[adapter]
+
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
 
@@ -833,8 +835,6 @@ class Linear(nn.Module, LoraLayer):
             self.lora_A[adapter].weight.data = weight_A.to(dtype)
             self.lora_B[adapter].weight.data = weight_B.to(dtype)
 
-        output_tensor = transpose(weight_B @ weight_A, self.fan_in_fan_out) * self.scaling[adapter]
-        
         return output_tensor
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
@@ -2014,6 +2014,7 @@ class ParamWrapper(nn.Module, LoraLayer):
         init_lora_weights,
         use_rslora,
         use_dora: bool = False,
+        use_kasa: bool = False,
         use_qalora: bool = False,
         lora_bias: bool = False,
         qalora_group_size: int = 32,
