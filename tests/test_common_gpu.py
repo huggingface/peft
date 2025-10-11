@@ -1040,7 +1040,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     @require_bitsandbytes
     def test_8bit_merge_lora_with_bias(self):
         # same as test_8bit_merge_lora but with lora_bias=True
-        torch.manual_seed(1000)
+        torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
