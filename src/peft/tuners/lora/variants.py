@@ -446,8 +446,9 @@ class KasaLinearVariant(LoraVariant):
             module.lora_diag = nn.ParameterDict()
             module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_diag",)
 
-        # Initialize lora_diag
-        module.lora_diag[adapter_name] = nn.Parameter(torch.randn(module.r[adapter_name]), requires_grad=True)
+        # Initialize lora_diag with the same dtype as the base layer
+        base_dtype = module.get_base_layer().weight.dtype
+        module.lora_diag[adapter_name] = nn.Parameter(torch.randn(module.r[adapter_name], dtype=base_dtype), requires_grad=True)
 
         # see https://github.com/juyongjiang/KaSA/blob/f85e88c22d0fa4cb8ab2923d7c2bf1bbec152da3/peft/src/peft/tuners/lora/layer.py#L132
 
@@ -458,10 +459,16 @@ class KasaLinearVariant(LoraVariant):
         weight = weight.to(torch.float32)
         U, S, Vh = torch.linalg.svd(weight.data, full_matrices=False)
         U_principle, S_principle, Vh_principle = U[:, :svd_rank], S[:svd_rank], Vh[:svd_rank, :]
-        module.get_base_layer().weight.data = (U_principle @ torch.diag(S_principle) @ Vh_principle).to(dtype)
+        reconstructed_weight = U_principle @ torch.diag(S_principle) @ Vh_principle
+        module.get_base_layer().weight.data = reconstructed_weight.to(dtype)
 
     @staticmethod
     def _get_delta_weight(weight_A, weight_B, lora_diag, scaling, fan_in_fan_out):
+        # Ensure all tensors have the same dtype
+        target_dtype = weight_A.dtype
+        weight_B = weight_B.to(target_dtype)
+        lora_diag = lora_diag.to(target_dtype)
+        
         diag = torch.diag(lora_diag)
         delta = weight_B @ diag @ weight_A
         if fan_in_fan_out:
@@ -504,6 +511,10 @@ class KasaLinearVariant(LoraVariant):
 
     @staticmethod
     def forward(module: Linear, active_adapter: str, x: torch.Tensor, result: torch.Tensor, **kwargs) -> torch.Tensor:
+        # Check if adapters are disabled
+        if module.disable_adapters:
+            return result
+            
         lora_A = module.lora_A[active_adapter]
         lora_B = module.lora_B[active_adapter]
         dropout = module.lora_dropout[active_adapter]
@@ -512,12 +523,27 @@ class KasaLinearVariant(LoraVariant):
 
         # KaSA calculation
         # see https://github.com/juyongjiang/KaSA/blob/f85e88c22d0fa4cb8ab2923d7c2bf1bbec152da3/peft/src/peft/tuners/lora/layer.py#L602C21-L602C110
+        
+        # Ensure all tensors have the same dtype as the result
+        target_dtype = result.dtype
+        x = x.to(target_dtype)
+        diag = diag.to(target_dtype)
+        
+        # Convert LoRA weights to target dtype
+        lora_A.weight.data = lora_A.weight.data.to(target_dtype)
+        lora_B.weight.data = lora_B.weight.data.to(target_dtype)
+        
+        lora_A_output = lora_A(dropout(x))
+        
         if x.ndim == 3:
-            lora_output = lora_B(torch.einsum("ijk,kl->ijl", lora_A(dropout(x)), diag)) * scaling
+            einsum_output = torch.einsum("ijk,kl->ijl", lora_A_output, diag)
+            lora_output = lora_B(einsum_output) * scaling
         elif x.ndim == 2:
-            lora_output = lora_B(lora_A(dropout(x)) @ diag) * scaling
+            matmul_output = lora_A_output @ diag
+            lora_output = lora_B(matmul_output) * scaling
         else:
             raise ValueError(f"Using KaSA with inputs of shape {x.ndim} is not supported, only 2 or 3 dims.")
+        
         return result + lora_output
 
 
