@@ -499,6 +499,29 @@ def train():
             bits=script_args.bits,
             calibration_dataset=script_args.calibration_dataset
         )
+        lora_config = LoraConfig(
+            task_type="CAUSAL_LM",
+            use_qalora=True,
+            qalora_group_size=script_args.qalora_group_size,
+            r=script_args.lora_r,
+            lora_alpha=script_args.lora_r,
+            target_modules=target_modules,
+            lora_dropout=0,
+            bias="none"
+        )
+
+        model = get_peft_model(model, lora_config)
+        torch.cuda.empty_cache()
+        print("🧹 Original model freed from memory")
+    elif script_args.training_mode == "qalora_svd_error":
+        print("🔧 Setting up QA-LoRA training...")
+        model = load_or_quantize_model(
+            script_args.model_name_or_path,
+            tokenizer,
+            qalora_group_size=script_args.qalora_group_size,
+            bits=script_args.bits,
+            calibration_dataset=script_args.calibration_dataset
+        )
         
         print("📥 Loading original model for error-svd initialization...")
         og_model = AutoModelForCausalLM.from_pretrained(
