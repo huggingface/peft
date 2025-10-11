@@ -442,7 +442,8 @@ class DoraConv3dVariant(_DoraConvNdVariant):
 class KasaLinearVariant(LoraVariant):
     @staticmethod
     def init(module: Linear, adapter_name: str, **kwargs: Any) -> None:
-        if not module.lora_diag:
+        if not hasattr(module, "lora_diag"):
+            module.lora_diag = nn.ParameterDict()
             module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_diag",)
 
         # Initialize lora_diag
