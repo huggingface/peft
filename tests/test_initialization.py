@@ -121,9 +121,6 @@ class TestLoraInitialization:
                 self.embed_tokens = nn.Embedding(1000, 1000)
                 self.linear = nn.Linear(1000, 1000, bias=bias)
 
-            def forward(self, x):
-                return
-
         class CausalLM(nn.Module):
             if tie_weights:
                 _tied_weights_keys = ["lm_head.weight"]
@@ -138,9 +135,6 @@ class TestLoraInitialization:
                     self.lm_head.weight = self.model.embed_tokens.weight
                 else:
                     self.lm_head = nn.Linear(1000, 1000, bias=bias)
-
-            def forward(self, x):
-                return
 
             def prepare_inputs_for_generation(self):
                 return

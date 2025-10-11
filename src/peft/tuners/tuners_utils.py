@@ -1182,12 +1182,10 @@ class BaseTuner(nn.Module, ABC):
 
     def _check_tied_modules(self, model: nn.Module, peft_config):
         """
-        Checks if any of the tied layers are targetted via `modules_to_save`
-        Updates the `peft_config.modules_to_tie` with any layers that needs to be tied
+        Checks if any of the tied layers are targetted via `modules_to_save` Updates the `peft_config.modules_to_tie`
+        with any layers that needs to be tied
         """
-        modules_to_save = (
-            set(getattr(peft_config, "modules_to_save", []) or [])
-        )
+        modules_to_save = set(getattr(peft_config, "modules_to_save", []) or [])
         is_embedding_to_save = any(m in EMBEDDING_LAYER_NAMES for m in modules_to_save)
 
         tied_weight_keys = self._get_tied_weight_keys(model)
@@ -1212,7 +1210,6 @@ class BaseTuner(nn.Module, ABC):
             and peft_config.peft_type == PeftType.LORA
         ):
             warnings.warn("You have requested ensure_weight_tying, but no tied modules were found in the model")
-
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
