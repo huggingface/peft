@@ -14,6 +14,7 @@
 
 import copy
 import itertools
+import json
 import math
 import platform
 import re
@@ -41,6 +42,7 @@ from peft import (
     LoftQConfig,
     LoKrConfig,
     LoraConfig,
+    OFTConfig,
     PeftMixedModel,
     PeftModel,
     PeftModelForCausalLM,
@@ -1818,6 +1820,49 @@ class TestVBLoraInitialization:
         msg = f"`out_features` {model.lin1.out_features} must be divisible by `vector_length` {vector_length}"
         with pytest.raises(ValueError, match=msg):
             get_peft_model(model, config)
+
+
+class TestOft:
+    torch_device = infer_device()
+
+    def get_model(self, bias=True):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = nn.Linear(32, 32)
+
+        return MyModule().eval().to(self.torch_device)
+
+    @pytest.mark.parametrize("peft_version", ["0.17.0", "0.18.0", None])
+    def test_load_outdated_oft_checkpoint_warns(self, peft_version, tmp_path, recwarn):
+        # In PEFT v0.18.0, there was a small change in the OFT implementation with Cayley-Neumann enabled. As the
+        # outputs change slightly, users need to be warned about it if the checkpoint stems from a PEFT version below
+        # 0.18.0. When the 'peft_version' key is not in the config, it means that the version is below 0.18.0.
+        config = OFTConfig(target_modules=["lin"], use_cayley_neumann=True)  # only relevant when using Cayley-Neumann
+        model = get_peft_model(self.get_model(), config)
+        model.save_pretrained(tmp_path)
+        del model
+
+        # overwrite the peft_version
+        with open(tmp_path / "adapter_config.json") as f:
+            config_json = json.load(f)
+
+        if peft_version is None:
+            config_json.pop("peft_version", None)
+        else:
+            config_json["peft_version"] = peft_version
+
+        with open(tmp_path / "adapter_config.json", "w") as f:
+            json.dump(config_json, f)
+
+        msg = "The cayley-neumann parameterization has been slightly changed to be more numerically stable in PEFT 0.18.0."
+        PeftModel.from_pretrained(self.get_model(), tmp_path)
+
+        warn_messages = [str(w.message) for w in recwarn.list]
+        if peft_version == "0.18.0":
+            assert not any(w.startswith(msg) for w in warn_messages)
+        else:
+            assert any(w.startswith(msg) for w in warn_messages)
 
 
 class TestC3AInitialization:
