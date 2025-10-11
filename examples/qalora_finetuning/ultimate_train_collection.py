@@ -536,6 +536,19 @@ def train():
         )
 
         model = get_peft_model(model, lora_config)
+
+        adapter_name = model.active_adapter
+        config = model.peft_config[adapter_name]
+
+        # Überprüfen, ob die Initialisierungsmethode verwendet wurde und die problematischen Daten enthält
+        if hasattr(config, "init_lora_weights") and isinstance(config.init_lora_weights, dict):
+            # Entfernen Sie den Tensor oder das gesamte Dictionary.
+            # Beides ist eine gute Lösung. Das Ersetzen durch einen einfachen Wert ist oft am sichersten.
+            print("Entferne nicht serialisierbare Tensor-Daten aus der Lora-Konfiguration vor dem Speichern...")
+            if "original_weights_map" in config.init_lora_weights:
+                del config.init_lora_weights["original_weights_map"]
+            if "W_orig" in config.init_lora_weights:
+                del config.init_lora_weights["W_orig"]
         
         # Cleanup
         del og_model
