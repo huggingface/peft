@@ -499,6 +499,7 @@ def train():
             bits=script_args.bits,
             calibration_dataset=script_args.calibration_dataset
         )
+        target_modules = ["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"]
         lora_config = LoraConfig(
             task_type="CAUSAL_LM",
             use_qalora=True,
@@ -577,6 +578,104 @@ def train():
         del og_model
         torch.cuda.empty_cache()
         print("🧹 Original model freed from memory")
+    elif script_args.training_mode == "qalora_svd_error_two_adapter":
+        print("✅ 1. Originalmodell laden, um 'Spickzettel' zu erstellen...")
+        original_model = AutoModelForCausalLM.from_pretrained(
+            script_args.model_name_or_path,
+            torch_dtype=torch.bfloat16,
+        )
+
+        # Erstelle den "Spickzettel" mit den Originalgewichten
+        original_weights_map = {
+            name: module.weight.cpu().clone()
+            for name, module in original_model.named_modules()
+            if isinstance(module, torch.nn.Linear)
+        }
+        del original_model # Speicher freigeben
+
+        print("🔧 2. Basismodell quantisieren...")
+        model = load_or_quantize_model(
+            script_args.model_name_or_path,
+            tokenizer,
+            qalora_group_size=script_args.qalora_group_size,
+            bits=script_args.bits,
+            calibration_dataset=script_args.calibration_dataset
+        )
+
+        # ==============================================================================
+        # SCHRITT 2: FEHLERKORREKTUR-ADAPTER HINZUFÜGEN (SVD-INIT, FROZEN)
+        # ==============================================================================
+        print("🏗️ 3. Fehlerkorrektur-Adapter ('error_correction') hinzufügen...")
+
+        # Das init-Dictionary für Ihre SVD-Funktion
+        init_config_error = {
+            "method": "error-svd",
+            "original_weights_map": original_weights_map
+        }
+
+        # Konfiguration für den *eingefrorenen* Korrektur-Adapter
+        error_config = LoraConfig(
+            r=1,  # Sehr kleiner Rank ist ausreichend
+            lora_alpha=1,
+            use_qalora=False, # WICHTIG: Dieser Adapter ist nur ein statischer Offset
+            init_lora_weights=init_config_error,
+            target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
+            bias="none",
+        )
+
+        # `get_peft_model` fügt den ERSTEN Adapter hinzu
+        model = get_peft_model(model, error_config, adapter_name="error_correction")
+        print("✅ 'error_correction' Adapter hinzugefügt und per SVD initialisiert.")
+
+        adapter_name = model.active_adapter
+        config = model.peft_config[adapter_name]
+
+        # Überprüfen, ob die Initialisierungsmethode verwendet wurde und die problematischen Daten enthält
+        if hasattr(config, "init_lora_weights") and isinstance(config.init_lora_weights, dict):
+            # Entfernen Sie den Tensor oder das gesamte Dictionary.
+            # Beides ist eine gute Lösung. Das Ersetzen durch einen einfachen Wert ist oft am sichersten.
+            print("Entferne nicht serialisierbare Tensor-Daten aus der Lora-Konfiguration vor dem Speichern...")
+            if "original_weights_map" in config.init_lora_weights:
+                del config.init_lora_weights["original_weights_map"]
+            if "W_orig" in config.init_lora_weights:
+                del config.init_lora_weights["W_orig"]
+        
+        # Cleanup
+        # print("❄️ 4. Fehlerkorrektur-Adapter einfrieren...")
+        # for name, param in model.named_parameters():
+        #     if "error_correction" in name:
+        #         param.requires_grad = False
+
+        # ==============================================================================
+        # SCHRITT 3: TASK-ADAPTER HINZUFÜGEN (GAUSS-INIT, TRAINABLE)
+        # ==============================================================================
+        print("🎨 5. Trainierbaren Task-Adapter ('task_adapter') hinzufügen...")
+
+        # Konfiguration für den *trainierbaren* Task-Adapter
+        train_config = LoraConfig(
+            r=script_args.lora_r, # Ihr normaler, höherer Rank (z.B. 64)
+            lora_alpha=script_args.lora_r,
+            use_qalora=True, # WICHTIG: Dieser Adapter wird mit QA-LoRA trainiert!
+            qalora_group_size=script_args.qalora_group_size,
+            init_lora_weights="gaussian", # Explizite Zufalls-Initialisierung
+            target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
+            lora_dropout=0.1, # Dropout macht nur für den trainierbaren Adapter Sinn
+            bias="none",
+        )
+
+        # `model.add_adapter` fügt einen ZWEITEN (oder dritten, etc.) Adapter hinzu
+        model.add_adapter("task_adapter", train_config)
+        print("✅ 'task_adapter' hinzugefügt und zufällig initialisiert.")
+
+
+        # ==============================================================================
+        # SCHRITT 4: FINALES SETUP FÜR DAS TRAINING
+        # ==============================================================================
+        print("🚀 6. 'task_adapter' als aktiv für das Training setzen...")
+        model.set_adapter("task_adapter")
+
+        print("\n--- Finales Modell-Setup ---")
+        model.print_trainable_parameters()
     elif script_args.training_mode == "gptq_lora":
         print("🔧 Setting up QA-LoRA training...")
         model = load_or_quantize_model(
