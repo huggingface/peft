@@ -61,19 +61,7 @@ class DeloraModel(BaseTuner):
         Raise a ValueError if there is something wrong with the config or if it conflicts with existing adapters.
 
         """
-        # TODO: there should be a check if any of the existing adapters actually has bias != "none", or else the check
-        # does not fully correspond to the error message.
-        if (len(self.peft_config) > 1) and (config.bias != "none"):
-            raise ValueError(
-                f"{self.__class__.__name__} supports only 1 adapter with bias. When using multiple adapters, "
-                "set bias to 'none' for all adapters."
-            )
-        # if there are multiple adapters, residual init cannot be used
-        if (len(self.peft_config) > 1) and (config.use_residual_init):
-            raise ValueError(
-                f"{self.__class__.__name__} supports only 1 adapter with residual init. When using multiple adapters, "
-                "set use_residual_init to False for all adapters."
-            )
+        super()._check_new_adapter_config(config)
 
     @staticmethod
     def _check_target_module_exists(delora_config, key):
@@ -96,16 +84,13 @@ class DeloraModel(BaseTuner):
         r_key = get_pattern_key(delora_config.rank_pattern.keys(), current_key)
         lambda_key = get_pattern_key(delora_config.lambda_pattern.keys(), current_key)
         r = delora_config.rank_pattern.get(r_key, delora_config.r)
-        lambda_ = delora_config.lambda_pattern.get(lambda_key, delora_config.lambda_)
+        delora_lambda = delora_config.lambda_pattern.get(lambda_key, delora_config.delora_lambda)
 
         kwargs = {
             "r": r,
-            "lambda_": lambda_,
+            "delora_lambda": delora_lambda,
             "module_dropout": delora_config.module_dropout,
             "init_weights": delora_config.init_weights,
-            "use_residual_init": (
-                delora_config.use_residual_init if delora_config.init_weights is not False else False
-            ),
         }
 
         if isinstance(target, DeloraLinear):
@@ -136,17 +121,13 @@ class DeloraModel(BaseTuner):
                 new_module.base_layer.state = child.state
             else:
                 new_module.state = child.state
-            if child.weight.device.type != "meta" and not any(b.device.type == "meta" for b in new_module.buffers()):
-                new_module.to(child.weight.device)
+            new_module.to(child.weight.device)
 
+        meta = torch.device("meta")
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if self.prefix in name:
-                if (
-                    not any(p.device.type == "meta" for p in module.parameters())
-                    and not any(b.device.type == "meta" for b in module.buffers())
-                    and child.weight.device.type != "meta"
-                ):
+                if not any(p.device == meta for p in module.parameters()):
                     module.to(child.weight.device)
 
     def _mark_only_adapters_as_trainable(self, model: torch.nn.Module) -> None:
@@ -156,7 +137,7 @@ class DeloraModel(BaseTuner):
 
         # enable bias training if requested
         for active_adapter in self.active_adapters:
-            bias = getattr(self.peft_config[active_adapter], "bias", "none")
+            bias = self.peft_config[active_adapter].bias
             if bias == "none":
                 continue
             if bias == "all":
@@ -216,7 +197,7 @@ class DeloraModel(BaseTuner):
         When disabling all adapters, the model output corresponds to the output of the base model.
         """
         for active_adapter in self.active_adapters:
-            val = getattr(self.peft_config[active_adapter], "bias", "none")
+            val = self.peft_config[active_adapter].bias
             if val != "none":
                 msg = (
                     f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
@@ -226,6 +207,14 @@ class DeloraModel(BaseTuner):
         self._set_adapter_layers(enabled=False)
 
     def set_adapter(self, adapter_name: str | list[str], inference_mode: bool = False) -> None:
+        """Set the active adapter(s).
+
+        Args:
+            adapter_name (`str` or `list[str]`):
+                Name(s) of the adapter(s) to be activated.
+            inference_mode (bool, optional):
+                 Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
+        """
         self.set_auxiliary_adapters(adapter_name, inference_mode=inference_mode)
         for module in self.model.modules():
             if isinstance(module, DeloraLayer):

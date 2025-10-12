@@ -2119,12 +2119,12 @@ class TestDeLoRAInitialization:
         return torch.randn(4, 10, device=self.torch_device)
 
     def test_delora_injection_keeps_output_default(self, data):
-        # With use_residual_init=True (default), initial forward should match base model
+        # With init_weights=True (default), initial forward should match base model
         torch.manual_seed(0)
         base = self.get_model()
         y_base = base(data)
 
-        cfg = DeloraConfig(target_modules=["lin0"], r=8, lambda_=8)
+        cfg = DeloraConfig(target_modules=["lin0"], r=8, delora_lambda=15, init_weights=True)
         model = get_peft_model(base, cfg)
         y_peft = model(data)
 
@@ -2134,21 +2134,21 @@ class TestDeLoRAInitialization:
         base = self.get_model()
         in_f, out_f = base.lin0.in_features, base.lin0.out_features
         r = 4
-        cfg = DeloraConfig(target_modules=["lin0"], r=r, lambda_=2)
+        cfg = DeloraConfig(target_modules=["lin0"], r=r, delora_lambda=15, init_weights=True)
         model = get_peft_model(base, cfg)
 
         layer = model.lin0  # DeloraLinear wrapper
         assert hasattr(layer, "delora_A") and hasattr(layer, "delora_B") and hasattr(layer, "delora_lambda")
         A = layer.delora_A["default"]
         B = layer.delora_B["default"]
-        lambda_ = layer.delora_lambda["default"]
+        delora_lambda = layer.delora_lambda["default"]
         assert tuple(A.shape) == (r, in_f)
         assert tuple(B.shape) == (out_f, r)
-        assert tuple(lambda_.shape) == (1,)
+        assert tuple(delora_lambda.shape) == (1,)
 
     def test_disable_enable_no_change(self, data):
         base = self.get_model()
-        cfg = DeloraConfig(target_modules=["lin0"], r=8, lambda_=8)
+        cfg = DeloraConfig(target_modules=["lin0"], r=8, delora_lambda=15, init_weights=True)
         model = get_peft_model(base, cfg)
 
         y0 = model(data)
@@ -2162,7 +2162,7 @@ class TestDeLoRAInitialization:
 
     def test_merge_and_unload_same_outputs(self, data):
         base = self.get_model()
-        cfg = DeloraConfig(target_modules=["lin0"], r=8, lambda_=8)
+        cfg = DeloraConfig(target_modules=["lin0"], r=8, delora_lambda=15, init_weights=True)
         model = get_peft_model(base, cfg)
         y_before = model(data)
 
@@ -2176,14 +2176,14 @@ class TestDeLoRAInitialization:
         with pytest.raises(ValueError):
             get_peft_model(base, DeloraConfig(target_modules=["lin0"], r=0))
 
-    def test_no_use_residual_init_keeps_output(self, data):
-        # With use_residual_init=False, the implementation compensates by subtracting initial delta in get_delta
+    def test_no_identity_init(self, data):
+        # With init_weights=False, there should be an initial delta to the base model output
         base = self.get_model()
         y_base = base(data)
-        cfg = DeloraConfig(target_modules=["lin0"], r=8, lambda_=8, use_residual_init=False)
+        cfg = DeloraConfig(target_modules=["lin0"], r=8, delora_lambda=15, init_weights=False)
         model = get_peft_model(base, cfg)
         y_peft = model(data)
-        assert torch.allclose(y_base, y_peft, atol=1e-6, rtol=1e-6)
+        assert not torch.allclose(y_base, y_peft, atol=1e-6, rtol=1e-6)
 
 
 class TestNoInfiniteRecursionDeepspeed:

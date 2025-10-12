@@ -860,7 +860,7 @@ TEST_CASES = [
         "Vanilla MLP 5 DeLoRA",
         "MLP",
         DeloraConfig,
-        {"target_modules": ["lin0"], "lambda_": 4, "module_dropout": 0.1},
+        {"target_modules": ["lin0"], "module_dropout": 0.1},
     ),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
@@ -3450,103 +3450,6 @@ class TestPeftCustomModel(PeftCommonTester):
         model.base_model.model.mha._restore_weights()
         assert model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad is True
         assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is True
-
-    def test_delora_use_residual_init_false_zero_delta_and_weights_unchanged(self):
-        # Base model and baseline output
-        base = MLP().to(self.torch_device).eval()
-        X = self.prepare_inputs_for_testing()
-        with torch.inference_mode():
-            base_out = base(**X)
-
-        # Keep copies of original base weights
-        w_lin0 = base.lin0.weight.detach().clone()
-        b_lin0 = base.lin0.bias.detach().clone() if base.lin0.bias is not None else None
-        w_lin1 = base.lin1.weight.detach().clone()
-        b_lin1 = base.lin1.bias.detach().clone() if base.lin1.bias is not None else None
-
-        # Wrap with DeLoRA, explicitly use_residual_init=False so setup does not touch base weights
-        cfg = DeloraConfig(target_modules=["lin0", "lin1"], use_residual_init=False)
-        peft_model = get_peft_model(base, cfg).eval()
-
-        # Access wrapped base layers
-        lin0 = peft_model.model.lin0
-        lin1 = peft_model.model.lin1
-        assert hasattr(lin0, "base_layer") and hasattr(lin1, "base_layer")
-
-        # Verify base weights stayed identical after wrapping
-        assert torch.allclose(lin0.base_layer.weight.detach(), w_lin0, atol=0.0, rtol=0.0)
-        if b_lin0 is not None:
-            assert torch.allclose(lin0.base_layer.bias.detach(), b_lin0, atol=0.0, rtol=0.0)
-        assert torch.allclose(lin1.base_layer.weight.detach(), w_lin1, atol=0.0, rtol=0.0)
-        if b_lin1 is not None:
-            assert torch.allclose(lin1.base_layer.bias.detach(), b_lin1, atol=0.0, rtol=0.0)
-
-        # At init, delta should be zero due to internal subtraction of initial A/B
-        with torch.inference_mode():
-            out_init = peft_model(**X)
-        assert torch.allclose(out_init, base_out, atol=1e-6, rtol=1e-6)
-
-        # Merge and unmerge should round-trip to base behavior
-        peft_model.merge_adapter()
-        with torch.inference_mode():
-            _ = peft_model(**X)  # merged forward just to exercise path
-        peft_model.unmerge_adapter()
-        with torch.inference_mode():
-            out_unmerged = peft_model(**X)
-        assert torch.allclose(out_unmerged, base_out, atol=1e-5, rtol=1e-5)
-
-    def test_delora_use_residual_init_true_weights_changed_and_delta_is_zero(self):
-        # Base model and baseline output
-        base = MLP().to(self.torch_device).eval()
-        X = self.prepare_inputs_for_testing()
-        with torch.inference_mode():
-            base_out = base(**X)
-
-        # Keep copies of original base weights
-        w_lin0 = base.lin0.weight.detach().clone()
-        b_lin0 = base.lin0.bias.detach().clone() if base.lin0.bias is not None else None
-        w_lin1 = base.lin1.weight.detach().clone()
-        b_lin1 = base.lin1.bias.detach().clone() if base.lin1.bias is not None else None
-
-        # Wrap with DeLoRA, use_residual_init=True so setup modifies base weights
-        cfg = DeloraConfig(target_modules=["lin0", "lin1"], use_residual_init=True)
-        peft_model = get_peft_model(base, cfg).eval()
-
-        # Access wrapped base layers
-        lin0 = peft_model.model.lin0
-        lin1 = peft_model.model.lin1
-        assert hasattr(lin0, "base_layer") and hasattr(lin1, "base_layer")
-
-        # Verify that base weights have changed (initial delta was subtracted)
-        assert not torch.allclose(lin0.base_layer.weight, w_lin0, atol=1e-6, rtol=1e-6)
-        assert not torch.allclose(lin1.base_layer.weight, w_lin1, atol=1e-6, rtol=1e-6)
-        if b_lin0 is not None:
-            # Bias should be unchanged since DeLoRA doesn't modify bias
-            assert torch.allclose(lin0.base_layer.bias, b_lin0, atol=1e-6, rtol=1e-6)
-        if b_lin1 is not None:
-            assert torch.allclose(lin1.base_layer.bias, b_lin1, atol=1e-6, rtol=1e-6)
-
-        # Verify that the effective delta is zero at initialization
-        # The output should match the original base model despite weight changes
-        with torch.inference_mode():
-            peft_out = peft_model(**X)
-
-        # The key test: despite base weights being modified, output should be identical
-        # because the initial delta was subtracted from base weights
-        assert torch.allclose(peft_out, base_out, atol=1e-5, rtol=1e-5)
-
-        # Verify that the effective delta is zero by checking that:
-        # modified_base_weight + current_delta = original_base_weight
-        with torch.no_grad():
-            delta0 = lin0.get_delta_weight("default")
-            delta1 = lin1.get_delta_weight("default")
-
-            # The effective result should equal the original weights
-            effective_w0 = lin0.base_layer.weight + delta0
-            effective_w1 = lin1.base_layer.weight + delta1
-
-            assert torch.allclose(effective_w0, w_lin0, atol=1e-5, rtol=1e-5)
-            assert torch.allclose(effective_w1, w_lin1, atol=1e-5, rtol=1e-5)
 
 
 class TestMultiRankAdapter:

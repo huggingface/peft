@@ -28,7 +28,7 @@ class DeloraConfig(PeftConfig):
     Args:
         r (`int`):
             The rank of the DeLoRA adapter.
-        lambda_ (`int`):
+        delora_lambda (`int`):
             The initial value of the boundary of the DeLoRA adapter. This variable sets an upper bound to the Frobenius
             norm of the weight change, avoiding the finetuned model to deviate too much from the original model.
         module_dropout (`float`):
@@ -50,15 +50,9 @@ class DeloraConfig(PeftConfig):
             will be updated during training. Be aware that this means that, even when disabling the adapters, the model
             will not produce the same output as the base model would have without adaptation.
         init_weights (`bool`):
-            Whether to perform initialization of adapter weights. If `True` (default): adapters are initialized
-            in an identity-preserving way with kaiming uniform initialization. If `False`: adapters immediately
-            contribute a non-zero delta and force `use_residual_init=False` with no initial A and B buffers.
-            This is generally discouraged for normal use.
-        use_residual_init (`bool`):
-            If False, frozen initial copies of the adapters are subtracted in the forward pass to allow for identity
-            initialization. This requires storing extra buffers on device, and extra computation. If `True`, initial
-            adapters are subtracted from the base weights once after initialization, so the effective initial delta is zero
-            without storing extra buffers on device.
+            Whether to perform initialization of adapter weights. If `True` (default): A is initialized with kaiming uniform
+            initialization, while B is initialized with zeros. If `False`: A and B are both initialized with kaiming uniform,
+            immediately contributing a non-zero delta. This is generally discouraged for normal use.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
@@ -71,14 +65,14 @@ class DeloraConfig(PeftConfig):
             specified by `r`. For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`.
         lambda_pattern (`dict`):
             The mapping from layer names or regexp expression to lambdas which are different from the default lambda
-            specified by `lambda_`. For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`.
+            specified by `delora_lambda`. For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`.
         modules_to_save (`Optional[List[str]]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
     """
 
     r: int = field(default=8, metadata={"help": "DeLoRA rank"})
-    lambda_: int = field(
-        default=8,
+    delora_lambda: int = field(
+        default=15,
         metadata={
             "help": "The initial value of the boundary of the DeLoRA adapter. This variable sets an upper bound to the "
             "Frobenius norm of the weight change, avoiding the finetuned model to deviate too much from the original model."
@@ -103,17 +97,9 @@ class DeloraConfig(PeftConfig):
     init_weights: bool = field(
         default=True,
         metadata={
-            "help": "Whether to perform initialization of adapter weights. If `True` (default): adapters are initialized in an "
-            "identity-preserving way with kaiming uniform initialization. If `False`: adapters immediately contribute a non-zero "
-            "delta and force `use_residual_init=False` with no initial A and B buffers. This is generally discouraged for normal use."
-        },
-    )
-    use_residual_init: bool = field(
-        default=False,
-        metadata={
-            "help": "If False, frozen initial copies of the adapters are subtracted in the forward pass to allow for identity initialization. "
-            "This requires storing extra buffers on device, and extra computation. If `True`, initial adapters are subtracted from the base "
-            "weights once after initialization, so the effective initial delta is zero without storing extra buffers on device."
+            "help": "Whether to perform initialization of adapter weights. If `True` (default): A is initialized with kaiming uniform "
+            "initialization, while B is initialized with zeros. If `False`: A and B are both initialized with kaiming uniform, "
+            "immediately contributing a non-zero delta. This is generally discouraged for normal use."
         },
     )
     layers_to_transform: Optional[Union[list[int], int]] = field(
@@ -133,18 +119,14 @@ class DeloraConfig(PeftConfig):
     rank_pattern: Optional[dict] = field(
         default_factory=dict,
         metadata={
-            "help": (
-                "The mapping from layer names or regexp expression to ranks which are different from the default rank specified by `r`. "
-                "For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`."
-            )
+            "help": "The mapping from layer names or regexp expression to ranks which are different from the default rank specified "
+            "by `r`. For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`."
         },
     )
     lambda_pattern: Optional[dict] = field(
         default_factory=dict,
         metadata={
-            "help": (
-                "The mapping from layer names or regexp expression to lambdas which are different from the default lambda specified by `lambda`. "
-            )
+            "help": "The mapping from layer names or regexp expression to lambdas which are different from the default lambda specified by `delora_lambda`."
         },
     )
     modules_to_save: Optional[list[str]] = field(
@@ -170,7 +152,3 @@ class DeloraConfig(PeftConfig):
         # check for layers_to_transform and layers_pattern
         if self.layers_pattern and not self.layers_to_transform:
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
-
-        # if init_weights is False, use_residual_init must be False
-        if not self.init_weights and self.use_residual_init:
-            raise ValueError("`use_residual_init` must be False when `init_weights` is False.")
