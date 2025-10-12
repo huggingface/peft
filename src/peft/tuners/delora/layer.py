@@ -123,7 +123,6 @@ class DeloraLayer(BaseTunerLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
-    @torch.no_grad()
     def reset_delora_parameters(
         self,
         adapter_name: str,

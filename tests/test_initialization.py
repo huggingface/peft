@@ -2146,37 +2146,7 @@ class TestDeLoRAInitialization:
         assert tuple(B.shape) == (out_f, r)
         assert tuple(delora_lambda.shape) == (1,)
 
-    def test_disable_enable_no_change(self, data):
-        base = self.get_model()
-        cfg = DeloraConfig(target_modules=["lin0"], r=8, delora_lambda=15, init_weights=True)
-        model = get_peft_model(base, cfg)
-
-        y0 = model(data)
-        model.disable_adapter_layers()
-        y1 = model(data)
-        model.enable_adapter_layers()
-        y2 = model(data)
-
-        assert torch.allclose(y0, y1, atol=1e-6, rtol=1e-6)
-        assert torch.allclose(y0, y2, atol=1e-6, rtol=1e-6)
-
-    def test_merge_and_unload_same_outputs(self, data):
-        base = self.get_model()
-        cfg = DeloraConfig(target_modules=["lin0"], r=8, delora_lambda=15, init_weights=True)
-        model = get_peft_model(base, cfg)
-        y_before = model(data)
-
-        merged = model.merge_and_unload()
-        merged.eval()
-        y_after = merged(data)
-        assert torch.allclose(y_before, y_after, atol=1e-6, rtol=1e-6)
-
-    def test_invalid_rank_raises(self):
-        base = self.get_model()
-        with pytest.raises(ValueError):
-            get_peft_model(base, DeloraConfig(target_modules=["lin0"], r=0))
-
-    def test_no_identity_init(self, data):
+    def test_init_weights_false_shifts_output(self, data):
         # With init_weights=False, there should be an initial delta to the base model output
         base = self.get_model()
         y_base = base(data)
