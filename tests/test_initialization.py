@@ -1673,7 +1673,8 @@ class TestLoraInitialization:
             ensure_weight_tying=True,
         )
 
-        model = get_peft_model(model, embed_token_config)
+        with pytest.warns(UserWarning, match="no tied modules are added in `modules_to_save`"):
+            model = get_peft_model(model, embed_token_config)
 
         assert isinstance(model.base_model.model.model.embed_tokens, torch.nn.modules.Embedding)
         assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear)
