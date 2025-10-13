@@ -108,8 +108,7 @@ class DeloraLayer(BaseTunerLayer):
         self.r[adapter_name] = r
         self.delora_A[adapter_name] = nn.Parameter(torch.empty(r, self.in_features))
         self.delora_B[adapter_name] = nn.Parameter(torch.empty(self.out_features, r))
-        self.delora_lambda[adapter_name] = nn.Parameter(torch.full((1,), float(delora_lambda)))
-        # self.module_dropout[adapter_name] = module_dropout
+        self.delora_lambda[adapter_name] = nn.Parameter(torch.empty(1))
         if module_dropout > 0.0:
             module_dropout_layer = nn.Dropout(p=module_dropout)
         else:

@@ -46,13 +46,13 @@ class DeloraConfig(PeftConfig):
             When passing a list of strings, either an exact match will be performed or it is checked if the name of the
             module ends with any of the passed strings.
         bias (`str`):
-            Bias type for DeLoRA. Can be 'none', 'all' or 'delora_only'. If 'all' or 'delora_only', the corresponding biases
-            will be updated during training. Be aware that this means that, even when disabling the adapters, the model
-            will not produce the same output as the base model would have without adaptation.
+            Bias type for DeLoRA. Can be 'none', 'all' or 'delora_only'. If 'all' or 'delora_only', the corresponding
+            biases will be updated during training. Be aware that this means that, even when disabling the adapters,
+            the model will not produce the same output as the base model would have without adaptation.
         init_weights (`bool`):
-            Whether to perform initialization of adapter weights. If `True` (default): A is initialized with kaiming uniform
-            initialization, while B is initialized with zeros. If `False`: A and B are both initialized with kaiming uniform,
-            immediately contributing a non-zero delta. This is generally discouraged for normal use.
+            Whether to perform initialization of adapter weights. If `True` (default): A is initialized with kaiming
+            uniform initialization, while B is initialized with zeros. If `False`: A and B are both initialized with
+            kaiming uniform, immediately contributing a non-zero delta. This is generally discouraged for normal use.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
