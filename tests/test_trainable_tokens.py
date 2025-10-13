@@ -958,9 +958,7 @@ class TestTrainableTokens:
             orig_embedding = base_model.get_input_embeddings()
 
             # Apply both TrainableTokens and LoRA to the same model
-            peft_config = LoraConfig(
-                target_modules=["q_proj"], trainable_token_indices={"embed_tokens": [0, 1, 3]}
-            )
+            peft_config = LoraConfig(target_modules=["q_proj"], trainable_token_indices={"embed_tokens": [0, 1, 3]})
             peft_model = get_peft_model(base_model, peft_config)
 
             # sanity check: with the default embed_scale, the embedding output should be reasonably sized
