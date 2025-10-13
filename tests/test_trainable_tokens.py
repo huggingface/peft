@@ -946,7 +946,9 @@ class TestTrainableTokens:
             assert (embedding_output == 0.0).all()
 
     def test_scaled_embedding_with_lora(self):
-        """Test that TrainableTokens works with LoRA on scaled embeddings when both are active simultaneously."""
+        """
+        Test that TrainableTokens works with LoRA on scaled embeddings when both are active simultaneously.
+        """
         model_id = "hf-internal-testing/tiny-random-Gemma3ForCausalLM"
         with hub_online_once(model_id):
             base_model = AutoModelForCausalLM.from_pretrained(model_id)
