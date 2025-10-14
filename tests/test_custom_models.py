@@ -1576,57 +1576,57 @@ class MockTransformerWrapper:
     """
 
     @classmethod
-    def from_pretrained(cls, model_id, torch_dtype=None):
+    def from_pretrained(cls, model_id, dtype=None):
         # set the seed so that from_pretrained always returns the same model
         torch.manual_seed(0)
 
-        if torch_dtype is None:
-            torch_dtype = torch.float32
+        if dtype is None:
+            dtype = torch.float32
 
         if model_id == "MLP":
-            return MLP().to(torch_dtype)
+            return MLP().to(dtype)
 
         if model_id == "EmbConv1D":
-            return ModelEmbConv1D().to(torch_dtype)
+            return ModelEmbConv1D().to(dtype)
 
         if model_id == "Conv1d":
-            return ModelConv1D().to(torch_dtype)
+            return ModelConv1D().to(dtype)
 
         if model_id == "Conv1dBigger":
-            return ModelConv1DBigger().to(torch_dtype)
+            return ModelConv1DBigger().to(dtype)
 
         if model_id == "Conv2d":
-            return ModelConv2D().to(torch_dtype)
+            return ModelConv2D().to(dtype)
 
         if model_id == "Conv2d1x1":
-            return ModelConv2D1x1().to(torch_dtype)
+            return ModelConv2D1x1().to(dtype)
 
         if model_id == "Conv1dKernel1":
-            return ModelConv1DKernel1().to(torch_dtype)
+            return ModelConv1DKernel1().to(dtype)
 
         if model_id == "Conv2dGroups":
-            return ModelConv2DGroups().to(torch_dtype)
+            return ModelConv2DGroups().to(dtype)
 
         if model_id == "Conv2dGroups2":
-            return ModelConv2DGroups2().to(torch_dtype)
+            return ModelConv2DGroups2().to(dtype)
 
         if model_id == "Conv3d":
-            return ModelConv3D().to(torch_dtype)
+            return ModelConv3D().to(dtype)
 
         if model_id == "MLP_LayerNorm":
-            return MLP_LayerNorm().to(torch_dtype)
+            return MLP_LayerNorm().to(dtype)
 
         if model_id == "MLP2":
-            return MLP2().to(torch_dtype)
+            return MLP2().to(dtype)
 
         if model_id == "Conv2d2":
-            return ModelConv2D2().to(torch_dtype)
+            return ModelConv2D2().to(dtype)
 
         if model_id == "MHA":
-            return ModelMha().to(torch_dtype)
+            return ModelMha().to(dtype)
 
         if model_id == "MlpUsingParameters":
-            return MlpUsingParameters().to(torch_dtype)
+            return MlpUsingParameters().to(dtype)
 
         raise ValueError(f"model_id {model_id} not implemented")
 
@@ -1827,7 +1827,7 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(reason="MacOS does not support multiple ops in float16")
 
         X = self.prepare_inputs_for_testing()
-        model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16).to(self.torch_device)
+        model = self.transformers_class.from_pretrained(model_id, dtype=torch.float16).to(self.torch_device)
         model.dtype = torch.float16
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -1869,7 +1869,7 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(reason="MacOS does not support multiple ops in bfloat16")
 
         X = self.prepare_inputs_for_testing()
-        model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16).to(self.torch_device)
+        model = self.transformers_class.from_pretrained(model_id, dtype=torch.bfloat16).to(self.torch_device)
         model.dtype = torch.bfloat16
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -1910,7 +1910,7 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(reason="MacOS does not support multiple ops in float16")
 
         X = self.prepare_inputs_for_testing()
-        model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16).to(self.torch_device)
+        model = self.transformers_class.from_pretrained(model_id, dtype=torch.float16).to(self.torch_device)
         model.dtype = torch.float16
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -1951,7 +1951,7 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(reason="MacOS does not support multiple ops in bfloat16")
 
         X = self.prepare_inputs_for_testing()
-        model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16).to(self.torch_device)
+        model = self.transformers_class.from_pretrained(model_id, dtype=torch.bfloat16).to(self.torch_device)
         model.dtype = torch.bfloat16
         config = config_cls(
             base_model_name_or_path=model_id,

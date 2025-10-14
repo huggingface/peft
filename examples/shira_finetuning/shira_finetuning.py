@@ -42,7 +42,7 @@ def train(
     device_map: str = "auto",
     shira_r: int = 32,
     shira_target_modules: list[str] = None,
-    torch_dtype: str = "float16",
+    dtype: str = "float16",
     seed: Optional[int] = None,
     use_custom_random_mask_function_with_custom_kwargs: Optional[bool] = False,
 ):
@@ -55,7 +55,7 @@ def train(
     # Set seed
     if seed is not None:
         set_seed(seed)
-    model_kwargs = {"torch_dtype": getattr(torch, torch_dtype), "device_map": device_map}
+    model_kwargs = {"dtype": getattr(torch, dtype), "device_map": device_map}
     model = AutoModelForCausalLM.from_pretrained(base_model, **model_kwargs)
 
     tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
@@ -191,7 +191,7 @@ if __name__ == "__main__":
     parser.add_argument("--device_map", type=str, default="auto")
     parser.add_argument("--shira_r", type=int, default=32)
     parser.add_argument("--shira_target_modules", type=str, default=None)
-    parser.add_argument("--torch_dtype", type=str, default="float16")
+    parser.add_argument("--dtype", type=str, default="float16")
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--use_custom_random_mask_function_with_custom_kwargs", action="store_true")
 
@@ -211,7 +211,7 @@ if __name__ == "__main__":
         device_map=args.device_map,
         shira_r=args.shira_r,
         shira_target_modules=args.shira_target_modules,
-        torch_dtype=args.torch_dtype,
+        dtype=args.dtype,
         seed=args.seed,
         use_custom_random_mask_function_with_custom_kwargs=args.use_custom_random_mask_function_with_custom_kwargs,
     )

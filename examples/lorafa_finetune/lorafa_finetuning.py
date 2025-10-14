@@ -72,14 +72,14 @@ def train_model(
                 bnb_4bit_use_double_quant=False,
                 bnb_4bit_quant_type="nf4",
             ),
-            torch_dtype=compute_dtype,
+            dtype=compute_dtype,
             device_map=device_map,
         )
         # setup for quantized training
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
     else:
         model = AutoModelForCausalLM.from_pretrained(
-            base_model_name_or_path, torch_dtype=compute_dtype, device_map=device_map
+            base_model_name_or_path, dtype=compute_dtype, device_map=device_map
         )
 
     # LoRA config for the PEFT model

@@ -603,7 +603,7 @@ class PeftCommonTester:
             self.skipTest("PyTorch 2.1 not supported for Half of addmm_impl_cpu_ ")
 
         with hub_online_once(model_id):
-            model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16)
+            model = self.transformers_class.from_pretrained(model_id, dtype=torch.float16)
             config = config_cls(
                 base_model_name_or_path=model_id,
                 **config_kwargs,
@@ -1142,7 +1142,7 @@ class PeftCommonTester:
             return pytest.skip("BFloat16 is not supported on MPS")
 
         with hub_online_once(model_id):
-            model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16)
+            model = self.transformers_class.from_pretrained(model_id, dtype=torch.bfloat16)
             config = config_cls(
                 base_model_name_or_path=model_id,
                 **config_kwargs,
@@ -1170,7 +1170,7 @@ class PeftCommonTester:
             model = get_peft_model(model, config)
             model = model.half()
 
-            assert model.base_model_torch_dtype == torch.float16
+            assert model.base_model_dtype == torch.float16
 
     def _test_training(self, model_id, config_cls, config_kwargs):
         if issubclass(config_cls, PromptLearningConfig):

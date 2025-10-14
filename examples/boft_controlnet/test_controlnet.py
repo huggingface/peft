@@ -84,7 +84,7 @@ def main(args):
         args.pretrained_model_name_or_path,
         controlnet=controlnet,
         unet=unet.model,
-        torch_dtype=torch.float32,
+        dtype=torch.float32,
         requires_safety_checker=False,
     ).to(device)
 
