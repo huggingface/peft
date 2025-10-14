@@ -796,14 +796,15 @@ class TestDecoderModels(PeftCommonTester):
             else:
                 assert not contains_embedding
 
-    def test_lora_embed_scale_is_applied(self):
+    @pytest.mark.parametrize("use_dora", [False, True])
+    def test_lora_embed_scale_is_applied(self, use_dora):
         """Test that LoRA correctly handles embeddings with scaling (e.g., Gemma3)."""
         model_id = "hf-internal-testing/tiny-random-Gemma3ForCausalLM"
         with hub_online_once(model_id):
             base_model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
             orig_embedding = base_model.get_input_embeddings()
 
-            peft_config = LoraConfig(target_modules=["embed_tokens"], init_lora_weights=False)
+            peft_config = LoraConfig(target_modules=["embed_tokens"], init_lora_weights=False, use_dora=use_dora)
             peft_model = get_peft_model(base_model, peft_config)
 
             x = torch.arange(10).to(self.torch_device)
@@ -813,7 +814,7 @@ class TestDecoderModels(PeftCommonTester):
             assert (max_embedding_output < 100.0).all()
             peft_model.merge_adapter()
             embedding_merged = peft_embedding(x)
-            assert torch.allclose(embedding_output, embedding_merged)
+            assert torch.allclose(embedding_output, embedding_merged, atol=1e-5, rtol=1e-5)
             peft_model.unmerge_adapter()
 
             # set embed_scale to an absurdly high value, then check that the embedding output is also scaled to a high
