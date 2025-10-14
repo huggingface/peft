@@ -445,7 +445,7 @@ class TestXlora:
                 adapters[str(i)] = adapter_path
 
             # Load base model and test X-LoRA with embed_scale
-            base_model = AutoModelForCausalLM.from_pretrained(model_id)
+            base_model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
             base_model.config.use_cache = False
             orig_embedding = base_model.get_input_embeddings()
 
@@ -456,18 +456,18 @@ class TestXlora:
             )
             xlora_model = get_peft_model(base_model, xlora_config)
 
-            # sanity check: with the default embed_scale, the embedding output should be reasonably sized
+            x = torch.arange(10).to(self.torch_device)
             xlora_embedding = xlora_model.base_model.model.get_input_embeddings()
-            max_embedding_output = xlora_embedding(torch.arange(10)).abs().max(0)[0]
+            max_embedding_output = xlora_embedding(x).abs().max(0)[0]
             assert (max_embedding_output < 100.0).all()
 
             # set embed_scale to an absurdly high value, then check that the embedding output is also scaled to a high
             # value
             orig_embedding.embed_scale.fill_(10000.0)
-            max_embedding_output = xlora_embedding(torch.arange(10)).abs().max(0)[0]
+            max_embedding_output = xlora_embedding(x).abs().max(0)[0]
             assert (max_embedding_output > 100.0).all()
 
             # set embed_scale to zero, then check that the embedding output is also zero
             orig_embedding.embed_scale.fill_(0)
-            embedding_output = xlora_embedding(torch.arange(10))
+            embedding_output = xlora_embedding(x)
             assert (embedding_output == 0.0).all()
