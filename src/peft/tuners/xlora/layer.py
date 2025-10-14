@@ -153,6 +153,10 @@ class XLoraEmbeddingLayer(XLoraLayer):
 
         result = self.target.base_layer(x, *args, **kwargs)
 
+        # Some embedding layers (e.g., Gemma3TextScaledWordEmbedding) apply scaling in their forward method.
+        # Since base_layer(x) already includes this scaling, we need to apply it to X-LoRA contributions too.
+        embed_scale = self.target._get_embed_scale()
+
         # Ignore if disabled. We want to make sure this is always run.
         if not self.target.merged:
             for adapter_n, active_adapter in enumerate(self.target.active_adapters):
@@ -171,7 +175,14 @@ class XLoraEmbeddingLayer(XLoraLayer):
                 else:
                     after_A_mod = after_A
                     scaling_weight = 1
-                result += (after_A_mod @ embedding_B) * scaling * scaling_weight
+
+                adapter_output = (after_A_mod @ embedding_B) * scaling * scaling_weight
+
+                # Apply embed_scale to match the base layer's scaling
+                if embed_scale is not None:
+                    adapter_output = adapter_output * embed_scale.to(adapter_output.dtype)
+
+                result += adapter_output
 
         return result
 
