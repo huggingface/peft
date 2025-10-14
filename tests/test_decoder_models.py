@@ -800,26 +800,31 @@ class TestDecoderModels(PeftCommonTester):
         """Test that LoRA correctly handles embeddings with scaling (e.g., Gemma3)."""
         model_id = "hf-internal-testing/tiny-random-Gemma3ForCausalLM"
         with hub_online_once(model_id):
-            base_model = AutoModelForCausalLM.from_pretrained(model_id)
+            base_model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
             orig_embedding = base_model.get_input_embeddings()
 
             peft_config = LoraConfig(target_modules=["embed_tokens"], init_lora_weights=False)
             peft_model = get_peft_model(base_model, peft_config)
 
-            # sanity check: with the default embed_scale, the embedding output should be reasonably sized
+            x = torch.arange(10).to(self.torch_device)
             peft_embedding = peft_model.base_model.model.get_input_embeddings()
-            max_embedding_output = peft_embedding(torch.arange(10)).abs().max(0)[0]
+            embedding_output = peft_embedding(x)
+            max_embedding_output = embedding_output.abs().max(0)[0]
             assert (max_embedding_output < 100.0).all()
+            peft_model.merge_adapter()
+            embedding_merged = peft_embedding(x)
+            assert torch.allclose(embedding_output, embedding_merged)
+            peft_model.unmerge_adapter()
 
             # set embed_scale to an absurdly high value, then check that the embedding output is also scaled to a high
             # value
             orig_embedding.embed_scale.fill_(10000.0)
-            max_embedding_output = peft_embedding(torch.arange(10)).abs().max(0)[0]
+            max_embedding_output = peft_embedding(x).abs().max(0)[0]
             assert (max_embedding_output > 100.0).all()
 
             # set embed_scale to zero, then check that the embedding output is also zero
             orig_embedding.embed_scale.fill_(0)
-            embedding_output = peft_embedding(torch.arange(10))
+            embedding_output = peft_embedding(x)
             assert (embedding_output == 0.0).all()
 
     def test_lora_embed_scale_is_applied_mixed_batch(self):
@@ -850,3 +855,23 @@ class TestDecoderModels(PeftCommonTester):
             orig_embedding.embed_scale.fill_(0)
             embedding_output = peft_embedding(input_ids, adapter_names=adapter_names)
             assert (embedding_output == 0.0).all()
+
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_set_requires_grad_prompt_learning_raises(self, config_cls, config_kwargs):
+        # Test that for prompt learning, calling set_requires_grad raises an error with an appropriate error message.
+        # Note that for non-prompt learning methods, set_requires_grad is being tested for custom models, so there is no
+        # specific test here.
+        model_id = PEFT_DECODER_MODELS_TO_TEST[0]  # it's enough to test this with one model
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        if not config.is_prompt_learning:
+            pytest.skip("This test is only for prompt learning methods.")
+
+        with hub_online_once(model_id + config_kwargs.get("tokenizer_name_or_path", "")):
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            model = get_peft_model(model, config)
+            msg = "Setting `requires_grad` is not supported for prompt learning methods like"
+            with pytest.raises(TypeError, match=msg):
+                model.set_requires_grad(adapter_names="adpater0")
