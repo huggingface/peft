@@ -232,6 +232,11 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
                     scale_grad_by_freq=self.base_layer.scale_grad_by_freq,
                     sparse=self.base_layer.sparse,
                 )
+                # Some embedding layers (e.g., Gemma3TextScaledWordEmbedding) apply scaling in their forward method.
+                # Since we're using F.embedding directly, we need to apply this scaling manually.
+                embed_scale = self._get_embed_scale()
+                if embed_scale is not None:
+                    result = result * embed_scale.to(result.dtype)
             elif isinstance(self.base_layer, torch.nn.Linear):
                 # Probably a tied adapter that wraps an LM head.
                 result = F.linear(

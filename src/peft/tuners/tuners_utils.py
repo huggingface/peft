@@ -50,6 +50,7 @@ from peft.utils.other import (
     set_additional_trainable_modules,
 )
 from peft.utils.peft_types import PeftType, TaskType
+from peft.utils.warning import PeftWarning
 
 from ..config import PeftConfig
 from ..utils import _get_submodules
@@ -1213,6 +1214,43 @@ class BaseTunerLayer(ABC):
         while hasattr(base_layer, "base_layer"):
             base_layer = base_layer.base_layer
         return base_layer
+
+    def _get_embed_scale(self):
+        """
+        Extract embed_scale from base layer if present and valid.
+
+        Some embedding layers (e.g., Gemma3TextScaledWordEmbedding) apply scaling to embeddings in their forward
+        method. This method checks for the presence of an `embed_scale` attribute. If it exists, it is assumed to be a
+        scalar. Its shape is validated accordingly.
+
+        Returns:
+            torch.Tensor or None: The embed_scale tensor if found and valid, None otherwise.
+        """
+        base_layer = self.get_base_layer()
+        if not hasattr(base_layer, "embed_scale"):
+            return None
+
+        embed_scale = base_layer.embed_scale
+
+        # Convert scalar values to tensors
+        if isinstance(embed_scale, (int, float)):
+            return torch.tensor(embed_scale, device=base_layer.weight.device, dtype=base_layer.weight.dtype)
+
+        # Validate tensor shape - must be scalar (0-d) or 1-element tensor for proper broadcasting
+        if isinstance(embed_scale, torch.Tensor):
+            if embed_scale.numel() == 1:
+                return embed_scale
+            else:
+                # Log warning but don't fail - this maintains backward compatibility
+                warnings.warn(
+                    f"Found embed_scale attribute with shape {embed_scale.shape}, expected scalar. "
+                    "Embedding scaling will not be applied. If this is unexpected, please open an issue at "
+                    "https://github.com/huggingface/peft/issues",
+                    PeftWarning,
+                )
+                return None
+
+        return None
 
     @property
     def weight(self) -> torch.Tensor:
