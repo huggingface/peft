@@ -421,6 +421,57 @@ def load_adapter_delta(adapter_root: str, layer_name: str) -> torch.Tensor:
     return delta.contiguous()
 
 
+def _recover_module_weight_any(qmod: torch.nn.Module) -> torch.Tensor:
+    """Best-effort recovery of a Linear-like weight matrix (out_features x in_features).
+    Tries: direct .weight -> dequantize_weight() -> to_float().weight -> forward recovery.
+    """
+    # Direct weight
+    w = getattr(qmod, "weight", None)
+    if isinstance(w, torch.Tensor):
+        return w.detach().float().cpu().contiguous()
+
+    # Dequantize API
+    if hasattr(qmod, "dequantize_weight") and callable(getattr(qmod, "dequantize_weight")):
+        try:
+            w = qmod.dequantize_weight()
+            if isinstance(w, tuple) and len(w) > 0 and isinstance(w[0], torch.Tensor):
+                w = w[0]
+            if isinstance(w, torch.Tensor):
+                return w.detach().float().cpu().contiguous()
+        except Exception:
+            pass
+
+    # to_float() fallback
+    if hasattr(qmod, "to_float") and callable(getattr(qmod, "to_float")):
+        try:
+            fmod = qmod.to_float()
+            w = getattr(fmod, "weight", None)
+            if isinstance(w, torch.Tensor):
+                return w.detach().float().cpu().contiguous()
+        except Exception:
+            pass
+
+    # Forward reconstruction
+    in_features = getattr(qmod, "in_features", None) or getattr(qmod, "infeatures", None)
+    out_features = getattr(qmod, "out_features", None) or getattr(qmod, "outfeatures", None)
+    if isinstance(in_features, int) and isinstance(out_features, int):
+        W = _recover_linear_weight_via_forward(qmod, in_features, out_features)
+        return W.detach().float().cpu().contiguous()
+
+    raise RuntimeError("Unable to recover weight: no .weight/.dequantize_weight/.to_float and unknown in/out features")
+
+
+def _load_model_weight(model_path: str, layer_name: str) -> torch.Tensor:
+    """Load a model and extract a layer's (out x in) weight on CPU (handles quantized layers)."""
+    mdl = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.float32, trust_remote_code=True)
+    qmod = _get_module_by_name(mdl, layer_name)
+    W = _recover_module_weight_any(qmod)
+    del mdl
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return W
+
+
 def _cmd_compare_adapters(args):
     # Build adapter map from --adapters-json (file path or inline JSON) and repeated --adapter TAG=PATH
     adapter_map = {}
@@ -482,34 +533,77 @@ def _cmd_compare_adapters(args):
                 raise ValueError(f"Duplicate adapter tag '{tag}' from --adapter (already defined)")
             adapter_map[tag] = path
 
-    if not adapter_map:
-        raise ValueError("No adapters specified. Use --adapters-json and/or --adapter TAG=PATH.")
+    if not adapter_map and not getattr(args, "weight", None) and not getattr(args, "model", None):
+        raise ValueError("No inputs specified. Use --adapters-json/--adapter and/or --weight and/or --model TAG=PATH.")
 
-    # Load deltas
+    # Load adapter deltas
     deltas = {}
     for tag, root in adapter_map.items():
         deltas[tag] = load_adapter_delta(root, args.layer_name)
 
-    # Optionally compute delta panels: TAG2 - TAG1 for each --delta spec (e.g., pre,ft)
+    # Load raw weights from tensor files
+    raw_weights: Dict[str, torch.Tensor] = {}
+    if getattr(args, "weight", None):
+        for spec in args.weight:
+            if "=" not in spec:
+                raise ValueError(f"--weight expects TAG=PATH, got: {spec}")
+            tag, path = spec.split("=", 1)
+            tag = tag.strip(); path = path.strip()
+            if tag in deltas or tag in raw_weights:
+                raise ValueError(f"Duplicate tag '{tag}' across inputs")
+            W = _load_tensor(path).to(torch.float32).contiguous()
+            raw_weights[tag] = W
+
+    # Load raw weights directly from model folders
+    if getattr(args, "model", None):
+        for spec in args.model:
+            if "=" not in spec:
+                raise ValueError(f"--model expects TAG=PATH, got: {spec}")
+            tag, path = spec.split("=", 1)
+            tag = tag.strip(); path = path.strip()
+            if tag in deltas or tag in raw_weights:
+                raise ValueError(f"Duplicate tag '{tag}' across inputs")
+            W = _load_model_weight(path, args.layer_name)
+            raw_weights[tag] = W
+
+    # Merge all panels
+    panels = {**deltas, **raw_weights}
+    if not panels:
+        raise ValueError("Nothing to visualize.")
+    
+    # ✅ NEW: Compute delta panels from --delta TAG1,TAG2 or TAG1:TAG2
     if getattr(args, "delta", None):
         for spec in args.delta:
-            if not spec:
-                continue
-            sep = "," if "," in spec else (":" if ":" in spec else None)
-            if not sep:
-                raise ValueError(f"--delta expects 'TAG1,TAG2' or 'TAG1:TAG2', got: {spec}")
-            tag1, tag2 = [s.strip() for s in spec.split(sep, 1)]
-            if tag1 not in deltas or tag2 not in deltas:
-                raise ValueError(f"--delta references unknown tags: {tag1}, {tag2}. Known: {list(deltas.keys())}")
-            if deltas[tag1].shape != deltas[tag2].shape:
-                raise ValueError(f"Shape mismatch for delta {tag2}-{tag1}: {deltas[tag2].shape} vs {deltas[tag1].shape}")
-            name = f"{tag2}_minus_{tag1}"
-            base_name = name
-            i = 2
-            while name in deltas:
-                name = f"{base_name}__{i}"
-                i += 1
-            deltas[name] = (deltas[tag2] - deltas[tag1]).contiguous()
+            # Parse TAG1,TAG2 or TAG1:TAG2
+            sep = "," if "," in spec else ":"
+            parts = spec.split(sep, 1)
+            if len(parts) != 2:
+                raise ValueError(f"Invalid --delta spec '{spec}'. Expected TAG1,TAG2 or TAG1:TAG2")
+            tag1, tag2 = parts[0].strip(), parts[1].strip()
+            
+            # Check both tags exist
+            if tag1 not in panels:
+                raise ValueError(f"Delta source tag '{tag1}' not found in loaded panels: {list(panels.keys())}")
+            if tag2 not in panels:
+                raise ValueError(f"Delta target tag '{tag2}' not found in loaded panels: {list(panels.keys())}")
+            
+            # Compute delta
+            W1 = panels[tag1]
+            W2 = panels[tag2]
+            if W1.shape != W2.shape:
+                raise ValueError(f"Shape mismatch for delta {tag1},{tag2}: {W1.shape} vs {W2.shape}")
+            
+            delta_tag = f"{tag2}-{tag1}"  # Name convention: "ft-pre" means ft minus pre
+            if delta_tag in panels:
+                raise ValueError(f"Delta tag '{delta_tag}' already exists (duplicate or naming conflict)")
+            
+            panels[delta_tag] = (W2 - W1).contiguous()
+            print(f"[delta] Computed {delta_tag} = {tag2} - {tag1}")
+
+    # Optional shape check (must match for a shared pooling factor)
+    shapes = {tuple(t.shape) for t in panels.values()}
+    if len(shapes) > 1:
+        print(f"[warn] Input tensors have differing shapes: {shapes}. Plotting may fail unless pooling brings them to a common size.")
 
     # Parse optional pooling factor
     pf = None
@@ -527,7 +621,7 @@ def _cmd_compare_adapters(args):
     out = save_adapter_comparison(
         layer_name=args.layer_name,
         out_dir=args.out_dir,
-        adapters=deltas,
+        adapters=panels,
         log_scale_threshold=args.log_scale_threshold,
         share_color_scale=not getattr(args, "per_panel_scale", False),
         vpercent=getattr(args, "vpercent", None),
@@ -581,7 +675,7 @@ def main():
     ap_pipe.add_argument("--coverage-ranks", type=str, default="1,2,4,8,16,32,64,128,256,512")
 
     # compare_adapters
-    ap_cmp = sub.add_parser("compare_adapters", help="Compare multiple adapters on a single layer")
+    ap_cmp = sub.add_parser("compare_adapters", help="Compare adapters and/or raw weights on a single layer")
     ap_cmp.add_argument("--layer-name", required=True, type=str)
     ap_cmp.add_argument("--out-dir", required=True, type=str)
     ap_cmp.add_argument(
@@ -602,6 +696,25 @@ def main():
             "JSON mapping (either a path to a .json file or inline JSON). "
             "Accepted forms: {\"pre\": \"/path\", ...} or "
             "[{\"tag\": \"pre\", \"path\": \"/path\"}, ...] or [[\"pre\", \"/path\"], ...]"
+        ),
+    )
+    # New: include arbitrary weights
+    ap_cmp.add_argument(
+        "--weight",
+        action="append",
+        required=False,
+        help=(
+            "Repeatable: TAG=PATH to a tensor file (.pt/.npy) to visualize as a panel. "
+            "Useful for W_original.pt, R_quant.pt, W_svd.pt, etc."
+        ),
+    )
+    ap_cmp.add_argument(
+        "--model",
+        action="append",
+        required=False,
+        help=(
+            "Repeatable: TAG=PATH to a model directory; the weight of --layer-name will be loaded from the model. "
+            "Works with FP and quantized models (best-effort recovery)."
         ),
     )
     ap_cmp.add_argument("--log-scale-threshold", type=float, default=1e-3)
