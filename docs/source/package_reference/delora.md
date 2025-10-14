@@ -15,12 +15,12 @@ rendered properly in your Markdown viewer.
 -->
 
 # DeLoRA: Decoupled Low-rank Adaptation
-
-[DeLoRA](https://huggingface.co/papers/2503.18225) is a parameter-efficient fine-tuning technique that leverages effectively decouples the learning of angles and magnitudes.
+[DeLoRA](https://huggingface.co/papers/2503.18225) is a parameter-efficient fine-tuning technique that implicitly maintains a Frobenius boundary with respect to the pretrained weights by normalizing and scaling learnable low-rank matrices. This effectively decouples the learning of directions (BA term) and magnitude (boundary term) of the weight updates, avoiding catastrophic shifts in the adapted weights and enhancing robustness to hyperparameter choices.
 
 Note:
-- use 10-100x larger learning rate than standard LoRA variants
-- the boundary parameter lambda sets an upper bound to the Frobenius norm of the weight change. Using different lambdas for different layers is possible
+- use 10-100x larger learning rate than standard LoRA variants (typical values from 1e-3/1e-2/..)
+- do not set a too small initial boundary parameter lambda (typical values are around 10/15/..)
+- setting different lambdas to different layers is possible
 
 The abstract from the paper is:
 
