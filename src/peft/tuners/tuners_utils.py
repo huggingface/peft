@@ -1444,8 +1444,6 @@ class BaseTunerLayer(ABC):
                 # no break encountered: could not determine the device
                 return
 
-        meta = torch.device("meta")
-
         # loop through all potential adapter layers and move them to the device of the base layer; be careful to only
         # move this specific adapter to the device, as the other adapters could be on different devices
         # see #1639
@@ -1454,8 +1452,6 @@ class BaseTunerLayer(ABC):
             if not isinstance(adapter_layer, (nn.ModuleDict, nn.ParameterDict, BufferDict)):
                 continue
             if adapter_name not in adapter_layer:
-                continue
-            if any(p.device == meta for p in adapter_layer.parameters()):
                 continue
 
             # TODO: weight is not necessarily defined here, leading to a NameError, fix that
