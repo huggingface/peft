@@ -20,6 +20,7 @@ import re
 import textwrap
 import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from contextlib import contextmanager, nullcontext
 from typing import Any, Optional, Union, overload
 
@@ -483,6 +484,18 @@ class BaseTuner(nn.Module, ABC):
             model=self.model, adapter_name=adapter_name, prefix=self.prefix, layer_cls=self.tuner_layer_cls
         )
         self.active_adapter = new_adapter or []
+
+    def set_requires_grad(self, adapter_names: str | Sequence[str], requires_grad: bool = True) -> None:
+        """
+        Enable or disable gradients on the given adapter(s).
+
+        Args:
+            adapter_name (`str` or `Sequence[str]`):
+                The name of the adapter(s) whose gradients should be enabled/disabled.
+            requires_grad (`bool`, *optional*)
+                Whether to enable (`True`, default) or disable (`False`).
+        """
+        set_requires_grad(self.model, adapter_names=adapter_names, requires_grad=requires_grad)
 
     def _check_new_adapter_config(self, config: PeftConfig) -> None:
         """
@@ -1391,6 +1404,27 @@ class BaseTunerLayer(ABC):
                     )
                     self.set_adapter(remaining_adapters[0])
 
+    def set_requires_grad(self, adapter_names: str | Sequence[str], requires_grad: bool = True) -> None:
+        """
+        Enable or disable gradients on the given adapter(s).
+
+        Args:
+            adapter_name (`str` or `Sequence[str]`):
+                The name of the adapter(s) whose gradients should be enabled/disabled.
+            requires_grad (`bool`, *optional*)
+                Whether to enable (`True`, default) or disable (`False`).
+        """
+        if isinstance(adapter_names, str):
+            adapter_names_set = {adapter_names}
+        else:
+            adapter_names_set = set(adapter_names)
+
+        for layer_name in self.adapter_layer_names:
+            module_dict = getattr(self, layer_name)
+            for key, layer in module_dict.items():
+                if key in adapter_names_set:
+                    layer.requires_grad_(requires_grad)
+
     def _move_adapter_to_device_of_base_layer(self, adapter_name: str, device: Optional[torch.device] = None) -> None:
         """
         Move the adapter of the given name to the device of the base layer.
@@ -1915,3 +1949,20 @@ def cast_adapter_dtype(model: nn.Module, adapter_name: str, autocast_adapter_dty
             for param in submodule[adapter_name].parameters():
                 if param.dtype in dtypes_to_convert_to_fp32:
                     param.data = param.data.to(torch.float32)
+
+
+def set_requires_grad(model, adapter_names: str | Sequence[str], requires_grad: bool = True) -> None:
+    """
+    Enable or disable gradients on the given adapter(s).
+
+    Args:
+        model (`nn.Module`):
+            The model from which the adapter should be deleted.
+        adapter_name (`str` or `Sequence[str]`):
+            The name of the adapter(s) whose gradients should be enabled/disabled.
+        requires_grad (`bool`, *optional*)
+            Whether to enable (`True`, default) or disable (`False`).
+    """
+    for module in model.modules():
+        if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
+            module.set_requires_grad(adapter_names=adapter_names, requires_grad=requires_grad)
