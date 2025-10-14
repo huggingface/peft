@@ -807,3 +807,17 @@ class LoraModel(BaseTuner):
         missing_keys = set(tied_weight_keys) - modules_to_save
 
         peft_config.modules_to_tie = missing_keys
+
+    def _maybe_warn_ensure_weight_tying(self, is_embedding_to_save, tied_weight_keys):
+        """
+        This method adds a warning if `ensure_weight_tying` is not enabled
+        """
+        if is_embedding_to_save and tied_weight_keys:
+            msg = (
+                "Model has `tie_word_embeddings=True` and a tied layer is part of the adapter, "
+                "but `ensure_weight_tying` is not set to True. "
+                "This can lead to complications, for example when merging the adapter "
+                "or converting your model to formats other than safetensors. "
+                "Check the discussion here: https://github.com/huggingface/peft/issues/2777"
+            )
+            warnings.warn(msg)

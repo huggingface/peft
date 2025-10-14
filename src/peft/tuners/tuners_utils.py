@@ -1194,9 +1194,16 @@ class BaseTuner(nn.Module, ABC):
         )
         warnings.warn(msg)
 
+    def _maybe_warn_ensure_weight_tying(self, is_embedding_to_save, tied_weight_keys):
+        """
+        This method adds a warning if `ensure_weight_tying` is not enabled. Each tuner class extending `BaseTuner` and
+        implementing `ensure_weight_tying` in PeftConfig should implement this.
+        """
+        pass
+
     def _check_tied_modules(self, model: nn.Module, peft_config):
         """
-        Checks if any of the tied layers are targetted via `modules_to_save` Updates the `peft_config.modules_to_tie`
+        Checks if any of the tied layers are targetted via `modules_to_save`. Updates the `peft_config.modules_to_tie`
         with any layers that needs to be tied
         """
         modules_to_save = set(getattr(peft_config, "modules_to_save", []) or [])
@@ -1217,15 +1224,7 @@ class BaseTuner(nn.Module, ABC):
                 warnings.warn("You have requested `ensure_weight_tying`, but no tied modules were found in the model")
 
         else:
-            if is_embedding_to_save and tied_weight_keys:
-                msg = (
-                    "Model has `tie_word_embeddings=True` and a tied layer is part of the adapter, "
-                    "but `ensure_weight_tying` is not set to True. "
-                    "This can lead to complications, for example when merging the adapter "
-                    "or converting your model to formats other than safetensors. "
-                    "Check the discussion here: https://github.com/huggingface/peft/issues/2777"
-                )
-                warnings.warn(msg)
+            self._maybe_warn_ensure_weight_tying(is_embedding_to_save, tied_weight_keys)
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
