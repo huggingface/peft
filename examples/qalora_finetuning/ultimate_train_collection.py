@@ -24,7 +24,7 @@ import numpy as np
 import torch
 import transformers
 from datasets import load_dataset
-from transformers import AutoModelForCausalLM, GPTQConfig, Trainer, TrainerCallback
+from transformers import AutoModelForCausalLM, GPTQConfig, Trainer
 from peft import LoraConfig, PeftModel, get_peft_model
 
 
@@ -934,7 +934,7 @@ def train():
             tokenizer=tokenizer,
             tasks=tasks,
             num_fewshot=1,
-            limit=50,
+            limit=100,
             per_device_eval_batch_size=2,
             output_dir=evaluation_dir,
             file_name=harness_file_name,
