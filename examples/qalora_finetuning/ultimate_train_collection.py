@@ -22,8 +22,8 @@ import numpy as np
 import torch
 import transformers
 from datasets import load_dataset
-from transformers import AutoModelForCausalLM, BitsAndBytesConfig, GPTQConfig, Trainer
-from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
+from transformers import AutoModelForCausalLM, GPTQConfig, Trainer
+from peft import LoraConfig, PeftModel, get_peft_model
 
 
 IGNORE_INDEX = -100
@@ -134,7 +134,10 @@ class TrainingArguments(transformers.TrainingArguments):
         default="c4",
         metadata={"help": "GPTQ calibration_dataset"},
     )
-
+    save_strategy: str = field(
+        default="no",
+        metadata={"help": "no"},
+    )
 def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str):
     """Collects the state dict and dump to disk."""
     state_dict = trainer.model.state_dict()
@@ -480,17 +483,7 @@ def train():
     tokenizer.pad_token_id = tokenizer.eos_token_id
 
     # Training mode selectiowave_moden
-    if script_args.training_mode == "corda":
-        print("🔧 Setting up CorDA training...")
-        res_model = transformers.AutoModelForCausalLM.from_pretrained(
-            script_args.model_name_or_path,
-            device_map="auto",
-            torch_dtype=torch.bfloat16,
-        )
-        model = PeftModel.from_pretrained(
-            res_model, script_args.model_name_or_path, subfolder="corda_init", is_trainable=True
-        )
-    elif script_args.training_mode == "qalora":
+    if script_args.training_mode == "qalora":
         print("🔧 Setting up QA-LoRA training...")
         model = load_or_quantize_model(
             script_args.model_name_or_path,
@@ -582,7 +575,7 @@ def train():
         print("✅ 1. Originalmodell laden, um 'Spickzettel' zu erstellen...")
         original_model = AutoModelForCausalLM.from_pretrained(
             script_args.model_name_or_path,
-            torch_dtype=torch.bfloat16,
+            torch_dtype=torch.float32,
         )
 
         # Erstelle den "Spickzettel" mit den Originalgewichten
@@ -624,11 +617,12 @@ def train():
         )
 
         # `get_peft_model` fügt den ERSTEN Adapter hinzu
-        model = get_peft_model(model, error_config, adapter_name="error_correction")
+        model = get_peft_model(model, error_config, adapter_name="error_correction", mixed=True)
         print("✅ 'error_correction' Adapter hinzugefügt und per SVD initialisiert.")
 
         adapter_name = model.active_adapter
-        config = model.peft_config[adapter_name]
+        config = model.peft_config["error_correction"]
+        # config = model.peft_config[adapter_name]
 
         # Überprüfen, ob die Initialisierungsmethode verwendet wurde und die problematischen Daten enthält
         if hasattr(config, "init_lora_weights") and isinstance(config.init_lora_weights, dict):
@@ -659,7 +653,7 @@ def train():
             qalora_group_size=script_args.qalora_group_size,
             init_lora_weights="gaussian", # Explizite Zufalls-Initialisierung
             target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
-            lora_dropout=0.1, # Dropout macht nur für den trainierbaren Adapter Sinn
+            lora_dropout=0, # Dropout macht nur für den trainierbaren Adapter Sinn
             bias="none",
         )
 
@@ -672,181 +666,11 @@ def train():
         # SCHRITT 4: FINALES SETUP FÜR DAS TRAINING
         # ==============================================================================
         print("🚀 6. 'task_adapter' als aktiv für das Training setzen...")
-        model.set_adapter("task_adapter")
+        model.set_adapter(["task_adapter", "error_correction"])
+        # model.set_adapter("task_adapter")
 
         print("\n--- Finales Modell-Setup ---")
         model.print_trainable_parameters()
-    elif script_args.training_mode == "gptq_lora":
-        print("🔧 Setting up QA-LoRA training...")
-        model = load_or_quantize_model(
-            script_args.model_name_or_path,
-            tokenizer,
-            qalora_group_size=script_args.qalora_group_size,
-            bits=script_args.bits,
-        )
-
-        lora_config = LoraConfig(
-            task_type="CAUSAL_LM",
-            r=script_args.lora_r,
-            lora_alpha=2 * script_args.lora_r,
-            # target_modules=["q_proj", "o_proj", "k_proj", "v_proj"],
-            target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
-            lora_dropout=0.05,
-            bias="none",
-        )
-
-        model = get_peft_model(model, lora_config)
-    elif script_args.training_mode == "outlier_aware_qalora": # Empfehlung: Eigener Modus-Name
-        print("🚀 Setting up Outlier-Aware QA-LoRA training...")
-        model_name_clean = script_args.model_name_or_path.replace("/", "_").replace("\\", "_")
-
-        # =======================================================================
-        # SCHRITT 1 & 2: Hochpräzises Modell laden & Outlier analysieren
-        # =======================================================================
-        print("Step 1/6: Loading high-precision base model for Hessian analysis...")
-        outlier_percentage_str = str(script_args.outlier_percentage).replace(".", "p")
-        cache_dir = "./hessian_cache"
-        os.makedirs(cache_dir, exist_ok=True)
-        outlier_cache_path = os.path.join(cache_dir, f"{model_name_clean}_outliers_{outlier_percentage_str}pct.pt")
-
-        if os.path.exists(outlier_cache_path):
-            print(f"✅ Loading cached Hessian outliers from: {outlier_cache_path}")
-            outlier_data = torch.load(outlier_cache_path, map_location="cpu")
-            print(f"Found outliers in {len(outlier_data)} layers.")
-        else:
-            print("🔥 No cached outlier data found. Starting Hessian calculation...")
-            # =======================================================================
-            # SCHRITT 1 & 2: Hochpräzises Modell laden & Outlier analysieren
-            # =======================================================================
-            print("Step 1/6: Loading high-precision base model for Hessian analysis...")
-            # Wichtig: Laden Sie das Modell in voller Präzision (z.B. bfloat16)
-            model = AutoModelForCausalLM.from_pretrained(
-                script_args.model_name_or_path,
-                torch_dtype=torch.bfloat16, # Oder float16
-                device_map="auto"
-            )
-
-            print("Step 2/6: Calculating Hessian saliency to find outliers...")
-            from utils import calculate_hessian_outliers
-            outlier_data = calculate_hessian_outliers(model, tokenizer, outlier_percentage=script_args.outlier_percentage)
-
-            # from utils import spqr_extract_outliers, get_c4_calibration_data
-
-            print("Step 2/6: Calculating Hessian saliency to find outliers...")
-
-            # calibration_samples = get_c4_calibration_data(
-            #     tokenizer,
-            #     n_samples= 128,
-            #     seq_len=2048,
-            # )
-
-            # calibration_batches = [dict(sample) for sample in calibration_samples]
-
-            # outlier_data = spqr_extract_outliers(
-            #     model,
-            #     calibration_batches=calibration_batches,
-            #     aaaaaaaaaaaaaaaaaaaaaaaaaaaaa=[
-            #         "mlp.gate_proj", "mlp.up_proj", "mlp.down_proj",
-            #         "self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj", "self_attn.o_proj",
-            #     ],
-            #     # Entweder globaler Anteil …
-            #     # outlier_percentage=script_args.outlier_percentage,  # z.B. 0.001 für 0.1%
-            #     # … oder feste Schwelle wie in SpQR (dann obige Zeile auskommentieren):
-            #     # outlier_threshold=script_args.outlier_threshold,  # z.B. 0.2
-            #     bits=2,
-            #     group_size=32,
-            #     percdamp=1.0,    # leichte Dämpfung für Stabilität
-            # )
-            print(f"Found outliers in {len(outlier_data)} layers.")
-
-            # Speichere die berechneten Outlier für das nächste Mal in den Cache
-            print(f"💾 Caching Hessian outliers to: {outlier_cache_path}")
-            torch.save(outlier_data, outlier_cache_path)
-
-            # Wichtig: Geben Sie den Speicher des hochpräzisen Modells frei
-            del model
-            torch.cuda.empty_cache()
-
-        # =======================================================================
-        # SCHRITT 3 & 4: Modell bereinigen und dann quantisieren
-        # =======================================================================
-        print("Step 3/6: Loading model again to create a cleaned version for quantization...")
-        # Wir laden das Modell erneut, um sicherzugehen, dass wir einen sauberen Start haben
-        model_for_quant = AutoModelForCausalLM.from_pretrained(
-            script_args.model_name_or_path,
-            torch_dtype=torch.bfloat16,
-            device_map="auto"
-        )
-
-        print("Step 4/6: Zeroing out outliers before quantization...")
-        for name, module in model_for_quant.named_modules():
-            if name in outlier_data:
-                # Holen Sie nur die Indizes, wir brauchen die Gewichte hier nicht
-                _, outlier_indices = outlier_data[name]
-                # Stellen Sie sicher, dass das Attribut 'weight' existiert und veränderbar ist
-                if hasattr(module, 'weight') and isinstance(module.weight, torch.nn.Parameter):
-                    with torch.no_grad():
-                        # Setze die Gewichte an den Outlier-Positionen auf Null
-                        module.weight.data.view(-1)[outlier_indices] = 0.0
-
-        print("Step 5/6: Quantizing the cleaned model...")
-        # Nutzen Sie Ihre bestehende Funktion, um das *bereinigte* Modell zu quantisieren.
-        # Diese Funktion ersetzt die nn.Linear-Schichten durch Ihre QuantLinear-Schichten.
-        cache_key = f"{model_name_clean}_outlier_aware_{outlier_percentage_str}_pct_gptq_{script_args.bits}bit_gs{script_args.qalora_group_size}"
-        quantized_model = load_or_quantize_model(
-            model_for_quant, # Übergeben Sie das modifizierte Modell
-            tokenizer,
-            qalora_group_size=script_args.qalora_group_size,
-            bits=script_args.bits,
-            cache_key=cache_key,
-            calibration_dataset=script_args.calibration_dataset
-            # Wichtig: Stellen Sie sicher, dass diese Funktion das Modell nicht neu von der Festplatte lädt,
-            # sondern das übergebene Objekt verwendet.
-        )
-
-        # Geben Sie den Speicher des bereinigten Modells frei
-        del model_for_quant
-        torch.cuda.empty_cache()
-
-        try:
-            from gptqmodel.nn_modules.qlinear import BaseQuantLinear  # type: ignore
-        except Exception:
-            class BaseQuantLinear(torch.nn.Module):  # fallback for type checking
-                pass
-        # =======================================================================
-        # SCHRITT 5: Outlier als Buffer in das quantisierte Modell injizieren
-        # =======================================================================
-        print("Step 6/6: Injecting high-precision outliers into the quantized model...")
-        for name, module in quantized_model.named_modules():
-            # Stellen Sie sicher, dass Sie den richtigen Klassentyp Ihrer quantisierten Schicht prüfen
-            if isinstance(module, BaseQuantLinear): # z.B. GPTQLinear, QuantLinear, etc.
-                if name in outlier_data:
-                    outlier_weights, outlier_indices = outlier_data[name]
-
-                    # Registrieren der Outlier als nicht-trainierbare Buffer
-                    module.register_buffer('outlier_weights', outlier_weights.to(torch.bfloat16))
-                    module.register_buffer('outlier_indices', outlier_indices.to(torch.long))
-
-        # =======================================================================
-        # SCHRITT 6: PEFT anwenden (wie bei normalem QA-LoRA)
-        # =======================================================================
-        print("🔧 Applying PEFT with QA-LoRA config...")
-        lora_config = LoraConfig(
-            task_type="CAUSAL_LM",
-            use_qalora=True,
-            qalora_group_size=script_args.qalora_group_size,
-            r=script_args.lora_r,
-            lora_alpha=2 * script_args.lora_r,
-            target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
-            lora_dropout=0.05,
-            bias="none",
-        )
-
-        # Hier passiert die Magie: PEFT wird auf das vorbereitete, hybride Modell angewendet.
-        # Ihre modifizierte `forward`-Methode in QALoraLinearVariant wird den Rest erledigen.
-        model = get_peft_model(quantized_model, lora_config)
-
-        print("\n✅ Outlier-Aware QA-LoRA model is ready for training!")
     elif script_args.training_mode == "pissa":
         print("🔧 Setting up PiSSA training...")
         model = transformers.AutoModelForCausalLM.from_pretrained(
@@ -867,66 +691,6 @@ def train():
         )
 
         model = get_peft_model(model, lora_config)
-    elif script_args.training_mode == "lora":
-        print("🔧 Setting up LoRA training...")
-        model = transformers.AutoModelForCausalLM.from_pretrained(
-            script_args.model_name_or_path,
-            torch_dtype=torch.bfloat16,
-            device_map="auto",
-        )
-
-        lora_config = LoraConfig(
-            task_type="CAUSAL_LM",
-            r=script_args.lora_r,
-            lora_alpha=2 * script_args.lora_r,
-            target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
-            lora_dropout=0.05,
-            bias="none",
-            init_lora_weights=True,
-        )
-
-        # model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
-        model = get_peft_model(model, lora_config)
-    elif script_args.training_mode == "qlora":
-        print("🔧 Setting up QLoRA training...")
-
-        # Configure 4-bit quantization for QLoRA
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_use_double_quant=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,
-        )
-
-        # Load model with 4-bit quantization
-        model = transformers.AutoModelForCausalLM.from_pretrained(
-            script_args.model_name_or_path,
-            quantization_config=bnb_config,
-            device_map="auto",
-            torch_dtype=torch.bfloat16,
-            trust_remote_code=True,
-        )
-
-        # Prepare model for k-bit training (essential for QLoRA)
-        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
-
-        # Configure LoRA for QLoRA
-        lora_config = LoraConfig(
-            task_type="CAUSAL_LM",
-            r=script_args.lora_r,
-            lora_alpha=2 * script_args.lora_r,
-            target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
-            lora_dropout=0.05,  # Slightly higher dropout for QLoRA
-            bias="none",
-            init_lora_weights=True,
-        )
-
-        model = get_peft_model(model, lora_config)
-
-        # Enable gradient checkpointing for memory efficiency
-        model.gradient_checkpointing_enable()
-
-        print(f"✅ QLoRA model loaded with 4-bit quantization")
     elif script_args.training_mode == "pissa_rank_analysis":
         print("🔧 Setting up rank analysis with multiple quantization configurations...")
 
@@ -1089,127 +853,6 @@ def train():
         print(f"LoRA rank: {script_args.lora_r}")
         print(f"Adapter saved to: {adapter_path}")
 
-    elif script_args.training_mode == "full":
-        print("🔧 Setting up full finetuning...")
-        model = transformers.AutoModelForCausalLM.from_pretrained(
-            script_args.model_name_or_path,
-            torch_dtype=torch.bfloat16,
-            device_map="auto",
-        )
-    elif script_args.training_mode == "daniel_old":
-        print("🔧 Setting up QA-LoRA training...")
-        model = load_or_quantize_model(
-            script_args.model_name_or_path,
-            tokenizer,
-            qalora_group_size=script_args.qalora_group_size,
-            bits=script_args.bits,
-        )
-
-        lora_config = LoraConfig(
-            task_type="CAUSAL_LM",
-            use_qalora=True,
-            qalora_group_size=script_args.qalora_group_size,
-            r=script_args.lora_r,
-            lora_alpha=2 * script_args.lora_r,
-            target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
-            lora_dropout=0.05,
-            bias="none",
-            init_lora_weights="daniel",  # PiSSA initialization
-        )
-
-        model = get_peft_model(model, lora_config)
-    elif script_args.training_mode == "daniel":
-        print("🔧 Setting up QA-LoRA training with PiSSA initialization...")
-
-        # =================================================================================
-        # PHASE 1: Sichern der originalen FP32-Gewichte
-        # =================================================================================
-        print("Phase 1: Lade das originale FP32-Modell zum Cachen der Gewichte...")
-        # Lade das hochpräzise Originalmodell
-        fp32_model = AutoModelForCausalLM.from_pretrained(script_args.model_name_or_path)
-
-        # Definiere die Zielmodule hier, damit wir wissen, welche Gewichte wir speichern müssen
-        target_modules = ["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"]
-
-        # Erstelle eine Map, die Layernamen auf ihre FP32-Gewichte abbildet
-        fp32_weights_map = {
-            name: module.weight.clone().to(torch.float32)
-            for name, module in fp32_model.named_modules()
-            # Speichere nur die Gewichte, die wir für PiSSA brauchen werden
-            if any(target_module in name for target_module in target_modules)
-        }
-
-        print(f"  -> {len(fp32_weights_map)} FP32-Gewichtsmatrizen für Ziel-Layer gecached.")
-
-        # Gib den Speicher des großen FP32-Modells sofort frei
-        del fp32_model
-        import gc
-
-        gc.collect()
-        torch.cuda.empty_cache()
-
-        # =================================================================================
-        # PHASE 2: Modell laden/quantisieren und Gewichte anheften
-        # =================================================================================
-        print("\nPhase 2: Lade oder quantisiere das Hauptmodell...")
-        model = load_or_quantize_model(
-            script_args.model_name_or_path,
-            tokenizer,
-            qalora_group_size=script_args.qalora_group_size,
-            bits=script_args.bits,
-        )
-        print("  -> Modell geladen/quantisiert.")
-
-        print("\nPhase 3: Hänge die gecachten FP32-Gewichte an die quantisierten Layer an...")
-        # Iteriere durch die Layer des *quantisierten* Modells
-        for name, module in model.named_modules():
-            if name in fp32_weights_map:
-                # Hänge das gecachte FP32-Gewicht als neues Attribut an den Layer an.
-                # Ihre `daniel_init` Funktion wird nach diesem Attribut suchen.
-                module.original_weight_fp32 = fp32_weights_map[name].to(module.qweight.device)
-                print(f"  - Originalgewicht für '{name}' erfolgreich angehängt.")
-
-        # =================================================================================
-        # PHASE 3: PEFT-Setup mit PiSSA (Ihr ursprünglicher Code)
-        # =================================================================================
-        print("\nPhase 4: Richte PEFT mit PiSSA-Initialisierung ein...")
-        lora_config = LoraConfig(
-            task_type="CAUSAL_LM",
-            use_qalora=True,
-            qalora_group_size=script_args.qalora_group_size,
-            r=script_args.lora_r,
-            lora_alpha=2 * script_args.lora_r,
-            target_modules=target_modules,  # Wiederverwendung der oben definierten Liste
-            lora_dropout=0.05,
-            bias="none",
-            init_lora_weights="daniel_niter_5",  # WICHTIG: Stellen Sie sicher, dass Sie hier die Anzahl der Iterationen angeben
-        )
-
-        model = get_peft_model(model, lora_config)
-        print("  -> PEFT-Modell erfolgreich erstellt. PiSSA-Initialisierung wird beim Trainingsstart ausgelöst.")
-    elif script_args.training_mode == "post_quantization":
-        print("🔧 Setting up post_quantization training...")
-        model = load_or_quantize_model(
-            script_args.model_name_or_path,
-            tokenizer,
-            qalora_group_size=script_args.qalora_group_size,
-            bits=script_args.bits,
-        )
-
-        lora_config = LoraConfig(
-            task_type="CAUSAL_LM",
-            r=script_args.lora_r,
-            lora_alpha=2 * script_args.lora_r,
-            target_modules=["q_proj", "o_proj", "k_proj", "v_proj"],
-            # target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
-            lora_dropout=0.05,
-            bias="none",
-        )
-
-        model = get_peft_model(model, lora_config)
-        # model = AutoModelForCausalLM.from_pretrained(script_args.model_name_or_path, device_map="auto", torch_dtype=torch.float16, trust_remote_code=True)
-        # raise ValueError(f"Unknown training mode: {script_args.training_mode}")
-
     trainable_params, all_param = get_nb_trainable_parameters(model)
     print(
         f"trainable params: {trainable_params:,d} || all params: {all_param:,d} || trainable%: {100 * trainable_params / all_param:.2f}%"
@@ -1236,18 +879,21 @@ def train():
         "train_dataset": train_dataset,
         "data_collator": data_collator,
     }
+
     # for name, param in model.named_parameters():
     #     if not param.requires_grad:
     #         print(f"❌ Gradient disabled for parameter: {name}")
+
     import wandb
     wandb.init()
+    model.save_pretrained(os.path.join(script_args.output_dir, "ft_pretrained/adapter"))
     if not script_args.skip_training: 
         trainer = Trainer(model=model, tokenizer=tokenizer, args=script_args, **data_module)
         trainer.train()
         # trainer.save_state()
-        model.save_pretrained(os.path.join(script_args.output_dir, "ft/adapter"))
+        model.save_pretrained(os.path.join(script_args.output_dir, "ft_posttrained/adapter"))
         tokenizer.save_pretrained(os.path.join(script_args.output_dir, "ft/adapter"))
-
+    
     if script_args.training_mode == "post_quantization":
         print("Applying GPTQ post-quantization...")
         # Configure 4-bit quantization for QLoRA
@@ -1290,15 +936,16 @@ def train():
     os.makedirs(output_dir_eval, exist_ok=True)
 
     from eval_peft import generate_alpaca_response, run_lm_harness_and_print_results
-    generate_alpaca_response(model, tokenizer, script_args.training_mode, script_args.lora_r, output_dir_eval, file_name)
-    tasks="wikitext,piqa,tinyArc,tinyHellaswag,tinyGSM8k,tinyMMLU"
-    # tasks = "wikitext"
+    # generate_alpaca_response(model, tokenizer, script_args.training_mode, script_args.lora_r, output_dir_eval, file_name)
+    # tasks="wikitext,piqa,tinyArc,tinyHellaswag,tinyGSM8k,tinyMMLU"
+    # tasks = "wikitext,piqa,gsm8k,mmlu"
+    tasks = "wikitext,piqa"
     run_lm_harness_and_print_results(
         model=model,
         tokenizer=tokenizer,
         tasks=tasks,
         num_fewshot=1,
-        limit=100,
+        limit=15,
         per_device_eval_batch_size=2,
         output_dir=output_dir_eval,
         file_name=file_name,
