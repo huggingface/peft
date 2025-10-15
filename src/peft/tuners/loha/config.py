@@ -69,7 +69,25 @@ class LoHaConfig(LycorisConfig):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
     """
 
-    r: int = field(default=8, metadata={"help": "LoHa rank"})
+    r: int = field(default=8, metadata={"help": "LoHa rank (used for both r1 and r2 if they are not specified)"})
+    r1: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Rank for the first Hadamard component (w1a @ w1b). "
+                "If not specified, defaults to r/2 for ABBA-style initialization, or r otherwise."
+            )
+        },
+    )
+    r2: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Rank for the second Hadamard component (w2a @ w2b). "
+                "If not specified, defaults to r/2 for ABBA-style initialization, or r otherwise."
+            )
+        },
+    )
     alpha: int = field(default=8, metadata={"help": "LoHa alpha"})
     rank_dropout: float = field(
         default=0.0, metadata={"help": "The dropout probability for rank dimension during training"}
@@ -86,6 +104,18 @@ class LoHaConfig(LycorisConfig):
             )
         },
     )
+    use_khatri_rao: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Use Khatri-Rao product optimization to reduce memory overhead. "
+                "This reparameterizes the update using Khatri-Rao product instead of "
+                "constructing full B1A1 and B2A2 matrices, reducing memory footprint "
+                "to be similar to LoRA while maintaining expressiveness. "
+                "Note: Automatically enabled when init_weights='abba' (per ABBA paper recommendation)."
+            )
+        },
+    )
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
@@ -98,12 +128,15 @@ class LoHaConfig(LycorisConfig):
         default=None,
         metadata={"help": "List of module names or regex expression of the module names to exclude from LoHa."},
     )
-    init_weights: bool = field(
+    init_weights: Union[bool, str] = field(
         default=True,
         metadata={
             "help": (
-                "Whether to initialize the weights of the LoHa layers with their default initialization. Don't change "
-                "this setting, except if you know exactly what you're doing."
+                "How to initialize the weights of the LoHa layers. "
+                "Pass `True` (default) for default initialization (zeros for one matrix), "
+                "`False` for random initialization, or `'abba'` for ABBA initialization "
+                "which initializes weights to approximate the pretrained weights. "
+                "Note: When 'abba' is used, use_khatri_rao is automatically enabled for memory efficiency."
             ),
         },
     )

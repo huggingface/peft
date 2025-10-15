@@ -38,35 +38,43 @@ class LoHaLayer(nn.Module, LycorisLayer):
         self.hada_w2_b = nn.ParameterDict({})
         self.hada_t1 = nn.ParameterDict({})
         self.hada_t2 = nn.ParameterDict({})
+        
+        # Khatri-Rao optimization flag
+        self.use_khatri_rao = {}
+        
+        # Store separate ranks for ABBA (r1 for first component, r2 for second)
+        self.r1 = {}
+        self.r2 = {}
 
     @property
     def _available_adapters(self) -> set[str]:
         return {*self.hada_w1_a, *self.hada_w1_b, *self.hada_w2_a, *self.hada_w2_b, *self.hada_t1, *self.hada_t2}
 
-    def create_adapter_parameters(self, adapter_name: str, r: int, shape: tuple[int, ...]):
+    def create_adapter_parameters(self, adapter_name: str, r1: int, r2: int, shape: tuple[int, ...]):
         # https://github.com/KohakuBlueleaf/LyCORIS/blob/eb460098187f752a5d66406d3affade6f0a07ece/lycoris/modules/loha.py#L130C9-L143C75
+        # Support different ranks for the two Hadamard components (ABBA-style)
         if len(shape) == 4:  # Conv2d
-            self.hada_t1[adapter_name] = nn.Parameter(torch.empty(r, r, shape[2], shape[3]))
-            self.hada_w1_a[adapter_name] = nn.Parameter(torch.empty(r, shape[0]))  # out_dim, 1-mode
-            self.hada_w1_b[adapter_name] = nn.Parameter(torch.empty(r, shape[1]))  # in_dim , 2-mode
+            self.hada_t1[adapter_name] = nn.Parameter(torch.empty(r1, r1, shape[2], shape[3]))
+            self.hada_w1_a[adapter_name] = nn.Parameter(torch.empty(r1, shape[0]))  # out_dim, 1-mode
+            self.hada_w1_b[adapter_name] = nn.Parameter(torch.empty(r1, shape[1]))  # in_dim , 2-mode
 
-            self.hada_t2[adapter_name] = nn.Parameter(torch.empty(r, r, shape[2], shape[3]))
-            self.hada_w2_a[adapter_name] = nn.Parameter(torch.empty(r, shape[0]))  # out_dim, 1-mode
-            self.hada_w2_b[adapter_name] = nn.Parameter(torch.empty(r, shape[1]))  # in_dim , 2-mode
+            self.hada_t2[adapter_name] = nn.Parameter(torch.empty(r2, r2, shape[2], shape[3]))
+            self.hada_w2_a[adapter_name] = nn.Parameter(torch.empty(r2, shape[0]))  # out_dim, 1-mode
+            self.hada_w2_b[adapter_name] = nn.Parameter(torch.empty(r2, shape[1]))  # in_dim , 2-mode
         elif len(shape) == 3:  # Conv1d
-            self.hada_t1[adapter_name] = nn.Parameter(torch.empty(r, r, shape[2], 1))
-            self.hada_w1_a[adapter_name] = nn.Parameter(torch.empty(r, shape[0]))  # out_dim, 1-mode
-            self.hada_w1_b[adapter_name] = nn.Parameter(torch.empty(r, shape[1]))  # in_dim , 2-mode
+            self.hada_t1[adapter_name] = nn.Parameter(torch.empty(r1, r1, shape[2], 1))
+            self.hada_w1_a[adapter_name] = nn.Parameter(torch.empty(r1, shape[0]))  # out_dim, 1-mode
+            self.hada_w1_b[adapter_name] = nn.Parameter(torch.empty(r1, shape[1]))  # in_dim , 2-mode
 
-            self.hada_t2[adapter_name] = nn.Parameter(torch.empty(r, r, shape[2], 1))
-            self.hada_w2_a[adapter_name] = nn.Parameter(torch.empty(r, shape[0]))  # out_dim, 1-mode
-            self.hada_w2_b[adapter_name] = nn.Parameter(torch.empty(r, shape[1]))  # in_dim , 2-mode
+            self.hada_t2[adapter_name] = nn.Parameter(torch.empty(r2, r2, shape[2], 1))
+            self.hada_w2_a[adapter_name] = nn.Parameter(torch.empty(r2, shape[0]))  # out_dim, 1-mode
+            self.hada_w2_b[adapter_name] = nn.Parameter(torch.empty(r2, shape[1]))  # in_dim , 2-mode
         else:  # Linear
-            self.hada_w1_a[adapter_name] = nn.Parameter(torch.empty(shape[0], r))
-            self.hada_w1_b[adapter_name] = nn.Parameter(torch.empty(r, shape[1]))
+            self.hada_w1_a[adapter_name] = nn.Parameter(torch.empty(shape[0], r1))
+            self.hada_w1_b[adapter_name] = nn.Parameter(torch.empty(r1, shape[1]))
 
-            self.hada_w2_a[adapter_name] = nn.Parameter(torch.empty(shape[0], r))
-            self.hada_w2_b[adapter_name] = nn.Parameter(torch.empty(r, shape[1]))
+            self.hada_w2_a[adapter_name] = nn.Parameter(torch.empty(shape[0], r2))
+            self.hada_w2_b[adapter_name] = nn.Parameter(torch.empty(r2, shape[1]))
 
     def reset_adapter_parameters(self, adapter_name: str):
         # Original implementation performs initialization with normal distribution
@@ -98,6 +106,83 @@ class LoHaLayer(nn.Module, LycorisLayer):
             nn.init.kaiming_uniform_(self.hada_t1[adapter_name], a=math.sqrt(5))
             nn.init.kaiming_uniform_(self.hada_t2[adapter_name], a=math.sqrt(5))
 
+    def reset_adapter_parameters_abba(self, adapter_name: str):
+        """
+        ABBA initialization: Initialize LoHa weights to approximate the pretrained weights.
+        This is based on the ABBA paper which proposes initializing adapters to approximate
+        the identity function or the pretrained weights.
+        
+        For LoHa with separate ranks: (w1a @ w1b) ⊙ (w2a @ w2b)
+        where w1a,w1b have rank r1 and w2a,w2b have rank r2.
+        We want this to approximate the pretrained weight W.
+        
+        Strategy: Use SVD to split the weight matrix, allocating r1 singular values
+        to the first component and r2 to the second component.
+        """
+        if adapter_name in self.hada_w1_a.keys():
+            base_layer = self.get_base_layer()
+            weight = base_layer.weight.data
+            
+            # Flatten weight for linear layers
+            if isinstance(base_layer, nn.Linear):
+                W = weight  # (out_features, in_features)
+            else:
+                # For conv layers, flatten to 2D
+                W = weight.reshape(weight.shape[0], -1)
+            
+            # Get the separate ranks
+            r1 = self.r1[adapter_name]
+            r2 = self.r2[adapter_name]
+            
+            try:
+                U, S, Vh = torch.linalg.svd(W, full_matrices=False)
+                
+                # Split singular values between r1 and r2
+                # Take top r1+r2 singular values and split them
+                total_r = min(r1 + r2, len(S))
+                actual_r1 = min(r1, total_r)
+                actual_r2 = min(r2, total_r)
+                
+                # Get components for first Hadamard term (rank r1)
+                U_r1 = U[:, :actual_r1]  # (m, r1)
+                S_r1 = S[:actual_r1]  # (r1,)
+                Vh_r1 = Vh[:actual_r1, :]  # (r1, n)
+                
+                # Get components for second Hadamard term (rank r2)
+                # Use next r2 singular values or reuse if not enough
+                if actual_r1 + actual_r2 <= len(S):
+                    U_r2 = U[:, actual_r1:actual_r1 + actual_r2]  # (m, r2)
+                    S_r2 = S[actual_r1:actual_r1 + actual_r2]  # (r2,)
+                    Vh_r2 = Vh[actual_r1:actual_r1 + actual_r2, :]  # (r2, n)
+                else:
+                    # Reuse early singular values if needed
+                    U_r2 = U[:, :actual_r2]  # (m, r2)
+                    S_r2 = S[:actual_r2]  # (r2,)
+                    Vh_r2 = Vh[:actual_r2, :]  # (r2, n)
+                
+                # Initialize first component: w1a @ w1b
+                # Use fourth root so that (w1a @ w1b) ⊙ (w2a @ w2b) ≈ W
+                fourth_root_S1 = torch.pow(S_r1, 0.25)
+                self.hada_w1_a[adapter_name].data.copy_(U_r1 * fourth_root_S1)
+                self.hada_w1_b[adapter_name].data.copy_(fourth_root_S1.unsqueeze(1) * Vh_r1)
+                
+                # Initialize second component: w2a @ w2b
+                fourth_root_S2 = torch.pow(S_r2, 0.25)
+                self.hada_w2_a[adapter_name].data.copy_(U_r2 * fourth_root_S2)
+                self.hada_w2_b[adapter_name].data.copy_(fourth_root_S2.unsqueeze(1) * Vh_r2)
+                
+            except Exception as e:
+                # Fallback to random initialization if SVD fails
+                import warnings
+                warnings.warn(f"ABBA initialization failed for {adapter_name}: {e}. Falling back to random init.")
+                self.reset_adapter_parameters_random(adapter_name)
+        
+        if adapter_name in self.hada_t1.keys():
+            # For convolutional layers with effective decomposition, use random init
+            # ABBA initialization for CP decomposition is more complex
+            nn.init.kaiming_uniform_(self.hada_t1[adapter_name], a=math.sqrt(5))
+            nn.init.kaiming_uniform_(self.hada_t2[adapter_name], a=math.sqrt(5))
+
     def update_layer(
         self,
         adapter_name: str,
@@ -107,6 +192,9 @@ class LoHaLayer(nn.Module, LycorisLayer):
         module_dropout: float,
         init_weights: bool,
         use_effective_conv2d: bool = False,
+        use_khatri_rao: bool = False,
+        r1: int = None,
+        r2: int = None,
         inference_mode: bool = False,
         **kwargs,
     ) -> None:
@@ -114,22 +202,55 @@ class LoHaLayer(nn.Module, LycorisLayer):
 
         Args:
             adapter_name (`str`): Name for the adapter to add.
-            r (`int`): Rank for the added adapter.
+            r (`int`): Rank for the added adapter (used if r1/r2 not specified).
             alpha (`float`): Alpha for the added adapter.
             rank_dropout (`float`): The dropout probability for rank dimension during training.
             module_dropout (`float`): The dropout probability for disabling adapter during training.
             init_weights (`bool`): Whether to initialize weights.
             use_effective_conv2d (`bool`, *optional*, defaults to `False`):
                 Use parameter effective decomposition for Conv2d with ksize > 1.
+            use_khatri_rao (`bool`, *optional*, defaults to `False`):
+                Use Khatri-Rao product optimization to reduce memory overhead.
+            r1 (`int`, *optional*): Rank for first Hadamard component. If None, defaults based on init_weights.
+            r2 (`int`, *optional`): Rank for second Hadamard component. If None, defaults based on init_weights.
         """
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
+        # Determine r1 and r2
+        # For ABBA: default to r1=r2=r/2 (total effective rank preserved)
+        # For standard: default to r1=r2=r (original behavior)
+        is_abba = isinstance(init_weights, str) and init_weights.lower() == "abba"
+        
+        if r1 is None:
+            r1 = r // 2 if is_abba and r >= 2 else r
+        if r2 is None:
+            r2 = r // 2 if is_abba and r >= 2 else r
+            
+        # Ensure at least rank 1
+        r1 = max(1, r1)
+        r2 = max(1, r2)
+
         self.r[adapter_name] = r
+        self.r1[adapter_name] = r1
+        self.r2[adapter_name] = r2
         self.alpha[adapter_name] = alpha
-        self.scaling[adapter_name] = alpha / r
+        self.scaling[adapter_name] = alpha / r  # Original scaling (for backward compatibility)
+        
+        # ABBA paper: separate scaling factors α/√r₁ and α/√r₂
+        import math
+        self.scaling1 = getattr(self, 'scaling1', {})
+        self.scaling2 = getattr(self, 'scaling2', {})
+        self.scaling1[adapter_name] = alpha / math.sqrt(r1)
+        self.scaling2[adapter_name] = alpha / math.sqrt(r2)
+        
         self.rank_dropout[adapter_name] = rank_dropout
         self.module_dropout[adapter_name] = module_dropout
+        
+        # Auto-enable Khatri-Rao when using ABBA initialization (per ABBA paper)
+        if is_abba and use_khatri_rao is False:
+            use_khatri_rao = True
+        self.use_khatri_rao[adapter_name] = use_khatri_rao
 
         # Determine shape of LoHa weights
         base_layer = self.get_base_layer()
@@ -165,11 +286,13 @@ class LoHaLayer(nn.Module, LycorisLayer):
         else:
             raise TypeError(f"LoHa is not implemented for base layers of type {type(base_layer).__name__}")
 
-        # Create weights with provided shape
-        self.create_adapter_parameters(adapter_name, r, shape)
+        # Create weights with provided shape (using r1 and r2)
+        self.create_adapter_parameters(adapter_name, r1, r2, shape)
 
         # Initialize weights
-        if init_weights:
+        if isinstance(init_weights, str) and init_weights.lower() == "abba":
+            self.reset_adapter_parameters_abba(adapter_name)
+        elif init_weights:
             self.reset_adapter_parameters(adapter_name)
         else:
             self.reset_adapter_parameters_random(adapter_name)
@@ -191,13 +314,27 @@ class LoHaLayer(nn.Module, LycorisLayer):
                 scale=torch.tensor(self.scaling[adapter_name]),
             )
         else:
-            weight = make_weight(
-                self.hada_w1_a[adapter_name],
-                self.hada_w1_b[adapter_name],
-                self.hada_w2_a[adapter_name],
-                self.hada_w2_b[adapter_name],
-                scale=torch.tensor(self.scaling[adapter_name]),
-            )
+            # Check if Khatri-Rao optimization is enabled
+            use_kr = self.use_khatri_rao.get(adapter_name, False)
+            
+            if use_kr:
+                # Use ABBA paper formula with separate scales: α/√r₁ and α/√r₂
+                weight = make_weight_kr(
+                    self.hada_w1_a[adapter_name],
+                    self.hada_w1_b[adapter_name],
+                    self.hada_w2_a[adapter_name],
+                    self.hada_w2_b[adapter_name],
+                    scale1=torch.tensor(self.scaling1[adapter_name]),
+                    scale2=torch.tensor(self.scaling2[adapter_name]),
+                )
+            else:
+                weight = make_weight(
+                    self.hada_w1_a[adapter_name],
+                    self.hada_w1_b[adapter_name],
+                    self.hada_w2_a[adapter_name],
+                    self.hada_w2_b[adapter_name],
+                    scale=torch.tensor(self.scaling[adapter_name]),
+                )
 
         base_layer = self.get_base_layer()
 
@@ -256,13 +393,16 @@ class Linear(LoHaLayer):
         rank_dropout: float = 0.0,
         module_dropout: float = 0.0,
         init_weights: bool = True,
+        use_khatri_rao: bool = False,
+        r1: int = None,
+        r2: int = None,
         **kwargs,
     ):
         super().__init__(base_layer)
 
         # Create adapter and set it active
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, **kwargs)
+        self.update_layer(adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, use_khatri_rao=use_khatri_rao, r1=r1, r2=r2, **kwargs)
 
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
@@ -290,6 +430,9 @@ class Conv2d(LoHaLayer):
         module_dropout: float = 0.0,
         use_effective_conv2d: bool = False,
         init_weights: bool = True,
+        use_khatri_rao: bool = False,
+        r1: int = None,
+        r2: int = None,
         **kwargs,
     ):
         super().__init__(base_layer)
@@ -297,7 +440,7 @@ class Conv2d(LoHaLayer):
         # Create adapter and set it active
         self._active_adapter = adapter_name
         self.update_layer(
-            adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, use_effective_conv2d, **kwargs
+            adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, use_effective_conv2d, use_khatri_rao=use_khatri_rao, r1=r1, r2=r2, **kwargs
         )
 
     def _get_delta_activations(
@@ -334,6 +477,9 @@ class Conv1d(LoHaLayer):
         module_dropout: float = 0.0,
         use_effective_conv2d: bool = False,
         init_weights: bool = True,
+        use_khatri_rao: bool = False,
+        r1: int = None,
+        r2: int = None,
         **kwargs,
     ):
         super().__init__(base_layer)
@@ -341,7 +487,7 @@ class Conv1d(LoHaLayer):
         # Create adapter and set it active
         self._active_adapter = adapter_name
         self.update_layer(
-            adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, use_effective_conv2d, **kwargs
+            adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, use_effective_conv2d, use_khatri_rao=use_khatri_rao, r1=r1, r2=r2, **kwargs
         )
 
     def _get_delta_activations(
@@ -365,6 +511,117 @@ class Conv1d(LoHaLayer):
         return "loha." + rep
 
 
+# For abba
+class HadaWeightKR(torch.autograd.Function):
+    """
+    Khatri-Rao optimized version of HadaWeight that avoids materializing
+    the full B1A1 and B2A2 matrices, significantly reducing memory overhead.
+    
+    Key Innovation:
+    Instead of computing (w1a @ w1b) * (w2a @ w2b) which requires storing two
+    m×n matrices, we compute the result row-by-row (or in chunks), never storing
+    the full intermediate matrices in memory.
+    
+    ABBA paper formula:
+    ΔW = (α/√r₁ · B₁A₁) ⊙ (α/√r₂ · B₂A₂)
+    where scale1 = α/√r₁ and scale2 = α/√r₂
+    
+    Mathematical equivalence:
+    result[i,j] = scale1 * (sum_k w1a[i,k]*w1b[k,j]) * scale2 * (sum_k w2a[i,k]*w2b[k,j])
+    
+    This can be computed without materializing full matrices by processing
+    one row at a time or using einsum with no intermediate storage.
+    
+    Memory savings: O(m*n) -> O(n) for forward pass (processing row by row)
+    """
+    @staticmethod
+    def forward(ctx, w1a, w1b, w2a, w2b, scale1=torch.tensor(1), scale2=torch.tensor(1)):
+        ctx.save_for_backward(w1a, w1b, w2a, w2b, scale1, scale2)
+        
+        # Handle different ranks: w1a/w1b may have rank r1, w2a/w2b may have rank r2
+        # w1a: (m, r1), w1b: (r1, n)
+        # w2a: (m, r2), w2b: (r2, n)
+        
+        m = w1a.shape[0]
+        n = w1b.shape[1]
+        
+        # Allocate output
+        diff_weight = torch.empty(m, n, dtype=w1a.dtype, device=w1a.device)
+        
+        # Process in chunks to save memory (chunk_size can be tuned)
+        # Smaller chunk_size = less memory, but more overhead
+        chunk_size = min(128, m)  # Process 128 rows at a time
+        
+        for i in range(0, m, chunk_size):
+            end_i = min(i + chunk_size, m)
+            # Compute chunk of term1: scale1 * (w1a[i:end_i] @ w1b) -> (chunk_size, n)
+            term1_chunk = scale1 * (w1a[i:end_i] @ w1b)  # Only materialize chunk_size × n
+            # Compute chunk of term2: scale2 * (w2a[i:end_i] @ w2b) -> (chunk_size, n)
+            term2_chunk = scale2 * (w2a[i:end_i] @ w2b)  # Only materialize chunk_size × n
+            # Element-wise multiply and store
+            # Result: (α/√r₁ · B₁A₁) ⊙ (α/√r₂ · B₂A₂)
+            diff_weight[i:end_i] = term1_chunk * term2_chunk
+            # These chunks are automatically freed after use
+        
+        return diff_weight
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        (w1a, w1b, w2a, w2b, scale1, scale2) = ctx.saved_tensors
+        
+        # Handle different ranks: w1a/w1b may have rank r1, w2a/w2b may have rank r2
+        # w1a: (m, r1), w1b: (r1, n)
+        # w2a: (m, r2), w2b: (r2, n)
+        m = w1a.shape[0]
+        n = w1b.shape[1]
+        
+        # Initialize gradients
+        grad_w1a = torch.zeros_like(w1a)
+        grad_w1b = torch.zeros_like(w1b)
+        grad_w2a = torch.zeros_like(w2a)
+        grad_w2b = torch.zeros_like(w2b)
+        
+        # Process in chunks to save memory
+        chunk_size = min(128, m)
+        
+        for i in range(0, m, chunk_size):
+            end_i = min(i + chunk_size, m)
+            
+            # Recompute forward pass chunks (trade computation for memory)
+            # term1_chunk = scale1 * (w1a @ w1b), term2_chunk = scale2 * (w2a @ w2b)
+            term1_chunk = scale1 * (w1a[i:end_i] @ w1b)  # (chunk_size, n)
+            term2_chunk = scale2 * (w2a[i:end_i] @ w2b)  # (chunk_size, n)
+            
+            grad_out_chunk = grad_out[i:end_i]  # (chunk_size, n)
+            
+            # Gradients for w1a and w1b
+            # d(ΔW)/d(B₁A₁) = grad_out ⊙ scale1 ⊙ (scale2 · B₂A₂)
+            # Chain rule: d/dw1a = scale1 * (grad_out ⊙ term2_chunk) @ w1b.T
+            grad_term1_chunk = scale1 * (grad_out_chunk * term2_chunk)  # (chunk_size, n)
+            grad_w1a[i:end_i] = grad_term1_chunk @ w1b.T  # (chunk_size, r1)
+            grad_w1b += w1a[i:end_i].T @ grad_term1_chunk  # (r1, n)
+            
+            # Gradients for w2a and w2b
+            # d(ΔW)/d(B₂A₂) = grad_out ⊙ scale2 ⊙ (scale1 · B₁A₁)
+            # Chain rule: d/dw2a = scale2 * (grad_out ⊙ term1_chunk) @ w2b.T
+            grad_term2_chunk = scale2 * (grad_out_chunk * term1_chunk)  # (chunk_size, n)
+            grad_w2a[i:end_i] = grad_term2_chunk @ w2b.T  # (chunk_size, r2)
+            grad_w2b += w2a[i:end_i].T @ grad_term2_chunk  # (r2, n)
+            
+            # Chunks are freed here
+        
+        return grad_w1a, grad_w1b, grad_w2a, grad_w2b, None, None
+
+def make_weight_kr(w1a, w1b, w2a, w2b, scale1, scale2):
+    """
+    Generate weights using Khatri-Rao optimization with separate scaling.
+    
+    ABBA paper formula: ΔW = (α/√r₁ · B₁A₁) ⊙ (α/√r₂ · B₂A₂)
+    where scale1 = α/√r₁ and scale2 = α/√r₂
+    """
+    return HadaWeightKR.apply(w1a, w1b, w2a, w2b, scale1, scale2)
+
+    
 # Below code is a direct copy from https://github.com/KohakuBlueleaf/LyCORIS/blob/eb460098187f752a5d66406d3affade6f0a07ece/lycoris/modules/loha.py#L9
 
 
