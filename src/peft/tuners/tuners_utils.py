@@ -1180,7 +1180,7 @@ class BaseTuner(nn.Module, ABC):
 
         return tied_weight_keys
 
-    def _maybe_add_modules_to_tie(self, peft_config, tied_weight_keys):
+    def _add_modules_to_tie(self, peft_config, tied_weight_keys):
         """
         This method adds modules to tie to `peft_config` so that those modules can be tied downstream. By default this
         method raises a warning, and each tuner class extending `BaseTuner` can choose to implement this.
