@@ -1170,7 +1170,7 @@ class PeftCommonTester:
             model = get_peft_model(model, config)
             model = model.half()
 
-            assert model.base_model_dtype == torch.float16
+            assert model.base_model_torch_dtype == torch.float16
 
     def _test_training(self, model_id, config_cls, config_kwargs):
         if issubclass(config_cls, PromptLearningConfig):

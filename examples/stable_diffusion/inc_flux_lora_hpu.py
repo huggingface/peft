@@ -41,7 +41,7 @@ hpu_configs = {
     "sdp_on_bf16": True,
     "gaudi_config": "Habana/stable-diffusion",
 }
-pipe = GaudiFluxPipeline.from_pretrained("black-forest-labs/FLUX.1-dev", dtype=torch.bfloat16, **hpu_configs)
+pipe = GaudiFluxPipeline.from_pretrained("black-forest-labs/FLUX.1-dev", torch_dtype=torch.bfloat16, **hpu_configs)
 prompt = "A picture of sks dog in a bucket"
 
 # Quantize FLUX transformer to FP8 using INC (Intel Neural Compressor)
