@@ -385,23 +385,91 @@ def _find_lora_keys(state_dict: Dict[str, torch.Tensor], layer_name: str):
     token = layer_name.strip()
     keys = list(state_dict.keys())
 
-    def match_keys(suffix: str):
-        return [k for k in keys if token in k and k.endswith(suffix)]
+    def is_A(k: str) -> bool:
+        return (
+            token in k
+            and (
+                k.endswith(".lora_A.weight")  # no adapter tag
+                or (".lora_A." in k and k.endswith(".weight"))  # with adapter tag
+            )
+        )
 
-    a_keys = match_keys(".lora_A.default.weight") or match_keys(".lora_A.weight")
-    b_keys = match_keys(".lora_B.default.weight") or match_keys(".lora_B.weight")
+    def is_B(k: str) -> bool:
+        return (
+            token in k
+            and (
+                k.endswith(".lora_B.weight")  # no adapter tag
+                or (".lora_B." in k and k.endswith(".weight"))  # with adapter tag
+            )
+        )
 
-    if not a_keys or not b_keys:
-        def loose_match(suffix: str):
-            return [k for k in keys if k.endswith(suffix) and f".{token}." in k]
-        a_keys = a_keys or loose_match(".lora_A.default.weight") or loose_match(".lora_A.weight")
-        b_keys = b_keys or loose_match(".lora_B.default.weight") or loose_match(".lora_B.weight")
+    def adapter_tag_for_A(k: str) -> str:
+        if ".lora_A." in k:
+            return k.split(".lora_A.", 1)[1].rsplit(".weight", 1)[0]
+        return "default"
 
-    if not a_keys or not b_keys:
-        raise KeyError(f"Could not locate LoRA A/B keys for layer '{layer_name}' in adapter state_dict.")
+    def adapter_tag_for_B(k: str) -> str:
+        if ".lora_B." in k:
+            return k.split(".lora_B.", 1)[1].rsplit(".weight", 1)[0]
+        return "default"
 
-    a_key = max(a_keys, key=len)
-    b_key = max(b_keys, key=len)
+    a_candidates = [k for k in keys if is_A(k)]
+    b_candidates = [k for k in keys if is_B(k)]
+
+    # Fallback auf alte Heuristik, falls nichts gefunden wurde
+    if not a_candidates and not b_candidates:
+        def match_keys(suffix: str):
+            return [k for k in keys if token in k and k.endswith(suffix)]
+
+        a_keys = match_keys(".lora_A.default.weight") or match_keys(".lora_A.weight")
+        b_keys = match_keys(".lora_B.default.weight") or match_keys(".lora_B.weight")
+
+        if not a_keys or not b_keys:
+            def loose_match(suffix: str):
+                return [k for k in keys if k.endswith(suffix) and f".{token}." in k]
+            a_keys = a_keys or loose_match(".lora_A.default.weight") or loose_match(".lora_A.weight")
+            b_keys = b_keys or loose_match(".lora_B.default.weight") or loose_match(".lora_B.weight")
+
+        if not a_keys or not b_keys:
+            raise KeyError(f"Could not locate LoRA A/B keys for layer '{layer_name}' in adapter state_dict.")
+
+        a_key = max(a_keys, key=len)
+        b_key = max(b_keys, key=len)
+        return a_key, b_key
+
+    # Scoring: bevorzuge ".default." und längere, spezifischere Keys
+    def score(k: str) -> float:
+        s = 0.0
+        if ".default." in k:
+            s += 2.0
+        s += len(k) * 1e-3
+        return s
+
+    # Fall 1: Es gibt A-Kandidaten – wähle passenden B (gleiche Adapter-Tag bevorzugt)
+    if a_candidates:
+        a_key = max(a_candidates, key=score)
+        a_tag = adapter_tag_for_A(a_key)
+        b_same_tag = [k for k in b_candidates if adapter_tag_for_B(k) == a_tag]
+        if b_same_tag:
+            b_key = max(b_same_tag, key=score)
+        elif b_candidates:
+            b_key = max(b_candidates, key=score)
+        else:
+            raise KeyError(f"No LoRA B key found for layer '{layer_name}'.")
+        return a_key, b_key
+
+    # Fall 2: Nur B-Kandidaten vorhanden – wähle passenden A (gleiche Adapter-Tag bevorzugt)
+    b_key = max(b_candidates, key=score)
+    b_tag = adapter_tag_for_B(b_key)
+    a_same_tag = [k for k in a_candidates if adapter_tag_for_A(k) == a_tag]
+    if a_same_tag:
+        a_key = max(a_same_tag, key=score)
+    else:
+        # Notfalls irgendeinen A-Key (sollte selten passieren, da pro Adapter-Datei nur ein Adapter drin ist)
+        a_keys_any = [k for k in keys if is_A(k)]
+        if not a_keys_any:
+            raise KeyError(f"No LoRA A key found for layer '{layer_name}'.")
+        a_key = max(a_keys_any, key=score)
     return a_key, b_key
 
 

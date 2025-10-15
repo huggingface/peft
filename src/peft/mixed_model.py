@@ -22,6 +22,7 @@ import torch
 from accelerate.hooks import remove_hook_from_submodules
 from torch import nn
 from transformers.utils import PushToHubMixin
+from safetensors.torch import save_file as safetensors_save_file
 
 from peft.utils.constants import DUMMY_MODEL_CONFIG
 
@@ -383,7 +384,60 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         selected_adapters: Optional[list[str]] = None,
         **kwargs: Any,
     ):
-        raise NotImplementedError(f"Saving is not supported for {self.__class__.__name__} (yet).")
+        """
+        Speichert jede ausgewählte Adapter-Instanz in einem Unterordner:
+          <save_directory>/<adapter_name>/{adapter_config.json, adapter_model.(bin|safetensors)}
+        Es werden nur die Parameter gesichert, die zum jeweiligen Adapter gehören.
+        """
+        if os.path.isfile(save_directory):
+            raise AssertionError(f"Provided path ({save_directory}) should be a directory, not a file")
+        os.makedirs(save_directory, exist_ok=True)
+
+        # Welche Adapter speichern?
+        adapter_names = selected_adapters or list(self.peft_config.keys())
+        if isinstance(adapter_names, str):
+            adapter_names = [adapter_names]
+
+        # Vollständiger State (nur CPU speichern)
+        full_state = self.state_dict()
+
+        def _filter_state_for_adapter(state: dict[str, torch.Tensor], adapter: str) -> dict[str, torch.Tensor]:
+            # Nimm nur Keys, die eindeutig den Adapter-Namen enthalten.
+            # Zusätzlich: modules_to_save (falls vorhanden) mitnehmen.
+            out = {}
+            for k, v in state.items():
+                if f".{adapter}." in k or k.startswith("modules_to_save.") or ".modules_to_save." in k:
+                    out[k] = v.detach().cpu()
+            return out
+
+        for adapter in adapter_names:
+            if adapter not in self.peft_config:
+                raise ValueError(f"Adapter '{adapter}' not found. Available: {sorted(self.peft_config.keys())}")
+
+            subdir = os.path.join(save_directory, adapter)
+            os.makedirs(subdir, exist_ok=True)
+
+            # 1) Konfiguration speichern
+            self.peft_config[adapter].save_pretrained(subdir)
+
+            # 2) Gewichte des Adapters speichern
+            adapter_state = _filter_state_for_adapter(full_state, adapter)
+            if not adapter_state:
+                # Kein Gewicht gefunden: trotzdem Config bleibt nützlich
+                print(f"[peft][mixed] Warning: no parameters found for adapter '{adapter}'. Saved config only.")
+                continue
+
+            if safe_serialization:
+                weights_path = os.path.join(subdir, "adapter_model.safetensors")
+                safetensors_save_file(adapter_state, weights_path)
+            else:
+                weights_path = os.path.join(subdir, "adapter_model.bin")
+                torch.save(adapter_state, weights_path)
+
+            # Optional: kleine Info
+            num_tensors = len(adapter_state)
+            num_params = sum(int(t.numel()) for t in adapter_state.values())
+            print(f"[peft][mixed] Saved adapter '{adapter}' -> {weights_path} ({num_tensors} tensors, {num_params} params)")
 
     @classmethod
     def from_pretrained(

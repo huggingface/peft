@@ -143,7 +143,7 @@ class MixedModel(BaseTuner):
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if any(prefix in name for prefix in PREFIXES):
-                module.to(child.weight.device)
+                module.to(child.dequantize_weight().device)
             if "ranknum" in name:
                 module.to(child.weight.device)
 
@@ -171,10 +171,10 @@ class MixedModel(BaseTuner):
 
     @staticmethod
     def _create_new_module(config, adapter_name, target, **kwargs):
-        gptq_quantization_config = kwargs.get("gptq_quantization_config", None)
-        AutoGPTQQuantLinear = get_auto_gptq_quant_linear(gptq_quantization_config)
-        if (gptq_quantization_config is not None) or (AutoGPTQQuantLinear is not None):
-            raise ValueError(f"GPTQ quantization not supported for {config.peft_type.value} (yet).")
+        # gptq_quantization_config = kwargs.get("gptq_quantization_config", None)
+        # AutoGPTQQuantLinear = get_auto_gptq_quant_linear(gptq_quantization_config)
+        # if (gptq_quantization_config is not None) or (AutoGPTQQuantLinear is not None):
+        #     raise ValueError(f"GPTQ quantization not supported for {config.peft_type.value} (yet).")
 
         loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
         loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)

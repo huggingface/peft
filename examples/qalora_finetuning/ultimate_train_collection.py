@@ -15,14 +15,16 @@
 import copy
 import os
 import random
+import json
+import time
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from typing import Optional, List
 import numpy as np
 import torch
 import transformers
 from datasets import load_dataset
-from transformers import AutoModelForCausalLM, GPTQConfig, Trainer
+from transformers import AutoModelForCausalLM, GPTQConfig, Trainer, TrainerCallback
 from peft import LoraConfig, PeftModel, get_peft_model
 
 
@@ -128,7 +130,12 @@ class TrainingArguments(transformers.TrainingArguments):
         metadata={"help": "The integration to report the results and logs to."},
     )
     skip_training: bool = field(
-        default=None
+        default=False,
+        metadata={"help": "If true, skip the training phase and proceed to evaluation."}
+    )
+    skip_evaluation: bool = field(
+        default=False,
+        metadata={"help": "If true, skip the final evaluation phase."}
     )
     calibration_dataset: str = field(
         default="c4",
@@ -461,15 +468,18 @@ def train():
     script_args = parser.parse_args_into_dataclasses()[0]
     print(script_args)
 
-    # --- ADD THIS BLOCK ---
-    # Set seed before initializing model.
+    os.makedirs(script_args.output_dir, exist_ok=True)
+    config_path = os.path.join(script_args.output_dir, "run_config.json")
+    with open(config_path, 'w') as f:
+        json.dump(asdict(script_args), f, indent=4)
+    print(f"✅ Run-Konfiguration gespeichert in: {config_path}")
+
     print(f"Setting random seed to {script_args.seed}")
     random.seed(script_args.seed)
     np.random.seed(script_args.seed)
     torch.manual_seed(script_args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(script_args.seed)
-        # --- END OF BLOCK ---
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
@@ -482,7 +492,6 @@ def train():
     )
     tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    # Training mode selectiowave_moden
     if script_args.training_mode == "qalora":
         print("🔧 Setting up QA-LoRA training...")
         model = load_or_quantize_model(
@@ -578,13 +587,12 @@ def train():
             torch_dtype=torch.float32,
         )
 
-        # Erstelle den "Spickzettel" mit den Originalgewichten
         original_weights_map = {
             name: module.weight.cpu().clone()
             for name, module in original_model.named_modules()
             if isinstance(module, torch.nn.Linear)
         }
-        del original_model # Speicher freigeben
+        del original_model
 
         print("🔧 2. Basismodell quantisieren...")
         model = load_or_quantize_model(
@@ -595,39 +603,29 @@ def train():
             calibration_dataset=script_args.calibration_dataset
         )
 
-        # ==============================================================================
-        # SCHRITT 2: FEHLERKORREKTUR-ADAPTER HINZUFÜGEN (SVD-INIT, FROZEN)
-        # ==============================================================================
         print("🏗️ 3. Fehlerkorrektur-Adapter ('error_correction') hinzufügen...")
 
-        # Das init-Dictionary für Ihre SVD-Funktion
         init_config_error = {
             "method": "error-svd",
             "original_weights_map": original_weights_map
         }
 
-        # Konfiguration für den *eingefrorenen* Korrektur-Adapter
         error_config = LoraConfig(
-            r=1,  # Sehr kleiner Rank ist ausreichend
+            r=1,
             lora_alpha=1,
-            use_qalora=False, # WICHTIG: Dieser Adapter ist nur ein statischer Offset
+            use_qalora=False,
             init_lora_weights=init_config_error,
             target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
             bias="none",
         )
 
-        # `get_peft_model` fügt den ERSTEN Adapter hinzu
         model = get_peft_model(model, error_config, adapter_name="error_correction", mixed=True)
         print("✅ 'error_correction' Adapter hinzugefügt und per SVD initialisiert.")
 
         adapter_name = model.active_adapter
         config = model.peft_config["error_correction"]
-        # config = model.peft_config[adapter_name]
 
-        # Überprüfen, ob die Initialisierungsmethode verwendet wurde und die problematischen Daten enthält
         if hasattr(config, "init_lora_weights") and isinstance(config.init_lora_weights, dict):
-            # Entfernen Sie den Tensor oder das gesamte Dictionary.
-            # Beides ist eine gute Lösung. Das Ersetzen durch einen einfachen Wert ist oft am sichersten.
             print("Entferne nicht serialisierbare Tensor-Daten aus der Lora-Konfiguration vor dem Speichern...")
             if "original_weights_map" in config.init_lora_weights:
                 del config.init_lora_weights["original_weights_map"]
@@ -645,29 +643,22 @@ def train():
         # ==============================================================================
         print("🎨 5. Trainierbaren Task-Adapter ('task_adapter') hinzufügen...")
 
-        # Konfiguration für den *trainierbaren* Task-Adapter
         train_config = LoraConfig(
-            r=script_args.lora_r, # Ihr normaler, höherer Rank (z.B. 64)
+            r=script_args.lora_r,
             lora_alpha=script_args.lora_r,
-            use_qalora=True, # WICHTIG: Dieser Adapter wird mit QA-LoRA trainiert!
+            use_qalora=True,
             qalora_group_size=script_args.qalora_group_size,
-            init_lora_weights="gaussian", # Explizite Zufalls-Initialisierung
+            init_lora_weights="gaussian",
             target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
-            lora_dropout=0, # Dropout macht nur für den trainierbaren Adapter Sinn
+            lora_dropout=0,
             bias="none",
         )
 
-        # `model.add_adapter` fügt einen ZWEITEN (oder dritten, etc.) Adapter hinzu
         model.add_adapter("task_adapter", train_config)
         print("✅ 'task_adapter' hinzugefügt und zufällig initialisiert.")
 
-
-        # ==============================================================================
-        # SCHRITT 4: FINALES SETUP FÜR DAS TRAINING
-        # ==============================================================================
         print("🚀 6. 'task_adapter' als aktiv für das Training setzen...")
         model.set_adapter(["task_adapter", "error_correction"])
-        # model.set_adapter("task_adapter")
 
         print("\n--- Finales Modell-Setup ---")
         model.print_trainable_parameters()
@@ -687,15 +678,12 @@ def train():
             lora_dropout=0,
             bias="none",
             init_lora_weights="pissa"
-            # init_lora_weights=f"pissa_niter_{script_args.pissa_niter}",  # PiSSA initialization
         )
 
         model = get_peft_model(model, lora_config)
     elif script_args.training_mode == "pissa_rank_analysis":
         print("🔧 Setting up rank analysis with multiple quantization configurations...")
 
-        # --- CACHING LOGIC START ---
-        # Phase 1: Definiere Pfade und prüfe auf existierende Artefakte
         model_name_clean = script_args.model_name_or_path.replace("/", "_").replace("\\", "_")
         base_output_dir = os.path.join(script_args.output_dir, f"quantized_residuals_r{script_args.lora_r}")
         os.makedirs(base_output_dir, exist_ok=True)
@@ -705,13 +693,11 @@ def train():
 
         full_precision_residual_path = os.path.join(script_args.output_dir, f"{model_name_clean}_residual_base_r{script_args.lora_r}_fp16")
 
-        # Prüfe, ob sowohl der Adapter als auch das Residual-Modell bereits existieren
         if os.path.exists(adapter_path) and os.path.exists(full_precision_residual_path):
             print(f"⏭️  Found cached adapter at: {adapter_path}")
             print(f"⏭️  Found cached residual model at: {full_precision_residual_path}")
             print("    Skipping model initialization and residual extraction.")
 
-            # Lade die target_modules aus der Adapter-Konfiguration für die spätere Verwendung
             from peft import PeftConfig
             try:
                 config = PeftConfig.from_pretrained(adapter_path)
@@ -723,7 +709,6 @@ def train():
         else:
             print("🔥 No cached artifacts found. Starting full initialization process...")
 
-            # Phase 2: Lade das Originalmodell und richte PEFT ein
             print("Phase 2: Loading original model and setting up PEFT...")
             model = AutoModelForCausalLM.from_pretrained(
                 script_args.model_name_or_path,
@@ -746,11 +731,10 @@ def train():
             peft_model = get_peft_model(model, lora_config)
             print("✅ PEFT model with daniel initialization complete")
 
-            # Phase 3: Extrahiere und speichere den Adapter und das Residual-Modell
             print(f"Phase 3: Saving adapter to: {adapter_path}")
             peft_model.save_pretrained(adapter_path)
 
-            print("🚀 Extracting residual weights using State Dict method...") # why is that so complicated? We need to clean up the "base_layer" substring model.layers.21.mlp.down_proj.base_layer.weight -> model.layers.21.mlp.down_proj.weight
+            print("🚀 Extracting residual weights using State Dict method...")
             peft_base_model = peft_model.get_base_model().to(torch.float32)
             base_state_dict = peft_base_model.state_dict()
             clean_state_dict = {}
@@ -762,7 +746,6 @@ def train():
                 elif "weight" in key and "lora" not in key and "base_layer" not in key:
                     clean_state_dict[key] = value.clone()
 
-            # Füge den lm_head manuell hinzu, da get_base_model() ihn oft auslässt
             if "lm_head.weight" in peft_model.state_dict():
                 print("🧠 Adding lm_head.weight to the clean state_dict.")
                 clean_state_dict["lm_head.weight"] = peft_model.state_dict()["lm_head.weight"].clone()
@@ -780,21 +763,18 @@ def train():
             tokenizer.save_pretrained(full_precision_residual_path)
             print("✅ Clean residual model saved.")
 
-            # Verifiziere den Speicher-/Ladevorgang
             reloaded_model_loaded = AutoModelForCausalLM.from_pretrained(full_precision_residual_path, torch_dtype=torch.float32)
             compare_models(
                 residual_model, reloaded_model_loaded, 
                 model1_name="Extracted Residual Model", 
                 model2_name="Reloaded Model"
             )
-            model = reloaded_model_loaded # residual model is in FP16 still
+            model = reloaded_model_loaded
 
         print("\n🧹 Clear memory before quantizing...")
 
         if 'peft_model' in locals():
             del peft_model
-        # if 'model' in locals():
-        #     del model
         if 'peft_base_model' in locals():
             del peft_base_model
         if 'base_state_dict' in locals():
@@ -806,15 +786,11 @@ def train():
         if 'reloaded_model_loaded' in locals():
             del reloaded_model_loaded
 
-        # Leere den CUDA-Cache, um den Speicher wirklich freizugeben
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
         print("✅ Speicherbereinigung abgeschlossen. Starte Quantisierung...")
 
-        # --- CACHING LOGIC END ---
-        # Vorher: Mehrfach-Quantisierung (quantization_configs) -> entfernen.
-        # Jetzt: Optional genau EINE Quantisierung auf Basis von script_args.bits und script_args.qalora_group_size
         bits = script_args.bits
         group_size = script_args.qalora_group_size
         print(f"\n{'=' * 60}")
@@ -841,10 +817,9 @@ def train():
 
         model, tok = load_residual_with_adapter(
             residual_or_quantized_path=quantized_path,
-            # residual_or_quantized_path=full_precision_residual_path,
             adapter_path=adapter_path,
             is_trainable=True,
-            dtype=torch.float16,  # oder torch.bfloat16, falls so gespeichert
+            dtype=torch.float16,
         )
         print(f"\n{'=' * 60}")
         print("🎉 QUANTIZATION SUMMARY")
@@ -880,30 +855,49 @@ def train():
         "data_collator": data_collator,
     }
 
-    # for name, param in model.named_parameters():
-    #     if not param.requires_grad:
-    #         print(f"❌ Gradient disabled for parameter: {name}")
-
     import wandb
     wandb.init()
-    model.save_pretrained(os.path.join(script_args.output_dir, "ft_pretrained/adapter"))
+    
+    training_metrics = {}
+
     if not script_args.skip_training: 
         trainer = Trainer(model=model, tokenizer=tokenizer, args=script_args, **data_module)
+        
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+        start_time = time.time()
+        
         trainer.train()
-        # trainer.save_state()
-        model.save_pretrained(os.path.join(script_args.output_dir, "ft_posttrained/adapter"))
-        tokenizer.save_pretrained(os.path.join(script_args.output_dir, "ft/adapter"))
+        
+        end_time = time.time()
+        
+        training_duration_min = (end_time - start_time) / 60
+        if torch.cuda.is_available():
+            peak_vram_bytes = torch.cuda.max_memory_allocated()
+            peak_vram_gb = peak_vram_bytes / (1024**3)
+        else:
+            peak_vram_gb = 0.0
+
+        final_loss = trainer.state.log_history[-1].get('loss') if trainer.state.log_history else None
+        
+        training_metrics = {
+            "peak_vram_gb": round(peak_vram_gb, 2),
+            "training_time_min": round(training_duration_min, 2),
+            "final_loss": final_loss,
+        }
+        
+        adapter_output_dir = os.path.join(script_args.output_dir, "adapter")
+        model.save_pretrained(adapter_output_dir, safe_serialization=True)
+        tokenizer.save_pretrained(adapter_output_dir)
+        print(f"✅ Adapter gespeichert in: {adapter_output_dir}")
+    else:
+        print("⏭️ Training übersprungen, wie angegeben.")
     
     if script_args.training_mode == "post_quantization":
         print("Applying GPTQ post-quantization...")
-        # Configure 4-bit quantization for QLoRA
         from peft.tuners.lora.gptq import merge_gptq_lora_to_linear
 
-        # This will dequantize-and-merge in-place (returns the same object for convenience)
         model = merge_gptq_lora_to_linear(model, adapter_names=None, dtype=torch.bfloat16)
-
-        # model = model.dequantize()
-        # model = model.merge_and_unload()
         temp_model_path = "./temp_merged_model"
 
         model.save_pretrained(temp_model_path)
@@ -916,7 +910,6 @@ def train():
             desc_act=False,
             sym=False,
         )
-        # post quantization gptq
         model = AutoModelForCausalLM.from_pretrained(
             temp_model_path,
             quantization_config=gptq_config,
@@ -926,31 +919,40 @@ def train():
         if torch.cuda.is_available():
             model.to("cuda") 
 
-    # --- START: Generation and Evaluation Logic ---
-    print("\n🚀 Starting Alpaca evaluation...")
-    # Put the model in evaluation mode
-    model.eval()
+    if not script_args.skip_evaluation:
+        print("\n🚀 Starte Evaluation...")
+        model.eval()
 
-    file_name = f"mode_{script_args.training_mode}_bits_{script_args.bits}_rank_{script_args.lora_r}_group_{script_args.qalora_group_size}_training_skip_{script_args.skip_training}_calibration_dataset_{script_args.calibration_dataset}"
-    output_dir_eval = os.path.join(script_args.output_dir, "eval_results")
-    os.makedirs(output_dir_eval, exist_ok=True)
+        evaluation_dir = os.path.join(script_args.output_dir, "evaluation")
+        os.makedirs(evaluation_dir, exist_ok=True)
 
-    from eval_peft import generate_alpaca_response, run_lm_harness_and_print_results
-    # generate_alpaca_response(model, tokenizer, script_args.training_mode, script_args.lora_r, output_dir_eval, file_name)
-    # tasks="wikitext,piqa,tinyArc,tinyHellaswag,tinyGSM8k,tinyMMLU"
-    # tasks = "wikitext,piqa,gsm8k,mmlu"
-    tasks = "wikitext,piqa"
-    run_lm_harness_and_print_results(
-        model=model,
-        tokenizer=tokenizer,
-        tasks=tasks,
-        num_fewshot=1,
-        limit=15,
-        per_device_eval_batch_size=2,
-        output_dir=output_dir_eval,
-        file_name=file_name,
-    )
-    print("eval lm_harness")
+        from eval_peft import run_lm_harness_and_print_results
+        tasks = "wikitext,piqa,tinyArc,tinyHellaswag,tinyGSM8k,tinyMMLU"
+        harness_file_name = "lm_harness_results"
+        run_lm_harness_and_print_results(
+            model=model,
+            tokenizer=tokenizer,
+            tasks=tasks,
+            num_fewshot=1,
+            limit=50,
+            per_device_eval_batch_size=2,
+            output_dir=evaluation_dir,
+            file_name=harness_file_name,
+        )
+        print(f"✅ LM-Harness Ergebnisse gespeichert in: {evaluation_dir}")
+
+        from eval_peft import generate_alpaca_response
+        alpaca_file_name = "alpaca_eval_results"
+        generate_alpaca_response(model, tokenizer, script_args.training_mode, script_args.lora_r, evaluation_dir, alpaca_file_name)
+        print(f"✅ AlpacaEval Ergebnisse gespeichert in: {evaluation_dir}")
+
+        metrics_path = os.path.join(evaluation_dir, "training_metrics.json")
+        with open(metrics_path, 'w') as f:
+            json.dump(training_metrics, f, indent=4)
+        print(f"✅ Trainingsmetriken gespeichert in: {metrics_path}")
+    else:
+        print("⏭️ Evaluation übersprungen, wie angegeben.")
+
 
 if __name__ == "__main__":
     train()
