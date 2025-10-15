@@ -1646,8 +1646,6 @@ class TestLoraInitialization:
         )
 
     def test_not_weight_tying_tied_model(self):
-        from peft.utils.other import ModulesToSaveWrapper
-
         model = self.get_lm_model()
         embed_token_config = LoraConfig(
             modules_to_save=["embed_tokens"],
