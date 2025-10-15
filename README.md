@@ -78,22 +78,6 @@ print(tokenizer.decode(outputs[0], skip_special_tokens=True))
 # prints something like: Preheat the oven to 350 degrees and place the cookie dough in a baking dish [...]
 ```
 
-> [!NOTE]
-> Transformer-based RWKV checkpoints (Transformers 4.56+) pick up LoRA defaults automatically. For a minimal
-> adapter:
-
-```python
-from transformers import RwkvConfig, RwkvForCausalLM
-from peft import LoraConfig, TaskType, get_peft_model
-
-config = RwkvConfig(hidden_size=512, num_hidden_layers=12, context_length=512)
-model = RwkvForCausalLM(config)
-
-# target_modules are inferred from the RWKV config; no manual list required
-lora_config = LoraConfig(r=8, lora_alpha=16, task_type=TaskType.CAUSAL_LM)
-model = get_peft_model(model, lora_config)
-```
-
 ## Why you should use PEFT
 
 There are many benefits of using PEFT but the main one is the huge savings in compute and storage, making PEFT applicable to many different use cases.
