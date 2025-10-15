@@ -1629,8 +1629,6 @@ class TestLoraInitialization:
             assert embed_np[k] is lm_head_np[k]
 
     def test_weight_tying_non_tied_model(self):
-        from peft.utils.other import ModulesToSaveWrapper
-
         model = self.get_lm_model(tie_weights=False)
         embed_token_config = LoraConfig(
             modules_to_save=["embed_tokens"],
