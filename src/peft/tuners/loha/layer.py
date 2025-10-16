@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import math
-from typing import Any
+from typing import Any, Literal, Union
 
 import torch
 import torch.nn as nn
@@ -190,7 +190,7 @@ class LoHaLayer(nn.Module, LycorisLayer):
         alpha: float,
         rank_dropout: float,
         module_dropout: float,
-        init_weights: bool,
+        init_weights: Union[bool, Literal["abba"]],
         use_effective_conv2d: bool = False,
         use_khatri_rao: bool = False,
         r1: int = None,
@@ -206,7 +206,14 @@ class LoHaLayer(nn.Module, LycorisLayer):
             alpha (`float`): Alpha for the added adapter.
             rank_dropout (`float`): The dropout probability for rank dimension during training.
             module_dropout (`float`): The dropout probability for disabling adapter during training.
-            init_weights (`bool`): Whether to initialize weights.
+            init_weights (`Union[bool, Literal["abba"]]`): How to initialize weights. 
+                `True` for default initialization (one matrix initialized to zeros), 
+                `False` for random initialization, or `"abba"` for ABBA initialization which 
+                approximates the pretrained weights using SVD decomposition. ABBA initialization 
+                enables the adapter to start with behavior close to the original model, potentially 
+                improving training stability and convergence.
+                Based on the ABBA paper: https://arxiv.org/pdf/2505.14238
+                See https://github.com/huggingface/peft/issues/2587 for implementation details.
             use_effective_conv2d (`bool`, *optional*, defaults to `False`):
                 Use parameter effective decomposition for Conv2d with ksize > 1.
             use_khatri_rao (`bool`, *optional*, defaults to `False`):
@@ -392,7 +399,7 @@ class Linear(LoHaLayer):
         alpha: float = 0.0,
         rank_dropout: float = 0.0,
         module_dropout: float = 0.0,
-        init_weights: bool = True,
+        init_weights: Union[bool, Literal["abba"]] = True,
         use_khatri_rao: bool = False,
         r1: int = None,
         r2: int = None,
@@ -429,7 +436,7 @@ class Conv2d(LoHaLayer):
         rank_dropout: float = 0.0,
         module_dropout: float = 0.0,
         use_effective_conv2d: bool = False,
-        init_weights: bool = True,
+        init_weights: Union[bool, Literal["abba"]] = True,
         use_khatri_rao: bool = False,
         r1: int = None,
         r2: int = None,
@@ -476,7 +483,7 @@ class Conv1d(LoHaLayer):
         rank_dropout: float = 0.0,
         module_dropout: float = 0.0,
         use_effective_conv2d: bool = False,
-        init_weights: bool = True,
+        init_weights: Union[bool, Literal["abba"]] = True,
         use_khatri_rao: bool = False,
         r1: int = None,
         r2: int = None,
