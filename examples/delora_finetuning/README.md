@@ -16,7 +16,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import SFTConfig, SFTTrainer
 from datasets import load_dataset
 
-model = AutoModelForCausalLM.from_pretrained("meta-llama/Meta-Llama-3-8B", torch_dtype=torch.bfloat16, device_map="auto")
+model = AutoModelForCausalLM.from_pretrained("meta-llama/Meta-Llama-3-8B", dtype=torch.bfloat16, device_map="auto")
 tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-8B")
 tokenizer.pad_token_id = tokenizer.eos_token_id
 delora_config = DeloraConfig(r=32, delora_lambda=15)
@@ -44,7 +44,7 @@ from peft import PeftModel
 from transformers import AutoModelForCausalLM
 
 model = AutoModelForCausalLM.from_pretrained(
-    "meta-llama/Meta-Llama-3-8B", torch_dtype=torch.bfloat16, device_map="auto"
+    "meta-llama/Meta-Llama-3-8B", dtype=torch.bfloat16, device_map="auto"
 )
 peft_model = PeftModel.from_pretrained(model, "delora-llama-3-8b")
 ```

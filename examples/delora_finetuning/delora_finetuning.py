@@ -47,20 +47,19 @@ def train_model(
     device_type = device.type
     device_module = getattr(torch, device_type, torch.cuda)
     bf16_supported = device_module.is_available() and device_module.is_bf16_supported()
-    torch_dtype = torch.bfloat16 if bf16_supported else torch.float32
+    dtype = torch.bfloat16 if bf16_supported else torch.float32
 
     # Load the base model
     model = AutoModelForCausalLM.from_pretrained(
         base_model,
-        torch_dtype=torch_dtype,
-        # token=hf_token,
+        dtype=dtype,
     )
 
     # DeLoRA config for the PEFT model
     peft_config = DeloraConfig(
         r=rank,
         delora_lambda=delora_lambda,
-        target_modules=(target_modules.split(",") if target_modules else ["q_proj", "v_proj"]),
+        target_modules=(target_modules.split(",") if target_modules else None),
         module_dropout=module_dropout,
         bias="none",
     )
