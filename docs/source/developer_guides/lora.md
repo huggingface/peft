@@ -539,7 +539,7 @@ from peft import PeftModel
 import torch
 
 base_model = AutoModelForCausalLM.from_pretrained(
-    "mistralai/Mistral-7B-v0.1", torch_dtype=torch.float16, device_map="auto"
+    "mistralai/Mistral-7B-v0.1", dtype=torch.float16, device_map="auto"
 )
 ```
 
@@ -813,7 +813,7 @@ To encode general knowledge, GenKnowSub subtracts the average of the provided ge
 >     # Loading the model
 >     base_model = AutoModelForCausalLM.from_pretrained(
 >         "microsoft/Phi-3-mini-4k-instruct",
->         torch_dtype=torch.bfloat16,
+>         dtype=torch.bfloat16,
 >         device_map="auto",
 >         quantization_config=bnb_config,
 >     )

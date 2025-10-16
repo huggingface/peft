@@ -802,16 +802,16 @@ def main(args):
         cur_class_images = len(list(class_images_dir.iterdir()))
 
         if cur_class_images < args.num_class_images:
-            torch_dtype = torch.float16 if accelerator.device.type in ["cuda", "xpu"] else torch.float32
+            dtype = torch.float16 if accelerator.device.type in ["cuda", "xpu"] else torch.float32
             if args.prior_generation_precision == "fp32":
-                torch_dtype = torch.float32
+                dtype = torch.float32
             elif args.prior_generation_precision == "fp16":
-                torch_dtype = torch.float16
+                dtype = torch.float16
             elif args.prior_generation_precision == "bf16":
-                torch_dtype = torch.bfloat16
+                dtype = torch.bfloat16
             pipeline = DiffusionPipeline.from_pretrained(
                 args.pretrained_model_name_or_path,
-                torch_dtype=torch_dtype,
+                dtype=dtype,
                 safety_checker=None,
                 revision=args.revision,
             )

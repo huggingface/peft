@@ -11,7 +11,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import SFTConfig, SFTTrainer
 from datasets import load_dataset
 
-model = AutoModelForCausalLM.from_pretrained("facebook/opt-350m", torch_dtype=torch.bfloat16, device_map="auto")
+model = AutoModelForCausalLM.from_pretrained("facebook/opt-350m", dtype=torch.bfloat16, device_map="auto")
 tokenizer = AutoTokenizer.from_pretrained("facebook/opt-350m")
 dataset = load_dataset("imdb", split="train[:1%]")
 lora_config = LoraConfig(
