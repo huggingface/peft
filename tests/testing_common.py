@@ -193,8 +193,6 @@ CLASSES_MAPPING = {
 DECODER_MODELS_EXTRA = {"cpt": (CPTConfig, CONFIG_TESTING_KWARGS[15])}
 
 
-
-
 def _skip_if_merging_not_supported(model_id, config_cls):
     """Skip tests for cases where adapter merge is unavailable.
 
@@ -207,9 +205,7 @@ def _skip_if_merging_not_supported(model_id, config_cls):
             "(See https://github.com/huggingface/peft/pull/2403)"
         )
     if issubclass(config_cls, OSFConfig):
-        pytest.skip(
-            f"Skipping test for {model_id} with {config_cls} as OSF adapter merge/unload are not implemented."
-        )
+        pytest.skip(f"Skipping test for {model_id} with {config_cls} as OSF adapter merge/unload are not implemented.")
 
 
 class PeftCommonTester:
@@ -608,7 +604,7 @@ class PeftCommonTester:
 
     def _test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls)
-        
+
         if (
             config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig, VBLoRAConfig)
             or config_kwargs.get("alora_invocation_tokens") is not None
@@ -640,7 +636,7 @@ class PeftCommonTester:
 
     def _test_merge_layers_nan(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls)
-        
+
         if (
             config_cls
             not in (
@@ -729,7 +725,7 @@ class PeftCommonTester:
 
     def _test_merge_layers(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls)
-        
+
         if issubclass(config_cls, PromptLearningConfig):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
@@ -819,7 +815,7 @@ class PeftCommonTester:
 
     def _test_merge_layers_multi(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls)
-        
+
         supported_peft_types = [
             PeftType.LORA,
             PeftType.LOHA,
@@ -909,7 +905,7 @@ class PeftCommonTester:
 
     def _test_merge_layers_is_idempotent(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls)
-        
+
         if config_kwargs.get("alora_invocation_tokens") is not None:
             # Merging not supported for Activated LoRA (aLoRA)
             return pytest.skip("Test not applicable for Activated LoRA (aLoRA)")
@@ -936,7 +932,7 @@ class PeftCommonTester:
 
     def _test_safe_merge(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls)
-        
+
         if config_kwargs.get("alora_invocation_tokens") is not None:
             # Merging not supported for Activated LoRA (aLoRA)
             return pytest.skip("Test not applicable for Activated LoRA (aLoRA)")

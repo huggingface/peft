@@ -1,10 +1,8 @@
-from tempfile import TemporaryDirectory
-
 import pytest
 import torch
 from torch.testing import assert_close
 
-from peft import OSFConfig, PeftModel, get_peft_model
+from peft import OSFConfig, get_peft_model
 from peft.tuners.osf.layer import OSFLayer
 from peft.tuners.osf.utils import (
     decompose_weight_matrix,

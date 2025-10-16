@@ -53,7 +53,6 @@ from peft import (
     ShiraConfig,
     TaskType,
     TrainableTokensConfig,
-    OSFConfig,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,

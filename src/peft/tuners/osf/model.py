@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import re
-import torch
+
 import torch.nn as nn
 
 from peft.tuners.tuners_utils import BaseTuner
 from peft.utils.constants import TRANSFORMERS_MODELS_TO_OSF_TARGET_MODULES_MAPPING
 
-from .layer import OSFLayer, Linear, dispatch_default
+from .layer import OSFLayer, dispatch_default
 
 
 class OSFModel(BaseTuner):
@@ -45,17 +45,28 @@ class OSFModel(BaseTuner):
         parameter_name: str | None = None,
     ) -> None:
         # OSF only works on 2D weight matrices
-        if not hasattr(target, 'weight') or len(target.weight.shape) != 2:
+        if not hasattr(target, "weight") or len(target.weight.shape) != 2:
             return None
-            
-        # Determine effective rank for this target
-        effective_rank = osf_config.effective_rank
-        
-        # Check for per-module rank overrides
-        if hasattr(osf_config, 'rank_pattern') and osf_config.rank_pattern:
+
+        # Determine effective rank for this target (supports int or fractional in (0,1])
+        def _resolve_rank(value, min_dim: int) -> int:
+            if value is None:
+                return max(min_dim // 2, 0)
+            # floats in (0,1] => fraction of min_dim
+            if isinstance(value, float) and 0 < value <= 1:
+                r = int(min_dim * value)
+            else:
+                r = int(value)
+            return max(min(min_dim, r), 0)
+
+        min_dim = min(target.weight.shape)
+        effective_rank = _resolve_rank(getattr(osf_config, "effective_rank", None), min_dim)
+
+        # Check for per-module rank overrides (allow int or fractional)
+        if hasattr(osf_config, "rank_pattern") and osf_config.rank_pattern:
             for pattern, rank in osf_config.rank_pattern.items():
                 if re.search(pattern, current_key):
-                    effective_rank = rank
+                    effective_rank = _resolve_rank(rank, min_dim)
                     break
 
         kwargs = {
@@ -76,11 +87,7 @@ class OSFModel(BaseTuner):
 
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
         for n, p in model.named_parameters():
-            if (
-                self.prefix not in n
-                and "svd_params" not in n
-                and not n.endswith(("_U_low", "_S_low", "_V_low"))
-            ):
+            if self.prefix not in n and "svd_params" not in n and not n.endswith(("_U_low", "_S_low", "_V_low")):
                 p.requires_grad = False
 
     def _cast_adapter_dtype(self, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
@@ -93,12 +100,12 @@ class OSFModel(BaseTuner):
             return
 
         for module in self.model.modules():
-            if not hasattr(module, 'osf_svd_params'):
+            if not hasattr(module, "osf_svd_params"):
                 continue
 
             # Get target dtype from base layer weight
-            base_layer = getattr(module, 'base_layer', None)
-            if base_layer is None or not hasattr(base_layer, 'weight'):
+            base_layer = getattr(module, "base_layer", None)
+            if base_layer is None or not hasattr(base_layer, "weight"):
                 continue
 
             target_dtype = base_layer.weight.dtype

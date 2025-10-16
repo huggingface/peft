@@ -15,12 +15,12 @@
 
 from __future__ import annotations
 
-import math
 from typing import Any
 
 import torch
+import torch.distributed as dist
 from torch import nn
-from torch.nn import functional as F
+
 
 # Note: OSF now relies on OSFLayer + BaseTuner; no model-level helpers required here.
 
@@ -89,28 +89,45 @@ def project_gradient_to_orthogonal_space(svd_dict: dict[str, Any]) -> None:
     U_high = svd_dict["U_high"]
     V_high = svd_dict["V_high"]
 
+    # Project U_low gradients to space orthogonal to U_high
     if svd_dict["U_low"].grad is not None:
         dU = svd_dict["U_low"].grad
-        local_U_high = _wait_if_async(getattr(U_high, "to_local", lambda: U_high)())
-        local_dU = _wait_if_async(getattr(dU, "to_local", lambda: dU)())
-        if local_U_high.size(0) != local_dU.size(0):
-            rank = torch.distributed.get_rank()
-            start = rank * local_dU.size(0)
-            end = start + local_dU.size(0)
-            local_U_high = local_U_high[start:end]
-        proj = local_U_high @ (local_U_high.transpose(0, 1) @ local_dU)
-        local_dU.sub_(proj)
-        dU.copy_(local_dU)
+        # Support distributed tensors by operating on the local shard
+        local_U_high = getattr(U_high, "to_local", lambda: U_high)()
+        local_dU = getattr(dU, "to_local", lambda: dU)()
 
+        # Perform projection computation using memory-efficient operations
+        # Memory-optimized projection: dU = dU - U_high @ (U_high.T @ dU)
+        # Use addmm_ for efficient in-place operation
+        # Compute local contribution to (U_high^T @ dU); all-reduce to get global projection
+        proj_coeff = torch.mm(local_U_high.transpose(0, 1), local_dU)
+        if dist.is_initialized() and dist.get_world_size() > 1:
+            dist.all_reduce(proj_coeff, op=dist.ReduceOp.SUM)
+        # Apply projection using only local rows of U_high
+        local_dU.addmm_(local_U_high, proj_coeff, alpha=-1.0)
+
+        if hasattr(dU, "_local_tensor"):
+            dU._local_tensor.copy_(local_dU)
+        else:
+            dU.copy_(local_dU)
+
+    # Repeat projection for V_low using V_high
     if svd_dict["V_low"].grad is not None:
         dV = svd_dict["V_low"].grad
-        local_V_high = _wait_if_async(getattr(V_high, "to_local", lambda: V_high)())
-        local_dV = _wait_if_async(getattr(dV, "to_local", lambda: dV)())
-        if local_V_high.size(1) != local_dV.size(1):
-            rank = torch.distributed.get_rank()
-            start = rank * local_dV.size(1)
-            end = start + local_dV.size(1)
-            local_V_high = local_V_high[:, start:end]
-        proj = (local_dV @ local_V_high.transpose(0, 1)) @ local_V_high
-        local_dV.sub_(proj)
-        dV.copy_(local_dV)
+        local_V_high = getattr(V_high, "to_local", lambda: V_high)()
+        local_dV = getattr(dV, "to_local", lambda: dV)()
+
+        # Compute Gram matrix G = V_high^T @ V_high for global projection across row-sharded V_high
+        # Assumes column dimension is consistent across ranks (row sharding over singular vectors)
+        G_local = torch.mm(local_V_high.transpose(0, 1), local_V_high)
+        if dist.is_initialized() and dist.get_world_size() > 1:
+            dist.all_reduce(G_local, op=dist.ReduceOp.SUM)
+
+        # Apply projection: dV = dV - dV @ G (use local shard of dV)
+        update = torch.mm(local_dV, G_local)
+        local_dV.add_(update, alpha=-1.0)
+
+        if hasattr(dV, "_local_tensor"):
+            dV._local_tensor.copy_(local_dV)
+        else:
+            dV.copy_(local_dV)

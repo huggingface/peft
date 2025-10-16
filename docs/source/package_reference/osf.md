@@ -105,6 +105,10 @@ config = OSFConfig(
         "gate_proj": 4     # Lower rank for gate projection
     }
 )
+ 
+# Fractional preserved rank is supported (interpreted per-target as fraction * min_dim)
+config = OSFConfig(effective_rank=0.8)  # preserve 80% of min_dim; train remaining 20%
+config = OSFConfig(rank_pattern={"q_proj": 0.5})  # preserve 50% on q_proj, others use global/default
 ```
 
 Note: OSF's `effective_rank` is the preserved (frozen) rank, not the trainable rank. The trainable rank equals `min(weight.shape) - effective_rank`. This differs from LoRA's `r`, which directly specifies the trainable rank.

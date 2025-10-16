@@ -339,6 +339,9 @@ TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING = {
     "qwen3": ["q_proj", "v_proj"],
 }
 
+##################
+# MISC CONSTANTS #
+##################
 WEIGHTS_NAME = "adapter_model.bin"
 SAFETENSORS_WEIGHTS_NAME = "adapter_model.safetensors"
 CONFIG_NAME = "adapter_config.json"
