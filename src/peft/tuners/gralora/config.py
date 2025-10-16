@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2025-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -55,6 +55,15 @@ class GraloraConfig(PeftConfig):
             )
         },
     )
+    init_weights: bool = field(
+        default=True,
+        metadata={
+            "help": (
+                "Whether to initialize the weights of the GraLoRA layers with their default initialization. "
+                "Don't change this setting, except if you know exactly what you're doing."
+            )
+        },
+    )
     layers_to_transform: Optional[Union[list[int], int]] = field(
         default=None,
         metadata={
@@ -76,6 +85,7 @@ class GraloraConfig(PeftConfig):
     )
 
     def __post_init__(self):
+        super().__post_init__()
         self.peft_type = PeftType.GRALORA
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules

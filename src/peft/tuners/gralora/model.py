@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2025-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import re
 import warnings
 from dataclasses import asdict
 from enum import Enum
@@ -27,7 +26,7 @@ from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
 from peft.utils import (
-    TRANSFORMERS_MODELS_TO_ORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
     _get_submodules,
 )
@@ -85,17 +84,6 @@ class GraloraModel(BaseTuner):
                 "set bias to 'none' for all adapters."
             )
 
-        for existing_config in self.peft_config.values():
-            if existing_config is config:
-                # skip the current config
-                continue
-
-            if existing_config.projection_prng_key != config.projection_prng_key:
-                raise ValueError(
-                    f"Gralora PRNG initialisation key must be the same for all adapters. Got {config.projection_prng_key=} but "
-                    f"previous config had {existing_config.projection_prng_key}."
-                )
-
     @staticmethod
     def _check_target_module_exists(gralora_config, key):
         return check_target_module_exists(gralora_config, key)
@@ -113,13 +101,6 @@ class GraloraModel(BaseTuner):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
 
-        pattern = re.compile(r"layers\.(\d+)\.(.+)")
-        match = pattern.search(current_key)
-        if match:
-            module_name = match.group(2).replace(".", "__")
-        else:
-            raise ValueError("Invalid target module type")
-
         r = gralora_config.r
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
@@ -129,22 +110,24 @@ class GraloraModel(BaseTuner):
             "gralora_k": gralora_config.gralora_k,
             "fan_in_fan_out": gralora_config.fan_in_fan_out,
             "hybrid_r": gralora_config.hybrid_r,
+            "init_weights": gralora_config.init_weights,
         }
         kwargs["bias"] = bias
 
         if isinstance(target, Linear):
             target.update_layer(
                 adapter_name,
-                module_name,
+                current_key,
                 r,
                 gralora_config.gralora_alpha,
                 gralora_config.gralora_dropout,
                 gralora_config.gralora_k,
                 gralora_config.hybrid_r,
+                gralora_config.init_weights,
             )
         else:
-            new_module = self._create_new_module(gralora_config, adapter_name, target, module_name, **kwargs)
-            if adapter_name not in self.active_adapter:
+            new_module = self._create_new_module(gralora_config, adapter_name, target, current_key, **kwargs)
+            if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
@@ -267,22 +250,22 @@ class GraloraModel(BaseTuner):
                 warnings.warn(msg)
         self._set_adapter_layers(enabled=False)
 
-    def set_adapter(self, adapter_name):
+    def set_adapter(self, adapter_name, inference_mode: bool = False):
         for module in self.model.modules():
             if isinstance(module, GraloraLayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
-                module.set_adapter(adapter_name)
+                module.set_adapter(adapter_name, inference_mode=inference_mode)
         self.active_adapter = adapter_name
 
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
         if peft_config.target_modules is None:
-            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_ORA_TARGET_MODULES_MAPPING:
+            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
                 raise ValueError("Please specify `target_modules` in `peft_config`")
             peft_config.target_modules = set(
-                TRANSFORMERS_MODELS_TO_ORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
+                TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
             )
         return peft_config
 
