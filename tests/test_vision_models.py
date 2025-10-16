@@ -50,7 +50,7 @@ CONFIGS = {
         r=1, oft_block_size=0, target_modules=["convolution"], modules_to_save=["classifier", "normalization"]
     ),
     "hra": HRAConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
-    # TODO: cannot use BOFT because some convolutional kernel dimensions are even (64) and others odd (147). There is no
+    # Cannot use BOFT because some convolutional kernel dimensions are even (64) and others odd (147). There is no
     # common denominator for the boft_block_size except 1, but using 1 results in an error in the fbd_cuda kernel:
     # > Error in forward_fast_block_diag_cuda_kernel: an illegal memory access was encountered
     # "boft": BOFTConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"], boft_block_size=2),
