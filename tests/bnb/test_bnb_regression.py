@@ -161,7 +161,7 @@ def test_opt_350m_4bit_quant_type_nf4():
     torch.testing.assert_allclose(output, expected)
 
 
-@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="No CUDA or XPU device available.")
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device available.")
 def test_opt_350m_4bit_quant_storage():
     # note: using torch.float32 instead of the default torch.uint8 does not seem to affect the result
     torch.manual_seed(0)

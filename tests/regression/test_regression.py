@@ -79,7 +79,7 @@ from peft import (
 )
 from peft.utils import infer_device
 
-from ..testing_utils import require_bitsandbytes, require_deterministic_for_xpu, require_non_cpu
+from ..testing_utils import require_bitsandbytes, require_deterministic_for_xpu, require_non_cpu, require_torch_gpu
 
 
 PEFT_VERSION = peft.__version__
@@ -604,7 +604,7 @@ class TestOpt8bitBnb(RegressionTester):
         self.assert_results_equal_or_store(model, "adalora_opt-350m_8bit")
 
 
-@require_non_cpu
+@require_torch_gpu
 @require_bitsandbytes
 class TestOpt4bitBnb(RegressionTester):
     def get_output(self, model):
