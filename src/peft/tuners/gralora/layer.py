@@ -224,8 +224,8 @@ class Linear(nn.Linear, GraloraLayer):
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
             adapter_names (`list[str]`, *optional*):
-                The list of adapter names that should be merged. If None, all active adapters will be merged.
-                Defaults to `None`.
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
         """
         from peft.tuners.tuners_utils import check_adapters_to_merge
 
@@ -274,9 +274,8 @@ class Linear(nn.Linear, GraloraLayer):
         """
         Compute the delta weight for GraLoRA adapter.
 
-        GraLoRA applies block-wise low-rank adaptation with information exchange.
-        This method computes the equivalent weight matrix that would be added to
-        the base weight during merge.
+        GraLoRA applies block-wise low-rank adaptation with information exchange. This method computes the equivalent
+        weight matrix that would be added to the base weight during merge.
 
         Args:
             adapter (str): The name of the adapter
