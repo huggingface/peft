@@ -88,16 +88,16 @@ config = OSFConfig()  # Uses model-appropriate defaults
 
 ### Effective Rank Configuration
 
-Control the decomposition rank:
+Control the preserved/trainable subspaces:
 
 ```python
-# Global rank (applies to all target modules)
-config = OSFConfig(effective_rank=16)
+# Global preserved rank (applies to all target modules)
+config = OSFConfig(effective_rank=16)  # preserves top-16 singular directions; trains the rest
 
-# Automatic rank (50% of the smaller matrix dimension per target)
+# Automatic preserved rank (50% of the smaller matrix dimension per target)
 config = OSFConfig(effective_rank=None)
 
-# Per-module rank overrides
+# Per-module preserved-rank overrides
 config = OSFConfig(
     effective_rank=8,
     rank_pattern={
@@ -106,6 +106,9 @@ config = OSFConfig(
     }
 )
 ```
+
+Note: OSF's `effective_rank` is the preserved (frozen) rank, not the trainable rank. The trainable rank equals `min(weight.shape) - effective_rank`. This differs from LoRA's `r`, which directly specifies the trainable rank.
+
 
 ## Training Advice for Continual Learning
 
@@ -120,13 +123,13 @@ model = get_peft_model(base_model, OSFConfig(effective_rank=r))
 train_task(model, task_1_data)
 
 # Task 2: recompute SVD on updated weights and increase preserved subspace
-base_model = model.base_model.model  # unwrap updated base
+base_model = model.unload()  # unwrap base model without assuming internals
 r += 4  # grow preserved subspace to include Task 1 knowledge
 model = get_peft_model(base_model, OSFConfig(effective_rank=r))
 train_task(model, task_2_data)
 
 # Task 3: recompute again and expand preserved subspace further
-base_model = model.base_model.model
+base_model = model.unload()
 r += 4
 model = get_peft_model(base_model, OSFConfig(effective_rank=r))
 train_task(model, task_3_data)
@@ -146,23 +149,23 @@ This approach ensures each task gets adequate learning capacity while progressiv
 ```python
 # Example: 4-task sequence with progressive budget allocation
 n_tasks = 4
-base_rank = 32  # Starting rank for full capacity
+max_preserved_rank = 512  # Upper bound for preserved rank per target (heuristic)
 
 for task_id in range(n_tasks):
-    # Calculate remaining capacity for current task
-    freeze_fraction = task_id / n_tasks
-    remaining_capacity = 1.0 - freeze_fraction
-    current_rank = int(base_rank * remaining_capacity)
-    
+    # Freeze increases over time; trainable capacity shrinks
+    preserved_fraction = (task_id + 1) / n_tasks
+    preserved_rank = int(max_preserved_rank * preserved_fraction)
+
     config = OSFConfig(
         target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
-        effective_rank=current_rank
+        effective_rank=preserved_rank,
     )
-    
-    print(f"Task {task_id + 1}: Using rank {current_rank} "
-          f"({remaining_capacity:.1%} of full capacity)")
-    
-    # Train on current task
+
+    print(
+        f"Task {task_id + 1}: Preserving rank {preserved_rank} "
+        f"({preserved_fraction:.1%} of max_preserved_rank - {max_preserved_rank} frozen); trainable rank = min_dim - preserved_rank"
+    )
+
     model = get_peft_model(base_model, config)
     train_task(model, task_data[task_id])
 ```

@@ -5,6 +5,7 @@ import torch
 from torch.testing import assert_close
 
 from peft import OSFConfig, PeftModel, get_peft_model
+from peft.tuners.osf.layer import OSFLayer
 from peft.tuners.osf.utils import (
     decompose_weight_matrix,
     reconstruct_weight_matrix,
@@ -53,13 +54,21 @@ def test_osf_gradient_projection_hook():
     assert_close(proj_v, torch.zeros_like(proj_v), atol=1e-6, rtol=1e-6)
 
 
-def test_osf_merge_unmerge_unsupported():
+def test_osf_merge_and_unload_and_unmerge_behavior():
     model = DummyModel(DummyConfig())
     cfg = OSFConfig(target_modules=["linear"], effective_rank=2)
     wrapped = get_peft_model(model, cfg)
-    with pytest.raises(NotImplementedError):
-        wrapped.merge_adapter()
+
+    # merge_adapter should work via BaseTuner and OSFLayer.merge
+    osf_linear = wrapped.base_model.model.linear
+    assert isinstance(osf_linear, OSFLayer)
+    wrapped.merge_adapter()
+    assert osf_linear.merged, "OSF layer should be marked as merged after merge_adapter()"
+
+    # unmerge_adapter is not supported for OSF
     with pytest.raises(NotImplementedError):
         wrapped.unmerge_adapter()
-    with pytest.raises(NotImplementedError):
-        wrapped.merge_and_unload()
+
+    # merge_and_unload should return the base model (no OSF wrappers)
+    merged_model = wrapped.merge_and_unload()
+    assert isinstance(merged_model.linear, torch.nn.Linear)

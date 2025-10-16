@@ -281,44 +281,6 @@ TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING = {
     "qwen3": ["q_proj", "v_proj"],
 }
 
-TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING = {
-    "t5": ["q", "v"],
-    "mt5": ["q", "v"],
-    "bart": ["q_proj", "v_proj"],
-    "gpt2": ["mlp.c_proj"],
-    "bloom": ["query_key_value"],
-    "blip-2": ["q", "v", "q_proj", "v_proj"],
-    "opt": ["q_proj", "v_proj"],
-    "gptj": ["q_proj", "v_proj"],
-    "gpt_neox": ["query_key_value"],
-    "gpt_neo": ["q_proj", "v_proj"],
-    "bert": ["query", "value"],
-    "roberta": ["query", "value"],
-    "xlm-roberta": ["query", "value"],
-    "electra": ["query", "value"],
-    "deberta-v2": ["query_proj", "value_proj"],
-    "deberta": ["in_proj"],
-    "layoutlm": ["query", "value"],
-    "llama": ["q_proj", "v_proj"],
-    "llama4": ["q_proj", "v_proj"],
-    "chatglm": ["query_key_value"],
-    "gpt_bigcode": ["mlp.c_proj"],
-    "mpt": ["Wqkv"],
-    "RefinedWebModel": ["query_key_value"],
-    "RefinedWeb": ["query_key_value"],
-    "falcon": ["query_key_value"],
-    "codegen": ["qkv_proj"],
-    "mistral": ["q_proj", "v_proj"],
-    "mixtral": ["q_proj", "v_proj"],
-    "stablelm": ["q_proj", "v_proj"],
-    "phi": ["q_proj", "v_proj", "fc1", "fc2"],
-    "gemma": ["q_proj", "v_proj"],
-    "gemma2": ["q_proj", "v_proj"],
-    "gemma3_text": ["q_proj", "v_proj"],
-    "qwen2": ["q_proj", "v_proj"],
-    "qwen3": ["q_proj", "v_proj"],
-}
-
 TRANSFORMERS_MODELS_TO_OSF_TARGET_MODULES_MAPPING = {
     "llama": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "down_proj", "up_proj"],
     "llama4": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "down_proj", "up_proj"],
@@ -338,10 +300,6 @@ TRANSFORMERS_MODELS_TO_OSF_TARGET_MODULES_MAPPING = {
     "falcon": ["query_key_value", "dense_4h_to_h"],
     "gpt_bigcode": ["c_attn", "c_proj"],
 }
-
-TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING = (
-    TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING  # Leaving this for now but RandLoRA is flexible
-)
 
 TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING = {
     "t5": ["q", "v"],

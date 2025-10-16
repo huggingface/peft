@@ -14,16 +14,25 @@ class OSFConfig(PeftConfig):
     
     Args:
         effective_rank (`int`, *optional*):
-            The effective rank for OSF decomposition. If None, defaults to 50% of min(weight.shape).
+            Preserved SVD rank ("high" subspace). The top-``effective_rank`` singular directions are frozen and
+            retained across tasks; the remaining dimensions form the trainable low-rank subspace. If `None`, defaults
+            to 50% of the smaller weight dimension per target module.
+            Note: This differs from LoRA's `r` (trainable rank). In OSF, the trainable rank is
+            `min(weight.shape) - effective_rank`.
         target_modules (`Union[list[str], str]`, *optional*):
-            The names of the modules to apply OSF to. Can be a list of module names or 'all-linear'.
+            The names of the modules to apply OSF to. Can be a list of module names or `"all-linear"`.
         rank_pattern (`dict[str, int]`, *optional*):
-            A dictionary of regex patterns to override effective_rank for specific modules.
+            A dictionary of regex patterns to override `effective_rank` for specific modules.
     """
 
     effective_rank: Optional[int] = field(
         default=None,
-        metadata={"help": "The effective rank for OSF decomposition. If None, defaults to 50% of min(weight.shape)."}
+        metadata={
+            "help": (
+                "Preserved SVD rank (frozen). Trainable rank equals min(weight.shape) - effective_rank. "
+                "If None, defaults to 50% of the smaller weight dimension."
+            )
+        },
     )
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,
