@@ -457,10 +457,10 @@ class BOFTLayer(BaseTunerLayer):
         skew_mat = 0.5 * (data - data.transpose(1, 2))
         id_mat = torch.eye(r, device=data.device).unsqueeze(0).expand(b, r, c)
 
-        # Perform the Cayley parametrization
+        # Perform the Cayley parametrization, must be in float32
         Q = torch.linalg.solve(id_mat + skew_mat, id_mat - skew_mat, left=False)
 
-        return Q
+        return Q.to(data.dtype)
 
 
 class Linear(nn.Module, BOFTLayer):
