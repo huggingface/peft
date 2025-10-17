@@ -526,7 +526,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
     def test_deeply_nested(self):
         # a somewhat absurdly nested model using different adapter types
         if platform.system() == "Linux":
-            self.skipTest("This test fails but only on GitHub CI with Linux systems.")
+            pytest.skip("This test fails but only on GitHub CI with Linux systems.")
 
         atol = 1e-5
         rtol = 1e-5
