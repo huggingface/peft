@@ -531,3 +531,552 @@ class TestGralora:
 
         # Outputs should be different due to different scaling
         assert not torch.allclose(out1, out2, atol=1e-6, rtol=1e-6)
+
+    def test_gralora_safe_merge_success(self):
+        """Test safe_merge with valid weights"""
+        torch.manual_seed(0)
+        mlp = MLP()
+        config = GraloraConfig(
+            target_modules=["lin1"],
+            r=8,
+            gralora_k=2,
+            hybrid_r=0,
+            init_weights=False,
+        )
+        model = get_peft_model(mlp, config)
+
+        x = torch.randn(5, 10)
+        with torch.no_grad():
+            output_before = model(x)
+
+        # Test safe merge
+        model.base_model.model.lin1.merge(safe_merge=True)
+
+        with torch.no_grad():
+            output_after = model(x)
+
+        assert torch.allclose(output_before, output_after, atol=1e-4, rtol=1e-4)
+
+    def test_gralora_safe_merge_detects_nan(self):
+        """Test that safe_merge detects NaN values"""
+        torch.manual_seed(0)
+        mlp = MLP()
+        config = GraloraConfig(
+            target_modules=["lin1"],
+            r=8,
+            gralora_k=2,
+            hybrid_r=0,
+        )
+        model = get_peft_model(mlp, config)
+
+        # Inject NaN into adapter weights (use .data to avoid requires_grad error)
+        model.base_model.model.lin1.gralora_A["default"].data[0, 0, 0] = float("nan")
+
+        # safe_merge should raise ValueError
+        with pytest.raises(ValueError, match="NaNs detected"):
+            model.base_model.model.lin1.merge(safe_merge=True)
+
+    def test_gralora_unmerge_warning_when_not_merged(self):
+        """Test that unmerge warns when already unmerged"""
+        torch.manual_seed(0)
+        mlp = MLP()
+        config = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2)
+        model = get_peft_model(mlp, config)
+
+        # Try to unmerge without merging first
+        with pytest.warns(UserWarning, match="Already unmerged"):
+            model.base_model.model.lin1.unmerge()
+
+    def test_gralora_hybrid_forward_computation(self):
+        """Test that hybrid LoRA component is used in forward pass"""
+        torch.manual_seed(0)
+        mlp_hybrid = MLP()
+        mlp_pure = MLP()
+
+        config_hybrid = GraloraConfig(
+            target_modules=["lin1"],
+            r=16,
+            gralora_k=4,
+            hybrid_r=4,
+            init_weights=False,
+        )
+        model_hybrid = get_peft_model(mlp_hybrid, config_hybrid)
+
+        config_pure = GraloraConfig(
+            target_modules=["lin1"],
+            r=16,
+            gralora_k=4,
+            hybrid_r=0,
+            init_weights=False,
+        )
+        model_pure = get_peft_model(mlp_pure, config_pure)
+
+        x = torch.randn(5, 10)
+
+        with torch.no_grad():
+            output_hybrid = model_hybrid(x)
+            output_pure = model_pure(x)
+
+        # Outputs should be different due to hybrid component
+        assert not torch.allclose(output_hybrid, output_pure, atol=1e-3)
+
+    def test_gralora_invalid_rank_zero(self):
+        """Test that r=0 raises error"""
+        mlp = MLP()
+        config = GraloraConfig(target_modules=["lin1"], r=0, gralora_k=2)
+
+        with pytest.raises(ValueError, match="`r` should be a positive integer"):
+            get_peft_model(mlp, config)
+
+    def test_gralora_invalid_rank_negative(self):
+        """Test that negative r raises error"""
+        mlp = MLP()
+        config = GraloraConfig(target_modules=["lin1"], r=-1, gralora_k=2)
+
+        with pytest.raises(ValueError, match="`r` should be a positive integer"):
+            get_peft_model(mlp, config)
+
+    def test_gralora_bias_all(self):
+        """Test bias='all' configuration"""
+        torch.manual_seed(0)
+        mlp = MLP(bias=True)
+        config = GraloraConfig(
+            target_modules=["lin1"],
+            r=8,
+            gralora_k=2,
+            bias="all",
+        )
+        model = get_peft_model(mlp, config)
+
+        # Check that all bias parameters are trainable
+        bias_params = [name for name, param in model.named_parameters() if "bias" in name and param.requires_grad]
+        assert len(bias_params) > 0, "At least some bias parameters should be trainable"
+
+    def test_gralora_bias_gralora_only(self):
+        """Test bias='gralora_only' configuration"""
+        torch.manual_seed(0)
+        mlp = MLP(bias=True)
+        config = GraloraConfig(
+            target_modules=["lin1"],
+            r=8,
+            gralora_k=2,
+            bias="gralora_only",
+        )
+        model = get_peft_model(mlp, config)
+
+        # Only GraLoRA layer biases should be trainable
+        assert model.base_model.model.lin1.bias.requires_grad
+        assert not model.base_model.model.lin0.bias.requires_grad
+
+    def test_gralora_multiple_adapters_with_bias_raises(self):
+        """Test that multiple adapters with bias raises error"""
+        torch.manual_seed(0)
+        mlp = MLP()
+        config1 = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2, bias="all")
+        model = get_peft_model(mlp, config1)
+
+        config2 = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2, bias="all")
+
+        with pytest.raises(ValueError, match="supports only 1 adapter with bias"):
+            model.add_adapter("adapter2", config2)
+
+    def test_gralora_cpu_fp16_merge(self):
+        """Test merge with fp16 on CPU"""
+        torch.manual_seed(0)
+        mlp = MLP().to(torch.float16)
+        config = GraloraConfig(
+            target_modules=["lin1"],
+            r=8,
+            gralora_k=2,
+            hybrid_r=0,
+            init_weights=False,
+        )
+        model = get_peft_model(mlp, config)
+
+        x = torch.randn(5, 10).to(torch.float16)
+
+        with torch.no_grad():
+            output_before = model(x)
+
+        # Merge (should handle CPU fp16 correctly)
+        model.merge_adapter()
+
+        with torch.no_grad():
+            output_after = model(x)
+
+        assert torch.allclose(output_before, output_after, atol=1e-2, rtol=1e-2)
+
+    def test_gralora_cpu_bf16_merge(self):
+        """Test merge with bf16 on CPU (if supported)"""
+        # Check if bfloat16 is supported
+        try:
+            _ = torch.randn(2, 2).to(torch.bfloat16)
+        except RuntimeError:
+            pytest.skip("bfloat16 not supported on this system")
+
+        torch.manual_seed(0)
+        mlp = MLP().to(torch.bfloat16)
+        config = GraloraConfig(
+            target_modules=["lin1"],
+            r=8,
+            gralora_k=2,
+            hybrid_r=2,
+            init_weights=False,
+        )
+        model = get_peft_model(mlp, config)
+
+        x = torch.randn(5, 10).to(torch.bfloat16)
+
+        with torch.no_grad():
+            output_before = model(x)
+
+        # Merge with hybrid component
+        model.merge_adapter()
+
+        with torch.no_grad():
+            output_after = model(x)
+
+        assert torch.allclose(output_before, output_after, atol=1e-2, rtol=1e-2)
+
+    def test_gralora_disable_adapter_layers_warns_with_bias(self):
+        """Test that disable_adapter_layers warns when bias is configured"""
+        torch.manual_seed(0)
+        mlp = MLP()
+        config = GraloraConfig(
+            target_modules=["lin1"],
+            r=8,
+            gralora_k=2,
+            bias="all",
+        )
+        model = get_peft_model(mlp, config)
+
+        with pytest.warns(UserWarning, match="disabling adapter layers with bias"):
+            model.disable_adapter_layers()
+
+    def test_gralora_set_adapter_warns_when_merged(self):
+        """Test that set_adapter warns and unmerges when model is merged"""
+        torch.manual_seed(0)
+        mlp = MLP()
+        config1 = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2)
+        model = get_peft_model(mlp, config1, adapter_name="adapter1")
+
+        config2 = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2)
+        model.add_adapter("adapter2", config2)
+
+        # Merge first adapter
+        model.merge_adapter()
+
+        # Setting adapter should warn and unmerge
+        with pytest.warns(UserWarning, match="Adapter cannot be set when the model is merged"):
+            model.set_adapter("adapter2")
+
+        # Model should be unmerged now
+        assert not model.base_model.model.lin1.merged
+
+    def test_gralora_delete_adapter(self):
+        """Test deleting an adapter"""
+        torch.manual_seed(0)
+        mlp = MLP()
+        config = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2)
+        model = get_peft_model(mlp, config, adapter_name="adapter1")
+
+        config2 = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2)
+        model.add_adapter("adapter2", config2)
+
+        # Delete adapter1
+        model.delete_adapter("adapter1")
+
+        assert "adapter1" not in model.peft_config
+        assert "adapter2" in model.peft_config
+
+    def test_gralora_delete_nonexistent_adapter_raises(self):
+        """Test that deleting nonexistent adapter raises error"""
+        torch.manual_seed(0)
+        mlp = MLP()
+        config = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2)
+        model = get_peft_model(mlp, config)
+
+        with pytest.raises(ValueError, match="Adapter .* does not exist"):
+            model.delete_adapter("nonexistent")
+
+    def test_gralora_unload_without_merge(self):
+        """Test unload without merging"""
+        torch.manual_seed(0)
+        mlp = MLP()
+        config = GraloraConfig(
+            target_modules=["lin1"],
+            r=8,
+            gralora_k=2,
+            init_weights=False,
+        )
+        model = get_peft_model(mlp, config)
+
+        x = torch.randn(5, 10)
+
+        # Get base model output
+        with model.disable_adapter():
+            with torch.no_grad():
+                base_output = model(x)
+
+        # Unload without merge
+        unloaded_model = model.unload()
+
+        with torch.no_grad():
+            unloaded_output = unloaded_model(x)
+
+        # Should match base model output (no merge)
+        assert torch.allclose(base_output, unloaded_output, atol=1e-5)
+
+    def test_gralora_get_peft_config_as_dict(self):
+        """Test get_peft_config_as_dict method"""
+        torch.manual_seed(0)
+        mlp = MLP()
+        config = GraloraConfig(
+            target_modules=["lin1"],
+            r=8,
+            gralora_k=2,
+            hybrid_r=4,
+            gralora_alpha=16,
+        )
+        model = get_peft_model(mlp, config)
+
+        config_dict = model.get_peft_config_as_dict(inference=False)
+
+        assert "default" in config_dict
+        assert config_dict["default"]["r"] == 8
+        assert config_dict["default"]["gralora_k"] == 2
+        assert config_dict["default"]["hybrid_r"] == 4
+
+    def test_gralora_get_peft_config_as_dict_inference_mode(self):
+        """Test get_peft_config_as_dict with inference=True"""
+        torch.manual_seed(0)
+        mlp = MLP()
+        config = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2)
+        model = get_peft_model(mlp, config)
+
+        config_dict = model.get_peft_config_as_dict(inference=True)
+
+        assert config_dict["default"]["inference_mode"] is True
+
+    def test_gralora_merge_with_hybrid_component(self):
+        """Test that merge works correctly with hybrid component"""
+        torch.manual_seed(0)
+        mlp = MLP()
+        config = GraloraConfig(
+            target_modules=["lin1"],
+            r=16,
+            gralora_k=4,
+            hybrid_r=4,
+            init_weights=False,
+        )
+        model = get_peft_model(mlp, config)
+
+        x = torch.randn(5, 10)
+
+        with torch.no_grad():
+            output_before = model(x)
+
+        # Merge
+        model.merge_adapter()
+
+        with torch.no_grad():
+            output_after = model(x)
+
+        # Outputs should be very close
+        assert torch.allclose(output_before, output_after, atol=1e-4, rtol=1e-4)
+
+    def test_gralora_repr(self):
+        """Test __repr__ method"""
+        torch.manual_seed(0)
+        mlp = MLP()
+        config = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2)
+        model = get_peft_model(mlp, config)
+
+        repr_str = repr(model.base_model.model.lin1)
+        assert "gralora" in repr_str.lower()
+
+    def test_gralora_merge_with_adapter_names(self):
+        """Test merge with specific adapter names"""
+        torch.manual_seed(0)
+        mlp = MLP()
+        config1 = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2, init_weights=False)
+        model = get_peft_model(mlp, config1, adapter_name="adapter1")
+
+        torch.manual_seed(42)
+        config2 = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2, init_weights=False)
+        model.add_adapter("adapter2", config2)
+
+        x = torch.randn(5, 10)
+
+        # Set to adapter1 and get output
+        model.set_adapter("adapter1")
+        with torch.no_grad():
+            output_before = model(x)
+
+        # Merge only adapter1
+        model.base_model.model.lin1.merge(adapter_names=["adapter1"])
+
+        with torch.no_grad():
+            output_after = model(x)
+
+        # Outputs should be close
+        assert torch.allclose(output_before, output_after, atol=1e-4, rtol=1e-4)
+
+    def test_gralora_enable_disable_adapter_layers(self):
+        """Test enable/disable adapter layers"""
+        torch.manual_seed(0)
+        mlp = MLP()
+        config = GraloraConfig(
+            target_modules=["lin1"],
+            r=8,
+            gralora_k=2,
+            init_weights=False,
+        )
+        model = get_peft_model(mlp, config)
+
+        x = torch.randn(5, 10)
+
+        # Get output with adapter enabled
+        with torch.no_grad():
+            output_enabled = model(x)
+
+        # Disable adapters
+        model.disable_adapter_layers()
+
+        with torch.no_grad():
+            output_disabled = model(x)
+
+        # Enable adapters
+        model.enable_adapter_layers()
+
+        with torch.no_grad():
+            output_re_enabled = model(x)
+
+        # Output with disabled adapter should be different
+        assert not torch.allclose(output_enabled, output_disabled, atol=1e-6)
+        # Output after re-enabling should match original
+        assert torch.allclose(output_enabled, output_re_enabled, atol=1e-6)
+
+    def test_gralora_forward_with_merged_adapter(self):
+        """Test forward pass with merged adapter"""
+        torch.manual_seed(0)
+        mlp = MLP()
+        config = GraloraConfig(
+            target_modules=["lin1"],
+            r=8,
+            gralora_k=2,
+            init_weights=False,
+        )
+        model = get_peft_model(mlp, config)
+
+        x = torch.randn(5, 10)
+
+        # Get output before merge
+        with torch.no_grad():
+            output_before = model(x)
+
+        # Merge adapter
+        model.merge_adapter()
+
+        # Forward with merged adapter (should take merged path)
+        with torch.no_grad():
+            output_after = model(x)
+
+        assert torch.allclose(output_before, output_after, atol=1e-4)
+
+    def test_gralora_forward_with_disable_adapters_and_merged(self):
+        """Test forward when disable_adapters=True and model is merged"""
+        torch.manual_seed(0)
+        mlp = MLP()
+        config = GraloraConfig(
+            target_modules=["lin1"],
+            r=8,
+            gralora_k=2,
+            init_weights=False,
+        )
+        model = get_peft_model(mlp, config)
+
+        x = torch.randn(5, 10)
+
+        # Merge adapter
+        model.merge_adapter()
+
+        # Get output with merged adapter
+        with torch.no_grad():
+            output_merged = model(x)
+
+        # Disable adapters (should unmerge)
+        with model.disable_adapter():
+            with torch.no_grad():
+                output_disabled = model(x)
+
+        # Outputs should be different
+        assert not torch.allclose(output_merged, output_disabled, atol=1e-5)
+
+    def test_gralora_bias_invalid_option_raises(self):
+        """Test that invalid bias option raises NotImplementedError"""
+        torch.manual_seed(0)
+        mlp = MLP()
+
+        # Create config with invalid bias (need to bypass validation)
+        config = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2)
+        model = get_peft_model(mlp, config)
+
+        # Manually set invalid bias to trigger the error
+        model.peft_config["default"].bias = "invalid_option"
+
+        with pytest.raises(NotImplementedError, match="Requested bias"):
+            model._mark_only_adapters_as_trainable(model.model)
+
+    def test_gralora_merge_empty_adapter_names(self):
+        """Test merge with empty adapter_names returns early"""
+        torch.manual_seed(0)
+        mlp = MLP()
+        config = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2)
+        model = get_peft_model(mlp, config)
+
+        # Call merge with empty list (should return early)
+        model.base_model.model.lin1.merge(adapter_names=[])
+
+        # Model should not be merged
+        assert not model.base_model.model.lin1.merged
+
+    def test_gralora_add_non_active_adapter(self):
+        """Test adding adapter that is not active (should not be trainable)"""
+        torch.manual_seed(0)
+        mlp = MLP()
+        config1 = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2)
+        model = get_peft_model(mlp, config1, adapter_name="adapter1")
+
+        # Keep adapter1 active
+        model.set_adapter("adapter1")
+
+        # Add adapter2 (should not be active/trainable initially)
+        torch.manual_seed(42)
+        config2 = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2)
+        model.add_adapter("adapter2", config2)
+
+        # adapter2 parameters should exist but might not be in active_adapters initially
+        assert "adapter2" in model.base_model.model.lin1.gralora_A
+
+    def test_gralora_forward_with_no_adapter_in_active_list(self):
+        """Test forward when active_adapter is not in gralora_A keys"""
+        torch.manual_seed(0)
+        mlp = MLP()
+        config = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2)
+        model = get_peft_model(mlp, config, adapter_name="adapter1")
+
+        x = torch.randn(5, 10)
+
+        # Manually set _active_adapter to include non-existent adapter
+        original_adapter = model.base_model.model.lin1._active_adapter
+        model.base_model.model.lin1._active_adapter = ["nonexistent", "adapter1"]
+
+        # Should still work (skip nonexistent adapter)
+        with torch.no_grad():
+            output = model(x)
+
+        assert output.shape == (5, 2)
+
+        # Restore
+        model.base_model.model.lin1._active_adapter = original_adapter

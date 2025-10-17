@@ -228,8 +228,8 @@ class GraloraModel(BaseTuner):
             config = {k: v.value if isinstance(v, Enum) else v for k, v in asdict(value).items()}
             if inference:
                 config["inference_mode"] = True
-        config_dict[key] = config
-        return config
+            config_dict[key] = config
+        return config_dict
 
     def _set_adapter_layers(self, enabled=True):
         for module in self.model.modules():
