@@ -343,7 +343,7 @@ class TestArrowRouting:
 
         # Create base in fp16 (no manual assignment to .dtype)
         with hub_online_once(model_id):
-            base = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float16)
+            base = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch.float16)
 
         cfg = ArrowConfig(top_k=2)
 
@@ -353,7 +353,7 @@ class TestArrowRouting:
             task_specific_adapter_paths=ts_adapters,
             arrow_config=cfg,
             autocast_adapter_dtype=False,
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
         ).eval()
 
         X = {

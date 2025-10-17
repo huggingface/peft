@@ -60,7 +60,7 @@ def test_opt_350m_4bit():
     model = AutoModelForCausalLM.from_pretrained(
         "facebook/opt-350m",
         quantization_config=bnb_config,
-        torch_dtype=torch.float32,
+        dtype=torch.float32,
     )
 
     input = torch.LongTensor([[1, 0, 1, 0, 1, 2]]).to(device)
@@ -79,7 +79,7 @@ def test_opt_350m_8bit():
     model = AutoModelForCausalLM.from_pretrained(
         "facebook/opt-350m",
         quantization_config=bnb_config,
-        torch_dtype=torch.float32,
+        dtype=torch.float32,
     )
 
     input = torch.LongTensor([[1, 0, 1, 0, 1, 2]]).to(device)
@@ -102,7 +102,7 @@ def test_opt_350m_4bit_double_quant():
     model = AutoModelForCausalLM.from_pretrained(
         "facebook/opt-350m",
         quantization_config=bnb_config,
-        torch_dtype=torch.float32,
+        dtype=torch.float32,
     )
 
     input = torch.LongTensor([[1, 0, 1, 0, 1, 2]]).to(device)
@@ -125,7 +125,7 @@ def test_opt_350m_4bit_compute_dtype_float16():
     model = AutoModelForCausalLM.from_pretrained(
         "facebook/opt-350m",
         quantization_config=bnb_config,
-        torch_dtype=torch.float32,
+        dtype=torch.float32,
     )
 
     input = torch.LongTensor([[1, 0, 1, 0, 1, 2]]).to(device)
@@ -149,7 +149,7 @@ def test_opt_350m_4bit_quant_type_nf4():
     model = AutoModelForCausalLM.from_pretrained(
         "facebook/opt-350m",
         quantization_config=bnb_config,
-        torch_dtype=torch.float32,
+        dtype=torch.float32,
     )
 
     input = torch.LongTensor([[1, 0, 1, 0, 1, 2]]).to(device)
@@ -174,7 +174,7 @@ def test_opt_350m_4bit_quant_storage():
     model = AutoModelForCausalLM.from_pretrained(
         "facebook/opt-350m",
         quantization_config=bnb_config,
-        torch_dtype=torch.float32,
+        dtype=torch.float32,
     )
 
     input = torch.LongTensor([[1, 0, 1, 0, 1, 2]]).to(device)
@@ -196,7 +196,7 @@ def test_opt_350m_8bit_threshold():
     model = AutoModelForCausalLM.from_pretrained(
         "facebook/opt-350m",
         quantization_config=bnb_config,
-        torch_dtype=torch.float32,
+        dtype=torch.float32,
     )
 
     input = torch.LongTensor([[1, 0, 1, 0, 1, 2]]).to(device)
@@ -224,7 +224,7 @@ def test_flan_t5_4bit():
     model = AutoModelForSeq2SeqLM.from_pretrained(
         "google/flan-t5-base",
         quantization_config=bnb_config,
-        torch_dtype=torch.float32,
+        dtype=torch.float32,
     )
 
     input = torch.LongTensor([[1, 0, 1, 0, 1, 2]]).to(device)
@@ -245,7 +245,7 @@ def test_flan_t5_8bit():
     model = AutoModelForSeq2SeqLM.from_pretrained(
         "google/flan-t5-base",
         quantization_config=bnb_config,
-        torch_dtype=torch.float32,
+        dtype=torch.float32,
     )
 
     input = torch.LongTensor([[1, 0, 1, 0, 1, 2]]).to(device)

@@ -91,9 +91,9 @@ class MockTransformerWrapper:
         # set the seed so that from_pretrained always returns the same model
         torch.manual_seed(0)
 
-        torch_dtype = torch.float32
+        dtype = torch.float32
 
-        return DummyLM().to(torch_dtype)
+        return DummyLM().to(dtype)
 
 
 VARIANT_MAP = {

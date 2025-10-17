@@ -491,7 +491,7 @@ class PeftCommonTester:
             pytest.skip("PyTorch 2.1 not supported for Half of addmm_impl_cpu_ ")
 
         with hub_online_once(model_id):
-            model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16)
+            model = self.transformers_class.from_pretrained(model_id, dtype=torch.float16)
             config = config_cls(
                 base_model_name_or_path=model_id,
                 **config_kwargs,
@@ -975,7 +975,7 @@ class PeftCommonTester:
         _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs)
 
         with hub_online_once(model_id):
-            model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16)
+            model = self.transformers_class.from_pretrained(model_id, dtype=torch.bfloat16)
             config = config_cls(
                 base_model_name_or_path=model_id,
                 **config_kwargs,
