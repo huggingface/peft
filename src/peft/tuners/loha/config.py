@@ -72,22 +72,21 @@ class LoHaConfig(LycorisConfig):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
     """
 
-    r: int = field(default=8, metadata={"help": "LoHa rank (used for both r1 and r2 if they are not specified)"})
-    r1: Optional[int] = field(
-        default=None,
+    r: int = field(
+        default=8, 
         metadata={
             "help": (
-                "Rank for the first Hadamard component (w1a @ w1b). "
-                "If not specified, defaults to r/2 for ABBA-style initialization, or r otherwise."
+                "LoHa rank for the first Hadamard component. For standard LoHa, both components use this rank. "
+                "For asymmetric ranks, use r2 to specify a different rank for the second component."
             )
-        },
+        }
     )
     r2: Optional[int] = field(
         default=None,
         metadata={
             "help": (
                 "Rank for the second Hadamard component (w2a @ w2b). "
-                "If not specified, defaults to r/2 for ABBA-style initialization, or r otherwise."
+                "If not specified, defaults to r (symmetric ranks)."
             )
         },
     )
@@ -107,15 +106,16 @@ class LoHaConfig(LycorisConfig):
             )
         },
     )
-    use_khatri_rao: bool = field(
-        default=False,
+    use_khatri_rao: Union[bool, Literal["auto"]] = field(
+        default="auto",
         metadata={
             "help": (
                 "Use Khatri-Rao product optimization to reduce memory overhead. "
                 "This reparameterizes the update using Khatri-Rao product instead of "
                 "constructing full B1A1 and B2A2 matrices, reducing memory footprint "
                 "to be similar to LoRA while maintaining expressiveness. "
-                "Note: Automatically enabled when init_weights='abba' (per ABBA paper recommendation)."
+                "When set to 'auto' (default), it is enabled for ABBA initialization (per paper recommendation) "
+                "and disabled for standard LoHa. Set to True or False to explicitly control this behavior."
             )
         },
     )
@@ -141,8 +141,7 @@ class LoHaConfig(LycorisConfig):
                 "which initializes weights to approximate the pretrained weights using SVD decomposition. "
                 "ABBA initialization can improve training stability and convergence. "
                 "Based on the ABBA paper: https://arxiv.org/pdf/2505.14238. "
-                "See https://github.com/huggingface/peft/issues/2587 for implementation details. "
-                "Note: When 'abba' is used, use_khatri_rao is automatically enabled for memory efficiency."
+                "See https://github.com/huggingface/peft/issues/2587 for implementation details."
             ),
         },
     )
