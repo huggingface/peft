@@ -2258,6 +2258,10 @@ class TestPeftCustomModel(PeftCommonTester):
         if config_kwargs.get("use_dora") and model_id == "EmbConv1D":
             atol, rtol = 1e-4, 1e-4
 
+        # ABBA Conv layers have slightly more numerical instability during merge/unmerge
+        if config_kwargs.get("init_weights") == "abba" and model_id in ["Conv1d", "Conv1dBigger", "Conv2d", "Conv2d1x1"]:
+            atol, rtol = 1e-4, 1e-4
+
         # check that there is a difference in results after training
         assert not torch.allclose(outputs_before, outputs_after, atol=atol, rtol=rtol)
 
