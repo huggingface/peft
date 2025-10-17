@@ -32,6 +32,7 @@ from peft import (
     BoneConfig,
     C3AConfig,
     CPTConfig,
+    DeloraConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -117,6 +118,14 @@ ALL_CONFIGS = [
             "cpt_token_ids": [0, 1, 2, 3, 4, 5, 6, 7],  # Example token IDs for testing
             "cpt_mask": [1, 1, 1, 1, 1, 1, 1, 1],
             "cpt_tokens_type_mask": [1, 2, 2, 2, 3, 3, 4, 4],
+        },
+    ),
+    (
+        DeloraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "r": 2,
         },
     ),
     (
@@ -290,8 +299,9 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         ShiraConfig,
         C3AConfig,
         MissConfig,
+        DeloraConfig,
     ]:
-        pytest.skip("Skipping BOFT/HRA/OFT/Bone/Road/SHiRA/C3A/MiSS for GPT2LMHeadModel")
+        pytest.skip("Skipping BOFT/HRA/OFT/Bone/Road/SHiRA/C3A/MiSS/DeLoRA for GPT2LMHeadModel")
 
 
 def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
@@ -304,8 +314,9 @@ def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
         C3AConfig,
         RoadConfig,
         MissConfig,
+        DeloraConfig,
     ]:
-        pytest.skip("Skipping AdaLora/BOFT/HRA/OFT/Bone/MiSS for GPT2LMHeadModel")
+        pytest.skip("Skipping AdaLora/BOFT/HRA/OFT/Bone/MiSS/DeLoRA for GPT2LMHeadModel")
 
 
 def _skip_alora_no_activation(config_cls, config_kwargs):
