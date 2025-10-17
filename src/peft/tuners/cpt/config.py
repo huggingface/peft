@@ -81,13 +81,9 @@ class CPTConfig(PromptLearningConfig):
         self.num_transformer_submodules = 1  # Number of transformer submodules used.
         self.peft_type = PeftType.CPT  # Specifies that the PEFT type is CPT.
         if self.task_type != TaskType.CAUSAL_LM:
-            # TODO: adjust this to raise an error with PEFT v0.18.0
-            warnings.warn(
-                f"{self.__class__.__name__} only supports task_type = {TaskType.CAUSAL_LM.value}, "
-                "setting it automatically. This will raise an error starting from PEFT v0.18.0.",
-                FutureWarning,
+            raise ValueError(
+                f"{self.__class__.__name__} only supports task_type = {TaskType.CAUSAL_LM.value}."
             )
-            self.task_type = TaskType.CAUSAL_LM  # Ensures task type is causal language modeling.
 
         if self.cpt_token_ids is None:
             self.cpt_token_ids = [0]
