@@ -36,6 +36,7 @@ from peft import (
     BOFTConfig,
     BoneConfig,
     C3AConfig,
+    DeloraConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -848,6 +849,19 @@ TEST_CASES = [
         WaveFTConfig,
         {"target_modules": "lin0", "n_frequency": 16, "wavelet_family": "db1", "proportional_parameters": True},
     ),
+    ##########
+    # DeLoRA #
+    ##########
+    ("Vanilla MLP 1 DeLoRA", "MLP", DeloraConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 DeLoRA", "MLP", DeloraConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 DeLoRA", "MLP", DeloraConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 DeLoRA", "MLP", DeloraConfig, {"target_modules": ["lin0", "lin1"]}),
+    (
+        "Vanilla MLP 5 DeLoRA",
+        "MLP",
+        DeloraConfig,
+        {"target_modules": ["lin0"], "module_dropout": 0.1},
+    ),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
 
@@ -1118,6 +1132,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_weights": False, "n_frequency": 8},
         {"target_modules": ["lin1"], "init_weights": False, "n_frequency": 8},
     ),
+    (
+        "DeLoRA Same",
+        "delora",
+        DeloraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "DeLoRA Different",
+        "delora",
+        DeloraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin1"], "init_weights": False},
+    ),
 ]
 
 PREFIXES = {
@@ -1138,6 +1166,7 @@ PREFIXES = {
     BoneConfig: "bone_",
     RoadConfig: "road_",
     MissConfig: "miss_",
+    DeloraConfig: "delora_",
     TrainableTokensConfig: "trainable_tokens_",
     WaveFTConfig: "waveft_",
 }
