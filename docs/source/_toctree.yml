@@ -90,6 +90,8 @@
       title: LoKr
     - local: package_reference/lora
       title: LoRA
+    - local: package_reference/osf
+      title: OSF
     - local: package_reference/xlora
       title: X-LoRA
     - local: package_reference/adapter_utils
@@ -143,6 +145,8 @@
       title: Model merge
     - local: package_reference/helpers
       title: Helpers
+    - local: package_reference/osf_utils
+      title: OSF utilities
     - local: package_reference/hotswap
       title: Hotswapping adapters
     - local: package_reference/functional
