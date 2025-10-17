@@ -53,6 +53,7 @@ RUN source activate peft && \
     "soundfile>=0.12.1" \
     scipy \
     torchao \
+    fbgemm-gpu-genai>=1.2.0 \
     git+https://github.com/huggingface/transformers \
     git+https://github.com/huggingface/accelerate \
     peft[test]@git+https://github.com/huggingface/peft \

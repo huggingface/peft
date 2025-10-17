@@ -4054,14 +4054,13 @@ class PeftTorchaoGPUTests(unittest.TestCase):
     supported_quant_types = [
         "int8_weight_only",
         "int8_dynamic_activation_int8_weight",
-        # int4_weight_only raises an error:
-        # RuntimeError: derivative for aten::_weight_int4pack_mm is not implemented
-        # "int4_weight_only",
+        "int4_weight_only",
     ]
 
     def setUp(self):
         self.causal_lm_model_id = "facebook/opt-125m"
         self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+        self.dtype = torch.bfloat16  # better support in torchao
         # torchao breaks with fp16 and if a previous test uses fp16, transformers will set this env var, which affects
         # subsequent tests, therefore the env var needs to be cleared explicitly
         #
@@ -4085,7 +4084,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             quantization_config = TorchAoConfig(quant_type=quant_type)
             model = AutoModelForCausalLM.from_pretrained(
-                self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
+                self.causal_lm_model_id, device_map=device, quantization_config=quantization_config, dtype=self.dtype
             )
             model = prepare_model_for_kbit_training(model)
 
@@ -4136,7 +4135,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             quantization_config = TorchAoConfig(quant_type="int8_weight_only")
             model = AutoModelForCausalLM.from_pretrained(
-                self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
+                self.causal_lm_model_id, device_map=device, quantization_config=quantization_config, dtype=self.dtype
             )
             model = prepare_model_for_kbit_training(model)
 
@@ -4187,7 +4186,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
 
         quantization_config = TorchAoConfig(quant_type="int8_dynamic_activation_int8_weight")
         model = AutoModelForCausalLM.from_pretrained(
-            self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
+            self.causal_lm_model_id, device_map=device, quantization_config=quantization_config, dtype=self.dtype
         )
         model = prepare_model_for_kbit_training(model)
 
@@ -4201,34 +4200,6 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             use_dora=True,
         )
         with pytest.raises(NotImplementedError):
-            get_peft_model(model, config)
-
-    @pytest.mark.single_gpu_tests
-    def test_causal_lm_training_single_gpu_torchao_int4_raises(self):
-        # int4_weight_only raises an error:
-        # RuntimeError: derivative for aten::_weight_int4pack_mm is not implemented
-        # TODO: Once proper torchao support for int4 is added, remove this test and add int4 to supported_quant_types
-        from transformers import TorchAoConfig
-
-        device = 0
-
-        quantization_config = TorchAoConfig(quant_type="int4_weight_only")
-        model = AutoModelForCausalLM.from_pretrained(
-            self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
-        )
-        model = prepare_model_for_kbit_training(model)
-
-        config = LoraConfig(
-            r=16,
-            lora_alpha=32,
-            target_modules=["q_proj", "v_proj"],
-            lora_dropout=0.05,
-            bias="none",
-            task_type="CAUSAL_LM",
-        )
-
-        msg = re.escape("TorchaoLoraLinear only supports int8 weights for now")
-        with pytest.raises(ValueError, match=msg):
             get_peft_model(model, config)
 
     @parameterized.expand(supported_quant_types)
@@ -4264,7 +4235,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
                 self.causal_lm_model_id,
                 device_map=device_map,
                 quantization_config=quantization_config,
-                dtype=torch.bfloat16,
+                dtype=self.dtype,
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
@@ -4312,62 +4283,6 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             # assert loss is not None
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
-    @pytest.mark.multi_gpu_tests
-    @require_torch_multi_accelerator
-    def test_causal_lm_training_multi_accelerator_torchao_int4_raises(self):
-        # int4_weight_only raises an error:
-        # RuntimeError: derivative for aten::_weight_int4pack_mm is not implemented
-        # TODO: Once proper torchao support for int4 is added, remove this test and add int4 to supported_quant_types
-        from transformers import TorchAoConfig
-
-        device_map = {
-            "model.decoder.embed_tokens": 0,
-            "lm_head": 0,
-            "model.decoder.embed_positions": 0,
-            "model.decoder.project_out": 0,
-            "model.decoder.project_in": 0,
-            "model.decoder.layers.0": 0,
-            "model.decoder.layers.1": 0,
-            "model.decoder.layers.2": 0,
-            "model.decoder.layers.3": 0,
-            "model.decoder.layers.4": 0,
-            "model.decoder.layers.5": 0,
-            "model.decoder.layers.6": 1,
-            "model.decoder.layers.7": 1,
-            "model.decoder.layers.8": 1,
-            "model.decoder.layers.9": 1,
-            "model.decoder.layers.10": 1,
-            "model.decoder.layers.11": 1,
-            "model.decoder.final_layer_norm": 1,
-        }
-        quantization_config = TorchAoConfig(quant_type="int4_weight_only")
-        model = AutoModelForCausalLM.from_pretrained(
-            self.causal_lm_model_id,
-            device_map=device_map,
-            quantization_config=quantization_config,
-            dtype=torch.bfloat16,
-        )
-
-        assert set(model.hf_device_map.values()) == set(range(device_count))
-        assert {p.device.index for p in model.parameters()} == set(range(device_count))
-
-        model = prepare_model_for_kbit_training(model)
-        model.model_parallel = True
-        model.is_parallelizable = True
-
-        config = LoraConfig(
-            r=16,
-            lora_alpha=32,
-            target_modules=["q_proj", "v_proj"],
-            lora_dropout=0.05,
-            bias="none",
-            task_type="CAUSAL_LM",
-        )
-
-        msg = re.escape("TorchaoLoraLinear only supports int8 weights for now")
-        with pytest.raises(ValueError, match=msg):
-            get_peft_model(model, config)
-
     @pytest.mark.single_gpu_tests
     def test_torchao_merge_layers_int8_weight_only(self):
         from torchao.dtypes import AffineQuantizedTensor
@@ -4380,7 +4295,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
 
         quantization_config = TorchAoConfig(quant_type=quant_type)
         model = AutoModelForCausalLM.from_pretrained(
-            self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
+            self.causal_lm_model_id, device_map=device, quantization_config=quantization_config, dtype=self.dtype
         ).eval()
         logits_base = model(dummy_input)[0]
 
@@ -4400,7 +4315,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
 
         # sanity check: outputs changed
         # precision is quite low, so we need to use high atol and rtol
-        atol, rtol = 1e-1, 1e-1
+        atol, rtol = 2e-1, 2e-1
         assert not torch.allclose(logits, logits_base, atol=atol, rtol=rtol)
 
         model.merge_adapter()
@@ -4433,7 +4348,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
 
         quantization_config = TorchAoConfig(quant_type=quant_type)
         model = AutoModelForCausalLM.from_pretrained(
-            self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
+            self.causal_lm_model_id, device_map=device, quantization_config=quantization_config, dtype=self.dtype
         ).eval()
 
         config = LoraConfig(
