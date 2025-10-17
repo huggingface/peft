@@ -16,9 +16,8 @@ class OSFConfig(PeftConfig):
         effective_rank (`int` or `float`, *optional*):
             Preserved SVD rank ("high" subspace). The top-``effective_rank`` singular directions are frozen and
             retained across tasks; the remaining dimensions form the trainable low-rank subspace. If `None`, defaults
-            to 50% of the smaller weight dimension per target module.
-            Note: This differs from LoRA's `r` (trainable rank). In OSF, the trainable rank is
-            `min(weight.shape) - effective_rank`.
+            to 50% of the smaller weight dimension per target module. Note: This differs from LoRA's `r` (trainable
+            rank). In OSF, the trainable rank is `min(weight.shape) - effective_rank`.
         target_modules (`Union[list[str], str]`, *optional*):
             The names of the modules to apply OSF to. Can be a list of module names or `"all-linear"`.
         rank_pattern (`dict[str, int|float]`, *optional*):

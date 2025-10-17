@@ -23,8 +23,8 @@ class OSFModel(BaseTuner):
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped base model.
 
-        This mirrors the behavior of other tuners (e.g., LoRA), ensuring attributes
-        like `device` resolve to the underlying transformers model.
+        This mirrors the behavior of other tuners (e.g., LoRA), ensuring attributes like `device` resolve to the
+        underlying transformers model.
         """
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
