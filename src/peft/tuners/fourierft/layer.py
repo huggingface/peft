@@ -220,9 +220,6 @@ class FourierFTLinear(nn.Module, FourierFTLayer):
         rep = super().__repr__()
         return "fourierft." + rep
 
-    def set_indices(self, adapter_name: str, n_frequency: int):
-        super().set_indices(adapter_name, n_frequency)
-
 
 class FourierFTConv2D(nn.Module, FourierFTLayer):
     # FourierFT implemented in a dense layer

@@ -39,6 +39,7 @@ from peft import (
     AdaLoraConfig,
     C3AConfig,
     EvaConfig,
+    FourierFTConfig,
     IA3Config,
     LoftQConfig,
     LoKrConfig,
@@ -4499,3 +4500,41 @@ class TestLoadPeftKeyMapping:
     def test_key_mapping_save_new_load_old_vblora(self, old_model, new_model, tmp_path):
         # save the new model, load it into the old model, should work without issues (forwards compatibility)
         self.check_vblora_load_no_warning(new_model, old_model, tmp_path)
+
+
+class TestFourierFTInitialization:
+    torch_device = infer_device()
+
+    def get_model(self, bias=True):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                # choose a large weight so that averages are close to expected values
+                self.linear = nn.Linear(1000, 1000, bias=bias)
+                self.embed = nn.Embedding(1000, 1000)
+                self.conv2d = nn.Conv2d(100, 100, 3, bias=bias)
+
+            def forward(self, x):
+                x_int = (100 * x).int()
+                x_4d = x.flatten().reshape(1, 100, 10, 10)
+                return self.linear(x), self.embed(x_int), self.conv2d(x_4d)
+
+        return MyModule().eval().to(self.torch_device)
+
+    def test_fourierft_set_alpha_and_n_frequency_raises(self):
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        config = FourierFTConfig(target_modules=["linear"], alpha=0.1, n_frequency=2000)
+        msg = "User shoudn't set both alpha and n_frequency parameters."
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+    def test_fourierft_set_alpha_and_n_frequency_pattern_raises(self):
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        config = FourierFTConfig(target_modules=["linear"], alpha=0.1, n_frequency_pattern={"linear": 2000})
+        msg = "User shoudn't set both alpha and n_frequency_pattern parameters."
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)

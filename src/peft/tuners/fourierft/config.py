@@ -179,9 +179,9 @@ class FourierFTConfig(PeftConfig):
         default_factory="backward",
         metadata={
             "help": (
-                "The normalization applied for the ifft2 operation."
-                "It has to be either `backward`, `forward` or `ortho`. See the pytorch documentation for the ifft2 function for more details"
-                "The default value is `backward`."
+                "The normalization applied for the ifft2 operation. "
+                "It has to be either `backward`, `forward` or `ortho`. See the pytorch documentation for the ifft2 function for more details "
+                "(https://docs.pytorch.org/docs/stable/generated/torch.fft.ifft2.html) The default value is `backward`."
             )
         },
     )
@@ -199,7 +199,10 @@ class FourierFTConfig(PeftConfig):
     alpha: float = field(
         default=None,
         metadata={
-            "help": ("The alpha value dynamically sets the n_frequency = int(alpha * out_features * in_features)")
+            "help": (
+                "The alpha value dynamically sets the n_frequency = int(alpha * out_features * in_features)"
+                "If alpha is set, the n_frequency and n_frequency_pattern parameters should not be set."
+            )
         },
     )
 
@@ -224,7 +227,7 @@ class FourierFTConfig(PeftConfig):
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
 
         if (self.alpha is not None) and (self.n_frequency != 1000):
-            raise ValueError("Don't set both alpha and n_frequency, as alpha overrides ...")
+            raise ValueError("Don't set both alpha and n_frequency, as alpha overrides n_frequency.")
 
         if (self.alpha is not None) and (self.n_frequency_pattern != {}):
-            raise ValueError("Don't set both alpha and n_frequency_pattern, as alpha overrides ...")
+            raise ValueError("Don't set both alpha and n_frequency_pattern, as alpha overrides n_frequency_pattern.")

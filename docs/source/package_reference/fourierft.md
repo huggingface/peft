@@ -20,7 +20,7 @@ rendered properly in your Markdown viewer.
 
 FourierFT currently has the following constraints:
 
-- Only `nn.Linear` layers are supported.
+- Only `nn.Linear` and `nn.Conv2d` layers are supported.
 - Quantized layers are not supported.
 
 If these constraints don't work for your use case, consider other methods instead.
