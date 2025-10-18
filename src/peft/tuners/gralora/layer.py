@@ -310,57 +310,28 @@ class Linear(nn.Linear, GraloraLayer):
         gralora_rank = r - hybrid_r
         subblock_gralora_rank = gralora_rank // gralora_k
 
-        # Simulate the forward pass computation to get equivalent weight matrix
-        # We need to compute: W_delta such that W_delta @ x = gralora_forward(x) - base_forward(x)
+        # scatter gralora_A to get the scattered weight matrix
+        l_indices = torch.arange(in_features, device=device)
+        n_indices = (l_indices // (in_features // gralora_k))
+        i_indices = (l_indices % (in_features // gralora_k))
+        gralora_A_scattered = torch.zeros(in_features, gralora_k, gralora_rank, device=device, dtype=dtype)
+        gralora_A_scattered.scatter_(1, 
+            n_indices.unsqueeze(1).unsqueeze(2).expand(-1, 1, gralora_rank),
+            gralora_A[n_indices, i_indices, :].unsqueeze(1)
+        )
 
-        # Create an identity matrix for each input dimension and compute output
-        # This gives us the columns of the weight matrix
-        delta_weight = torch.zeros(out_features, in_features, device=device, dtype=gralora_A.dtype)
-
-        # Process in batches to avoid memory issues
-        batch_size = min(256, in_features)
-        for start_idx in range(0, in_features, batch_size):
-            end_idx = min(start_idx + batch_size, in_features)
-            batch_len = end_idx - start_idx
-
-            # Create identity input: [batch_len, in_features]
-            x = torch.zeros(batch_len, in_features, device=device, dtype=gralora_A.dtype)
-            for i in range(batch_len):
-                x[i, start_idx + i] = 1.0
-
-            # Apply GraLoRA transformation (following forward logic)
-            # x shape: [batch_len, in_features]
-            N = gralora_k
-
-            # Reshape x: [batch_len, N, in_features//N]
-            x_reshaped = x.view(batch_len, N, in_features // N)
-
-            # Apply gralora_A: [batch_len, N, in_features//N] @ [N, in_features//N, rank]
-            # Result: [batch_len, N, rank]
-            temp = torch.einsum("bni, nir -> bnr", x_reshaped, gralora_A)
-
-            # Reshape and permute for information exchange
-            # [batch_len, N, rank] -> [batch_len, N, N, subblock_rank]
-            temp = temp.view(batch_len, N, N, subblock_gralora_rank)
-            # Permute: [batch_len, N, N, subblock_rank] -> [batch_len, N, N, subblock_rank]
-            temp = temp.permute(0, 2, 1, 3)
-            # Reshape: [batch_len, N, N * subblock_rank]
-            temp = temp.reshape(batch_len, N, N * subblock_gralora_rank)
-
-            # Apply gralora_B: [batch_len, N, N*subblock_rank] @ [N, rank, out_features//N]
-            # Note: rank here is actually gralora_rank = N * subblock_gralora_rank
-            # Result: [batch_len, N, out_features//N]
-            output = torch.einsum("bnr, nro -> bno", temp, gralora_B)
-
-            # Reshape to [batch_len, out_features]
-            output = output.reshape(batch_len, out_features)
-
-            # Store in delta_weight (transpose because weight is [out, in])
-            delta_weight[:, start_idx:end_idx] = output.T
+        # compute the delta weight
+        delta_weight = torch.einsum(
+            "ikr, kro -> iko",
+            gralora_A_scattered
+            .view(in_features, gralora_k, gralora_k, subblock_gralora_rank)
+            .permute(0, 2, 1, 3)
+            .reshape(in_features, gralora_k, gralora_rank),
+            gralora_B,
+        ).reshape(in_features, out_features).T
 
         # Add hybrid LoRA component if present
         if hybrid_r > 0:
-            # general_A: [in_features, hybrid_r], general_B: [hybrid_r, out_features]
             weight_A_general = gralora_A_general.weight  # [hybrid_r, in_features]
             weight_B_general = gralora_B_general.weight  # [out_features, hybrid_r]
 
