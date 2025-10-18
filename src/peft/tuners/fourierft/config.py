@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
@@ -78,6 +78,14 @@ class FourierFTConfig(PeftConfig):
         init_weights (`bool`):
             The initialization of the Fourier weights. Set this to False (the default) if the spectrum are initialized
             to a standard normal distribution. Set this to True if the spectrum are initialized to zeros.
+        alpha:
+            The alpha value dynamically sets the n_frequency = int(alpha * out_features * in_features) If alpha is set,
+            the n_frequency and n_frequency_pattern parameters should not be set.
+        ifft2_norm:
+            The normalization applied for the ifft2 operation. It has to be either `backward`, `forward` or `ortho`.
+            See the pytorch documentation for the ifft2 function for more details
+            (https://docs.pytorch.org/docs/stable/generated/torch.fft.ifft2.html) The default value is `backward`.
+
     """
 
     n_frequency: int = field(
@@ -174,6 +182,17 @@ class FourierFTConfig(PeftConfig):
             )
         },
     )
+
+    ifft2_norm: Optional[Literal["backward", "forward", "ortho"]] = field(
+        default_factory="backward",
+        metadata={
+            "help": (
+                "The normalization applied for the ifft2 operation. "
+                "It has to be either `backward`, `forward` or `ortho`. See the pytorch documentation for the ifft2 function for more details "
+                "(https://docs.pytorch.org/docs/stable/generated/torch.fft.ifft2.html) The default value is `backward`."
+            )
+        },
+    )
     init_weights: bool = field(
         default=False,
         metadata={
@@ -181,6 +200,16 @@ class FourierFTConfig(PeftConfig):
                 "The initialization of the Fourier weights. Set this to False (the default) if the spectrum should be "
                 "initialized to a standard normal distribution. Set this to True if the spectrum should be initialized "
                 "to zeros."
+            )
+        },
+    )
+
+    alpha: float = field(
+        default=None,
+        metadata={
+            "help": (
+                "The alpha value dynamically sets the n_frequency = int(alpha * out_features * in_features)"
+                "If alpha is set, the n_frequency and n_frequency_pattern parameters should not be set."
             )
         },
     )
@@ -204,3 +233,9 @@ class FourierFTConfig(PeftConfig):
         # check for layers_to_transform and layers_pattern
         if self.layers_pattern and not self.layers_to_transform:
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
+
+        if (self.alpha is not None) and (self.n_frequency != 1000):
+            raise ValueError("Don't set both alpha and n_frequency, as alpha overrides n_frequency.")
+
+        if (self.alpha is not None) and (self.n_frequency_pattern != {}):
+            raise ValueError("Don't set both alpha and n_frequency_pattern, as alpha overrides n_frequency_pattern.")
