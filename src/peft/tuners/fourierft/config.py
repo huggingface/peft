@@ -78,6 +78,14 @@ class FourierFTConfig(PeftConfig):
         init_weights (`bool`):
             The initialization of the Fourier weights. Set this to False (the default) if the spectrum are initialized
             to a standard normal distribution. Set this to True if the spectrum are initialized to zeros.
+        alpha:
+            The alpha value dynamically sets the n_frequency = int(alpha * out_features * in_features) If alpha is set,
+            the n_frequency and n_frequency_pattern parameters should not be set.
+        ifft2_norm:
+            The normalization applied for the ifft2 operation. It has to be either `backward`, `forward` or `ortho`.
+            See the pytorch documentation for the ifft2 function for more details
+            (https://docs.pytorch.org/docs/stable/generated/torch.fft.ifft2.html) The default value is `backward`.
+
     """
 
     n_frequency: int = field(
