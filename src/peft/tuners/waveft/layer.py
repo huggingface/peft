@@ -189,6 +189,7 @@ class WaveFTLayer(BaseTunerLayer):
             dense_spectrum[indices[0, :], indices[1, :]] = spectrum
             delta_weight = dense_spectrum * self.waveft_scaling[adapter]
 
+        delta_weight = transpose(delta_weight, self.fan_in_fan_out)
         return delta_weight
 
 
@@ -238,7 +239,7 @@ class WaveFTLinear(nn.Module, WaveFTLayer):
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
                     orig_weights = base_layer.weight.data.clone()
-                    orig_weights += transpose(self.get_delta_weight(active_adapter), self.fan_in_fan_out)
+                    orig_weights += self.get_delta_weight(active_adapter), self.fan_in_fan_out
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
@@ -247,7 +248,7 @@ class WaveFTLinear(nn.Module, WaveFTLayer):
 
                     base_layer.weight.data = orig_weights
                 else:
-                    base_layer.weight.data += transpose(self.get_delta_weight(active_adapter), self.fan_in_fan_out)
+                    base_layer.weight.data += self.get_delta_weight(active_adapter), self.fan_in_fan_out
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -260,12 +261,7 @@ class WaveFTLinear(nn.Module, WaveFTLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.waveft_spectrum.keys():
-                self.get_base_layer().weight.data -= transpose(
-                    self.get_delta_weight(active_adapter), self.fan_in_fan_out
-                )
-
-    def get_delta_weight(self, adapter) -> torch.Tensor:
-        return super().get_delta_weight(adapter)
+                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         previous_dtype = x.dtype

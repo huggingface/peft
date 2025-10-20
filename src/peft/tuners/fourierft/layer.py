@@ -93,7 +93,7 @@ class FourierFTLayer(BaseTunerLayer):
         dense_spectrum = torch.zeros(self.out_features, self.in_features, device=spectrum.device)
         dense_spectrum[indices[0, :], indices[1, :]] = spectrum.float()
         delta_weight = torch.fft.ifft2(dense_spectrum).real * self.fourierft_scaling[adapter]
-        return delta_weight.to(spectrum.dtype)
+        return transpose(delta_weight.to(spectrum.dtype), self.fan_in_fan_out)
 
 
 class FourierFTLinear(nn.Module, FourierFTLayer):
@@ -140,7 +140,7 @@ class FourierFTLinear(nn.Module, FourierFTLayer):
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
                     orig_weights = base_layer.weight.data.clone()
-                    orig_weights += transpose(self.get_delta_weight(active_adapter), self.fan_in_fan_out)
+                    orig_weights += self.get_delta_weight(active_adapter)
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
@@ -149,7 +149,7 @@ class FourierFTLinear(nn.Module, FourierFTLayer):
 
                     base_layer.weight.data = orig_weights
                 else:
-                    base_layer.weight.data += transpose(self.get_delta_weight(active_adapter), self.fan_in_fan_out)
+                    base_layer.weight.data += self.get_delta_weight(active_adapter)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -162,12 +162,8 @@ class FourierFTLinear(nn.Module, FourierFTLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.fourierft_spectrum.keys():
-                self.get_base_layer().weight.data -= transpose(
-                    self.get_delta_weight(active_adapter), self.fan_in_fan_out
+                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
                 )
-
-    def get_delta_weight(self, adapter) -> torch.Tensor:
-        return super().get_delta_weight(adapter)
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         previous_dtype = x.dtype
