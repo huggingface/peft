@@ -597,6 +597,7 @@ class PeftCommonTester:
             logits_merged_unloaded = model(**dummy_input)[0]
 
             conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
+            is_decoder = getattr(getattr(model, "config", None), "is_decoder", False)
             atol, rtol = 1e-4, 1e-4
             if self.torch_device in ["mlu"]:
                 atol, rtol = 1e-3, 1e-3  # MLU
@@ -606,7 +607,7 @@ class PeftCommonTester:
             if (config.peft_type in {"IA3", "LORA", "OFT"}) and (model_id in conv_ids):
                 # for some reason, the Conv introduces a larger error
                 atol, rtol = 0.3, 0.01
-            if (config.peft_type == "OFT") and not model.config.is_decoder:
+            if (config.peft_type == "OFT") and not is_decoder:
                 atol, rtol = 0.3, 0.01
             if model_id == "trl-internal-testing/tiny-Llama4ForCausalLM":
                 # also getting larger errors here, not exactly sure why

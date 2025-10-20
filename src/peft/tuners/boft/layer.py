@@ -370,6 +370,13 @@ class BOFTLayer(BaseTunerLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
+    def _move_adapter_to_device_of_base_layer(self, adapter_name: str, **kwargs) -> None:
+        super()._move_adapter_to_device_of_base_layer(adapter_name=adapter_name, **kwargs)
+        new_device = self.boft_R[adapter_name].device
+        new_dtype = self.boft_R[adapter_name].dtype
+        if new_device != torch.device("meta"):
+            self.boft_P = self.boft_P.to(new_device, new_dtype)
+
     def reset_boft_parameters(self, adapter_name, init_weights):
         """
         Reset the BOFT parameters.
