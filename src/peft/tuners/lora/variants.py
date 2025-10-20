@@ -236,6 +236,7 @@ class DoraLinearVariant(LoraVariant):
             scaling=scaling,
             base_layer=module.get_base_layer(),
             base_result=base_result,
+            adapter_name=active_adapter,
         )
         return result
 
@@ -325,6 +326,7 @@ class DoraEmbeddingVariant(DoraLinearVariant):
             scaling=scaling,
             base_layer=module.get_base_layer(),
             embed_fn=module._embed,
+            adapter_name=active_adapter,
         )
 
         # Some embedding layers (e.g., Gemma3TextScaledWordEmbedding) apply scaling in their forward method.
@@ -422,6 +424,7 @@ class _DoraConvNdVariant(LoraVariant):
             scaling=scaling,
             base_layer=module.get_base_layer(),
             base_result=base_result,
+            adapter_name=active_adapter,
         )
         return result
 
