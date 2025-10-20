@@ -658,9 +658,14 @@ class PeftCommonTester:
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
+        if config_cls == VBLoRAConfig:
+            # for VBLoRA, increase this value or else the two adapters are too similar
+            config.init_logits_std *= 100
+            config.init_vector_bank_bound *= 100
 
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
+            torch.manual_seed(0)
             model = get_peft_model(model, config)
             model = model.to(self.torch_device)
 
@@ -670,6 +675,7 @@ class PeftCommonTester:
             with torch.inference_mode():
                 logits_adapter_1 = model(**dummy_input)[0]
 
+            torch.manual_seed(1)
             model.add_adapter("adapter-2", config)
             model.set_adapter("adapter-2")
             model.eval()
