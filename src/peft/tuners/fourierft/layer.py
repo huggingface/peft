@@ -163,7 +163,6 @@ class FourierFTLinear(nn.Module, FourierFTLayer):
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.fourierft_spectrum.keys():
                 self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
-                )
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         previous_dtype = x.dtype
