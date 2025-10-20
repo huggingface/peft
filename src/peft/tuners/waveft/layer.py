@@ -260,7 +260,9 @@ class WaveFTLinear(nn.Module, WaveFTLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.waveft_spectrum.keys():
-                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
+                self.get_base_layer().weight.data -= transpose(
+                    self.get_delta_weight(active_adapter), self.fan_in_fan_out
+                )
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         return super().get_delta_weight(adapter)
