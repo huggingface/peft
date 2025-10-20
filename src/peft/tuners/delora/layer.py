@@ -200,7 +200,7 @@ class DeloraLinear(nn.Module, DeloraLayer):
 
                         if not torch.isfinite(orig_weights).all():
                             raise ValueError(
-                                f"NaNs detected in merged weights for adapter {active_adapter}; aborting merge"
+                                f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                             )
 
                         base_layer.weight.data = orig_weights
