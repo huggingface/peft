@@ -64,3 +64,7 @@ tests_regression:
 
 tests_torch_compile:
 	python -m pytest tests/test_torch_compile.py $(if $(IS_GITHUB_CI),--report-log "compile_tests.log",)
+
+tests_training:
+	accelerate launch --config_file tests/training/fsdp_config.yaml tests/training/training.py $(if $(IS_GITHUB_CI),--report-log "training_fsdp.log",)
+	accelerate launch --config_file tests/training/fsdp_config.yaml tests/training/training.py --quant 4bit $(if $(IS_GITHUB_CI),--report-log "training_fsdp_4bit.log",)
