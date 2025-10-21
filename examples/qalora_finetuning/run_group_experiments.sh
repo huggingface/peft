@@ -13,7 +13,7 @@ set -e
 # ============================================================================
 MODEL_NAMES=(
     "HuggingFaceTB/SmolLM2-1.7B"
-    "TinyLlama/TinyLlama_v1.1"
+    # "TinyLlama/TinyLlama_v1.1"
     # "meta-llama/Llama-3.2-1B"
     # "microsoft/phi-2"
 )
@@ -23,9 +23,10 @@ BASE_OUTPUT_DIR="${BASE_OUTPUT_DIR:-$REPO_ROOT/train_results_group_exp}"
 
 # --- Iteration Parameters ---
 TRAINING_MODES=("qalora" "pissa_rank_analysis" "qalora_svd_error_two_adapter") 
+# TRAINING_MODES=("pissa_rank_analysis" "qalora_svd_error_two_adapter") 
 LORA_RANKS=(8 16 32 64)
 BITS_LIST=(2 3)
-CALIBRATION_DATASETS=("c4" "alpaca-cleaned")
+CALIBRATION_DATASETS=("c4")
 QALORA_GROUP_SIZES=(32 128)
 
 # --- Training Configuration ---
@@ -79,19 +80,12 @@ main() {
                 for bits in "${BITS_LIST[@]}"; do
                     for dataset in "${CALIBRATION_DATASETS[@]}"; do
                         
-                        if [ "$mode" = "qalora" ]; then
-                            GROUP_SIZES_TO_RUN=("${QALORA_GROUP_SIZES[@]}")
-                        else
-                            GROUP_SIZES_TO_RUN=(128)
-                        fi
+                        GROUP_SIZES_TO_RUN=("${QALORA_GROUP_SIZES[@]}")
 
                         for group_size in "${GROUP_SIZES_TO_RUN[@]}"; do
                             log_info "===== Running: MODEL=${MODEL_SHORT_NAME} MODE=${mode} RANK=${rank} BITS=${bits} DATASET=${dataset} GROUP=${group_size} ====="
 
-                        EXPERIMENT_NAME="${MODEL_SHORT_NAME}_${mode}_r${rank}_b${bits}_d${dataset}"
-                        if [ "$mode" = "qalora" ]; then
-                            EXPERIMENT_NAME="${EXPERIMENT_NAME}_group${group_size}"
-                        fi
+                        EXPERIMENT_NAME="${MODEL_SHORT_NAME}_${mode}_r${rank}_b${bits}_d${dataset}_group${group_size}"
 
                         TRAIN_OUTPUT_DIR="${BASE_OUTPUT_DIR}/${EXPERIMENT_NAME}"
                         ADAPTER_DIR="${TRAIN_OUTPUT_DIR}/adapter"
@@ -121,7 +115,6 @@ main() {
                                 --logging_steps="$LOGGING_STEPS" \
                                 --save_steps="$SAVE_STEPS" \
                                 --model_max_length="$MAX_LENGTH" \
-                                --report_to="wandb"
 
                             if [ $? -ne 0 ]; then
                                 log_error "Training failed for $EXPERIMENT_NAME. Skipping."
