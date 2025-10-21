@@ -30,7 +30,7 @@ class C3AModel(BaseTuner):
     """
     Creates C3A model from a pretrained transformers model.
 
-    The method is described in detail in [TODO].
+    The method is described in detail in https://huggingface.co/papers/2407.19342.
 
     Args:
         model ([`torch.nn.Module`]): The model to be adapted.
