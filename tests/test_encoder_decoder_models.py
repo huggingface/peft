@@ -232,6 +232,13 @@ ALL_CONFIGS = [
 ]
 
 
+def _skip_osf_disable_adapter_test(config_cls):
+    if config_cls is OSFConfig:
+        pytest.skip(
+            "Skipping OSF for disable_adapter test because OSF uses exact SVD decomposition, so outputs are identical until training."
+        )
+
+
 class TestEncoderDecoderModels(PeftCommonTester):
     transformers_class = AutoModelForSeq2SeqLM
 
@@ -394,6 +401,7 @@ class TestEncoderDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_disable_adapter(self, model_id, config_cls, config_kwargs):
+        _skip_osf_disable_adapter_test(config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_disable_adapter(model_id, config_cls, config_kwargs)
 

@@ -332,6 +332,13 @@ def _skip_alora_no_activation(config_cls, config_kwargs):
         pytest.skip("Skipping aLoRA no-activation-case because the test expects changed output which there won't be.")
 
 
+def _skip_osf_disable_adapter_test(config_cls):
+    if config_cls is OSFConfig:
+        pytest.skip(
+            "Skipping OSF for disable_adapter test because OSF uses exact SVD decomposition, so outputs are identical until training."
+        )
+
+
 class TestDecoderModels(PeftCommonTester):
     transformers_class = AutoModelForCausalLM
 
@@ -592,6 +599,7 @@ class TestDecoderModels(PeftCommonTester):
     def test_disable_adapter(self, model_id, config_cls, config_kwargs):
         _skip_if_not_conv1d_supported(model_id, config_cls)
         _skip_alora_no_activation(config_cls, config_kwargs)
+        _skip_osf_disable_adapter_test(config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_disable_adapter(model_id, config_cls, config_kwargs.copy())
 
