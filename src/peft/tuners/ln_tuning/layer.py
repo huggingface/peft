@@ -105,7 +105,7 @@ class LNTuningLayer(nn.Module, BaseTunerLayer):
             if self.merged:
                 self.unmerge()
             result = self.base_layer(x, *args, **kwargs)
-        elif self.merged:
+        elif self.merged or (len(self.active_adapters) == 0):
             result = self.base_layer(x, *args, **kwargs)
         else:
             if len(self.active_adapters) != 1:
