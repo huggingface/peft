@@ -50,11 +50,11 @@ class LoHaConfig(LycorisConfig):
             When passing a list of strings, either an exact match will be performed or it is checked if the name of the
             module ends with any of the passed strings.
         init_weights (`Union[bool, Literal["abba"]]`):
-            How to initialize the weights of the LoHa layers. Pass `True` (default) for default initialization,
-            `False` for random initialization, or `'abba'` for ABBA initialization which approximates pretrained weights
-            using SVD decomposition, potentially improving training stability and convergence. 
-            Based on the ABBA paper: https://arxiv.org/pdf/2505.14238
-            See https://github.com/huggingface/peft/issues/2587 for implementation details.
+            How to initialize the weights of the LoHa layers. Pass `True` (default) for default initialization, `False`
+            for random initialization, or `'abba'` for ABBA initialization which approximates pretrained weights using
+            SVD decomposition, potentially improving training stability and convergence. Based on the ABBA paper:
+            https://arxiv.org/pdf/2505.14238 See https://github.com/huggingface/peft/issues/2587 for implementation
+            details.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
@@ -73,13 +73,13 @@ class LoHaConfig(LycorisConfig):
     """
 
     r: int = field(
-        default=8, 
+        default=8,
         metadata={
             "help": (
                 "LoHa rank for the first Hadamard component. For standard LoHa, both components use this rank. "
                 "For asymmetric ranks, use r2 to specify a different rank for the second component."
             )
-        }
+        },
     )
     r2: Optional[int] = field(
         default=None,

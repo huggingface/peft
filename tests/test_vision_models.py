@@ -45,6 +45,12 @@ from .testing_utils import load_cat_image
 CONFIGS = {
     "lora": LoraConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
     "loha": LoHaConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
+    "abba": LoHaConfig(
+        target_modules=["convolution"],
+        modules_to_save=["classifier", "normalization"],
+        init_weights="abba",
+        r=2,
+    ),
     "lokr": LoKrConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
     "oft": OFTConfig(
         r=1, oft_block_size=0, target_modules=["convolution"], modules_to_save=["classifier", "normalization"]

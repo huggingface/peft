@@ -2221,7 +2221,12 @@ class TestPeftCustomModel(PeftCommonTester):
             # Adam optimizer since SGD isn't great for small models with IA3 + Conv1D
             lr = 0.01
             # ABBA Conv layers need lower learning rate to prevent gradient explosion
-            if config_kwargs.get("init_weights") == "abba" and model_id in ["Conv1d", "Conv1dBigger", "Conv2d", "Conv2d1x1"]:
+            if config_kwargs.get("init_weights") == "abba" and model_id in [
+                "Conv1d",
+                "Conv1dBigger",
+                "Conv2d",
+                "Conv2d1x1",
+            ]:
                 lr = 0.001  # Very low LR for ABBA Conv with Adam
             optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
@@ -2259,7 +2264,12 @@ class TestPeftCustomModel(PeftCommonTester):
             atol, rtol = 1e-4, 1e-4
 
         # ABBA Conv layers have slightly more numerical instability during merge/unmerge
-        if config_kwargs.get("init_weights") == "abba" and model_id in ["Conv1d", "Conv1dBigger", "Conv2d", "Conv2d1x1"]:
+        if config_kwargs.get("init_weights") == "abba" and model_id in [
+            "Conv1d",
+            "Conv1dBigger",
+            "Conv2d",
+            "Conv2d1x1",
+        ]:
             atol, rtol = 1e-4, 1e-4
 
         # check that there is a difference in results after training
