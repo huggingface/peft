@@ -367,6 +367,7 @@ class LoraModel(BaseTuner):
                 # Note that this will lead to double application of whatever the callbacks do in normal forward.
                 # Make sure that whatever change is done, can be applied more than once without harm (idempotency).
                 if isinstance(layer, GradientCheckpointingLayer) and layer.gradient_checkpointing:
+
                     def forward_pre_hook(name, module, inputs, **kwargs):
                         for submodule in module.modules():
                             if isinstance(submodule, LoraLayer):
