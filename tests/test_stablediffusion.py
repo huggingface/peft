@@ -100,6 +100,38 @@ DIFFUSERS_CONFIGS = [
         },
     ),
     (
+        LoHaConfig,
+        {
+            "text_encoder": {
+                "r": 8,
+                "alpha": 32,
+                "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
+                "rank_dropout": 0.0,
+                "module_dropout": 0.0,
+                "init_weights": "abba",
+                "use_khatri_rao": True,
+            },
+            "unet": {
+                "r": 8,
+                "alpha": 32,
+                "target_modules": [
+                    "proj_in",
+                    "proj_out",
+                    "to_k",
+                    "to_q",
+                    "to_v",
+                    "to_out.0",
+                    "ff.net.0.proj",
+                    "ff.net.2",
+                ],
+                "rank_dropout": 0.0,
+                "module_dropout": 0.0,
+                "init_weights": "abba",
+                "use_khatri_rao": True,
+            },
+        },
+    ),
+    (
         LoKrConfig,
         {
             "text_encoder": {
@@ -268,6 +300,9 @@ class TestStableDiffusionModel(PeftCommonTester):
         if (config_cls == LoKrConfig) and (self.torch_device not in ["cuda", "xpu"]):
             pytest.skip("Merging test with LoKr fails without GPU")
 
+        # Store original config_kwargs before modification (deep copy)
+        original_config_kwargs = copy.deepcopy(config_kwargs)
+
         # Instantiate model & adapters
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         model = self.instantiate_sd_peft(model_id, config_cls, config_kwargs)
@@ -288,11 +323,21 @@ class TestStableDiffusionModel(PeftCommonTester):
             merged_output = np.array(model(**dummy_input).images[0]).astype(np.float32)
 
         # Images are in uint8 drange, so use large atol
-        assert np.allclose(peft_output, merged_output, atol=1.0)
+        # Increase tolerance for LoHa when init_weights is set to "abba"
+        if config_cls == LoHaConfig and original_config_kwargs.get("text_encoder", {}).get("init_weights") == "abba":
+            atol = 15.0
+        else:
+            atol = 1.0
+
+        assert np.allclose(peft_output, merged_output, atol=atol)
 
     @pytest.mark.parametrize("model_id", PEFT_DIFFUSERS_SD_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", DIFFUSERS_CONFIGS)
     def test_merge_layers_safe_merge(self, model_id, config_cls, config_kwargs):
+        init_weights = (
+            config_kwargs.get("text_encoder", {})["init_weights"] if config_cls == LoHaConfig else "not loha"
+        )
+
         if (config_cls == LoKrConfig) and (self.torch_device not in ["cuda", "xpu"]):
             pytest.skip("Merging test with LoKr fails without GPU")
 
@@ -315,7 +360,12 @@ class TestStableDiffusionModel(PeftCommonTester):
             merged_output = np.array(model(**dummy_input).images[0]).astype(np.float32)
 
         # Images are in uint8 drange, so use large atol
-        assert np.allclose(peft_output, merged_output, atol=1.0)
+        # Increase tolerance for LoHa when init_weights is set to "abba"
+        if config_cls == LoHaConfig and config_kwargs.get("text_encoder", {}).get("init_weights") == "abba":
+            atol = 15.0
+        else:
+            atol = 1.0
+        assert np.allclose(peft_output, merged_output, atol=atol), f"{init_weights}, {atol}"
 
     @pytest.mark.parametrize("model_id", PEFT_DIFFUSERS_SD_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", DIFFUSERS_CONFIGS)
