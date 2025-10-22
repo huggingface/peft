@@ -27,6 +27,7 @@ class PeftType(str, enum.Enum):
     - PREFIX_TUNING
     - LORA
     - ADALORA
+    - BDLORA
     - BOFT
     - ADAPTION_PROMPT
     - IA3
@@ -54,6 +55,7 @@ class PeftType(str, enum.Enum):
     PREFIX_TUNING = "PREFIX_TUNING"
     LORA = "LORA"
     ADALORA = "ADALORA"
+    BDLORA = "BDLORA"
     BOFT = "BOFT"
     ADAPTION_PROMPT = "ADAPTION_PROMPT"
     IA3 = "IA3"
