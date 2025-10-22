@@ -27,7 +27,8 @@ class BlockDiagonalLinear(nn.Module):
         self.out_features = out_features
         self.nblocks = nblocks
 
-        self.weight = nn.Parameter(torch.empty(nblocks, out_features // nblocks, in_features // nblocks))
+
+        self.weight = nn.Parameter(torch.empty(out_features, in_features // nblocks))
         # BD-LoRA initialization should overwrite this, so the initialization does not matter for our implementation. I would guess that we could
         # also leave the tensor empty to save a bit of compute - although I cannot 100% verify that init_lora_weights is always set to True with
         # all possible LoRA parameters
@@ -48,13 +49,13 @@ class BlockDiagonalLinear(nn.Module):
         n = self.out_features // nb
 
         x = x.reshape(B, nb, m)
-
-        assert self.weight.shape == (nb, n, m)
+        assert self.weight.shape == (nb * n, m)
+        w = self.weight.view(nb, n, m)
 
         # x: (B, nb, m)
         # weight: (nb, n, m)
         # output should be (B, nb, n) (and then we reshape to stack the blocks)
-        out = torch.einsum("bim,inm->bin", x, self.weight)
+        out = torch.einsum("bim,inm->bin", x, w)
         return out.reshape(B, -1)
 
     def __repr__(self):

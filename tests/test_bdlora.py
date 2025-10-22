@@ -105,7 +105,7 @@ class TestBdLora:
         
         layer = BlockDiagonalLinear(in_features, out_features, nblocks, bias=False)  # No bias
         
-        expected_shape = (nblocks, out_features // nblocks, in_features // nblocks)
+        expected_shape = (out_features, in_features // nblocks)
         assert layer.weight.shape == expected_shape
 
     def test_bdlora_forward_pass(self, mlp):
