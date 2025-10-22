@@ -26,10 +26,10 @@ jobs:
     env:
       PEFT_DEBUG_WITH_TORCH_COMPILE: 1
       CUDA_VISIBLE_DEVICES: "0"
-      TEST_TYPE: "single_gpu_huggingface/peft-gpu-bnb-latest:latest"
+      TEST_TYPE: "single_gpu_huggingface/peft-gpu:latest"
       USE_PYTORCH_NIGHTLY: "${{ github.event.inputs.pytorch_nightly }}"
     container:
-      image: "huggingface/peft-gpu-bnb-latest:latest"
+      image: "huggingface/peft-gpu:latest"
       options: --gpus all --shm-size "16gb" --ipc host -v /mnt/cache/.cache/huggingface:/mnt/cache/
     defaults:
       run:
