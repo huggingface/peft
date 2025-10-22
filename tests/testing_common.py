@@ -1434,6 +1434,7 @@ class PeftCommonTester:
             PeftType.VBLORA,
             PeftType.BONE,
             PeftType.MISS,
+            PeftType.DELORA,
         ]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters

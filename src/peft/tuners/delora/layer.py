@@ -34,14 +34,14 @@ class DeloraLayer(BaseTunerLayer):
     # All names of other parameters that may contain adapter-related parameters
     other_param_names = (
         "r",
-        "module_dropout",
+        "delora_dropout",
         "delora_w_norm",
     )
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         self.base_layer = base_layer
         self.r = {}
-        self.module_dropout = nn.ModuleDict({})
+        self.delora_dropout = nn.ModuleDict({})
         self.delora_A = nn.ParameterDict({})
         self.delora_B = nn.ParameterDict({})
         self.delora_lambda = nn.ParameterDict({})
@@ -113,7 +113,7 @@ class DeloraLayer(BaseTunerLayer):
             module_dropout_layer = nn.Dropout(p=module_dropout)
         else:
             module_dropout_layer = nn.Identity()
-        self.module_dropout.update(nn.ModuleDict({adapter_name: module_dropout_layer}))
+        self.delora_dropout.update(nn.ModuleDict({adapter_name: module_dropout_layer}))
 
         # Initialize weights
         self.reset_delora_parameters(adapter_name, init_weights, delora_lambda)
@@ -200,7 +200,7 @@ class DeloraLinear(nn.Module, DeloraLayer):
 
                         if not torch.isfinite(orig_weights).all():
                             raise ValueError(
-                                f"NaNs detected in merged weights for adapter {active_adapter}; aborting merge"
+                                f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                             )
 
                         base_layer.weight.data = orig_weights
@@ -241,7 +241,7 @@ class DeloraLinear(nn.Module, DeloraLayer):
                 if adapter not in self.delora_A:
                     continue
 
-                x_d = self.module_dropout[adapter](x)
+                x_d = self.delora_dropout[adapter](x)
 
                 # Decomposed delta calculation
                 # 1. (x * w_norm) @ A.T
