@@ -19,8 +19,18 @@ MODEL_NAMES=(
 )
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BASE_OUTPUT_DIR="${BASE_OUTPUT_DIR:-$REPO_ROOT/train_results_group_exp}"
+MODE="${TRAIN_MODE:-auto}"
 
+if [[ "$MODE" == "cluster" ]] || [[ -n "${SLURM_JOB_ID:-}" ]] || [[ -n "${APPTAINER_NAME:-${SINGULARITY_NAME:-}}" ]]; then
+    # Cluster: require explicit BASE_OUTPUT_DIR
+    BASE_OUTPUT_DIR="${BASE_OUTPUT_DIR:?BASE_OUTPUT_DIR not set}"
+else
+    # Offline/local: default under repo root
+    REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    BASE_OUTPUT_DIR="${BASE_OUTPUT_DIR:-$REPO_ROOT/train_results_group_exp}"
+fi
+export BASE_OUTPUT_DIR
+echo "BASE_OUTPUT_DIR=$BASE_OUTPUT_DIR"
 # --- Iteration Parameters ---
 TRAINING_MODES=("qalora" "pissa_rank_analysis" "qalora_svd_error_two_adapter") 
 # TRAINING_MODES=("pissa_rank_analysis" "qalora_svd_error_two_adapter") 

@@ -25,8 +25,13 @@ import torch
 import transformers
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, GPTQConfig, Trainer
+from transformers.trainer_callback import ProgressCallback
 from peft import LoraConfig, PeftModel, get_peft_model
+import datasets
 
+is_training_on_cluster = os.environ.get("TRAIN_MODE", "").lower() == "cluster"
+if is_training_on_cluster:
+    datasets.disable_progress_bar()
 
 IGNORE_INDEX = -100
 
@@ -862,7 +867,10 @@ def train():
 
     if not script_args.skip_training: 
         trainer = Trainer(model=model, tokenizer=tokenizer, args=script_args, **data_module)
-        
+        if is_training_on_cluster:
+            trainer.remove_callback(ProgressCallback)
+            transformers.utils.logging.set_verbosity_error() 
+
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
         start_time = time.time()
