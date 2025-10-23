@@ -21,23 +21,54 @@ from peft.utils import PeftType
 
 @dataclass
 class GraloraConfig(PeftConfig):
-    r: int = field(default=8, metadata={"help": "gralora attention dimension"})
+    r: int = field(
+        default=32,
+        metadata={
+            "help": (
+                "GraLoRA attention dimension determines the rank of the GraLoRA adapter. "
+                "The total parameter count of the GraLoRA adapter is same as LoRA with same rank r, while the expressivitiy is multiplied by gralora_k."
+            )
+        },
+    )
     hybrid_r: int = field(
-        default=0, metadata={"help": "hybrid_r is the rank allocated to vanilla LoRA method when using Hybrid GraLoRA"}
+        default=0,
+        metadata={
+            "help": (
+                "hybrid_r is the rank allocated to vanilla LoRA method when using Hybrid GraLoRA method. "
+                "Hybrid GraLoRA, a combination of GraLoRA and vanilla LoRA, becomes available when hybrid_r > 0. "
+                "r + hybrid_r determines the parameter count of the GraLoRA adapter."
+            )
+        },
     )
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
             "help": (
-                "List of module names or regex expression of the module names to replace with gralora."
+                "List of module names or regex expression of the module names to replace with gralora. "
                 "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. "
                 "Only linear layers are supported."
             )
         },
     )
-    gralora_alpha: int = field(default=8, metadata={"help": "gralora alpha"})
+    gralora_alpha: int = field(
+        default=64,
+        metadata={
+            "help": (
+                "gralora alpha is the scaling factor for the GraLoRA adapter."
+                "Scale becomes gralora_alpha / (r + hybrid_r)."
+            )
+        },
+    )
     gralora_dropout: float = field(default=0.0, metadata={"help": "gralora dropout"})
-    gralora_k: int = field(default=2, metadata={"help": "gralora k"})
+    gralora_k: int = field(
+        default=2,
+        metadata={
+            "help": (
+                "gralora_k determines the number of subblocks in the GraLoRA adapter."
+                "The total parameter count is preserved regardles of gralora_k, while the expressivitiy is multiplied by gralora_k."
+            )
+        },
+    )
     fan_in_fan_out: bool = field(
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
@@ -90,3 +121,5 @@ class GraloraConfig(PeftConfig):
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
+        if self.r % self.gralora_k != 0:
+            raise ValueError(f"r should be divisible by gralora_k, but got {self.r} and {self.gralora_k}")

@@ -38,7 +38,6 @@ class GraloraLayer(BaseTunerLayer):
         self.scaling = {}
         self.gralora_dropout = nn.ModuleDict({})
 
-        # Set to `None` otherwise to avoid computation with random weight
         self.gralora_A = nn.ParameterDict({})
         self.gralora_B = nn.ParameterDict({})
         self.gralora_A_general = nn.ModuleDict({})
@@ -55,56 +54,12 @@ class GraloraLayer(BaseTunerLayer):
             in_features, out_features = (
                 base_layer.weight.ds_shape if hasattr(base_layer.weight, "ds_shape") else base_layer.weight.shape
             )
+        else:
+            raise NotImplementedError(f"Unsupported layer type {type(base_layer)}")
 
         self.in_features = in_features
         self.out_features = out_features
         self.kwargs = kwargs
-
-    def _move_adapter_to_device_of_base_layer(self, adapter_name: str, device: Optional[torch.device] = None) -> None:
-        """
-        Move the adapter of the given name to the device of the base layer.
-        """
-        from peft.tuners._buffer_dict import BufferDict
-
-        if device is None:
-            # check weight and qweight (for GPTQ)
-            for weight_name in ("weight", "qweight"):
-                weight = getattr(self.get_base_layer(), weight_name, None)
-                if weight is not None:
-                    device = weight.device
-                    dtype = weight.dtype
-                    break
-            else:
-                # no break encountered: could not determine the device
-                return
-
-        # loop through all potential adapter layers and move them to the device of the base layer; be careful to only
-        # move this specific adapter to the device, as the other adapters could be on different devices
-        # see #1639
-        for adapter_layer_name in self.adapter_layer_names + self.other_param_names:
-            adapter_layer = getattr(self, adapter_layer_name, None)
-            if not isinstance(adapter_layer, (nn.ModuleDict, nn.ParameterDict, BufferDict)):
-                continue
-            if adapter_name not in adapter_layer:
-                continue
-            if weight.dtype.is_floating_point or weight.dtype.is_complex:
-                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device, dtype=dtype)
-            else:
-                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device)
-
-    @property
-    def merged(self) -> bool:
-        return bool(self.merged_adapters)
-
-    @property
-    def bias(self) -> torch.Tensor:
-        base_layer = self.get_base_layer()
-        if isinstance(base_layer, nn.Linear):
-            return base_layer.bias
-        elif isinstance(base_layer, Conv1D):
-            return base_layer.bias
-        else:
-            return None
 
     def update_layer(
         self,
@@ -119,6 +74,8 @@ class GraloraLayer(BaseTunerLayer):
     ):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+        elif hybrid_r < 0:
+            raise ValueError(f"`hybrid_r` should be a non-negative integer value but the value passed is {hybrid_r}")
 
         self.r[adapter_name] = r
         self.gralora_alpha[adapter_name] = gralora_alpha
@@ -133,21 +90,29 @@ class GraloraLayer(BaseTunerLayer):
         self.gralora_dropout.update(nn.ModuleDict({adapter_name: gralora_dropout_layer}))
 
         # Actual trainable parameters
+        if self.in_features % gralora_k != 0:
+            raise ValueError(
+                f"in_features should be divisible by gralora_k, but got {self.in_features} and {gralora_k}"
+            )
+        if self.out_features % gralora_k != 0:
+            raise ValueError(
+                f"out_features should be divisible by gralora_k, but got {self.out_features} and {gralora_k}"
+            )
         subblock_in_features = self.in_features // gralora_k
         subblock_out_features = self.out_features // gralora_k
 
-        gralora_r = r - hybrid_r  # gralora_r is the rank allocated to gralora method
-        assert gralora_r % gralora_k == 0, f"r should be divisible by gralora_k, but got {r} and {gralora_k}"
+        # gralora_r is the rank allocated to GraLoRA method; hybrid_r is the rank allocated to vanilla LoRA
+        gralora_r = r
 
-        gralora_A = nn.ParameterList()
-        gralora_B = nn.ParameterList()
+        gralora_A = []
+        gralora_B = []
         for _ in range(gralora_k):
-            new_A = nn.Parameter(torch.zeros(gralora_r, subblock_in_features))
-            new_B = nn.Parameter(torch.zeros(subblock_out_features, gralora_r))
+            new_A = nn.Parameter(torch.empty(gralora_r, subblock_in_features))
+            new_B = nn.Parameter(torch.empty(subblock_out_features, gralora_r))
             if init_weights:
                 # Initialize to identity: A is random, B is zero
                 nn.init.kaiming_uniform_(new_A, a=math.sqrt(5))
-                # new_B is already initialized to zeros
+                nn.init.zeros_(new_B)
             else:
                 # Initialize to random: both A and B are random (for testing)
                 nn.init.kaiming_uniform_(new_A, a=math.sqrt(5))
@@ -183,7 +148,7 @@ class GraloraLayer(BaseTunerLayer):
 
         self.module_name = module_name
 
-        self.scaling[adapter_name] = gralora_alpha / r
+        self.scaling[adapter_name] = gralora_alpha / (gralora_r + hybrid_r)
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
@@ -305,30 +270,38 @@ class Linear(nn.Linear, GraloraLayer):
         # Get dimensions
         in_features = self.in_features
         out_features = self.out_features
-        subblock_in = in_features // gralora_k
-        subblock_out = out_features // gralora_k
-        gralora_rank = r - hybrid_r
+        gralora_rank = r
+        if in_features % gralora_k != 0:
+            raise ValueError(f"in_features should be divisible by gralora_k, but got {in_features} and {gralora_k}")
+        elif out_features % gralora_k != 0:
+            raise ValueError(f"out_features should be divisible by gralora_k, but got {out_features} and {gralora_k}")
+        elif gralora_rank % gralora_k != 0:
+            raise ValueError(f"rank should be divisible by gralora_k, but got {gralora_rank} and {gralora_k}")
         subblock_gralora_rank = gralora_rank // gralora_k
 
         # scatter gralora_A to get the scattered weight matrix
         l_indices = torch.arange(in_features, device=device)
-        n_indices = (l_indices // (in_features // gralora_k))
-        i_indices = (l_indices % (in_features // gralora_k))
+        n_indices = l_indices // (in_features // gralora_k)
+        i_indices = l_indices % (in_features // gralora_k)
         gralora_A_scattered = torch.zeros(in_features, gralora_k, gralora_rank, device=device, dtype=dtype)
-        gralora_A_scattered.scatter_(1, 
+        gralora_A_scattered.scatter_(
+            1,
             n_indices.unsqueeze(1).unsqueeze(2).expand(-1, 1, gralora_rank),
-            gralora_A[n_indices, i_indices, :].unsqueeze(1)
+            gralora_A[n_indices, i_indices, :].unsqueeze(1),
         )
 
         # compute the delta weight
-        delta_weight = torch.einsum(
-            "ikr, kro -> iko",
-            gralora_A_scattered
-            .view(in_features, gralora_k, gralora_k, subblock_gralora_rank)
-            .permute(0, 2, 1, 3)
-            .reshape(in_features, gralora_k, gralora_rank),
-            gralora_B,
-        ).reshape(in_features, out_features).T
+        delta_weight = (
+            torch.einsum(
+                "ikr, kro -> iko",
+                gralora_A_scattered.view(in_features, gralora_k, gralora_k, subblock_gralora_rank)
+                .permute(0, 2, 1, 3)
+                .reshape(in_features, gralora_k, gralora_rank),
+                gralora_B,
+            )
+            .reshape(in_features, out_features)
+            .T
+        )
 
         # Add hybrid LoRA component if present
         if hybrid_r > 0:
@@ -380,16 +353,14 @@ class Linear(nn.Linear, GraloraLayer):
                 gralora_B_general = self.gralora_B_general[active_adapter]
 
                 r = self.r[active_adapter]
+                gralora_rank = r
                 gralora_k = self.gralora_k[active_adapter]
                 hybrid_r = self.hybrid_r[active_adapter]
-
-                assert len(gralora_A) == len(gralora_B)
 
                 dropout = self.gralora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
 
                 gralora_dtype = gralora_A.dtype
-                gralora_rank = r - hybrid_r
 
                 B, L, in_features = x.shape
                 N = gralora_k
