@@ -18,7 +18,7 @@ class ModelArguments:
     model_name_or_path: str = field(
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
-    max_length: Optional[int] = field(
+    max_seq_length: Optional[int] = field(
         default=512,
         metadata={"help": "The maximum total input sequence length after tokenization."},
     )
