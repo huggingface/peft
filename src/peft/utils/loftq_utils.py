@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Callable, Optional, Union
+from collections.abc import Callable
+from typing import Optional, Union
 
 import torch
 from accelerate.utils.memory import clear_device_cache
