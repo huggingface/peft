@@ -1361,8 +1361,9 @@ class PeftCommonTester:
 
             inputs = self.prepare_inputs_for_testing()
 
-            # invocation to get the reference non-zero grads that are supposed to exist without gradient checkpointing
-            output = model(**inputs)[0]
+            # invocation to get the reference non-zero grads that are supposed to exist without gradient checkpointing;
+            # note we're squaring the output for bigger gradients
+            output = model(**inputs)[0] ** 2
 
             loss = output.sum()
             loss.backward()
@@ -1376,7 +1377,7 @@ class PeftCommonTester:
             model.prepare_model_for_gradient_checkpointing(model)
             model.gradient_checkpointing_enable({"use_reentrant": use_reentrant})
 
-            output = model(**inputs)[0]
+            output = model(**inputs)[0] ** 2
 
             loss = output.sum()
             loss.backward()
