@@ -39,6 +39,7 @@ from peft import (
     LoraConfig,
     MissConfig,
     OFTConfig,
+    OSFConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
@@ -286,6 +287,12 @@ ALL_CONFIGS = [
             "target_modules": None,
         },
     ),
+    (
+        OSFConfig,
+        {
+            "task_type": "CAUSAL_LM",
+        },
+    ),
 ]
 
 
@@ -295,13 +302,14 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         BoneConfig,
         HRAConfig,
         OFTConfig,
+        OSFConfig,
         RoadConfig,
         ShiraConfig,
         C3AConfig,
         MissConfig,
         DeloraConfig,
     ]:
-        pytest.skip("Skipping BOFT/HRA/OFT/Bone/Road/SHiRA/C3A/MiSS/DeLoRA for GPT2LMHeadModel")
+        pytest.skip("Skipping BOFT/HRA/OFT/Bone/Road/SHiRA/C3A/MiSS/OSF/DeLoRA for GPT2LMHeadModel")
 
 
 def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
@@ -322,6 +330,13 @@ def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
 def _skip_alora_no_activation(config_cls, config_kwargs):
     if config_cls is LoraConfig and config_kwargs.get("alora_invocation_tokens") == [1000]:
         pytest.skip("Skipping aLoRA no-activation-case because the test expects changed output which there won't be.")
+
+
+def _skip_osf_disable_adapter_test(config_cls):
+    if config_cls is OSFConfig:
+        pytest.skip(
+            "Skipping OSF for disable_adapter test because OSF uses exact SVD decomposition, so outputs are identical until training."
+        )
 
 
 class TestDecoderModels(PeftCommonTester):
@@ -584,6 +599,7 @@ class TestDecoderModels(PeftCommonTester):
     def test_disable_adapter(self, model_id, config_cls, config_kwargs):
         _skip_if_not_conv1d_supported(model_id, config_cls)
         _skip_alora_no_activation(config_cls, config_kwargs)
+        _skip_osf_disable_adapter_test(config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_disable_adapter(model_id, config_cls, config_kwargs.copy())
 
