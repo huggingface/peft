@@ -71,7 +71,7 @@ from peft.utils import infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
 from peft.utils.other import ModulesToSaveWrapper
 
-from .testing_utils import load_dataset_english_quotes, require_deterministic_for_xpu
+from .testing_utils import hub_online_once, load_dataset_english_quotes, require_deterministic_for_xpu
 
 
 try:
@@ -1144,6 +1144,14 @@ class TestLoraInitialization:
         )
         with pytest.raises(ValueError, match=msg):
             get_peft_model(model, config, adapter_name="foobar")
+
+    def test_trainable_token_indices_targets_head_and_embedding(self):
+        # targeting embedding and LM head explicitly, see #2863
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            config = LoraConfig(trainable_token_indices={"lm_head": [0], "embed_tokens": [0]})
+            get_peft_model(model, config)  # does not raise
 
     @require_deterministic_for_xpu
     def test_lora_use_dora_linear(self, data):
