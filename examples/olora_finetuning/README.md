@@ -18,7 +18,7 @@ lora_config = LoraConfig(
     init_lora_weights="olora"
 )
 peft_model = get_peft_model(model, lora_config)
-training_args = SFTConfig(dataset_text_field="text", max_seq_length=128)
+training_args = SFTConfig(dataset_text_field="text", max_length=128)
 trainer = SFTTrainer(
     model=peft_model,
     train_dataset=dataset,

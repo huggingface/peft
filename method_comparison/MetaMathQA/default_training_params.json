@@ -1,7 +1,7 @@
 {
   "model_id": "meta-llama/Llama-3.2-3B",
   "dtype": "bfloat16",
-  "max_seq_length": 768,
+  "max_length": 768,
   "batch_size": 4,
   "batch_size_eval": 50,
   "max_steps": 5000,
