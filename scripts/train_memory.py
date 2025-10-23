@@ -26,7 +26,7 @@ python train_memory.py --help
 Train the google/gemma-2-2b model with a LoRA config json at the indicated location.
 
 ```bash
-python train_memory.py "google/gemma-2-2b" --max_length 256 --batch_size 1 --rank 32 --dtype bfloat16 --path_config <path-to-adapter-config.json>
+python train_memory.py "google/gemma-2-2b" --max_seq_length 256 --batch_size 1 --rank 32 --dtype bfloat16 --path_config <path-to-adapter-config.json>
 ```
 
 Fully fine-tune the model (i.e. without LoRA) by setting the rank to 0:
@@ -38,7 +38,7 @@ python train_memory.py "google/gemma-2-2b" --rank 0
 Get an estimate of the size of the hidden states by passing `--monitor_tensors`. This trains just for a single epoch. For realistic estimates, the batch size for this:
 
 ```bash
-python train_memory.py "google/gemma-2-2b" --max_length 256 --batch_size 32 --rank 32 --dtype bfloat16 --path_config configs/lora_rank-32_embedding-lora/ --monitor_tensors
+python train_memory.py "google/gemma-2-2b" --max_seq_length 256 --batch_size 32 --rank 32 --dtype bfloat16 --path_config configs/lora_rank-32_embedding-lora/ --monitor_tensors
 ```
 
 """
@@ -106,14 +106,14 @@ def get_data(tokenizer):
     return data
 
 
-def train(model_id, rank, dtype, monitor_tensors, max_length, batch_size, max_steps, path_config):
+def train(model_id, rank, dtype, monitor_tensors, max_seq_length, batch_size, max_steps, path_config):
     init_accelerator()
     device_module = getattr(torch, device, torch.cuda)
     accelerator_memory_init = device_module.max_memory_allocated()
     accelerator_memory_log = []
 
     tokenizer = AutoTokenizer.from_pretrained(model_id)
-    tokenizer.model_max_length = max_length
+    tokenizer.model_max_length = max_seq_length
     if not tokenizer.pad_token:
         tokenizer.pad_token = tokenizer.eos_token
     data = get_data(tokenizer)
@@ -259,7 +259,7 @@ if __name__ == "__main__":
         action="store_true",
         help="Monitor tensor sizes during training for a single training step, off by default",
     )
-    parser.add_argument("--max_length", type=int, default=128, help="Maximum sequence length, default 128")
+    parser.add_argument("--max_seq_length", type=int, default=128, help="Maximum sequence length, default 128")
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size, default 1")
     parser.add_argument("--max_steps", type=int, default=50, help="Maximum number of training steps, default 50")
     parser.add_argument("--path_config", type=str, default=None, help="Path to LoRA config")
@@ -269,7 +269,7 @@ if __name__ == "__main__":
         rank=args.rank,
         dtype=args.dtype,
         monitor_tensors=args.monitor_tensors,
-        max_length=args.max_length,
+        max_seq_length=args.max_seq_length,
         batch_size=args.batch_size,
         max_steps=args.max_steps,
         path_config=args.path_config,

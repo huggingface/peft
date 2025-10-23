@@ -72,7 +72,7 @@ class TrainConfig:
     Args:
         model_id: The model identifier
         dtype: The data type to use for the model
-        max_length: The maximum sequence length
+        max_seq_length: The maximum sequence length
         batch_size: The batch size for training
         batch_size_eval: The batch size for eval/test, can be much higher than for training
         max_steps: The maximum number of steps to train for
@@ -92,7 +92,7 @@ class TrainConfig:
 
     model_id: str
     dtype: Literal["float32", "float16", "bfloat16", "int8", "int4"]
-    max_length: int
+    max_seq_length: int
     batch_size: int
     batch_size_eval: int
     max_steps: int
@@ -114,8 +114,8 @@ class TrainConfig:
             raise ValueError(f"Invalid model_id: {self.model_id}")
         if self.dtype not in ["float32", "float16", "bfloat16", "int8", "int4"]:
             raise ValueError(f"Invalid dtype: {self.dtype}")
-        if self.max_length < 0:
-            raise ValueError(f"Invalid max_length: {self.max_length}")
+        if self.max_seq_length < 0:
+            raise ValueError(f"Invalid max_seq_length: {self.max_seq_length}")
         if self.batch_size <= 0:
             raise ValueError(f"Invalid batch_size: {self.batch_size}")
         if self.batch_size_eval <= 0:
@@ -194,9 +194,9 @@ def init_accelerator() -> int:
     return accelerator_memory_init
 
 
-def get_tokenizer(*, model_id: str, max_length: int):
+def get_tokenizer(*, model_id: str, max_seq_length: int):
     tokenizer = AutoTokenizer.from_pretrained(model_id)
-    tokenizer.model_max_length = max_length
+    tokenizer.model_max_length = max_seq_length
     if not tokenizer.pad_token:
         tokenizer.pad_token = tokenizer.eos_token
     return tokenizer

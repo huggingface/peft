@@ -118,7 +118,7 @@ Results are stored in one of the result directories. An example output could loo
     "train_config": {
       "model_id": "meta-llama/Llama-3.2-3B",
       "dtype": "bfloat16",
-      "max_length": 768,
+      "max_seq_length": 768,
       "batch_size": 4,
       "batch_size_eval": 51,
       "max_steps": 5000,
