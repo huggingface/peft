@@ -17,6 +17,7 @@ from dataclasses import asdict, replace
 
 import numpy as np
 import pytest
+import torch
 from diffusers import StableDiffusionPipeline
 
 from peft import (
@@ -259,6 +260,17 @@ class TestStableDiffusionModel(PeftCommonTester):
     transformers_class = StableDiffusionPipeline
     sd_model = StableDiffusionPipeline.from_pretrained("hf-internal-testing/tiny-sd-pipe")
 
+    @pytest.fixture(autouse=True)
+    def autofixture(self):
+        # Disable TF32 in cudnn
+        prev_value = torch.backends.cudnn.allow_tf32
+        try:
+            torch.backends.cudnn.allow_tf32 = False
+            yield
+        finally:
+            torch.backends.cudnn.allow_tf32 = prev_value
+        torch.cuda.empty_cache()
+
     def instantiate_sd_peft(self, model_id, config_cls, config_kwargs):
         # Instantiate StableDiffusionPipeline
         if model_id == "hf-internal-testing/tiny-sd-pipe":
@@ -323,13 +335,7 @@ class TestStableDiffusionModel(PeftCommonTester):
             merged_output = np.array(model(**dummy_input).images[0]).astype(np.float32)
 
         # Images are in uint8 drange, so use large atol
-        # Increase tolerance for LoHa when init_weights is set to "abba"
-        if config_cls == LoHaConfig and original_config_kwargs.get("text_encoder", {}).get("init_weights") == "abba":
-            atol = 15.0
-        else:
-            atol = 1.0
-
-        assert np.allclose(peft_output, merged_output, atol=atol)
+        assert np.allclose(peft_output, merged_output, atol=1.0)
 
     @pytest.mark.parametrize("model_id", PEFT_DIFFUSERS_SD_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", DIFFUSERS_CONFIGS)
@@ -360,12 +366,7 @@ class TestStableDiffusionModel(PeftCommonTester):
             merged_output = np.array(model(**dummy_input).images[0]).astype(np.float32)
 
         # Images are in uint8 drange, so use large atol
-        # Increase tolerance for LoHa when init_weights is set to "abba"
-        if config_cls == LoHaConfig and config_kwargs.get("text_encoder", {}).get("init_weights") == "abba":
-            atol = 15.0
-        else:
-            atol = 1.0
-        assert np.allclose(peft_output, merged_output, atol=atol), f"{init_weights}, {atol}"
+        assert np.allclose(peft_output, merged_output, atol=1.0)
 
     @pytest.mark.parametrize("model_id", PEFT_DIFFUSERS_SD_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", DIFFUSERS_CONFIGS)

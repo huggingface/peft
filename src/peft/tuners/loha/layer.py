@@ -597,7 +597,7 @@ class HadaWeightKR(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(ctx, w1a, w1b, w2a, w2b, scale1=torch.tensor(1), scale2=torch.tensor(1)):
+    def forward(ctx, w1a, w1b, w2a, w2b, scale1, scale2):
         ctx.save_for_backward(w1a, w1b, w2a, w2b, scale1, scale2)
 
         # Handle different ranks: w1a/w1b may have rank r1, w2a/w2b may have rank r2
