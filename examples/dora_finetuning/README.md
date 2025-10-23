@@ -24,7 +24,7 @@ trainer = transformers.Trainer(
     model=peft_model,
     train_dataset=dataset,
     dataset_text_field="text",
-    max_seq_length=2048,
+    max_length=2048,
     tokenizer=tokenizer,
 )
 trainer.train()
