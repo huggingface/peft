@@ -38,6 +38,7 @@ from peft import (
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
+    GraloraConfig,
     HRAConfig,
     IA3Config,
     LNTuningConfig,
@@ -666,6 +667,25 @@ TEST_CASES = [
             "init_weights": True,
         },
     ),
+    ###########
+    # GraLoRA #
+    ###########
+    ("Vanilla MLP 1 GraLoRA", "MLP", GraloraConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 GraLoRA", "MLP", GraloraConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 GraLoRA", "MLP", GraloraConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 GraLoRA", "MLP", GraloraConfig, {"target_modules": ["lin0", "lin1"]}),
+    (
+        "Vanilla MLP 5 GraLoRA",
+        "MLP",
+        GraloraConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"]},
+    ),
+    (
+        "Embedding + transformers Conv1D 1 GraLoRA",
+        "EmbConv1D",
+        GraloraConfig,
+        {"target_modules": ["conv1d"], "gralora_k": 1},
+    ),
     ##########
     # VBLoRA #
     ##########
@@ -980,6 +1000,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"n_frequency": 10, "target_modules": ["lin1"]},
     ),
     (
+        "GraLoRA Same",
+        "gralora",
+        GraloraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "GraLoRA Different",
+        "gralora",
+        GraloraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin1"], "init_weights": False},
+    ),
+    (
         "SHiRA Same",
         "shira",
         ShiraConfig,
@@ -1165,6 +1199,7 @@ PREFIXES = {
     VeraConfig: "vera_lambda_",
     RandLoraConfig: "randlora_",
     FourierFTConfig: "fourierft_",
+    GraloraConfig: "gralora_",
     C3AConfig: "c3a_",
     HRAConfig: "hra_",
     ShiraConfig: "shira_",
@@ -3089,12 +3124,12 @@ class TestPeftCustomModel(PeftCommonTester):
                 cancelled_B = module.lora_B["cancelled"].weight.data
 
                 # The weights should be approximately zero (they cancel out)
-                assert torch.allclose(cancelled_A, torch.zeros_like(cancelled_A), atol=1e-5), (
-                    f"Cancelled A should be ~0, got max abs value {cancelled_A.abs().max()}"
-                )
-                assert torch.allclose(cancelled_B, torch.zeros_like(cancelled_B), atol=1e-5), (
-                    f"Cancelled B should be ~0, got max abs value {cancelled_B.abs().max()}"
-                )
+                assert torch.allclose(
+                    cancelled_A, torch.zeros_like(cancelled_A), atol=1e-5
+                ), f"Cancelled A should be ~0, got max abs value {cancelled_A.abs().max()}"
+                assert torch.allclose(
+                    cancelled_B, torch.zeros_like(cancelled_B), atol=1e-5
+                ), f"Cancelled B should be ~0, got max abs value {cancelled_B.abs().max()}"
 
     def test_add_weighted_adapter_negative_weight_with_different_scaling(self):
         # Test negative weights with different scaling factors (lora_alpha)
@@ -3500,9 +3535,9 @@ class TestMultiRankAdapter:
                 if isinstance(module, BaseTunerLayer):
                     rank_expected = rank_pattern.get(key, r)
                     rank_current = module.lora_A[adapter].weight.shape[0]
-                    assert rank_current == rank_expected, (
-                        f"Rank {rank_current} is not equal to expected {rank_expected}"
-                    )
+                    assert (
+                        rank_current == rank_expected
+                    ), f"Rank {rank_current} is not equal to expected {rank_expected}"
 
 
 class TestLayerRepr:

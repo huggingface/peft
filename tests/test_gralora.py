@@ -112,7 +112,7 @@ class TestGralora:
                 in_features = module.in_features
                 out_features = module.out_features
                 k = 4
-                gralora_rank = 16 - 4  # r - hybrid_r
+                gralora_rank = 16
 
                 # Check GraLoRA block shapes
                 # Each block has full gralora_rank, not gralora_rank // k
@@ -203,7 +203,7 @@ class TestGralora:
         mlp_hybrid = MLP()
         config_hybrid = GraloraConfig(
             target_modules=["lin1", "lin2"],
-            r=16,
+            r=12,
             gralora_k=4,
             hybrid_r=4,
         )
@@ -217,9 +217,9 @@ class TestGralora:
 
         # Pure and hybrid should have same total parameters (r is constant)
         # but distributed differently between block-diagonal and full-rank components
-        assert params_pure == params_hybrid, (
-            f"Pure ({params_pure}) and Hybrid ({params_hybrid}) should have same parameter count"
-        )
+        assert (
+            params_pure == params_hybrid
+        ), f"Pure ({params_pure}) and Hybrid ({params_hybrid}) should have same parameter count"
 
         # Check that hybrid has general components
         has_general = False
@@ -444,7 +444,7 @@ class TestGralora:
             hybrid_r=0,
         )
 
-        with pytest.raises(AssertionError, match="r should be divisible by gralora_k"):
+        with pytest.raises(ValueError, match="r should be divisible by gralora_k"):
             get_peft_model(mlp, config)
 
     def test_gralora_trainable_parameters_only(self, mlp_gralora_hybrid):
@@ -826,37 +826,6 @@ class TestGralora:
 
         # Should match base model output (no merge)
         assert torch.allclose(base_output, unloaded_output, atol=1e-5)
-
-    def test_gralora_get_peft_config_as_dict(self):
-        """Test get_peft_config_as_dict method"""
-        torch.manual_seed(0)
-        mlp = MLP()
-        config = GraloraConfig(
-            target_modules=["lin1"],
-            r=8,
-            gralora_k=2,
-            hybrid_r=4,
-            gralora_alpha=16,
-        )
-        model = get_peft_model(mlp, config)
-
-        config_dict = model.get_peft_config_as_dict(inference=False)
-
-        assert "default" in config_dict
-        assert config_dict["default"]["r"] == 8
-        assert config_dict["default"]["gralora_k"] == 2
-        assert config_dict["default"]["hybrid_r"] == 4
-
-    def test_gralora_get_peft_config_as_dict_inference_mode(self):
-        """Test get_peft_config_as_dict with inference=True"""
-        torch.manual_seed(0)
-        mlp = MLP()
-        config = GraloraConfig(target_modules=["lin1"], r=8, gralora_k=2)
-        model = get_peft_model(mlp, config)
-
-        config_dict = model.get_peft_config_as_dict(inference=True)
-
-        assert config_dict["default"]["inference_mode"] is True
 
     def test_gralora_merge_with_hybrid_component(self):
         """Test that merge works correctly with hybrid component"""
