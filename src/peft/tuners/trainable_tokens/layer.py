@@ -121,9 +121,9 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         # get defined behavior.
         weight = self.get_base_layer().weight
 
-        try:
+        if hasattr(self.get_base_layer(), "embedding_dim"):
             embed_dim = self.get_base_layer().embedding_dim
-        except AttributeError:
+        else:
             # lm_head doesn't have embedding_dim attribute
             embed_dim = self.get_base_layer().in_features
 
