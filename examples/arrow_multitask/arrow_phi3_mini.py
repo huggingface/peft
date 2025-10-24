@@ -186,7 +186,10 @@ def set_seed(seed: int):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    elif hasattr(torch, 'xpu') and torch.xpu.is_available():
+        torch.xpu.manual_seed_all(seed)
 
 
 def compute_loglike_loss(logits, labels, reduction="none"):
@@ -215,7 +218,7 @@ def compute_loglike_loss(logits, labels, reduction="none"):
 
 
 def evaluate_on_multi_choice_batched(
-    eval_dataset, model, tokenizer, ds_name, labels, predictions, args, batch_size=32, max_length=512, device="cuda"
+    eval_dataset, model, tokenizer, ds_name, labels, predictions, args, batch_size=32, max_length=512, device="auto"
 ):
     # Local import to mirror your original function
     model.eval()
@@ -326,7 +329,7 @@ if __name__ == "__main__":
                 args,
                 batch_size=64,  # tune this
                 max_length=512,  # tune if options are long
-                device="cuda",
+                device="auto",
             )
     else:
         general_adapter_paths = []
@@ -371,5 +374,5 @@ if __name__ == "__main__":
                 args,
                 batch_size=32,  # tune this
                 max_length=512,  # tune if options are long
-                device="cuda",
+                device="auto",
             )
