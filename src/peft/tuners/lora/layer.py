@@ -1084,6 +1084,10 @@ class Embedding(nn.Module, LoraLayer):
         # extra argument that allows mixing different adapters in the same batch at inference time.
         result = self.base_layer(x, *args, **kwargs)
 
+        # Some embedding layers (e.g., Gemma3TextScaledWordEmbedding) apply scaling in their forward method.
+        # Since base_layer(x) already includes this scaling, we need to apply it to LoRA contributions too.
+        embed_scale = self._get_embed_scale()
+
         unique_adapters = set(adapter_names)
         sub_batch_indices_list = []
         for adapter in unique_adapters:
@@ -1103,7 +1107,13 @@ class Embedding(nn.Module, LoraLayer):
             # layer output
             sub_batch = x[sub_batch_indices_list[i]]
             after_A = self._embed(sub_batch, embedding_A)
-            result[sub_batch_indices_list[i]] += (after_A @ embedding_B) * scaling
+            adapter_output = (after_A @ embedding_B) * scaling
+
+            # Apply embed_scale to match the base layer's scaling
+            if embed_scale is not None:
+                adapter_output = adapter_output * embed_scale.to(adapter_output.dtype)
+
+            result[sub_batch_indices_list[i]] += adapter_output
 
         return result
 
@@ -1135,6 +1145,11 @@ class Embedding(nn.Module, LoraLayer):
         else:
             result = self.base_layer(x, *args, **kwargs)
             torch_result_dtype = result.dtype
+
+            # Some embedding layers (e.g., Gemma3TextScaledWordEmbedding) apply scaling in their forward method.
+            # Since base_layer(x) already includes this scaling, we need to apply it to LoRA contributions too.
+            embed_scale = self._get_embed_scale()
+
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.lora_embedding_A:
                     continue
@@ -1144,7 +1159,13 @@ class Embedding(nn.Module, LoraLayer):
                     embedding_B = self.lora_embedding_B[active_adapter].T
                     scaling = self.scaling[active_adapter]
                     after_A = self._embed(x, embedding_A)
-                    result = result + (after_A @ embedding_B) * scaling
+                    adapter_output = (after_A @ embedding_B) * scaling
+
+                    # Apply embed_scale to match the base layer's scaling
+                    if embed_scale is not None:
+                        adapter_output = adapter_output * embed_scale.to(adapter_output.dtype)
+
+                    result = result + adapter_output
                 else:
                     result = self.lora_variant[active_adapter].forward(
                         self,

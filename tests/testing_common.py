@@ -35,6 +35,7 @@ from peft import (
     BOFTConfig,
     BoneConfig,
     CPTConfig,
+    DeloraConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -44,6 +45,7 @@ from peft import (
     LoraConfig,
     MissConfig,
     OFTConfig,
+    OSFConfig,
     PeftModel,
     PeftType,
     PrefixTuningConfig,
@@ -168,6 +170,12 @@ CONFIG_TESTING_KWARGS = (
         "cpt_mask": [1, 1, 1, 1, 1, 1, 1, 1],
         "cpt_tokens_type_mask": [1, 2, 2, 2, 3, 3, 4, 4],
     },
+    # DeLoRA
+    {
+        "r": 8,
+        "target_modules": None,
+        "bias": "none",
+    },
 )
 
 CLASSES_MAPPING = {
@@ -187,9 +195,25 @@ CLASSES_MAPPING = {
     "miss": (MissConfig, CONFIG_TESTING_KWARGS[12]),
     "lora+trainable_tokens": (LoraConfig, CONFIG_TESTING_KWARGS[13]),
     "randlora": (RandLoraConfig, CONFIG_TESTING_KWARGS[14]),
+    "delora": (DeloraConfig, CONFIG_TESTING_KWARGS[17]),
 }
 
 DECODER_MODELS_EXTRA = {"cpt": (CPTConfig, CONFIG_TESTING_KWARGS[15])}
+
+
+def _skip_if_merging_not_supported(model_id, config_cls):
+    """Skip tests for cases where adapter merge is unavailable.
+
+    - Conv2dGroups: merge is not supported (by design) — see PR #2403.
+    - OSF: merge/unload are not implemented yet in the tuner.
+    """
+    if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
+        pytest.skip(
+            f"Skipping test for {model_id} as adapter merging is not supported for Conv2dGroups. "
+            "(See https://github.com/huggingface/peft/pull/2403)"
+        )
+    if issubclass(config_cls, OSFConfig):
+        pytest.skip(f"Skipping test for {model_id} with {config_cls} as OSF adapter merge/unload are not implemented.")
 
 
 class PeftCommonTester:
@@ -587,6 +611,8 @@ class PeftCommonTester:
                     assert load_result2.missing_keys == []
 
     def _test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
+
         if (
             config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig, VBLoRAConfig)
             or config_kwargs.get("alora_invocation_tokens") is not None
@@ -603,7 +629,7 @@ class PeftCommonTester:
             self.skipTest("PyTorch 2.1 not supported for Half of addmm_impl_cpu_ ")
 
         with hub_online_once(model_id):
-            model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16)
+            model = self.transformers_class.from_pretrained(model_id, dtype=torch.float16)
             config = config_cls(
                 base_model_name_or_path=model_id,
                 **config_kwargs,
@@ -617,6 +643,8 @@ class PeftCommonTester:
             _ = model.merge_and_unload()
 
     def _test_merge_layers_nan(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
+
         if (
             config_cls
             not in (
@@ -704,6 +732,8 @@ class PeftCommonTester:
                 model = model.merge_and_unload(safe_merge=True)
 
     def _test_merge_layers(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
+
         if issubclass(config_cls, PromptLearningConfig):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
@@ -792,6 +822,8 @@ class PeftCommonTester:
             assert torch.allclose(logits_merged, logits_merged_from_pretrained, atol=atol, rtol=rtol)
 
     def _test_merge_layers_multi(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
+
         supported_peft_types = [
             PeftType.LORA,
             PeftType.LOHA,
@@ -880,6 +912,8 @@ class PeftCommonTester:
             assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3)
 
     def _test_merge_layers_is_idempotent(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
+
         if config_kwargs.get("alora_invocation_tokens") is not None:
             # Merging not supported for Activated LoRA (aLoRA)
             return pytest.skip("Test not applicable for Activated LoRA (aLoRA)")
@@ -905,6 +939,8 @@ class PeftCommonTester:
             assert torch.allclose(logits_0, logits_1, atol=1e-6, rtol=1e-6)
 
     def _test_safe_merge(self, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
+
         if config_kwargs.get("alora_invocation_tokens") is not None:
             # Merging not supported for Activated LoRA (aLoRA)
             return pytest.skip("Test not applicable for Activated LoRA (aLoRA)")
@@ -1142,7 +1178,7 @@ class PeftCommonTester:
             return pytest.skip("BFloat16 is not supported on MPS")
 
         with hub_online_once(model_id):
-            model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16)
+            model = self.transformers_class.from_pretrained(model_id, dtype=torch.bfloat16)
             config = config_cls(
                 base_model_name_or_path=model_id,
                 **config_kwargs,
@@ -1426,6 +1462,7 @@ class PeftCommonTester:
             PeftType.VBLORA,
             PeftType.BONE,
             PeftType.MISS,
+            PeftType.DELORA,
         ]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
@@ -1775,6 +1812,8 @@ class PeftCommonTester:
                     if "single" in adapter_name:
                         new_delta_weight = target.get_delta_weight(adapter_name)
                         weighted_original_delta_weights = target.get_delta_weight(adapter_list[0]) * weight_list[0]
+                        sign = 1 if weight_list[0] > 0 else -1
+                        weighted_original_delta_weights = sign * weighted_original_delta_weights
                         assert torch.allclose(new_delta_weight, weighted_original_delta_weights, atol=1e-4, rtol=1e-4)
                     elif "svd" in adapter_name:
                         assert target.r[adapter_name] == 20
@@ -1831,6 +1870,7 @@ class PeftCommonTester:
 
         adapter_list = ["adapter1", "adapter_2", "adapter_3"]
         weight_list = [0.5, 1.5, 1.5]
+        negative_weight_list = [-0.5, -0.8, -1.2]
         # Initialize the config
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -1847,8 +1887,10 @@ class PeftCommonTester:
 
             if isinstance(config, LoraConfig):
                 self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, weight_list)
+                self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, negative_weight_list)
             elif isinstance(config, IA3Config):
                 self._test_weighted_combination_of_adapters_ia3(model, config, adapter_list, weight_list)
+                self._test_weighted_combination_of_adapters_ia3(model, config, adapter_list, negative_weight_list)
             else:
                 pytest.skip(f"Test not applicable for {config}")
 

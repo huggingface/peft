@@ -39,7 +39,7 @@ print(script_args)
 
 model = AutoModelForCausalLM.from_pretrained(
     script_args.base_model_name_or_path,
-    torch_dtype=(
+    dtype=(
         torch.float16
         if script_args.bits == "fp16"
         else (torch.bfloat16 if script_args.bits == "bf16" else torch.float32)

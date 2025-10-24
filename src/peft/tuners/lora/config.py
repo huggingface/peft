@@ -666,6 +666,17 @@ class LoraConfig(PeftConfig):
     lora_mpo: bool = field(
         default=False, metadata={"help": "Use MPO for helping LoRA"}
     )
+    ensure_weight_tying: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Whether to tie weights or not after peft initialization. "
+                "This will ensure that the adapters added to the tied layers "
+                "are also tied. This is only applicable for layers passed via "
+                "`modules_to_save`."
+            )
+        },
+    )
 
     def to_dict(self):
         """
@@ -684,6 +695,10 @@ class LoraConfig(PeftConfig):
         self.exclude_modules = (
             set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
+
+        if self.ensure_weight_tying:
+            self.modules_to_tie = None
+
         if isinstance(self.target_parameters, str):
             raise TypeError("`target_parameters` must be a list of strings or None.")
 

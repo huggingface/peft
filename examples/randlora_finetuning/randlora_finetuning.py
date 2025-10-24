@@ -52,7 +52,7 @@ def train_model(
     device_type = device.type
     device_module = getattr(torch, device_type, torch.cuda)
     bf16_suppotrted = device_module.is_available() and device_module.is_bf16_supported()
-    torch_dtype = torch.bfloat16 if bf16_suppotrted else torch.float16
+    dtype = torch.bfloat16 if bf16_suppotrted else torch.float16
 
     # QRandLora (quantized randlora): IF YOU WANNA QUANTIZE THE MODEL
     if quantize:
@@ -65,14 +65,14 @@ def train_model(
                 bnb_4bit_use_double_quant=True,
                 bnb_4bit_quant_type="nf4",
             ),
-            torch_dtype=torch_dtype,
+            dtype=dtype,
         )
         # setup for quantized training
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
     else:
         model = AutoModelForCausalLM.from_pretrained(
             base_model,
-            torch_dtype=torch_dtype,
+            dtype=dtype,
             token=hf_token,
         )
     # LoRa config for the PEFT model

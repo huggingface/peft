@@ -20,6 +20,7 @@ from peft import (
     BOFTConfig,
     BoneConfig,
     C3AConfig,
+    DeloraConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -34,6 +35,7 @@ from peft import (
     ShiraConfig,
     VBLoRAConfig,
     VeraConfig,
+    WaveFTConfig,
 )
 
 from .testing_common import PeftCommonTester
@@ -74,6 +76,14 @@ ALL_CONFIGS = [
     ),
     (
         MissConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+            "r": 2,
+        },
+    ),
+    (
+        DeloraConfig,
         {
             "task_type": "FEATURE_EXTRACTION",
             "target_modules": None,
@@ -201,6 +211,14 @@ ALL_CONFIGS = [
         {
             "task_type": "FEATURE_EXTRACTION",
             "block_size": 1,
+            "target_modules": None,
+        },
+    ),
+    (
+        WaveFTConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "n_frequency": 8,
             "target_modules": None,
         },
     ),

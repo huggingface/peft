@@ -120,7 +120,12 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         # onto the new values, we would get undefined behavior. By replacing the specific token values we always
         # get defined behavior.
         weight = self.get_base_layer().weight
-        embed_dim = self.get_base_layer().embedding_dim
+
+        if hasattr(self.get_base_layer(), "embedding_dim"):
+            embed_dim = self.get_base_layer().embedding_dim
+        else:
+            # lm_head doesn't have embedding_dim attribute
+            embed_dim = self.get_base_layer().in_features
 
         if init_weights:
             if check_deepspeed_zero3_enabled():
@@ -232,6 +237,11 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
                     scale_grad_by_freq=self.base_layer.scale_grad_by_freq,
                     sparse=self.base_layer.sparse,
                 )
+                # Some embedding layers (e.g., Gemma3TextScaledWordEmbedding) apply scaling in their forward method.
+                # Since we're using F.embedding directly, we need to apply this scaling manually.
+                embed_scale = self._get_embed_scale()
+                if embed_scale is not None:
+                    result = result * embed_scale.to(result.dtype)
             elif isinstance(self.base_layer, torch.nn.Linear):
                 # Probably a tied adapter that wraps an LM head.
                 result = F.linear(

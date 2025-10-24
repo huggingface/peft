@@ -2075,7 +2075,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                torch_dtype=torch.float16,
+                dtype=torch.float16,
                 device_map="auto",
                 quantization_config=self.quantization_config,
             )
@@ -2128,7 +2128,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
 
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
             device_map="auto",
             quantization_config=self.quantization_config,
         )
@@ -2201,7 +2201,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                torch_dtype=torch.float16,
+                dtype=torch.float16,
                 device_map="auto",
                 quantization_config=self.quantization_config,
             )
@@ -2279,7 +2279,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                torch_dtype=torch.float16,
+                dtype=torch.float16,
                 device_map=device_map,
                 quantization_config=self.quantization_config,
             )
@@ -2344,7 +2344,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
         # default adapter name
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
             device_map="auto",
             quantization_config=self.quantization_config,
         )
@@ -2355,7 +2355,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
         # other adapter name
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
             device_map="auto",
             quantization_config=self.quantization_config,
         )
@@ -2918,7 +2918,7 @@ class TestLoftQ:
         clear_device_cache(garbage_collection=True)
 
         # now load quantized model and apply LoftQ-initialized weights on top
-        base_model = self.get_base_model(tmp_path / "base_model", device=device, **kwargs, torch_dtype=torch.float32)
+        base_model = self.get_base_model(tmp_path / "base_model", device=device, **kwargs, dtype=torch.float32)
         loftq_model = PeftModel.from_pretrained(base_model, tmp_path / "loftq_model", is_trainable=True)
 
         # TODO sanity check: model is quantized
@@ -2950,8 +2950,9 @@ class TestLoftQ:
         assert mse_loftq > 0.0
 
         # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
-        assert mse_loftq < (mse_quantized / self.error_factor)
-        assert mae_loftq < (mae_quantized / self.error_factor)
+        error_factor = self.get_error_factor(device)
+        assert mse_loftq < (mse_quantized / error_factor)
+        assert mae_loftq < (mae_quantized / error_factor)
 
     @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_bloomz_loftq_4bit_iter_5(self, device, tmp_path):
@@ -3225,7 +3226,7 @@ class MixedPrecisionTests(unittest.TestCase):
         # which should not use fp16.
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
         )
         model = get_peft_model(model, self.config, autocast_adapter_dtype=False)
 
@@ -3249,7 +3250,7 @@ class MixedPrecisionTests(unittest.TestCase):
         # No exception should be raised.
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
         )
         model = get_peft_model(model, self.config, autocast_adapter_dtype=True)
 
@@ -3271,7 +3272,7 @@ class MixedPrecisionTests(unittest.TestCase):
         # Same test as above but containing the fix to make it work
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
         )
         model = get_peft_model(model, self.config, autocast_adapter_dtype=False)
 
@@ -3283,7 +3284,7 @@ class MixedPrecisionTests(unittest.TestCase):
         dtype_counts_before = Counter(p.dtype for p in model.parameters())
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
         )
 
         model = get_peft_model(model, self.config, autocast_adapter_dtype=True)
@@ -3308,13 +3309,13 @@ class MixedPrecisionTests(unittest.TestCase):
         # Same as previous tests, but loading the adapter with PeftModel.from_pretrained instead
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
         )
         model = get_peft_model(model, self.config, autocast_adapter_dtype=False)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             model.save_pretrained(tmp_dir)
-            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, torch_dtype=torch.float16)
+            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, dtype=torch.float16)
             model = PeftModel.from_pretrained(model, tmp_dir, autocast_adapter_dtype=False, is_trainable=True)
 
             trainer = Trainer(
@@ -3335,7 +3336,7 @@ class MixedPrecisionTests(unittest.TestCase):
         # Same as previous tests, but loading the adapter with PeftModel.from_pretrained instead
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
         )
         # Below, we purposefully set autocast_adapter_dtype=False so that the saved adapter uses float16. We still want
         # the loaded adapter to use float32 when we load it with autocast_adapter_dtype=True.
@@ -3348,7 +3349,7 @@ class MixedPrecisionTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             model.save_pretrained(tmp_dir)
-            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, torch_dtype=torch.float16)
+            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, dtype=torch.float16)
             model = PeftModel.from_pretrained(model, tmp_dir, autocast_adapter_dtype=True, is_trainable=True)
             # sanity check: this should NOT have float16 adapter weights:
             assert (
@@ -3375,7 +3376,7 @@ class MixedPrecisionTests(unittest.TestCase):
         # load_model(..., autocast_adapter_dtype=True) (the default).
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
         )
         # Below, we purposefully set autocast_adapter_dtype=False so that the saved adapter uses float16. We still want
         # the loaded adapter to use float32 when we load it with autocast_adapter_dtype=True.
@@ -3388,7 +3389,7 @@ class MixedPrecisionTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             model.save_pretrained(tmp_dir)
-            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, torch_dtype=torch.float16)
+            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, dtype=torch.float16)
             # the default adapter is now in float16
             model = get_peft_model(model, self.config, autocast_adapter_dtype=False)
             # sanity check: this should NOT have float16 adapter weights:
@@ -3497,7 +3498,7 @@ class PeftAqlmGPUTests(unittest.TestCase):
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
                 device_map="cuda",
-                torch_dtype="auto",
+                dtype="auto",
             )
 
             model = prepare_model_for_kbit_training(model)
@@ -3583,7 +3584,7 @@ class PeftHqqGPUTests(unittest.TestCase):
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
                 device_map=device,
-                torch_dtype=compute_dtype,
+                dtype=compute_dtype,
                 quantization_config=quant_config,
             )
 
@@ -3641,7 +3642,7 @@ class PeftHqqGPUTests(unittest.TestCase):
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
             device_map=device,
-            torch_dtype=compute_dtype,
+            dtype=compute_dtype,
         )
         config = LoraConfig(
             target_modules=["q_proj", "v_proj"],
@@ -3664,7 +3665,7 @@ class PeftHqqGPUTests(unittest.TestCase):
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
             device_map=device,
-            torch_dtype=compute_dtype,
+            dtype=compute_dtype,
             quantization_config=quant_config,
         )
         torch.manual_seed(0)
@@ -3697,7 +3698,7 @@ class PeftHqqGPUTests(unittest.TestCase):
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
                 device_map=device,
-                torch_dtype=compute_dtype,
+                dtype=compute_dtype,
                 quantization_config=quant_config,
             )
             model = PeftModel.from_pretrained(model, tmp_dir)
@@ -4263,7 +4264,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
                 self.causal_lm_model_id,
                 device_map=device_map,
                 quantization_config=quantization_config,
-                torch_dtype=torch.bfloat16,
+                dtype=torch.bfloat16,
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
@@ -4344,7 +4345,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             self.causal_lm_model_id,
             device_map=device_map,
             quantization_config=quantization_config,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
         )
 
         assert set(model.hf_device_map.values()) == set(range(device_count))
@@ -4588,7 +4589,7 @@ class TestFSDPWrap:
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
             quantization_config=quant_config,
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         )
         # model = prepare_model_for_kbit_training(model)
         config = LoraConfig(
@@ -5344,7 +5345,7 @@ class TestArrowQuantized:
             # Load quantized base model
             base_model = AutoModelForCausalLM.from_pretrained(
                 model_id,
-                torch_dtype=torch.bfloat16,
+                dtype=torch.bfloat16,
                 device_map="auto",
                 quantization_config=bnb_config,
             )
