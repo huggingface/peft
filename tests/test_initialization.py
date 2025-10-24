@@ -38,6 +38,7 @@ from peft import (
     C3AConfig,
     DeloraConfig,
     EvaConfig,
+    GraloraConfig,
     IA3Config,
     LoftQConfig,
     LoKrConfig,
@@ -2163,6 +2164,56 @@ class TestDeLoRAInitialization:
         model = get_peft_model(base, cfg)
         y_peft = model(data)
         assert not torch.allclose(y_base, y_peft, atol=1e-6, rtol=1e-6)
+
+
+class TestGraLoRAInitialization:
+    """Basic sanity tests for the GraLoRA tuner."""
+
+    torch_device = infer_device()
+
+    def get_model(self, bias=True):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 30, bias=bias)
+                self.lin1 = nn.Linear(30, 2, bias=bias)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                return X
+
+        return MLP(bias=bias).to(self.torch_device).eval()
+
+    @pytest.fixture
+    def data(self):
+        torch.manual_seed(0)
+        return torch.randn(4, 10, device=self.torch_device)
+
+    def test_gralora_with_incompatible_gralora_k_and_r_raises(self):
+        model = self.get_model()
+        r = 6
+        gralora_k = 4
+        # msg = f"r should be divisible by gralora_k, but got {config.r} and {config.gralora_k}"
+        msg = f"r should be divisible by gralora_k, but got {r} and {gralora_k}"
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            GraloraConfig(target_modules=["lin0"], r=r, gralora_k=gralora_k)
+
+    def test_gralora_with_incompatible_gralora_k_and_in_features_raises(self):
+        model = self.get_model()
+        config = GraloraConfig(target_modules=["lin0"], r=6, gralora_k=3)
+        msg = f"in_features should be divisible by gralora_k, but got {model.lin0.in_features} and {config.gralora_k}"
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            get_peft_model(model, config)
+
+    def test_gralora_with_incompatible_gralora_k_and_out_features_raises(self):
+        model = self.get_model()
+        config = GraloraConfig(target_modules=["lin1"], r=6, gralora_k=3)
+        msg = (
+            f"out_features should be divisible by gralora_k, but got {model.lin1.out_features} and {config.gralora_k}"
+        )
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            get_peft_model(model, config)
 
 
 class TestNoInfiniteRecursionDeepspeed:
