@@ -163,6 +163,7 @@ def create_and_prepare_model(args, data_args, training_args):
             target_modules=args.lora_target_modules.split(",")
             if args.lora_target_modules != "all-linear"
             else args.lora_target_modules,
+            lora_mpo=args.lora_mpo,
         )
 
     special_tokens = None

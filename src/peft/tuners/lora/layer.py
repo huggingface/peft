@@ -34,6 +34,7 @@ from peft.utils.integrations import (
 )
 from peft.utils.other import transpose
 from peft.utils.warning import PeftWarning
+from .mpo_shape_calculator import calculate_mpo_shape
 
 from .config import ArrowConfig, LoraConfig
 
@@ -224,6 +225,9 @@ class LoraLayer(BaseTunerLayer):
         elif init_lora_weights == "orthogonal":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.orthogonal_init(adapter_name)
+        elif init_lora_weights == "lorampo":
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.lorampo_init(adapter_name)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
         # call this before init of the lora variants
@@ -256,6 +260,8 @@ class LoraLayer(BaseTunerLayer):
                 nn.init.kaiming_uniform_(self.lora_A[adapter_name].weight, a=math.sqrt(5))
             elif init_lora_weights.lower() == "gaussian":
                 nn.init.normal_(self.lora_A[adapter_name].weight, std=1 / self.r[adapter_name])
+            elif init_lora_weights == "lorampo":
+                pass # use MPO to initialize
             else:
                 raise ValueError(f"Unknown initialization {init_lora_weights=}")
             nn.init.zeros_(self.lora_B[adapter_name].weight)
@@ -444,6 +450,37 @@ class LoraLayer(BaseTunerLayer):
             self.lora_embedding_A[adapter_name].weight.data = lora_A
             self.lora_embedding_B[adapter_name].weight.data = lora_B
         self.get_base_layer().weight.data = qweight
+    def lorampo_init(self, adapter_name):
+        print(f"using MPO for LoRA")
+        from matrix2mpo_plus import MPO
+        weight = self.get_base_layer().weight
+        mpo_input_shape, mpo_output_shape = calculate_mpo_shape(self.in_features, self.out_features)
+  
+        dtype = weight.dtype
+        device = weight.device
+        self.mpo = MPO(mpo_input_shape, mpo_output_shape, 100000)
+        r = self.r[adapter_name]
+        if r > 0:
+            self.r = r
+            # 将LoRA相关属性设置到lora_layer中
+            self.lora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
+            self.lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=False)
+            self.scaling[adapter_name] = self.lora_alpha[adapter_name] / r
+            # Freezing the pre-trained weight matrix
+            self.get_base_layer().weight.requires_grad = False
+        mpo_tensor_set, _, _ = self.mpo.matrix2mpo(weight.T.to(torch.float32).cpu().detach().numpy())
+       
+        A_weight = mpo_tensor_set[0] # in_features,bond
+        B_weight = mpo_tensor_set[1] # bond,infeatures
+
+        self.lora_A[adapter_name].weight.data = torch.from_numpy(A_weight[..., :self.r].copy()).to(torch.float32).to(device)
+        self.lora_B[adapter_name].weight.data = torch.from_numpy(B_weight[:self.r, ...].copy()).to(torch.float32).to(device)
+        
+        self.get_base_layer().weight.data = self.mpo.mpo2matrix([torch.from_numpy(A_weight[..., self.r:]).to(torch.float32),torch.from_numpy(B_weight[self.r:, ...]).to(torch.float32)]).T
+
+        del A_weight
+        del B_weight
+
 
     @torch.no_grad()
     def orthogonal_init(self, adapter_name):
@@ -567,7 +604,11 @@ class LoraLayer(BaseTunerLayer):
             # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
             # layer output
             sub_batch = x[sub_batch_indices_list[i]].to(lora_A.weight.dtype)
-            if active_adapter not in self.lora_variant:  # vanilla LoRA
+            if active_adapter == "lorampo":
+                loradot = torch.tensordot(self.lora_A[active_adapter].weight.data.T, self.lora_B[active_adapter].weight.data.T, dims=([3],[0])).permute(0,1,3,2,4,5).reshape(1024,2048)
+                lora_output = (loradot @ sub_batch) * scaling
+                result[sub_batch_indices_list[i]] += lora_output.to(torch_result_dtype)
+            elif active_adapter not in self.lora_variant:  # vanilla LoRA
                 lora_output = lora_B(lora_A(dropout(sub_batch))) * scaling
                 result[sub_batch_indices_list[i]] += lora_output.to(torch_result_dtype)
             else:
@@ -803,8 +844,16 @@ class Linear(nn.Module, LoraLayer):
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
                 x = self._cast_input_dtype(x, lora_A.weight.dtype)
-                if active_adapter not in self.lora_variant:  # vanilla LoRA
-                    result = result + lora_B(lora_A(dropout(x))) * scaling
+                if active_adapter == "lorampo":
+                    pass
+                    # loradot = torch.tensordot(self.lora_A[active_adapter].weight.data.T, self.lora_B[active_adapter].weight.data.T, dims=([3],[0])).permute(0,1,3,2,4,5).reshape(1024,2048)
+                    # lora_output = (loradot @ dropout(x)) * scaling
+                    # result = result + lora_output
+                elif active_adapter not in self.lora_variant:  # vanilla LoRA
+                    # result = result + lora_B(lora_A(dropout(x))) * scaling
+                    loradot = torch.tensordot(self.lora_A[active_adapter].weight, self.lora_B[active_adapter].weight, dims=([3],[0])).permute(0,1,3,2,4,5).reshape(self.in_features, self.out_features)
+                    lora_output = (dropout(x) @ loradot) # * scaling
+                    result = result + lora_output
                 else:
                     result = self.lora_variant[active_adapter].forward(
                         self,

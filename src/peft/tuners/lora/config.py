@@ -663,6 +663,9 @@ class LoraConfig(PeftConfig):
     arrow_config: Optional[ArrowConfig] = field(
         default=None, metadata={"help": "The necessary config to apply arrow routing on the model."}
     )
+    lora_mpo: bool = field(
+        default=False, metadata={"help": "Use MPO for helping LoRA"}
+    )
 
     def to_dict(self):
         """
