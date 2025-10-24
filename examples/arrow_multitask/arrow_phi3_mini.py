@@ -223,6 +223,11 @@ def evaluate_on_multi_choice_batched(
     # Local import to mirror your original function
     model.eval()
 
+    if device == "auto":
+        device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
+    else:
+        device = torch.device(device)
+
     for start in tqdm(
         range(0, len(eval_dataset), batch_size), total=(len(eval_dataset) + batch_size - 1) // batch_size
     ):
