@@ -158,6 +158,43 @@ class LoraModel(BaseTuner):
                 f"{self.__class__.__name__} supports only 1 adapter with bias. When using multiple adapters, "
                 "set bias to 'none' for all adapters."
             )
+        
+        # Check KaSA adapter compatibility (only when adding additional adapters)
+        existing_adapters = list(self.peft_config.keys())
+        if len(existing_adapters) > 1:
+            new_adapter_name = None
+            for name, existing_config in self.peft_config.items():
+                if existing_config is config:
+                    new_adapter_name = name
+                    break
+            
+            if new_adapter_name is not None:
+                existing_adapters_without_new = [
+                    name for name in existing_adapters 
+                    if name != new_adapter_name  
+                ]
+                has_kasa = any(
+                    getattr(self.peft_config[name], 'use_kasa', False) 
+                    for name in existing_adapters_without_new
+                )
+                is_new_kasa = getattr(config, 'use_kasa', False)
+            else:
+                has_kasa = any(
+                    getattr(self.peft_config[name], 'use_kasa', False) 
+                    for name in existing_adapters
+                )
+                is_new_kasa = getattr(config, 'use_kasa', False)
+            
+            if has_kasa and not is_new_kasa:
+                raise ValueError(
+                    f"KaSA adapters cannot be mixed with other adapter types. "
+                    f"Existing adapters include KaSA, but new adapter is not KaSA."
+                )
+            elif not has_kasa and is_new_kasa:
+                raise ValueError(
+                    f"KaSA adapters cannot be mixed with other adapter types. "
+                    f"New adapter is KaSA, but existing adapters are not KaSA."
+                )
 
     @staticmethod
     def _check_target_module_exists(lora_config, key):
