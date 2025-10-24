@@ -22,6 +22,7 @@ from peft import (
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
+    GraloraConfig,
     HRAConfig,
     IA3Config,
     LoraConfig,
@@ -95,6 +96,13 @@ ALL_CONFIGS = [
         {
             "task_type": "FEATURE_EXTRACTION",
             "n_frequency": 10,
+            "target_modules": None,
+        },
+    ),
+    (
+        GraloraConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
             "target_modules": None,
         },
     ),
