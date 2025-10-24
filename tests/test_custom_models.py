@@ -681,6 +681,18 @@ TEST_CASES = [
         {"target_modules": ["lin0"], "modules_to_save": ["lin1"]},
     ),
     (
+        "Vanilla MLP 6 GraLoRA",
+        "MLP",
+        GraloraConfig,
+        {"target_modules": ["lin0", "lin1"], "modules_to_save": ["lin1"]},
+    ),
+    (
+        "Vanilla MLP 7 Hybrid GraLoRA",
+        "MLP",
+        GraloraConfig,
+        {"target_modules": ["lin0", "lin1"], "modules_to_save": ["lin1"], "hybrid_r": 4},
+    ),
+    (
         "Embedding + transformers Conv1D 1 GraLoRA",
         "EmbConv1D",
         GraloraConfig,
@@ -3124,12 +3136,12 @@ class TestPeftCustomModel(PeftCommonTester):
                 cancelled_B = module.lora_B["cancelled"].weight.data
 
                 # The weights should be approximately zero (they cancel out)
-                assert torch.allclose(
-                    cancelled_A, torch.zeros_like(cancelled_A), atol=1e-5
-                ), f"Cancelled A should be ~0, got max abs value {cancelled_A.abs().max()}"
-                assert torch.allclose(
-                    cancelled_B, torch.zeros_like(cancelled_B), atol=1e-5
-                ), f"Cancelled B should be ~0, got max abs value {cancelled_B.abs().max()}"
+                assert torch.allclose(cancelled_A, torch.zeros_like(cancelled_A), atol=1e-5), (
+                    f"Cancelled A should be ~0, got max abs value {cancelled_A.abs().max()}"
+                )
+                assert torch.allclose(cancelled_B, torch.zeros_like(cancelled_B), atol=1e-5), (
+                    f"Cancelled B should be ~0, got max abs value {cancelled_B.abs().max()}"
+                )
 
     def test_add_weighted_adapter_negative_weight_with_different_scaling(self):
         # Test negative weights with different scaling factors (lora_alpha)
@@ -3440,6 +3452,24 @@ class TestPeftCustomModel(PeftCommonTester):
         for k in state_dict:
             assert torch.allclose(state_dict[k], state_dict_loaded[k])
 
+    def test_gralora_and_hybrid_gralora_parameter_count(self):
+        # Here we test the parameter count of GraLoRA is preserved
+        # when rank r + hybrid_r is the same regardless of the value of gralora_k.
+        model1 = MLP()
+        config1 = GraloraConfig(target_modules=["lin0"], r=12, gralora_k=2, hybrid_r=0)
+        model1 = get_peft_model(model1, config1)
+        model2 = MLP()
+        config2 = GraloraConfig(target_modules=["lin0"], r=10, gralora_k=2, hybrid_r=2)
+        model2 = get_peft_model(model2, config2)
+        model3 = MLP()
+        config3 = GraloraConfig(target_modules=["lin0"], r=10, gralora_k=5, hybrid_r=2)
+        model3 = get_peft_model(model3, config3)
+        trainable_params1, all_params1 = model1.get_nb_trainable_parameters()
+        trainable_params2, all_params2 = model2.get_nb_trainable_parameters()
+        trainable_params3, all_params3 = model3.get_nb_trainable_parameters()
+        assert trainable_params1 == trainable_params2 == trainable_params3
+        assert all_params1 == all_params2 == all_params3
+
     @pytest.mark.parametrize("with_forward_call", [False, True])
     def test_mha_gradients_set_correctly(self, with_forward_call):
         # check for this bug: https://github.com/huggingface/peft/issues/761#issuecomment-1893804738
@@ -3535,9 +3565,9 @@ class TestMultiRankAdapter:
                 if isinstance(module, BaseTunerLayer):
                     rank_expected = rank_pattern.get(key, r)
                     rank_current = module.lora_A[adapter].weight.shape[0]
-                    assert (
-                        rank_current == rank_expected
-                    ), f"Rank {rank_current} is not equal to expected {rank_expected}"
+                    assert rank_current == rank_expected, (
+                        f"Rank {rank_current} is not equal to expected {rank_expected}"
+                    )
 
 
 class TestLayerRepr:

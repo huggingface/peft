@@ -271,12 +271,6 @@ class Linear(nn.Linear, GraloraLayer):
         in_features = self.in_features
         out_features = self.out_features
         gralora_rank = r
-        if in_features % gralora_k != 0:
-            raise ValueError(f"in_features should be divisible by gralora_k, but got {in_features} and {gralora_k}")
-        elif out_features % gralora_k != 0:
-            raise ValueError(f"out_features should be divisible by gralora_k, but got {out_features} and {gralora_k}")
-        elif gralora_rank % gralora_k != 0:
-            raise ValueError(f"rank should be divisible by gralora_k, but got {gralora_rank} and {gralora_k}")
         subblock_gralora_rank = gralora_rank // gralora_k
 
         # scatter gralora_A to get the scattered weight matrix
