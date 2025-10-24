@@ -12,7 +12,7 @@ from peft import LoraConfig, get_peft_model
 from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer, DataCollatorForLanguageModeling
 from datasets import load_dataset
 
-model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-Instruct-v0.3", device_map="cuda")
+model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-Instruct-v0.3", device_map="auto")
 tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-Instruct-v0.3")
 dataset = load_dataset("Lots-of-LoRAs/task1660_super_glue_question_generation", split="train")
 
@@ -66,7 +66,7 @@ python alora_finetuning.py \
     --quantize \
     --eval_step 10 \
     --save_step 100 \
-    --device "cuda:0" \
+    --device "auto" \
     --lora_r 32 \
     --lora_alpha 32 \
     --lora_dropout 0.05 \
