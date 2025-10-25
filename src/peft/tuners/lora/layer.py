@@ -451,32 +451,43 @@ class LoraLayer(BaseTunerLayer):
             self.lora_embedding_B[adapter_name].weight.data = lora_B
         self.get_base_layer().weight.data = qweight
     def lorampo_init(self, adapter_name):
-        print(f"using MPO for LoRA")
-        from matrix2mpo_plus import MPO
+        """Initialize LoRA with MPO decomposition."""
+        try:
+            from matrix2mpo_plus import MPO
+        except ImportError:
+            raise ImportError(
+                "matrix2mpo_plus is required for MPO initialization. "
+                "Please install it with: pip install matrix2mpo_plus"
+            )
+        
         weight = self.get_base_layer().weight
         mpo_input_shape, mpo_output_shape = calculate_mpo_shape(self.in_features, self.out_features)
-  
+        
         dtype = weight.dtype
         device = weight.device
         self.mpo = MPO(mpo_input_shape, mpo_output_shape, 100000)
         r = self.r[adapter_name]
+        
         if r > 0:
-            self.r = r
             # 将LoRA相关属性设置到lora_layer中
             self.lora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
             self.lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=False)
             self.scaling[adapter_name] = self.lora_alpha[adapter_name] / r
             # Freezing the pre-trained weight matrix
             self.get_base_layer().weight.requires_grad = False
+            
         mpo_tensor_set, _, _ = self.mpo.matrix2mpo(weight.T.to(torch.float32).cpu().detach().numpy())
        
-        A_weight = mpo_tensor_set[0] # in_features,bond
-        B_weight = mpo_tensor_set[1] # bond,infeatures
+        A_weight = mpo_tensor_set[0]  # in_features,bond
+        B_weight = mpo_tensor_set[1]  # bond,infeatures
 
-        self.lora_A[adapter_name].weight.data = torch.from_numpy(A_weight[..., :self.r].copy()).to(torch.float32).to(device)
-        self.lora_B[adapter_name].weight.data = torch.from_numpy(B_weight[:self.r, ...].copy()).to(torch.float32).to(device)
+        self.lora_A[adapter_name].weight.data = torch.from_numpy(A_weight[..., :r].copy()).to(torch.float32).to(device)
+        self.lora_B[adapter_name].weight.data = torch.from_numpy(B_weight[:r, ...].copy()).to(torch.float32).to(device)
         
-        self.get_base_layer().weight.data = self.mpo.mpo2matrix([torch.from_numpy(A_weight[..., self.r:]).to(torch.float32),torch.from_numpy(B_weight[self.r:, ...]).to(torch.float32)]).T
+        self.get_base_layer().weight.data = self.mpo.mpo2matrix([
+            torch.from_numpy(A_weight[..., r:]).to(torch.float32),
+            torch.from_numpy(B_weight[r:, ...]).to(torch.float32)
+        ]).T
 
         del A_weight
         del B_weight
