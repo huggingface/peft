@@ -340,6 +340,8 @@ if is_bnb_4bit_available():
             super().__init__()
             LoraLayer.__init__(self, base_layer)
             self.fan_in_fan_out = False
+            # if kwargs['lora_config'].lora_mpo:
+            #     init_lora_weights = "lorampo"
 
             self._active_adapter = adapter_name
             self.update_layer(
