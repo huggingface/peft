@@ -27,6 +27,10 @@ from peft.tuners.lora.variants import (
     DoraConv2dVariant,
     DoraEmbeddingVariant,
     DoraLinearVariant,
+    WoraConv1dVariant,
+    WoraConv2dVariant,
+    WoraEmbeddingVariant,
+    WoraLinearVariant,
     calculate_alora_offsets,
     get_alora_offsets_for_forward,
     get_alora_offsets_for_generate,
@@ -106,6 +110,12 @@ VARIANT_MAP = {
     "alora": {
         LoraLinear: ALoraLinearVariant,
     },
+    "wora": {
+        LoraLinear: WoraLinearVariant,
+        LoraEmbedding: WoraEmbeddingVariant,
+        LoraConv1d: WoraConv1dVariant,
+        LoraConv2d: WoraConv2dVariant,
+    },
 }
 
 
@@ -119,6 +129,11 @@ TEST_CASES = [
         "alora",
         LoraConfig,
         {"target_modules": ["linear1", "linear2"], "alora_invocation_tokens": [1]},
+    ),
+    (
+        "wora",
+        LoraConfig,
+        {"target_modules": ["linear1", "linear2", "conv1d", "conv2d", "embedding"], "use_wora": True},
     ),
 ]
 
@@ -167,6 +182,20 @@ class TestLoraVariants:
 
         for layer in layer_names:
             assert getattr(peft_model.base_model.model, layer).lora_magnitude_vector["default"].weight.grad is not None
+
+    def test_wora_params_have_gradients(self):
+        """Ensure that the WoRA alpha and beta parameters are participating in the output computation."""
+        layer_names = ["linear1", "linear2", "conv1d", "conv2d", "embedding"]
+        peft_config = LoraConfig(target_modules=layer_names, use_wora=True)
+        base_model, peft_model = self.custom_model_with_loss_backpropagated(peft_config)
+
+        for layer in layer_names:
+            # Check magnitude vector (inherited from DoRA)
+            assert getattr(peft_model.base_model.model, layer).lora_magnitude_vector["default"].weight.grad is not None
+            # Check WoRA-specific alpha parameter
+            assert getattr(peft_model.base_model.model, layer).lora_wora_alpha["default"].grad is not None
+            # Check WoRA-specific beta parameter
+            assert getattr(peft_model.base_model.model, layer).lora_wora_beta["default"].grad is not None
 
 
 class TestActivatedLora:
