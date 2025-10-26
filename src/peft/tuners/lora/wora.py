@@ -175,7 +175,7 @@ class WoraLinearLayer(nn.Module):
 class WoraEmbeddingLayer(WoraLinearLayer):
     """WoRA layer for embedding transformations."""
 
-    def forward(self, x, *, lora_A, lora_B, scaling, alpha, beta, base_layer, embed_fn):
+    def forward(self, x, *, lora_A, lora_B, scaling, alpha, beta, base_layer, embed_fn, base_result):
         """
         Forward pass for WoRA embedding layer.
 
@@ -188,6 +188,7 @@ class WoraEmbeddingLayer(WoraLinearLayer):
             beta: Beta parameter
             base_layer: The base embedding layer
             embed_fn: Embedding function
+            base_result: The base embedding result
 
         Returns:
             Tuple of (mag_norm_scale, result_wora)
@@ -206,8 +207,12 @@ class WoraEmbeddingLayer(WoraLinearLayer):
         weight_norm = weight_norm.detach()
         mag_norm_scale = magnitude / weight_norm
 
-        # WoRA weighted scaling - use Parameter tensors directly to maintain gradient flow
-        result_wora = beta * mag_norm_scale * (embed_fn(x, lora_A) @ lora_B) * scaling
+        # Compute LoRA result
+        lora_result = embed_fn(x, lora_A) @ lora_B
+
+        # WoRA weighted scaling: (beta - 1) for base + alpha for LoRA
+        # Use Parameter tensors directly to maintain gradient flow
+        result_wora = mag_norm_scale * (beta - 1) * base_result + alpha * mag_norm_scale * lora_result * scaling
         return mag_norm_scale, result_wora
 
     def __repr__(self) -> str:
@@ -236,11 +241,12 @@ class _WoraConvNdLayer(WoraLinearLayer):
         lora_weight = lora_weight.reshape(weight.shape)
         magnitude = self.weight
 
-        # Convert alpha and beta to scalars
-        alpha_val = alpha.item() if isinstance(alpha, (torch.Tensor, nn.Parameter)) else alpha
-        beta_val = beta.item() if isinstance(beta, (torch.Tensor, nn.Parameter)) else beta
+        # Use alpha and beta tensors directly for gradient flow
+        # Extract values only for weight_norm calculation
+        alpha_val_for_norm = alpha.item() if isinstance(alpha, (torch.Tensor, nn.Parameter)) else alpha
+        beta_val_for_norm = beta.item() if isinstance(beta, (torch.Tensor, nn.Parameter)) else beta
 
-        weight_norm = self.get_weight_norm(weight, lora_weight.detach(), scaling, alpha_val, beta_val)
+        weight_norm = self.get_weight_norm(weight, lora_weight.detach(), scaling, alpha_val_for_norm, beta_val_for_norm)
         # see section 4.3 of DoRA (https://huggingface.co/papers/2402.09353)
         weight_norm = weight_norm.detach()
         mag_norm_scale = magnitude / weight_norm
@@ -262,8 +268,9 @@ class _WoraConvNdLayer(WoraLinearLayer):
                 bias_shape = (1, -1) + (1,) * (base_result.dim() - 2)
                 base_result = base_result - bias.view(*bias_shape)
 
-        # WoRA weighted scaling
-        result_wora = (beta_val * mag_norm_scale - 1) * base_result + alpha_val * mag_norm_scale * lora_B(lora_A(x)) * scaling
+        # WoRA weighted scaling: (beta - 1) for base + alpha for LoRA
+        # Use Parameter tensors directly to maintain gradient flow
+        result_wora = (beta * mag_norm_scale - 1) * base_result + alpha * mag_norm_scale * lora_B(lora_A(x)) * scaling
         return result_wora
 
     def __repr__(self) -> str:

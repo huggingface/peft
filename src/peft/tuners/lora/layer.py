@@ -945,6 +945,16 @@ class Embedding(nn.Module, LoraLayer):
 
         self.use_dora[adapter_name] = use_dora
 
+        self.use_wora[adapter_name] = use_wora
+
+        # Initialize WoRA parameters if needed
+        if use_wora:
+            self.lora_wora_alpha[adapter_name] = nn.Parameter(torch.tensor(1.0), requires_grad=True)
+            self.lora_wora_beta[adapter_name] = nn.Parameter(torch.tensor(1.0), requires_grad=True)
+            # Explicitly ensure they remain trainable
+            self.lora_wora_alpha[adapter_name].requires_grad_(True)
+            self.lora_wora_beta[adapter_name].requires_grad_(True)
+
         if init_lora_weights == "loftq":
             self.loftq_init(adapter_name)
         elif init_lora_weights:
@@ -1270,6 +1280,16 @@ class _ConvNd(nn.Module, LoraLayer):
         self.use_rslora[adapter_name] = use_rslora
 
         self.use_dora[adapter_name] = use_dora
+
+        self.use_wora[adapter_name] = use_wora
+
+        # Initialize WoRA parameters if needed
+        if use_wora:
+            self.lora_wora_alpha[adapter_name] = nn.Parameter(torch.tensor(1.0), requires_grad=True)
+            self.lora_wora_beta[adapter_name] = nn.Parameter(torch.tensor(1.0), requires_grad=True)
+            # Explicitly ensure they remain trainable
+            self.lora_wora_alpha[adapter_name].requires_grad_(True)
+            self.lora_wora_beta[adapter_name].requires_grad_(True)
 
         if init_lora_weights == "loftq":
             self.loftq_init(adapter_name)

@@ -983,8 +983,8 @@ class WoraEmbeddingVariant(WoraLinearVariant):
         **kwargs,
     ) -> torch.Tensor:
         """Forward pass for WoRA Embedding layer."""
-        lora_embedding_A = module.lora_embedding_A[active_adapter]
-        lora_embedding_B = module.lora_embedding_B[active_adapter]
+        lora_embedding_A = module.lora_embedding_A[active_adapter].T
+        lora_embedding_B = module.lora_embedding_B[active_adapter].T
         scaling = module.scaling[active_adapter]
         alpha = module.lora_wora_alpha[active_adapter]
         beta = module.lora_wora_beta[active_adapter]
@@ -999,10 +999,17 @@ class WoraEmbeddingVariant(WoraLinearVariant):
             beta=beta,
             base_layer=module.get_base_layer(),
             embed_fn=embed_fn,
+            base_result=result,
         )
-        
-        # Apply WoRA scaling to base result
-        result = mag_norm_scale.view(-1, 1) * (beta.item() * result) + result_wora
+
+        # Some embedding layers (e.g., Gemma3TextScaledWordEmbedding) apply scaling in their forward method.
+        # Since base_layer(x) already includes this scaling, we need to apply it to WoRA contributions too.
+        # Note: embed_scale is applied AFTER weight norm calculation to preserve WoRA's weight geometry semantics.
+        embed_scale = module._get_embed_scale()
+        if embed_scale is not None:
+            result_wora = result_wora * embed_scale.to(result_wora.dtype)
+
+        result = mag_norm_scale * result + result_wora
         return result
 
 
