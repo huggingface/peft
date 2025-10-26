@@ -787,8 +787,8 @@ class WoraLinearVariant(LoraVariant):
         wora_layer = WoraLinearLayer(fan_in_fan_out=getattr(module, "fan_in_fan_out", False))
         lora_A = module.lora_A[adapter_name].weight
         lora_B = module.lora_B[adapter_name].weight
-        alpha = module.wora_alpha[adapter_name]
-        beta = module.wora_beta[adapter_name]
+        alpha = module.lora_wora_alpha[adapter_name]
+        beta = module.lora_wora_beta[adapter_name]
         
         place_on_cpu = module.ephemeral_gpu_offload and (lora_A.device.type == "cpu" or lora_B.device.type == "cpu")
         if module.ephemeral_gpu_offload:
@@ -821,8 +821,8 @@ class WoraLinearVariant(LoraVariant):
         delta_weight = module.get_delta_weight(active_adapter)
 
         # Get alpha and beta values
-        alpha = module.wora_alpha[active_adapter].item()
-        beta = module.wora_beta[active_adapter].item()
+        alpha = module.lora_wora_alpha[active_adapter].item()
+        beta = module.lora_wora_beta[active_adapter].item()
 
         # since delta_weight already includes scaling, set it to 1 here
         weight_norm = (
@@ -849,8 +849,8 @@ class WoraLinearVariant(LoraVariant):
         delta_weight = module.get_delta_weight(active_adapter)
         
         # Get alpha and beta values
-        alpha = module.wora_alpha[active_adapter].item()
-        beta = module.wora_beta[active_adapter].item()
+        alpha = module.lora_wora_alpha[active_adapter].item()
+        beta = module.lora_wora_beta[active_adapter].item()
         
         weight_norm = (
             module.lora_magnitude_vector[active_adapter]
@@ -876,8 +876,8 @@ class WoraLinearVariant(LoraVariant):
         delta_weight = module.get_delta_weight(active_adapter)
         
         # Get alpha and beta values
-        alpha = module.wora_alpha[active_adapter].item()
-        beta = module.wora_beta[active_adapter].item()
+        alpha = module.lora_wora_alpha[active_adapter].item()
+        beta = module.lora_wora_beta[active_adapter].item()
         
         weight_norm = module._cache_pop(f"{active_adapter}-weight_norm")
         wora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
@@ -901,8 +901,8 @@ class WoraLinearVariant(LoraVariant):
         lora_B = module.lora_B[active_adapter]
         dropout = module.lora_dropout[active_adapter]
         scaling = module.scaling[active_adapter]
-        alpha = module.wora_alpha[active_adapter]
-        beta = module.wora_beta[active_adapter]
+        alpha = module.lora_wora_alpha[active_adapter]
+        beta = module.lora_wora_beta[active_adapter]
 
         if isinstance(dropout, nn.Identity) or not module.training:
             base_result = result
@@ -937,8 +937,8 @@ class WoraEmbeddingVariant(WoraLinearVariant):
         lora_embedding_A = module.lora_embedding_A[adapter_name]
         lora_embedding_B = module.lora_embedding_B[adapter_name]
         scaling = module.scaling[adapter_name]
-        alpha = module.wora_alpha[adapter_name]
-        beta = module.wora_beta[adapter_name]
+        alpha = module.lora_wora_alpha[adapter_name]
+        beta = module.lora_wora_beta[adapter_name]
         
         wora_layer.update_layer(
             base_layer=module.get_base_layer(), 
@@ -957,8 +957,8 @@ class WoraEmbeddingVariant(WoraLinearVariant):
         delta_weight = module.get_delta_weight(active_adapter)
 
         # Get alpha and beta values
-        alpha = module.wora_alpha[active_adapter].item()
-        beta = module.wora_beta[active_adapter].item()
+        alpha = module.lora_wora_alpha[active_adapter].item()
+        beta = module.lora_wora_beta[active_adapter].item()
 
         # since delta_weight already includes scaling, set it to 1 here
         weight_norm = (
@@ -986,8 +986,8 @@ class WoraEmbeddingVariant(WoraLinearVariant):
         lora_embedding_A = module.lora_embedding_A[active_adapter]
         lora_embedding_B = module.lora_embedding_B[active_adapter]
         scaling = module.scaling[active_adapter]
-        alpha = module.wora_alpha[active_adapter]
-        beta = module.wora_beta[active_adapter]
+        alpha = module.lora_wora_alpha[active_adapter]
+        beta = module.lora_wora_beta[active_adapter]
 
         embed_fn = module._embed
         mag_norm_scale, result_wora = module.lora_magnitude_vector[active_adapter](
@@ -1019,8 +1019,8 @@ class _WoraConvNdVariant(LoraVariant):
         lora_A = module.lora_A[adapter_name].weight
         lora_B = module.lora_B[adapter_name].weight
         scaling = module.scaling[adapter_name]
-        alpha = module.wora_alpha[adapter_name]
-        beta = module.wora_beta[adapter_name]
+        alpha = module.lora_wora_alpha[adapter_name]
+        beta = module.lora_wora_beta[adapter_name]
         
         wora_layer.update_layer(
             base_layer=module.get_base_layer(), 
@@ -1039,8 +1039,8 @@ class _WoraConvNdVariant(LoraVariant):
         delta_weight = module.get_delta_weight(active_adapter)
 
         # Get alpha and beta values
-        alpha = module.wora_alpha[active_adapter].item()
-        beta = module.wora_beta[active_adapter].item()
+        alpha = module.lora_wora_alpha[active_adapter].item()
+        beta = module.lora_wora_beta[active_adapter].item()
 
         # since delta_weight already includes scaling, set it to 1 here
         weight_norm = (
@@ -1063,8 +1063,8 @@ class _WoraConvNdVariant(LoraVariant):
         delta_weight = module.get_delta_weight(active_adapter)
         
         # Get alpha and beta values
-        alpha = module.wora_alpha[active_adapter].item()
-        beta = module.wora_beta[active_adapter].item()
+        alpha = module.lora_wora_alpha[active_adapter].item()
+        beta = module.lora_wora_beta[active_adapter].item()
         
         weight_norm = (
             module.lora_magnitude_vector[active_adapter]
@@ -1086,8 +1086,8 @@ class _WoraConvNdVariant(LoraVariant):
         delta_weight = module.get_delta_weight(active_adapter)
         
         # Get alpha and beta values
-        alpha = module.wora_alpha[active_adapter].item()
-        beta = module.wora_beta[active_adapter].item()
+        alpha = module.lora_wora_alpha[active_adapter].item()
+        beta = module.lora_wora_beta[active_adapter].item()
         
         weight_norm = module._cache_pop(f"{active_adapter}-weight_norm")
         wora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
@@ -1110,8 +1110,8 @@ class _WoraConvNdVariant(LoraVariant):
         lora_B = module.lora_B[active_adapter]
         dropout = module.lora_dropout[active_adapter]
         scaling = module.scaling[active_adapter]
-        alpha = module.wora_alpha[active_adapter]
-        beta = module.wora_beta[active_adapter]
+        alpha = module.lora_wora_alpha[active_adapter]
+        beta = module.lora_wora_beta[active_adapter]
 
         if isinstance(dropout, nn.Identity) or not module.training:
             base_result = result

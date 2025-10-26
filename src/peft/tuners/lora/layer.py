@@ -93,7 +93,7 @@ class LoraVariant:
 
 class LoraLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
-    adapter_layer_names: tuple[str, ...] = ("lora_A", "lora_B", "lora_embedding_A", "lora_embedding_B", "wora_alpha", "wora_beta")
+    adapter_layer_names: tuple[str, ...] = ("lora_A", "lora_B", "lora_embedding_A", "lora_embedding_B", "lora_wora_alpha", "lora_wora_beta")
     # All names of other parameters that may contain adapter-related parameters
     other_param_names: tuple[str, ...] = ("r", "lora_alpha", "scaling", "lora_dropout")
 
@@ -116,8 +116,8 @@ class LoraLayer(BaseTunerLayer):
         self.use_wora: dict[str, bool] = {}  # for WoRA
         self.lora_bias: dict[str, bool] = {}
         self.lora_magnitude_vector = torch.nn.ModuleDict()  # for DoRA and WoRA
-        self.wora_alpha = torch.nn.ParameterDict()  # for WoRA: learnable alpha scalars
-        self.wora_beta = torch.nn.ParameterDict()   # for WoRA: learnable beta scalars
+        self.lora_wora_alpha = torch.nn.ParameterDict()  # for WoRA: learnable alpha scalars
+        self.lora_wora_beta = torch.nn.ParameterDict()   # for WoRA: learnable beta scalars
         self._caches: dict[str, Any] = {}
         self.ephemeral_gpu_offload: bool = ephemeral_gpu_offload
         # flag to enable/disable casting of input to weight dtype during forward call
@@ -216,8 +216,11 @@ class LoraLayer(BaseTunerLayer):
 
         # Initialize WoRA parameters if needed
         if use_wora:
-            self.wora_alpha[adapter_name] = nn.Parameter(torch.tensor(1.0), requires_grad=True)
-            self.wora_beta[adapter_name] = nn.Parameter(torch.tensor(1.0), requires_grad=True)
+            self.lora_wora_alpha[adapter_name] = nn.Parameter(torch.tensor(1.0), requires_grad=True)
+            self.lora_wora_beta[adapter_name] = nn.Parameter(torch.tensor(1.0), requires_grad=True)
+            # Explicitly ensure they remain trainable (in case something tries to freeze them)
+            self.lora_wora_alpha[adapter_name].requires_grad_(True)
+            self.lora_wora_beta[adapter_name].requires_grad_(True)
 
         # for inits that require access to the base weight, use gather_param_ctx so that the weight is gathered when using DeepSpeed
         if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
