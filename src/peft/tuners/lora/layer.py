@@ -95,7 +95,7 @@ class LoraLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names: tuple[str, ...] = ("lora_A", "lora_B", "lora_embedding_A", "lora_embedding_B")
     # All names of other parameters that may contain adapter-related parameters
-    other_param_names: tuple[str, ...] = ("r", "lora_alpha", "scaling", "lora_dropout")
+    other_param_names: tuple[str, ...] = ("r", "lora_alpha", "scaling", "lora_dropout", "wora_alpha", "wora_beta")
 
     def __init__(self, base_layer: nn.Module, ephemeral_gpu_offload: bool = False, **kwargs) -> None:
         self.base_layer = base_layer
@@ -113,8 +113,11 @@ class LoraLayer(BaseTunerLayer):
         self.merged_adapters = []
         self.use_dora: dict[str, bool] = {}  # not actively used anymore after #2443, keep it for BC
         self.use_rslora: dict[str, bool] = {}
+        self.use_wora: dict[str, bool] = {}  # for WoRA
         self.lora_bias: dict[str, bool] = {}
-        self.lora_magnitude_vector = torch.nn.ModuleDict()  # for DoRA
+        self.lora_magnitude_vector = torch.nn.ModuleDict()  # for DoRA and WoRA
+        self.wora_alpha = {}  # for WoRA: dict[str, nn.Parameter]
+        self.wora_beta = {}   # for WoRA: dict[str, nn.Parameter]
         self._caches: dict[str, Any] = {}
         self.ephemeral_gpu_offload: bool = ephemeral_gpu_offload
         # flag to enable/disable casting of input to weight dtype during forward call
@@ -127,11 +130,12 @@ class LoraLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+    def resolve_lora_variant(self, *, use_dora: bool, use_wora: bool = False, **kwargs) -> Optional[LoraVariant]:
         """Return a matching LoRA variant for this layer type.
 
         Given the init arguments of this layer, return the correct LoRA variant, if any. E.g., if `use_dora=True`, this
-        method should return the DoRA variant for the given layer. If `use_alora=True`, same for aLoRA.
+        method should return the DoRA variant for the given layer. If `use_alora=True`, same for aLoRA. If `use_wora=True`,
+        same for WoRA.
 
         If there is no fitting variant, return None.
 
@@ -152,6 +156,7 @@ class LoraLayer(BaseTunerLayer):
         use_dora: bool = False,
         use_alora: bool = False,
         use_qalora: bool = False,
+        use_wora: bool = False,
         lora_bias: bool = False,
         arrow_config: ArrowConfig = None,
         qalora_group_size: int = 32,
@@ -177,6 +182,7 @@ class LoraLayer(BaseTunerLayer):
             use_dora=use_dora,
             use_alora=use_alora,
             use_qalora=use_qalora,
+            use_wora=use_wora,
             qalora_group_size=qalora_group_size,
             arrow_config=arrow_config,
         )
@@ -205,6 +211,13 @@ class LoraLayer(BaseTunerLayer):
         self.use_rslora[adapter_name] = use_rslora
 
         self.use_dora[adapter_name] = use_dora
+
+        self.use_wora[adapter_name] = use_wora
+
+        # Initialize WoRA parameters if needed
+        if use_wora:
+            self.wora_alpha[adapter_name] = nn.Parameter(torch.tensor(1.0))
+            self.wora_beta[adapter_name] = nn.Parameter(torch.tensor(1.0))
 
         # for inits that require access to the base weight, use gather_param_ctx so that the weight is gathered when using DeepSpeed
         if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
