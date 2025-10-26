@@ -216,8 +216,8 @@ class LoraLayer(BaseTunerLayer):
 
         # Initialize WoRA parameters if needed
         if use_wora:
-            self.wora_alpha[adapter_name] = nn.Parameter(torch.tensor(1.0))
-            self.wora_beta[adapter_name] = nn.Parameter(torch.tensor(1.0))
+            self.wora_alpha[adapter_name] = nn.Parameter(torch.tensor(1.0), requires_grad=True)
+            self.wora_beta[adapter_name] = nn.Parameter(torch.tensor(1.0), requires_grad=True)
 
         # for inits that require access to the base weight, use gather_param_ctx so that the weight is gathered when using DeepSpeed
         if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
