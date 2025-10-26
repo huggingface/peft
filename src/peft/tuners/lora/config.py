@@ -571,6 +571,19 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    use_wora: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Enable 'Weighted-Direction Low-Rank Adaptation' (WoRA). WoRA extends DoRA by adding learnable "
+                "scalar parameters (alpha, beta) that weight the base weights and low-rank update before normalization, "
+                "allowing the model to learn the optimal trade-off between pretrained knowledge and task-specific adaptations. "
+                "See <a href='https://arxiv.org/pdf/2404.10292'>the WoRA paper</a> for details. "
+                "Note: WoRA cannot be used simultaneously with DoRA or QALoRA. WoRA supports linear, embedding, and "
+                "convolutional layers. Like DoRA, it is recommended to merge weights for inference."
+            )
+        },
+    )
     alora_invocation_tokens: Optional[list[int]] = field(
         default=None,
         metadata={
@@ -714,6 +727,16 @@ class LoraConfig(PeftConfig):
         if self.use_dora and self.megatron_config:
             raise ValueError("DoRA does not support megatron_core, please set `use_dora=False`.")
 
+        # Check WoRA conflicts
+        if self.use_wora and self.use_dora:
+            raise ValueError("Cannot use both WoRA and DoRA simultaneously. Please set one to False.")
+
+        if self.use_wora and self.use_qalora:
+            raise ValueError("WoRA with QALoRA is not supported yet. Please set one to False.")
+
+        if self.use_wora and self.megatron_config:
+            raise ValueError("WoRA does not support megatron_core, please set `use_wora=False`.")
+
         # handle init_lora_weights and loftq_config
         if self.init_lora_weights == "loftq":
             import importlib
@@ -751,6 +774,8 @@ class LoraConfig(PeftConfig):
                 )
             if self.use_dora:
                 raise ValueError("The argument lora_bias=True is not supported for DoRA, please pass use_dora=False")
+            if self.use_wora:
+                raise ValueError("The argument lora_bias=True is not supported for WoRA, please pass use_wora=False")
 
         if self.alora_invocation_tokens is not None and self.task_type != "CAUSAL_LM":
             warnings.warn("aLoRA is currently only supported for CAUSAL_LM task.")

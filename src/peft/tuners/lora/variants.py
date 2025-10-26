@@ -27,6 +27,7 @@ from .arrow import ArrowLoraLinearLayer
 from .config import PeftConfig
 from .dora import DoraConv1dLayer, DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer
 from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd
+from .wora import WoraConv1dLayer, WoraConv2dLayer, WoraConv3dLayer, WoraEmbeddingLayer, WoraLinearLayer
 
 
 class ArrowLinearVariant(LoraVariant):
@@ -771,3 +772,388 @@ def get_alora_offsets_for_generate(model: nn.module, *args, **kwargs):
 
             kwargs["alora_offsets"] = None
     return kwargs
+
+
+class WoraLinearVariant(LoraVariant):
+    """WoRA (Weighted-Direction Low-Rank Adaptation) variant for Linear layers."""
+
+    @staticmethod
+    def init(module: Linear, adapter_name: str, **kwargs: Any) -> None:
+        """Initialize WoRA-specific parameters for a Linear layer."""
+        if not module.lora_magnitude_vector:
+            # first wora layer being added, add lora_magnitude_vector to the list of learnable parameters
+            module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_magnitude_vector",)
+
+        wora_layer = WoraLinearLayer(fan_in_fan_out=getattr(module, "fan_in_fan_out", False))
+        lora_A = module.lora_A[adapter_name].weight
+        lora_B = module.lora_B[adapter_name].weight
+        alpha = module.wora_alpha[adapter_name]
+        beta = module.wora_beta[adapter_name]
+        
+        place_on_cpu = module.ephemeral_gpu_offload and (lora_A.device.type == "cpu" or lora_B.device.type == "cpu")
+        if module.ephemeral_gpu_offload:
+            if lora_A.device.type in ["cuda", "xpu"]:
+                lora_B = lora_B.to(lora_A.device)
+            else:
+                if lora_B.device.type not in ["cuda", "xpu"]:
+                    if is_xpu_available():
+                        lora_B = lora_B.to("xpu")
+                    else:
+                        lora_B = lora_B.to("cuda")
+                lora_A = lora_A.to(lora_B.device)
+        
+        scaling = module.scaling[adapter_name]
+        wora_layer.update_layer(
+            base_layer=module.get_base_layer(),
+            lora_A=lora_A,
+            lora_B=lora_B,
+            scaling=scaling,
+            alpha=alpha,
+            beta=beta,
+            place_on_cpu=place_on_cpu,
+        )
+        module.lora_magnitude_vector[adapter_name] = wora_layer
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        """Safely merge WoRA adapter weights into base weights."""
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+
+        # Get alpha and beta values
+        alpha = module.wora_alpha[active_adapter].item()
+        beta = module.wora_beta[active_adapter].item()
+
+        # since delta_weight already includes scaling, set it to 1 here
+        weight_norm = (
+            module.lora_magnitude_vector[active_adapter]
+            .get_weight_norm(orig_weight, transpose(delta_weight, module.fan_in_fan_out), scaling=1, alpha=alpha, beta=beta)
+            .detach()
+        )
+        # We need to cache weight_norm because it has to be based on the original weights. We
+        # cannot calculate it on the fly based on the merged weights when unmerging because its a
+        # different value
+        module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+        wora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
+        wora_factor = transpose(wora_factor.view(-1, 1), module.fan_in_fan_out)
+        
+        # Apply WoRA weighted combination
+        new_weight = wora_factor * (beta * orig_weight + alpha * delta_weight)
+        new_weight = new_weight.to(orig_dtype)
+        return new_weight
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        """Merge WoRA adapter weights into base weights (in-place)."""
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+        
+        # Get alpha and beta values
+        alpha = module.wora_alpha[active_adapter].item()
+        beta = module.wora_beta[active_adapter].item()
+        
+        weight_norm = (
+            module.lora_magnitude_vector[active_adapter]
+            .get_weight_norm(orig_weight, transpose(delta_weight, module.fan_in_fan_out), scaling=1, alpha=alpha, beta=beta)
+            .detach()
+        )
+        # We need to cache weight_norm because it has to be based on the original weights. We
+        # cannot calculate it on the fly based on the merged weights when unmerging because its a
+        # different value
+        module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+        wora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
+        wora_factor = transpose(wora_factor.view(-1, 1), module.fan_in_fan_out)
+        
+        # Apply WoRA weighted combination
+        new_weight = wora_factor * (beta * orig_weight.data + alpha * delta_weight)
+        new_weight = new_weight.to(orig_dtype)
+        orig_weight.data = new_weight
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        """Unmerge WoRA adapter weights from merged weights."""
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+        
+        # Get alpha and beta values
+        alpha = module.wora_alpha[active_adapter].item()
+        beta = module.wora_beta[active_adapter].item()
+        
+        weight_norm = module._cache_pop(f"{active_adapter}-weight_norm")
+        wora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
+        
+        # Reverse WoRA weighted combination
+        new_weight = orig_weight.data / wora_factor.view(-1, 1) - alpha * delta_weight
+        new_weight = new_weight / beta
+        new_weight = new_weight.to(orig_dtype)
+        return new_weight
+
+    @staticmethod
+    def forward(
+        module: Linear,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        """Forward pass for WoRA Linear layer."""
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        dropout = module.lora_dropout[active_adapter]
+        scaling = module.scaling[active_adapter]
+        alpha = module.wora_alpha[active_adapter]
+        beta = module.wora_beta[active_adapter]
+
+        if isinstance(dropout, nn.Identity) or not module.training:
+            base_result = result
+        else:
+            x = dropout(x)
+            base_result = None
+
+        result = result + module.lora_magnitude_vector[active_adapter](
+            x,
+            lora_A=lora_A,
+            lora_B=lora_B,
+            scaling=scaling,
+            alpha=alpha,
+            beta=beta,
+            base_layer=module.get_base_layer(),
+            base_result=base_result,
+        )
+        return result
+
+
+class WoraEmbeddingVariant(WoraLinearVariant):
+    """WoRA variant for Embedding layers."""
+
+    @staticmethod
+    def init(module: Embedding, adapter_name: str, **kwargs: Any) -> None:
+        """Initialize WoRA-specific parameters for an Embedding layer."""
+        if module.lora_magnitude_vector is None:
+            # first wora layer being added, add lora_magnitude_vector to the list of learnable parameters
+            module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_magnitude_vector",)
+
+        wora_layer = WoraEmbeddingLayer(fan_in_fan_out=True)
+        lora_embedding_A = module.lora_embedding_A[adapter_name]
+        lora_embedding_B = module.lora_embedding_B[adapter_name]
+        scaling = module.scaling[adapter_name]
+        alpha = module.wora_alpha[adapter_name]
+        beta = module.wora_beta[adapter_name]
+        
+        wora_layer.update_layer(
+            base_layer=module.get_base_layer(), 
+            lora_A=lora_embedding_A, 
+            lora_B=lora_embedding_B, 
+            scaling=scaling,
+            alpha=alpha,
+            beta=beta,
+        )
+        module.lora_magnitude_vector[adapter_name] = wora_layer
+
+    @staticmethod
+    def merge_safe(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        """Safely merge WoRA adapter weights for Embedding."""
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+
+        # Get alpha and beta values
+        alpha = module.wora_alpha[active_adapter].item()
+        beta = module.wora_beta[active_adapter].item()
+
+        # since delta_weight already includes scaling, set it to 1 here
+        weight_norm = (
+            module.lora_magnitude_vector[active_adapter]
+            .get_weight_norm(orig_weight, delta_weight, scaling=1, alpha=alpha, beta=beta)
+            .detach()
+        )
+        module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+        wora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
+        
+        # Apply WoRA weighted combination
+        new_weight = wora_factor.view(-1, 1) * (beta * orig_weight + alpha * delta_weight)
+        new_weight = new_weight.to(orig_dtype)
+        return new_weight
+
+    @staticmethod
+    def forward(
+        module: Embedding,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        """Forward pass for WoRA Embedding layer."""
+        lora_embedding_A = module.lora_embedding_A[active_adapter]
+        lora_embedding_B = module.lora_embedding_B[active_adapter]
+        scaling = module.scaling[active_adapter]
+        alpha = module.wora_alpha[active_adapter]
+        beta = module.wora_beta[active_adapter]
+
+        embed_fn = module._embed
+        mag_norm_scale, result_wora = module.lora_magnitude_vector[active_adapter](
+            x,
+            lora_A=lora_embedding_A,
+            lora_B=lora_embedding_B,
+            scaling=scaling,
+            alpha=alpha,
+            beta=beta,
+            base_layer=module.get_base_layer(),
+            embed_fn=embed_fn,
+        )
+        
+        # Apply WoRA scaling to base result
+        result = mag_norm_scale.view(-1, 1) * (beta.item() * result) + result_wora
+        return result
+
+
+class _WoraConvNdVariant(LoraVariant):
+    """Base WoRA variant for convolutional layers."""
+
+    @staticmethod
+    def init_convd_variant(module: _ConvNd, adapter_name: str, wora_layer: nn.Module) -> None:
+        """Initialize WoRA for convolutional layers."""
+        if module.lora_magnitude_vector is None:
+            # first wora layer being added, add lora_magnitude_vector to the list of learnable parameters
+            module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_magnitude_vector",)
+
+        lora_A = module.lora_A[adapter_name].weight
+        lora_B = module.lora_B[adapter_name].weight
+        scaling = module.scaling[adapter_name]
+        alpha = module.wora_alpha[adapter_name]
+        beta = module.wora_beta[adapter_name]
+        
+        wora_layer.update_layer(
+            base_layer=module.get_base_layer(), 
+            lora_A=lora_A, 
+            lora_B=lora_B, 
+            scaling=scaling,
+            alpha=alpha,
+            beta=beta,
+        )
+        module.lora_magnitude_vector[adapter_name] = wora_layer
+
+    @staticmethod
+    def merge_safe(module: _ConvNd, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        """Safely merge WoRA adapter weights for Conv layers."""
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+
+        # Get alpha and beta values
+        alpha = module.wora_alpha[active_adapter].item()
+        beta = module.wora_beta[active_adapter].item()
+
+        # since delta_weight already includes scaling, set it to 1 here
+        weight_norm = (
+            module.lora_magnitude_vector[active_adapter]
+            .get_weight_norm(orig_weight, delta_weight, scaling=1, alpha=alpha, beta=beta)
+            .detach()
+        )
+        module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+        wora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
+        
+        # Apply WoRA weighted combination
+        new_weight = wora_factor * (beta * orig_weight + alpha * delta_weight)
+        new_weight = new_weight.to(orig_dtype)
+        return new_weight
+
+    @staticmethod
+    def merge_unsafe(module: _ConvNd, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        """Merge WoRA adapter weights for Conv layers (in-place)."""
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+        
+        # Get alpha and beta values
+        alpha = module.wora_alpha[active_adapter].item()
+        beta = module.wora_beta[active_adapter].item()
+        
+        weight_norm = (
+            module.lora_magnitude_vector[active_adapter]
+            .get_weight_norm(orig_weight, delta_weight, scaling=1, alpha=alpha, beta=beta)
+            .detach()
+        )
+        module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+        wora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
+        
+        # Apply WoRA weighted combination
+        new_weight = wora_factor * (beta * orig_weight.data + alpha * delta_weight)
+        new_weight = new_weight.to(orig_dtype)
+        orig_weight.data = new_weight
+
+    @staticmethod
+    def unmerge(module: _ConvNd, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        """Unmerge WoRA adapter weights from Conv layers."""
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+        
+        # Get alpha and beta values
+        alpha = module.wora_alpha[active_adapter].item()
+        beta = module.wora_beta[active_adapter].item()
+        
+        weight_norm = module._cache_pop(f"{active_adapter}-weight_norm")
+        wora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
+        
+        # Reverse WoRA weighted combination
+        new_weight = (orig_weight.data / wora_factor - alpha * delta_weight) / beta
+        new_weight = new_weight.to(orig_dtype)
+        return new_weight
+
+    @staticmethod
+    def forward(
+        module: _ConvNd,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        """Forward pass for WoRA Conv layers."""
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        dropout = module.lora_dropout[active_adapter]
+        scaling = module.scaling[active_adapter]
+        alpha = module.wora_alpha[active_adapter]
+        beta = module.wora_beta[active_adapter]
+
+        if isinstance(dropout, nn.Identity) or not module.training:
+            base_result = result
+        else:
+            x = dropout(x)
+            base_result = None
+
+        result = result + module.lora_magnitude_vector[active_adapter](
+            x,
+            lora_A=lora_A,
+            lora_B=lora_B,
+            scaling=scaling,
+            alpha=alpha,
+            beta=beta,
+            base_layer=module.get_base_layer(),
+            base_result=base_result,
+        )
+        return result
+
+
+class WoraConv1dVariant(_WoraConvNdVariant):
+    """WoRA variant for Conv1d layers."""
+
+    @staticmethod
+    def init(module: Conv1d, adapter_name: str, **kwargs: Any) -> None:
+        wora_layer = WoraConv1dLayer(fan_in_fan_out=False)
+        _WoraConvNdVariant.init_convd_variant(module, adapter_name, wora_layer=wora_layer)
+
+
+class WoraConv2dVariant(_WoraConvNdVariant):
+    """WoRA variant for Conv2d layers."""
+
+    @staticmethod
+    def init(module: Conv2d, adapter_name: str, **kwargs: Any) -> None:
+        wora_layer = WoraConv2dLayer(fan_in_fan_out=False)
+        _WoraConvNdVariant.init_convd_variant(module, adapter_name, wora_layer=wora_layer)
+
+
+class WoraConv3dVariant(_WoraConvNdVariant):
+    """WoRA variant for Conv3d layers."""
+
+    @staticmethod
+    def init(module: Conv3d, adapter_name: str, **kwargs: Any) -> None:
+        wora_layer = WoraConv3dLayer(fan_in_fan_out=False)
+        _WoraConvNdVariant.init_convd_variant(module, adapter_name, wora_layer=wora_layer)
