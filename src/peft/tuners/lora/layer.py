@@ -451,7 +451,23 @@ class LoraLayer(BaseTunerLayer):
             self.lora_embedding_B[adapter_name].weight.data = lora_B
         self.get_base_layer().weight.data = qweight
     def lorampo_init(self, adapter_name):
-        """Initialize LoRA with MPO decomposition."""
+        """Initialize LoRA with MPO decomposition.
+        
+        For quantized models (8-bit, 4-bit), falls back to standard LoRA initialization.
+        """
+        # Check if the model is quantized
+        base_layer = self.get_base_layer()
+        is_quantized = (
+            hasattr(base_layer, 'SCB') or 
+            hasattr(base_layer, 'state') and hasattr(base_layer.state, 'SCB') or
+            isinstance(base_layer, nn.Linear) and not hasattr(base_layer.weight, 'data')
+        )
+        
+        if is_quantized:
+            # For quantized models, fall back to standard LoRA initialization
+            self.reset_lora_parameters(adapter_name, True)
+            return
+        
         try:
             from matrix2mpo_plus import MPO
         except ImportError:
