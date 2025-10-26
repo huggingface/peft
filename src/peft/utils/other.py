@@ -1464,7 +1464,46 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
                         f"`trainable_tokens={{'{target_layer}': x}}` but not both."
                     )
 
+        # Check weight tying configuration first to determine which layers to wrap
+        weights_tied = (
+            model_config.get("tie_word_embeddings", False)
+            # some models may be misconfigured to have weight tying enabled but don't define tied weights keys
+            and model._tied_weights_keys is not None
+        )
+        ensure_weight_tying = getattr(peft_config, "ensure_weight_tying", False)
+
+        # Check if we're dealing with dict format that specifies both embed_tokens and lm_head
+        is_dict_format = isinstance(peft_config.trainable_token_indices, dict)
+        has_both_layers = False
+        indices_mismatch = False
+        embed_key = None
+        lm_head_key = None
+        layers_to_skip = set()
+
+        if is_dict_format and len(target_layers) > 1:
+            # Find embedding and lm_head keys
+            for key in target_layers:
+                key_lower = key.lower()
+                if "embed" in key_lower and not ("lm" in key_lower or "head" in key_lower):
+                    embed_key = key
+                elif "lm_head" in key_lower or ("head" in key_lower and "lm" not in key_lower):
+                    lm_head_key = key
+
+            if embed_key and lm_head_key:
+                has_both_layers = True
+                # Check if indices are different
+                if target_layers[embed_key] != target_layers[lm_head_key]:
+                    indices_mismatch = True
+                else:
+                    # Same indices - if weights are tied and we're applying tying, skip lm_head (it'll be tied later)
+                    if weights_tied and not (not ensure_weight_tying and False):  # Will apply tying
+                        layers_to_skip.add(lm_head_key)
+
         for target_layer, token_indices in target_layers.items():
+            # Skip layers that will be handled by weight tying
+            if target_layer in layers_to_skip:
+                continue
+
             _set_trainable(
                 model,
                 adapter_name,
@@ -1476,16 +1515,35 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
                 activate_adapter=activate_adapter,
             )
 
-        # There might be the possibility that we have output weights that are tied to the input weights.
-        # In that case we will tie any module that wants tied weights to the token adapter to make sure that
-        # any modification is reflected in the tied layers as well.
-        if (
-            model_config.get("tie_word_embeddings", False)
-            # some models may be misconfigured to have weight tying enabled but don't define tied weights keys
-            and model._tied_weights_keys is not None
+        # Case 1: weights NOT tied + ensure_weight_tying=True -> WARNING
+        if not weights_tied and ensure_weight_tying:
+            warnings.warn(
+                "ensure_weight_tying=True but the model does not have tied weights "
+                "(tie_word_embeddings=False). Weight tying will not be applied for trainable_token_indices."
+            )
+
+        # Case 2: weights tied + ensure_weight_tying=True + different indices -> ERROR
+        if weights_tied and ensure_weight_tying and has_both_layers and indices_mismatch:
+            raise ValueError(
+                f"Cannot ensure weight tying when different token indices are specified for "
+                f"embedding ({embed_key}: {target_layers[embed_key]}) and "
+                f"lm_head ({lm_head_key}: {target_layers[lm_head_key]}). "
+                f"Please use the same indices for both layers or set ensure_weight_tying=False."
+            )
+
+        # Case 3: Apply weight tying when appropriate
+        # - When weights are tied AND we should apply tying
+        # - Apply tying unless: weights tied + ensure_weight_tying=False + different indices (BC: treat as separate)
+        should_apply_tying = (
+            weights_tied
             and isinstance(model.get_input_embeddings(), TrainableTokensWrapper)
-        ):
-            # the embedding layer is modified and we want weight tying.
+            and not (not ensure_weight_tying and has_both_layers and indices_mismatch)
+        )
+
+        if should_apply_tying:
+            # There might be the possibility that we have output weights that are tied to the input weights.
+            # In that case we will tie any module that wants tied weights to the token adapter to make sure that
+            # any modification is reflected in the tied layers as well.
             module_keys = [".".join(n.split(".")[:-1]) for n in model._tied_weights_keys]
 
             token_adapter = model.get_input_embeddings().token_adapter
