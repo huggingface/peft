@@ -116,8 +116,8 @@ class LoraLayer(BaseTunerLayer):
         self.use_wora: dict[str, bool] = {}  # for WoRA
         self.lora_bias: dict[str, bool] = {}
         self.lora_magnitude_vector = torch.nn.ModuleDict()  # for DoRA and WoRA
-        self.wora_alpha = {}  # for WoRA: dict[str, nn.Parameter]
-        self.wora_beta = {}   # for WoRA: dict[str, nn.Parameter]
+        self.wora_alpha = torch.nn.ParameterDict()  # for WoRA: learnable alpha scalars
+        self.wora_beta = torch.nn.ParameterDict()   # for WoRA: learnable beta scalars
         self._caches: dict[str, Any] = {}
         self.ephemeral_gpu_offload: bool = ephemeral_gpu_offload
         # flag to enable/disable casting of input to weight dtype during forward call

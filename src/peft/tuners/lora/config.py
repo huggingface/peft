@@ -734,7 +734,10 @@ class LoraConfig(PeftConfig):
         if self.use_wora and self.use_qalora:
             raise ValueError("WoRA with QALoRA is not supported yet. Please set one to False.")
 
-        if self.use_wora and self.megatron_config:
+        if self.use_wora and self.alora_invocation_tokens is not None:
+            raise ValueError("WoRA with aLoRA is not supported. Please set use_wora=False or alora_invocation_tokens=None.")
+
+        if self.use_wora and self.megatron_config is not None:
             raise ValueError("WoRA does not support megatron_core, please set `use_wora=False`.")
 
         # handle init_lora_weights and loftq_config
