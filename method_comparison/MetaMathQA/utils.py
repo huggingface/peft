@@ -44,7 +44,8 @@ from transformers import (
 import peft
 from peft import PeftConfig, get_peft_model, prepare_model_for_kbit_training
 from peft.optimizers import create_lorafa_optimizer, create_loraplus_optimizer
-from peft.utils import infer_device, SAFETENSORS_WEIGHTS_NAME
+from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
+
 
 device = infer_device()
 

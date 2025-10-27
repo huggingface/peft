@@ -75,7 +75,7 @@ if script_args.bits in ["nf4", "fp4", "int8"]:
 elif script_args.residual_model_name_or_path is not None:
     res_model = AutoModelForCausalLM.from_pretrained(
         script_args.residual_model_name_or_path,
-        torch_dtype=(
+        dtype=(
             torch.float16
             if script_args.bits == "fp16"
             else (torch.bfloat16 if script_args.bits == "bf16" else torch.float32)
@@ -94,7 +94,7 @@ elif script_args.base_model_name_or_path is not None:
     )
     model = AutoModelForCausalLM.from_pretrained(
         script_args.base_model_name_or_path,
-        torch_dtype=(
+        dtype=(
             torch.float16
             if script_args.bits == "fp16"
             else (torch.bfloat16 if script_args.bits == "bf16" else torch.float32)

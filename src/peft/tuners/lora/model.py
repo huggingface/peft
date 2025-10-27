@@ -805,3 +805,9 @@ class LoraModel(BaseTuner):
                 )
 
         return tensors_lora
+
+    def _add_modules_to_tie(self, peft_config, tied_weight_keys):
+        modules_to_save = set(getattr(peft_config, "modules_to_save", []) or [])
+        missing_keys = set(tied_weight_keys) - modules_to_save
+
+        peft_config.modules_to_tie = missing_keys

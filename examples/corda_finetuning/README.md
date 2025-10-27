@@ -78,7 +78,7 @@ from peft.tuners.lora.corda import preprocess_corda
 from trl import SFTConfig, SFTTrainer
 from datasets import load_dataset
 
-model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf", torch_dtype=torch.bfloat16, device_map="auto")
+model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf", dtype=torch.bfloat16, device_map="auto")
 tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf")
 tokenizer.pad_token_id = tokenizer.eos_token_id
 sampled_dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="train[:256]")
@@ -109,7 +109,7 @@ preprocess_corda(model, lora_config, run_model=run_model)
 peft_model = get_peft_model(model, lora_config)
 peft_model.print_trainable_parameters()
 
-training_args = SFTConfig(dataset_text_field="text", max_seq_length=128)
+training_args = SFTConfig(dataset_text_field="text", max_length=128)
 trainer = SFTTrainer(
     model=peft_model,
     args=training_args,
@@ -236,7 +236,7 @@ from peft import PeftModel
 from transformers import AutoModelForCausalLM
 
 model = AutoModelForCausalLM.from_pretrained(
-    "meta-llama/Llama-2-7b-hf", torch_dtype=torch.bfloat16, device_map="auto"
+    "meta-llama/Llama-2-7b-hf", dtype=torch.bfloat16, device_map="auto"
 )
 # No SVD is performed during this step, and the base model remains unaltered.
 peft_model = PeftModel.from_pretrained(model, "corda-llama-2-7b-lora")

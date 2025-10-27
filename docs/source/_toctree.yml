@@ -90,6 +90,8 @@
       title: LoKr
     - local: package_reference/lora
       title: LoRA
+    - local: package_reference/osf
+      title: OSF
     - local: package_reference/xlora
       title: X-LoRA
     - local: package_reference/adapter_utils
@@ -136,6 +138,8 @@
       title: RoAd
     - local: package_reference/waveft
       title: WaveFT
+    - local: package_reference/delora
+      title: DeLoRA
 
     title: Adapters
   - sections:

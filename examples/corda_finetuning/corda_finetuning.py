@@ -229,7 +229,7 @@ def train():
         print("Train in Full Finetuning mode")
         model = transformers.AutoModelForCausalLM.from_pretrained(
             script_args.model_name_or_path,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             device_map="auto",
         )
     trainable_params, all_param = get_nb_trainable_parameters(model)

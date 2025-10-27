@@ -24,7 +24,7 @@ MODEL_ID = "LoftQ/Mistral-7B-v0.1-4bit-64rank"
 
 base_model = AutoModelForCausalLM.from_pretrained(
     MODEL_ID, 
-    torch_dtype=torch.bfloat16,  # you may change it with different models
+    dtype=torch.bfloat16,  # you may change it with different models
     quantization_config=BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_compute_dtype=torch.bfloat16,  # bfloat16 is recommended
@@ -81,7 +81,7 @@ MODEL_DIR = "model_zoo/loftq/Llama-2-7b-hf-4bit-16rank"
 
 base_model = AutoModelForCausalLM.from_pretrained(
     MODEL_DIR, 
-    torch_dtype=torch.bfloat16,
+    dtype=torch.bfloat16,
     quantization_config=BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_compute_dtype=torch.bfloat16,

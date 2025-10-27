@@ -77,7 +77,7 @@ class PeftGPTQModelCommonTests(unittest.TestCase):
         quantization_config = GPTQConfig(bits=4, use_exllama=False)
         kwargs = {
             "pretrained_model_name_or_path": model_id,
-            "torch_dtype": torch.float16,
+            "dtype": torch.float16,
             "device_map": "auto",
             "quantization_config": quantization_config,
         }
@@ -114,7 +114,7 @@ class PeftGPTQModelCommonTests(unittest.TestCase):
         quantization_config = GPTQConfig(bits=4, use_exllama=False)
         kwargs = {
             "pretrained_model_name_or_path": model_id,
-            "torch_dtype": torch.float16,
+            "dtype": torch.float16,
             "device_map": "auto",
             "quantization_config": quantization_config,
         }
@@ -179,7 +179,7 @@ class PeftGPTQModelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                torch_dtype=torch.float16,
+                dtype=torch.float16,
                 device_map="auto",
                 quantization_config=self.quantization_config,
             )
@@ -232,7 +232,7 @@ class PeftGPTQModelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                torch_dtype=torch.float16,
+                dtype=torch.float16,
                 device_map="auto",
                 quantization_config=self.quantization_config,
             )
@@ -284,7 +284,7 @@ class PeftGPTQModelTests(unittest.TestCase):
 
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
             device_map="auto",
             quantization_config=self.quantization_config,
         )
@@ -353,7 +353,7 @@ class PeftGPTQModelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                torch_dtype=torch.float16,
+                dtype=torch.float16,
                 device_map="auto",
                 quantization_config=self.quantization_config,
             )
@@ -416,7 +416,7 @@ class PeftGPTQModelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                torch_dtype=torch.float16,
+                dtype=torch.float16,
                 device_map="auto",
                 quantization_config=self.quantization_config,
             )
@@ -478,7 +478,7 @@ class PeftGPTQModelTests(unittest.TestCase):
         # default adapter name
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
             device_map="auto",
             quantization_config=self.quantization_config,
         )
@@ -489,7 +489,7 @@ class PeftGPTQModelTests(unittest.TestCase):
         # other adapter name
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
             device_map="auto",
             quantization_config=self.quantization_config,
         )
@@ -514,7 +514,7 @@ class PeftGPTQModelTests(unittest.TestCase):
         # default adapter name
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
             device_map="auto",
             quantization_config=self.quantization_config,
         )
@@ -525,7 +525,7 @@ class PeftGPTQModelTests(unittest.TestCase):
         # other adapter name
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
             device_map="auto",
             quantization_config=self.quantization_config,
         )

@@ -36,6 +36,7 @@ from peft import (
     BOFTConfig,
     BoneConfig,
     C3AConfig,
+    DeloraConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -45,6 +46,7 @@ from peft import (
     LoraConfig,
     MissConfig,
     OFTConfig,
+    OSFConfig,
     PeftModel,
     PeftWarning,
     RandLoraConfig,
@@ -60,7 +62,7 @@ from peft import (
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import AuxiliaryTrainingWrapper, infer_device
 
-from .testing_common import PeftCommonTester
+from .testing_common import PeftCommonTester, _skip_if_merging_not_supported
 from .testing_utils import get_state_dict, require_non_cpu, set_init_weights_false
 
 
@@ -732,6 +734,11 @@ TEST_CASES = [
         TrainableTokensConfig,
         {"target_modules": ["emb"], "token_indices": [0, 1, 3], "init_weights": False},
     ),
+    ################################
+    # Orthogonal Subspace Learning #
+    ################################
+    ("Vanilla MLP 1 OSF", "MLP", OSFConfig, {}),
+    ("Vanilla MLP 2 OSF", "MLP", OSFConfig, {"target_svd_config": {"lin0.weight": 5, "lin1.weight": 1}}),
     ############
     # RandLora #
     ############
@@ -882,6 +889,19 @@ TEST_CASES = [
         "MLP",
         WaveFTConfig,
         {"target_modules": "lin0", "n_frequency": 16, "wavelet_family": "db1", "proportional_parameters": True},
+    ),
+    ##########
+    # DeLoRA #
+    ##########
+    ("Vanilla MLP 1 DeLoRA", "MLP", DeloraConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 DeLoRA", "MLP", DeloraConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 DeLoRA", "MLP", DeloraConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 DeLoRA", "MLP", DeloraConfig, {"target_modules": ["lin0", "lin1"]}),
+    (
+        "Vanilla MLP 5 DeLoRA",
+        "MLP",
+        DeloraConfig,
+        {"target_modules": ["lin0"], "module_dropout": 0.1},
     ),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
@@ -1153,6 +1173,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_weights": False, "n_frequency": 8},
         {"target_modules": ["lin1"], "init_weights": False, "n_frequency": 8},
     ),
+    (
+        "DeLoRA Same",
+        "delora",
+        DeloraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "DeLoRA Different",
+        "delora",
+        DeloraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin1"], "init_weights": False},
+    ),
 ]
 
 PREFIXES = {
@@ -1173,8 +1207,10 @@ PREFIXES = {
     BoneConfig: "bone_",
     RoadConfig: "road_",
     MissConfig: "miss_",
+    DeloraConfig: "delora_",
     TrainableTokensConfig: "trainable_tokens_",
     WaveFTConfig: "waveft_",
+    OSFConfig: "osf_",
 }
 
 
@@ -1611,57 +1647,57 @@ class MockTransformerWrapper:
     """
 
     @classmethod
-    def from_pretrained(cls, model_id, torch_dtype=None):
+    def from_pretrained(cls, model_id, dtype=None):
         # set the seed so that from_pretrained always returns the same model
         torch.manual_seed(0)
 
-        if torch_dtype is None:
-            torch_dtype = torch.float32
+        if dtype is None:
+            dtype = torch.float32
 
         if model_id == "MLP":
-            return MLP().to(torch_dtype)
+            return MLP().to(dtype)
 
         if model_id == "EmbConv1D":
-            return ModelEmbConv1D().to(torch_dtype)
+            return ModelEmbConv1D().to(dtype)
 
         if model_id == "Conv1d":
-            return ModelConv1D().to(torch_dtype)
+            return ModelConv1D().to(dtype)
 
         if model_id == "Conv1dBigger":
-            return ModelConv1DBigger().to(torch_dtype)
+            return ModelConv1DBigger().to(dtype)
 
         if model_id == "Conv2d":
-            return ModelConv2D().to(torch_dtype)
+            return ModelConv2D().to(dtype)
 
         if model_id == "Conv2d1x1":
-            return ModelConv2D1x1().to(torch_dtype)
+            return ModelConv2D1x1().to(dtype)
 
         if model_id == "Conv1dKernel1":
-            return ModelConv1DKernel1().to(torch_dtype)
+            return ModelConv1DKernel1().to(dtype)
 
         if model_id == "Conv2dGroups":
-            return ModelConv2DGroups().to(torch_dtype)
+            return ModelConv2DGroups().to(dtype)
 
         if model_id == "Conv2dGroups2":
-            return ModelConv2DGroups2().to(torch_dtype)
+            return ModelConv2DGroups2().to(dtype)
 
         if model_id == "Conv3d":
-            return ModelConv3D().to(torch_dtype)
+            return ModelConv3D().to(dtype)
 
         if model_id == "MLP_LayerNorm":
-            return MLP_LayerNorm().to(torch_dtype)
+            return MLP_LayerNorm().to(dtype)
 
         if model_id == "MLP2":
-            return MLP2().to(torch_dtype)
+            return MLP2().to(dtype)
 
         if model_id == "Conv2d2":
-            return ModelConv2D2().to(torch_dtype)
+            return ModelConv2D2().to(dtype)
 
         if model_id == "MHA":
-            return ModelMha().to(torch_dtype)
+            return ModelMha().to(dtype)
 
         if model_id == "MlpUsingParameters":
-            return MlpUsingParameters().to(torch_dtype)
+            return MlpUsingParameters().to(dtype)
 
         raise ValueError(f"model_id {model_id} not implemented")
 
@@ -1721,47 +1757,31 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
-        # https://github.com/huggingface/peft/pull/2403
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
-            pytest.skip(
-                f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
-            )
+        _skip_if_merging_not_supported(model_id, config_cls)
 
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
-        # https://github.com/huggingface/peft/pull/2403
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
-            pytest.skip(
-                f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
-            )
+        _skip_if_merging_not_supported(model_id, config_cls)
 
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers_fp16(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_is_idempotent(self, test_name, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
+
         # calling merge twice with the same arguments should not change the output
-
-        # https://github.com/huggingface/peft/pull/2403
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
-            pytest.skip(
-                f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
-            )
-
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers_is_idempotent(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_safe_merge(self, test_name, model_id, config_cls, config_kwargs):
-        # https://github.com/huggingface/peft/pull/2403
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
-            pytest.skip(
-                f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
-            )
+        _skip_if_merging_not_supported(model_id, config_cls)
 
+        # calling merge twice with the same arguments should not change the output
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_safe_merge(model_id, config_cls, config_kwargs)
 
@@ -1862,7 +1882,7 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(reason="MacOS does not support multiple ops in float16")
 
         X = self.prepare_inputs_for_testing()
-        model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16).to(self.torch_device)
+        model = self.transformers_class.from_pretrained(model_id, dtype=torch.float16).to(self.torch_device)
         model.dtype = torch.float16
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -1874,9 +1894,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
-            # this model does not support merging
-            return
+        _skip_if_merging_not_supported(model_id, config_cls)
 
         model.merge_adapter(safe_merge=False)
         model(**X)
@@ -1904,7 +1922,7 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(reason="MacOS does not support multiple ops in bfloat16")
 
         X = self.prepare_inputs_for_testing()
-        model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16).to(self.torch_device)
+        model = self.transformers_class.from_pretrained(model_id, dtype=torch.bfloat16).to(self.torch_device)
         model.dtype = torch.bfloat16
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -1916,9 +1934,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
-            # this model does not support merging
-            return
+        _skip_if_merging_not_supported(model_id, config_cls)
 
         model.merge_adapter(safe_merge=False)
         model(**X)
@@ -1945,7 +1961,7 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(reason="MacOS does not support multiple ops in float16")
 
         X = self.prepare_inputs_for_testing()
-        model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16).to(self.torch_device)
+        model = self.transformers_class.from_pretrained(model_id, dtype=torch.float16).to(self.torch_device)
         model.dtype = torch.float16
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -1957,9 +1973,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
-            # this model does not support merging
-            return
+        _skip_if_merging_not_supported(model_id, config_cls)
 
         model.merge_adapter(safe_merge=False)
         model(**X)
@@ -1986,7 +2000,7 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(reason="MacOS does not support multiple ops in bfloat16")
 
         X = self.prepare_inputs_for_testing()
-        model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16).to(self.torch_device)
+        model = self.transformers_class.from_pretrained(model_id, dtype=torch.bfloat16).to(self.torch_device)
         model.dtype = torch.bfloat16
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -1998,9 +2012,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
-            # this model does not support merging
-            return
+        _skip_if_merging_not_supported(model_id, config_cls)
 
         model.merge_adapter(safe_merge=False)
         model(**X)
@@ -2077,7 +2089,7 @@ class TestPeftCustomModel(PeftCommonTester):
             lr = 0.1  # otherwise we get nan
         elif "mha" in model_id.lower():
             lr = 1e-3  # we get exploding gradients with MHA when learning rate is too high
-        elif issubclass(config_cls, VBLoRAConfig) or issubclass(config_cls, RandLoraConfig):
+        elif issubclass(config_cls, (VBLoRAConfig, RandLoraConfig, OSFConfig)):
             lr = 0.01  # otherwise we get nan
         elif config_kwargs.get("init_weights") == "abba":
             # ABBA starts closer to pretrained, use gentler updates than standard (0.5)
@@ -2136,7 +2148,13 @@ class TestPeftCustomModel(PeftCommonTester):
         model.eval()
         outputs_before = model(**X)
         # ABBA uses SVD initialization, so outputs won't match base model initially - skip that assertion
-        if config_kwargs.get("init_weights") != "abba":
+        # OSF uses SVD reconstruction which introduces small numerical differences
+        if config_kwargs.get("init_weights") == "abba":
+            # ABBA uses non-zero initialization, so skip the assertion
+            pass
+        elif issubclass(config_cls, OSFConfig):
+            assert torch.allclose(outputs_base, outputs_before, rtol=1e-4, atol=1e-4)
+        else:
             assert torch.allclose(outputs_base, outputs_before)
 
         if issubclass(config_cls, VBLoRAConfig):
@@ -2177,21 +2195,18 @@ class TestPeftCustomModel(PeftCommonTester):
         assert not torch.allclose(outputs_before, outputs_after, rtol=rtol, atol=atol)
         # For ABBA: outputs_before != outputs_disabled because ABBA uses non-zero init
         # But outputs_disabled should equal base model for both ABBA and others
+        # OSF uses SVD reconstruction which introduces small numerical differences
         if config_kwargs.get("init_weights") == "abba":
             assert torch.allclose(outputs_base, outputs_disabled)
+        elif issubclass(config_cls, OSFConfig):
+            assert torch.allclose(outputs_before, outputs_disabled, rtol=1e-4, atol=1e-4)
         else:
             assert torch.allclose(outputs_before, outputs_disabled)
         assert torch.allclose(outputs_after, outputs_enabled_after_disable)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_disable_adapters_with_merging(self, test_name, model_id, config_cls, config_kwargs):
-        # Same test as test_disable_adapters, but additionally merge the trained adapter.
-
-        # https://github.com/huggingface/peft/pull/2403
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
-            pytest.skip(
-                f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
-            )
+        _skip_if_merging_not_supported(model_id, config_cls)
 
         # same as test_disable_adapters, but with merging
         X = self.prepare_inputs_for_testing()

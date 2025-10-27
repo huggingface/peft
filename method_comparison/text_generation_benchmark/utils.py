@@ -24,10 +24,11 @@ import subprocess
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any, Callable, Optional
-from peft.utils import infer_device
 
 import psutil
 import torch
+
+from peft.utils import infer_device
 
 
 FILE_NAME_BENCHMARK_PARAMS = "benchmark_params.json"

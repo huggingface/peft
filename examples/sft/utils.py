@@ -129,14 +129,12 @@ def create_and_prepare_model(args, data_args, training_args):
             load_in_4bit=args.use_4bit_quantization,
         )
     else:
-        torch_dtype = (
-            quant_storage_dtype if quant_storage_dtype and quant_storage_dtype.is_floating_point else torch.float32
-        )
+        dtype = quant_storage_dtype if quant_storage_dtype and quant_storage_dtype.is_floating_point else torch.float32
 
         # Prepare model loading arguments
         model_kwargs = {
             "trust_remote_code": True,
-            "torch_dtype": torch_dtype,
+            "dtype": dtype,
         }
         if args.use_flash_attn:
             if torch.xpu.is_available():

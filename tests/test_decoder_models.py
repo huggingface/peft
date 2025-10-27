@@ -32,12 +32,14 @@ from peft import (
     BoneConfig,
     C3AConfig,
     CPTConfig,
+    DeloraConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
     LoraConfig,
     MissConfig,
     OFTConfig,
+    OSFConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
@@ -117,6 +119,14 @@ ALL_CONFIGS = [
             "cpt_token_ids": [0, 1, 2, 3, 4, 5, 6, 7],  # Example token IDs for testing
             "cpt_mask": [1, 1, 1, 1, 1, 1, 1, 1],
             "cpt_tokens_type_mask": [1, 2, 2, 2, 3, 3, 4, 4],
+        },
+    ),
+    (
+        DeloraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "r": 2,
         },
     ),
     (
@@ -277,6 +287,12 @@ ALL_CONFIGS = [
             "target_modules": None,
         },
     ),
+    (
+        OSFConfig,
+        {
+            "task_type": "CAUSAL_LM",
+        },
+    ),
 ]
 
 
@@ -286,12 +302,14 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         BoneConfig,
         HRAConfig,
         OFTConfig,
+        OSFConfig,
         RoadConfig,
         ShiraConfig,
         C3AConfig,
         MissConfig,
+        DeloraConfig,
     ]:
-        pytest.skip("Skipping BOFT/HRA/OFT/Bone/Road/SHiRA/C3A/MiSS for GPT2LMHeadModel")
+        pytest.skip("Skipping BOFT/HRA/OFT/Bone/Road/SHiRA/C3A/MiSS/OSF/DeLoRA for GPT2LMHeadModel")
 
 
 def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
@@ -304,13 +322,21 @@ def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
         C3AConfig,
         RoadConfig,
         MissConfig,
+        DeloraConfig,
     ]:
-        pytest.skip("Skipping AdaLora/BOFT/HRA/OFT/Bone/MiSS for GPT2LMHeadModel")
+        pytest.skip("Skipping AdaLora/BOFT/HRA/OFT/Bone/MiSS/DeLoRA for GPT2LMHeadModel")
 
 
 def _skip_alora_no_activation(config_cls, config_kwargs):
     if config_cls is LoraConfig and config_kwargs.get("alora_invocation_tokens") == [1000]:
         pytest.skip("Skipping aLoRA no-activation-case because the test expects changed output which there won't be.")
+
+
+def _skip_osf_disable_adapter_test(config_cls):
+    if config_cls is OSFConfig:
+        pytest.skip(
+            "Skipping OSF for disable_adapter test because OSF uses exact SVD decomposition, so outputs are identical until training."
+        )
 
 
 class TestDecoderModels(PeftCommonTester):
@@ -573,6 +599,7 @@ class TestDecoderModels(PeftCommonTester):
     def test_disable_adapter(self, model_id, config_cls, config_kwargs):
         _skip_if_not_conv1d_supported(model_id, config_cls)
         _skip_alora_no_activation(config_cls, config_kwargs)
+        _skip_osf_disable_adapter_test(config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_disable_adapter(model_id, config_cls, config_kwargs.copy())
 
@@ -796,14 +823,15 @@ class TestDecoderModels(PeftCommonTester):
             else:
                 assert not contains_embedding
 
-    def test_lora_embed_scale_is_applied(self):
+    @pytest.mark.parametrize("use_dora", [False, True])
+    def test_lora_embed_scale_is_applied(self, use_dora):
         """Test that LoRA correctly handles embeddings with scaling (e.g., Gemma3)."""
         model_id = "hf-internal-testing/tiny-random-Gemma3ForCausalLM"
         with hub_online_once(model_id):
             base_model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
             orig_embedding = base_model.get_input_embeddings()
 
-            peft_config = LoraConfig(target_modules=["embed_tokens"], init_lora_weights=False)
+            peft_config = LoraConfig(target_modules=["embed_tokens"], init_lora_weights=False, use_dora=use_dora)
             peft_model = get_peft_model(base_model, peft_config)
 
             x = torch.arange(10).to(self.torch_device)
@@ -813,7 +841,7 @@ class TestDecoderModels(PeftCommonTester):
             assert (max_embedding_output < 100.0).all()
             peft_model.merge_adapter()
             embedding_merged = peft_embedding(x)
-            assert torch.allclose(embedding_output, embedding_merged)
+            assert torch.allclose(embedding_output, embedding_merged, atol=1e-5, rtol=1e-5)
             peft_model.unmerge_adapter()
 
             # set embed_scale to an absurdly high value, then check that the embedding output is also scaled to a high

@@ -44,7 +44,7 @@ def train(
     waveft_scaling: float = 25.0,
     waveft_wavelet_family: str = "db1",
     waveft_use_idwt: bool = True,
-    torch_dtype: str = "float16",
+    dtype: str = "float16",
     seed: Optional[int] = None,
 ):
     # Set device_map to the right place when enabling DDP.
@@ -56,7 +56,7 @@ def train(
     # Set seed
     if seed is not None:
         set_seed(seed)
-    model_kwargs = {"dtype": getattr(torch, torch_dtype), "device_map": device_map}
+    model_kwargs = {"dtype": getattr(torch, dtype), "device_map": device_map}
     model = AutoModelForCausalLM.from_pretrained(base_model, **model_kwargs)
 
     tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
@@ -162,7 +162,7 @@ if __name__ == "__main__":
     parser.add_argument("--waveft_scaling", type=float, default=25.0)
     parser.add_argument("--waveft_wavelet_family", type=str, default="db1")
     parser.add_argument("--waveft_use_idwt", action="store_true", default=True)
-    parser.add_argument("--torch_dtype", type=str, default="float16")
+    parser.add_argument("--dtype", type=str, default="float16")
     parser.add_argument("--seed", type=int, default=None)
 
     args = parser.parse_args()
@@ -184,6 +184,6 @@ if __name__ == "__main__":
         waveft_scaling=args.waveft_scaling,
         waveft_wavelet_family=args.waveft_wavelet_family,
         waveft_use_idwt=args.waveft_use_idwt,
-        torch_dtype=args.torch_dtype,
+        dtype=args.dtype,
         seed=args.seed,
     )
