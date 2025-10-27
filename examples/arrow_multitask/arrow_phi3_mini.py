@@ -188,7 +188,7 @@ def set_seed(seed: int):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-    elif hasattr(torch, 'xpu') and torch.xpu.is_available():
+    elif hasattr(torch, "xpu") and torch.xpu.is_available():
         torch.xpu.manual_seed_all(seed)
 
 
