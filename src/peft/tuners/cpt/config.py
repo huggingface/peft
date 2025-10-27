@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import warnings
 from dataclasses import dataclass, field
 from typing import Literal, Optional
 
@@ -81,9 +80,7 @@ class CPTConfig(PromptLearningConfig):
         self.num_transformer_submodules = 1  # Number of transformer submodules used.
         self.peft_type = PeftType.CPT  # Specifies that the PEFT type is CPT.
         if self.task_type != TaskType.CAUSAL_LM:
-            raise ValueError(
-                f"{self.__class__.__name__} only supports task_type = {TaskType.CAUSAL_LM.value}."
-            )
+            raise ValueError(f"{self.__class__.__name__} only supports task_type = {TaskType.CAUSAL_LM.value}.")
 
         if self.cpt_token_ids is None:
             self.cpt_token_ids = [0]
