@@ -277,7 +277,9 @@ class Linear(nn.Linear, GraloraLayer):
         l_indices = torch.arange(in_features, device=device)
         n_indices = l_indices // (in_features // gralora_k)
         i_indices = l_indices % (in_features // gralora_k)
-        gralora_A_scattered = torch.zeros(in_features, gralora_k, gralora_rank, device=device, dtype=dtype)
+        gralora_A_scattered = torch.zeros(
+            in_features, gralora_k, gralora_rank, device=device, dtype=torch.float32 if cast_to_fp32 else dtype
+        )
         gralora_A_scattered.scatter_(
             1,
             n_indices.unsqueeze(1).unsqueeze(2).expand(-1, 1, gralora_rank),
