@@ -26,50 +26,48 @@ class GraloraConfig(PeftConfig):
 
     Args:
         r (`int`):
-            GraLoRA attention dimension determines the rank of the GraLoRA adapter.
-            The total parameter count of the GraLoRA adapter is same as LoRA with same rank r, while the expressivitiy is multiplied by gralora_k.
+            GraLoRA attention dimension determines the rank of the GraLoRA adapter. The total parameter count of the
+            GraLoRA adapter is same as LoRA with same rank r, while the expressivitiy is multiplied by gralora_k.
         hybrid_r (`int`):
             Hybrid GraLoRA rank determines the rank allocated to vanilla LoRA method when using Hybrid GraLoRA method.
-            Hybrid GraLoRA, a combination of GraLoRA and vanilla LoRA, becomes available when hybrid_r > 0.
-            The parameter count of the GraLoRA adapter is r + hybrid_r.
+            Hybrid GraLoRA, a combination of GraLoRA and vanilla LoRA, becomes available when hybrid_r > 0. The
+            parameter count of the GraLoRA adapter is r + hybrid_r.
         target_modules (`Union[List[str], str]`):
-            List of module names or regex expression of the module names to replace with GraLoRA. "
-            For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. "
-            This can also be a wildcard 'all-linear' which matches all linear/Conv1D "
-            "(if the model is a PreTrainedModel, the output layer excluded). "
-            If not specified, modules will be chosen according to the model architecture, If the architecture is "
-            not known, an error will be raised -- in this case, you should specify the target modules manually. "
-            To avoid targeting any modules (because you want to apply `target_parameters`), set "
-            `target_modules=[]`.
+            List of module names or regex expression of the module names to replace with GraLoRA. " For example, ['q',
+            'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. " This can also be a wildcard 'all-linear'
+            which matches all linear/Conv1D " "(if the model is a PreTrainedModel, the output layer excluded). " If not
+            specified, modules will be chosen according to the model architecture, If the architecture is " not known,
+            an error will be raised -- in this case, you should specify the target modules manually. " To avoid
+            targeting any modules (because you want to apply `target_parameters`), set " `target_modules=[]`.
         gralora_alpha (`int`): GraLoRA alpha.
-            GraLoRA alpha is the scaling factor for the GraLoRA adapter.
-            Scale becomes gralora_alpha / (r + hybrid_r).
+            GraLoRA alpha is the scaling factor for the GraLoRA adapter. Scale becomes gralora_alpha / (r + hybrid_r).
         gralora_dropout (`float`):
-            GraLoRA dropout is the dropout probability for the GraLoRA adapter.
-            It is used to prevent overfitting and improve the generalization of the GraLoRA adapter.
+            GraLoRA dropout is the dropout probability for the GraLoRA adapter. It is used to prevent overfitting and
+            improve the generalization of the GraLoRA adapter.
         gralora_k (`int`):
-            GraLoRA k determines the number of subblocks in the GraLoRA adapter.
-            The rank r must be divisible by gralora_k for the GraLoRA adapter to be valid.
-            The total parameter count is preserved regardles of gralora_k.
-            The entire rank of the GraLoRA adapter is increased by gralora_k, while the rank of each subblock is reduced by gralora_k.
-            gralora_k=2 is recommended for rank 32 or lower, and gralora_k=4 is recommended for rank 64 or higher.
+            GraLoRA k determines the number of subblocks in the GraLoRA adapter. The rank r must be divisible by
+            gralora_k for the GraLoRA adapter to be valid. The total parameter count is preserved regardles of
+            gralora_k. The entire rank of the GraLoRA adapter is increased by gralora_k, while the rank of each
+            subblock is reduced by gralora_k. gralora_k=2 is recommended for rank 32 or lower, and gralora_k=4 is
+            recommended for rank 64 or higher.
         fan_in_fan_out (`bool`):
-            Set this to True if the layer to replace stores weight like (fan_in, fan_out).
-            For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
+            Set this to True if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 uses
+            `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
         bias (`str`):
-            Bias type for gralora. Can be 'none', 'all' or 'gralora_only'.
-            If 'all' or 'gralora_only', the corresponding biases will be updated during training.
-            Be aware that this means that, even when disabling the adapters, the model will not produce the same output as the base model would have without adaptation.
+            Bias type for gralora. Can be 'none', 'all' or 'gralora_only'. If 'all' or 'gralora_only', the
+            corresponding biases will be updated during training. Be aware that this means that, even when disabling
+            the adapters, the model will not produce the same output as the base model would have without adaptation.
         init_weights (`bool`):
-            Whether to initialize the weights of the GraLoRA layers with their default initialization.
-            Don't change this setting, except if you know exactly what you're doing.
+            Whether to initialize the weights of the GraLoRA layers with their default initialization. Don't change
+            this setting, except if you know exactly what you're doing.
         layers_to_transform (`Union[List[int], int]`):
-            The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes that are specified inside this list.
-            If a single integer is passed, PEFT will transform only the layer at this index.
-            This only works when target_modules is a list of str.
+            The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes
+            that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at
+            this index. This only works when target_modules is a list of str.
         layers_pattern (`Optional[Union[List[str], str]]`):
-            The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern.
-            This only works when target_modules is a list of str. This should target the `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
+            The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is
+            not in the common layers pattern. This only works when target_modules is a list of str. This should target
+            the `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
     """
 
     r: int = field(
