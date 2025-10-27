@@ -877,7 +877,49 @@ def train():
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
         start_time = time.time()
-        
+
+        from eval_peft import run_lm_harness_and_print_results
+        from transformers import TrainerCallback
+
+        def run_my_eval(model, tokenizer, evaluation_dir, eval_step):
+            tasks = "wikitext,piqa"
+            harness_file_name = f"lm_harness_results_step_{eval_step}"
+            run_lm_harness_and_print_results(
+                model=model,
+                tokenizer=tokenizer,
+                tasks=tasks,
+                num_fewshot=1,
+                limit=30,
+                per_device_eval_batch_size=2,
+                output_dir=evaluation_dir,
+                file_name=harness_file_name,
+            )
+            print(f"✅ LM-Harness Ergebnisse gespeichert in: {evaluation_dir}/{harness_file_name}")
+
+        class CustomEvalCallback(TrainerCallback):
+            def __init__(self, eval_fn, eval_args, eval_every_steps=250):
+                self.eval_fn = eval_fn
+                self.eval_args = eval_args
+                self.eval_every_steps = eval_every_steps
+
+            def on_step_end(self, args, state, control, **kwargs):
+                if state.global_step > 0 and state.global_step % self.eval_every_steps == 0:
+                    print(f"\n🔎 Running custom evaluation at step {state.global_step} ...")
+                    # eval_step als Argument übergeben
+                    self.eval_fn(**self.eval_args, eval_step=state.global_step)
+                    print("✅ Custom evaluation finished.\n")
+                return control
+
+        evaluation_dir = os.path.join(script_args.output_dir, "evaluation")
+        os.makedirs(evaluation_dir, exist_ok=True)
+
+        custom_eval_callback = CustomEvalCallback(
+            eval_fn=run_my_eval,
+            eval_args={"model": model, "tokenizer": tokenizer, "evaluation_dir": evaluation_dir},
+            eval_every_steps=500
+        )
+
+        trainer.add_callback(custom_eval_callback)
         trainer.train()
         
         end_time = time.time()
@@ -938,24 +980,25 @@ def train():
         os.makedirs(evaluation_dir, exist_ok=True)
 
         from eval_peft import run_lm_harness_and_print_results
-        tasks = "wikitext,piqa,tinyArc,tinyHellaswag,tinyGSM8k,tinyMMLU"
+        # tasks = "wikitext,piqa,tinyArc,tinyHellaswag,tinyGSM8k,tinyMMLU"
+        tasks = "wikitext,piqa"
         harness_file_name = "lm_harness_results"
         run_lm_harness_and_print_results(
             model=model,
             tokenizer=tokenizer,
             tasks=tasks,
             num_fewshot=1,
-            limit=100,
+            limit=30,
             per_device_eval_batch_size=2,
             output_dir=evaluation_dir,
             file_name=harness_file_name,
         )
         print(f"✅ LM-Harness Ergebnisse gespeichert in: {evaluation_dir}")
 
-        from eval_peft import generate_alpaca_response
-        alpaca_file_name = "alpaca_eval_results"
-        generate_alpaca_response(model, tokenizer, script_args.training_mode, script_args.lora_r, evaluation_dir, alpaca_file_name)
-        print(f"✅ AlpacaEval Ergebnisse gespeichert in: {evaluation_dir}")
+        # from eval_peft import generate_alpaca_response
+        # alpaca_file_name = "alpaca_eval_results"
+        # generate_alpaca_response(model, tokenizer, script_args.training_mode, script_args.lora_r, evaluation_dir, alpaca_file_name)
+        # print(f"✅ AlpacaEval Ergebnisse gespeichert in: {evaluation_dir}")
 
         metrics_path = os.path.join(evaluation_dir, "training_metrics.json")
         with open(metrics_path, 'w') as f:
