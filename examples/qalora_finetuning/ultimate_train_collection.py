@@ -565,7 +565,7 @@ def train():
                 "group_size": script_args.qalora_group_size
             }
         )
-
+        del original_weights_map
         model = get_peft_model(model, lora_config)
 
         adapter_name = model.active_adapter
@@ -624,7 +624,7 @@ def train():
             bias="none",
         )
 
-        model = get_peft_model(model, error_config, adapter_name="error_correction", mixed=True)
+        model = get_peft_model(model, error_config, adapter_name="error_correction")
         print("✅ 'error_correction' Adapter hinzugefügt und per SVD initialisiert.")
 
         adapter_name = model.active_adapter
@@ -638,10 +638,10 @@ def train():
                 del config.init_lora_weights["W_orig"]
         
         # Cleanup
-        # print("❄️ 4. Fehlerkorrektur-Adapter einfrieren...")
-        # for name, param in model.named_parameters():
-        #     if "error_correction" in name:
-        #         param.requires_grad = False
+        print("❄️ 4. Fehlerkorrektur-Adapter einfrieren...")
+        for name, param in model.named_parameters():
+            if "error_correction" in name:
+                param.requires_grad = False
 
         # ==============================================================================
         # SCHRITT 3: TASK-ADAPTER HINZUFÜGEN (GAUSS-INIT, TRAINABLE)
@@ -663,10 +663,13 @@ def train():
         print("✅ 'task_adapter' hinzugefügt und zufällig initialisiert.")
 
         print("🚀 6. 'task_adapter' als aktiv für das Training setzen...")
-        model.set_adapter(["task_adapter", "error_correction"])
+        model.set_adapter("task_adapter")
 
         print("\n--- Finales Modell-Setup ---")
         model.print_trainable_parameters()
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
     elif script_args.training_mode == "pissa":
         print("🔧 Setting up PiSSA training...")
         model = transformers.AutoModelForCausalLM.from_pretrained(
@@ -860,8 +863,8 @@ def train():
         "data_collator": data_collator,
     }
 
-    import wandb
-    wandb.init()
+    # import wandb
+    # wandb.init()
     
     training_metrics = {}
 
