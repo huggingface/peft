@@ -249,6 +249,8 @@ class LoraLayer(BaseTunerLayer):
             else:
                 print("Not init with avg_group_pooling")
         # Angepasster Block für error-svd
+        elif isinstance(init_lora_weights, dict) and init_lora_weights.get("method") == "spqr-svd":
+            self.spqr_svd_init(adapter_name, init_lora_weights)
         elif isinstance(init_lora_weights, dict) and init_lora_weights.get("method") == "error-svd":
             base_layer = self.get_base_layer()
             if hasattr(base_layer, "dequantize_weight"):
@@ -257,45 +259,18 @@ class LoraLayer(BaseTunerLayer):
                 weights_map = init_lora_weights.get("original_weights_map", {})
                 
                 # Finde den Layer-Namen durch Dimensionsvergleich
-                target_weight = None
-                layer_name = None
+                layer_name = kwargs["kwargs"]["current_key"]
                 
-                # Hole die erwarteten Dimensionen dieses Layers
-                out_features = self.lora_B[adapter_name].weight.shape[0]
-                in_features = self.lora_A[adapter_name].weight.shape[1]
-                
-                for name, weight in weights_map.items():
-                    # Prüfe ob die Dimensionen passen (berücksichtige mögliche Transposition)
-                    if isinstance(weight, torch.nn.Module):
-                        if hasattr(weight, 'weight'):
-                            w = weight.weight
-                        else:
-                            continue
-                    else:
-                        w = weight
-                        
-                    if w.shape == (out_features, in_features) or w.shape == (in_features, out_features):
-                        target_weight = w
-                        layer_name = name
-                        break
-                
-                if target_weight is not None:
-                    # Erstelle das Dictionary für error_svd_init
-                    init_dict_for_this_layer = {
-                        "original_weight": target_weight,
-                        "group_size": init_lora_weights.get("group_size")
-                    }
+                # Erstelle das Dictionary für error_svd_init
+                init_dict_for_this_layer = {
+                    "original_weight": weights_map[layer_name],
+                    "group_size": init_lora_weights.get("group_size")
+                }
                     
-                    with gather_params_ctx(base_layer.dequantize_weight()):
-                        self.error_svd_init(adapter_name, init_dict_for_this_layer)
-                    print(f"✅ Init layer adapter {layer_name} with error-svd")
-                else:
-                    print(f"⚠️ Konnte kein passendes Original-Gewicht finden. Wechsle zu avg-group-pooling.")
-                    g = init_lora_weights.get("group_size", 32)
-                    self.avg_group_pooling(adapter_name, {"method": "avg-group-pooling", "group_size": g})
-                    
-            else:
-                print(f"❌ Layer hat keine dequantize_weight Methode")
+                with gather_params_ctx(base_layer.dequantize_weight()):
+                    self.error_svd_init(adapter_name, init_dict_for_this_layer)
+                print(f"✅ Init layer adapter {layer_name} with error-svd")
+
         elif isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
             with gather_params_ctx(self.get_base_layer().weight):
                 self.pissa_init(adapter_name, init_lora_weights)
@@ -355,7 +330,93 @@ class LoraLayer(BaseTunerLayer):
         # Platzhalter, ersetze ihn durch deine echte Implementierung
         U, S, Vh = torch.linalg.svd(matrix, full_matrices=False)
         return U, S, Vh.T
-    
+
+    def spqr_svd_init(self, adapter_name: str, init_lora_weights: dict):
+        """
+        Initialisiert LoRA-Gewichte mit vorgeladenen SVD-Daten aus einem SPQR-Adapter.
+        Strukturell identisch zu `error_svd_init` aufgebaut.
+
+        Args:
+            adapter_name (str): Der Name des Adapters, der initialisiert wird.
+            init_lora_weights (dict): Ein Dictionary, das die SPQR-SVD-Daten enthält.
+        """
+        base = self.get_base_layer()
+
+        # --- BLOCK 1: DIMENSIONEN UND SKALIERUNG (exakt wie in error_svd_init) ---
+        out_features = self.lora_B[adapter_name].weight.shape[0]
+        in_features = self.lora_A[adapter_name].weight.shape[1]
+        r = int(self.r[adapter_name])
+        s = float(self.scaling[adapter_name])
+
+        # --- BLOCK 2: AUFLÖSUNG DER SPQR-SVD-DATEN (analog zu "Resolving W_orig") ---
+        
+        spqr_svd_data: Optional[dict] = None
+        
+        # 1. PRIORITÄT: Direkt aus dem `init_lora_weights` Dictionary.
+        # Wir suchen nach dem gesamten Adapter-Dictionary.
+        if isinstance(init_lora_weights, dict):
+            adapter_dict = init_lora_weights.get("spqr_svd_adapter")
+            if isinstance(adapter_dict, dict):
+                # Wir haben das Haupt-Dictionary. Jetzt brauchen wir die Daten für DIESEN Layer.
+                # Dafür nutzen wir die "tagging"-Methode, die wir zuvor besprochen haben.
+                if hasattr(base, "peft_layer_name"):
+                    layer_name = getattr(base, "peft_layer_name")
+                    if layer_name in adapter_dict:
+                        spqr_svd_data = adapter_dict[layer_name]
+                        
+        # 2. FALLBACK: Suche nach den SVD-Daten als Attribut direkt am Basis-Layer.
+        # (Dies könnte nützlich sein, wenn man die Daten manuell injiziert).
+        if spqr_svd_data is None:
+            if hasattr(base, "spqr_svd_data"):
+                val = getattr(base, "spqr_svd_data")
+                if isinstance(val, dict) and all(k in val for k in ['U', 'S', 'Vh']):
+                    spqr_svd_data = val
+
+        # LETZTER AUSWEG: Wenn alle Methoden fehlschlagen, brechen wir mit einer klaren Fehlermeldung ab.
+        if spqr_svd_data is None:
+            warnings.warn(
+                f"[spqr-svd] Could not resolve SPQR-SVD data for layer. "
+                f"Please ensure 'spqr_svd_adapter' is in init_lora_weights and the base layers are tagged with 'peft_layer_name'."
+                "Skipping initialization and using default (Kaiming uniform)."
+            )
+            if adapter_name in self.lora_A:
+                nn.init.kaiming_uniform_(self.lora_A[adapter_name].weight, a=math.sqrt(5))
+                nn.init.zeros_(self.lora_B[adapter_name].weight)
+            return
+
+        # --- BLOCK 3: SVD-MATRIZEN VERARBEITEN (ersetzt die SVD-Berechnung) ---
+
+        U_k, S_k, Vh_k = spqr_svd_data['U'], spqr_svd_data['S'], spqr_svd_data['Vh']
+        
+        # Sanity-Checks für die Dimensionen der SVD-Matrizen
+        if U_k.shape[0] != out_features or U_k.shape[1] != r:
+            raise ValueError(f"Shape mismatch for U matrix: expected ({out_features}, {r}), got {U_k.shape}")
+        if S_k.shape[0] != r:
+            raise ValueError(f"Shape mismatch for S vector: expected ({r},), got {S_k.shape}")
+        if Vh_k.shape[0] != r or Vh_k.shape[1] != in_features:
+            raise ValueError(f"Shape mismatch for Vh matrix: expected ({r}, {in_features}), got {Vh_k.shape}")
+
+        # Skalierung von PEFT anwenden (identisch zu error_svd_init, aber ohne sqrt)
+        S_k_scaled = S_k / max(s, 1e-12)
+
+        # lora_A = Vh
+        # lora_B = U * S_scaled
+        lora_A_weight = Vh_k
+        lora_B_weight = U_k @ torch.diag(S_k_scaled)
+
+        # --- BLOCK 4: GEWICHTE ZUWEISEN (exakt wie in error_svd_init) ---
+
+        # Zuweisung der Gewichte
+        self.lora_A[adapter_name].weight.data.copy_(lora_A_weight.to(self.lora_A[adapter_name].weight.dtype))
+        self.lora_B[adapter_name].weight.data.copy_(lora_B_weight.to(self.lora_B[adapter_name].weight.dtype))
+
+        # Optional: Diagnostische Ausgabe
+        if hasattr(base, "peft_layer_name"):
+            layer_name_info = getattr(base, "peft_layer_name")
+        else:
+            layer_name_info = "unknown layer"
+        print(f"✅ [spqr-svd] Init successful for adapter '{adapter_name}' on layer '{layer_name_info}'.")
+
     def init_wavelet_svd_adapter(self, adapter_name):
         """
         Initialisiert LoRA-Adapter A und B, indem zuerst eine Wavelet-Dekomposition
@@ -527,7 +588,8 @@ class LoraLayer(BaseTunerLayer):
 
         def _orient_out_in(W: torch.Tensor) -> torch.Tensor:
             if W.dim() != 2: raise ValueError(f"[error-svd] Expected 2D weight, got {tuple(W.shape)}")
-            if W.shape[0] != out_features and W.shape[1] == out_features: return W.t().contiguous()
+            if W.shape[0] != out_features and W.shape[1] == out_features: 
+                return W.t().contiguous()
             return W
 
         # Resolve W_q (quantized weight)
@@ -544,10 +606,6 @@ class LoraLayer(BaseTunerLayer):
             warnings.warn("[error-svd] Konnte quantisiertes Gewicht Wq nicht finden. Wechsle zu avg-group-pooling.")
             return self.avg_group_pooling(adapter_name, {"method": "avg-group-pooling", "group_size": g})
         Wq = _orient_out_in(Wq.detach().to(torch.float32))
-        # --- ENDE: KEINE ÄNDERUNGEN ---
-
-
-        # --- ANPASSUNGEN HIER ---
         # Resolve W_orig (original FP32 weights) with new priority order
         Worig: Optional[torch.Tensor] = None
         
@@ -559,30 +617,9 @@ class LoraLayer(BaseTunerLayer):
             if isinstance(maybe, torch.Tensor):
                 Worig = maybe
 
-        # 2. FALLBACK: Wenn im Dictionary nichts gefunden wurde, suche nach Attributen auf dem Layer.
-        if Worig is None:
-            for attr in ("original_weight_fp32", "weight_fp32", "orig_weight", "fp32_weight", "original_weight"):
-                if hasattr(base, attr):
-                    val = getattr(base, attr)
-                    if isinstance(val, torch.Tensor):
-                        Worig = val
-                        break # Nimm das erste gefundene Attribut
-
-        # 3. FALLBACK: Prüfe auf einen gecachten Wert von einem vorherigen Lauf.
-        if Worig is None and hasattr(self, "_qalora_W_pre") and isinstance(self._qalora_W_pre, dict):
-            Worig = self._qalora_W_pre.get(adapter_name, None)
-
-        # LETZTER AUSWEG: Wenn alle Methoden fehlschlagen, wechsle zur alten Pooling-Methode.
-        if Worig is None:
-            warnings.warn("[error-svd] W_orig konnte nicht gefunden werden. Wechsle zu avg-group-pooling.")
-            return self.avg_group_pooling(adapter_name, {"method": "avg-group-pooling", "group_size": g})
-        
         # Stelle sicher, dass Device und Orientierung passen.
         Worig = _orient_out_in(Worig.detach().to(device=Wq.device, dtype=torch.float32))
-        # --- ENDE DER ANPASSUNGEN ---
 
-
-        # --- KEINE ÄNDERUNGEN AB HIER ---
         # Sanity checks
         if Wq.shape != Worig.shape:
             raise ValueError(f"[error-svd] Shape-Mismatch: W_orig {tuple(Worig.shape)} vs W_q {tuple(Wq.shape)}")

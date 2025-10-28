@@ -67,6 +67,7 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
             use_qalora=use_qalora,
             lora_bias=lora_bias,
             qalora_group_size=qalora_group_size,
+            **kwargs,
         )
 
     def resolve_lora_variant(self, *, use_dora: bool, use_qalora: bool, **kwargs) -> Optional[LoraVariant]:

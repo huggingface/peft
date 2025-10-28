@@ -209,6 +209,7 @@ class LoraModel(BaseTuner):
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
             "parameter_name": parameter_name,
+            "current_key": current_key,
         }
         # for torchao merging, we need the get_apply_tensor_subclass from the quantization config
         try:

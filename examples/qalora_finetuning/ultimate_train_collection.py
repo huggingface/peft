@@ -567,7 +567,70 @@ def train():
         )
         del original_weights_map
         model = get_peft_model(model, lora_config)
+        adapter_name = model.active_adapter
+        config = model.peft_config[adapter_name]
 
+        # Überprüfen, ob die Initialisierungsmethode verwendet wurde und die problematischen Daten enthält
+        if hasattr(config, "init_lora_weights") and isinstance(config.init_lora_weights, dict):
+            # Entfernen Sie den Tensor oder das gesamte Dictionary.
+            # Beides ist eine gute Lösung. Das Ersetzen durch einen einfachen Wert ist oft am sichersten.
+            print("Entferne nicht serialisierbare Tensor-Daten aus der Lora-Konfiguration vor dem Speichern...")
+            if "original_weights_map" in config.init_lora_weights:
+                del config.init_lora_weights["original_weights_map"]
+            if "W_orig" in config.init_lora_weights:
+                del config.init_lora_weights["W_orig"]
+        
+        # Cleanup
+        del og_model
+        torch.cuda.empty_cache()
+        print("🧹 Original model freed from memory")
+
+    elif script_args.training_mode == "spqr_outlier":
+        print("🔧 Setting up QA-LoRA training...")
+        model = load_or_quantize_model(
+            script_args.model_name_or_path,
+            tokenizer,
+            qalora_group_size=script_args.qalora_group_size,
+            bits=script_args.bits,
+            calibration_dataset=script_args.calibration_dataset
+        )
+        
+        print("📥 Loading original model for error-svd initialization...")
+        og_model = AutoModelForCausalLM.from_pretrained(
+            script_args.model_name_or_path,
+            torch_dtype=torch.bfloat16,
+            device_map="auto"
+        )
+        
+        # Erstelle eine Map mit Layer-Name -> Gewicht
+        original_weights_map = {}
+        target_modules = ["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"]
+        
+        for name, module in og_model.named_modules():
+            if hasattr(module, 'weight') and isinstance(module.weight, torch.nn.Parameter):
+                # Speichere nur die relevanten Layer
+                if any(target in name for target in target_modules):
+                    original_weights_map[name] = module.weight.data.clone().to(torch.float32)
+        
+        print(f"📊 Gespeichert: {len(original_weights_map)} Original-Gewichte für error-svd")
+        print("✅ SPQR adapter data found in the model object.")
+
+        lora_config = LoraConfig(
+            task_type="CAUSAL_LM",
+            use_qalora=False,
+            qalora_group_size=script_args.qalora_group_size,
+            r=script_args.lora_r,
+            lora_alpha=script_args.lora_r,
+            target_modules=target_modules,
+            lora_dropout=0,
+            bias="none",
+            init_lora_weights={
+                "method": "spqr-svd", 
+                "spqr_svd_adapter": torch.load("/home/nudel/Documents/peft/quantized_models/HuggingFaceTB_SmolLM2-1.7B_gptq_2bit_groupsize_32_calibration_dataset_c4/spqr_adapter_svd/adapter_model.pt")
+            }
+        )
+        del original_weights_map
+        model = get_peft_model(model, lora_config)
         adapter_name = model.active_adapter
         config = model.peft_config[adapter_name]
 
@@ -670,6 +733,8 @@ def train():
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+    
+    
     elif script_args.training_mode == "pissa":
         print("🔧 Setting up PiSSA training...")
         model = transformers.AutoModelForCausalLM.from_pretrained(
@@ -889,7 +954,7 @@ def train():
                 tokenizer=tokenizer,
                 tasks=tasks,
                 num_fewshot=1,
-                limit=30,
+                limit=50,
                 per_device_eval_batch_size=2,
                 output_dir=evaluation_dir,
                 file_name=harness_file_name,
