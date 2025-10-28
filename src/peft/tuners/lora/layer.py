@@ -250,7 +250,19 @@ class LoraLayer(BaseTunerLayer):
                 print("Not init with avg_group_pooling")
         # Angepasster Block für error-svd
         elif isinstance(init_lora_weights, dict) and init_lora_weights.get("method") == "spqr-svd":
-            self.spqr_svd_init(adapter_name, init_lora_weights)
+            base_layer = self.get_base_layer()
+            if hasattr(base_layer, "dequantize_weight"):
+                
+                # Hole die weights_map direkt aus dem init_lora_weights Dictionary
+                weights_map = init_lora_weights.get("spqr_svd_adapter", {})
+                
+                # Finde den Layer-Namen durch Dimensionsvergleich
+                layer_name = kwargs["kwargs"]["current_key"]
+                
+                # Erstelle das Dictionary für error_svd_init
+                with gather_params_ctx(base_layer.dequantize_weight()):
+                    self.spqr_svd_init(adapter_name, weights_map[layer_name])
+                print(f"✅ Init layer adapter {layer_name} with error-svd")
         elif isinstance(init_lora_weights, dict) and init_lora_weights.get("method") == "error-svd":
             base_layer = self.get_base_layer()
             if hasattr(base_layer, "dequantize_weight"):
@@ -331,14 +343,14 @@ class LoraLayer(BaseTunerLayer):
         U, S, Vh = torch.linalg.svd(matrix, full_matrices=False)
         return U, S, Vh.T
 
-    def spqr_svd_init(self, adapter_name: str, init_lora_weights: dict):
+    def spqr_svd_init(self, adapter_name: str, spqr_outlier: dict):
         """
         Initialisiert LoRA-Gewichte mit vorgeladenen SVD-Daten aus einem SPQR-Adapter.
         Strukturell identisch zu `error_svd_init` aufgebaut.
 
         Args:
             adapter_name (str): Der Name des Adapters, der initialisiert wird.
-            init_lora_weights (dict): Ein Dictionary, das die SPQR-SVD-Daten enthält.
+            spqr_outlier (dict): Ein Dictionary, das die SPQR-SVD-Daten enthält.
         """
         base = self.get_base_layer()
 
@@ -350,40 +362,8 @@ class LoraLayer(BaseTunerLayer):
 
         # --- BLOCK 2: AUFLÖSUNG DER SPQR-SVD-DATEN (analog zu "Resolving W_orig") ---
         
-        spqr_svd_data: Optional[dict] = None
+        spqr_svd_data: Optional[dict] = spqr_outlier
         
-        # 1. PRIORITÄT: Direkt aus dem `init_lora_weights` Dictionary.
-        # Wir suchen nach dem gesamten Adapter-Dictionary.
-        if isinstance(init_lora_weights, dict):
-            adapter_dict = init_lora_weights.get("spqr_svd_adapter")
-            if isinstance(adapter_dict, dict):
-                # Wir haben das Haupt-Dictionary. Jetzt brauchen wir die Daten für DIESEN Layer.
-                # Dafür nutzen wir die "tagging"-Methode, die wir zuvor besprochen haben.
-                if hasattr(base, "peft_layer_name"):
-                    layer_name = getattr(base, "peft_layer_name")
-                    if layer_name in adapter_dict:
-                        spqr_svd_data = adapter_dict[layer_name]
-                        
-        # 2. FALLBACK: Suche nach den SVD-Daten als Attribut direkt am Basis-Layer.
-        # (Dies könnte nützlich sein, wenn man die Daten manuell injiziert).
-        if spqr_svd_data is None:
-            if hasattr(base, "spqr_svd_data"):
-                val = getattr(base, "spqr_svd_data")
-                if isinstance(val, dict) and all(k in val for k in ['U', 'S', 'Vh']):
-                    spqr_svd_data = val
-
-        # LETZTER AUSWEG: Wenn alle Methoden fehlschlagen, brechen wir mit einer klaren Fehlermeldung ab.
-        if spqr_svd_data is None:
-            warnings.warn(
-                f"[spqr-svd] Could not resolve SPQR-SVD data for layer. "
-                f"Please ensure 'spqr_svd_adapter' is in init_lora_weights and the base layers are tagged with 'peft_layer_name'."
-                "Skipping initialization and using default (Kaiming uniform)."
-            )
-            if adapter_name in self.lora_A:
-                nn.init.kaiming_uniform_(self.lora_A[adapter_name].weight, a=math.sqrt(5))
-                nn.init.zeros_(self.lora_B[adapter_name].weight)
-            return
-
         # --- BLOCK 3: SVD-MATRIZEN VERARBEITEN (ersetzt die SVD-Berechnung) ---
 
         U_k, S_k, Vh_k = spqr_svd_data['U'], spqr_svd_data['S'], spqr_svd_data['Vh']

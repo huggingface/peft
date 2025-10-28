@@ -595,24 +595,9 @@ def train():
             calibration_dataset=script_args.calibration_dataset
         )
         
-        print("📥 Loading original model for error-svd initialization...")
-        og_model = AutoModelForCausalLM.from_pretrained(
-            script_args.model_name_or_path,
-            torch_dtype=torch.bfloat16,
-            device_map="auto"
-        )
-        
         # Erstelle eine Map mit Layer-Name -> Gewicht
-        original_weights_map = {}
         target_modules = ["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"]
         
-        for name, module in og_model.named_modules():
-            if hasattr(module, 'weight') and isinstance(module.weight, torch.nn.Parameter):
-                # Speichere nur die relevanten Layer
-                if any(target in name for target in target_modules):
-                    original_weights_map[name] = module.weight.data.clone().to(torch.float32)
-        
-        print(f"📊 Gespeichert: {len(original_weights_map)} Original-Gewichte für error-svd")
         print("✅ SPQR adapter data found in the model object.")
 
         lora_config = LoraConfig(
@@ -621,6 +606,8 @@ def train():
             qalora_group_size=script_args.qalora_group_size,
             r=script_args.lora_r,
             lora_alpha=script_args.lora_r,
+            # r=1,
+            # lora_alpha=1,
             target_modules=target_modules,
             lora_dropout=0,
             bias="none",
@@ -629,7 +616,6 @@ def train():
                 "spqr_svd_adapter": torch.load("/home/nudel/Documents/peft/quantized_models/HuggingFaceTB_SmolLM2-1.7B_gptq_2bit_groupsize_32_calibration_dataset_c4/spqr_adapter_svd/adapter_model.pt")
             }
         )
-        del original_weights_map
         model = get_peft_model(model, lora_config)
         adapter_name = model.active_adapter
         config = model.peft_config[adapter_name]
@@ -639,13 +625,9 @@ def train():
             # Entfernen Sie den Tensor oder das gesamte Dictionary.
             # Beides ist eine gute Lösung. Das Ersetzen durch einen einfachen Wert ist oft am sichersten.
             print("Entferne nicht serialisierbare Tensor-Daten aus der Lora-Konfiguration vor dem Speichern...")
-            if "original_weights_map" in config.init_lora_weights:
-                del config.init_lora_weights["original_weights_map"]
-            if "W_orig" in config.init_lora_weights:
-                del config.init_lora_weights["W_orig"]
-        
+            if "spqr_svd_adapter" in config.init_lora_weights:
+                del config.init_lora_weights["spqr_svd_adapter"]
         # Cleanup
-        del og_model
         torch.cuda.empty_cache()
         print("🧹 Original model freed from memory")
     elif script_args.training_mode == "qalora_svd_error_two_adapter":
