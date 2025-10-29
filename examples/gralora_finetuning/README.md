@@ -13,13 +13,13 @@ With respect to your standard PEFT training procedure with LoRA, simply swap you
 
 ```python
 import torch
-from peft import GraloraConfig
-from transformers import AutoTokenizer, AutoModelForCausalLM
 from datasets import load_dataset
+from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import SFTTrainer, SFTConfig
+from peft import GraloraConfig
 
-model = AutoModelForCausalLM.from_pretrained("huggyllama/llama-7b", device_map="auto")
-tokenizer = AutoTokenizer.from_pretrained("huggyllama/llama-7b")
+model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.2-3B", dtype=torch.bfloat16, device_map="auto")
+tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-3B")
 dataset = load_dataset("timdettmers/openassistant-guanaco", split="train")
 gralora_config = GraloraConfig()
 
@@ -29,14 +29,13 @@ trainer = SFTTrainer(
     processing_class=tokenizer,
     peft_config=gralora_config,
     args=SFTConfig(
-        output_dir="./gralora-llama-7b",
         max_length=2048,
         dataset_text_field="text",
         per_device_train_batch_size=2,
     ),
 )
 trainer.train()
-trainer.model.save_pretrained("gralora-llama-7b")
+trainer.model.save_pretrained("gralora-llama-3.2-3b")
 ```
 
 Run the finetuning script simply by running:

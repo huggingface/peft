@@ -24,7 +24,6 @@ def train_model(
     learning_rate: float,
     cutoff_len: int,
     val_set_size: int,
-    quantize: bool,
     eval_step: int,
     save_step: int,
     device: str,
@@ -50,26 +49,7 @@ def train_model(
     # load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(base_model, token=hf_token)
 
-    # Quantized GraLoRA: IF YOU WANNA QUANTIZE THE MODEL
-    if quantize:
-        if (torch.cuda.is_available() and torch.cuda.is_bf16_supported()) or torch.xpu.is_available():
-            bnb_4bit_compute_dtype = torch.bfloat16
-        else:
-            bnb_4bit_compute_dtype = torch.float16
-        model = AutoModelForCausalLM.from_pretrained(
-            base_model,
-            token=hf_token,
-            quantization_config=BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_compute_dtype=bnb_4bit_compute_dtype,
-                bnb_4bit_use_double_quant=True,
-                bnb_4bit_quant_type="nf4",
-            ),
-        )
-        # setup for quantized training
-        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
-    else:
-        model = AutoModelForCausalLM.from_pretrained(base_model, token=hf_token)
+    model = AutoModelForCausalLM.from_pretrained(base_model, token=hf_token)
     # GraLoRA config for the PEFT model
     gralora_config = GraloraConfig(
         r=gralora_r,  # Rank of matrix
@@ -113,7 +93,6 @@ def train_model(
         per_device_eval_batch_size=batch_size,
         warmup_steps=100,
         weight_decay=0.01,
-        logging_dir="./logs",
         logging_steps=eval_step,
         save_steps=save_step,
         save_total_limit=2,
@@ -157,7 +136,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Fine-tune LLaMA with GraLoRA and PEFT")
-    parser.add_argument("--base_model", type=str, default="huggyllama/llama-7b", help="Base model path or name")
+    parser.add_argument("--base_model", type=str, default="meta-llama/Llama-3.2-3B", help="Base model path or name")
     parser.add_argument(
         "--data_path", type=str, default="timdettmers/openassistant-guanaco", help="Dataset path or name"
     )
@@ -169,7 +148,6 @@ if __name__ == "__main__":
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--cutoff_len", type=int, default=512, help="Cutoff length for tokenization")
     parser.add_argument("--val_set_size", type=int, default=500, help="Validation set size")
-    parser.add_argument("--quantize", action="store_true", help="Use quantization")
     parser.add_argument("--eval_step", type=int, default=10, help="Evaluation step interval")
     parser.add_argument("--save_step", type=int, default=100, help="Save step interval")
     parser.add_argument("--device", type=str, default="auto", help="Device to use for training")
@@ -198,7 +176,6 @@ if __name__ == "__main__":
         learning_rate=args.learning_rate,
         cutoff_len=args.cutoff_len,
         val_set_size=args.val_set_size,
-        quantize=args.quantize,
         eval_step=args.eval_step,
         save_step=args.save_step,
         device=args.device,
