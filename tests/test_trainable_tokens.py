@@ -990,7 +990,9 @@ class TestTrainableTokens:
             {"lm_head": [1, 2], "embed_tokens": [3, 4]},  # dict format - different indices
         ],
     )
-    def test_ensure_weight_tying_warns_when_model_not_tied(self, model_weight_untied, recwarn, trainable_token_indices):
+    def test_ensure_weight_tying_warns_when_model_not_tied(
+        self, model_weight_untied, recwarn, trainable_token_indices
+    ):
         """Should warn when ensure_weight_tying=True but model doesn't have tied weights"""
         peft_config = LoraConfig(
             target_modules="all-linear",
