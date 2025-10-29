@@ -363,8 +363,9 @@ class LoraModel(BaseTuner):
             for n, layer in self.named_modules():
                 # gradient checkpointing layer are executed concurrently to the 'normal' forward call
                 # (in the backward step the gradient checkpointing layer's forward will be executed again).
-                # to be consistent with the normal forward we need to enable the pre hooks for this concurrent
-                # forward call as well.
+                # this means that when the gradient checkpointing layer is called, the _enable_peft_forward_hooks
+                # context manager is long gone. to be consistent with the normal forward we need to register the pre
+                # hooks for this concurrent forward call as well.
                 #
                 # Note that this will lead to double application of whatever the callbacks do in normal forward.
                 # Make sure that whatever change is done, can be applied more than once without harm (idempotency).
@@ -380,7 +381,7 @@ class LoraModel(BaseTuner):
                                 module._peft_gradient_checkpointing_forward_hooks.append(handle)
 
                     def backward_hook(name, module, *grad_output, **kwargs):
-                        for _ in range(len(module._peft_gradient_checkpointing_forward_hooks)):
+                        while module._peft_gradient_checkpointing_forward_hooks:
                             module._peft_gradient_checkpointing_forward_hooks.pop().remove()
 
                     if getattr(layer, "_peft_gradient_checkpointing_forward_hooks", []):

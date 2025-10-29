@@ -25,6 +25,7 @@ from operator import attrgetter
 
 import pytest
 import torch
+import transformers
 import yaml
 from diffusers import StableDiffusionPipeline
 from packaging import version
@@ -1327,9 +1328,10 @@ class PeftCommonTester:
             # TODO: no gradients on the "dense" layer, other layers work, not sure why
             self.skipTest("AdaLora with RoBERTa does not work correctly")
 
-        if "bart" in model_id.lower():
-            # TODO: no backprop possible with Bart, not sure why
-            self.skipTest("Bart does not work correctly")
+        if "bart" in model_id.lower() and version.parse(transformers.__version__) <= version.parse("5.0"):
+            self.skipTest(
+                "Bart in transformers < 5.0 doesn't handle input sharing well enough. See transformers#41821"
+            )
 
         if (config_cls == OFTConfig) and ("deberta" in model_id.lower()):
             # TODO: no gradients on the "dense" layer, other layers work, not sure why
@@ -1344,9 +1346,10 @@ class PeftCommonTester:
             if not getattr(model, "supports_gradient_checkpointing", False):
                 return pytest.skip(f"Model {model_id} does not support gradient checkpointing")
 
-            # Disable lora_dropout to remove non-determinism in gradient creation
-            if "lora_dropout" in config_kwargs:
-                del config_kwargs["lora_dropout"]
+            # Disable lora_dropout and friends to remove non-determinism in gradient creation
+            for key in list(config_kwargs.keys()):
+                if key.endswith("dropout"):
+                    del config_kwargs[key]
 
             config = config_cls(
                 base_model_name_or_path=model_id,
