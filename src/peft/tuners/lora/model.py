@@ -352,11 +352,13 @@ class LoraModel(BaseTuner):
         # If adapter_names is passed as an argument, we inject it into the forward arguments.
         adapter_names = kwargs.pop("adapter_names", None)
         alora_offsets = kwargs.pop("alora_offsets", None)
+
         if adapter_names is None and alora_offsets is None:
             # nothing to do
             yield
             return
         hook_handles = []
+
         if alora_offsets is not None:
             for n, layer in self.named_modules():
                 # gradient checkpointing layer are executed concurrently to the 'normal' forward call
