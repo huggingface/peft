@@ -4910,7 +4910,7 @@ class TestWeightTying:
             ensure_weight_tying=True,
         )
 
-        with pytest.warns(UserWarning, match="no tied modules are added in `modules_to_save`"):
+        with pytest.warns(UserWarning, match="no tied modules are added"):
             model = get_peft_model(model, embed_token_config)
 
         assert isinstance(model.base_model.model.model.embed_tokens, torch.nn.modules.Embedding)
@@ -4938,3 +4938,91 @@ class TestWeightTying:
         assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear), (
             "LM head is not of type nn.linear"
         )
+
+    @pytest.mark.parametrize("layer", ["lm_head", "embed_tokens"])
+    def test_weight_tying_tied_model_target_modules_lora(self, layer):
+        # Same as `test_weight_tying_tied_model_lora` but the tied module is passed
+        # in `target_modules` instead of `modules_to_save`.
+        model = self.get_lm_model()
+
+        embed_token_config = LoraConfig(
+            target_modules=[layer, "linear"],
+            ensure_weight_tying=True,
+        )
+
+        model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.embed_tokens, LoraLayer)
+        assert isinstance(model.base_model.model.lm_head, LoraLayer)
+
+        # Since embed_tokens and lm_head weights are transpose of each other
+        # lm_head lora_A == embed_tokens lora_B
+        adapter_name = "default"
+
+        embed_lora_A = model.base_model.model.model.embed_tokens.lora_embedding_A[adapter_name]
+        embed_lora_B = model.base_model.model.model.embed_tokens.lora_embedding_B[adapter_name]
+
+        lm_lora_A = model.base_model.model.lm_head.lora_A[adapter_name].weight
+        lm_lora_B = model.base_model.model.lm_head.lora_B[adapter_name].weight
+
+        assert torch.allclose(embed_lora_A, lm_lora_B)
+        assert torch.allclose(embed_lora_B, lm_lora_A)
+        assert embed_lora_A is lm_lora_B
+        assert embed_lora_B is lm_lora_A
+
+    @pytest.mark.parametrize("layer", ["lm_head", "embed_tokens"])
+    def test_weight_tying_non_tied_model_target_modules_lora(self, layer):
+        # When model weights are not tied, ensure a warning is raised even if
+        # the tied module name is present in `target_modules`.
+        model = self.get_lm_model(tie_weights=False)
+        embed_token_config = LoraConfig(
+            target_modules=[layer, "linear"],
+            ensure_weight_tying=True,
+        )
+        with pytest.warns(UserWarning, match="no tied modules were found in the model"):
+            model = get_peft_model(model, embed_token_config)
+
+        if layer == "embed_tokens":
+            assert isinstance(model.base_model.model.model.embed_tokens, LoraLayer)
+            assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear)
+        elif layer == "lm_head":
+            assert isinstance(model.base_model.model.model.embed_tokens, torch.nn.modules.Embedding)
+            assert isinstance(model.base_model.model.lm_head, LoraLayer)
+        else:
+            raise NotImplementedError("Layer type {layer} is not supported for this test")
+
+    @pytest.mark.parametrize("layer", ["lm_head", "embed_tokens"])
+    def test_not_weight_tying_tied_model_target_modules_lora(self, layer):
+        # If ensure_weight_tying is False, a warning should be raised even when
+        # the tied module is present in `target_modules`.
+        model = self.get_lm_model()
+        embed_token_config = LoraConfig(
+            target_modules=[layer, "linear"],
+            ensure_weight_tying=False,
+        )
+        with pytest.warns(UserWarning, match="`ensure_weight_tying` is not set to True"):
+            model = get_peft_model(model, embed_token_config)
+
+        if layer == "embed_tokens":
+            assert isinstance(model.base_model.model.model.embed_tokens, LoraLayer)
+            assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear)
+        elif layer == "lm_head":
+            assert isinstance(model.base_model.model.model.embed_tokens, torch.nn.modules.Embedding)
+            assert isinstance(model.base_model.model.lm_head, LoraLayer)
+        else:
+            raise NotImplementedError("Layer type {layer} is not supported for this test")
+
+    def test_weight_tying_tied_model_target_modules_lokr(self):
+        from peft.tuners.lokr.layer import LoKrLayer
+
+        model = self.get_lm_model()
+
+        embed_token_config = LoKrConfig(target_modules=["linear", "lm_head"])
+
+        with pytest.warns(UserWarning, match="no implementation exists to tie the adapters"):
+            model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.embed_tokens, torch.nn.modules.Embedding), (
+            "Embed tokens is not updated as a LoRA layer"
+        )
+        assert isinstance(model.base_model.model.lm_head, LoKrLayer), "LM head is not of type nn.linear"

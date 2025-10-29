@@ -249,9 +249,19 @@ class LoraModel(BaseTuner):
             if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
-            self._replace_module(parent, target_name, new_module, target)
 
-    def _replace_module(self, parent, child_name, new_module, child):
+            is_tied = target_name in (getattr(lora_config, "target_modules_to_tie", []) or [])
+
+            self._replace_module(
+                parent=parent,
+                child_name=target_name,
+                new_module=new_module,
+                child=target,
+                is_tied=is_tied,
+                adapter_name=adapter_name,
+            )
+
+    def _replace_module(self, parent, child_name, new_module, child, is_tied, adapter_name):
         # override in LoraModel to handle quantized weights properly
 
         setattr(parent, child_name, new_module)
@@ -278,6 +288,11 @@ class LoraModel(BaseTuner):
                     weight = next(child.parameters())
                 if not any(p.device == meta for p in module.parameters()):
                     module.to(weight.device)
+
+        if is_tied:
+            tied_module = self.model.get_input_embeddings()
+            new_module.lora_A[adapter_name].weight = tied_module.lora_embedding_B[adapter_name]
+            new_module.lora_B[adapter_name].weight = tied_module.lora_embedding_A[adapter_name]
 
     @staticmethod
     def _create_new_module(lora_config, adapter_name, target, **kwargs):
@@ -811,3 +826,11 @@ class LoraModel(BaseTuner):
         missing_keys = set(tied_weight_keys) - modules_to_save
 
         peft_config.modules_to_tie = missing_keys
+
+    def _add_targets_to_tie(self, peft_config, tied_weight_keys):
+        target_modules = set(getattr(peft_config, "target_modules", []) or [])
+        missing_keys = set(tied_weight_keys) - target_modules
+
+        peft_config.target_modules_to_tie = missing_keys
+        for m in missing_keys:
+            peft_config.target_modules.add(m)
