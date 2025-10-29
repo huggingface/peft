@@ -1472,35 +1472,63 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
         )
         ensure_weight_tying = getattr(peft_config, "ensure_weight_tying", False)
 
-        # Check if we're dealing with dict format that specifies both embed_tokens and lm_head
-        is_dict_format = isinstance(peft_config.trainable_token_indices, dict)
+        # When multiple target layers are specified, check if they correspond to tied weights
         has_both_layers = False
         indices_mismatch = False
-        embed_key = None
-        lm_head_key = None
         layers_to_skip = set()
+        tied_layer_keys = []
 
-        if is_dict_format and len(target_layers) > 1:
-            # Find embedding and lm_head keys
-            for key in target_layers:
-                key_lower = key.lower()
-                if "embed" in key_lower and not ("lm" in key_lower or "head" in key_lower):
-                    embed_key = key
-                elif "lm_head" in key_lower or ("head" in key_lower and "lm" not in key_lower):
-                    lm_head_key = key
+        if len(target_layers) > 1 and weights_tied and model._tied_weights_keys:
+            # Check if any of the target layers correspond to tied weights in the model
+            # Instead of guessing layer names, compare against actual tied weight keys
+            # Extract module names from tied weights keys (remove the weight attribute name)
+            tied_module_names = {".".join(key.split(".")[:-1]) for key in model._tied_weights_keys}
 
-            if embed_key and lm_head_key:
+            # Also get the input embedding layer name as it's the source of tied weights
+            embedding_module = model.get_input_embeddings()
+            embedding_name = None
+            for name, module in model.named_modules():
+                if module is embedding_module:
+                    # Get just the last part of the name for matching with target_layers
+                    embedding_name = name.split(".")[-1]
+                    break
+
+            # Find which target layers are in the tied weights (including the embedding source)
+            for target_layer in target_layers:
+                # Check if this is the embedding layer
+                if embedding_name and target_layer == embedding_name:
+                    tied_layer_keys.append(target_layer)
+                    continue
+                # Check if this target layer matches any tied module (considering nested structures)
+                for tied_module in tied_module_names:
+                    if tied_module.endswith(target_layer) or target_layer in tied_module.split("."):
+                        tied_layer_keys.append(target_layer)
+                        break
+
+            # If we found multiple tied layers in our targets, check their indices
+            if len(tied_layer_keys) >= 2:
                 has_both_layers = True
-                # Check if indices are different
-                if target_layers[embed_key] != target_layers[lm_head_key]:
-                    indices_mismatch = True
-                else:
-                    # Same indices - if weights are tied and we're applying tying, skip lm_head (it'll be tied later)
-                    if weights_tied and not (not ensure_weight_tying and False):  # Will apply tying
-                        layers_to_skip.add(lm_head_key)
+                # Check if all tied layers have the same indices
+                first_indices = target_layers[tied_layer_keys[0]]
+                indices_match = all(target_layers[key] == first_indices for key in tied_layer_keys[1:])
+                indices_mismatch = not indices_match
 
+                # If indices match and we'll apply tying, skip the tied modules (not the embedding)
+                # They'll be wrapped later by the tying logic with the tied_adapter parameter
+                if indices_match:
+                    # Determine if we'll apply tying: not (ensure_weight_tying=False AND different indices)
+                    # Since indices match here, indices_mismatch=False, so this simplifies to: we apply tying
+                    # Skip all tied modules except the embedding (first one in tied_layer_keys)
+                    # The embedding is typically first, but to be safe, skip modules in _tied_weights_keys
+                    for key in tied_layer_keys:
+                        # Check if this key is in the tied weights (not the source embedding)
+                        for tied_module in tied_module_names:
+                            if tied_module.endswith(key) or key in tied_module.split("."):
+                                layers_to_skip.add(key)
+                                break
+
+        # Wrap target layers (skip those that will be handled by weight tying logic)
         for target_layer, token_indices in target_layers.items():
-            # Skip layers that will be handled by weight tying
             if target_layer in layers_to_skip:
                 continue
 
@@ -1524,11 +1552,12 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
 
         # Case 2: weights tied + ensure_weight_tying=True + different indices -> ERROR
         if weights_tied and ensure_weight_tying and has_both_layers and indices_mismatch:
+            # Build more generic error message showing the conflicting layers
+            tied_layers_info = ", ".join([f"{key}: {target_layers[key]}" for key in tied_layer_keys])
             raise ValueError(
-                f"Cannot ensure weight tying when different token indices are specified for "
-                f"embedding ({embed_key}: {target_layers[embed_key]}) and "
-                f"lm_head ({lm_head_key}: {target_layers[lm_head_key]}). "
-                f"Please use the same indices for both layers or set ensure_weight_tying=False."
+                f"Cannot ensure weight tying when different token indices are specified for tied layers. "
+                f"Conflicting layers: {tied_layers_info}. "
+                f"Please use the same indices for all tied layers or set ensure_weight_tying=False."
             )
 
         # Case 3: Apply weight tying when appropriate
