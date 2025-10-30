@@ -87,6 +87,11 @@ REGRESSION_DIR = tempfile.mkdtemp(prefix="peft_regression_")
 HF_TOKEN = os.environ.get("HF_TOKEN")
 # the repo has to be created manually once, it is not automatically created
 HF_REPO = "peft-internal-testing/regression-tests"
+# note: For XPU devices, a separate regression test repository(for 4 bit) is used due to hardware and implementation
+# differences that can lead to different numerical results compared to CUDA-based devices.
+# See PR https://github.com/huggingface/peft/pull/2843
+HF_REPO_XPU = "Intel/peft-regression-tests"
+LORA_4BIT_FOLDER = "lora_opt-350m_bnb_4bit"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -96,17 +101,54 @@ def setup_tearndown():
 
     # download regression artifacts from Hugging Face Hub at the start
     snapshot_download(repo_id=HF_REPO, local_dir=REGRESSION_DIR)
+
+    # WARNING: If running on XPU, LORA_4BIT_FOLDER artifacts are loaded from HF_REPO_XPU, which is outside of
+    # peft direct control. The load_output function uses torch.load, which can execute arbitrary
+    # code from pickle files. Users should be aware of this potential security risk.
+    is_xpu = (infer_device() == "xpu")
+    if is_xpu:
+        lora_4bit_folder_path = os.path.join(REGRESSION_DIR, LORA_4BIT_FOLDER)
+        if os.path.isdir(lora_4bit_folder_path):
+            try:
+                shutil.rmtree(lora_4bit_folder_path)
+                print(f"[peft regression] Removed existing '{LORA_4BIT_FOLDER}' before XPU overlay.")
+            except Exception as e:
+                print(f"[peft regression][WARNING] Failed to remove existing '{LORA_4BIT_FOLDER}': {e}", file=sys.stderr)
+
+        try:
+            snapshot_download(
+                repo_id=HF_REPO_XPU,
+                local_dir=REGRESSION_DIR,
+                allow_patterns=[f"{LORA_4BIT_FOLDER}/**"],
+            )
+            print(f"[peft regression] XPU overlay fetched '{LORA_4BIT_FOLDER}' from {HF_REPO_XPU}")
+        except Exception as e:
+            print(f"[peft regression][WARNING] Failed to fetch XPU folder '{LORA_4BIT_FOLDER}': {e}", file=sys.stderr)
+
     yield
 
     # delete regression artifacts at the end of the test session; optionally, upload them first if in creation mode
     creation_mode = strtobool(os.environ.get("REGRESSION_CREATION_MODE", "False"))
     if creation_mode:
-        # upload the regression directory to Hugging Face Hub, will overwrite by default
-        upload_folder(
-            repo_id=HF_REPO,
-            folder_path=REGRESSION_DIR,
-            token=HF_TOKEN,
-        )
+        if is_xpu:
+            lora_4bit_folder_path = os.path.join(REGRESSION_DIR, LORA_4BIT_FOLDER)
+            if os.path.isdir(lora_4bit_folder_path):
+                upload_folder(
+                    repo_id=HF_REPO_XPU,
+                    folder_path=lora_4bit_folder_path,
+                    path_in_repo=LORA_4BIT_FOLDER,
+                    token=HF_TOKEN,
+                )
+                print(f"[peft regression] Uploaded XPU-specific '{LORA_4BIT_FOLDER}' to {HF_REPO_XPU}")
+            else:
+                print(f"[peft regression][WARNING] '{lora_4bit_folder_path}' not found; nothing uploaded to {HF_REPO_XPU}", file=sys.stderr)
+        else:
+            # upload the regression directory to Hugging Face Hub, will overwrite by default
+            upload_folder(
+                repo_id=HF_REPO,
+                folder_path=REGRESSION_DIR,
+                token=HF_TOKEN,
+            )
 
     shutil.rmtree(REGRESSION_DIR)
 
@@ -637,7 +679,7 @@ class TestOpt4bitBnb(RegressionTester):
             init_lora_weights=False,
         )
         model = get_peft_model(base_model, config)
-        self.assert_results_equal_or_store(model, "lora_opt-350m_bnb_4bit")
+        self.assert_results_equal_or_store(model, LORA_4BIT_FOLDER)
 
     def test_adalora(self):
         # TODO
