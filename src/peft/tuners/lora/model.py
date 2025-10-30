@@ -290,9 +290,16 @@ class LoraModel(BaseTuner):
                     module.to(weight.device)
 
         if is_tied:
-            tied_module = self.model.get_input_embeddings()
-            new_module.lora_A[adapter_name].weight = tied_module.lora_embedding_B[adapter_name]
-            new_module.lora_B[adapter_name].weight = tied_module.lora_embedding_A[adapter_name]
+            if child_name == "embed_tokens":
+                tied_module = self.model.get_output_embeddings()
+                new_module.lora_embedding_A[adapter_name] = tied_module.lora_B[adapter_name].weight.T
+                new_module.lora_embedding_B[adapter_name] = tied_module.lora_A[adapter_name].weight.T
+            elif child_name == "lm_head":
+                tied_module = self.model.get_input_embeddings()
+                new_module.lora_A[adapter_name].weight = tied_module.lora_embedding_B[adapter_name].T
+                new_module.lora_B[adapter_name].weight = tied_module.lora_embedding_A[adapter_name].T
+            else:
+                raise NotImplementedError(f"Tying adapters is not yet supported for layer {child_name}")
 
     @staticmethod
     def _create_new_module(lora_config, adapter_name, target, **kwargs):

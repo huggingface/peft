@@ -677,15 +677,6 @@ class TestTrainableTokens:
 
         assert merged_model.model.decoder.embed_tokens.weight.data_ptr() == merged_model.lm_head.weight.data_ptr()
 
-    def test_weight_tying_normally_issues_warning(self, model_weight_tied, recwarn):
-        # When using models with weight tying and targeting the embedding or the tied layer should raise a warning.
-        peft_config = LoraConfig(target_modules=["embed_tokens"])
-        peft_model = get_peft_model(model_weight_tied, peft_config)
-
-        warnings = [w.message.args[0] for w in recwarn]
-        warnings = [msg for msg in warnings if "Model with `tie_word_embeddings=True` and the" in msg]
-        assert warnings
-
     def test_weight_tying_state_dict_ignores_tied_weights(self, model_weight_tied):
         # since weight tying is currently not supported make sure that an error is raised when attempting
         # to use a model that has tied input/output embeddings

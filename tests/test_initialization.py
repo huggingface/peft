@@ -4837,9 +4837,13 @@ class TestWeightTying:
             def get_input_embeddings(self):
                 return self.model.embed_tokens
 
+            def get_output_embeddings(self):
+                return self.lm_head
+
         return CausalLM().eval().to(self.torch_device)
 
-    def test_weight_tying_tied_model_lora(self):
+    @pytest.mark.parametrize("layer", ["embed_tokens"])
+    def test_weight_tying_tied_model_lora(self, layer):
         # If weight tying is enabled and `embed_tokens`
         # is passed as a `modules_to_save`, it needs to be ensured
         # that lm_head is tied to the adapter added to `embed_tokens`
@@ -4847,19 +4851,15 @@ class TestWeightTying:
         model = self.get_lm_model()
 
         embed_token_config = LoraConfig(
-            modules_to_save=["embed_tokens"],
+            modules_to_save=[layer],
             target_modules=["linear"],
             ensure_weight_tying=True,
         )
 
         model = get_peft_model(model, embed_token_config)
 
-        assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper), (
-            "Embed tokens is not added in Modules to Save"
-        )
-        assert type(model.base_model.model.model.embed_tokens) is type(model.base_model.model.lm_head), (
-            "Embed tokens and LM head types are not same"
-        )
+        assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper)
+        assert isinstance(model.base_model.model.lm_head, ModulesToSaveWrapper)
 
         # Validating that all model parameters are same
         embed_np = dict(model.base_model.model.model.embed_tokens.named_parameters())
@@ -4965,8 +4965,8 @@ class TestWeightTying:
         lm_lora_A = model.base_model.model.lm_head.lora_A[adapter_name].weight
         lm_lora_B = model.base_model.model.lm_head.lora_B[adapter_name].weight
 
-        assert torch.allclose(embed_lora_A, lm_lora_B)
-        assert torch.allclose(embed_lora_B, lm_lora_A)
+        assert torch.allclose(embed_lora_A, lm_lora_B.T)
+        assert torch.allclose(embed_lora_B, lm_lora_A.T)
         assert embed_lora_A is lm_lora_B
         assert embed_lora_B is lm_lora_A
 
