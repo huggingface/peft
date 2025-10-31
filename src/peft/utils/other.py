@@ -1437,8 +1437,6 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
         # Tie the modules if any tied layer is passed in `modules_to_save`.
         # This should always be called after
         # `_set_trainable` is called for `modules_to_save`.
-
-        # Tied module should either be input embedding or output embedding based on which module to tie
         tied_module = getattr(model.get_input_embeddings().modules_to_save, adapter_name)
         _set_trainable(
             model,

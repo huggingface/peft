@@ -723,6 +723,7 @@ class BaseTuner(nn.Module, ABC):
         excluded_modules = []
         unmatched_modules = []
         targeted_modules_from_peft_config: list[str] = []  # only relevant if state_dict is passed
+        targets_to_tie: list[str] = []
         # Note: If possible, all checks should be performed *at the start of this method*.
         # This way, we can raise early if something goes wrong, without leaving the model
         # in a bad (half-initialized) state.
@@ -798,9 +799,6 @@ class BaseTuner(nn.Module, ABC):
             if not key:
                 continue
 
-            if self._check_tied_module_exists(peft_config, key):
-                continue
-
             # It is possible that we're adding an additional adapter, so if we encounter a key that clearly belongs to a
             # previous adapter we can skip here since we don't want to interfere with adapter internals.
             for adapter_key in existing_adapter_prefixes:
@@ -819,6 +817,9 @@ class BaseTuner(nn.Module, ABC):
                 elif not result:
                     unmatched_modules.append(key)
                 else:
+                    if self._check_tied_module_exists(peft_config, key):
+                        targets_to_tie.append(key)
+                        continue
                     self.targeted_module_names.append(key)
                     parent, target, target_name = _get_submodules(model, key)
                     self._check_target_module_compatiblity(peft_config, model, target_name)
@@ -832,6 +833,9 @@ class BaseTuner(nn.Module, ABC):
                 if key not in module_names:
                     unmatched_modules.append(key)
                 else:
+                    if self._check_tied_module_exists(peft_config, key):
+                        targets_to_tie.append(key)
+                        continue
                     self.targeted_module_names.append(key)
                     parent, target, target_name = _get_submodules(model, key)
                     self._check_target_module_compatiblity(peft_config, model, target_name)
@@ -852,45 +856,13 @@ class BaseTuner(nn.Module, ABC):
             )
 
         # Another loop for tying target modules
-        for key, module in named_modules:
-            if not key:
-                continue
-
-            if not self._check_tied_module_exists(peft_config, key):
-                continue
-
-            if state_dict is None:
-                result = self._check_target_module_exists(peft_config, key)
-                if isinstance(result, _ExcludedModule):
-                    excluded_modules.append(key)
-                elif not result:
-                    unmatched_modules.append(key)
-                else:
-                    self.targeted_module_names.append(key)
-                    parent, target, target_name = _get_submodules(model, key)
-                    self._check_target_module_compatiblity(peft_config, model, target_name)
-                    ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
-                    with ctx():
-                        self._create_and_replace(
-                            peft_config, adapter_name, target, target_name, parent, current_key=key
-                        )
-            else:
-                # use the state_dict to match modules instead
-                if key not in module_names:
-                    unmatched_modules.append(key)
-                else:
-                    self.targeted_module_names.append(key)
-                    parent, target, target_name = _get_submodules(model, key)
-                    self._check_target_module_compatiblity(peft_config, model, target_name)
-                    ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
-                    with ctx():
-                        self._create_and_replace(
-                            peft_config, adapter_name, target, target_name, parent, current_key=key
-                        )
-
-                # still record what would have been matched via the config so that the two results can be compared
-                if self._check_target_module_exists(peft_config, key):
-                    targeted_modules_from_peft_config.append(key)
+        for key in targets_to_tie:
+            self.targeted_module_names.append(key)
+            parent, target, target_name = _get_submodules(model, key)
+            self._check_target_module_compatiblity(peft_config, model, target_name)
+            ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
+            with ctx():
+                self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
 
         ####################
         # CHECK FOR ERRORS #
@@ -1229,31 +1201,27 @@ class BaseTuner(nn.Module, ABC):
                     tied_target_modules.append(target_module)
         return tied_target_modules
 
-    def _get_tied_weight_keys(self, model: nn.Module, prefix="") -> set[str]:
+    def _get_tied_weight_keys(self, model: nn.Module, prefix="") -> list[str]:
         """
         Get the list of modules that needs to be tied
 
         For example: For models which have `embed_tokens` and `lm_head` as the tied keys this function will return
         [`lm_head`]
 
-        Adapted from: https://github.com/huggingface/transformers/blob/v4.57.0/src/transformers/modeling_utils.py#L563
+        From: https://github.com/huggingface/transformers/blob/v4.57.0/src/transformers/modeling_utils.py#L563
         """
-        tied_weight_keys = set()
+        tied_weight_keys = []
         if getattr(model, "_tied_weights_keys", None) is not None:
-            names = {f"{prefix}.{k}" if prefix else k for k in model._tied_weights_keys}
-            tied_weight_keys.update(names)
+            names = [f"{prefix}.{k}" if prefix else k for k in model._tied_weights_keys]
+            tied_weight_keys.extend(names)
         if getattr(model, "_dynamic_tied_weights_keys", None) is not None:
-            names = {f"{prefix}.{k}" if prefix else k for k in model._dynamic_tied_weights_keys}
-            tied_weight_keys.update(names)
+            names = [f"{prefix}.{k}" if prefix else k for k in model._dynamic_tied_weights_keys]
+            tied_weight_keys.extend(names)
         for name, submodule in model.named_children():
             local_prefix = f"{prefix}.{name}" if prefix else name
-            tied_weight_keys.update(self._get_tied_weight_keys(submodule, prefix=local_prefix))
+            tied_weight_keys.extend(self._get_tied_weight_keys(submodule, prefix=local_prefix))
 
-        tied_weight_keys = {".".join(n.split(".")[:-1]) for n in tied_weight_keys}
-
-        # If there's at least one tied key add `embed_tokens` to the set
-        if tied_weight_keys:
-            tied_weight_keys.add("embed_tokens")
+        tied_weight_keys = [".".join(n.split(".")[:-1]) for n in tied_weight_keys]
 
         return tied_weight_keys
 

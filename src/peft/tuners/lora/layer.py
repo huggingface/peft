@@ -156,6 +156,8 @@ class LoraLayer(BaseTunerLayer):
         arrow_config: ArrowConfig = None,
         qalora_group_size: int = 32,
         inference_mode: bool = False,
+        is_tied: bool = False,
+        tied_adapters: dict = {},
         **kwargs,
     ):
         # collect the kwargs
@@ -195,6 +197,16 @@ class LoraLayer(BaseTunerLayer):
         # Actual trainable parameters
         self.lora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
         self.lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=lora_bias)
+        if is_tied:
+            if not tied_adapters:
+                raise RuntimeError("Layer is marked as tied, but tied adapters are not provided")
+
+            lora_A_params = tied_adapters["lora_A"]
+            lora_B_params = tied_adapters["lora_B"]
+
+            self.lora_A[adapter_name].weight = torch.nn.Parameter(lora_A_params)
+            self.lora_B[adapter_name].weight = torch.nn.Parameter(lora_B_params)
+
         self.lora_bias[adapter_name] = lora_bias
 
         if use_rslora:
@@ -631,6 +643,8 @@ class Linear(nn.Module, LoraLayer):
             use_alora=use_alora,
             lora_bias=lora_bias,
             arrow_config=arrow_config,
+            is_tied=kwargs.get("is_tied", False),
+            tied_adapters=kwargs.get("tied_adapters"),
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
