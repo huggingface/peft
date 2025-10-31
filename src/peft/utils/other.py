@@ -1110,7 +1110,7 @@ def _prepare_prompt_learning_config(peft_config, model_config):
         if "head_dim" in model_config:
             head_dim = model_config["head_dim"]
         else:
-            head_dim = peft_config.token_dim // num_attention_heads
+            head_dim = peft_config.token_dim // peft_config.num_attention_heads
         peft_config.token_dim = head_dim * num_key_value_heads
         peft_config.num_attention_heads = num_key_value_heads
 
