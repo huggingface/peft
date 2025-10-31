@@ -4837,9 +4837,6 @@ class TestWeightTying:
             def get_input_embeddings(self):
                 return self.model.embed_tokens
 
-            def get_output_embeddings(self):
-                return self.lm_head
-
         return CausalLM().eval().to(self.torch_device)
 
     @pytest.mark.parametrize("layer", ["lm_head", "embed_tokens", ["lm_head", "embed_tokens"]])
