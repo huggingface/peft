@@ -2054,8 +2054,9 @@ class TestPeftCustomModel(PeftCommonTester):
             optimizer.zero_grad()
             y_pred = model(**X)
             loss = y_pred.sum()
-            loss.backward()
-            optimizer.step()
+            if loss.requires_grad:
+                loss.backward()
+                optimizer.step()
 
         tol = 1e-4
         params_before = dict(model_before.named_parameters())
@@ -2106,8 +2107,9 @@ class TestPeftCustomModel(PeftCommonTester):
             optimizer.zero_grad()
             y_pred = model(**X)
             loss = y_pred.sum()
-            loss.backward()
-            optimizer.step()
+            if loss.requires_grad:
+                loss.backward()
+                optimizer.step()
 
         tol = 1e-4
         params_before = get_state_dict(model)
@@ -2175,8 +2177,9 @@ class TestPeftCustomModel(PeftCommonTester):
             y_pred = model(**X)
             y = torch.arange(len(y_pred)).to(self.torch_device) % 2
             loss = nn.functional.nll_loss(y_pred, y)
-            loss.backward()
-            optimizer.step()
+            if loss.requires_grad:
+                loss.backward()
+                optimizer.step()
 
         model.eval()
         outputs_after = model(**X)
@@ -2252,8 +2255,9 @@ class TestPeftCustomModel(PeftCommonTester):
             y_pred = model(**X)
             y = torch.arange(len(y_pred)).to(self.torch_device) % 2
             loss = nn.functional.nll_loss(y_pred, y)
-            loss.backward()
-            optimizer.step()
+            if loss.requires_grad:
+                loss.backward()
+                optimizer.step()
 
         model.eval()
         outputs_unmerged = model(**X)
