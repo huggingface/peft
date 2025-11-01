@@ -184,7 +184,7 @@ class FourierFTConfig(PeftConfig):
     )
 
     ifft2_norm: Optional[Literal["backward", "forward", "ortho"]] = field(
-        default_factory="backward",
+        default="backward",
         metadata={
             "help": (
                 "The normalization applied for the ifft2 operation. "

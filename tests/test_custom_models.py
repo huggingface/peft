@@ -669,7 +669,7 @@ TEST_CASES = [
         FourierFTConfig,
         {
             "target_modules": ["conv2d"],
-            "n_frequency": 1000,
+            "n_frequency": 10,
         },
     ),
     (
