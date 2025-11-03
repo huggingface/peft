@@ -105,43 +105,29 @@ def setup_tearndown():
     # WARNING: If running on XPU, LORA_4BIT_FOLDER artifacts are loaded from HF_REPO_XPU, which is outside of
     # peft direct control. The load_output function uses torch.load, which can execute arbitrary
     # code from pickle files. Users should be aware of this potential security risk.
-    is_xpu = (infer_device() == "xpu")
-    if is_xpu:
+    use_xpu = strtobool(os.environ.get("PEFT_USE_XPU", "False")) and (infer_device() == "xpu")
+    if use_xpu:
         lora_4bit_folder_path = os.path.join(REGRESSION_DIR, LORA_4BIT_FOLDER)
-        if os.path.isdir(lora_4bit_folder_path):
-            try:
-                shutil.rmtree(lora_4bit_folder_path)
-                print(f"[peft regression] Removed existing '{LORA_4BIT_FOLDER}' before XPU overlay.")
-            except Exception as e:
-                print(f"[peft regression][WARNING] Failed to remove existing '{LORA_4BIT_FOLDER}': {e}", file=sys.stderr)
-
-        try:
-            snapshot_download(
-                repo_id=HF_REPO_XPU,
-                local_dir=REGRESSION_DIR,
-                allow_patterns=[f"{LORA_4BIT_FOLDER}/**"],
-            )
-            print(f"[peft regression] XPU overlay fetched '{LORA_4BIT_FOLDER}' from {HF_REPO_XPU}")
-        except Exception as e:
-            print(f"[peft regression][WARNING] Failed to fetch XPU folder '{LORA_4BIT_FOLDER}': {e}", file=sys.stderr)
+        shutil.rmtree(lora_4bit_folder_path)
+        snapshot_download(
+            repo_id=HF_REPO_XPU,
+            local_dir=REGRESSION_DIR,
+            allow_patterns=[f"{LORA_4BIT_FOLDER}/**"],
+        )
 
     yield
 
     # delete regression artifacts at the end of the test session; optionally, upload them first if in creation mode
     creation_mode = strtobool(os.environ.get("REGRESSION_CREATION_MODE", "False"))
     if creation_mode:
-        if is_xpu:
+        if use_xpu:
             lora_4bit_folder_path = os.path.join(REGRESSION_DIR, LORA_4BIT_FOLDER)
-            if os.path.isdir(lora_4bit_folder_path):
-                upload_folder(
-                    repo_id=HF_REPO_XPU,
-                    folder_path=lora_4bit_folder_path,
-                    path_in_repo=LORA_4BIT_FOLDER,
-                    token=HF_TOKEN,
-                )
-                print(f"[peft regression] Uploaded XPU-specific '{LORA_4BIT_FOLDER}' to {HF_REPO_XPU}")
-            else:
-                print(f"[peft regression][WARNING] '{lora_4bit_folder_path}' not found; nothing uploaded to {HF_REPO_XPU}", file=sys.stderr)
+            upload_folder(
+                repo_id=HF_REPO_XPU,
+                folder_path=lora_4bit_folder_path,
+                path_in_repo=LORA_4BIT_FOLDER,
+                token=HF_TOKEN,
+            )
         else:
             # upload the regression directory to Hugging Face Hub, will overwrite by default
             upload_folder(
