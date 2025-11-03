@@ -17,7 +17,7 @@ import torch
 from torch import nn
 
 from peft import BdLoraConfig, PeftModel, get_peft_model
-from peft.tuners.bdlora.layer import BlockDiagonalLinear, ColumnParallelLinearLora, RowParallelLinearLora
+from peft.tuners.bdlora.layer import BlockDiagonalLinear, LoraABlockdiagonalLinear, LoraBBlockdiagonalLinear
 from peft.tuners.lora.layer import Linear
 
 
@@ -55,14 +55,14 @@ class TestBdLora:
         config = BdLoraConfig(
             r=16,
             target_modules=["lin1", "lin2"],
-            row_sharded_modules=["lin1"],
-            column_sharded_modules=["lin2"],
+            lora_a_is_blockdiagonal=["lin1"],
+            lora_b_is_blockdiagonal=["lin2"],
             nblocks=4,
         )
         assert config.r == 16
         assert set(config.target_modules) == {"lin1", "lin2"}  # target_modules is a set
-        assert config.row_sharded_modules == ["lin1"]
-        assert config.column_sharded_modules == ["lin2"]
+        assert config.lora_a_is_blockdiagonal == ["lin1"]
+        assert config.lora_b_is_blockdiagonal == ["lin2"]
         assert config.nblocks == 4
         assert config.prefix == "lora_"
 
@@ -71,8 +71,8 @@ class TestBdLora:
         config = BdLoraConfig(
             r=8,
             target_modules=["lin1", "lin2"],
-            row_sharded_modules=["lin1"],
-            column_sharded_modules=["lin2"],
+            lora_a_is_blockdiagonal=["lin1"],
+            lora_b_is_blockdiagonal=["lin2"],
             nblocks=4,
         )
         peft_model = get_peft_model(mlp, config)
@@ -82,8 +82,8 @@ class TestBdLora:
         assert trainable_params > 0
 
         # Check that correct layer types are created
-        assert isinstance(peft_model.base_model.model.lin1, RowParallelLinearLora)
-        assert isinstance(peft_model.base_model.model.lin2, ColumnParallelLinearLora)
+        assert isinstance(peft_model.base_model.model.lin1, LoraABlockdiagonalLinear)
+        assert isinstance(peft_model.base_model.model.lin2, LoraBBlockdiagonalLinear)
 
     def test_block_diagonal_linear_forward(self):
         """Test BlockDiagonalLinear forward pass."""
@@ -113,8 +113,8 @@ class TestBdLora:
         config = BdLoraConfig(
             r=8,
             target_modules=["lin1", "lin2"],
-            row_sharded_modules=["lin1"],
-            column_sharded_modules=["lin2"],
+            lora_a_is_blockdiagonal=["lin1"],
+            lora_b_is_blockdiagonal=["lin2"],
             nblocks=4,
         )
         peft_model = get_peft_model(mlp, config)
@@ -131,8 +131,8 @@ class TestBdLora:
         config = BdLoraConfig(
             r=8,
             target_modules=["lin1", "lin2"],
-            row_sharded_modules=["lin1"],
-            column_sharded_modules=["lin2"],
+            lora_a_is_blockdiagonal=["lin1"],
+            lora_b_is_blockdiagonal=["lin2"],
             nblocks=4,
         )
         peft_model = get_peft_model(mlp, config)
@@ -160,7 +160,7 @@ class TestBdLora:
         for nblocks in [2, 4]:  # Reduced to avoid model reuse issues
             torch.manual_seed(0)
             mlp = MLP()
-            config = BdLoraConfig(r=16, target_modules=["lin1"], row_sharded_modules=["lin1"], nblocks=nblocks)
+            config = BdLoraConfig(r=16, target_modules=["lin1"], lora_a_is_blockdiagonal=["lin1"], nblocks=nblocks)
             peft_model = get_peft_model(mlp, config)
 
             # Check that block diagonal layer has correct nblocks
@@ -178,8 +178,8 @@ class TestBdLora:
         config = BdLoraConfig(
             r=8,
             target_modules=["lin1", "lin2", "lin3"],
-            row_sharded_modules=["lin1", "lin2"],
-            column_sharded_modules=["lin3"],
+            lora_a_is_blockdiagonal=["lin1", "lin2"],
+            lora_b_is_blockdiagonal=["lin3"],
             nblocks=4,
         )
         peft_model = get_peft_model(mlp, config)
@@ -199,7 +199,7 @@ class TestBdLora:
         config = BdLoraConfig(
             r=8,
             target_modules=["lin1", "lin2"],
-            row_sharded_modules=["lin1"],
+            lora_a_is_blockdiagonal=["lin1"],
             # lin2 not specified in either list
             nblocks=4,
         )
@@ -212,8 +212,8 @@ class TestBdLora:
         config = BdLoraConfig(
             r=8,
             target_modules=["lin1", "lin2"],
-            row_sharded_modules=["lin1"],
-            column_sharded_modules=["lin2"],
+            lora_a_is_blockdiagonal=["lin1"],
+            lora_b_is_blockdiagonal=["lin2"],
             nblocks=4,
         )
         peft_model = get_peft_model(mlp, config)

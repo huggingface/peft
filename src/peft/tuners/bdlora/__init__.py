@@ -17,6 +17,7 @@ from peft.utils import register_peft_method
 from .config import BdLoraConfig
 from .model import BdLoraModel
 
+
 register_peft_method(
     name="bdlora", config_cls=BdLoraConfig, model_cls=BdLoraModel, prefix="lora_", is_mixed_compatible=True
 )
