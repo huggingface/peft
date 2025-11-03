@@ -17,11 +17,6 @@ from peft.utils import register_peft_method
 from .config import BdLoraConfig
 from .model import BdLoraModel
 
-
-# TODO: Which layers should be exposed?
-# __all__ = ["Conv2d", "Linear", "BdLoraModel"]
-
-# TODO: Compatible with Mixed?
 register_peft_method(
-    name="bdlora", config_cls=BdLoraConfig, model_cls=BdLoraModel, prefix="lora_", is_mixed_compatible=False
+    name="bdlora", config_cls=BdLoraConfig, model_cls=BdLoraModel, prefix="lora_", is_mixed_compatible=True
 )
