@@ -4204,9 +4204,11 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             get_peft_model(model, config)
 
     @pytest.mark.single_gpu_tests
+    @pytest.mark.xfail(
+        reason="int4_weight_only still has issues",
+        raises=RuntimeError,
+    )
     def test_causal_lm_training_single_gpu_torchao_int4_raises(self):
-        # int4_weight_only raises an error:
-        # RuntimeError: derivative for aten::_weight_int4pack_mm is not implemented
         # TODO: Once proper torchao support for int4 is added, remove this test and add int4 to supported_quant_types
         from transformers import TorchAoConfig
 
@@ -4227,9 +4229,12 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             task_type="CAUSAL_LM",
         )
 
-        msg = re.escape("TorchaoLoraLinear only supports int8 weights for now")
-        with pytest.raises(ValueError, match=msg):
-            get_peft_model(model, config)
+        model = get_peft_model(model, config)
+        inputs = torch.arange(10).view(1, -1).to(device)
+        # this raises:
+        # > RuntimeError: cutlass cannot initialize
+        # tested in multiple matchines
+        model(inputs)
 
     @parameterized.expand(supported_quant_types)
     @pytest.mark.multi_gpu_tests
