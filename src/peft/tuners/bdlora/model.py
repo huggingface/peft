@@ -29,7 +29,7 @@ from ..lora.inc import dispatch_inc
 from ..lora.layer import Linear, ParamWrapper, dispatch_default
 from ..lora.torchao import dispatch_torchao
 from ..lora.tp_layer import dispatch_megatron
-from .layer import ColumnParallelLinearLora, RowParallelLinearLora
+from .layer import LoraABlockdiagonalLinear, LoraBBlockdiagonalLinear
 
 
 class BdLoraModel(LoraModel):
@@ -37,20 +37,26 @@ class BdLoraModel(LoraModel):
 
     @staticmethod
     def _create_new_module(bdlora_config, adapter_name, target, target_name, **kwargs):
-        # Replacing this function is easier than replacing the _create_and_replace method
+        # Replacing this function is easier than replacing the _create_and_replace method.
+        # A lot of code here is taken from the original LoRA module.
         # ---
         # Read the user-defined lists from the config
-        row_patterns = bdlora_config.row_sharded_modules or []
-        column_patterns = bdlora_config.column_sharded_modules or []
+        lora_a_blockdiagonal_pattern = bdlora_config.lora_a_is_blockdiagonal or []
+        lora_b_blockdiagonal_pattern = bdlora_config.lora_b_is_blockdiagonal or []
 
         # Check if the current module's name matches any pattern
-        is_row_module = any(pattern in target_name for pattern in row_patterns)
-        is_column_module = any(pattern in target_name for pattern in column_patterns)
+        has_lora_a_blockdiagonal = any(pattern in target_name for pattern in lora_a_blockdiagonal_pattern)
+        has_lora_b_blockdiagonal = any(pattern in target_name for pattern in lora_b_blockdiagonal_pattern)
 
-        if is_row_module:
-            LayerToUse = RowParallelLinearLora
-        elif is_column_module:
-            LayerToUse = ColumnParallelLinearLora
+        if has_lora_a_blockdiagonal and has_lora_b_blockdiagonal:
+            raise ValueError(
+                f"{target} with name {target_name} fits both LoRA-A and LoRA-B block-diagonal patterns. Check the used BD-LoRa configuration."
+            )
+
+        if has_lora_a_blockdiagonal:
+            LayerToUse = LoraABlockdiagonalLinear
+        elif has_lora_b_blockdiagonal:
+            LayerToUse = LoraBBlockdiagonalLinear
         else:
             LayerToUse = Linear  # We assume that the module should be unsharded in this case
         dispatchers = []
@@ -120,7 +126,9 @@ class BdLoraModel(LoraModel):
         if lora_config.target_parameters:
             # Right now, unfortunately, we don't support multiple adapters with target_parameters on the same model.
             other_configs_use_target_params = any(
-                conf.target_parameters for key, conf in self.peft_config.items() if key != adapter_name
+                conf.target_parameters  # type: ignore
+                for key, conf in self.peft_config.items()
+                if key != adapter_name
             )
             if other_configs_use_target_params:
                 raise ValueError(

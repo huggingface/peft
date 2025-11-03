@@ -63,29 +63,29 @@ class BlockDiagonalLinear(nn.Module):
         return f"{self.__class__.__name__}(in_features={self.in_features}, out_features={self.out_features}, nblocks={self.nblocks})"
 
 
-class RowParallelLinearLora(Linear):
+class LoraABlockdiagonalLinear(Linear):
     """LoRA adapter for RowParallelLinear where A is block-diagonal"""
 
     def __init__(self, *args, **kwargs):
-        self.nblocks = kwargs.pop("nblocks", 1)  # Number of blocks in block diagonal
+        self.nblocks = kwargs.pop("nblocks", 1)
         super().__init__(*args, **kwargs)
 
     def update_layer(self, adapter_name, r, *args, **kwargs):
         super().update_layer(adapter_name, r, *args, **kwargs)
         # A is block-diagonal (for row-parallel)
-        layer = BlockDiagonalLinear(self.in_features, r, nblocks=self.nblocks, bias=False)
-        self.lora_A.update(nn.ModuleDict({adapter_name: layer}))
+        layer = BlockDiagonalLinear(self.in_features, r, nblocks=self.nblocks, bias=False)  # type: ignore
+        self.lora_A.update(nn.ModuleDict({adapter_name: layer}))  # type: ignore
 
 
-class ColumnParallelLinearLora(Linear):
+class LoraBBlockdiagonalLinear(Linear):
     """LoRA adapter for ColumnParallelLinear where B is block-diagonal"""
 
     def __init__(self, *args, **kwargs):
-        self.nblocks = kwargs.pop("nblocks", 1)  # Number of blocks in block diagonal
+        self.nblocks = kwargs.pop("nblocks", 1)
         super().__init__(*args, **kwargs)
 
     def update_layer(self, adapter_name, r, *args, **kwargs):
         super().update_layer(adapter_name, r, *args, **kwargs)
         # B is block-diagonal (for column-parallel)
-        layer = BlockDiagonalLinear(r, self.out_features, nblocks=self.nblocks, bias=False)
-        self.lora_B.update(nn.ModuleDict({adapter_name: layer}))
+        layer = BlockDiagonalLinear(r, self.out_features, nblocks=self.nblocks, bias=False)  # type: ignore
+        self.lora_B.update(nn.ModuleDict({adapter_name: layer}))  # type: ignore
