@@ -41,6 +41,7 @@ class BlockDiagonalLinear(nn.Module):
         # Handle non-2D inputs by flattening first dimension, as these are usually
         # treated as batched over in nn.Linear Layers. We simply call this flattened first dimension
         # the batch size from now on
+        first_dims = x.shape[:-1]
         if not len(x.shape) == 2:
             x = x.reshape(-1, x.shape[-1])
 
@@ -57,7 +58,7 @@ class BlockDiagonalLinear(nn.Module):
         # weight: (nb, n, m)
         # output should be (B, nb, n) (and then we reshape to stack the blocks)
         out = torch.einsum("bim,inm->bin", x, w)
-        return out.reshape(B, -1)
+        return out.reshape(*first_dims, -1)
 
     def __repr__(self):
         return f"{self.__class__.__name__}(in_features={self.in_features}, out_features={self.out_features}, nblocks={self.nblocks})"
