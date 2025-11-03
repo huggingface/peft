@@ -541,9 +541,12 @@ class TestDecoderModels(PeftCommonTester):
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
-    def test_training_decoders_gradient_checkpointing(self, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("use_reentrant", [True, False])
+    def test_training_decoders_gradient_checkpointing(self, model_id, config_cls, config_kwargs, use_reentrant):
         _skip_if_not_conv1d_supported(model_id, config_cls)
-        self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs.copy())
+        self._test_training_gradient_checkpointing(
+            model_id, config_cls, config_kwargs.copy(), use_reentrant=use_reentrant
+        )
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
