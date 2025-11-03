@@ -21,5 +21,7 @@ from .model import BdLoraModel
 # TODO: Which layers should be exposed?
 # __all__ = ["Conv2d", "Linear", "BdLoraModel"]
 
-#TODO: Compatible with Mixed?
-register_peft_method(name="bdlora", config_cls=BdLoraConfig, model_cls=BdLoraModel, prefix="lora_", is_mixed_compatible=False)
+# TODO: Compatible with Mixed?
+register_peft_method(
+    name="bdlora", config_cls=BdLoraConfig, model_cls=BdLoraModel, prefix="lora_", is_mixed_compatible=False
+)

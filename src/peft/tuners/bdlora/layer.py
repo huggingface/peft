@@ -13,20 +13,21 @@
 # limitations under the License.
 
 import math
-import peft
+
 import torch
 import torch.nn as nn
+
 from ..lora.layer import Linear
 
 
 class BlockDiagonalLinear(nn.Module):
     def __init__(self, in_features: int, out_features: int, nblocks: int, bias: bool = True):
-        """Implementation of a block-diagonal linear layer. The weight matrix is divded into nblocks with size out_features // nblocks, in_features// nblocks."""
+        """Implementation of a block-diagonal linear layer. The weight matrix is divded into nblocks with size out_features //
+        nblocks, in_features// nblocks."""
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.nblocks = nblocks
-
 
         self.weight = nn.Parameter(torch.empty(out_features, in_features // nblocks))
         # BD-LoRA initialization should overwrite this, so the initialization does not matter for our implementation. I would guess that we could
@@ -69,19 +70,11 @@ class RowParallelLinearLora(Linear):
         self.nblocks = kwargs.pop("nblocks", 1)  # Number of blocks in block diagonal
         super().__init__(*args, **kwargs)
 
-    def update_layer(
-        self,
-        adapter_name,
-        r,
-        *args,
-        **kwargs
-    ):
+    def update_layer(self, adapter_name, r, *args, **kwargs):
         super().update_layer(adapter_name, r, *args, **kwargs)
         # A is block-diagonal (for row-parallel)
         layer = BlockDiagonalLinear(self.in_features, r, nblocks=self.nblocks, bias=False)
-        self.lora_A.update(
-            nn.ModuleDict({adapter_name: layer})
-        )
+        self.lora_A.update(nn.ModuleDict({adapter_name: layer}))
 
 
 class ColumnParallelLinearLora(Linear):
@@ -91,13 +84,7 @@ class ColumnParallelLinearLora(Linear):
         self.nblocks = kwargs.pop("nblocks", 1)  # Number of blocks in block diagonal
         super().__init__(*args, **kwargs)
 
-    def update_layer(
-        self,
-        adapter_name,
-        r,
-        *args,
-        **kwargs
-    ):
+    def update_layer(self, adapter_name, r, *args, **kwargs):
         super().update_layer(adapter_name, r, *args, **kwargs)
         # B is block-diagonal (for column-parallel)
         layer = BlockDiagonalLinear(r, self.out_features, nblocks=self.nblocks, bias=False)

@@ -14,7 +14,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, List
+from typing import Optional
+
 from peft.utils import PeftType
 
 from ..lora import LoraConfig
@@ -25,21 +26,13 @@ class BdLoraConfig(LoraConfig):
     """
     TODO : add docstring
     """
+
     prefix: str = field(default="lora_")
     # Add fields for the user to specify module types
-    row_sharded_modules: Optional[List[str]] = field(
-        default=None,
-        metadata={"help": "TODO"}
-    )
-    column_sharded_modules: Optional[List[str]] = field(
-        default=None,
-        metadata={"help": "TODO"}
-    )
-    nblocks: int = field(
-        default=None,
-        metadata={"help": "TODO"}
-    )
-    
+    row_sharded_modules: Optional[list[str]] = field(default=None, metadata={"help": "TODO"})
+    column_sharded_modules: Optional[list[str]] = field(default=None, metadata={"help": "TODO"})
+    nblocks: int = field(default=None, metadata={"help": "TODO"})
+
     def __post_init__(self):
         super().__post_init__()
         self.peft_type = PeftType.BDLORA

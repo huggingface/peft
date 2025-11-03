@@ -12,28 +12,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import operator
 from typing import Optional
+
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-from .layer import RowParallelLinearLora, ColumnParallelLinearLora
-from ..lora.layer import Conv2d, LoraLayer, ParamWrapper, dispatch_default, Linear
+from peft.utils import get_quantization_config
+from peft.utils.other import get_pattern_key
+
 from ..lora import LoraLayer, LoraModel
-from ..lora.layer import dispatch_default
 from ..lora.aqlm import dispatch_aqlm
 from ..lora.awq import dispatch_awq
 from ..lora.eetq import dispatch_eetq
 from ..lora.gptq import dispatch_gptq
 from ..lora.hqq import dispatch_hqq
 from ..lora.inc import dispatch_inc
+from ..lora.layer import Linear, ParamWrapper, dispatch_default
 from ..lora.torchao import dispatch_torchao
 from ..lora.tp_layer import dispatch_megatron
-from peft.utils.other import get_pattern_key
-from peft.utils import get_quantization_config
+from .layer import ColumnParallelLinearLora, RowParallelLinearLora
 
-import operator
 
- 
 class BdLoraModel(LoraModel):
     prefix: str = "lora_"
+
     @staticmethod
     def _create_new_module(bdlora_config, adapter_name, target, target_name, **kwargs):
         # Replacing this function is easier than replacing the _create_and_replace method
@@ -51,11 +52,11 @@ class BdLoraModel(LoraModel):
         elif is_column_module:
             LayerToUse = ColumnParallelLinearLora
         else:
-            LayerToUse = Linear # We assume that the module should be unsharded in this case
+            LayerToUse = Linear  # We assume that the module should be unsharded in this case
         dispatchers = []
 
         def bdlora_dispatch_func(target, adapter_name, lora_config, **kwargs):
-            kwargs['nblocks'] = lora_config.nblocks
+            kwargs["nblocks"] = lora_config.nblocks
             layer = LayerToUse(target, adapter_name, **kwargs)
             return layer
 
@@ -192,7 +193,9 @@ class BdLoraModel(LoraModel):
                     "PEFT repo: https://github.com/huggingface/peft/issues"
                 )
             device_map = self.model.hf_device_map if hasattr(self.model, "hf_device_map") else None
-            new_module = self._create_new_module(lora_config, adapter_name, target, target_name, device_map=device_map, **kwargs)
+            new_module = self._create_new_module(
+                lora_config, adapter_name, target, target_name, device_map=device_map, **kwargs
+            )
             new_module.requires_grad_(True)
             if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
