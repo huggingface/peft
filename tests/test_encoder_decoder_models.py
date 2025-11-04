@@ -22,12 +22,14 @@ from peft import (
     BOFTConfig,
     BoneConfig,
     C3AConfig,
+    DeloraConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
     LoraConfig,
     MissConfig,
     OFTConfig,
+    OSFConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
@@ -80,6 +82,14 @@ ALL_CONFIGS = [
             "target_modules": None,
             "r": 2,
             "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        DeloraConfig,
+        {
+            "task_type": "SEQ_2_SEQ_LM",
+            "target_modules": None,
+            "r": 2,
         },
     ),
     (
@@ -213,7 +223,20 @@ ALL_CONFIGS = [
             "target_modules": None,
         },
     ),
+    (
+        OSFConfig,
+        {
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
 ]
+
+
+def _skip_osf_disable_adapter_test(config_cls):
+    if config_cls is OSFConfig:
+        pytest.skip(
+            "Skipping OSF for disable_adapter test because OSF uses exact SVD decomposition, so outputs are identical until training."
+        )
 
 
 class TestEncoderDecoderModels(PeftCommonTester):
@@ -330,8 +353,11 @@ class TestEncoderDecoderModels(PeftCommonTester):
 
     @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
-    def test_training_encoder_decoders_gradient_checkpointing(self, model_id, config_cls, config_kwargs):
-        self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs)
+    @pytest.mark.parametrize("use_reentrant", [True, False])
+    def test_training_encoder_decoders_gradient_checkpointing(
+        self, model_id, config_cls, config_kwargs, use_reentrant
+    ):
+        self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs, use_reentrant=use_reentrant)
 
     @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
@@ -378,6 +404,7 @@ class TestEncoderDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_disable_adapter(self, model_id, config_cls, config_kwargs):
+        _skip_osf_disable_adapter_test(config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_disable_adapter(model_id, config_cls, config_kwargs)
 

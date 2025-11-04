@@ -326,6 +326,14 @@ class DoraEmbeddingVariant(DoraLinearVariant):
             base_layer=module.get_base_layer(),
             embed_fn=module._embed,
         )
+
+        # Some embedding layers (e.g., Gemma3TextScaledWordEmbedding) apply scaling in their forward method.
+        # Since base_layer(x) already includes this scaling, we need to apply it to DoRA contributions too.
+        # Note: embed_scale is applied AFTER weight norm calculation to preserve DoRA's weight geometry semantics.
+        embed_scale = module._get_embed_scale()
+        if embed_scale is not None:
+            dora_result = dora_result * embed_scale.to(dora_result.dtype)
+
         result = mag_norm_scale * result + dora_result
         return result
 

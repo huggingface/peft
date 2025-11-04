@@ -43,7 +43,7 @@ python -m pip install git+https://github.com/huggingface/peft
 
 ### ValueError: Attempting to unscale FP16 gradients
 
-This error probably occurred because the model was loaded with `torch_dtype=torch.float16` and then used in an automatic mixed precision (AMP) context, e.g. by setting `fp16=True` in the [`~transformers.Trainer`] class from 🤗 Transformers. The reason is that when using AMP, trainable weights should never use fp16. To make this work without loading the whole model in fp32, add the following to your code:
+This error probably occurred because the model was loaded with `dtype=torch.float16` and then used in an automatic mixed precision (AMP) context, e.g. by setting `fp16=True` in the [`~transformers.Trainer`] class from 🤗 Transformers. The reason is that when using AMP, trainable weights should never use fp16. To make this work without loading the whole model in fp32, add the following to your code:
 
 ```python
 peft_model = get_peft_model(...)
@@ -294,7 +294,7 @@ It is possible to get this information for non-PEFT models if they are using PEF
 
 >>> path = "runwayml/stable-diffusion-v1-5"
 >>> lora_id = "takuma104/lora-test-text-encoder-lora-target"
->>> pipe = StableDiffusionPipeline.from_pretrained(path, torch_dtype=torch.float16)
+>>> pipe = StableDiffusionPipeline.from_pretrained(path, dtype=torch.float16)
 >>> pipe.load_lora_weights(lora_id, adapter_name="adapter-1")
 >>> pipe.load_lora_weights(lora_id, adapter_name="adapter-2")
 >>> pipe.set_lora_device(["adapter-2"], "cuda")

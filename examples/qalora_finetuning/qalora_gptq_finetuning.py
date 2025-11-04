@@ -44,7 +44,7 @@ def load_or_quantize_model(
         test_model = AutoModelForCausalLM.from_pretrained(
             base_model,
             device_map="auto",
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
             trust_remote_code=True,  # Some GPTQ models might need this
         )
 
@@ -95,7 +95,7 @@ def load_or_quantize_model(
 
     # Load and quantize the model
     model = AutoModelForCausalLM.from_pretrained(
-        base_model, device_map="auto", quantization_config=gptq_config, torch_dtype=torch.float16
+        base_model, device_map="auto", quantization_config=gptq_config, dtype=torch.float16
     )
 
     # Save the quantized model to cache

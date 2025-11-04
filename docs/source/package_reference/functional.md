@@ -28,6 +28,10 @@ The functions provided here can be considered "public API" of PEFT and hence are
 [[autodoc]] functional.set_adapter
     - all
 
+## Set the `requires_grad` attribute of the specified adapters
+[[autodoc]] functional.set_requires_grad
+    - all
+
 ## Load the weights of the PEFT state dict into the model
 [[autodoc]] functional.set_peft_model_state_dict
     - all

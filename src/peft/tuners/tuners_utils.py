@@ -20,6 +20,7 @@ import re
 import textwrap
 import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from contextlib import contextmanager, nullcontext
 from typing import Any, Optional, Union, overload
 
@@ -49,6 +50,7 @@ from peft.utils.other import (
     set_additional_trainable_modules,
 )
 from peft.utils.peft_types import PeftType, TaskType
+from peft.utils.warning import PeftWarning
 
 from ..config import PeftConfig
 from ..utils import _get_submodules
@@ -483,6 +485,18 @@ class BaseTuner(nn.Module, ABC):
         )
         self.active_adapter = new_adapter or []
 
+    def set_requires_grad(self, adapter_names: str | Sequence[str], requires_grad: bool = True) -> None:
+        """
+        Enable or disable gradients on the given adapter(s).
+
+        Args:
+            adapter_name (`str` or `Sequence[str]`):
+                The name of the adapter(s) whose gradients should be enabled/disabled.
+            requires_grad (`bool`, *optional*)
+                Whether to enable (`True`, default) or disable (`False`).
+        """
+        set_requires_grad(self.model, adapter_names=adapter_names, requires_grad=requires_grad)
+
     def _check_new_adapter_config(self, config: PeftConfig) -> None:
         """
         A helper method to check the config of a new adapter being added.
@@ -689,6 +703,8 @@ class BaseTuner(nn.Module, ABC):
         # This way, we can raise early if something goes wrong, without leaving the model
         # in a bad (half-initialized) state.
         self._check_new_adapter_config(peft_config)
+
+        self._check_tied_modules(model, peft_config)
 
         model_config = self.get_model_config(model)
 
@@ -1154,6 +1170,86 @@ class BaseTuner(nn.Module, ABC):
                     tied_target_modules.append(target_module)
         return tied_target_modules
 
+    def _get_tied_weight_keys(self, model: nn.Module, prefix="") -> list[str]:
+        """
+        Get the list of modules that needs to be tied
+
+        For example: For models which have `embed_tokens` and `lm_head` as the tied keys this function will return
+        [`lm_head`]
+
+        From: https://github.com/huggingface/transformers/blob/v4.57.0/src/transformers/modeling_utils.py#L563
+        """
+        tied_weight_keys = []
+        if getattr(model, "_tied_weights_keys", None) is not None:
+            names = [f"{prefix}.{k}" if prefix else k for k in model._tied_weights_keys]
+            tied_weight_keys.extend(names)
+        if getattr(model, "_dynamic_tied_weights_keys", None) is not None:
+            names = [f"{prefix}.{k}" if prefix else k for k in model._dynamic_tied_weights_keys]
+            tied_weight_keys.extend(names)
+        for name, submodule in model.named_children():
+            local_prefix = f"{prefix}.{name}" if prefix else name
+            tied_weight_keys.extend(self._get_tied_weight_keys(submodule, prefix=local_prefix))
+
+        tied_weight_keys = [".".join(n.split(".")[:-1]) for n in tied_weight_keys]
+
+        return tied_weight_keys
+
+    def _add_modules_to_tie(self, peft_config, tied_weight_keys):
+        """
+        This method adds modules to tie to `peft_config` so that those modules can be tied downstream. By default this
+        method raises a warning, and each tuner class extending `BaseTuner` can choose to implement this.
+        """
+        msg = (
+            "Model has `tie_word_embeddings=True` and a tied layer is part of the adapter, "
+            "but no implementation exists to tie the adapters. "
+            "This can lead to complications, for example when merging the adapter "
+            "or converting your model to formats other than safetensors. "
+            "Check the discussion here: https://github.com/huggingface/peft/issues/2777"
+        )
+        warnings.warn(msg)
+
+    def _check_tied_modules(self, model: nn.Module, peft_config):
+        """
+        Checks if any of the tied layers are targetted via `modules_to_save`. Updates the `peft_config.modules_to_tie`
+        with any layers that needs to be tied
+        """
+        modules_to_save = set(getattr(peft_config, "modules_to_save", []) or [])
+        is_embedding_to_save = any(m in EMBEDDING_LAYER_NAMES for m in modules_to_save)
+
+        tied_weight_keys = self._get_tied_weight_keys(model)
+
+        if getattr(peft_config, "ensure_weight_tying", False):
+            if is_embedding_to_save and tied_weight_keys:
+                self._add_modules_to_tie(peft_config, tied_weight_keys)
+
+            elif not is_embedding_to_save and tied_weight_keys:
+                warnings.warn(
+                    "You have requested `ensure_weight_tying`, but no tied modules are added in `modules_to_save`"
+                )
+
+            elif not tied_weight_keys:
+                warnings.warn("You have requested `ensure_weight_tying`, but no tied modules were found in the model")
+
+        elif is_embedding_to_save and tied_weight_keys:
+            if hasattr(peft_config, "ensure_weight_tying"):
+                msg = (
+                    "Model has `tie_word_embeddings=True` and a tied layer is part of the adapter, "
+                    "but `ensure_weight_tying` is not set to True. "
+                    "This can lead to complications, for example when merging the adapter "
+                    "or converting your model to formats other than safetensors. "
+                    "Check the discussion here: https://github.com/huggingface/peft/issues/2777"
+                )
+                warnings.warn(msg)
+            else:
+                msg = (
+                    "Model has `tie_word_embeddings=True` and a tied layer is part of the adapter, "
+                    "but no implementation exists to tie the adapters. "
+                    "This can lead to complications, for example when merging the adapter "
+                    "or converting your model to formats other than safetensors. "
+                    "Check the discussion here: https://github.com/huggingface/peft/issues/2777"
+                )
+                warnings.warn(msg)
+
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
         try:
@@ -1200,6 +1296,43 @@ class BaseTunerLayer(ABC):
         while hasattr(base_layer, "base_layer"):
             base_layer = base_layer.base_layer
         return base_layer
+
+    def _get_embed_scale(self):
+        """
+        Extract embed_scale from base layer if present and valid.
+
+        Some embedding layers (e.g., Gemma3TextScaledWordEmbedding) apply scaling to embeddings in their forward
+        method. This method checks for the presence of an `embed_scale` attribute. If it exists, it is assumed to be a
+        scalar. Its shape is validated accordingly.
+
+        Returns:
+            torch.Tensor or None: The embed_scale tensor if found and valid, None otherwise.
+        """
+        base_layer = self.get_base_layer()
+        if not hasattr(base_layer, "embed_scale"):
+            return None
+
+        embed_scale = base_layer.embed_scale
+
+        # Convert scalar values to tensors
+        if isinstance(embed_scale, (int, float)):
+            return torch.tensor(embed_scale, device=base_layer.weight.device, dtype=base_layer.weight.dtype)
+
+        # Validate tensor shape - must be scalar (0-d) or 1-element tensor for proper broadcasting
+        if isinstance(embed_scale, torch.Tensor):
+            if embed_scale.numel() == 1:
+                return embed_scale
+            else:
+                # Log warning but don't fail - this maintains backward compatibility
+                warnings.warn(
+                    f"Found embed_scale attribute with shape {embed_scale.shape}, expected scalar. "
+                    "Embedding scaling will not be applied. If this is unexpected, please open an issue at "
+                    "https://github.com/huggingface/peft/issues",
+                    PeftWarning,
+                )
+                return None
+
+        return None
 
     @property
     def weight(self) -> torch.Tensor:
@@ -1352,6 +1485,27 @@ class BaseTunerLayer(ABC):
                         f"{new_active_adapter}."
                     )
                     self.set_adapter(remaining_adapters[0])
+
+    def set_requires_grad(self, adapter_names: str | Sequence[str], requires_grad: bool = True) -> None:
+        """
+        Enable or disable gradients on the given adapter(s).
+
+        Args:
+            adapter_name (`str` or `Sequence[str]`):
+                The name of the adapter(s) whose gradients should be enabled/disabled.
+            requires_grad (`bool`, *optional*)
+                Whether to enable (`True`, default) or disable (`False`).
+        """
+        if isinstance(adapter_names, str):
+            adapter_names_set = {adapter_names}
+        else:
+            adapter_names_set = set(adapter_names)
+
+        for layer_name in self.adapter_layer_names:
+            module_dict = getattr(self, layer_name)
+            for key, layer in module_dict.items():
+                if key in adapter_names_set:
+                    layer.requires_grad_(requires_grad)
 
     def _move_adapter_to_device_of_base_layer(self, adapter_name: str, device: Optional[torch.device] = None) -> None:
         """
@@ -1877,3 +2031,20 @@ def cast_adapter_dtype(model: nn.Module, adapter_name: str, autocast_adapter_dty
             for param in submodule[adapter_name].parameters():
                 if param.dtype in dtypes_to_convert_to_fp32:
                     param.data = param.data.to(torch.float32)
+
+
+def set_requires_grad(model, adapter_names: str | Sequence[str], requires_grad: bool = True) -> None:
+    """
+    Enable or disable gradients on the given adapter(s).
+
+    Args:
+        model (`nn.Module`):
+            The model from which the adapter should be deleted.
+        adapter_name (`str` or `Sequence[str]`):
+            The name of the adapter(s) whose gradients should be enabled/disabled.
+        requires_grad (`bool`, *optional*)
+            Whether to enable (`True`, default) or disable (`False`).
+    """
+    for module in model.modules():
+        if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
+            module.set_requires_grad(adapter_names=adapter_names, requires_grad=requires_grad)

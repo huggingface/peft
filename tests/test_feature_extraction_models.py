@@ -20,6 +20,7 @@ from peft import (
     BOFTConfig,
     BoneConfig,
     C3AConfig,
+    DeloraConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -75,6 +76,14 @@ ALL_CONFIGS = [
     ),
     (
         MissConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+            "r": 2,
+        },
+    ),
+    (
+        DeloraConfig,
         {
             "task_type": "FEATURE_EXTRACTION",
             "target_modules": None,
@@ -321,9 +330,10 @@ class TestPeftFeatureExtractionModel(PeftCommonTester):
 
     @pytest.mark.parametrize("model_id", PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
-    def test_training_gradient_checkpointing(self, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("use_reentrant", [True, False])
+    def test_training_gradient_checkpointing(self, model_id, config_cls, config_kwargs, use_reentrant):
         skip_deberta_lora_tests(config_cls, model_id)
-        self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs)
+        self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs, use_reentrant=use_reentrant)
 
     @pytest.mark.parametrize("model_id", PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)

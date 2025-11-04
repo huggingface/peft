@@ -19,6 +19,7 @@ from .boft import BOFTConfig, BOFTModel
 from .bone import BoneConfig, BoneModel
 from .c3a import C3AConfig, C3AModel
 from .cpt import CPTConfig, CPTEmbedding
+from .delora import DeloraConfig, DeloraModel
 from .fourierft import FourierFTConfig, FourierFTModel
 from .hra import HRAConfig, HRAModel
 from .ia3 import IA3Config, IA3Model
@@ -40,6 +41,7 @@ from .miss import MissConfig, MissModel
 from .mixed import MixedModel
 from .multitask_prompt_tuning import MultitaskPromptEmbedding, MultitaskPromptTuningConfig, MultitaskPromptTuningInit
 from .oft import OFTConfig, OFTModel
+from .osf import OSFConfig, OSFModel
 from .p_tuning import PromptEncoder, PromptEncoderConfig, PromptEncoderReparameterizationType
 from .poly import PolyConfig, PolyModel
 from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
@@ -70,6 +72,8 @@ __all__ = [
     "C3AModel",
     "CPTConfig",
     "CPTEmbedding",
+    "DeloraConfig",
+    "DeloraModel",
     "EvaConfig",
     "FourierFTConfig",
     "FourierFTModel",
@@ -95,6 +99,8 @@ __all__ = [
     "MultitaskPromptTuningInit",
     "OFTConfig",
     "OFTModel",
+    "OSFConfig",
+    "OSFModel",
     "PolyConfig",
     "PolyModel",
     "PrefixEncoder",

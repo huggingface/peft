@@ -511,10 +511,10 @@ from peft import PeftModel
 base_model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1")
 peft_model_id = "alignment-handbook/zephyr-7b-sft-lora"
 model = PeftModel.from_pretrained(base_model, peft_model_id)
-model.merge_and_unload()
+model = model.merge_and_unload()
 ```
 
-If you need to keep a copy of the weights so you can unmerge the adapter later or delete and load different ones, you should use the [`~LoraModel.merge_adapter`] function instead. Now you have the option to use [`~LoraModel.unmerge_adapter`] to return the base model.
+It is important to assign the returned model to a variable and use it, [`~LoraModel.merge_and_unload`] is not an in-place operation. If you need to keep a copy of the weights so you can unmerge the adapter later or delete and load different ones, you should use the [`~LoraModel.merge_adapter`] function instead. Now you have the option to use [`~LoraModel.unmerge_adapter`] to return the base model.
 
 ```py
 from transformers import AutoModelForCausalLM
@@ -539,7 +539,7 @@ from peft import PeftModel
 import torch
 
 base_model = AutoModelForCausalLM.from_pretrained(
-    "mistralai/Mistral-7B-v0.1", torch_dtype=torch.float16, device_map="auto"
+    "mistralai/Mistral-7B-v0.1", dtype=torch.float16, device_map="auto"
 )
 ```
 
@@ -603,11 +603,11 @@ model.load_adapter("alignment-handbook/zephyr-7b-dpo-lora", adapter_name="dpo")
 model.set_adapter("dpo")
 ```
 
-To return the base model, you could use [`~LoraModel.unload`] to unload all of the LoRA modules or [`~LoraModel.delete_adapter`] to delete the adapter entirely.
+To return the base model, you could use [`~LoraModel.unload`] to unload all of the LoRA modules or [`~LoraModel.delete_adapter`] to delete the adapter entirely. [`~LoraModel.unload`] is not an in-place operation, remember to assign the returned model to a variable and use it.
 
 ```py
 # unload adapter
-model.unload()
+model = model.unload()
 
 # delete adapter
 model.delete_adapter("dpo")
@@ -813,7 +813,7 @@ To encode general knowledge, GenKnowSub subtracts the average of the provided ge
 >     # Loading the model
 >     base_model = AutoModelForCausalLM.from_pretrained(
 >         "microsoft/Phi-3-mini-4k-instruct",
->         torch_dtype=torch.bfloat16,
+>         dtype=torch.bfloat16,
 >         device_map="auto",
 >         quantization_config=bnb_config,
 >     )

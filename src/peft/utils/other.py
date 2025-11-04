@@ -21,6 +21,7 @@ import re
 import warnings
 from collections.abc import Sequence
 from contextlib import nullcontext
+from operator import attrgetter
 from typing import Any, Optional, Union
 
 import accelerate
@@ -45,6 +46,7 @@ from .constants import (
     TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_BONE_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_HRA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
@@ -85,6 +87,7 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_BONE_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_HRA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING",
@@ -480,6 +483,28 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         """Delete an adapter from the layer, set a new active adapter if necessary"""
         raise NotImplementedError
 
+    def set_requires_grad(self, adapter_names: str | Sequence[str], requires_grad: bool = True) -> None:
+        """
+        Enable or disable gradients on the given adapter(s).
+
+        Args:
+            adapter_name (`str` or `Sequence[str]`):
+                The name of the adapter(s) whose gradients should be enabled/disabled.
+            requires_grad (`bool`, *optional*)
+                Whether to enable (`True`, default) or disable (`False`).
+        """
+        if isinstance(adapter_names, str):
+            adapter_names_set = {adapter_names}
+        else:
+            adapter_names_set = set(adapter_names)
+
+        for layer_name in self.adapter_layer_names:
+            # use attrgetter, as it resolves `.` in the attribute name
+            module_dict = attrgetter(layer_name)(self)
+            for key, layer in module_dict.items():
+                if key in adapter_names_set:
+                    layer.requires_grad_(requires_grad)
+
     def adapter_state_dict(self, adapter_name):
         """Return the state dict of this module for a given adapter."""
         raise NotImplementedError
@@ -508,10 +533,10 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
     # All names of layers that may contain adapter (trainable) weights
     adapter_layer_names: tuple[str, ...] = ("modules_to_save",)
 
-    def __init__(self, module_to_save, adapter_name):
-        super().__init__(module_to_save, adapter_name)
+    def __init__(self, module_to_save, adapter_name, tied_module=None):
+        super().__init__(module_to_save, adapter_name, tied_module=tied_module)
 
-    def init_modules(self, adapter_name):
+    def init_modules(self, adapter_name, **kwargs):
         # we treat each adapter separately, so we have multiple adapters, same (copied) module for each
         self.modules_to_save = torch.nn.ModuleDict({})
 
@@ -535,7 +560,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
     def _getattr_wrapped(self, name, modules):
         return getattr(modules["modules_to_save"][self.active_adapters[0]], name)
 
-    def update(self, adapter_name, **kwargs):
+    def update(self, adapter_name, tied_module=None, **kwargs):
         super().update(adapter_name)
 
         context_manager = nullcontext()
@@ -550,7 +575,13 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 
         if adapter_name not in self.modules_to_save:
             with context_manager:
-                self.modules_to_save[adapter_name] = copy.deepcopy(self.original_module)
+                if tied_module:
+                    new_linear = torch.nn.Linear(*tied_module.weight.shape, bias=False)
+                    new_linear.weight = tied_module.weight
+
+                    self.modules_to_save[adapter_name] = new_linear
+                else:
+                    self.modules_to_save[adapter_name] = copy.deepcopy(self.original_module)
 
         if hasattr(self.modules_to_save[adapter_name], "_hf_hook"):
             old_hook = self.modules_to_save[adapter_name]._hf_hook
@@ -1400,6 +1431,20 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
             inference_mode=peft_config.inference_mode,
             module_names=getattr(peft_config, "modules_to_save", None),
             activate_adapter=activate_adapter,
+        )
+
+    if getattr(peft_config, "modules_to_tie", None) is not None:
+        # Tie the modules if any tied layer is passed in `modules_to_save`.
+        # This should always be called after
+        # `_set_trainable` is called for `modules_to_save`.
+        tied_module = getattr(model.get_input_embeddings().modules_to_save, adapter_name)
+        _set_trainable(
+            model,
+            adapter_name,
+            inference_mode=peft_config.inference_mode,
+            module_names=getattr(peft_config, "modules_to_tie", None),
+            activate_adapter=activate_adapter,
+            tied_module=tied_module,
         )
 
     if getattr(peft_config, "trainable_token_indices", None) is not None:

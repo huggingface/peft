@@ -26,6 +26,7 @@ from peft import (
     BOFTConfig,
     BoneConfig,
     C3AConfig,
+    CPTConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
@@ -36,6 +37,7 @@ from peft import (
     MissConfig,
     MultitaskPromptTuningConfig,
     OFTConfig,
+    OSFConfig,
     PeftConfig,
     PeftType,
     PolyConfig,
@@ -70,6 +72,7 @@ ALL_CONFIG_CLASSES = (
     (LoKrConfig, {}),
     (LoraConfig, {}),
     (MissConfig, {}),
+    (OSFConfig, {}),
     (MultitaskPromptTuningConfig, {}),
     (PolyConfig, {}),
     (PrefixTuningConfig, {}),
@@ -134,6 +137,8 @@ class TestPeftConfig:
 
             if expected_cls == AdaLoraConfig:
                 mandatory_config_kwargs = {"total_step": 1}
+            elif expected_cls == CPTConfig:
+                mandatory_config_kwargs = {"task_type": TaskType.CAUSAL_LM}
 
             config = PeftConfig.from_peft_type(peft_type=peft_type, **mandatory_config_kwargs)
             assert type(config) is expected_cls

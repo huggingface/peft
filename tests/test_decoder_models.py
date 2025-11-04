@@ -32,12 +32,14 @@ from peft import (
     BoneConfig,
     C3AConfig,
     CPTConfig,
+    DeloraConfig,
     FourierFTConfig,
     HRAConfig,
     IA3Config,
     LoraConfig,
     MissConfig,
     OFTConfig,
+    OSFConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
@@ -117,6 +119,14 @@ ALL_CONFIGS = [
             "cpt_token_ids": [0, 1, 2, 3, 4, 5, 6, 7],  # Example token IDs for testing
             "cpt_mask": [1, 1, 1, 1, 1, 1, 1, 1],
             "cpt_tokens_type_mask": [1, 2, 2, 2, 3, 3, 4, 4],
+        },
+    ),
+    (
+        DeloraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "r": 2,
         },
     ),
     (
@@ -277,6 +287,12 @@ ALL_CONFIGS = [
             "target_modules": None,
         },
     ),
+    (
+        OSFConfig,
+        {
+            "task_type": "CAUSAL_LM",
+        },
+    ),
 ]
 
 
@@ -286,12 +302,14 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         BoneConfig,
         HRAConfig,
         OFTConfig,
+        OSFConfig,
         RoadConfig,
         ShiraConfig,
         C3AConfig,
         MissConfig,
+        DeloraConfig,
     ]:
-        pytest.skip("Skipping BOFT/HRA/OFT/Bone/Road/SHiRA/C3A/MiSS for GPT2LMHeadModel")
+        pytest.skip("Skipping BOFT/HRA/OFT/Bone/Road/SHiRA/C3A/MiSS/OSF/DeLoRA for GPT2LMHeadModel")
 
 
 def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
@@ -304,13 +322,21 @@ def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
         C3AConfig,
         RoadConfig,
         MissConfig,
+        DeloraConfig,
     ]:
-        pytest.skip("Skipping AdaLora/BOFT/HRA/OFT/Bone/MiSS for GPT2LMHeadModel")
+        pytest.skip("Skipping AdaLora/BOFT/HRA/OFT/Bone/MiSS/DeLoRA for GPT2LMHeadModel")
 
 
 def _skip_alora_no_activation(config_cls, config_kwargs):
     if config_cls is LoraConfig and config_kwargs.get("alora_invocation_tokens") == [1000]:
         pytest.skip("Skipping aLoRA no-activation-case because the test expects changed output which there won't be.")
+
+
+def _skip_osf_disable_adapter_test(config_cls):
+    if config_cls is OSFConfig:
+        pytest.skip(
+            "Skipping OSF for disable_adapter test because OSF uses exact SVD decomposition, so outputs are identical until training."
+        )
 
 
 class TestDecoderModels(PeftCommonTester):
@@ -515,9 +541,12 @@ class TestDecoderModels(PeftCommonTester):
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
-    def test_training_decoders_gradient_checkpointing(self, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("use_reentrant", [True, False])
+    def test_training_decoders_gradient_checkpointing(self, model_id, config_cls, config_kwargs, use_reentrant):
         _skip_if_not_conv1d_supported(model_id, config_cls)
-        self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs.copy())
+        self._test_training_gradient_checkpointing(
+            model_id, config_cls, config_kwargs.copy(), use_reentrant=use_reentrant
+        )
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
@@ -573,6 +602,7 @@ class TestDecoderModels(PeftCommonTester):
     def test_disable_adapter(self, model_id, config_cls, config_kwargs):
         _skip_if_not_conv1d_supported(model_id, config_cls)
         _skip_alora_no_activation(config_cls, config_kwargs)
+        _skip_osf_disable_adapter_test(config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_disable_adapter(model_id, config_cls, config_kwargs.copy())
 
@@ -708,6 +738,7 @@ class TestDecoderModels(PeftCommonTester):
             (
                 CPTConfig,
                 {
+                    "task_type": "CAUSAL_LM",
                     "cpt_token_ids": [0, 1, 2, 3, 4, 5, 6, 7],  # Example token IDs for testing
                     "cpt_mask": [1, 1, 1, 1, 1, 1, 1, 1],
                     "cpt_tokens_type_mask": [1, 2, 2, 2, 3, 3, 4, 4],
@@ -795,3 +826,84 @@ class TestDecoderModels(PeftCommonTester):
                 )
             else:
                 assert not contains_embedding
+
+    @pytest.mark.parametrize("use_dora", [False, True])
+    def test_lora_embed_scale_is_applied(self, use_dora):
+        """Test that LoRA correctly handles embeddings with scaling (e.g., Gemma3)."""
+        model_id = "hf-internal-testing/tiny-random-Gemma3ForCausalLM"
+        with hub_online_once(model_id):
+            base_model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
+            orig_embedding = base_model.get_input_embeddings()
+
+            peft_config = LoraConfig(target_modules=["embed_tokens"], init_lora_weights=False, use_dora=use_dora)
+            peft_model = get_peft_model(base_model, peft_config)
+
+            x = torch.arange(10).to(self.torch_device)
+            peft_embedding = peft_model.base_model.model.get_input_embeddings()
+            embedding_output = peft_embedding(x)
+            max_embedding_output = embedding_output.abs().max(0)[0]
+            assert (max_embedding_output < 100.0).all()
+            peft_model.merge_adapter()
+            embedding_merged = peft_embedding(x)
+            assert torch.allclose(embedding_output, embedding_merged, atol=1e-5, rtol=1e-5)
+            peft_model.unmerge_adapter()
+
+            # set embed_scale to an absurdly high value, then check that the embedding output is also scaled to a high
+            # value
+            orig_embedding.embed_scale.fill_(10000.0)
+            max_embedding_output = peft_embedding(x).abs().max(0)[0]
+            assert (max_embedding_output > 100.0).all()
+
+            # set embed_scale to zero, then check that the embedding output is also zero
+            orig_embedding.embed_scale.fill_(0)
+            embedding_output = peft_embedding(x)
+            assert (embedding_output == 0.0).all()
+
+    def test_lora_embed_scale_is_applied_mixed_batch(self):
+        """Test that LoRA correctly handles embeddings with scaling in mixed batch mode."""
+        model_id = "hf-internal-testing/tiny-random-Gemma3ForCausalLM"
+        with hub_online_once(model_id):
+            base_model = AutoModelForCausalLM.from_pretrained(model_id)
+            orig_embedding = base_model.get_input_embeddings()
+
+            peft_config = LoraConfig(target_modules=["embed_tokens"], init_lora_weights=False)
+            peft_model = get_peft_model(base_model, peft_config)
+            peft_model.add_adapter("adapter2", peft_config)
+
+            # sanity check: with the default embed_scale, the embedding output should be reasonably sized
+            peft_embedding = peft_model.base_model.model.get_input_embeddings()
+            input_ids = torch.arange(10).unsqueeze(0).repeat(2, 1)
+            adapter_names = ["default", "adapter2"]
+            max_embedding_output = peft_embedding(input_ids, adapter_names=adapter_names).abs().max()
+            assert max_embedding_output < 100.0
+
+            # set embed_scale to an absurdly high value, then check that the embedding output is also scaled to a high
+            # value
+            orig_embedding.embed_scale.fill_(10000.0)
+            max_embedding_output = peft_embedding(input_ids, adapter_names=adapter_names).abs().max()
+            assert max_embedding_output > 100.0
+
+            # set embed_scale to zero, then check that the embedding output is also zero
+            orig_embedding.embed_scale.fill_(0)
+            embedding_output = peft_embedding(input_ids, adapter_names=adapter_names)
+            assert (embedding_output == 0.0).all()
+
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_set_requires_grad_prompt_learning_raises(self, config_cls, config_kwargs):
+        # Test that for prompt learning, calling set_requires_grad raises an error with an appropriate error message.
+        # Note that for non-prompt learning methods, set_requires_grad is being tested for custom models, so there is no
+        # specific test here.
+        model_id = PEFT_DECODER_MODELS_TO_TEST[0]  # it's enough to test this with one model
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        if not config.is_prompt_learning:
+            pytest.skip("This test is only for prompt learning methods.")
+
+        with hub_online_once(model_id + config_kwargs.get("tokenizer_name_or_path", "")):
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            model = get_peft_model(model, config)
+            msg = "Setting `requires_grad` is not supported for prompt learning methods like"
+            with pytest.raises(TypeError, match=msg):
+                model.set_requires_grad(adapter_names="adpater0")

@@ -623,7 +623,7 @@ class TestOpt4bitBnb(RegressionTester):
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-350m",
             quantization_config=bnb_config,
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         )
         return model
 

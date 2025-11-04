@@ -55,7 +55,7 @@ model = AutoModelForCausalLM.from_pretrained(
         bnb_4bit_use_double_quant=True,
         bnb_4bit_quant_type="nf4",
     ),
-    torch_dtype=torch.float16,
+    dtype=torch.float16,
 )
 
 tokenizer = AutoTokenizer.from_pretrained("facebook/opt-350m")

@@ -19,7 +19,7 @@ provide PEFT integrations.
 """
 
 from peft.mapping import inject_adapter_in_model
-from peft.tuners.tuners_utils import cast_adapter_dtype, delete_adapter, set_adapter
+from peft.tuners.tuners_utils import cast_adapter_dtype, delete_adapter, set_adapter, set_requires_grad
 from peft.utils import get_peft_model_state_dict, set_peft_model_state_dict
 
 
@@ -30,4 +30,5 @@ __all__ = [
     "inject_adapter_in_model",
     "set_adapter",
     "set_peft_model_state_dict",
+    "set_requires_grad",
 ]

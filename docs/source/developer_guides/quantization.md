@@ -144,7 +144,7 @@ The models support LoRA adapter tuning. To tune the quantized model you'll need 
 ```py
 quantized_model = AutoModelForCausalLM.from_pretrained(
     "BlackSamorez/Mixtral-8x7b-AQLM-2Bit-1x16-hf-test-dispatch",
-    torch_dtype="auto", device_map="auto", low_cpu_mem_usage=True,
+    dtype="auto", device_map="auto", low_cpu_mem_usage=True,
 )
 
 peft_config = LoraConfig(...)
