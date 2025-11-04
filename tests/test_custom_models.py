@@ -2054,6 +2054,9 @@ class TestPeftCustomModel(PeftCommonTester):
             optimizer.zero_grad()
             y_pred = model(**X)
             loss = y_pred.sum()
+            # ABBA initialization uses SVD decomposition which can result in adapter parameters that don't
+            # meaningfully contribute to the loss, making loss.requires_grad=False. This check prevents
+            # RuntimeError when calling backward() on a tensor that doesn't require gradients.
             if loss.requires_grad:
                 loss.backward()
                 optimizer.step()
@@ -2107,6 +2110,9 @@ class TestPeftCustomModel(PeftCommonTester):
             optimizer.zero_grad()
             y_pred = model(**X)
             loss = y_pred.sum()
+            # ABBA initialization uses SVD decomposition which can result in adapter parameters that don't
+            # meaningfully contribute to the loss, making loss.requires_grad=False. This check prevents
+            # RuntimeError when calling backward() on a tensor that doesn't require gradients.
             if loss.requires_grad:
                 loss.backward()
                 optimizer.step()
@@ -2177,6 +2183,9 @@ class TestPeftCustomModel(PeftCommonTester):
             y_pred = model(**X)
             y = torch.arange(len(y_pred)).to(self.torch_device) % 2
             loss = nn.functional.nll_loss(y_pred, y)
+            # ABBA initialization uses SVD decomposition which can result in adapter parameters that don't
+            # meaningfully contribute to the loss, making loss.requires_grad=False. This check prevents
+            # RuntimeError when calling backward() on a tensor that doesn't require gradients.
             if loss.requires_grad:
                 loss.backward()
                 optimizer.step()
@@ -2255,6 +2264,9 @@ class TestPeftCustomModel(PeftCommonTester):
             y_pred = model(**X)
             y = torch.arange(len(y_pred)).to(self.torch_device) % 2
             loss = nn.functional.nll_loss(y_pred, y)
+            # ABBA initialization uses SVD decomposition which can result in adapter parameters that don't
+            # meaningfully contribute to the loss, making loss.requires_grad=False. This check prevents
+            # RuntimeError when calling backward() on a tensor that doesn't require gradients.
             if loss.requires_grad:
                 loss.backward()
                 optimizer.step()
