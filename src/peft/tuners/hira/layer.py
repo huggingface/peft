@@ -671,34 +671,18 @@ class _ConvNd(nn.Module, HiRALayer):
         spatial_ones = (1,) * (base.weight.dim() - 2)
 
         # HiRA factor A: conv from in_channels to r
-        self.hira_A[adapter_name] = conv_cls(
-            in_channels,
-            r,
-            kernel_size=kernel_size,
-            stride=stride,
-            padding=padding,
-            dilation=dilation,
-            groups=groups,
-            bias=False,
-        )
-        # HiRA factor B: conv from r back to out_channels
-        self.hira_B[adapter_name] = conv_cls(
-            r,
-            out_channels,
-            kernel_size=spatial_ones,
-            stride=(1,) * len(spatial_ones),
-            padding=(0,) * len(spatial_ones),
-            dilation=(1,) * len(spatial_ones),
-            groups=groups,
-            bias=False,
-        )
+        weight_shape_A = (r, in_channels, *kernel_size)
+        weight_shape_B = (out_channels, r, *spatial_ones)
+
+        self.hira_A[adapter_name] = nn.Parameter(torch.randn(weight_shape_A))
+        self.hira_B[adapter_name] = nn.Parameter(torch.randn(weight_shape_B))
 
         # Initialize HiRA parameters (A with Kaiming, B zeros)
         if init_hira_weights:
             # A: same init as base conv weight
-            nn.init.kaiming_uniform_(self.hira_A[adapter_name].weight, a=math.sqrt(5))
+            nn.init.kaiming_uniform_(self.hira_A[adapter_name], a=math.sqrt(5))
             # B: initialize to zero
-            nn.init.zeros_(self.hira_B[adapter_name].weight)
+            nn.init.zeros_(self.hira_B[adapter_name])
 
         # Place adapters on correct device and register
         self._move_adapter_to_device_of_base_layer(adapter_name)
@@ -774,16 +758,16 @@ class _ConvNd(nn.Module, HiRALayer):
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
-        device = self.hira_B[adapter].weight.device
-        dtype = self.hira_A[adapter].weight.dtype
+        device = self.hira_B[adapter].device
+        dtype = self.hira_A[adapter].dtype
 
         # In case users wants to merge the adapter weights that are in
         # (b)float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
         # (b)float16 because some CPUs have slow bf16/fp16 matmuls.
         cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
 
-        weight_A = self.hira_A[adapter].weight
-        weight_B = self.hira_B[adapter].weight
+        weight_A = self.hira_A[adapter]
+        weight_B = self.hira_B[adapter]
 
         if cast_to_fp32:
             weight_A = weight_A.float()
@@ -840,8 +824,8 @@ class _ConvNd(nn.Module, HiRALayer):
                     continue
                 hira_A = self.hira_A[active_adapter]
                 dropout = self.hira_dropout[active_adapter]
-                x = self._cast_input_dtype(x, hira_A.weight.dtype)
-                x_in = self._cast_input_dtype(x, hira_A.weight.dtype)
+                x = self._cast_input_dtype(x, hira_A.dtype)
+                x_in = self._cast_input_dtype(x, hira_A.dtype)
                 x_drop = dropout(x_in)
                 # low-rank factor B@A
                 bia = self.get_delta_weight(active_adapter)  # now returns (B@A) tensor
