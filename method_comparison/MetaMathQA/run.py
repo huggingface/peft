@@ -18,7 +18,6 @@ Main entry point to run the experiments. Contains general setup and the proper t
 
 import argparse
 import datetime as dt
-import gc
 import json
 import os
 import random
@@ -296,7 +295,6 @@ def train(
                 }
                 print_verbose(json.dumps(log_dict))
 
-            # # TODO is this needed?
             if step % ACCELERATOR_EMPTY_CACHE_SCHEDULE == 0:
                 torch_accelerator_module.empty_cache()
 
