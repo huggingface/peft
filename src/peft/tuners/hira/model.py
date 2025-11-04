@@ -175,7 +175,6 @@ class HiRAModel(BaseTuner):
             "hira_dropout": hira_config.hira_dropout,
             "fan_in_fan_out": hira_config.fan_in_fan_out,
             "init_hira_weights": hira_config.init_hira_weights,
-            "ephemeral_gpu_offload": hira_config.runtime_config.ephemeral_gpu_offload,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }

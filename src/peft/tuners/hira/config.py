@@ -93,8 +93,6 @@ class HiRAConfig(PeftConfig):
             Build a new stack of layers by stacking the original model layers according to the ranges specified. This
             allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
             all have separate HiRA adapters attached to them.
-        runtime_config (`HiRARuntimeConfig`):
-            Runtime configurations (which are not saved or restored).
     """
 
     r: int = field(default=32, metadata={"help": "HiRA intermediate r configuration"})
@@ -188,13 +186,6 @@ class HiRAConfig(PeftConfig):
         },
     )
 
-    def to_dict(self):
-        """
-        Returns the configuration for your adapter model as a dictionary. Removes runtime configurations.
-        """
-        rv = super().to_dict()
-        rv.pop("runtime_config")
-        return rv
 
     def __post_init__(self):
         super().__post_init__()
