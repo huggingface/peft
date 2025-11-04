@@ -157,7 +157,7 @@ class LoraLayer(BaseTunerLayer):
         qalora_group_size: int = 32,
         inference_mode: bool = False,
         is_tied: bool = False,
-        tied_adapters: dict = {},
+        tied_adapters: Optional[dict[str, nn.Parameter]] = None,
         **kwargs,
     ):
         # collect the kwargs
