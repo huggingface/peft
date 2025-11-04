@@ -74,8 +74,8 @@ class ArrowConfig:
     """
     This is the sub-configuration class to store the configuration for Arrow and GenKnowSub algorithm. Arrow is a
     routing algorithm to combine the trained LoRA modules to solve new tasks, proposed in
-    'https://huggingface.co/papers/2405.11157'. GenKnowSub is a refinement on the trained modules before being combined via
-    Arrow, introduced in 'https://aclanthology.org/2025.acl-short.54/'
+    'https://huggingface.co/papers/2405.11157'. GenKnowSub is a refinement on the trained modules before being combined
+    via Arrow, introduced in 'https://aclanthology.org/2025.acl-short.54/'
     """
 
     top_k: int = field(
