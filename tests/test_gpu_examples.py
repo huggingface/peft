@@ -5381,7 +5381,7 @@ class TestDtypeAutocastBnb:
 
     model_id = "trl-internal-testing/tiny-Qwen2ForCausalLM-2.5"
     # no need to check each possible peft type, a selection should be enough
-    peft_types_to_test = ["lora", "vera"]
+    peft_types_to_test = ["lora", "vera", "lora-target-param"]
 
     def check_dtype(self, quant_config, autocast_adapter_dtype, base_dtype, expected_dtype, peft_type, tmp_path=None):
         """helper function that creates the PEFT model and checks that the dtype of the PEFT adapter is as expected.
@@ -5396,6 +5396,8 @@ class TestDtypeAutocastBnb:
             peft_config = LoraConfig()
         elif peft_type == "vera":
             peft_config = VeraConfig()
+        elif peft_type == "lora-target-param":
+            peft_config = LoraConfig(target_modules=[], target_parameters=["q_proj.weight", "v_proj.weight"])
         else:
             raise ValueError("Argument must be one of 'lora' or 'vera'")
 
@@ -5404,9 +5406,12 @@ class TestDtypeAutocastBnb:
                 self.model_id,
                 quantization_config=quant_config,
                 dtype=base_dtype,
+                device_map="auto",
             )
             model = get_peft_model(model, peft_config, autocast_adapter_dtype=autocast_adapter_dtype)
-            model.add_adapter("other", peft_config, autocast_adapter_dtype=autocast_adapter_dtype)
+            if peft_type != "lora-target-param":
+                # target_parameters does not allow multiple adapters on the same parameter
+                model.add_adapter("other", peft_config, autocast_adapter_dtype=autocast_adapter_dtype)
             peft_params = [p for n, p in model.named_parameters() if model.prefix in n]
             assert all(p.dtype == expected_dtype for p in peft_params)
 
@@ -5417,9 +5422,14 @@ class TestDtypeAutocastBnb:
                 self.model_id,
                 quantization_config=quant_config,
                 dtype=base_dtype,
+                device_map="auto",
             )
             model = PeftModel.from_pretrained(model, tmp_path, autocast_adapter_dtype=autocast_adapter_dtype)
-            model.load_adapter(tmp_path / "other", adapter_name="other", autocast_adapter_dtype=autocast_adapter_dtype)
+            if peft_type != "lora-target-param":
+                # target_parameters does not allow multiple adapters on the same parameter
+                model.load_adapter(
+                    tmp_path / "other", adapter_name="other", autocast_adapter_dtype=autocast_adapter_dtype
+                )
             peft_params = [p for n, p in model.named_parameters() if model.prefix in n]
             assert all(p.dtype == expected_dtype for p in peft_params)
 
