@@ -38,6 +38,7 @@ from peft.utils import (
     ModulesToSaveWrapper,
     _freeze_adapter,
     _get_submodules,
+    _set_adapter,
     get_quantization_config,
 )
 from peft.utils.other import get_pattern_key
@@ -125,8 +126,21 @@ class HiRAModel(BaseTuner):
 
     prefix: str = "hira_"
 
-    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
-        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
+    def __init__(
+        self,
+        model,
+        config,
+        adapter_name,
+        low_cpu_mem_usage: bool = False,
+        state_dict: Optional[dict[str, torch.Tensor]] = None,
+    ) -> None:
+        super().__init__(
+            model,
+            config,
+            adapter_name,
+            low_cpu_mem_usage=low_cpu_mem_usage,
+            state_dict=state_dict,
+        )
 
     def _check_new_adapter_config(self, config: HiRAConfig) -> None:
         """
@@ -336,7 +350,8 @@ class HiRAModel(BaseTuner):
         """
         self._set_adapter_layers(enabled=False)
 
-    def set_adapter(self, adapter_name: str | list[str]) -> None:
+    def set_adapter(self, adapter_name: str | list[str], inference_mode: bool = False) -> None:
+
         """Set the active adapter(s).
 
         Additionally, this function will set the specified adapters to trainable (i.e., requires_grad=True). If this is
@@ -350,13 +365,17 @@ class HiRAModel(BaseTuner):
 
         Args:
             adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
+            inference_mode (`bool`, *optional*, defaults to `False`): Whether the activated adapter should require
+                gradients.
         """
+        _set_adapter(self.model, adapter_name, inference_mode=inference_mode)
+
         for module in self.model.modules():
             if isinstance(module, HiRALayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
-                module.set_adapter(adapter_name)
+                module.set_adapter(adapter_name, inference_mode=inference_mode)
         self.active_adapter = adapter_name
 
     @contextmanager

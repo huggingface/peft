@@ -873,27 +873,27 @@ TEST_CASES = [
     # HIRA #
     #######
     ("Vanilla MLP 1 HiRA", "MLP", HiRAConfig, {"target_modules": "lin0"}),
-    # ("Vanilla MLP 2 HiRA", "MLP", HiRAConfig, {"target_modules": ["lin0"]}),
-    # ("Vanilla MLP 3 HiRA", "MLP", HiRAConfig, {"target_modules": ["lin1"]}),
-    # ("Vanilla MLP 4 HiRA", "MLP", HiRAConfig, {"target_modules": ["lin0", "lin1"]}),
-    # ("Vanilla MLP 5 HiRA", "MLP", HiRAConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
-    # (
-    #     "Vanilla MLP 6 HiRA",
-    #     "MLP",
-    #     HiRAConfig,
-    #     {
-    #         "target_modules": ["lin0"],
-    #         "hira_dropout": 0.1,
-    #     },
-    # ),
-    # ("Embedding + transformers Conv1D 1 HiRA", "EmbConv1D", HiRAConfig, {"target_modules": ["conv1d"]}),
-    # ("Embedding + transformers Conv1D 2 HiRA", "EmbConv1D", HiRAConfig, {"target_modules": ["emb"]}),
-    # ("Embedding + transformers Conv1D 3 HiRA", "EmbConv1D", HiRAConfig, {"target_modules": ["emb", "conv1d"]}),
-    # ("Conv1d HiRA", "Conv1d", HiRAConfig, {"target_modules": ["conv1d"]}),
-    # ("Conv2d 1 HiRA", "Conv2d", HiRAConfig, {"target_modules": ["conv2d"]}),
-    # ("Conv2d 2 HiRA", "Conv2d", HiRAConfig, {"target_modules": ["conv2d", "lin0"]}),
-    # ("Conv3d 1 HiRA", "Conv3d", HiRAConfig, {"target_modules": ["conv3d"]}),
-    # ("Conv3d 2 HiRA", "Conv3d", HiRAConfig, {"target_modules": ["conv3d", "lin0"]}),
+    ("Vanilla MLP 2 HiRA", "MLP", HiRAConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 HiRA", "MLP", HiRAConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 HiRA", "MLP", HiRAConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 5 HiRA", "MLP", HiRAConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    (
+        "Vanilla MLP 6 HiRA",
+        "MLP",
+        HiRAConfig,
+        {
+            "target_modules": ["lin0"],
+            "hira_dropout": 0.1,
+        },
+    ),
+    ("Embedding + transformers Conv1D 1 HiRA", "EmbConv1D", HiRAConfig, {"target_modules": ["conv1d"]}),
+    ("Embedding + transformers Conv1D 2 HiRA", "EmbConv1D", HiRAConfig, {"target_modules": ["emb"]}),
+    ("Embedding + transformers Conv1D 3 HiRA", "EmbConv1D", HiRAConfig, {"target_modules": ["emb", "conv1d"]}),
+    ("Conv1d HiRA", "Conv1d", HiRAConfig, {"target_modules": ["conv1d"]}),
+    ("Conv2d 1 HiRA", "Conv2d", HiRAConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d 2 HiRA", "Conv2d", HiRAConfig, {"target_modules": ["conv2d", "lin0"]}),
+    ("Conv3d 1 HiRA", "Conv3d", HiRAConfig, {"target_modules": ["conv3d"]}),
+    ("Conv3d 2 HiRA", "Conv3d", HiRAConfig, {"target_modules": ["conv3d", "lin0"]}),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
 

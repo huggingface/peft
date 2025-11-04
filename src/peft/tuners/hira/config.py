@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
+import warnings
 
 from torch import nn
 
@@ -140,6 +141,16 @@ class HiRAConfig(PeftConfig):
             ),
         },
     )
+    init_weights: bool | Literal["gaussian"] | None = field(
+        default=None,
+        metadata={
+            "help": (
+                "Compatibility alias for `init_hira_weights`. When provided, this value overrides "
+                "`init_hira_weights`."
+            ),
+        },
+        repr=False,
+    )
     layers_to_transform: Optional[Union[list[int], int]] = field(
         default=None,
         metadata={
@@ -196,6 +207,18 @@ class HiRAConfig(PeftConfig):
         self.exclude_modules = (
             set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
+
+        default_init = type(self).__dataclass_fields__["init_hira_weights"].default
+        if self.init_weights is not None:
+            if self.init_hira_weights != default_init and self.init_hira_weights != self.init_weights:
+                warnings.warn(
+                    "`init_weights` is deprecated for HiRA. Please use `init_hira_weights` instead.",
+                    UserWarning,
+                )
+            self.init_hira_weights = self.init_weights
+
+        # always keep the alias in sync for downstream helpers relying on `init_weights`
+        self.init_weights = self.init_hira_weights
 
         # if target_modules is a regex expression, then layers_to_transform should be None
         if isinstance(self.target_modules, str) and self.layers_to_transform is not None:
