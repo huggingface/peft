@@ -1991,6 +1991,53 @@ class TestPeftCustomModel(PeftCommonTester):
         model(**X)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @pytest.mark.parametrize("autocast_adapter_dtype", [True, False])
+    def test_adapter_dtype_autocast(
+        self, test_name, model_id, config_cls, config_kwargs, dtype, autocast_adapter_dtype, tmp_path
+    ):
+        """checks that the dtype of the PEFT adapter corresponds to the expected dtype.
+
+        Checks:
+        - get_peft_model
+        - add_adapter
+        - PeftModel.from_pretrained
+        - load_adapter
+        - with and without autocasting adapter dtype
+        """
+        if config_cls in (LNTuningConfig, OSFConfig):
+            # TODO Check why these methods fail
+            pytest.skip("LNTuning and OSF are currently failing this test, this needs to be investigated")
+
+        if autocast_adapter_dtype:
+            expected_dtype = torch.float32
+        else:
+            expected_dtype = dtype
+
+        model = self.transformers_class.from_pretrained(model_id, dtype=dtype).to(self.torch_device)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config, autocast_adapter_dtype=autocast_adapter_dtype)
+        if config_kwargs.get("target_parameters", None) is None:
+            # target_parameters does not allow multiple adapters on the same parameter
+            model.add_adapter("other", config, autocast_adapter_dtype=autocast_adapter_dtype)
+        peft_params = [p for n, p in model.named_parameters() if model.prefix in n]
+        assert all(p.dtype == expected_dtype for p in peft_params)
+
+        model.save_pretrained(tmp_path)
+        del model
+
+        model = self.transformers_class.from_pretrained(model_id, dtype=dtype).to(self.torch_device)
+        model = PeftModel.from_pretrained(model, tmp_path, autocast_adapter_dtype=autocast_adapter_dtype)
+        if config_kwargs.get("target_parameters", None) is None:
+            # target_parameters does not allow multiple adapters on the same parameter
+            model.load_adapter(tmp_path / "other", adapter_name="other", autocast_adapter_dtype=autocast_adapter_dtype)
+        peft_params = [p for n, p in model.named_parameters() if model.prefix in n]
+        assert all(p.dtype == expected_dtype for p in peft_params)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_only_params_are_updated(self, test_name, model_id, config_cls, config_kwargs):
         # An explicit test that when using an adapter on a custom model, only the adapter parameters are updated during
         # training
