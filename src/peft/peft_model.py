@@ -315,6 +315,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     output_state_dict = save_mutated_as_lora(
                         peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs
                     )
+
+                for k, v in output_state_dict.items():
+                    if not v.is_contiguous():
+                        output_state_dict[k] = v.contiguous()
+
                 safe_save_file(
                     output_state_dict,
                     os.path.join(output_dir, SAFETENSORS_WEIGHTS_NAME),
