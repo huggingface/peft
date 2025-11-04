@@ -56,7 +56,7 @@ class HiRAConfig(PeftConfig):
 
     Args:
         r (`int`):
-            HiRA r configuration (the "r").
+               Rank of the HiRA configuration, controlling the dimension of the low-rank part of matrice AB in HiRA.
         target_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
             names will be replaced. When passing a string, a regex match will be performed. When passing a list of
@@ -186,9 +186,6 @@ class HiRAConfig(PeftConfig):
                 "ranges of a model and stack them while reusing layers at either end of each sequence."
             )
         },
-    )
-    runtime_config: HiRARuntimeConfig = field(
-        default_factory=HiRARuntimeConfig, metadata={"help": "Runtime configurations"}
     )
 
     def to_dict(self):
