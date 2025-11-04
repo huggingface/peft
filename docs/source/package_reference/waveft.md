@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # WaveFT: Wavelet Fine-Tuning
 
-[WaveFT](https://arxiv.org/abs/2505.12532) is a novel parameter-efficient fine-tuning (PEFT) method that introduces sparse updates in the **wavelet domain** of residual matrices. Unlike LoRA, which is constrained by discrete low-rank choices, WaveFT enables fine-grained control over the number of trainable parameters by directly learning a sparse set of coefficients in the transformed space. These coefficients are then mapped back to the weight domain via the Inverse Discrete Wavelet Transform (IDWT), producing high-rank updates without incurring inference overhead.
+[WaveFT](https://huggingface.co/papers/2505.12532) is a novel parameter-efficient fine-tuning (PEFT) method that introduces sparse updates in the **wavelet domain** of residual matrices. Unlike LoRA, which is constrained by discrete low-rank choices, WaveFT enables fine-grained control over the number of trainable parameters by directly learning a sparse set of coefficients in the transformed space. These coefficients are then mapped back to the weight domain via the Inverse Discrete Wavelet Transform (IDWT), producing high-rank updates without incurring inference overhead.
 
 WaveFT currently has the following constraint:
 
