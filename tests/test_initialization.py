@@ -14,6 +14,7 @@
 
 import copy
 import itertools
+import json
 import math
 import platform
 import re
@@ -52,8 +53,11 @@ from peft import (
     PeftModelForTokenClassification,
     PeftWarning,
     PrefixTuningConfig,
+    PromptEmbedding,
     PromptTuningConfig,
+    PromptTuningInit,
     RoadConfig,
+    TaskType,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
@@ -1735,6 +1739,64 @@ class TestPromptTuningInitialization:
             PromptTuningConfig(prompt_tuning_init="TEXT", prompt_tuning_init_text="prompt tuning init text")
         with pytest.raises(ValueError, match="When prompt_tuning_init='TEXT', prompt_tuning_init_text can't be None"):
             PromptTuningConfig(prompt_tuning_init="TEXT", tokenizer_name_or_path="t5-base")
+
+    def test_prompt_tuning_trust_remote_code(self, tmp_path, monkeypatch):
+        # See #2888 for details
+
+        # This is a test for a hypothetical exploit that would enable trust_remote_code (and thus RCE) when a user loads
+        # a malicious prompt tuning model. This is because PEFT would just pass the on the tokenizer_kwargs defined in
+        # the prompt tuning config unsanitzed, which means that if the tokenizer is also malicious, the malicious code
+        # would be executed. For this exploit to work, a user cannot load a model using PeftModel.from_pretrained as
+        # normal, because the tokenizer is only loaded in training mode. Although the attacker could set
+        # inference_mode=True in the adapter_config.json, that would still not work because prompt tuning methods cannot
+        # be loaded in inference mode. Therefore, the only way for the exploit to work would be if the user manually
+        # loads the model, as is shown below.
+
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        with hub_online_once(model_id):
+            # crafting the malicious checkpoint:
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            config = PromptTuningConfig(
+                num_virtual_tokens=10,
+                task_type=TaskType.CAUSAL_LM,
+                tokenizer_name_or_path=model_id,
+                prompt_tuning_init=PromptTuningInit.TEXT,
+                prompt_tuning_init_text="hello",
+                tokenizer_kwargs={"trust_remote_code": "foobar"},
+            )
+            model = get_peft_model(model, config)
+            model.save_pretrained(tmp_path)
+
+            with open(tmp_path / "adapter_config.json") as f:
+                config_dict = json.load(f)
+                # disable inference mode
+                config_dict["inference_mode"] = False
+            with open(tmp_path / "adapter_config.json", "w") as f:
+                json.dump(config_dict, f)
+
+            del model
+
+            # applying a mock to check the used parameters
+            used_args = []
+            used_kwargs = {}
+
+            orig_from_pretrained = AutoTokenizer.from_pretrained
+
+            def fake_from_pretrained(*args, **kwargs):
+                used_args.extend(args)
+                used_kwargs.update(kwargs)
+                return orig_from_pretrained(*args, **kwargs)
+
+            monkeypatch.setattr(AutoTokenizer, "from_pretrained", fake_from_pretrained)
+
+            # user code: loading the malicious checkpoint
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            config = PromptTuningConfig.from_pretrained(tmp_path)
+            PromptEmbedding(config, model.model.decoder.embed_tokens)
+
+            # check that neither args nor kwargs used trust_remote_code='foobar'
+            assert "foobar" not in used_args
+            assert used_kwargs.get("trust_remote_code") != "foobar"
 
 
 class TestVeraInitialization:

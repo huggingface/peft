@@ -79,6 +79,9 @@ class PromptEmbedding(torch.nn.Module):
             from transformers import AutoTokenizer
 
             tokenizer_kwargs = config.tokenizer_kwargs or {}
+            # security: disallow trust_remote_code, as this could allow code execution when loading a prompt tuning
+            # checkpoint
+            tokenizer_kwargs.pop("trust_remote_code", None)
             tokenizer = AutoTokenizer.from_pretrained(config.tokenizer_name_or_path, **tokenizer_kwargs)
             init_text = config.prompt_tuning_init_text
             init_token_ids = tokenizer(init_text)["input_ids"]
