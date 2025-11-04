@@ -81,7 +81,7 @@ def compute_accuracy_scienceqa(model, eval_dataset, tokenizer, data_collator):
 
                 # Extract the answer (last letter in the generated text)
                 # Look for single capital letters A, B, C, D
-                matches = re.findall(r'\b([A-D])\b', generated_text)
+                matches = re.findall(r"\b([A-D])\b", generated_text)
                 pred = matches[-1] if matches else "X"
 
                 # Get ground truth (find the label that's not -100)
@@ -124,7 +124,7 @@ def compute_accuracy_numglue(model, eval_dataset, tokenizer, data_collator):
                 generated_text = tokenizer.decode(outputs[i], skip_special_tokens=True)
 
                 # Extract number from generated text
-                numbers = re.findall(r'-?\d+\.?\d*', generated_text)
+                numbers = re.findall(r"-?\d+\.?\d*", generated_text)
                 pred = numbers[-1] if numbers else "-999"
 
                 # Get ground truth
@@ -208,7 +208,7 @@ def evaluate_model(model, eval_dataset, data_collator, tokenizer, task_name, tas
     else:
         accuracy = 0.0
 
-    print(f"  {task_name}: Loss = {loss:.4f}, Accuracy = {accuracy*100:.2f}%")
+    print(f"  {task_name}: Loss = {loss:.4f}, Accuracy = {accuracy * 100:.2f}%")
     return loss, accuracy
 
 
@@ -321,7 +321,7 @@ def train_with_osf(
     for task_idx, task in enumerate(tasks):
         print(f"\n{'=' * 80}")
         print(f"TASK {task_idx + 1}: {task['name']}")
-        print(f"Effective Rank: {task['effective_rank']} (preserving {task['effective_rank']*100:.0f}%)")
+        print(f"Effective Rank: {task['effective_rank']} (preserving {task['effective_rank'] * 100:.0f}%)")
         print(f"{'=' * 80}")
 
         # Configure OSF for this task
@@ -368,7 +368,7 @@ def train_with_osf(
 
         # Unload OSF to get the updated base model for next task (if not last task)
         if task_idx < len(tasks) - 1:
-            print(f"\nUnloading OSF adapter to prepare for next task...")
+            print("\nUnloading OSF adapter to prepare for next task...")
             model = model.unload()
 
     # Save final model
@@ -547,14 +547,16 @@ def print_results_comparison(osf_history, full_history):
     osf_avg_final = sum(osf_final_accs) / len(osf_final_accs)
     full_avg_final = sum(full_final_accs) / len(full_final_accs)
 
-    print(f"\n1. Average Accuracy Across All 3 Tasks (After Final Task):")
+    print("\n1. Average Accuracy Across All 3 Tasks (After Final Task):")
     print(f"   OSF:     {osf_avg_final:.2f}%")
     print(f"   Full FT: {full_avg_final:.2f}%")
-    print(f"   Difference: {osf_avg_final - full_avg_final:+.2f}% {'(OSF better)' if osf_avg_final > full_avg_final else '(Full FT better)'}")
+    print(
+        f"   Difference: {osf_avg_final - full_avg_final:+.2f}% {'(OSF better)' if osf_avg_final > full_avg_final else '(Full FT better)'}"
+    )
 
     # Average forgetting (for tasks 1 and 2 only, since task 3 is the final task)
-    print(f"\n2. Average Forgetting (Task 1 & 2):")
-    print(f"   Forgetting = Final Accuracy - Initial Accuracy (negative is worse)\n")
+    print("\n2. Average Forgetting (Task 1 & 2):")
+    print("   Forgetting = Final Accuracy - Initial Accuracy (negative is worse)\n")
 
     osf_forgetting_vals = []
     full_forgetting_vals = []
@@ -583,7 +585,7 @@ def print_results_comparison(osf_history, full_history):
     osf_avg_forgetting = sum(osf_forgetting_vals) / len(osf_forgetting_vals)
     full_avg_forgetting = sum(full_forgetting_vals) / len(full_forgetting_vals)
 
-    print(f"   Average Forgetting:")
+    print("   Average Forgetting:")
     print(f"     OSF:     {osf_avg_forgetting:+.2f}%")
     print(f"     Full FT: {full_avg_forgetting:+.2f}%")
     print(
@@ -673,7 +675,7 @@ def main():
             print(f"   {task}: {acc:.2f}%")
 
         # Average forgetting
-        print(f"\n2. Average Forgetting (Task 1 & 2):")
+        print("\n2. Average Forgetting (Task 1 & 2):")
         osf_forgetting_vals = []
         for task_idx, task in enumerate(tasks[:-1]):
             osf_initial_acc = osf_history[task][0][1] * 100

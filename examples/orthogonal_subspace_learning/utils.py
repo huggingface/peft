@@ -12,11 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import random
 
 import torch
 from datasets import load_dataset
-from transformers import AutoTokenizer
 
 
 def load_scienceqa(num_train=1000, num_eval=200, seed=42):
@@ -54,6 +52,7 @@ def load_numglue(num_train=1000, num_eval=200, seed=42):
         train_dataset, eval_dataset
     """
     import json
+
     from datasets import Dataset
     from huggingface_hub import hf_hub_download
 
@@ -62,23 +61,20 @@ def load_numglue(num_train=1000, num_eval=200, seed=42):
 
     # Read and process the JSON file line by line
     data = []
-    with open(json_path, 'r') as f:
+    with open(json_path) as f:
         for line in f:
             if line.strip():  # Skip empty lines
                 item = json.loads(line)
                 # Extract the number from the answer JSON structure
-                answer = item.get('answer', '')
+                answer = item.get("answer", "")
                 if isinstance(answer, dict):
                     # NumGLUE answers are JSON with 'number' and 'date' fields
                     # Extract just the number field
-                    answer_str = answer.get('number', '')
+                    answer_str = answer.get("number", "")
                 else:
                     answer_str = str(answer)
 
-                data.append({
-                    'question': item.get('question', ''),
-                    'answer': answer_str
-                })
+                data.append({"question": item.get("question", ""), "answer": answer_str})
 
     # Create dataset from processed data
     dataset = Dataset.from_list(data)
@@ -131,7 +127,7 @@ def format_scienceqa_for_llama(examples, tokenizer, max_length=512):
         choices = examples["choices"][i]
 
         # Format choices
-        choices_text = "\n".join([f"{chr(65+j)}. {choice}" for j, choice in enumerate(choices)])
+        choices_text = "\n".join([f"{chr(65 + j)}. {choice}" for j, choice in enumerate(choices)])
 
         prompt = f"""Answer the following science question by selecting the correct option.
                     Question: {question}
@@ -279,7 +275,7 @@ class DataCollatorForCompletionOnly:
 
     def __call__(self, features):
         # Pad sequences
-        max_len = min(max([len(f["input_ids"]) for f in features]), self.max_length)
+        max_len = min(max(len(f["input_ids"]) for f in features), self.max_length)
 
         input_ids = []
         attention_mask = []
