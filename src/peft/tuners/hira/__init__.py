@@ -15,7 +15,7 @@
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.utils import register_peft_method
 
-from .config import HiRAConfig, HiRARuntimeConfig
+from .config import HiRAConfig
 from .layer import Conv2d, Conv3d, Embedding, HiRALayer, Linear
 from .model import HiRAModel
 
@@ -27,7 +27,6 @@ __all__ = [
     "HiRAConfig",
     "HiRALayer",
     "HiRAModel",
-    "HiRARuntimeConfig",
     "Linear",
 ]
 

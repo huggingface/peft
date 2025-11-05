@@ -23,7 +23,6 @@ from .fourierft import FourierFTConfig, FourierFTModel
 from .hira import (
     HiRAConfig,
     HiRAModel,
-    HiRARuntimeConfig,
 )
 from .hra import HRAConfig, HRAModel
 from .ia3 import IA3Config, IA3Model
@@ -83,7 +82,6 @@ __all__ = [
     "HRAModel",
     "HiRAConfig",
     "HiRAModel",
-    "HiRARuntimeConfig",
     "IA3Config",
     "IA3Model",
     "LNTuningConfig",

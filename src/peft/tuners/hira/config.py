@@ -24,30 +24,6 @@ from peft.config import PeftConfig
 from peft.utils import PeftType
 
 
-@dataclass
-class HiRARuntimeConfig:
-    """
-    This is the sub-configuration class to store the runtime configurations for the model.
-
-    Args:
-        ephemeral_gpu_offload (`bool`):
-            Whether to use ephemeral GPU offloading for models partially kept in CPU memory.
-    """
-
-    ephemeral_gpu_offload: bool = field(
-        default=False,
-        metadata={
-            "help": (
-                "Whether to use ephemeral GPU offloading for models partially kept in CPU memory. Ephemeral GPU offloading result in "
-                "the data involved in intense operations being momentarily copied over to the GPU, and the results copied "
-                "back to CPU. There is a momentary VRAM overhead, but operations are generally orders of magnitude faster "
-                "compared to performing them on the CPU. This is useful when parts of the model and/or components (such "
-                "as adapters) are kept in CPU memory until they are needed. Rather than perform expensive operations on "
-                "small data, the data is transferred to the GPU on-demand, the operation(s) performed, and the results "
-                "moved back to CPU memory. Currently only affects DoRA initialization."
-            )
-        },
-    )
 
 
 @dataclass
