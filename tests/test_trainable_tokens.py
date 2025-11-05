@@ -1066,7 +1066,7 @@ class TestTrainableTokens:
         assert lm_head_adapter.token_indices["default"] == [1, 2]
 
     def test_weight_tying_bc_same_indices_applied(self, model_weight_tied):
-        """Backwards compatibility: same indices should have weight tying even when ensure_weight_tying=False"""
+        """When indices are the same, weight tying should be applied even when ensure_weight_tying=False"""
         peft_config = LoraConfig(
             target_modules="all-linear",
             trainable_token_indices={"lm_head": [1, 2], "embed_tokens": [1, 2]},
