@@ -1993,8 +1993,17 @@ class TestPeftCustomModel(PeftCommonTester):
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
     @pytest.mark.parametrize("autocast_adapter_dtype", [True, False])
+    @pytest.mark.parametrize("low_cpu_mem_usage", [False, True])
     def test_adapter_dtype_autocast(
-        self, test_name, model_id, config_cls, config_kwargs, dtype, autocast_adapter_dtype, tmp_path
+        self,
+        test_name,
+        model_id,
+        config_cls,
+        config_kwargs,
+        dtype,
+        autocast_adapter_dtype,
+        low_cpu_mem_usage,
+        tmp_path,
     ):
         """checks that the dtype of the PEFT adapter corresponds to the expected dtype.
 
@@ -2004,6 +2013,7 @@ class TestPeftCustomModel(PeftCommonTester):
         - PeftModel.from_pretrained
         - load_adapter
         - with and without autocasting adapter dtype
+        - with and without low_cpu_mem_usage (which only makes sense for loading adapters)
         """
         if config_cls in (LNTuningConfig, OSFConfig):
             # TODO Check why these methods fail
@@ -2030,10 +2040,17 @@ class TestPeftCustomModel(PeftCommonTester):
         del model
 
         model = self.transformers_class.from_pretrained(model_id, dtype=dtype).to(self.torch_device)
-        model = PeftModel.from_pretrained(model, tmp_path, autocast_adapter_dtype=autocast_adapter_dtype)
+        model = PeftModel.from_pretrained(
+            model, tmp_path, autocast_adapter_dtype=autocast_adapter_dtype, low_cpu_mem_usage=low_cpu_mem_usage
+        )
         if config_kwargs.get("target_parameters", None) is None:
             # target_parameters does not allow multiple adapters on the same parameter
-            model.load_adapter(tmp_path / "other", adapter_name="other", autocast_adapter_dtype=autocast_adapter_dtype)
+            model.load_adapter(
+                tmp_path / "other",
+                adapter_name="other",
+                autocast_adapter_dtype=autocast_adapter_dtype,
+                low_cpu_mem_usage=low_cpu_mem_usage,
+            )
         peft_params = [p for n, p in model.named_parameters() if model.prefix in n]
         assert all(p.dtype == expected_dtype for p in peft_params)
 
