@@ -48,6 +48,8 @@
 # tests/regression/<TEST_NAME>/ will be loaded and compared to the current output.
 #
 # When implementing new tests, check the existing ones as well as the description in the docstring of RegressionTester.
+#
+# Note: For 4-bit tests using XPU (regardless of REGRESSION_CREATION_MODE), set `PEFT_USE_XPU=True` to enable the correct XPU path.
 
 import os
 import shutil
