@@ -812,14 +812,18 @@ class BaseTuner(nn.Module, ABC):
             if state_dict is None:
                 # normal mechanism: match the modules using the peft_config
                 result = self._check_target_module_exists(peft_config, key)
+                # If the module is a tied layer, then we skip injecting
+                # any adapter here and tie it later to the adapter of the source layer.
+                # In this loop we only add adapters to the source layer (eg: embed_tokens)
+                # Only applicable if `ensure_weight_tying = True` for LoraConfig
+                if self._check_tied_module_exists(peft_config, key):
+                    targets_to_tie.append(key)
+                    continue
                 if isinstance(result, _ExcludedModule):
                     excluded_modules.append(key)
                 elif not result:
                     unmatched_modules.append(key)
                 else:
-                    if self._check_tied_module_exists(peft_config, key):
-                        targets_to_tie.append(key)
-                        continue
                     self.targeted_module_names.append(key)
                     parent, target, target_name = _get_submodules(model, key)
                     self._check_target_module_compatiblity(peft_config, model, target_name)
@@ -833,6 +837,10 @@ class BaseTuner(nn.Module, ABC):
                 if key not in module_names:
                     unmatched_modules.append(key)
                 else:
+                    # If the module is a tied layer, then we skip injecting
+                    # any adapter here and tie it later to the adapter of the source layer.
+                    # In this loop we only add adapters to the source layer (eg: embed_tokens)
+                    # Only applicable if `ensure_weight_tying = True` for LoraConfig
                     if self._check_tied_module_exists(peft_config, key):
                         targets_to_tie.append(key)
                         continue
@@ -855,7 +863,8 @@ class BaseTuner(nn.Module, ABC):
                 peft_config=peft_config, model=model, adapter_name=adapter_name, low_cpu_mem_usage=low_cpu_mem_usage
             )
 
-        # Another loop for tying target modules
+        # Here we inject tied adapters for all the layers which were tied
+        # Only applicable if `ensure_weight_tying = True` for LoraConfig
         for key in targets_to_tie:
             self.targeted_module_names.append(key)
             parent, target, target_name = _get_submodules(model, key)

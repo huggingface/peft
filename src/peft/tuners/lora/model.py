@@ -187,6 +187,8 @@ class LoraModel(BaseTuner):
         r = lora_config.rank_pattern.get(r_key, lora_config.r)
         alpha = lora_config.alpha_pattern.get(alpha_key, lora_config.lora_alpha)
 
+        # Checks if the target is marked as a tied layer
+        # If true, we add the reference to lora adapters of embedding layer in `tied_adapters`
         is_tied = target_name in (getattr(lora_config, "target_modules_to_tie", []) or [])
         tied_adapters = {}
         if is_tied:
@@ -213,7 +215,6 @@ class LoraModel(BaseTuner):
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
             "parameter_name": parameter_name,
-            "is_tied": is_tied,
             "tied_adapters": tied_adapters,
         }
 
@@ -824,8 +825,8 @@ class LoraModel(BaseTuner):
         tied layers from `module_to_save`. Maintain a separate set for layers to be tied
 
         Args:
-            peft_config (LoraConfig): _description_
-            tied_weight_keys (list[str]): _description_
+            peft_config (LoraConfig)
+            tied_weight_keys (list[str])
         """
         tied_weight_keys = set(tied_weight_keys)
         setattr(peft_config, "modules_to_tie", tied_weight_keys)
@@ -840,7 +841,15 @@ class LoraModel(BaseTuner):
 
         setattr(peft_config, "modules_to_save", modules_to_save)
 
-    def _add_targets_to_tie(self, peft_config, tied_weight_keys):
+    def _add_targets_to_tie(self, peft_config: LoraConfig, tied_weight_keys: list[str]):
+        """
+        Tied weight keys contains the layers tied to the embedding layer. Add embedding layer and remove rest of the
+        tied layers from `target_modules`. Maintain a separate set for layers to be tied
+
+        Args:
+            peft_config (LoraConfig)
+            tied_weight_keys (list[str])
+        """
         tied_weight_keys = set(tied_weight_keys)
         setattr(peft_config, "target_modules_to_tie", tied_weight_keys)
 
@@ -848,6 +857,7 @@ class LoraModel(BaseTuner):
         target_modules.add("embed_tokens")
 
         for m in tied_weight_keys:
-            target_modules.add(m)
+            if m in target_modules:
+                target_modules.remove(m)
 
         setattr(peft_config, "target_modules", target_modules)

@@ -156,7 +156,6 @@ class LoraLayer(BaseTunerLayer):
         arrow_config: ArrowConfig = None,
         qalora_group_size: int = 32,
         inference_mode: bool = False,
-        is_tied: bool = False,
         tied_adapters: Optional[dict[str, nn.Parameter]] = None,
         **kwargs,
     ):
@@ -197,10 +196,11 @@ class LoraLayer(BaseTunerLayer):
         # Actual trainable parameters
         self.lora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
         self.lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=lora_bias)
-        if is_tied:
-            if not tied_adapters:
-                raise RuntimeError("Layer is marked as tied, but tied adapters are not provided")
 
+        # Tying adapters is only implemented for Linear layers
+        # where the source is the embedding layer.
+        # Currently, this is the most prevelant way of tying layers (weight tying)
+        if tied_adapters:
             lora_A_params = tied_adapters["lora_A"]
             lora_B_params = tied_adapters["lora_B"]
 
@@ -643,7 +643,6 @@ class Linear(nn.Module, LoraLayer):
             use_alora=use_alora,
             lora_bias=lora_bias,
             arrow_config=arrow_config,
-            is_tied=kwargs.get("is_tied", False),
             tied_adapters=kwargs.get("tied_adapters"),
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
