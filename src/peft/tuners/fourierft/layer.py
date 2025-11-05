@@ -186,6 +186,9 @@ class FourierFTLinear(nn.Module, FourierFTLayer):
         # apply alpha patch
         if alpha:
             n_frequency = int(alpha * self.in_features * self.out_features)
+            if n_frequency <= 0:
+                raise ValueError(f"The alpha you set makes the n_frequency lower or equal to 0. Use a higher alpha value!")
+
 
         self.fan_in_fan_out = fan_in_fan_out
         self._active_adapter = adapter_name

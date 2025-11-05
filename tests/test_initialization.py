@@ -4523,18 +4523,15 @@ class TestFourierFTInitialization:
 
     def test_fourierft_set_alpha_and_n_frequency_raises(self):
         torch.manual_seed(0)
-
-        model = self.get_model()
-        config = FourierFTConfig(target_modules=["linear"], alpha=0.1, n_frequency=20)
         msg = "Don't set both alpha and n_frequency, as alpha overrides n_frequency."
         with pytest.raises(ValueError, match=msg):
-            get_peft_model(model, config)
+            model = self.get_model()
+            config = FourierFTConfig(target_modules=["linear"], alpha=0.1, n_frequency=20)
 
     def test_fourierft_set_alpha_and_n_frequency_pattern_raises(self):
         torch.manual_seed(0)
 
-        model = self.get_model()
-        config = FourierFTConfig(target_modules=["linear"], alpha=0.1, n_frequency_pattern={"linear": 20})
         msg = "Don't set both alpha and n_frequency_pattern, as alpha overrides n_frequency_pattern."
         with pytest.raises(ValueError, match=msg):
-            get_peft_model(model, config)
+            model = self.get_model()
+            config = FourierFTConfig(target_modules=["linear"], alpha=0.1, n_frequency_pattern={"linear": 20})
