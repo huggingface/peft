@@ -729,15 +729,27 @@ class TestDecoderModels(PeftCommonTester):
         self._test_prepare_for_training(model_id, LoraConfig, config_kwargs.copy())
         self._test_generate(model_id, LoraConfig, config_kwargs.copy())
 
-    def test_prompt_learning_with_grouped_query_attention(self):
+    def test_prefix_tuning_qwen2_with_grouped_query_attention(self):
         # See 1901, fixes a bug with handling GQA
         model_id = "peft-internal-testing/tiny-dummy-qwen2"
-        base_model = AutoModelForCausalLM.from_pretrained(model_id)
-        peft_config = PrefixTuningConfig(num_virtual_tokens=10, task_type="CAUSAL_LM")
-        model = get_peft_model(base_model, peft_config)
-        x = torch.tensor([[1, 2, 3]])
-        # does not raise
-        model(x)
+        with hub_online_once(model_id):
+            base_model = AutoModelForCausalLM.from_pretrained(model_id)
+            peft_config = PrefixTuningConfig(num_virtual_tokens=10, task_type="CAUSAL_LM")
+            model = get_peft_model(base_model, peft_config)
+            x = torch.tensor([[1, 2, 3]])
+            # does not raise
+            model(x)
+
+    def test_prefix_tuning_qwen3_with_grouped_query_attention(self):
+        # See 2881, fixes a bug with handling GQA
+        model_id = "trl-internal-testing/tiny-Qwen3ForCausalLM"
+        with hub_online_once(model_id):
+            base_model = AutoModelForCausalLM.from_pretrained(model_id)
+            peft_config = PrefixTuningConfig(num_virtual_tokens=10, task_type="CAUSAL_LM")
+            model = get_peft_model(base_model, peft_config)
+            x = torch.tensor([[1, 2, 3]])
+            # does not raise
+            model(x)
 
     def test_prefix_tuning_mistral(self):
         # See issue 869, 1962
