@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2025-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ class HiRAConfig(PeftConfig):
 
     Args:
         r (`int`):
-               Rank of the HiRA configuration, controlling the dimension of the low-rank part of matrice AB in HiRA.
+            Rank of the low-rank component in HiRA. Although HiRA achieves a high-rank adaptation through Hadamard fusion, this value defines the dimension of the underlying low-rank factorization (matrices A and B).
         target_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
             names will be replaced. When passing a string, a regex match will be performed. When passing a list of
