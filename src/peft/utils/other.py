@@ -1480,17 +1480,18 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
                 activate_adapter=activate_adapter,
             )
 
+        tied_weights_keys = _get_keys_tied_with_embedding(model)
+
         # There might be the possibility that we have output weights that are tied to the input weights.
         # In that case we will tie any module that wants tied weights to the token adapter to make sure that
         # any modification is reflected in the tied layers as well.
         if (
-            model_config.get("tie_word_embeddings", False)
-            # some models may be misconfigured to have weight tying enabled but don't define tied weights keys
-            and model._tied_weights_keys is not None
+            tied_weights_keys
+            and model_config.get("tie_word_embeddings", False)
             and isinstance(model.get_input_embeddings(), TrainableTokensWrapper)
         ):
             # the embedding layer is modified and we want weight tying.
-            module_keys = [".".join(n.split(".")[:-1]) for n in model._tied_weights_keys]
+            module_keys = [".".join(n.split(".")[:-1]) for n in tied_weights_keys]
 
             token_adapter = model.get_input_embeddings().token_adapter
             _set_trainable(
@@ -1556,3 +1557,45 @@ def create_attention_mask(
             position_ids=position_ids,
         )
     return attention_mask
+
+
+def _get_keys_tied_with_embedding(model):
+    """
+    Get the list of the fully qualified name of the parameters that are tied to the input embeddings. In case of a
+    source-target-mapping `_tied_weights_keys`, it will attempt to identify the input embedding weights.
+
+    For example: For models which have `embed_tokens` and `lm_head` as the tied keys this function will return
+    [`lm_head`].
+
+    Note that this function will not check if weight tying is disabled by the model's config. There can be the case
+    that the weight tying definition is present but the tying is disabled via `model_config.tie_word_embeddings=False`.
+    You have to check that yourself.
+    """
+    tied_weights = []
+
+    for name, module in model.named_modules():
+        if not hasattr(module, "_tied_weights_keys"):
+            continue
+        if isinstance(module._tied_weights_keys, dict):
+            if not hasattr(model, "get_input_embeddings"):
+                raise ValueError(
+                    "The supplied model implements `_tied_weights_keys` as a dict but doesn't implement "
+                    "'get_input_embeddings' so we can't determine which weights are tied to embeddings."
+                )
+
+            # technically it would be sufficient to just return candidates since that contains all the keys of
+            # all modules that are tied (not just equal!) to the input embeddings. the only reason why we aren't
+            # doing that is because we need to filter out the original embedding name since we promise to just
+            # return the keys of the tying targets.
+            #
+            # the reason why we don't compute `candidates` once is that there might be a few levels of nesting
+            # so that the keys have various prefixes (e.g., `model.`). eventually we'll find the module that
+            # defines both input embedding and weight tying mapping, then the keys will match.
+            input_embedding_params = set(module.get_input_embeddings().parameters())
+            candidates = [n for n, p in module.named_parameters(remove_duplicate=False) if p in input_embedding_params]
+
+            tied_weights.extend(k for k, v in module._tied_weights_keys.items() if k in candidates)
+        elif module._tied_weights_keys is not None:
+            tied_weights.extend(f"{name}.{k}" if name else k for k in module._tied_weights_keys)
+
+    return tied_weights
