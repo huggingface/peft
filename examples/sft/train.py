@@ -18,6 +18,14 @@ class ModelArguments:
     model_name_or_path: str = field(
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
+    adapter_name: Optional[str] = field(
+        default="lora",
+        metadata={"help": "Use MPO for training."},
+    )
+    lora_mpo: Optional[bool] = field(
+        default=False,
+        metadata={"help": "Use MPO for LoRA for training."},
+    )
     max_seq_length: Optional[int] = field(
         default=512,
         metadata={"help": "The maximum total input sequence length after tokenization."},
@@ -103,6 +111,8 @@ def main(model_args, data_args, training_args):
 
     # model
     model, peft_config, tokenizer = create_and_prepare_model(model_args, data_args, training_args)
+    if model_args.lora_mpo == True:
+        peft_config.init_lora_weights = "lorampo"
 
     # gradient ckpt
     model.config.use_cache = not training_args.gradient_checkpointing
