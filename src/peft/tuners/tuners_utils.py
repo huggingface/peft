@@ -45,7 +45,7 @@ from peft.utils.constants import (
 from peft.utils.integrations import init_empty_weights
 from peft.utils.other import (
     AuxiliaryTrainingWrapper,
-    _get_keys_tied_with_embedding,
+    _get_module_names_tied_with_embedding,
     _set_adapter,
     match_target_against_key,
     set_additional_trainable_modules,
@@ -1171,8 +1171,8 @@ class BaseTuner(nn.Module, ABC):
                     tied_target_modules.append(target_module)
         return tied_target_modules
 
-    def _get_keys_tied_with_embedding(self) -> list[str]:
-        return _get_keys_tied_with_embedding(self)
+    def _get_module_names_tied_with_embedding(self) -> list[str]:
+        return _get_module_names_tied_with_embedding(self)
 
     def _add_modules_to_tie(self, peft_config, tied_weight_keys):
         """
@@ -1196,7 +1196,7 @@ class BaseTuner(nn.Module, ABC):
         modules_to_save = set(getattr(peft_config, "modules_to_save", []) or [])
         is_embedding_to_save = any(m in EMBEDDING_LAYER_NAMES for m in modules_to_save)
 
-        tied_weight_keys = self._get_keys_tied_with_embedding()
+        tied_weight_keys = self._get_module_names_tied_with_embedding()
 
         if getattr(peft_config, "ensure_weight_tying", False):
             if is_embedding_to_save and tied_weight_keys:

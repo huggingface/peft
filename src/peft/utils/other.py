@@ -1480,25 +1480,22 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
                 activate_adapter=activate_adapter,
             )
 
-        tied_weights_keys = _get_keys_tied_with_embedding(model)
+        tied_weights_module_names = _get_module_names_tied_with_embedding(model)
 
         # There might be the possibility that we have output weights that are tied to the input weights.
         # In that case we will tie any module that wants tied weights to the token adapter to make sure that
         # any modification is reflected in the tied layers as well.
         if (
-            tied_weights_keys
+            tied_weights_module_names
             and model_config.get("tie_word_embeddings", False)
             and isinstance(model.get_input_embeddings(), TrainableTokensWrapper)
         ):
-            # the embedding layer is modified and we want weight tying.
-            module_keys = [".".join(n.split(".")[:-1]) for n in tied_weights_keys]
-
             token_adapter = model.get_input_embeddings().token_adapter
             _set_trainable(
                 model,
                 adapter_name,
                 inference_mode=peft_config.inference_mode,
-                module_names=module_keys,
+                module_names=tied_weights_module_names,
                 strict_module_check=True,
                 wrapper_cls=TrainableTokensWrapper,
                 token_indices=token_adapter.token_indices[adapter_name],
@@ -1559,9 +1556,9 @@ def create_attention_mask(
     return attention_mask
 
 
-def _get_keys_tied_with_embedding(model):
+def _get_module_names_tied_with_embedding(model):
     """
-    Get the list of the fully qualified name of the parameters that are tied to the input embeddings. In case of a
+    Get the list of the fully qualified names of the modules that are tied to the input embeddings. In case of a
     source-target-mapping `_tied_weights_keys`, it will attempt to identify the input embedding weights.
 
     For example: For models which have `embed_tokens` and `lm_head` as the tied keys this function will return
@@ -1598,4 +1595,4 @@ def _get_keys_tied_with_embedding(model):
         elif module._tied_weights_keys is not None:
             tied_weights.extend(f"{name}.{k}" if name else k for k in module._tied_weights_keys)
 
-    return tied_weights
+    return [".".join(name.split(".")[:-1]) for name in tied_weights]
