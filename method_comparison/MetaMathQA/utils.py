@@ -38,6 +38,7 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
+    PreTrainedModel,
     get_cosine_schedule_with_warmup,
 )
 
@@ -206,9 +207,8 @@ def get_base_model(
     *,
     model_id: str,
     dtype: Literal["float32", "float16", "bfloat16", "int8", "int4"],
-    compile: bool,
     attn_implementation: Optional[str],
-) -> nn.Module:
+) -> PreTrainedModel:
     kwargs: dict[str, Any] = {
         "pretrained_model_name_or_path": model_id,
         "device_map": device,
@@ -221,9 +221,9 @@ def get_base_model(
         quant_config = BitsAndBytesConfig(load_in_8bit=True)
         kwargs["quantization_config"] = quant_config
     elif dtype == "bfloat16":
-        kwargs["torch_dtype"] = torch.bfloat16
+        kwargs["dtype"] = torch.bfloat16
     elif dtype == "float16":
-        kwargs["torch_dtype"] = torch.float16
+        kwargs["dtype"] = torch.float16
     elif dtype != "float32":
         raise ValueError(f"Invalid dtype: {dtype}")
 
@@ -231,9 +231,6 @@ def get_base_model(
 
     if dtype in ["int8", "int4"]:
         model = prepare_model_for_kbit_training(model)
-
-    if compile:
-        model = torch.compile(model)
 
     return model
 
@@ -247,13 +244,15 @@ def get_model(
     peft_config: Optional[PeftConfig],
     autocast_adapter_dtype: bool,
 ) -> nn.Module:
-    base_model = get_base_model(
-        model_id=model_id, dtype=dtype, compile=compile, attn_implementation=attn_implementation
-    )
+    base_model = get_base_model(model_id=model_id, dtype=dtype, attn_implementation=attn_implementation)
     if peft_config is None:
         model = base_model
     else:
         model = get_peft_model(base_model, peft_config, autocast_adapter_dtype=autocast_adapter_dtype)
+
+    if compile:
+        model = torch.compile(model, dynamic=True)
+
     return model
 
 
