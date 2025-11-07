@@ -860,4 +860,4 @@ class LoraModel(BaseTuner):
             if m in target_modules:
                 target_modules.remove(m)
 
-        setattr(peft_config, "target_modules", target_modules)
+        peft_config.target_modules = target_modules
