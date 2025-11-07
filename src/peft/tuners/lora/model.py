@@ -262,7 +262,7 @@ class LoraModel(BaseTuner):
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
 
-            self._replace_module(parent=parent, child_name=target_name, new_module=new_module, child=target)
+            self._replace_module(parent, target_name, new_module, target)
 
     def _replace_module(self, parent, child_name, new_module, child):
         # override in LoraModel to handle quantized weights properly
