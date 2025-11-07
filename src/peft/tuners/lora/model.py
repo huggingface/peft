@@ -829,7 +829,7 @@ class LoraModel(BaseTuner):
             tied_weight_keys (list[str])
         """
         tied_weight_keys = set(tied_weight_keys)
-        setattr(peft_config, "modules_to_tie", tied_weight_keys)
+        peft_config.modules_to_tie = tied_weight_keys
 
         modules_to_save = getattr(peft_config, "modules_to_save", []) or []
         if "embed_tokens" not in modules_to_save:
@@ -839,7 +839,7 @@ class LoraModel(BaseTuner):
             if m in modules_to_save:
                 modules_to_save.remove(m)
 
-        setattr(peft_config, "modules_to_save", modules_to_save)
+        peft_config.modules_to_save = modules_to_save
 
     def _add_targets_to_tie(self, peft_config: LoraConfig, tied_weight_keys: list[str]):
         """
@@ -851,7 +851,7 @@ class LoraModel(BaseTuner):
             tied_weight_keys (list[str])
         """
         tied_weight_keys = set(tied_weight_keys)
-        setattr(peft_config, "target_modules_to_tie", tied_weight_keys)
+        peft_config.target_modules_to_tie = tied_weight_keys
 
         target_modules = set(getattr(peft_config, "target_modules", []) or [])
         target_modules.add("embed_tokens")
@@ -860,4 +860,4 @@ class LoraModel(BaseTuner):
             if m in target_modules:
                 target_modules.remove(m)
 
-        setattr(peft_config, "target_modules", target_modules)
+        peft_config.target_modules = target_modules
