@@ -4970,6 +4970,37 @@ class TestWeightTying:
         assert embed_lora_A.data_ptr() == lm_lora_B.data_ptr()
         assert embed_lora_B.data_ptr() == lm_lora_A.data_ptr()
 
+    @pytest.mark.parametrize("layer", [".*embed_tokens$", ".*lm_head$", ".*(embed_tokens|lm_head)$"])
+    def test_weight_tying_tied_model_target_modules_str_lora(self, layer):
+        # Same as `test_weight_tying_tied_model_target_modules_lora` but the tied module
+        # are passed as str
+        model = self.get_lm_model()
+
+        embed_token_config = LoraConfig(
+            target_modules=layer,
+            ensure_weight_tying=True,
+        )
+
+        model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.embed_tokens, LoraLayer)
+        assert isinstance(model.base_model.model.lm_head, LoraLayer)
+
+        # Since embed_tokens and lm_head weights are transpose of each other
+        # lm_head lora_A == embed_tokens lora_B
+        adapter_name = "default"
+
+        embed_lora_A = model.base_model.model.model.embed_tokens.lora_embedding_A[adapter_name]
+        embed_lora_B = model.base_model.model.model.embed_tokens.lora_embedding_B[adapter_name]
+
+        lm_lora_A = model.base_model.model.lm_head.lora_A[adapter_name].weight
+        lm_lora_B = model.base_model.model.lm_head.lora_B[adapter_name].weight
+
+        assert torch.allclose(embed_lora_A, lm_lora_B.T)
+        assert torch.allclose(embed_lora_B, lm_lora_A.T)
+        assert embed_lora_A.data_ptr() == lm_lora_B.data_ptr()
+        assert embed_lora_B.data_ptr() == lm_lora_A.data_ptr()
+
     @pytest.mark.parametrize(
         "layer,tie_weights",
         [

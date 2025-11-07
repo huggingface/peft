@@ -1274,8 +1274,14 @@ class BaseTuner(nn.Module, ABC):
         modules_to_save = set(getattr(peft_config, "modules_to_save", []) or [])
         is_embedding_to_save = any(m in EMBEDDING_LAYER_NAMES for m in modules_to_save)
 
-        target_modules = set(getattr(peft_config, "target_modules", []) or [])
-        is_embedding_in_target = any(m in EMBEDDING_LAYER_NAMES for m in target_modules)
+        raw_target_modules = getattr(peft_config, "target_modules", None)
+        if isinstance(raw_target_modules, str):
+            is_embedding_in_target = any(
+                match_target_against_key(raw_target_modules, m) for m in EMBEDDING_LAYER_NAMES
+            )
+        else:
+            target_modules = set(raw_target_modules or [])
+            is_embedding_in_target = any(m in EMBEDDING_LAYER_NAMES for m in target_modules)
 
         tied_weight_keys = self._get_tied_weight_keys(model)
 

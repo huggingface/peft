@@ -853,7 +853,18 @@ class LoraModel(BaseTuner):
         tied_weight_keys = set(tied_weight_keys)
         peft_config.target_modules_to_tie = tied_weight_keys
 
-        target_modules = set(getattr(peft_config, "target_modules", []) or [])
+        raw_target_modules = getattr(peft_config, "target_modules", None)
+
+        if isinstance(raw_target_modules, str):
+            # The way weight tying is handled for adapters, we always want to add
+            # lora adapters to the input embedding layer (embed_tokens)
+            # instead of output embedding lauyer.
+            if "lm_head" in raw_target_modules:
+                raw_target_modules = raw_target_modules.replace("lm_head", "embed_tokens")
+                peft_config.target_modules = raw_target_modules
+            return
+
+        target_modules = set(raw_target_modules or [])
         target_modules.add("embed_tokens")
 
         for m in tied_weight_keys:
