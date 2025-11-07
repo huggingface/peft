@@ -851,7 +851,7 @@ class LoraModel(BaseTuner):
             tied_weight_keys (list[str])
         """
         tied_weight_keys = set(tied_weight_keys)
-        setattr(peft_config, "target_modules_to_tie", tied_weight_keys)
+        peft_config.target_modules_to_tie = tied_weight_keys
 
         target_modules = set(getattr(peft_config, "target_modules", []) or [])
         target_modules.add("embed_tokens")
