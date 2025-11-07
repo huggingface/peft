@@ -2015,9 +2015,10 @@ class TestPeftCustomModel(PeftCommonTester):
         - with and without autocasting adapter dtype
         - with and without low_cpu_mem_usage (which only makes sense for loading adapters)
         """
-        if config_cls in (LNTuningConfig, OSFConfig):
-            # TODO Check why these methods fail
-            pytest.skip("LNTuning and OSF are currently failing this test, this needs to be investigated")
+        if autocast_adapter_dtype and (config_cls == LNTuningConfig):
+            # LN Tuning basically copies the base weight and makes it trainable, hence it makes sense to keep the dtype
+            # of the base model weight.
+            pytest.skip("LNTuning and OSF are exempted from casting the adapter weights to float32")
 
         if autocast_adapter_dtype:
             expected_dtype = torch.float32
