@@ -406,8 +406,7 @@ class QALoraLinearVariant(LoraVariant):
         gptq_group_size = getattr(module.base_layer, "group_size", 32)
 
         amplification_factor = kwargs.get("amplification_factor", 4.0)
-        effective_scale = (lora_alpha / lora_r) * amplification_factor
-
+        effective_scale = (lora_alpha / lora_r) 
         with torch.no_grad():
             # --- 2. LoRA-Beitrag auf der gepoolten Ebene berechnen ---
             # Dies ergibt eine "low-resolution" Delta-Matrix: delta_W_pooled
@@ -418,12 +417,12 @@ class QALoraLinearVariant(LoraVariant):
             # Wir wiederholen jede Spalte (die einem Pool entspricht) `qalora_group_size` mal,
             # um die ursprüngliche `in_features`-Dimension wiederherzustellen.
             # Shape: [out_features, in_features]
-            delta_W_full = delta_W_pooled.repeat_interleave(qalora_group_size, dim=1)
+            # delta_W_full = delta_W_pooled.repeat_interleave(qalora_group_size, dim=1)
 
             # --- 4. Den "Full-Resolution-Shift" für die qzeros berechnen ---
             # Zuerst transponieren wir, um die Form an die `scales` anzupassen.
             # Shape: [in_features, out_features]
-            lora_contribution_full = delta_W_full.t()
+            lora_contribution_full = delta_W_pooled
 
             # Jetzt gruppieren wir diesen vollen Beitrag gemäß der GPTQ-Gruppengröße,
             # indem wir den Mittelwert über jede Gruppe bilden.
@@ -438,36 +437,67 @@ class QALoraLinearVariant(LoraVariant):
 
             # --- 6. Originale qzeros entpacken und vollständig dequantisieren ---
             bits = getattr(module.base_layer, "bits", 4)
-            mask = (2**bits) - 1
+            num_groups = scales.shape[0]
+            out_features = scales.shape[1]
 
-            if qzeros_packed.dtype != torch.int32:
-                print("Warning: qzeros are not in packed int32 format. Skipping merge.")
-                return
+            if bits == 3:
+                # 3-bit: Use GPTQ's native unpacking logic (matches __init__.py)
+                device = qzeros_packed.device
+                
+                # GPTQ stores 3-bit as: qzeros.shape = [num_groups, out_features // 3]
+                # Each int32 element is part of a 3-word interleaved structure
+                qzeros_reshaped = qzeros_packed.reshape(num_groups, qzeros_packed.shape[1] // 3, 3, 1)
+                qzeros_expanded = qzeros_reshaped.expand(-1, -1, -1, 12)  # [G, C//3, 3, 12]
+                
+                # Shift map (same as in __init__.py dequantize_weight)
+                wf = torch.tensor([
+                    [0, 3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 0],
+                    [0, 1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31],
+                    [0, 2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 0],
+                ], dtype=torch.int32).reshape(1, 3, 12).to(device)
+                
+                unpacked_qzeros = qzeros_expanded >> wf
+                
+                # Handle overlapping bits (same as __init__.py)
+                unpacked_qzeros[:, :, 0, 10] = (unpacked_qzeros[:, :, 0, 10] & 0x3) | ((unpacked_qzeros[:, :, 1, 0] << 2) & 0x4)
+                unpacked_qzeros[:, :, 1, 11] = (unpacked_qzeros[:, :, 1, 11] & 0x1) | ((unpacked_qzeros[:, :, 2, 0] << 1) & 0x6)
+                
+                unpacked_qzeros = unpacked_qzeros & 0x7  # Mask to 3-bit
+                
+                # Concatenate and reshape to [num_groups, out_features]
+                unpacked_qzeros = torch.cat([
+                    unpacked_qzeros[:, :, 0, :11],
+                    unpacked_qzeros[:, :, 1, 1:12],
+                    unpacked_qzeros[:, :, 2, 1:11]
+                ], dim=2).reshape(num_groups, -1)[:, :out_features]
+                
+                # Dequantize: zeros_float = zeros_int * scale
+                dequantized_qzeros = unpacked_qzeros.to(torch.float32) * scales.to(torch.float32)
+                
+            else:
+                # 2/4/8-bit (existing)
+                if qzeros_packed.dtype != torch.int32:
+                    print("Warning: qzeros are not in packed int32 format. Skipping merge.")
+                    return
 
-            elements_per_packed_val = 32 // bits
-            shifts = torch.arange(
-                0, elements_per_packed_val * bits, bits, device=qzeros_packed.device, dtype=torch.int32
-            ).unsqueeze(0)
-
-            # Entpacken der quantisierten qzeros (0-15 für 4-bit)
-            unpacked_qzeros = (qzeros_packed.unsqueeze(-1) >> shifts) & mask
-            unpacked_qzeros = unpacked_qzeros.view(qzeros_packed.shape[0], -1)
-            unpacked_qzeros = unpacked_qzeros[:, : scales.shape[1]]
-
-            # WICHTIG: Vollständige Dequantisierung der qzeros in den Gewichtsraum
-            # Dies konvertiert von quantisierten Werten (0-15) zu echten Zero-Point-Werten
-            dequantized_qzeros = unpacked_qzeros.to(torch.float16) * scales
+                mask = (1 << bits) - 1
+                elems_per_word = 32 // bits
+                shifts = torch.arange(0, elems_per_word * bits, bits, device=qzeros_packed.device, dtype=torch.int32).unsqueeze(0)
+                unpacked_qzeros = (qzeros_packed.unsqueeze(-1) >> shifts) & mask                      # [G, ncols, elems_per_word]
+                unpacked_qzeros = unpacked_qzeros.view(qzeros_packed.shape[0], -1)[:, :out_features]  # [G, C], int32
+                dequantized_qzeros = unpacked_qzeros.to(torch.float32) * scales.to(torch.float32)
 
             # --- 7. LoRA-Shift auf dequantisierte qzeros anwenden ---
             # Jetzt können wir den weight_adjustment direkt subtrahieren
-            new_qzeros_fp16 = dequantized_qzeros - weight_adjustment.to(torch.float16)
+            new_qzeros_fp16 = (dequantized_qzeros - weight_adjustment.to(torch.float32)).to(torch.float16)
 
             # --- 8. Alten qzeros-Parameter durch den neuen ersetzen ---
-            del module.base_layer.qzeros
-            module.base_layer.register_parameter("qzeros", torch.nn.Parameter(new_qzeros_fp16, requires_grad=False))
+            if hasattr(module.base_layer, "qzeros"):
+                delattr(module.base_layer, "qzeros")
+            module.base_layer.register_parameter("zeros", torch.nn.Parameter(new_qzeros_fp16, requires_grad=False))
 
             print(
-                f"Merged adapter into qzeros for layer. New qzeros shape: {new_qzeros_fp16.shape}, dtype: {new_qzeros_fp16.dtype}"
+                f"Merged adapter into qzeros for layer. New zeros shape: {new_qzeros_fp16.shape}, dtype: {new_qzeros_fp16.dtype}, bits: {bits}"
             )
 
     @staticmethod
@@ -502,7 +532,8 @@ class QALoraLinearVariant(LoraVariant):
 
         lora_A_weight_reshaped = lora_A_weight.view(lora_A_weight.shape[0], pooled_features, group_size)
         lora_A_pooled_weight = lora_A_weight_reshaped.mean(dim=2)
-
+        testing = lora_A_weight.t() @ lora_B_weight.t()
+        print(testing.shape)
         intermediate = x_pooled_scaled @ lora_A_pooled_weight.t()
         delta = intermediate @ lora_B_weight.t() * lora_scaling_coefficient
 

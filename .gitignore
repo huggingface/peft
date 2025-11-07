@@ -158,3 +158,4 @@ trainer_output
 *.tex
 visualizations*
 spqr_visualizations
+*.tex
