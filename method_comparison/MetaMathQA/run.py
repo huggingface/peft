@@ -65,6 +65,9 @@ dtype_to_bytes_linear = {"float32": 4, "float16": 2, "bfloat16": 2, "int8": 1, "
 # if lr scheduler with warmup is used, the ratio of warmup steps to total steps
 BUCKET_FACTOR = 20  # number of batches per bucket, increasing this further has diminishing returns
 
+# disable torch inductor caching to keep total runtime numbers comparable when torch.compile is used
+os.environ["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"
+
 
 def get_generation_config(*, seq_len, generate_kwargs) -> GenerationConfig:
     # filter out None values so that we don't depend on setting correct defaults in the config
