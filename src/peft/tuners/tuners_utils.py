@@ -378,14 +378,10 @@ class BaseTuner(nn.Module, ABC):
             `bool`
                 True if key matches any tied modules from config, False if no match found.
         """
-        _target_modules_to_tie = getattr(peft_config, "target_modules_to_tie", {}) or {}
-
-        if key in _target_modules_to_tie or any(
-            key.endswith(f".{target_key}") for target_key in _target_modules_to_tie
-        ):
-            return True
-
-        return False
+        target_modules_to_tie = getattr(peft_config, "target_modules_to_tie", []) or []
+        return key in target_modules_to_tie or any(
+            key.endswith(f".{target_key}") for target_key in target_modules_to_tie
+        )
 
     @staticmethod
     def _check_target_module_exists(peft_config: PeftConfig, key: str) -> bool | re.Match[str] | None:
