@@ -27,7 +27,7 @@ import numpy as np
 import pytest
 import torch
 from accelerate import infer_auto_device_map
-from accelerate.test_utils.testing import run_command
+from accelerate.test_utils.testing import get_backend, run_command
 from accelerate.utils import patch_environment
 from accelerate.utils.imports import is_bf16_available
 from accelerate.utils.memory import clear_device_cache
@@ -106,6 +106,11 @@ from .testing_utils import (
     require_torchao,
     torch_device,
 )
+
+
+device, _, _ = get_backend()
+if device == "cpu":
+    pytest.skip(allow_module_level=True, reason="GPU tests require hardware accelerator, got CPU only")
 
 
 # Some tests with multi GPU require specific device maps to ensure that the models are loaded in two devices
