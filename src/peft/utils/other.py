@@ -1570,31 +1570,41 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
     that the weight tying definition is present but the tying is disabled via `model_config.tie_word_embeddings=False`.
     You have to check that yourself.
     """
+    from peft import PeftModel
+    from peft.tuners.tuners_utils import BaseTuner
+
     tied_weights = []
 
-    for name, module in model.named_modules():
-        if not hasattr(module, "_tied_weights_keys"):
-            continue
-        if isinstance(module._tied_weights_keys, dict):
-            if not hasattr(model, "get_input_embeddings"):
-                raise ValueError(
-                    "The supplied model implements `_tied_weights_keys` as a dict but doesn't implement "
-                    "'get_input_embeddings' so we can't determine which weights are tied to embeddings."
-                )
+    if isinstance(model, PeftModel):
+        model = model.base_model
 
-            # technically it would be sufficient to just return candidates since that contains all the keys of
-            # all modules that are tied (not just equal!) to the input embeddings. the only reason why we aren't
-            # doing that is because we need to filter out the original embedding name since we promise to just
-            # return the keys of the tying targets.
-            #
-            # the reason why we don't compute `candidates` once is that there might be a few levels of nesting
-            # so that the keys have various prefixes (e.g., `model.`). eventually we'll find the module that
-            # defines both input embedding and weight tying mapping, then the keys will match.
-            input_embedding_params = set(module.get_input_embeddings().parameters())
-            candidates = [n for n, p in module.named_parameters(remove_duplicate=False) if p in input_embedding_params]
+    if isinstance(model, BaseTuner):
+        model = model.model
 
-            tied_weights.extend(k for k, v in module._tied_weights_keys.items() if k in candidates)
-        elif module._tied_weights_keys is not None:
-            tied_weights.extend(f"{name}.{k}" if name else k for k in module._tied_weights_keys)
+    if not hasattr(model, "_tied_weights_keys"):
+        return []
 
-    return [".".join(name.split(".")[:-1]) for name in tied_weights]
+    if isinstance(model._tied_weights_keys, dict):
+        if not hasattr(model, "get_input_embeddings"):
+            raise ValueError(
+                "The supplied model implements `_tied_weights_keys` as a dict but doesn't implement "
+                "'get_input_embeddings' so we can't determine which weights are tied to embeddings."
+            )
+
+        # technically it would be sufficient to just return candidates since that contains all the keys of
+        # all models that are tied (not just equal!) to the input embeddings. the only reason why we aren't
+        # doing that is because we need to filter out the original embedding name since we promise to just
+        # return the keys of the tying targets.
+        #
+        # the reason why we don't compute `candidates` once is that there might be a few levels of nesting
+        # so that the keys have various prefixes (e.g., `model.`). eventually we'll find the model that
+        # defines both input embedding and weight tying mapping, then the keys will match.
+        input_embedding_params = set(model.get_input_embeddings().parameters())
+        candidates = [n for n, p in model.named_parameters(remove_duplicate=False) if p in input_embedding_params]
+
+        tied_weights.extend(k for k, v in model._tied_weights_keys.items() if k in candidates)
+    elif model._tied_weights_keys is not None:
+        # TODO remove this when transformers <v5 is no longer supported
+        tied_weights.extend(k for k in model._tied_weights_keys)
+
+    return list({".".join(name.split(".")[:-1]) for name in tied_weights})

@@ -13,14 +13,22 @@
 # limitations under the License.
 
 import copy
+from unittest.mock import patch
 
 import pytest
 import torch
 from torch import nn
-from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification, LlavaForConditionalGeneration
+from transformers import (
+    AutoModelForCausalLM,
+    AutoModelForSeq2SeqLM,
+    AutoModelForSequenceClassification,
+    LlavaForConditionalGeneration,
+)
 
 from peft import LoraConfig, PeftModel, VeraConfig, get_peft_model
-from peft.utils.other import ModulesToSaveWrapper, _get_no_split_modules
+from peft.utils.other import ModulesToSaveWrapper, _get_module_names_tied_with_embedding, _get_no_split_modules
+
+from .testing_utils import hub_online_once
 
 
 class ModelWithModuleDict(nn.Module):
@@ -530,3 +538,67 @@ class TestGetNoSplitModules:
 
         no_split_modules = _get_no_split_modules(model)
         assert no_split_modules == {"CLIPEncoderLayer", "LlamaDecoderLayer"}
+
+
+class TestGetTiedWithEmbedding:
+    model_tied_weights_mapping = {
+        "peft-internal-testing/tiny-random-BertModel": {
+            "cls.predictions.decoder.weight": "embeddings.word_embeddings.weight",
+            "cls.predictions.decoder.bias": "embeddings.word_embeddings.bias",
+        },
+        "facebook/opt-125m": {"lm_head.weight": "model.decoder.embed_tokens.weight"},
+        "hf-internal-testing/tiny-random-t5": {
+            "lm_head.weight": "shared.weight",
+            "encoder.embed_tokens.weight": "shared.weight",
+            "decoder.embed_tokens.weight": "shared.weight",
+        },
+    }
+
+    model_ids = [
+        "facebook/opt-125m",
+        "peft-internal-testing/tiny-random-BertModel",
+        "hf-internal-testing/tiny-random-t5",
+    ]
+
+    def get_model(self, model_id, tied_weights_type):
+        with hub_online_once(model_id):
+            if "t5" in model_id:
+                model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
+            else:
+                model = AutoModelForCausalLM.from_pretrained(model_id)
+
+            expected_keys = list(
+                {".".join(k.split(".")[:-1]) for k in self.model_tied_weights_mapping[model_id].keys()}
+            )
+
+            if tied_weights_type == "linear":
+                return model, expected_keys
+
+            elif tied_weights_type == "mapping":
+                mapping = self.model_tied_weights_mapping[model_id]
+
+                with patch.object(model, "_tied_weights_keys", mapping):
+                    return model, expected_keys
+
+            else:
+                raise RuntimeError("Invalid fixture request")
+
+    @pytest.mark.parametrize("tied_weights_type", ["linear", "mapping"])
+    @pytest.mark.parametrize("model_id", model_ids)
+    def test_get_modules_tied_to_embedding(self, model_id, tied_weights_type):
+        model, expected = self.get_model(model_id, tied_weights_type)
+
+        modules = _get_module_names_tied_with_embedding(model)
+
+        assert expected == modules
+
+    @pytest.mark.parametrize("tied_weights_type", ["linear", "mapping"])
+    @pytest.mark.parametrize("model_id", model_ids)
+    def test_get_modules_tied_to_embedding_peft(self, model_id, tied_weights_type):
+        model, expected = self.get_model(model_id, tied_weights_type)
+
+        peft_model = get_peft_model(model, LoraConfig())
+
+        modules = _get_module_names_tied_with_embedding(peft_model)
+
+        assert expected == modules
