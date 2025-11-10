@@ -16,7 +16,6 @@
 # limitations under the License.
 import dataclasses
 import re
-import unittest
 from copy import deepcopy
 
 import pytest
@@ -179,7 +178,7 @@ BNB_QUANTIZATIONS = [("4bit",), ("8bit",)]
 BNB_TEST_CASES = [(x + y) for x in MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES for y in BNB_QUANTIZATIONS]
 
 
-class PeftCustomKwargsTester(unittest.TestCase):
+class PeftCustomKwargsTester:
     r"""
     Test if the PeftModel is instantiated with correct behaviour for custom kwargs. This includes:
     - test if regex matching works correctly
@@ -444,7 +443,7 @@ class MLP(nn.Module):
         self.sm = nn.LogSoftmax(dim=-1)
 
 
-class TestTargetedModuleNames(unittest.TestCase):
+class TestTargetedModuleNames:
     """Check that the attribute targeted_module_names is correctly set.
 
     This checks LoRA and IA³, but this should be sufficient, testing all other tuners is not necessary.
@@ -492,7 +491,7 @@ class TestTargetedModuleNames(unittest.TestCase):
         assert model.targeted_module_names == expected
 
 
-class TestTargetedParameterNames(unittest.TestCase):
+class TestTargetedParameterNames:
     """Check that the attribute targeted_parameter_names (via target_parameters) is correctly set.
 
     This is only implemented for LoRA. Regex matching is currently not implemented.
@@ -520,7 +519,7 @@ class TestTargetedParameterNames(unittest.TestCase):
         assert model.targeted_parameter_names == expected
 
 
-class TestExcludedModuleNames(unittest.TestCase):
+class TestExcludedModuleNames:
     """Check that the attribute exclude_module is correctly set.
 
     This checks LoRA and IA³, but this should be sufficient, testing all other tuners is not necessary.
@@ -1527,7 +1526,7 @@ class ModelWithNoConfig(nn.Module):
     pass
 
 
-class TestBaseTunerGetModelConfig(unittest.TestCase):
+class TestBaseTunerGetModelConfig:
     def test_get_model_config_use_to_dict(self):
         config = BaseTuner.get_model_config(ModelWithConfig())
         assert config == MockModelConfig.config

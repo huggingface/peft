@@ -25,6 +25,7 @@ from operator import attrgetter
 
 import pytest
 import torch
+import transformers
 import yaml
 from diffusers import StableDiffusionPipeline
 from packaging import version
@@ -1343,7 +1344,11 @@ class PeftCommonTester:
                 # more than 1 layer, i.e. setting layers_to_transform=[0] should target fewer layers
                 assert nb_trainable < nb_trainable_all
 
-    def _test_training_gradient_checkpointing(self, model_id, config_cls, config_kwargs):
+    def _test_training_gradient_checkpointing(self, model_id, config_cls, config_kwargs, use_reentrant=True):
+        # Note that certain configurations, such as activated lora with 'alora_invocation_tokens': [1000], do not
+        # generate gradients since the adapter is never activated so this will be a no-op for this test. It is still
+        # a valid test but it might be confusing to see a test pass if it is not supposed to.
+
         if config_cls == PrefixTuningConfig:
             return pytest.skip(f"Test not applicable for {config_cls}")
 
@@ -1351,9 +1356,17 @@ class PeftCommonTester:
             # TODO: no gradients on the "dense" layer, other layers work, not sure why
             self.skipTest("AdaLora with RoBERTa does not work correctly")
 
+        if "bart" in model_id.lower() and version.parse(transformers.__version__) <= version.parse("5.0"):
+            self.skipTest(
+                "Bart in transformers < 5.0 doesn't handle input sharing well enough. See transformers#41821"
+            )
+
         if (config_cls == OFTConfig) and ("deberta" in model_id.lower()):
             # TODO: no gradients on the "dense" layer, other layers work, not sure why
             self.skipTest("OFT with Deberta does not work correctly")
+
+        if "gptbigcode" in model_id.lower():
+            self.skipTest("GPTBigCode currently doesn't implement gradient checkpointing correctly.")
 
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
@@ -1361,7 +1374,10 @@ class PeftCommonTester:
             if not getattr(model, "supports_gradient_checkpointing", False):
                 return pytest.skip(f"Model {model_id} does not support gradient checkpointing")
 
-            model.gradient_checkpointing_enable()
+            # Disable lora_dropout and friends to remove non-determinism in gradient creation
+            for key in list(config_kwargs.keys()):
+                if key.endswith("dropout"):
+                    del config_kwargs[key]
 
             config = config_cls(
                 base_model_name_or_path=model_id,
@@ -1369,14 +1385,36 @@ class PeftCommonTester:
             )
             model = get_peft_model(model, config)
             model = model.to(self.torch_device)
+            params = [(n, p) for n, p in model.named_parameters() if p.requires_grad]
+
+            # if we don't set this, gradient checkpointing is not activated.
+            model.train(True)
 
             inputs = self.prepare_inputs_for_testing()
 
-            # check if `training` works
-            output = model(**inputs)[0]
+            # invocation to get the reference non-zero grads that are supposed to exist without gradient checkpointing;
+            # note we're squaring the output for bigger gradients
+            output = model(**inputs)[0] ** 2
 
             loss = output.sum()
             loss.backward()
+
+            non_zero_grad_params_normal = {n for n, p in params if p.grad.abs().sum() > 0}
+
+            for name, param in params:
+                param.grad = None
+
+            # invocation with gradient checkpointing for comparison
+            model.prepare_model_for_gradient_checkpointing(model)
+            model.gradient_checkpointing_enable({"use_reentrant": use_reentrant})
+
+            output = model(**inputs)[0] ** 2
+
+            loss = output.sum()
+            loss.backward()
+
+            non_zero_grad_params_checkpointing = {n for n, p in params if p.grad.abs().sum() > 0}
+            assert non_zero_grad_params_normal == non_zero_grad_params_checkpointing
 
             for n, param in model.named_parameters():
                 if "prompt_encoder." in n:  # prompt tuning methods
