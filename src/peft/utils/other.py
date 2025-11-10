@@ -1556,10 +1556,12 @@ def create_attention_mask(
     return attention_mask
 
 
-def _get_module_names_tied_with_embedding(model):
+def _get_module_names_tied_with_embedding(model) -> list[str]:
     """
     Get the list of the fully qualified names of the modules that are tied to the input embeddings. In case of a
-    source-target-mapping `_tied_weights_keys`, it will attempt to identify the input embedding weights.
+    source-target-mapping `_tied_weights_keys`, it will attempt to identify the input embedding weights from the
+    mapping and return the list of tied modules accordingly. This gives a unified interface to both transformers v4
+    tied weights and v5 mapped tied weights.
 
     For example: For models which have `embed_tokens` and `lm_head` as the tied keys this function will return
     [`lm_head`].
