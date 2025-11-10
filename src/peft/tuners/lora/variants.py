@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import collections
+import math
 import warnings
 from typing import Any, Optional
 
@@ -771,3 +772,85 @@ def get_alora_offsets_for_generate(model: nn.module, *args, **kwargs):
 
             kwargs["alora_offsets"] = None
     return kwargs
+
+
+class BlockDiagonalLinear(nn.Module):
+    def __init__(self, in_features: int, out_features: int, nblocks: int, bias: bool = True):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.nblocks = nblocks
+        self.weight = nn.Parameter(torch.empty(out_features, in_features // nblocks))
+        torch.nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        if bias:
+            raise NotImplementedError
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        first_dims = x.shape[:-1]
+        if not len(x.shape) == 2:
+            x = x.reshape(-1, x.shape[-1])
+        B = x.shape[0]
+        nb = self.nblocks
+        m = x.shape[-1] // nb
+        n = self.out_features // nb
+        x = x.reshape(B, nb, m)
+        w = self.weight.view(nb, n, m)
+        out = torch.einsum("bim,inm->bin", x, w)
+        return out.reshape(*first_dims, -1)
+
+
+class BdLoraLinearVariant(LoraVariant):
+    @staticmethod
+    def init(module: Linear, adapter_name: str, **kwargs) -> None:
+        use_bdlora = kwargs.get("use_bdlora")
+        if not use_bdlora:
+            return
+
+        target_name = kwargs.get("target_name", "")
+
+        # Handle case where use_bdlora is a dict (from saved config) instead of BdLoraConfig object
+        if isinstance(use_bdlora, dict):
+            from peft.tuners.lora.config import BdLoraConfig
+
+            use_bdlora = BdLoraConfig(**use_bdlora)
+
+        lora_a_blockdiagonal_pattern = use_bdlora.lora_a_is_blockdiagonal or []
+        lora_b_blockdiagonal_pattern = use_bdlora.lora_b_is_blockdiagonal or []
+        nblocks = use_bdlora.nblocks
+
+        has_lora_a_blockdiagonal = any(pattern in target_name for pattern in lora_a_blockdiagonal_pattern)
+        has_lora_b_blockdiagonal = any(pattern in target_name for pattern in lora_b_blockdiagonal_pattern)
+
+        if has_lora_a_blockdiagonal and has_lora_b_blockdiagonal:
+            raise ValueError(f"Target {target_name} matches both A and B block-diagonal patterns")
+
+        if has_lora_a_blockdiagonal:
+            r = module.lora_A[adapter_name].out_features
+            layer = BlockDiagonalLinear(module.in_features, r, nblocks=nblocks, bias=False)
+            module.lora_A[adapter_name] = layer
+        elif has_lora_b_blockdiagonal:
+            r = module.lora_B[adapter_name].in_features
+            layer = BlockDiagonalLinear(r, module.out_features, nblocks=nblocks, bias=False)
+            module.lora_B[adapter_name] = layer
+
+    @staticmethod
+    def forward(module: Linear, active_adapter: str, x: torch.Tensor, result: torch.Tensor, **kwargs) -> torch.Tensor:
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        dropout = module.lora_dropout[active_adapter]
+        scaling = module.scaling[active_adapter]
+        x = dropout(x)
+        result += lora_B(lora_A(x)) * scaling
+        return result
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        return orig_weight + module.get_delta_weight(active_adapter)
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        orig_weight.data += module.get_delta_weight(active_adapter)
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        return orig_weight - module.get_delta_weight(active_adapter)

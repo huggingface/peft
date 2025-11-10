@@ -120,6 +120,37 @@ class ArrowConfig:
 
 
 @dataclass
+class BdLoraConfig:
+    """
+    Configuration for BD-LoRA (Block-Diagonal LoRA).
+
+    Args:
+        lora_a_is_blockdiagonal: Modules where LoRA-A is block-diagonal
+        lora_b_is_blockdiagonal: Modules where LoRA-B is block-diagonal
+        nblocks: Number of blocks in block-diagonal matrices
+    """
+
+    lora_a_is_blockdiagonal: Optional[list[str]] = field(
+        default=None,
+        metadata={
+            "help": "Modules where the LoRA-A is block-diagonal. Matches each pattern in the list against the module name via `pattern is in target_name`. Example: ['up_proj', 'q_proj', 'v_proj', 'k_proj']"
+        },
+    )
+    lora_b_is_blockdiagonal: Optional[list[str]] = field(
+        default=None,
+        metadata={
+            "help": "Modules where the LoRA-B is block-diagonal. Matches each pattern in the list against the module name via `pattern is in target_name`. Example: ['out_proj', 'down_proj']"
+        },
+    )
+    nblocks: int = field(
+        default=1,
+        metadata={
+            "help": "Number of blocks each block-diagonal matrix has. If using BD-LoRA to speed up inference, set it to be equal to the desired sharding degree during serving."
+        },
+    )
+
+
+@dataclass
 class EvaConfig:
     """
     This is the sub-configuration class to store the configuration for a data-driven initialization via EVA. EVA was
@@ -657,6 +688,15 @@ class LoraConfig(PeftConfig):
                 "it needs to be targeted with `target_parameters`. As an example, for Llama4, you can pass: "
                 "`target_parameters=['feed_forward.experts.gate_up_proj', 'feed_forward.experts.down_proj]`. Passing a "
                 "string for regex matching is not implemented yet."
+            )
+        },
+    )
+    use_bdlora: Optional[BdLoraConfig] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Enable BD-LoRA (Block-Diagonal LoRA) by providing a BdLoraConfig. This technique uses block-diagonal matrices for LoRA-A or LoRA-B "
+                "factors to enable faster multi-LoRA serving by eliminating communication overheads in distributed settings."
             )
         },
     )
