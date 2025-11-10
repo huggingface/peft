@@ -3465,9 +3465,9 @@ class MixedPrecisionTests(unittest.TestCase):
 @require_non_xpu
 @require_torch_gpu
 @require_aqlm
-@unittest.skipUnless(
-    version.parse(importlib.metadata.version("transformers")) >= version.parse("4.38.0"),
-    "test requires `transformers>=4.38.0`",
+@pytest.mark.skipif(
+    not version.parse(importlib.metadata.version("transformers")) >= version.parse("4.38.0"),
+    reason="test requires `transformers>=4.38.0`",
 )
 class PeftAqlmGPUTests(unittest.TestCase):
     r"""
@@ -3550,9 +3550,9 @@ class PeftAqlmGPUTests(unittest.TestCase):
 @require_non_xpu
 @require_torch_gpu
 @require_hqq
-@unittest.skipUnless(
-    version.parse(importlib.metadata.version("transformers")) >= version.parse("4.36.1"),
-    "test requires `transformers>=4.36.1`",
+@pytest.mark.skipif(
+    not version.parse(importlib.metadata.version("transformers")) >= version.parse("4.36.1"),
+    reason="test requires `transformers>=4.36.1`",
 )
 class PeftHqqGPUTests(unittest.TestCase):
     r"""
