@@ -97,7 +97,9 @@ class OFTRotationModule(nn.Module):
         self.use_cayley_neumann = use_cayley_neumann
         self.num_cayley_neumann_terms = num_cayley_neumann_terms
         # Create indices for upper triangle (excluding diagonal)
-        self.rows, self.cols = torch.triu_indices(block_size, block_size, 1)
+        rows, cols = torch.triu_indices(block_size, block_size, 1)
+        self.register_buffer("rows", rows, persistent=False)
+        self.register_buffer("cols", cols, persistent=False)
 
     def _pytorch_skew_symmetric(self, vec, block_size):
         batch_size = vec.shape[0]
@@ -139,9 +141,11 @@ class OFTRotationModule(nn.Module):
                     R.add_(Q_squared, alpha=2.0)
 
                     Q_power = Q_squared
-                    for i in range(3, num_neumann_terms):
+                    for _ in range(3, num_neumann_terms - 1):
                         Q_power = torch.bmm(Q_power, Q_skew)
                         R.add_(Q_power, alpha=2.0)
+                    Q_power = torch.bmm(Q_power, Q_skew)
+                    R.add_(Q_power)
         else:
             id_mat = (
                 torch.eye(Q_skew.shape[-1], device=Q_skew.device)
@@ -621,9 +625,13 @@ class Linear(nn.Module, OFTLayer):
             if active_adapter in self.oft_R.keys():
                 oft_mat = self.get_delta_weight(active_adapter)
 
+                previous_dtype = oft_mat.dtype
+                if previous_dtype != torch.float32:
+                    oft_mat = oft_mat.to(torch.float32)
+
                 orig_weights = self.get_base_layer().weight.data
                 orig_weights = torch.transpose(orig_weights, 0, 1)
-                orig_weights = torch.mm(oft_mat.t(), orig_weights.to(oft_mat.dtype))
+                orig_weights = torch.mm(torch.linalg.inv(oft_mat).to(previous_dtype), orig_weights.to(previous_dtype))
                 orig_weights = torch.transpose(orig_weights, 0, 1)
 
                 base_layer.weight.data = orig_weights.to(orig_dtype)
@@ -855,13 +863,17 @@ class Conv2d(nn.Module, OFTLayer):
             if active_adapter in self.oft_R.keys():
                 oft_mat = self.get_delta_weight(active_adapter)
 
+                previous_dtype = oft_mat.dtype
+                if previous_dtype != torch.float32:
+                    oft_mat = oft_mat.to(torch.float32)
+
                 orig_weights = self.get_base_layer().weight.data.clone()
                 orig_weights = orig_weights.view(
                     self.out_features,
                     self.in_features * self.get_base_layer().kernel_size[0] * self.get_base_layer().kernel_size[0],
                 )
                 orig_weights = torch.transpose(orig_weights, 0, 1)
-                orig_weights = torch.mm(oft_mat.t(), orig_weights.to(oft_mat.dtype))
+                orig_weights = torch.mm(torch.linalg.inv(oft_mat).to(previous_dtype), orig_weights.to(previous_dtype))
                 orig_weights = torch.transpose(orig_weights, 0, 1)
                 orig_weights = orig_weights.view(
                     self.out_features,

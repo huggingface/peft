@@ -28,7 +28,7 @@ peft_model.print_trainable_parameters()
 
 dataset = load_dataset("imdb", split="train[:1%]")
 
-training_args = SFTConfig(dataset_text_field="text", max_seq_length=128)
+training_args = SFTConfig(dataset_text_field="text", max_length=128)
 trainer = SFTTrainer(
     model=peft_model,
     args=training_args,

@@ -109,7 +109,7 @@ preprocess_corda(model, lora_config, run_model=run_model)
 peft_model = get_peft_model(model, lora_config)
 peft_model.print_trainable_parameters()
 
-training_args = SFTConfig(dataset_text_field="text", max_seq_length=128)
+training_args = SFTConfig(dataset_text_field="text", max_length=128)
 trainer = SFTTrainer(
     model=peft_model,
     args=training_args,

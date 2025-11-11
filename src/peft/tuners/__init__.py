@@ -40,6 +40,7 @@ from .miss import MissConfig, MissModel
 from .mixed import MixedModel
 from .multitask_prompt_tuning import MultitaskPromptEmbedding, MultitaskPromptTuningConfig, MultitaskPromptTuningInit
 from .oft import OFTConfig, OFTModel
+from .osf import OSFConfig, OSFModel
 from .p_tuning import PromptEncoder, PromptEncoderConfig, PromptEncoderReparameterizationType
 from .poly import PolyConfig, PolyModel
 from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
@@ -95,6 +96,8 @@ __all__ = [
     "MultitaskPromptTuningInit",
     "OFTConfig",
     "OFTModel",
+    "OSFConfig",
+    "OSFModel",
     "PolyConfig",
     "PolyModel",
     "PrefixEncoder",

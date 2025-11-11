@@ -74,8 +74,8 @@ class ArrowConfig:
     """
     This is the sub-configuration class to store the configuration for Arrow and GenKnowSub algorithm. Arrow is a
     routing algorithm to combine the trained LoRA modules to solve new tasks, proposed in
-    'https://arxiv.org/pdf/2405.11157'. GenKnowSub is a refinement on the trained modules before being combined via
-    Arrow, introduced in 'https://aclanthology.org/2025.acl-short.54/'
+    'https://huggingface.co/papers/2405.11157'. GenKnowSub is a refinement on the trained modules before being combined
+    via Arrow, introduced in 'https://aclanthology.org/2025.acl-short.54/'
     """
 
     top_k: int = field(
@@ -663,6 +663,17 @@ class LoraConfig(PeftConfig):
     arrow_config: Optional[ArrowConfig] = field(
         default=None, metadata={"help": "The necessary config to apply arrow routing on the model."}
     )
+    ensure_weight_tying: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Whether to tie weights or not after peft initialization. "
+                "This will ensure that the adapters added to the tied layers "
+                "are also tied. This is only applicable for layers passed via "
+                "`modules_to_save`."
+            )
+        },
+    )
 
     def to_dict(self):
         """
@@ -681,6 +692,10 @@ class LoraConfig(PeftConfig):
         self.exclude_modules = (
             set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
+
+        if self.ensure_weight_tying:
+            self.modules_to_tie = None
+
         if isinstance(self.target_parameters, str):
             raise TypeError("`target_parameters` must be a list of strings or None.")
 

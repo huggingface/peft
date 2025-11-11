@@ -284,9 +284,25 @@ TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING = {
     "qwen3": ["q_proj", "v_proj"],
 }
 
-##################
-# MISC CONSTANTS #
-##################
+TRANSFORMERS_MODELS_TO_OSF_TARGET_MODULES_MAPPING = {
+    "llama": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "down_proj", "up_proj"],
+    "llama4": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "down_proj", "up_proj"],
+    "mistral": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "down_proj", "up_proj"],
+    "mixtral": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "down_proj", "up_proj"],
+    "gemma": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "down_proj", "up_proj"],
+    "gemma2": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "down_proj", "up_proj"],
+    "gemma3_text": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "down_proj", "up_proj"],
+    "qwen2": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "down_proj", "up_proj"],
+    "qwen3": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "down_proj", "up_proj"],
+    "phi": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "down_proj", "up_proj"],
+    "gpt2": ["c_attn", "c_proj"],
+    "bloom": ["query_key_value", "dense_4h_to_h"],
+    "opt": ["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"],
+    "gptj": ["q_proj", "k_proj", "v_proj", "out_proj", "fc_in", "fc_out"],
+    "gpt_neox": ["query_key_value", "dense_4h_to_h"],
+    "falcon": ["query_key_value", "dense_4h_to_h"],
+    "gpt_bigcode": ["c_attn", "c_proj"],
+}
 
 TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING = {
     "t5": ["q", "v"],
@@ -326,6 +342,9 @@ TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING = {
     "qwen3": ["q_proj", "v_proj"],
 }
 
+##################
+# MISC CONSTANTS #
+##################
 WEIGHTS_NAME = "adapter_model.bin"
 SAFETENSORS_WEIGHTS_NAME = "adapter_model.safetensors"
 CONFIG_NAME = "adapter_config.json"

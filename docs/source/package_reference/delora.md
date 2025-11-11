@@ -18,9 +18,14 @@ rendered properly in your Markdown viewer.
 [DeLoRA](https://huggingface.co/papers/2503.18225) is a parameter-efficient fine-tuning technique that implicitly maintains a Frobenius boundary with respect to the pretrained weights by normalizing and scaling learnable low-rank matrices. This effectively decouples the learning of directions (BA term) and magnitude (boundary term) of the weight updates, avoiding catastrophic shifts in the adapted weights and enhancing robustness to hyperparameter choices.
 
 Note:
-- use 10-100x larger learning rate than standard LoRA variants (typical values from 1e-3/1e-2/..)
-- do not set a too small initial boundary parameter lambda (typical values are around 10/15/..)
-- setting different lambdas to different layers is possible
+- use a learning rate 10-100x larger than for standard LoRA variants (typical values from 1e-3/1e-2/..)
+- ensure the initial boundary parameter lambda is not too small (typical values around 10/15/..). Setting different lambdas to different layers is possible
+
+DeLoRA currently has the following constraints:
+- Only nn.Linear layers are supported.
+- Quantized layers are not supported.
+
+If these constraints don't work for your use case, consider other methods instead.
 
 The abstract from the paper is:
 

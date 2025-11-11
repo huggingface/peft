@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.17.2.dev0"
+__version__ = "0.18.0.rc1.dev0"
 
 from .auto import (
     MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
@@ -84,6 +84,8 @@ from .tuners import (
     MultitaskPromptTuningInit,
     OFTConfig,
     OFTModel,
+    OSFConfig,
+    OSFModel,
     PolyConfig,
     PolyModel,
     PrefixEncoder,
@@ -181,6 +183,8 @@ __all__ = [
     "MultitaskPromptTuningInit",
     "OFTConfig",
     "OFTModel",
+    "OSFConfig",
+    "OSFModel",
     "PeftConfig",
     "PeftMixedModel",
     "PeftModel",

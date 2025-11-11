@@ -39,6 +39,7 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
+    OSFConfig,
     PeftModel,
     PrefixTuningConfig,
     PromptEncoderConfig,
@@ -88,6 +89,21 @@ def _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs):
 
     if config_cls not in (IA3Config, LoHaConfig, LoKrConfig, LoraConfig):
         pytest.skip("This PEFT method does not support Conv1D layers, skipping this test.")
+
+
+def _skip_if_merging_not_supported(model_id, config_cls):
+    """Skip tests for cases where adapter merge is unavailable.
+
+    - Conv2dGroups: merge is not supported (by design) — see PR #2403.
+    - OSF: merge/unload are not implemented yet in the tuner.
+    """
+    if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
+        pytest.skip(
+            f"Skipping test for {model_id} as adapter merging is not supported for Conv2dGroups. "
+            "(See https://github.com/huggingface/peft/pull/2403)"
+        )
+    if issubclass(config_cls, OSFConfig):
+        pytest.skip(f"Skipping test for {model_id} with {config_cls} as OSF adapter merge/unload are not implemented.")
 
 
 class PeftCommonTester:
@@ -750,8 +766,8 @@ class PeftCommonTester:
 
     def _test_safe_merge(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(config_cls, config_kwargs)
-
         torch.manual_seed(0)
+
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
             config = config_cls(
@@ -1155,12 +1171,19 @@ class PeftCommonTester:
                 # more than 1 layer, i.e. setting layers_to_transform=[0] should target fewer layers
                 assert nb_trainable < nb_trainable_all
 
-    def _test_training_gradient_checkpointing(self, model_id, config_cls, config_kwargs):
+    def _test_training_gradient_checkpointing(self, model_id, config_cls, config_kwargs, use_reentrant=True):
+        # Note that certain configurations, such as activated lora with 'alora_invocation_tokens': [1000], do not
+        # generate gradients since the adapter is never activated so this will be a no-op for this test. It is still
+        # a valid test but it might be confusing to see a test pass if it is not supposed to.
+
         if config_cls == PrefixTuningConfig:
             pytest.skip("Prefix Tuning does not support gradient checkpointing, skipping this test.")
         if (config_cls == AdaLoraConfig) and ("roberta" in model_id.lower()):
             # TODO: no gradients on the "dense" layer, other layers work, not sure why
             pytest.skip("AdaLora with RoBERTa does not work correctly")
+
+        if "gptbigcode" in model_id.lower():
+            self.skipTest("GPTBigCode currently doesn't implement gradient checkpointing correctly.")
 
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
@@ -1168,7 +1191,10 @@ class PeftCommonTester:
             if not getattr(model, "supports_gradient_checkpointing", False):
                 pytest.skip(f"Model {model_id} does not support gradient checkpointing")
 
-            model.gradient_checkpointing_enable()
+            # Disable lora_dropout and friends to remove non-determinism in gradient creation
+            for key in list(config_kwargs.keys()):
+                if key.endswith("dropout"):
+                    del config_kwargs[key]
 
             config = config_cls(
                 base_model_name_or_path=model_id,
@@ -1176,14 +1202,36 @@ class PeftCommonTester:
             )
             model = get_peft_model(model, config)
             model = model.to(self.torch_device)
+            params = [(n, p) for n, p in model.named_parameters() if p.requires_grad]
+
+            # if we don't set this, gradient checkpointing is not activated.
+            model.train(True)
 
             inputs = self.prepare_inputs_for_testing()
 
-            # check if `training` works
-            output = model(**inputs)[0]
+            # invocation to get the reference non-zero grads that are supposed to exist without gradient checkpointing;
+            # note we're squaring the output for bigger gradients
+            output = model(**inputs)[0] ** 2
 
             loss = output.sum()
             loss.backward()
+
+            non_zero_grad_params_normal = {n for n, p in params if p.grad.abs().sum() > 0}
+
+            for name, param in params:
+                param.grad = None
+
+            # invocation with gradient checkpointing for comparison
+            model.prepare_model_for_gradient_checkpointing(model)
+            model.gradient_checkpointing_enable({"use_reentrant": use_reentrant})
+
+            output = model(**inputs)[0] ** 2
+
+            loss = output.sum()
+            loss.backward()
+
+            non_zero_grad_params_checkpointing = {n for n, p in params if p.grad.abs().sum() > 0}
+            assert non_zero_grad_params_normal == non_zero_grad_params_checkpointing
 
             for n, param in model.named_parameters():
                 if "prompt_encoder." in n:  # prompt tuning methods
@@ -1254,9 +1302,9 @@ class PeftCommonTester:
                 assert param.grad is not None
 
     def _test_delete_adapter(self, model_id, config_cls, config_kwargs):
+        _skip_if_deleting_adapter_not_supported(config_cls, config_kwargs)
         if config_cls == AdaLoraConfig:
             pytest.skip("AdaLoRA does not support multiple adapters")
-        _skip_if_deleting_adapter_not_supported(config_cls, config_kwargs)
 
         config = config_cls(
             base_model_name_or_path=model_id,

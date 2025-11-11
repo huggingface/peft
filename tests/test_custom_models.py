@@ -46,6 +46,7 @@ from peft import (
     LoraConfig,
     MissConfig,
     OFTConfig,
+    OSFConfig,
     PeftModel,
     PeftWarning,
     RandLoraConfig,
@@ -61,7 +62,7 @@ from peft import (
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import AuxiliaryTrainingWrapper, infer_device
 
-from .testing_common import PeftCommonTester
+from .testing_common import PeftCommonTester, _skip_if_merging_not_supported
 from .testing_utils import get_state_dict, require_non_cpu, set_init_weights_false
 
 
@@ -698,6 +699,11 @@ TEST_CASES = [
         TrainableTokensConfig,
         {"target_modules": ["emb"], "token_indices": [0, 1, 3], "init_weights": False},
     ),
+    ################################
+    # Orthogonal Subspace Learning #
+    ################################
+    ("Vanilla MLP 1 OSF", "MLP", OSFConfig, {}),
+    ("Vanilla MLP 2 OSF", "MLP", OSFConfig, {"target_svd_config": {"lin0.weight": 5, "lin1.weight": 1}}),
     ############
     # RandLora #
     ############
@@ -1169,6 +1175,7 @@ PREFIXES = {
     DeloraConfig: "delora_",
     TrainableTokensConfig: "trainable_tokens_",
     WaveFTConfig: "waveft_",
+    OSFConfig: "osf_",
 }
 
 
@@ -1715,47 +1722,31 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
-        # https://github.com/huggingface/peft/pull/2403
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
-            pytest.skip(
-                f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
-            )
+        _skip_if_merging_not_supported(model_id, config_cls)
 
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
-        # https://github.com/huggingface/peft/pull/2403
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
-            pytest.skip(
-                f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
-            )
+        _skip_if_merging_not_supported(model_id, config_cls)
 
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers_fp16(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_is_idempotent(self, test_name, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls)
+
         # calling merge twice with the same arguments should not change the output
-
-        # https://github.com/huggingface/peft/pull/2403
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
-            pytest.skip(
-                f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
-            )
-
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers_is_idempotent(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_safe_merge(self, test_name, model_id, config_cls, config_kwargs):
-        # https://github.com/huggingface/peft/pull/2403
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
-            pytest.skip(
-                f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
-            )
+        _skip_if_merging_not_supported(model_id, config_cls)
 
+        # calling merge twice with the same arguments should not change the output
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_safe_merge(model_id, config_cls, config_kwargs)
 
@@ -1802,8 +1793,11 @@ class TestPeftCustomModel(PeftCommonTester):
         pass
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
-    def test_training_custom_models_gradient_checkpointing(self, test_name, model_id, config_cls, config_kwargs):
-        self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs)
+    @pytest.mark.parametrize("use_reentrant", [True, False])
+    def test_training_custom_models_gradient_checkpointing(
+        self, test_name, model_id, config_cls, config_kwargs, use_reentrant
+    ):
+        self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs, use_reentrant=use_reentrant)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_inference_safetensors(self, test_name, model_id, config_cls, config_kwargs):
@@ -1868,9 +1862,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
-            # this model does not support merging
-            return
+        _skip_if_merging_not_supported(model_id, config_cls)
 
         model.merge_adapter(safe_merge=False)
         model(**X)
@@ -1910,9 +1902,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
-            # this model does not support merging
-            return
+        _skip_if_merging_not_supported(model_id, config_cls)
 
         model.merge_adapter(safe_merge=False)
         model(**X)
@@ -1951,9 +1941,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
-            # this model does not support merging
-            return
+        _skip_if_merging_not_supported(model_id, config_cls)
 
         model.merge_adapter(safe_merge=False)
         model(**X)
@@ -1992,9 +1980,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
-            # this model does not support merging
-            return
+        _skip_if_merging_not_supported(model_id, config_cls)
 
         model.merge_adapter(safe_merge=False)
         model(**X)
@@ -2071,7 +2057,7 @@ class TestPeftCustomModel(PeftCommonTester):
             lr = 0.1  # otherwise we get nan
         elif "mha" in model_id.lower():
             lr = 1e-3  # we get exploding gradients with MHA when learning rate is too high
-        elif issubclass(config_cls, VBLoRAConfig) or issubclass(config_cls, RandLoraConfig):
+        elif issubclass(config_cls, (VBLoRAConfig, RandLoraConfig, OSFConfig)):
             lr = 0.01  # otherwise we get nan
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
@@ -2122,7 +2108,11 @@ class TestPeftCustomModel(PeftCommonTester):
             torch.nn.init.zeros_(model.vblora_vector_bank["default"])
         model.eval()
         outputs_before = model(**X)
-        assert torch.allclose(outputs_base, outputs_before)
+        # OSF uses SVD reconstruction which introduces small numerical differences
+        if issubclass(config_cls, OSFConfig):
+            assert torch.allclose(outputs_base, outputs_before, rtol=1e-4, atol=1e-4)
+        else:
+            assert torch.allclose(outputs_base, outputs_before)
 
         if issubclass(config_cls, VBLoRAConfig):
             # initialize `vblora_vector_bank` so it can be trained
@@ -2160,18 +2150,16 @@ class TestPeftCustomModel(PeftCommonTester):
         else:
             rtol, atol = 1e-5, 1e-8
         assert not torch.allclose(outputs_before, outputs_after, rtol=rtol, atol=atol)
-        assert torch.allclose(outputs_before, outputs_disabled)
+        # OSF uses SVD reconstruction which introduces small numerical differences
+        if issubclass(config_cls, OSFConfig):
+            assert torch.allclose(outputs_before, outputs_disabled, rtol=1e-4, atol=1e-4)
+        else:
+            assert torch.allclose(outputs_before, outputs_disabled)
         assert torch.allclose(outputs_after, outputs_enabled_after_disable)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_disable_adapters_with_merging(self, test_name, model_id, config_cls, config_kwargs):
-        # Same test as test_disable_adapters, but additionally merge the trained adapter.
-
-        # https://github.com/huggingface/peft/pull/2403
-        if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
-            pytest.skip(
-                f"Skipping test for {model_id} as merging is not supported. (See https://github.com/huggingface/peft/pull/2403 for details)"
-            )
+        _skip_if_merging_not_supported(model_id, config_cls)
 
         # same as test_disable_adapters, but with merging
         X = self.prepare_inputs_for_testing()

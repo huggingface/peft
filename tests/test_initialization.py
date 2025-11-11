@@ -69,8 +69,9 @@ from peft.tuners.lora.corda import preprocess_corda
 from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
+from peft.utils.other import ModulesToSaveWrapper
 
-from .testing_utils import load_dataset_english_quotes, require_deterministic_for_xpu
+from .testing_utils import hub_online_once, load_dataset_english_quotes, require_deterministic_for_xpu
 
 
 try:
@@ -1143,6 +1144,14 @@ class TestLoraInitialization:
         )
         with pytest.raises(ValueError, match=msg):
             get_peft_model(model, config, adapter_name="foobar")
+
+    def test_trainable_token_indices_targets_head_and_embedding(self):
+        # targeting embedding and LM head explicitly, see #2863
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            config = LoraConfig(trainable_token_indices={"lm_head": [0], "embed_tokens": [0]})
+            get_peft_model(model, config)  # does not raise
 
     @require_deterministic_for_xpu
     def test_lora_use_dora_linear(self, data):
@@ -4792,3 +4801,140 @@ class TestLoadPeftKeyMapping:
     def test_key_mapping_save_new_load_old_vblora(self, old_model, new_model, tmp_path):
         # save the new model, load it into the old model, should work without issues (forwards compatibility)
         self.check_vblora_load_no_warning(new_model, old_model, tmp_path)
+
+
+class TestWeightTying:
+    """Test class to check the weight tying of adapters."""
+
+    torch_device = infer_device()
+
+    def get_lm_model(self, tie_weights=True):
+        # Mimicking a LM with embed_tokens and lm_head layers
+        # to test weight tying of adapters
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+                self.embed_tokens = nn.Embedding(1000, 1000)
+                self.linear = nn.Linear(1000, 1000, bias=False)
+
+        class CausalLM(nn.Module):
+            if tie_weights:
+                _tied_weights_keys = ["lm_head.weight"]
+
+            def __init__(self):
+                super().__init__()
+                self.model = MyModule()
+                self.config = {"tie_word_embeddings": tie_weights}
+                self.lm_head = nn.Linear(1000, 1000, bias=False)
+
+                if tie_weights:
+                    self.lm_head.weight = self.model.embed_tokens.weight
+
+            def prepare_inputs_for_generation(self):
+                return
+
+            def get_input_embeddings(self):
+                return self.model.embed_tokens
+
+        return CausalLM().eval().to(self.torch_device)
+
+    def test_weight_tying_tied_model_lora(self):
+        # If weight tying is enabled and `embed_tokens`
+        # is passed as a `modules_to_save`, it needs to be ensured
+        # that lm_head is tied to the adapter added to `embed_tokens`
+
+        model = self.get_lm_model()
+
+        embed_token_config = LoraConfig(
+            modules_to_save=["embed_tokens"],
+            target_modules=["linear"],
+            ensure_weight_tying=True,
+        )
+
+        model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper), (
+            "Embed tokens is not added in Modules to Save"
+        )
+        assert type(model.base_model.model.model.embed_tokens) is type(model.base_model.model.lm_head), (
+            "Embed tokens and LM head types are not same"
+        )
+
+        # Validating that all model parameters are same
+        embed_np = dict(model.base_model.model.model.embed_tokens.named_parameters())
+        lm_head_np = dict(model.base_model.model.lm_head.named_parameters())
+
+        for k in embed_np.keys():
+            assert torch.allclose(embed_np[k], lm_head_np[k])
+            assert embed_np[k] is lm_head_np[k]
+
+    def test_weight_tying_non_tied_model_lora(self):
+        model = self.get_lm_model(tie_weights=False)
+        embed_token_config = LoraConfig(
+            modules_to_save=["embed_tokens"],
+            target_modules=["linear"],
+            ensure_weight_tying=True,
+        )
+        with pytest.warns(UserWarning, match="no tied modules were found in the model"):
+            model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper), (
+            "Embed tokens is not added in Modules to Save"
+        )
+        assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear), (
+            "LM head is not of type nn.linear"
+        )
+
+    def test_not_weight_tying_tied_model_lora(self):
+        model = self.get_lm_model()
+        embed_token_config = LoraConfig(
+            modules_to_save=["embed_tokens"],
+            target_modules=["linear"],
+            ensure_weight_tying=False,
+        )
+        with pytest.warns(UserWarning, match="`ensure_weight_tying` is not set to True"):
+            model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper), (
+            "Embed tokens is not added in Modules to Save"
+        )
+        assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear), (
+            "LM head is not of type nn.linear"
+        )
+
+    def test_weight_tying_tied_model_no_embed_lora(self):
+        model = self.get_lm_model()
+        embed_token_config = LoraConfig(
+            target_modules=["linear"],
+            ensure_weight_tying=True,
+        )
+
+        with pytest.warns(UserWarning, match="no tied modules are added in `modules_to_save`"):
+            model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.embed_tokens, torch.nn.modules.Embedding)
+        assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear)
+
+        # Validating that all model parameters are same
+        embed_np = dict(model.base_model.model.model.embed_tokens.named_parameters())
+        lm_head_np = dict(model.base_model.model.lm_head.named_parameters())
+
+        for k in embed_np.keys():
+            assert torch.allclose(embed_np[k], lm_head_np[k])
+            assert embed_np[k] is lm_head_np[k]
+
+    def test_weight_tying_tied_model_lokr(self):
+        model = self.get_lm_model()
+
+        embed_token_config = LoKrConfig(modules_to_save=["embed_tokens"], target_modules=["linear"])
+
+        with pytest.warns(UserWarning, match="no implementation exists to tie the adapters"):
+            model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper), (
+            "Embed tokens is not added in Modules to Save"
+        )
+        assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear), (
+            "LM head is not of type nn.linear"
+        )

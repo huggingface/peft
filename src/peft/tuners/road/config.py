@@ -28,7 +28,7 @@ RoadVariant = Literal["road_1", "road_2", "road_4"]
 class RoadConfig(PeftConfig):
     """
     This is the configuration class to store the configuration of a [`RoadModel`]. RoAd adapter is proposed in
-    https://arxiv.org/pdf/2409.00119.
+    https://huggingface.co/papers/2409.00119.
 
     Args:
         variant (Union[`RoadVariant`, `str`]):
