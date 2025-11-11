@@ -25,6 +25,7 @@ from operator import attrgetter
 
 import pytest
 import torch
+import transformers
 import yaml
 from diffusers import StableDiffusionPipeline
 from packaging import version
@@ -47,6 +48,7 @@ from peft import (
     PromptTuningConfig,
     RoadConfig,
     VBLoRAConfig,
+    VeraConfig,
     get_peft_model,
     get_peft_model_state_dict,
     inject_adapter_in_model,
@@ -73,7 +75,7 @@ def _skip_if_merging_not_supported(model_id, config_cls, config_kwargs):
         pytest.skip("Test not applicable for Activated LoRA")
     if issubclass(config_cls, OSFConfig):
         pytest.skip(f"Skipping test for {model_id} with {config_cls} as OSF adapter merge/unload are not implemented.")
-    if (model_id == "Conv2dGroups2") and (config_cls == LoraConfig):
+    if model_id.startswith("Conv2dGroups") and (config_cls == LoraConfig):
         # note: right now, only LoRA supports groups>1, if other PEFT methods add support, they might also need to skip
         pytest.skip("Merging conv layers with groups>1 and LoRA is not supported.")
 
@@ -1134,7 +1136,7 @@ class PeftCommonTester:
                 )
 
                 logits_from_pretrained = model_from_pretrained(**inputs)[0][0]
-                if config_cls == VBLoRAConfig:
+                if config_cls in (VBLoRAConfig, VeraConfig):
                     atol, rtol = 1e-3, 1e-3
                 else:
                     atol, rtol = 1e-4, 1e-4
@@ -1174,6 +1176,9 @@ class PeftCommonTester:
 
         if "gptbigcode" in model_id.lower():
             pytest.skip("GPTBigCode currently doesn't implement gradient checkpointing correctly.")
+        if "bart" in model_id.lower() and version.parse(transformers.__version__) <= version.parse("5.0"):
+            # TODO: remove once torch < 5.0 no longer supported
+            pytest.skip("Bart in transformers < 5.0 doesn't handle input sharing well enough. See transformers#41821")
 
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
