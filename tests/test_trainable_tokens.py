@@ -584,16 +584,28 @@ class TestTrainableTokens:
     @pytest.fixture()
     def model_weight_tied(self, request, model_id_weight_tied):
         model_weight_tied = AutoModelForCausalLM.from_pretrained(model_id_weight_tied)
+        tied_keys = model_weight_tied._tied_weights_keys
 
+        # TODO remove when transformers <5 is not supported anymore
         if not hasattr(request, "param") or request.param == "list":
-            yield model_weight_tied
+            if isinstance(tied_keys, list):
+                # transformers <5, list is already the default
+                yield model_weight_tied
+            else:
+                # simulate transformers <5 for backward compatibility testing
+                with patch.object(model_weight_tied, "_tied_weights_keys", list(tied_keys.keys())):
+                    yield model_weight_tied
 
         elif request.param == "mapping":
-            # tied_weights_keys uses mapping format, relevant for transformers v5+
-            mapping = {"lm_head.weight": "model.decoder.embed_tokens.weight"}
-
-            with patch.object(model_weight_tied, "_tied_weights_keys", mapping):
+            if isinstance(tied_keys, dict):
+                # transformers >=5, mapping is already the default
                 yield model_weight_tied
+            else:
+                # simulate transformers >=5
+                mapping = {"lm_head.weight": "model.decoder.embed_tokens.weight"}
+
+                with patch.object(model_weight_tied, "_tied_weights_keys", mapping):
+                    yield model_weight_tied
 
         else:
             raise RuntimeError("Invalid request")
