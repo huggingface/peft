@@ -1603,9 +1603,9 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
         input_embedding_params = set(model.get_input_embeddings().parameters())
         candidates = [n for n, p in model.named_parameters(remove_duplicate=False) if p in input_embedding_params]
 
-        # Consider the case that sources and targets are already wrapped by a PEFT method. In that case we need
-        # to restore the base layer names to find the layers via the names from the mapping and translate the
-        # mapped layers back.
+        # Consider the case that sources and targets are already wrapped by a PEFT method. In that case we won't
+        # find them by their old names. Therefore, we need to create a map of the new names to the old names so
+        # that we can translate back and forth.
         peft_reverse_mapping = {base_layer_pattern.sub("", name): name for name in candidates}
 
         # AuxiliaryTrainingWrapper don't have an adapter suffix but still have a base_layer attribute,
