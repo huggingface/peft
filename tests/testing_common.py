@@ -66,11 +66,13 @@ from peft.utils import (
 from .testing_utils import get_state_dict, hub_online_once
 
 
-def _skip_if_merging_not_supported(config_cls, config_kwargs):
+def _skip_if_merging_not_supported(model_id, config_cls, config_kwargs):
     if issubclass(config_cls, PromptLearningConfig):
         pytest.skip("Prompt learning does not support merging, skipping this test.")
     if config_kwargs.get("alora_invocation_tokens") is not None:
         pytest.skip("Test not applicable for Activated LoRA")
+    if issubclass(config_cls, OSFConfig):
+        pytest.skip(f"Skipping test for {model_id} with {config_cls} as OSF adapter merge/unload are not implemented.")
 
 
 def _skip_if_adding_weighted_adapters_not_supported(config):
@@ -89,21 +91,6 @@ def _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs):
 
     if config_cls not in (IA3Config, LoHaConfig, LoKrConfig, LoraConfig):
         pytest.skip("This PEFT method does not support Conv1D layers, skipping this test.")
-
-
-def _skip_if_merging_not_supported(model_id, config_cls):
-    """Skip tests for cases where adapter merge is unavailable.
-
-    - Conv2dGroups: merge is not supported (by design) — see PR #2403.
-    - OSF: merge/unload are not implemented yet in the tuner.
-    """
-    if model_id in ["Conv2dGroups", "Conv2dGroups2"]:
-        pytest.skip(
-            f"Skipping test for {model_id} as adapter merging is not supported for Conv2dGroups. "
-            "(See https://github.com/huggingface/peft/pull/2403)"
-        )
-    if issubclass(config_cls, OSFConfig):
-        pytest.skip(f"Skipping test for {model_id} with {config_cls} as OSF adapter merge/unload are not implemented.")
 
 
 class PeftCommonTester:
@@ -501,7 +488,7 @@ class PeftCommonTester:
                     assert load_result2.missing_keys == []
 
     def _test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
-        _skip_if_merging_not_supported(config_cls, config_kwargs)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
         _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs)
         if (self.torch_device in ["cpu"]) and (version.parse(torch.__version__) <= version.parse("2.1")):
             pytest.skip("PyTorch 2.1 not supported for Half of addmm_impl_cpu_ ")
@@ -521,7 +508,7 @@ class PeftCommonTester:
             _ = model.merge_and_unload()
 
     def _test_merge_layers_nan(self, model_id, config_cls, config_kwargs):
-        _skip_if_merging_not_supported(config_cls, config_kwargs)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
         _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs)
 
         with hub_online_once(model_id):
@@ -582,7 +569,7 @@ class PeftCommonTester:
                 model = model.merge_and_unload(safe_merge=True)
 
     def _test_merge_layers(self, model_id, config_cls, config_kwargs):
-        _skip_if_merging_not_supported(config_cls, config_kwargs)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
         _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs)
 
         with hub_online_once(model_id):
@@ -660,7 +647,7 @@ class PeftCommonTester:
             assert torch.allclose(logits_merged, logits_merged_from_pretrained, atol=atol, rtol=rtol)
 
     def _test_merge_layers_multi(self, model_id, config_cls, config_kwargs):
-        _skip_if_merging_not_supported(config_cls, config_kwargs)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
         if issubclass(config_cls, AdaLoraConfig):
             # AdaLora does not support adding more than 1 adapter
             pytest.skip("AdaLoRA does not support multiple adapters, skipping this test.")
@@ -740,7 +727,7 @@ class PeftCommonTester:
             assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3)
 
     def _test_merge_layers_is_idempotent(self, model_id, config_cls, config_kwargs):
-        _skip_if_merging_not_supported(config_cls, config_kwargs)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
         _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs)
 
         with hub_online_once(model_id):
@@ -765,7 +752,7 @@ class PeftCommonTester:
             assert torch.allclose(logits_0, logits_1, atol=1e-6, rtol=1e-6)
 
     def _test_safe_merge(self, model_id, config_cls, config_kwargs):
-        _skip_if_merging_not_supported(config_cls, config_kwargs)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
         torch.manual_seed(0)
 
         with hub_online_once(model_id):
@@ -1183,7 +1170,7 @@ class PeftCommonTester:
             pytest.skip("AdaLora with RoBERTa does not work correctly")
 
         if "gptbigcode" in model_id.lower():
-            self.skipTest("GPTBigCode currently doesn't implement gradient checkpointing correctly.")
+            pytest.skip("GPTBigCode currently doesn't implement gradient checkpointing correctly.")
 
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
