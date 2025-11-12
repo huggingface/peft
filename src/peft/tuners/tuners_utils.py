@@ -1282,18 +1282,17 @@ class BaseTuner(nn.Module, ABC):
         tied_weight_keys = self._get_tied_weight_keys(model)
 
         if getattr(peft_config, "ensure_weight_tying", False):
-            if (is_embedding_to_save or is_embedding_in_target) and tied_weight_keys:
+            if tied_weight_keys:
                 if is_embedding_to_save:
                     self._add_modules_to_tie(peft_config, tied_weight_keys)
                 elif is_embedding_in_target:
                     self._add_targets_to_tie(peft_config, tied_weight_keys)
-
-            elif not (is_embedding_to_save or is_embedding_in_target) and tied_weight_keys:
-                warnings.warn(
-                    "You have requested `ensure_weight_tying`, but no tied modules are added in either `modules_to_save` or `target_modules`"
-                )
-
-            elif not tied_weight_keys:
+                else:
+                    warnings.warn(
+                        "You have requested `ensure_weight_tying`, but no tied modules are added in either "
+                        "`modules_to_save` or `target_modules`"
+                    )
+            else:
                 warnings.warn("You have requested `ensure_weight_tying`, but no tied modules were found in the model")
 
         elif (is_embedding_to_save or is_embedding_in_target) and tied_weight_keys:
