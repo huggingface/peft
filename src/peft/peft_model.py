@@ -23,7 +23,9 @@ from collections.abc import Sequence
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass
+from functools import wraps
 from typing import Any, Literal, Optional, Union
+from unittest.mock import patch
 
 import packaging.version
 import torch
@@ -36,6 +38,7 @@ from safetensors import safe_open
 from safetensors.torch import save_file as safe_save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers import Cache, DynamicCache, EncoderDecoderCache, PreTrainedModel
+from transformers.masking_utils import ALL_MASK_ATTENTION_FUNCTIONS, BlockMask, find_packed_sequence_indices
 from transformers.modeling_outputs import QuestionAnsweringModelOutput, SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
 
@@ -2922,6 +2925,71 @@ class PeftModelForQuestionAnswering(PeftModel):
             )
 
 
+_orig_preprocess_mask_arguments = transformers.masking_utils._preprocess_mask_arguments
+
+
+@wraps(_orig_preprocess_mask_arguments)
+def _prefix_tuning_preprocess_mask_arguments(
+    config,
+    input_embeds: torch.Tensor,
+    attention_mask: Union[torch.Tensor, BlockMask],
+    cache_position: torch.Tensor,
+    past_key_values: Optional[Cache],
+    position_ids: Optional[torch.Tensor],
+    layer_idx: int,
+) -> tuple[bool, Optional[Union[torch.Tensor, BlockMask]], Optional[torch.Tensor], Optional[int], Optional[int]]:
+    # This is a copy of transformers.masking_utils._preprocess_mask_arguments with one small modification to make it
+    # work with prefix tuning. The issue is that with prefix tuning, the attention mask needs to be bigger to account
+    # for the virtual tokens. Transformers doesn't account for those automatically, even though the attention_mask being
+    # passed in already accounts for them. Therefore, we ensure that the kv_length takes them into account.
+
+    # If the mask is already 4D, simply return as-is (it was already prepared, or it is custom)
+    if isinstance(attention_mask, (torch.Tensor, BlockMask)) and len(attention_mask.shape) == 4:
+        return True, attention_mask, None, None, None
+
+    # For TGI/vLLM backends, or other custom attention without equivalent mask creation: we don't need a mask!
+    # Note: it's not ideal to check the `_global_mapping` attribute instead of the object itself, however otherwise
+    # full graph dynamo tracing (i.e. torch.export or compile with `fullgraph=True`) will fail on Python<3.11
+    # with `torch._dynamo.exc.Unsupported: 'inline in skipfiles:Mapping.__contains__ | __contains__, skipped
+    # according trace_rules.lookup SKIP_DIRS'` -- can be removed when we require Python>=3.11
+    if config._attn_implementation not in ALL_MASK_ATTENTION_FUNCTIONS._global_mapping:
+        return True, None, None, None, None
+
+    # Move the mask to correct device, and potentially switch dtype for efficiency
+    if attention_mask is not None and attention_mask.ndim == 2:
+        attention_mask = attention_mask.to(device=cache_position.device, dtype=torch.bool)
+
+    # If using a cache, it can give all information about mask sizes based on seen tokens
+    if past_key_values is not None:
+        kv_length, kv_offset = past_key_values.get_mask_sizes(cache_position, layer_idx)
+    else:  # Otherwise, we infer based on our input
+        # PEFT FIX IS HERE
+        # see https://github.com/huggingface/transformers/pull/41696
+        # 1. Rely on input directly
+        if attention_mask is None:
+            kv_length, kv_offset = input_embeds.shape[1], 0
+        # 2. Rely on the mask instead - needed for special cases like prefix tuning in PEFT
+        else:
+            kv_length, kv_offset = attention_mask.shape[-1], 0
+        # END OF PEFT FIX
+
+    # We check the position_ids for potential packed sequence format (only if the 2D attention mask is explicitly None,
+    # and we don't have past_key_values, i.e. generally a training setup)
+    packed_sequence_mask = None
+    if position_ids is not None and attention_mask is None and past_key_values is None:
+        batch_size = input_embeds.shape[0]
+        # The position ids are sometimes just unsqueezed, without being expanded
+        if batch_size != position_ids.shape[0]:
+            position_ids = position_ids.expand(batch_size, -1)
+        packed_sequence_mask = find_packed_sequence_indices(position_ids)
+
+    return False, attention_mask, packed_sequence_mask, kv_length, kv_offset
+
+
+_ptpma_extra_doc = "    WARNING: This function has been patched by PEFT for use with Prefix Tuning\n"
+_prefix_tuning_preprocess_mask_arguments.__doc__ = _ptpma_extra_doc + _prefix_tuning_preprocess_mask_arguments.__doc__
+
+
 class PeftModelForFeatureExtraction(PeftModel):
     """
     Peft model for extracting features/embeddings from transformer models
@@ -3017,7 +3085,11 @@ class PeftModelForFeatureExtraction(PeftModel):
         if peft_config.peft_type == PeftType.PREFIX_TUNING:
             # overwrite past_kv in kwargs
             kwargs["past_key_values"] = self.get_prompt(batch_size)
-            return self.base_model(input_ids=input_ids, **kwargs)
+            with patch(
+                "transformers.masking_utils._preprocess_mask_arguments", new=_prefix_tuning_preprocess_mask_arguments
+            ):
+                # see comment in _prefix_tuning_preprocess_mask_arguments for explanation
+                return self.base_model(input_ids=input_ids, **kwargs)
         else:
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
@@ -3025,6 +3097,17 @@ class PeftModelForFeatureExtraction(PeftModel):
             prompts = prompts.to(inputs_embeds.dtype)
             inputs_embeds = torch.cat((prompts, inputs_embeds), dim=1)
             return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
+
+    def generate(self, *args, **kwargs):
+        peft_config = self.active_peft_config
+        if peft_config.peft_type != PeftType.PREFIX_TUNING:
+            return super().generate(*args, **kwargs)
+
+        with patch(
+            "transformers.masking_utils._preprocess_mask_arguments", new=_prefix_tuning_preprocess_mask_arguments
+        ):
+            # see comment in _prefix_tuning_preprocess_mask_arguments for explanation
+            return super().generate(*args, **kwargs)
 
 
 @dataclass
