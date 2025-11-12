@@ -1584,7 +1584,6 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
         model = model.model
 
     if not hasattr(model, "_tied_weights_keys"):
-        print("NO TIED WEIGHTS KEYS")
         return []
 
     base_layer_pattern = re.compile(r"[^.]+\.base_layer\.")
@@ -1622,4 +1621,4 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
         # TODO remove this when transformers <v5 is no longer supported
         tied_weights.extend(model._tied_weights_keys)
 
-    return sorted({".".join(name.split(".")[:-1]) for name in tied_weights})
+    return sorted({name.rpartition(".")[0] for name in tied_weights})

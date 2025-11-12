@@ -574,7 +574,7 @@ class TestGetModuleNamesTiedWithEmbedding:
                 model = AutoModelForCausalLM.from_pretrained(model_id)
 
             tied_weights_keys = list(self.model_tied_weights_mapping[model_id].keys())
-            expected_module_names = sorted({".".join(k.split(".")[:-1]) for k in tied_weights_keys})
+            expected_module_names = sorted({k.rpartition(".")[0] for k in tied_weights_keys})
 
             if tied_weights_type == "list":
                 # for transformers >=5 this tests compatibility with transformers <5
