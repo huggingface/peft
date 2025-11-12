@@ -978,3 +978,175 @@ class TestTrainableTokens:
             orig_embedding.embed_scale.fill_(0)
             embedding_output = peft_embedding(x)
             assert (embedding_output == 0.0).all()
+
+    # Tests for ensure_weight_tying parameter with trainable_token_indices
+    # See #2864 for details on the expected behavior
+    @pytest.mark.parametrize(
+        "trainable_token_indices",
+        [
+            [1, 2, 3],  # list format
+            {"embed_tokens": [1, 2, 3]},  # dict format - single layer
+            {"lm_head": [1, 2], "embed_tokens": [1, 2]},  # dict format - same indices
+            {"lm_head": [1, 2], "embed_tokens": [3, 4]},  # dict format - different indices
+        ],
+    )
+    def test_ensure_weight_tying_warns_when_model_not_tied(
+        self, model_weight_untied, recwarn, trainable_token_indices
+    ):
+        """Should warn when ensure_weight_tying=True but model doesn't have tied weights"""
+        peft_config = LoraConfig(
+            target_modules="all-linear",
+            trainable_token_indices=trainable_token_indices,
+            ensure_weight_tying=True,
+        )
+        peft_model = get_peft_model(model_weight_untied, peft_config)
+
+        warnings_list = [w.message.args[0] for w in recwarn]
+        expected = "ensure_weight_tying=True but the model does not have tied weights"
+        assert any(expected in msg for msg in warnings_list)
+
+        # Verify adapters are not tied (model doesn't have tied weights)
+        if isinstance(trainable_token_indices, dict) and len(trainable_token_indices) > 1:
+            embed_adapter = peft_model.model.model.embed_tokens.token_adapter
+            lm_head_adapter = peft_model.model.lm_head.token_adapter
+            assert embed_adapter is not None
+            assert lm_head_adapter is not None
+            assert embed_adapter.trainable_tokens_delta is not lm_head_adapter.trainable_tokens_delta
+
+    def test_weight_tying_bc_different_indices_treated_separately(self, model_weight_tied):
+        """Backwards compatibility: different indices should be treated separately when ensure_weight_tying=False"""
+        peft_config = LoraConfig(
+            target_modules="all-linear",
+            trainable_token_indices={"lm_head": [1, 2], "embed_tokens": [3, 4]},
+            ensure_weight_tying=False,  # BC behavior
+        )
+        peft_model = get_peft_model(model_weight_tied, peft_config)
+
+        # Check that both layers have token adapters but they're NOT tied
+        embed_adapter = peft_model.model.model.decoder.embed_tokens.token_adapter
+        lm_head_adapter = peft_model.model.lm_head.token_adapter
+
+        assert embed_adapter is not None
+        assert lm_head_adapter is not None
+        # They should NOT share the same delta parameters (treated as separate)
+        assert embed_adapter.trainable_tokens_delta is not lm_head_adapter.trainable_tokens_delta
+        # They should have different token indices
+        assert embed_adapter.token_indices["default"] == [3, 4]
+        assert lm_head_adapter.token_indices["default"] == [1, 2]
+
+    def test_ensure_weight_tying_errors_with_different_indices(self, model_weight_tied):
+        """Should raise error when ensure_weight_tying=True with different indices for embedding and lm_head"""
+        peft_config = LoraConfig(
+            target_modules="all-linear",
+            trainable_token_indices={"lm_head": [1, 2], "embed_tokens": [3, 4]},
+            ensure_weight_tying=True,
+        )
+
+        msg = "Cannot ensure weight tying when different token indices are specified"
+        with pytest.raises(ValueError, match=msg):
+            peft_model = get_peft_model(model_weight_tied, peft_config)
+
+    def test_ensure_weight_tying_applied_with_same_indices(self, model_weight_tied):
+        """Should apply weight tying when ensure_weight_tying=True with same indices"""
+        peft_config = LoraConfig(
+            target_modules="all-linear",
+            trainable_token_indices={"lm_head": [1, 2], "embed_tokens": [1, 2]},
+            ensure_weight_tying=True,
+        )
+        peft_model = get_peft_model(model_weight_tied, peft_config)
+
+        # Check that weight tying is properly applied
+        embed_adapter = peft_model.model.model.decoder.embed_tokens.token_adapter
+        lm_head_adapter = peft_model.model.lm_head.token_adapter
+
+        # They should share the same delta parameters (weight tying)
+        assert embed_adapter.trainable_tokens_delta is lm_head_adapter.trainable_tokens_delta
+        # They should have the same token indices
+        assert embed_adapter.token_indices["default"] == [1, 2]
+        assert lm_head_adapter.token_indices["default"] == [1, 2]
+
+    def test_weight_tying_bc_same_indices_applied(self, model_weight_tied):
+        """When indices are the same, weight tying should be applied even when ensure_weight_tying=False"""
+        peft_config = LoraConfig(
+            target_modules="all-linear",
+            trainable_token_indices={"lm_head": [1, 2], "embed_tokens": [1, 2]},
+            ensure_weight_tying=False,  # BC: still applies tying when indices are the same
+        )
+        peft_model = get_peft_model(model_weight_tied, peft_config)
+
+        # Even with ensure_weight_tying=False, BC behavior should still tie when indices are same
+        embed_adapter = peft_model.model.model.decoder.embed_tokens.token_adapter
+        lm_head_adapter = peft_model.model.lm_head.token_adapter
+
+        # They should share the same delta parameters (BC behavior)
+        assert embed_adapter.trainable_tokens_delta is lm_head_adapter.trainable_tokens_delta
+
+    def test_ensure_weight_tying_with_single_layer(self, model_weight_tied):
+        """ensure_weight_tying should work with single layer (list format)"""
+        peft_config = LoraConfig(
+            target_modules="all-linear",
+            trainable_token_indices=[1, 2, 3],
+            ensure_weight_tying=True,
+        )
+        peft_model = get_peft_model(model_weight_tied, peft_config)
+
+        # Should apply weight tying to tied layers automatically
+        embed_adapter = peft_model.model.model.decoder.embed_tokens.token_adapter
+        lm_head_adapter = peft_model.model.lm_head.token_adapter
+
+        # They should share the same delta parameters
+        assert embed_adapter.trainable_tokens_delta is lm_head_adapter.trainable_tokens_delta
+
+    def test_untied_model_list_format_no_ensure(self, model_weight_untied):
+        """Untied model with list format, ensure_weight_tying=False - trainable tokens on embeddings only"""
+        peft_config = LoraConfig(
+            target_modules="all-linear",
+            trainable_token_indices=[1, 2, 3],
+            ensure_weight_tying=False,
+        )
+        peft_model = get_peft_model(model_weight_untied, peft_config)
+
+        # Only embed_tokens should have token adapter
+        assert hasattr(peft_model.model.model.embed_tokens, "token_adapter")
+        assert not hasattr(peft_model.model.lm_head, "token_adapter")
+
+    def test_tied_model_list_format_no_ensure(self, model_weight_tied):
+        """Tied model with list format, ensure_weight_tying=False - tied trainable tokens"""
+        peft_config = LoraConfig(
+            target_modules="all-linear",
+            trainable_token_indices=[1, 2, 3],
+            ensure_weight_tying=False,
+        )
+        peft_model = get_peft_model(model_weight_tied, peft_config)
+
+        # Both should have token adapters and be tied
+        embed_adapter = peft_model.model.model.decoder.embed_tokens.token_adapter
+        lm_head_adapter = peft_model.model.lm_head.token_adapter
+
+        # They should share the same delta parameters (BC behavior)
+        assert embed_adapter.trainable_tokens_delta is lm_head_adapter.trainable_tokens_delta
+
+    @pytest.mark.parametrize(
+        "trainable_token_indices",
+        [
+            {"lm_head": [1, 2], "embed_tokens": [1, 2]},  # same indices
+            {"lm_head": [1, 2], "embed_tokens": [3, 4]},  # different indices
+        ],
+    )
+    def test_untied_model_dict_no_ensure(self, model_weight_untied, trainable_token_indices):
+        """Untied model with dict format, ensure_weight_tying=False - treat as separate"""
+        peft_config = LoraConfig(
+            target_modules="all-linear",
+            trainable_token_indices=trainable_token_indices,
+            ensure_weight_tying=False,
+        )
+        peft_model = get_peft_model(model_weight_untied, peft_config)
+
+        # Both should have token adapters but NOT tied (since model doesn't have tied weights)
+        embed_adapter = peft_model.model.model.embed_tokens.token_adapter
+        lm_head_adapter = peft_model.model.lm_head.token_adapter
+
+        assert embed_adapter is not None
+        assert lm_head_adapter is not None
+        # They should NOT share delta parameters (model doesn't have tied weights)
+        assert embed_adapter.trainable_tokens_delta is not lm_head_adapter.trainable_tokens_delta
