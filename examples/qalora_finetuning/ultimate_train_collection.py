@@ -910,11 +910,12 @@ def train():
         "data_collator": data_collator,
     }
 
-    # import wandb
-    # wandb.init()
+    import wandb
+    wandb.init()
     
     training_metrics = {}
 
+    EVAL_SAMPLES = 100
     if not script_args.skip_training: 
         trainer = Trainer(model=model, tokenizer=tokenizer, args=script_args, **data_module)
         if is_training_on_cluster:
@@ -936,7 +937,7 @@ def train():
                 tokenizer=tokenizer,
                 tasks=tasks,
                 num_fewshot=1,
-                limit=50,
+                limit=EVAL_SAMPLES,
                 per_device_eval_batch_size=2,
                 output_dir=evaluation_dir,
                 file_name=harness_file_name,
@@ -1035,7 +1036,7 @@ def train():
             tokenizer=tokenizer,
             tasks=tasks,
             num_fewshot=1,
-            limit=30,
+            limit=EVAL_SAMPLES,
             per_device_eval_batch_size=2,
             output_dir=evaluation_dir,
             file_name=harness_file_name,
