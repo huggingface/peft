@@ -28,6 +28,7 @@ from peft.utils import (
     _get_submodules,
     get_auto_gptq_quant_linear,
 )
+from peft.utils.other import _set_adapter
 
 
 # Collection of constants used for all tuners
@@ -188,7 +189,7 @@ class MixedModel(BaseTuner):
         return new_module
 
     def set_adapter(self, adapter_name: Union[str, list[str]], inference_mode: bool = False) -> None:
-        self.set_auxiliary_adapters(adapter_name, inference_mode=inference_mode)
+        _set_adapter(self, adapter_name, inference_mode=inference_mode)  # handle auxiliary modules
         for module in self.model.modules():
             if isinstance(module, Layers):
                 if module.merged:
