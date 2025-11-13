@@ -1793,8 +1793,11 @@ class TestPeftCustomModel(PeftCommonTester):
         pass
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
-    def test_training_custom_models_gradient_checkpointing(self, test_name, model_id, config_cls, config_kwargs):
-        self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs)
+    @pytest.mark.parametrize("use_reentrant", [True, False])
+    def test_training_custom_models_gradient_checkpointing(
+        self, test_name, model_id, config_cls, config_kwargs, use_reentrant
+    ):
+        self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs, use_reentrant=use_reentrant)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_inference_safetensors(self, test_name, model_id, config_cls, config_kwargs):

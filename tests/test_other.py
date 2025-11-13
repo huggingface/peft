@@ -13,14 +13,23 @@
 # limitations under the License.
 
 import copy
+from contextlib import contextmanager
+from unittest.mock import patch
 
 import pytest
 import torch
 from torch import nn
-from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification, LlavaForConditionalGeneration
+from transformers import (
+    AutoModelForCausalLM,
+    AutoModelForSeq2SeqLM,
+    AutoModelForSequenceClassification,
+    LlavaForConditionalGeneration,
+)
 
 from peft import LoraConfig, PeftModel, VeraConfig, get_peft_model
-from peft.utils.other import ModulesToSaveWrapper, _get_no_split_modules
+from peft.utils.other import ModulesToSaveWrapper, _get_module_names_tied_with_embedding, _get_no_split_modules
+
+from .testing_utils import hub_online_once
 
 
 class ModelWithModuleDict(nn.Module):
@@ -530,3 +539,86 @@ class TestGetNoSplitModules:
 
         no_split_modules = _get_no_split_modules(model)
         assert no_split_modules == {"CLIPEncoderLayer", "LlamaDecoderLayer"}
+
+
+class TestGetModuleNamesTiedWithEmbedding:
+    # TODO remove mapping when transformers <5 is not supported anymore as it is the default
+    # from there on. also remove the 'list' tied weights type
+    model_tied_weights_mapping = {
+        "peft-internal-testing/tiny-random-BertModel": {
+            "cls.predictions.decoder.weight": "bert.embeddings.word_embeddings.weight",
+            "cls.predictions.decoder.bias": "bert.embeddings.word_embeddings.bias",
+        },
+        "facebook/opt-125m": {
+            "lm_head.weight": "model.decoder.embed_tokens.weight",
+        },
+        "hf-internal-testing/tiny-random-t5": {
+            "lm_head.weight": "shared.weight",
+            "encoder.embed_tokens.weight": "shared.weight",
+            "decoder.embed_tokens.weight": "shared.weight",
+        },
+    }
+
+    model_ids = [
+        "facebook/opt-125m",
+        "peft-internal-testing/tiny-random-BertModel",
+        "hf-internal-testing/tiny-random-t5",
+    ]
+
+    @contextmanager
+    def patch_model(self, model_id, tied_weights_type):
+        with hub_online_once(model_id):
+            if "t5" in model_id:
+                model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
+            else:
+                model = AutoModelForCausalLM.from_pretrained(model_id)
+
+            tied_weights_keys = list(self.model_tied_weights_mapping[model_id].keys())
+            expected_module_names = sorted({k.rpartition(".")[0] for k in tied_weights_keys})
+
+            if tied_weights_type == "list":
+                # for transformers >=5 this tests compatibility with transformers <5
+                with patch.object(model, "_tied_weights_keys", list(tied_weights_keys)):
+                    yield model, expected_module_names
+
+            elif tied_weights_type == "mapping":
+                # for transformers <5 this tests compatibility with transformers >=5
+                mapping = self.model_tied_weights_mapping[model_id]
+
+                with patch.object(model, "_tied_weights_keys", mapping):
+                    yield model, expected_module_names
+
+            else:
+                raise RuntimeError("Invalid fixture request")
+
+    @pytest.mark.parametrize("tied_weights_type", ["list", "mapping"])
+    @pytest.mark.parametrize("model_id", model_ids)
+    def test_get_modules_tied_to_embedding(self, model_id, tied_weights_type):
+        with self.patch_model(model_id, tied_weights_type) as (model, expected):
+            if tied_weights_type == "mapping":
+                assert isinstance(model._tied_weights_keys, dict)
+
+            # transformers defines the bias as tied even if it doesn't exist, filter out in that case
+            if not hasattr(model.get_input_embeddings(), "bias"):
+                expected = list(filter(lambda k: "bias" not in k, expected))
+
+            modules = _get_module_names_tied_with_embedding(model)
+
+            assert expected == modules
+
+    @pytest.mark.parametrize("tied_weights_type", ["list", "mapping"])
+    @pytest.mark.parametrize("model_id", model_ids)
+    def test_get_modules_tied_to_embedding_peft(self, model_id, tied_weights_type):
+        with self.patch_model(model_id, tied_weights_type) as (model, expected):
+            if tied_weights_type == "mapping":
+                assert isinstance(model._tied_weights_keys, dict)
+
+            # transformers defines the bias as tied even if it doesn't exist, filter out in that case
+            if not hasattr(model.get_input_embeddings(), "bias"):
+                expected = list(filter(lambda k: "bias" not in k, expected))
+
+            peft_model = get_peft_model(model, LoraConfig())
+
+            modules = peft_model._get_module_names_tied_with_embedding()
+
+            assert expected == modules

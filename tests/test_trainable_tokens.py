@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import copy
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -581,8 +582,33 @@ class TestTrainableTokens:
         return "facebook/opt-125m"
 
     @pytest.fixture()
-    def model_weight_tied(self, model_id_weight_tied):
-        return AutoModelForCausalLM.from_pretrained(model_id_weight_tied)
+    def model_weight_tied(self, request, model_id_weight_tied):
+        model_weight_tied = AutoModelForCausalLM.from_pretrained(model_id_weight_tied)
+        tied_keys = model_weight_tied._tied_weights_keys
+
+        # TODO remove when transformers <5 is not supported anymore
+        if not hasattr(request, "param") or request.param == "list":
+            if isinstance(tied_keys, list):
+                # transformers <5, list is already the default
+                yield model_weight_tied
+            else:
+                # simulate transformers <5 for backward compatibility testing
+                with patch.object(model_weight_tied, "_tied_weights_keys", list(tied_keys.keys())):
+                    yield model_weight_tied
+
+        elif request.param == "mapping":
+            if isinstance(tied_keys, dict):
+                # transformers >=5, mapping is already the default
+                yield model_weight_tied
+            else:
+                # simulate transformers >=5
+                mapping = {"lm_head.weight": "model.decoder.embed_tokens.weight"}
+
+                with patch.object(model_weight_tied, "_tied_weights_keys", mapping):
+                    yield model_weight_tied
+
+        else:
+            raise RuntimeError("Invalid request")
 
     @pytest.mark.parametrize(
         "peft_config",
@@ -603,13 +629,24 @@ class TestTrainableTokens:
         assert not hasattr(peft_model.model.lm_head, "token_adapter")
 
     @pytest.mark.parametrize(
-        "peft_config",
+        "peft_config, model_weight_tied",
         [
-            LoraConfig(
-                target_modules="all-linear",
-                trainable_token_indices={"embed_tokens": [0, 1, 3]},
+            (
+                LoraConfig(
+                    target_modules="all-linear",
+                    trainable_token_indices={"embed_tokens": [0, 1, 3]},
+                ),
+                "list",
+            ),
+            (
+                LoraConfig(
+                    target_modules="all-linear",
+                    trainable_token_indices={"embed_tokens": [0, 1, 3]},
+                ),
+                "mapping",
             ),
         ],
+        indirect=["model_weight_tied"],
     )
     def test_weight_tying_applied_when_model_is_tied(self, model_weight_tied, peft_config, tmp_path):
         # test if the weight tying is affected as well when we modified the embedding.
@@ -641,6 +678,7 @@ class TestTrainableTokens:
 
         assert merged_model.model.decoder.embed_tokens.weight.data_ptr() == merged_model.lm_head.weight.data_ptr()
 
+    @pytest.mark.parametrize("model_weight_tied", ["list", "mapping"], indirect=["model_weight_tied"])
     def test_weight_tying_applied_when_model_is_tied_standalone(self, model_weight_tied):
         # since weight tying is currently not supported make sure that an error is raised when attempting
         # to use a model that has tied input/output embeddings

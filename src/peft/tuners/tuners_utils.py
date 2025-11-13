@@ -45,6 +45,7 @@ from peft.utils.constants import (
 from peft.utils.integrations import init_empty_weights
 from peft.utils.other import (
     AuxiliaryTrainingWrapper,
+    _get_module_names_tied_with_embedding,
     _set_adapter,
     match_target_against_key,
     set_additional_trainable_modules,
@@ -1215,29 +1216,8 @@ class BaseTuner(nn.Module, ABC):
                     tied_target_modules.append(target_module)
         return tied_target_modules
 
-    def _get_tied_weight_keys(self, model: nn.Module, prefix="") -> list[str]:
-        """
-        Get the list of modules that needs to be tied
-
-        For example: For models which have `embed_tokens` and `lm_head` as the tied keys this function will return
-        [`lm_head`]
-
-        From: https://github.com/huggingface/transformers/blob/v4.57.0/src/transformers/modeling_utils.py#L563
-        """
-        tied_weight_keys = []
-        if getattr(model, "_tied_weights_keys", None) is not None:
-            names = [f"{prefix}.{k}" if prefix else k for k in model._tied_weights_keys]
-            tied_weight_keys.extend(names)
-        if getattr(model, "_dynamic_tied_weights_keys", None) is not None:
-            names = [f"{prefix}.{k}" if prefix else k for k in model._dynamic_tied_weights_keys]
-            tied_weight_keys.extend(names)
-        for name, submodule in model.named_children():
-            local_prefix = f"{prefix}.{name}" if prefix else name
-            tied_weight_keys.extend(self._get_tied_weight_keys(submodule, prefix=local_prefix))
-
-        tied_weight_keys = [".".join(n.split(".")[:-1]) for n in tied_weight_keys]
-
-        return tied_weight_keys
+    def _get_module_names_tied_with_embedding(self) -> list[str]:
+        return _get_module_names_tied_with_embedding(self)
 
     def _add_modules_to_tie(self, peft_config, tied_weight_keys):
         """
@@ -1274,7 +1254,7 @@ class BaseTuner(nn.Module, ABC):
             target_modules = set(raw_target_modules or [])
             is_embedding_in_target = any(m in EMBEDDING_LAYER_NAMES for m in target_modules)
 
-        tied_weight_keys = self._get_tied_weight_keys(model)
+        tied_weight_keys = self._get_module_names_tied_with_embedding()
 
         if getattr(peft_config, "ensure_weight_tying", False):
             if tied_weight_keys:
