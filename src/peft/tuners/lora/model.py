@@ -25,11 +25,7 @@ import torch
 from torch import nn
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-from peft.tuners.tuners_utils import (
-    BaseTuner,
-    BaseTunerLayer,
-    replicate_layers,
-)
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, find_parameter_name_by_tensor, replicate_layers
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     AuxiliaryTrainingWrapper,
@@ -832,8 +828,13 @@ class LoraModel(BaseTuner):
         peft_config.modules_to_tie = tied_weight_keys
 
         modules_to_save = getattr(peft_config, "modules_to_save", []) or []
-        if "embed_tokens" not in modules_to_save:
-            modules_to_save.append("embed_tokens")
+
+        embed_layer_name = find_parameter_name_by_tensor(self.model, self.model.get_input_embeddings().weight)
+        # find_parameter_name_by_tensor returns the parameter name, so we need to strip the weight from the name
+        embed_layer_name = embed_layer_name.replace(".weight", "")
+
+        if embed_layer_name not in modules_to_save:
+            modules_to_save.append(embed_layer_name)
 
         for m in tied_weight_keys:
             if m in modules_to_save:
@@ -854,17 +855,20 @@ class LoraModel(BaseTuner):
         peft_config.target_modules_to_tie = tied_weight_keys
 
         raw_target_modules = getattr(peft_config, "target_modules", None)
+        embed_layer_name = find_parameter_name_by_tensor(self.model, self.model.get_input_embeddings().weight)
+        # find_parameter_name_by_tensor returns the parameter name, so we need to strip the weight from the name
+        embed_layer_name = embed_layer_name.replace(".weight", "")
 
         if isinstance(raw_target_modules, str):
             # The way weight tying is handled for adapters, we always want to add
             # lora adapters to the input embedding layer (embed_tokens)
             # instead of output embedding lauyer.
-            raw_target_modules = rf"(?:{raw_target_modules}|.*embed_tokens$)"
+            raw_target_modules = rf"(?:{raw_target_modules}|.*{embed_layer_name}$)"
             peft_config.target_modules = raw_target_modules
             return
 
         target_modules = set(raw_target_modules or [])
-        target_modules.add("embed_tokens")
+        target_modules.add(embed_layer_name)
 
         for m in tied_weight_keys:
             if m in target_modules:

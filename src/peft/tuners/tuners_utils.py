@@ -57,6 +57,15 @@ from ..utils import _get_submodules
 from ._buffer_dict import BufferDict
 
 
+warn_msg_weight_tying = (
+    "Model has `tie_word_embeddings=True` and a tied layer is part of the adapter, "
+    "but no implementation exists to tie the adapters. "
+    "This can lead to complications, for example when merging the adapter "
+    "or converting your model to formats other than safetensors. "
+    "Check the discussion here: https://github.com/huggingface/peft/issues/2777"
+)
+
+
 @contextmanager
 def onload_layer(layer):
     r"""
@@ -1237,14 +1246,7 @@ class BaseTuner(nn.Module, ABC):
 
         Check `peft.tuners.lora.LoraModel._add_modules_to_tie` for an example.
         """
-        msg = (
-            "Model has `tie_word_embeddings=True` and a tied layer is part of the adapter, "
-            "but no implementation exists to tie the adapters. "
-            "This can lead to complications, for example when merging the adapter "
-            "or converting your model to formats other than safetensors. "
-            "Check the discussion here: https://github.com/huggingface/peft/issues/2777"
-        )
-        warnings.warn(msg)
+        warnings.warn(warn_msg_weight_tying)
 
     def _add_targets_to_tie(self, peft_config, tied_weight_keys):
         """
@@ -1253,14 +1255,7 @@ class BaseTuner(nn.Module, ABC):
 
         Check `peft.tuners.lora.LoraModel._add_targets_to_tie` for an example.
         """
-        msg = (
-            "Model has `tie_word_embeddings=True` and a tied layer is part of the adapter, "
-            "but no implementation exists to tie the adapters. "
-            "This can lead to complications, for example when merging the adapter "
-            "or converting your model to formats other than safetensors. "
-            "Check the discussion here: https://github.com/huggingface/peft/issues/2777"
-        )
-        warnings.warn(msg)
+        warnings.warn(warn_msg_weight_tying)
 
     def _check_tied_modules(self, model: nn.Module, peft_config):
         """
@@ -1973,6 +1968,24 @@ def replicate_layers(model: nn.Module, layer_map: list[tuple[int, int]]):
         raise ValueError("Unexpected model type, need to handle post-processing of layers.")
     if hasattr(model.config, "num_hidden_layers"):  # Common to Llama, Bert, Falcon.
         model.config.num_hidden_layers = len(new_layers)
+
+
+def find_parameter_name_by_tensor(model: nn.Module, reference_tensor: torch.Tensor) -> str:
+    """
+    Find layer name from the model by matching the reference tensor to the model parameters
+
+    Args:
+        model (nn.Module): The model with named modules
+        reference_tensor (torch.Tensor): The reference tensor to find
+
+    Returns:
+        str: Name of the layer
+    """
+    for n, m in model.named_parameters():
+        if m is reference_tensor:
+            return n
+
+    return ""
 
 
 ###############################
