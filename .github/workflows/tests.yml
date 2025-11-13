@@ -84,10 +84,7 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           TRANSFORMERS_IS_CI: 1
         run: |
-          set +e
           make test
-          status=$?
-          exit $status
       - name: Dump cache content and diff
         # This is just debug info so that we can monitor if the model cache diverges substantially
         # over time and what the diverging model is.
