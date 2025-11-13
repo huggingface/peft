@@ -90,6 +90,7 @@ class FourierFTModel(BaseTuner):
             target.update_layer(
                 adapter_name,
                 n_frequency,
+                alpha,
                 scaling,
                 fourierft_config.init_weights,
                 random_loc_seed,

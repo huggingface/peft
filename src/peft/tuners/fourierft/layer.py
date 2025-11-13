@@ -61,18 +61,33 @@ class FourierFTLayer(BaseTunerLayer):
             raise ValueError(f"Unsupported layer type {type(base_layer)}")
 
     def update_layer(
-        self, adapter_name, n_frequency, scaling, init_weights, random_loc_seed, inference_mode: bool = False, **kwargs
+        self,
+        adapter_name,
+        n_frequency,
+        alpha,
+        scaling,
+        init_weights,
+        random_loc_seed,
+        inference_mode: bool = False,
+        **kwargs,
     ):
+        if alpha:
+            if isinstance(self, FourierFTConv2D):
+                kW = self.base_layer.kernel_size[0]
+                kH = self.base_layer.kernel_size[1]
+                n_frequency = int(alpha * self.in_features * self.out_features * kW * kH)
+            else:
+                n_frequency = int(alpha * self.in_features * self.out_features)
+
         if n_frequency <= 0:
             raise ValueError(f"`n_frequency` should be a positive integer value but the value passed is {n_frequency}")
 
-        if isinstance(self, FourierFTLinear):
-            max_freqs = self.in_features * self.out_features
-        else:
+        if isinstance(self, FourierFTConv2D):
             kW = self.base_layer.kernel_size[0]
             kH = self.base_layer.kernel_size[1]
             max_freqs = self.in_features * self.out_features * kW * kH
-
+        else:
+            max_freqs = self.in_features * self.out_features
         if n_frequency >= max_freqs:
             raise ValueError(
                 f"`n_frequency` should be less than or equal to the product of the input and output dimensions "
@@ -183,16 +198,9 @@ class FourierFTLinear(nn.Module, FourierFTLayer):
         super().__init__()
         FourierFTLayer.__init__(self, base_layer, **kwargs)
 
-        # apply alpha patch
-        if alpha:
-            n_frequency = int(alpha * self.in_features * self.out_features)
-            if n_frequency <= 0:
-                raise ValueError(f"The alpha you set makes the n_frequency lower or equal to 0. Use a higher alpha value!")
-
-
         self.fan_in_fan_out = fan_in_fan_out
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, n_frequency, scaling, init_weights, random_loc_seed)
+        self.update_layer(adapter_name, n_frequency, alpha, scaling, init_weights, random_loc_seed)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         return super().get_delta_weight(adapter)
@@ -243,13 +251,7 @@ class FourierFTConv2D(nn.Module, FourierFTLayer):
 
         self.fan_in_fan_out = fan_in_fan_out
         self._active_adapter = adapter_name
-        kW = base_layer.kernel_size[0]
-        kH = base_layer.kernel_size[1]
-
-        # apply alpha patch
-        if alpha:
-            n_frequency = int(alpha * self.in_features * self.out_features * kW * kH)
-        self.update_layer(adapter_name, n_frequency, scaling, init_weights, random_loc_seed)
+        self.update_layer(adapter_name, n_frequency, alpha, scaling, init_weights, random_loc_seed)
 
     def set_indices(self, adapter_name: str, n_frequency: int):
         kW = self.base_layer.kernel_size[0]
