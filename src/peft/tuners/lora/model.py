@@ -859,7 +859,7 @@ class LoraModel(BaseTuner):
             # The way weight tying is handled for adapters, we always want to add
             # lora adapters to the input embedding layer (embed_tokens)
             # instead of output embedding lauyer.
-            raw_target_modules = f"(?:{raw_target_modules}|.*embed_tokens$)"
+            raw_target_modules = rf"(?:{raw_target_modules}|.*embed_tokens$)"
             peft_config.target_modules = raw_target_modules
             return
 
