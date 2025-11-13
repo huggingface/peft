@@ -93,7 +93,7 @@ class LoraVariant:
 
 class LoraLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
-    adapter_layer_names: tuple[str, ...] = ("lora_A", "lora_B", "lora_embedding_A", "lora_embedding_B")
+    adapter_layer_names: tuple[str, ...] = ("lora_A", "lora_B", "lora_embedding_A", "lora_embedding_B", "lora_wora_alpha", "lora_wora_beta")
     # All names of other parameters that may contain adapter-related parameters
     other_param_names: tuple[str, ...] = ("r", "lora_alpha", "scaling", "lora_dropout")
 
@@ -113,8 +113,11 @@ class LoraLayer(BaseTunerLayer):
         self.merged_adapters = []
         self.use_dora: dict[str, bool] = {}  # not actively used anymore after #2443, keep it for BC
         self.use_rslora: dict[str, bool] = {}
+        self.use_wora: dict[str, bool] = {}  # for WoRA
         self.lora_bias: dict[str, bool] = {}
-        self.lora_magnitude_vector = torch.nn.ModuleDict()  # for DoRA
+        self.lora_magnitude_vector = torch.nn.ModuleDict()  # for DoRA and WoRA
+        self.lora_wora_alpha = torch.nn.ParameterDict()  # for WoRA: learnable alpha scalars
+        self.lora_wora_beta = torch.nn.ParameterDict()   # for WoRA: learnable beta scalars
         self._caches: dict[str, Any] = {}
         self.ephemeral_gpu_offload: bool = ephemeral_gpu_offload
         # flag to enable/disable casting of input to weight dtype during forward call
@@ -127,11 +130,12 @@ class LoraLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+    def resolve_lora_variant(self, *, use_dora: bool, use_wora: bool = False, **kwargs) -> Optional[LoraVariant]:
         """Return a matching LoRA variant for this layer type.
 
         Given the init arguments of this layer, return the correct LoRA variant, if any. E.g., if `use_dora=True`, this
-        method should return the DoRA variant for the given layer. If `use_alora=True`, same for aLoRA.
+        method should return the DoRA variant for the given layer. If `use_alora=True`, same for aLoRA. If `use_wora=True`,
+        same for WoRA.
 
         If there is no fitting variant, return None.
 
@@ -152,6 +156,7 @@ class LoraLayer(BaseTunerLayer):
         use_dora: bool = False,
         use_alora: bool = False,
         use_qalora: bool = False,
+        use_wora: bool = False,
         lora_bias: bool = False,
         arrow_config: ArrowConfig = None,
         qalora_group_size: int = 32,
@@ -177,6 +182,7 @@ class LoraLayer(BaseTunerLayer):
             use_dora=use_dora,
             use_alora=use_alora,
             use_qalora=use_qalora,
+            use_wora=use_wora,
             qalora_group_size=qalora_group_size,
             arrow_config=arrow_config,
         )
@@ -205,6 +211,16 @@ class LoraLayer(BaseTunerLayer):
         self.use_rslora[adapter_name] = use_rslora
 
         self.use_dora[adapter_name] = use_dora
+
+        self.use_wora[adapter_name] = use_wora
+
+        # Initialize WoRA parameters if needed
+        if use_wora:
+            self.lora_wora_alpha[adapter_name] = nn.Parameter(torch.tensor(1.0), requires_grad=True)
+            self.lora_wora_beta[adapter_name] = nn.Parameter(torch.tensor(1.0), requires_grad=True)
+            # Explicitly ensure they remain trainable (in case something tries to freeze them)
+            self.lora_wora_alpha[adapter_name].requires_grad_(True)
+            self.lora_wora_beta[adapter_name].requires_grad_(True)
 
         # for inits that require access to the base weight, use gather_param_ctx so that the weight is gathered when using DeepSpeed
         if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
@@ -611,6 +627,7 @@ class Linear(nn.Module, LoraLayer):
         use_rslora: bool = False,
         use_dora: bool = False,
         use_alora: bool = False,
+        use_wora: bool = False,
         arrow_config: ArrowConfig = None,
         lora_bias: bool = False,
         **kwargs,
@@ -629,25 +646,28 @@ class Linear(nn.Module, LoraLayer):
             use_rslora=use_rslora,
             use_dora=use_dora,
             use_alora=use_alora,
+            use_wora=use_wora,
             lora_bias=lora_bias,
             arrow_config=arrow_config,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def resolve_lora_variant(
-        self, *, arrow_config: ArrowConfig, use_dora: bool, use_alora: bool, **kwargs
+        self, *, arrow_config: ArrowConfig, use_dora: bool, use_alora: bool, use_wora: bool = False, **kwargs
     ) -> Optional[LoraVariant]:
         if arrow_config is not None:
             from .variants import ArrowLinearVariant
 
             return ArrowLinearVariant()
 
-        if not use_dora and not use_alora:
+        if not use_wora and not use_dora and not use_alora:
             return None
 
-        from .variants import ALoraLinearVariant, DoraLinearVariant
+        from .variants import ALoraLinearVariant, DoraLinearVariant, WoraLinearVariant
 
-        if use_alora:
+        if use_wora:
+            return WoraLinearVariant()
+        elif use_alora:
             return ALoraLinearVariant()
         else:
             return DoraLinearVariant()
@@ -837,6 +857,7 @@ class Embedding(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        use_wora: bool = False,
         arrow_config: ArrowConfig = None,
         lora_bias: bool = False,
         **kwargs,
@@ -858,17 +879,21 @@ class Embedding(nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
+            use_wora=use_wora,
             lora_bias=lora_bias,
             arrow_config=arrow_config,
         )
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
-        if not use_dora:
+    def resolve_lora_variant(self, *, use_dora: bool, use_wora: bool = False, **kwargs) -> Optional[LoraVariant]:
+        if not use_wora and not use_dora:
             return None
 
-        from .variants import DoraEmbeddingVariant
+        from .variants import DoraEmbeddingVariant, WoraEmbeddingVariant
 
-        return DoraEmbeddingVariant()
+        if use_wora:
+            return WoraEmbeddingVariant()
+        else:
+            return DoraEmbeddingVariant()
 
     def update_layer(
         self,
@@ -880,6 +905,7 @@ class Embedding(nn.Module, LoraLayer):
         use_rslora,
         use_dora,
         lora_bias,
+        use_wora: bool = False,
         arrow_config: ArrowConfig = None,
         inference_mode: bool = False,
         **kwargs,
@@ -891,7 +917,7 @@ class Embedding(nn.Module, LoraLayer):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
-        lora_variant = self.resolve_lora_variant(use_dora=use_dora, arrow_config=arrow_config)
+        lora_variant = self.resolve_lora_variant(use_dora=use_dora, use_wora=use_wora, arrow_config=arrow_config)
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 
@@ -918,6 +944,16 @@ class Embedding(nn.Module, LoraLayer):
         self.use_rslora[adapter_name] = use_rslora
 
         self.use_dora[adapter_name] = use_dora
+
+        self.use_wora[adapter_name] = use_wora
+
+        # Initialize WoRA parameters if needed
+        if use_wora:
+            self.lora_wora_alpha[adapter_name] = nn.Parameter(torch.tensor(1.0), requires_grad=True)
+            self.lora_wora_beta[adapter_name] = nn.Parameter(torch.tensor(1.0), requires_grad=True)
+            # Explicitly ensure they remain trainable
+            self.lora_wora_alpha[adapter_name].requires_grad_(True)
+            self.lora_wora_beta[adapter_name].requires_grad_(True)
 
         if init_lora_weights == "loftq":
             self.loftq_init(adapter_name)
@@ -1147,6 +1183,7 @@ class _ConvNd(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        use_wora: bool = False,
         arrow_config: ArrowConfig = None,
         lora_bias: bool = False,
         **kwargs,
@@ -1176,6 +1213,7 @@ class _ConvNd(nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
+            use_wora=use_wora,
             lora_bias=lora_bias,
             arrow_config=arrow_config,
         )
@@ -1190,6 +1228,7 @@ class _ConvNd(nn.Module, LoraLayer):
         use_rslora,
         use_dora,
         lora_bias,
+        use_wora: bool = False,
         arrow_config: ArrowConfig = None,
         inference_mode: bool = False,
         **kwargs,
@@ -1208,7 +1247,7 @@ class _ConvNd(nn.Module, LoraLayer):
                 PeftWarning,
             )
 
-        lora_variant = self.resolve_lora_variant(use_dora=use_dora, arrow_config=arrow_config)
+        lora_variant = self.resolve_lora_variant(use_dora=use_dora, use_wora=use_wora, arrow_config=arrow_config)
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 
@@ -1241,6 +1280,16 @@ class _ConvNd(nn.Module, LoraLayer):
         self.use_rslora[adapter_name] = use_rslora
 
         self.use_dora[adapter_name] = use_dora
+
+        self.use_wora[adapter_name] = use_wora
+
+        # Initialize WoRA parameters if needed
+        if use_wora:
+            self.lora_wora_alpha[adapter_name] = nn.Parameter(torch.tensor(1.0), requires_grad=True)
+            self.lora_wora_beta[adapter_name] = nn.Parameter(torch.tensor(1.0), requires_grad=True)
+            # Explicitly ensure they remain trainable
+            self.lora_wora_alpha[adapter_name].requires_grad_(True)
+            self.lora_wora_beta[adapter_name].requires_grad_(True)
 
         if init_lora_weights == "loftq":
             self.loftq_init(adapter_name)
@@ -1452,13 +1501,16 @@ class Conv2d(_ConvNd):
             raise ValueError(f"Conv2d layer kernel must have 4 dimensions, not {self._kernel_dim}")
         self.conv_fn = F.conv2d
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
-        if not use_dora:
+    def resolve_lora_variant(self, *, use_dora: bool, use_wora: bool = False, **kwargs) -> Optional[LoraVariant]:
+        if not use_wora and not use_dora:
             return None
 
-        from .variants import DoraConv2dVariant
+        from .variants import DoraConv2dVariant, WoraConv2dVariant
 
-        return DoraConv2dVariant()
+        if use_wora:
+            return WoraConv2dVariant()
+        else:
+            return DoraConv2dVariant()
 
 
 class Conv1d(_ConvNd):
@@ -1469,13 +1521,16 @@ class Conv1d(_ConvNd):
             raise ValueError(f"Conv1d layer kernel must have 3 dimensions, not {self._kernel_dim}")
         self.conv_fn = F.conv1d
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
-        if not use_dora:
+    def resolve_lora_variant(self, *, use_dora: bool, use_wora: bool = False, **kwargs) -> Optional[LoraVariant]:
+        if not use_wora and not use_dora:
             return None
 
-        from .variants import DoraConv1dVariant
+        from .variants import DoraConv1dVariant, WoraConv1dVariant
 
-        return DoraConv1dVariant()
+        if use_wora:
+            return WoraConv1dVariant()
+        else:
+            return DoraConv1dVariant()
 
 
 class Conv3d(_ConvNd):
@@ -1486,13 +1541,16 @@ class Conv3d(_ConvNd):
             raise ValueError(f"Conv3d layer kernel must have 5 dimensions, not {self._kernel_dim}")
         self.conv_fn = F.conv3d
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
-        if not use_dora:
+    def resolve_lora_variant(self, *, use_dora: bool, use_wora: bool = False, **kwargs) -> Optional[LoraVariant]:
+        if not use_wora and not use_dora:
             return None
 
-        from .variants import DoraConv3dVariant
+        from .variants import DoraConv3dVariant, WoraConv3dVariant
 
-        return DoraConv3dVariant()
+        if use_wora:
+            return WoraConv3dVariant()
+        else:
+            return DoraConv3dVariant()
 
 
 class MultiheadAttention(nn.Module, LoraLayer):
