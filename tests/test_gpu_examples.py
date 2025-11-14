@@ -4209,9 +4209,11 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             get_peft_model(model, config)
 
     @pytest.mark.single_gpu_tests
+    @pytest.mark.xfail(
+        reason="int4_weight_only still has issues",
+        raises=RuntimeError,
+    )
     def test_causal_lm_training_single_gpu_torchao_int4_raises(self):
-        # int4_weight_only raises an error:
-        # RuntimeError: derivative for aten::_weight_int4pack_mm is not implemented
         # TODO: Once proper torchao support for int4 is added, remove this test and add int4 to supported_quant_types
         from transformers import TorchAoConfig
 
@@ -4232,9 +4234,12 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             task_type="CAUSAL_LM",
         )
 
-        msg = re.escape("TorchaoLoraLinear only supports int8 weights for now")
-        with pytest.raises(ValueError, match=msg):
-            get_peft_model(model, config)
+        model = get_peft_model(model, config)
+        inputs = torch.arange(10).view(1, -1).to(device)
+        # this raises:
+        # > RuntimeError: cutlass cannot initialize
+        # tested in multiple matchines
+        model(inputs)
 
     @parameterized.expand(supported_quant_types)
     @pytest.mark.multi_gpu_tests
@@ -4644,6 +4649,7 @@ class TestBOFT:
 
 class TestPTuningReproducibility:
     device = infer_device()
+    causal_lm_model_id = "facebook/opt-125m"
 
     @require_non_cpu
     @require_deterministic_for_xpu
@@ -4679,6 +4685,48 @@ class TestPTuningReproducibility:
 
         torch.testing.assert_close(output_loaded, output_peft)
         torch.testing.assert_close(gen_loaded, gen_peft)
+
+    @require_bitsandbytes
+    @pytest.mark.single_gpu_tests
+    def test_p_tuning_causal_lm_training_8bit_bnb(self):
+        # test is analog to PeftBnbGPUExampleTests.test_causal_lm_training
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+                device_map="auto",
+            )
+
+            tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+            config = PromptEncoderConfig(task_type="CAUSAL_LM", num_virtual_tokens=20, encoder_hidden_size=128)
+            model = get_peft_model(model, config)
+
+            data = load_dataset_english_quotes()
+            data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            )
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
 
 
 @pytest.mark.single_gpu_tests
@@ -4953,6 +5001,7 @@ class TestALoRAInferenceGPU:
 @pytest.mark.multi_gpu_tests
 class TestPrefixTuning:
     device = infer_device()
+    causal_lm_model_id = "facebook/opt-125m"
 
     @require_torch_multi_accelerator
     def test_prefix_tuning_multiple_devices_decoder_model(self):
@@ -5012,6 +5061,48 @@ class TestPrefixTuning:
         peft_config = PrefixTuningConfig(num_virtual_tokens=10, task_type="SEQ_2_SEQ_LM")
         model = get_peft_model(model, peft_config)
         model.generate(**inputs)  # does not raise
+
+    @require_bitsandbytes
+    @pytest.mark.single_gpu_tests
+    def test_prefix_tuning_causal_lm_training_8bit_bnb(self):
+        # test is analog to PeftBnbGPUExampleTests.test_causal_lm_training
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+                device_map="auto",
+            )
+
+            tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+            config = PrefixTuningConfig(num_virtual_tokens=10, task_type=TaskType.CAUSAL_LM)
+            model = get_peft_model(model, config)
+
+            data = load_dataset_english_quotes()
+            data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            )
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
 
 
 @pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU")
