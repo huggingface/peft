@@ -24,7 +24,7 @@ import random
 import sys
 import textwrap
 import time
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from functools import partial
 from typing import Any, Callable, Literal, Optional
 
@@ -61,6 +61,9 @@ from peft.utils import CONFIG_NAME, infer_device
 BUCKET_FACTOR = 20
 # empty device cache every N steps; 10 is a good compromise between keeping memory down while lowering runtime overhead
 ACCELERATOR_EMPTY_CACHE_SCHEDULE = 10
+
+# disable torch inductor caching to keep total runtime numbers comparable when torch.compile is used
+os.environ["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"
 
 
 def get_generation_config(*, seq_len, generate_kwargs) -> GenerationConfig:
@@ -140,7 +143,7 @@ def train(
     torch_accelerator_module = getattr(torch, device_type, torch.cuda)
     if use_amp:
         grad_scaler: GradScaler | DummyGradScaler = GradScaler(device=device_type)
-        autocast_ctx: Callable[[], ContextManager[Any]] = partial(autocast, device_type=device_type)
+        autocast_ctx: Callable[[], AbstractContextManager[Any]] = partial(autocast, device_type=device_type)
     else:
         grad_scaler = DummyGradScaler()
         autocast_ctx = nullcontext
@@ -242,7 +245,7 @@ def train(
                 dur_train = sum(durations[-eval_steps:])
                 tokens_per_sec = token_sum / dur_train
 
-                model.eval()
+                # Note: don't call model.eval() and model.train() before/after this, as it would trigger re-compiles
                 predictions, responses = evaluate(
                     model=model,
                     tokenizer=tokenizer,
@@ -250,7 +253,6 @@ def train(
                     batch_size=batch_size_eval,
                     generate_kwargs={**generation_kwargs},
                 )
-                model.train()
 
                 example = random.choice(predictions)
                 example = textwrap.shorten(example, width=750)
@@ -393,23 +395,28 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
     print_verbose(model)
 
     # train model
-    train_result = train(
-        model=model,
-        max_steps=train_config.max_steps,
-        batch_size=train_config.batch_size,
-        batch_size_eval=train_config.batch_size_eval,
-        tokenizer=tokenizer,
-        accelerator_memory_init=accelerator_memory_init,
-        eval_steps=train_config.eval_steps,
-        generation_kwargs=train_config.generation_kwargs,
-        grad_norm_clip=train_config.grad_norm_clip,
-        optimizer_type=train_config.optimizer_type,
-        optimizer_kwargs=train_config.optimizer_kwargs,
-        query_template=train_config.query_template,
-        lr_scheduler_arg=train_config.lr_scheduler,
-        use_amp=train_config.use_amp,
-        is_adalora=isinstance(peft_config, AdaLoraConfig),
-    )
+    # context is only relevant if compile=True, as it errors on re-compile & graph breaks
+    with (
+        torch._dynamo.config.patch(error_on_recompile=True, inline_inbuilt_nn_modules=False),
+        torch._inductor.config.patch("triton.cudagraph_support_input_mutation", False),
+    ):
+        train_result = train(
+            model=model,
+            max_steps=train_config.max_steps,
+            batch_size=train_config.batch_size,
+            batch_size_eval=train_config.batch_size_eval,
+            tokenizer=tokenizer,
+            accelerator_memory_init=accelerator_memory_init,
+            eval_steps=train_config.eval_steps,
+            generation_kwargs=train_config.generation_kwargs,
+            grad_norm_clip=train_config.grad_norm_clip,
+            optimizer_type=train_config.optimizer_type,
+            optimizer_kwargs=train_config.optimizer_kwargs,
+            query_template=train_config.query_template,
+            lr_scheduler_arg=train_config.lr_scheduler,
+            use_amp=train_config.use_amp,
+            is_adalora=isinstance(peft_config, AdaLoraConfig),
+        )
 
     if train_result.status == TrainStatus.FAILED:
         print_verbose("Training failed, not logging results")
