@@ -35,6 +35,7 @@ from peft import (
     CPTConfig,
     DeloraConfig,
     FourierFTConfig,
+    GraloraConfig,
     HRAConfig,
     IA3Config,
     LoraConfig,
@@ -138,6 +139,30 @@ ALL_CONFIGS = [
             "task_type": "CAUSAL_LM",
             "n_frequency": 10,
             "target_modules": None,
+        },
+    ),
+    (
+        GraloraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "r": 8,
+            "alpha": 16,
+            "target_modules": None,
+            "gralora_dropout": 0.05,
+            "gralora_k": 2,
+            "hybrid_r": 0,
+        },
+    ),
+    (
+        GraloraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "r": 16,
+            "alpha": 32,
+            "target_modules": None,
+            "gralora_dropout": 0.05,
+            "gralora_k": 4,
+            "hybrid_r": 4,
         },
     ),
     (
