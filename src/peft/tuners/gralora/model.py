@@ -79,7 +79,7 @@ class GraloraModel(BaseTuner):
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "r": r,
-            "gralora_alpha": gralora_config.gralora_alpha,
+            "alpha": gralora_config.alpha,
             "gralora_dropout": gralora_config.gralora_dropout,
             "gralora_k": gralora_config.gralora_k,
             "fan_in_fan_out": gralora_config.fan_in_fan_out,
@@ -93,7 +93,7 @@ class GraloraModel(BaseTuner):
                 adapter_name,
                 current_key,
                 r,
-                gralora_config.gralora_alpha,
+                gralora_config.alpha,
                 gralora_config.gralora_dropout,
                 gralora_config.gralora_k,
                 gralora_config.hybrid_r,

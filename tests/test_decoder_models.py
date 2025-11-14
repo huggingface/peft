@@ -143,7 +143,7 @@ ALL_CONFIGS = [
         {
             "task_type": "CAUSAL_LM",
             "r": 8,
-            "gralora_alpha": 16,
+            "alpha": 16,
             "target_modules": None,
             "gralora_dropout": 0.05,
             "gralora_k": 2,
@@ -155,7 +155,7 @@ ALL_CONFIGS = [
         {
             "task_type": "CAUSAL_LM",
             "r": 16,
-            "gralora_alpha": 32,
+            "alpha": 32,
             "target_modules": None,
             "gralora_dropout": 0.05,
             "gralora_k": 4,

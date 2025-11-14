@@ -52,7 +52,7 @@ def train_model(
     # GraLoRA config for the PEFT model
     gralora_config = GraloraConfig(
         r=gralora_r,  # Rank of matrix
-        gralora_alpha=gralora_alpha,
+        alpha=gralora_alpha,
         target_modules=(
             gralora_target_modules.split(",")
             if gralora_target_modules

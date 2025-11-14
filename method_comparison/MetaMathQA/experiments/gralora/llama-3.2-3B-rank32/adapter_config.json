@@ -3,7 +3,7 @@
   "base_model_name_or_path": null,
   "bias": "none",
   "fan_in_fan_out": false,
-  "gralora_alpha": 64,
+  "alpha": 64,
   "gralora_dropout": 0.0,
   "gralora_k": 2,
   "hybrid_r": 0,

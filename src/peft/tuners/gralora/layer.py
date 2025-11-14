@@ -27,12 +27,12 @@ from peft.utils.other import transpose
 class GraloraLayer(BaseTunerLayer):
     # List all names of layers that may contain adapter weight
     adapter_layer_names = ("gralora_A", "gralora_B", "gralora_A_general", "gralora_B_general")
-    other_param_names = ("r", "hybrid_r", "gralora_alpha", "scaling", "gralora_dropout")
+    other_param_names = ("r", "hybrid_r", "alpha", "scaling", "gralora_dropout")
 
     def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer
         self.r = {}
-        self.gralora_alpha = {}
+        self.alpha = {}
         self.gralora_k = {}
         self.hybrid_r = {}
         self.scaling = {}
@@ -66,7 +66,7 @@ class GraloraLayer(BaseTunerLayer):
         adapter_name,
         module_name,
         r,
-        gralora_alpha,
+        alpha,
         gralora_dropout,
         gralora_k: int = 2,
         hybrid_r: int = 0,
@@ -78,7 +78,7 @@ class GraloraLayer(BaseTunerLayer):
             raise ValueError(f"`hybrid_r` should be a non-negative integer value but the value passed is {hybrid_r}")
 
         self.r[adapter_name] = r
-        self.gralora_alpha[adapter_name] = gralora_alpha
+        self.alpha[adapter_name] = alpha
         self.gralora_k[adapter_name] = gralora_k
         self.hybrid_r[adapter_name] = hybrid_r
 
@@ -148,7 +148,7 @@ class GraloraLayer(BaseTunerLayer):
 
         self.module_name = module_name
 
-        self.scaling[adapter_name] = gralora_alpha / (gralora_r + hybrid_r)
+        self.scaling[adapter_name] = alpha / (gralora_r + hybrid_r)
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
@@ -161,7 +161,7 @@ class Linear(nn.Linear, GraloraLayer):
         adapter_name: str,
         module_name,
         r: int = 0,
-        gralora_alpha: int = 1,
+        alpha: int = 1,
         gralora_dropout: float = 0.0,
         gralora_k: int = 2,
         hybrid_r: int = 0,
@@ -175,9 +175,7 @@ class Linear(nn.Linear, GraloraLayer):
         self.fan_in_fan_out = fan_in_fan_out
 
         self._active_adapter = adapter_name
-        self.update_layer(
-            adapter_name, module_name, r, gralora_alpha, gralora_dropout, gralora_k, hybrid_r, init_weights
-        )
+        self.update_layer(adapter_name, module_name, r, alpha, gralora_dropout, gralora_k, hybrid_r, init_weights)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """

@@ -39,8 +39,8 @@ class GraloraConfig(PeftConfig):
             specified, modules will be chosen according to the model architecture, If the architecture is " not known,
             an error will be raised -- in this case, you should specify the target modules manually. " To avoid
             targeting any modules (because you want to apply `target_parameters`), set " `target_modules=[]`.
-        gralora_alpha (`int`): GraLoRA alpha.
-            GraLoRA alpha is the scaling factor for the GraLoRA adapter. Scale becomes gralora_alpha / (r + hybrid_r).
+        alpha (`int`): GraLoRA alpha.
+            GraLoRA alpha is the scaling factor for the GraLoRA adapter. Scale becomes alpha / (r + hybrid_r).
         gralora_dropout (`float`):
             GraLoRA dropout is the dropout probability for the GraLoRA adapter. It is used to prevent overfitting and
             improve the generalization of the GraLoRA adapter.
@@ -104,12 +104,11 @@ class GraloraConfig(PeftConfig):
             )
         },
     )
-    gralora_alpha: int = field(
+    alpha: int = field(
         default=64,
         metadata={
             "help": (
-                "gralora alpha is the scaling factor for the GraLoRA adapter. "
-                "Scale becomes gralora_alpha / (r + hybrid_r). "
+                "gralora alpha is the scaling factor for the GraLoRA adapter. Scale becomes alpha / (r + hybrid_r). "
             )
         },
     )
