@@ -1692,7 +1692,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         self.add_adapter(new_adapter_name, peft_config)
 
-        lora_layers =[ m for m in self.modules() if isinstance(m, LoraLayer)]
+        lora_layers = [m for m in self.modules() if isinstance(m, LoraLayer)]
         if progressbar:
             try:
                 from tqdm.auto import tqdm
@@ -1909,7 +1909,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     module.lora_B[adapter_name].weight.data.zero_()
                 except Exception as e2:
                     warnings.warn(f"Failed to merge layer {name}: {e2}", UserWarning)
-
 
         base_model = self.unload()
 

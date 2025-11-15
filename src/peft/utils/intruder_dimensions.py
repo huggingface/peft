@@ -223,7 +223,7 @@ def mitigate_intruder_dimensions(
         right_vecs = intruder_results["right_vectors"]
 
     if len(singular_vals) == 0:
-        return w_pretrained + delta_w
+        return delta_w
 
     device = w_pretrained.device
     target_dtype = torch.float32
@@ -241,9 +241,9 @@ def mitigate_intruder_dimensions(
     intruder_component = left_vecs @ sigma_diag @ right_vecs
 
     scaling_factor = lambda_factor - 1.0
-    w_mitigated = w0_float + delta_w_float + scaling_factor * intruder_component
+    delta_w_mitigated = delta_w_float + scaling_factor * intruder_component
 
-    return w_mitigated.to(dtype=w_pretrained.dtype)
+    return delta_w_mitigated.to(dtype=w_pretrained.dtype)
 
 
 def project_delta_to_lora(
