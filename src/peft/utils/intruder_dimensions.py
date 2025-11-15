@@ -243,7 +243,7 @@ def mitigate_intruder_dimensions(
     scaling_factor = lambda_factor - 1.0
     delta_w_mitigated = delta_w_float + scaling_factor * intruder_component
 
-    return delta_w_mitigated.to(dtype=w_pretrained.dtype)
+    return delta_w_mitigated.to(dtype=delta_w.dtype)
 
 
 def project_delta_to_lora(
