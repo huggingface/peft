@@ -67,6 +67,7 @@ from .utils import (
     set_peft_model_state_dict,
     shift_tokens_right,
 )
+from .utils.intrude_dimenstion import apply_lora_mitigation_merge_and_unload
 
 
 class PeftModel(PushToHubMixin, torch.nn.Module):
@@ -1592,6 +1593,107 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         card.text = "\n".join(lines)
         card.save(filename)
+
+    def reduce_intruder_dimensions(
+        self,
+        adapter_name: str = "default",
+        top_k: int = 10,
+        threshold_epsilon: float = 0.5,
+        mitigation_lambda: float = 0.75,
+        progressbar: bool = True,
+    ):
+        """
+        Mitigate catastrophic forgetting by reducing intruder dimensions in LoRA adapters.
+
+        This implements the method from "LoRA vs Full Fine-tuning: An Illusion of Equivalence"
+        (https://arxiv.org/abs/2410.21228).
+
+        **Note**: This method uses merge-and-unload approach, permanently modifying the base model.
+        The LoRA adapter will be removed after mitigation.
+
+        Args:
+            adapter_name (`str`, defaults to `"default"`):
+                Name of the adapter to mitigate.
+            top_k (`int`, defaults to `10`):
+                Number of top singular vectors to check for intruders.
+            threshold_epsilon (`float`, defaults to `0.5`):
+                Cosine similarity threshold below which vectors are considered intruders.
+                Lower values detect more intruders.
+            mitigation_lambda (`float`, defaults to `0.75`):
+                Scaling factor for intruder dimensions.
+            progressbar (`bool`, defaults to `True`):
+        Returns:
+            The base model with mitigated weights (LoRA adapter is removed).
+
+        Example:
+            ```python
+            from peft import PeftModel
+            from transformers import AutoModelForCausalLM
+
+            # Load fine-tuned LoRA model
+            base_model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf")
+            model = PeftModel.from_pretrained(base_model, "path/to/lora/adapter")
+
+            # Apply mitigation
+            model = model.reduce_intruder_dimensions(
+                adapter_name="default",
+                mitigation_lambda=0.75,  # Moderate mitigation
+            )
+
+            # Model is now merged and unloaded
+            # Use it directly or save it
+            model.save_pretrained("./mitigated_model")
+            ```
+
+        References:
+            - Paper: https://arxiv.org/abs/2410.21228
+            - Code: https://github.com/reeceshuttle/intruder-dimensions
+        """
+
+        if adapter_name not in self.peft_config:
+            raise ValueError(
+                f"Adapter '{adapter_name}' not found. Available adapters: {list(self.peft_config.keys())}"
+            )
+
+        if not (0.0 <= threshold_epsilon <= 1.0):
+            raise ValueError(f"threshold_epsilon must be in [0, 1], got {threshold_epsilon}")
+
+        if not (0.0 <= mitigation_lambda <= 1.0):
+            raise ValueError(
+                f"mitigation_lambda must be in [0, 1], got {mitigation_lambda}. Use 0.75-0.9 for moderate mitigation."
+            )
+
+        if top_k < 1:
+            raise ValueError(f"top_k must be >= 1, got {top_k}")
+
+        peft_config = self.peft_config[adapter_name]
+        if peft_config.peft_type.name != "LORA":
+            raise ValueError(
+                f"Intruder mitigation only supports LoRA adapters. "
+                f"Adapter '{adapter_name}' is {peft_config.peft_type.name}"
+            )
+
+        import warnings
+
+        warnings.warn(
+            f"Applying intruder dimension mitigation to adapter '{adapter_name}'. "
+            f"This will permanently merge the mitigated weights into the base model "
+            f"and remove the LoRA adapter. Make sure to save your original adapter first!",
+            UserWarning,
+        )
+
+        apply_lora_mitigation_merge_and_unload(
+            model=self,
+            adapter_name=adapter_name,
+            top_k=top_k,
+            epsilon=threshold_epsilon,
+            lambda_factor=mitigation_lambda,
+            progressbar=progressbar,
+        )
+
+        self = self.merge_and_unload(adapter_names=[adapter_name])
+
+        return self
 
 
 class PeftModelForSequenceClassification(PeftModel):
