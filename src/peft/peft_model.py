@@ -1850,7 +1850,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             stacklevel=2,
         )
 
-        lora_layers = [m for m in self.modules() if isinstance(m, LoraLayer)]
+        lora_layers = [(name, m) for name, m in self.named_modules() if isinstance(m, LoraLayer)]
         if progressbar:
             try:
                 from tqdm.auto import tqdm
@@ -1910,8 +1910,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 except Exception as e2:
                     warnings.warn(f"Failed to merge layer {name}: {e2}", UserWarning)
 
-        # Get the clean base model
-        base_model = self.base_model.unload()
+
+        base_model = self.unload()
 
         if hasattr(base_model, "peft_config"):
             delattr(base_model, "peft_config")
