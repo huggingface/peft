@@ -67,7 +67,7 @@ from .utils import (
     set_peft_model_state_dict,
     shift_tokens_right,
 )
-from .utils.intrude_dimenstion import apply_lora_mitigation_merge_and_unload
+from .utils.intruder_dimensions import detect_intruder_dimensions, mitigate_intruder_dimensions, project_delta_to_lora
 
 
 class PeftModel(PushToHubMixin, torch.nn.Module):
@@ -1596,7 +1596,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
     def reduce_intruder_dimensions(
         self,
-        adapter_name: str = "default",
+        old_adapter_name: str = "default",
+        new_adapter_name: Optional[str] = None,
         top_k: int = 10,
         threshold_epsilon: float = 0.5,
         mitigation_lambda: float = 0.75,
@@ -1605,25 +1606,28 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         Mitigate catastrophic forgetting by reducing intruder dimensions in LoRA adapters.
 
-        This implements the method from "LoRA vs Full Fine-tuning: An Illusion of Equivalence"
-        (https://arxiv.org/abs/2410.21228).
-
-        **Note**: This method uses merge-and-unload approach, permanently modifying the base model.
-        The LoRA adapter will be removed after mitigation.
+        This implements the **non-destructive** path from "LoRA vs Full Fine-tuning: An Illusion of Equivalence"
+        (https://arxiv.org/abs/2410.21228). It creates a new adapter with mitigated weights while preserving
+        the original adapter.
 
         Args:
-            adapter_name (`str`, defaults to `"default"`):
+            old_adapter_name (`str`, defaults to `"default"`):
                 Name of the adapter to mitigate.
+            new_adapter_name (`str`, *optional*):
+                Name for the new mitigated adapter. If not provided, defaults to `{old_adapter_name}_mitigated`.
             top_k (`int`, defaults to `10`):
                 Number of top singular vectors to check for intruders.
             threshold_epsilon (`float`, defaults to `0.5`):
                 Cosine similarity threshold below which vectors are considered intruders.
                 Lower values detect more intruders.
             mitigation_lambda (`float`, defaults to `0.75`):
-                Scaling factor for intruder dimensions.
+                Scaling factor for intruder dimensions. Values closer to 1.0 mean less mitigation.
             progressbar (`bool`, defaults to `True`):
+                Whether to show a progress bar during mitigation.
+
         Returns:
-            The base model with mitigated weights (LoRA adapter is removed).
+            `PeftModel`: The model with the new mitigated adapter added and set as active.
+                         The original adapter is preserved.
 
         Example:
             ```python
@@ -1634,21 +1638,190 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             base_model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf")
             model = PeftModel.from_pretrained(base_model, "path/to/lora/adapter")
 
-            # Apply mitigation
+            # Apply non-destructive mitigation
             model = model.reduce_intruder_dimensions(
-                adapter_name="default",
-                mitigation_lambda=0.75,  # Moderate mitigation
+                old_adapter_name="default",
+                new_adapter_name="default_mitigated",
+                mitigation_lambda=0.75,
             )
 
-            # Model is now merged and unloaded
-            # Use it directly or save it
-            model.save_pretrained("./mitigated_model")
+            # Original adapter still available
+            model.set_adapter("default")  # Switch to original
+            model.set_adapter("default_mitigated")  # Switch to mitigated
+
+            # Save the new adapter
+            model.save_pretrained("./mitigated_adapter")
             ```
 
         References:
             - Paper: https://arxiv.org/abs/2410.21228
             - Code: https://github.com/reeceshuttle/intruder-dimensions
         """
+        from .tuners.lora import LoraLayer
+
+        if old_adapter_name not in self.peft_config:
+            raise ValueError(
+                f"Adapter '{old_adapter_name}' not found. Available adapters: {list(self.peft_config.keys())}"
+            )
+
+        if new_adapter_name is None:
+            new_adapter_name = f"{old_adapter_name}_mitigated"
+
+        if new_adapter_name in self.peft_config:
+            raise ValueError(
+                f"Adapter '{new_adapter_name}' already exists. Choose a different name or delete the existing adapter."
+            )
+
+        if not (0.0 <= threshold_epsilon <= 1.0):
+            raise ValueError(f"threshold_epsilon must be in [0, 1], got {threshold_epsilon}")
+
+        if not (0.0 <= mitigation_lambda <= 1.0):
+            raise ValueError(
+                f"mitigation_lambda must be in [0, 1], got {mitigation_lambda}. Use 0.75-0.9 for moderate mitigation."
+            )
+
+        if top_k < 1:
+            raise ValueError(f"top_k must be >= 1, got {top_k}")
+
+        peft_config = self.peft_config[old_adapter_name]
+        if peft_config.peft_type.name != "LORA":
+            raise ValueError(
+                f"Intruder mitigation only supports LoRA adapters. "
+                f"Adapter '{old_adapter_name}' is {peft_config.peft_type.name}"
+            )
+
+        self.add_adapter(new_adapter_name, peft_config)
+
+        if progressbar:
+            try:
+                from tqdm.auto import tqdm
+
+                iterator = tqdm(
+                    self.modules(),
+                    desc=f"Applying intruder mitigation to {new_adapter_name}",
+                    total=sum(1 for _ in self.modules() if isinstance(_, LoraLayer)),
+                )
+            except ImportError:
+                iterator = self.modules()
+        else:
+            iterator = self.modules()
+
+        for module in iterator:
+            if not isinstance(module, LoraLayer):
+                continue
+
+            if old_adapter_name not in module.lora_A or old_adapter_name not in module.lora_B:
+                continue
+
+            try:
+                base_weight = module.get_base_layer().weight.data
+
+                delta_w = module.get_delta_weight(old_adapter_name)
+
+                w_finetuned = base_weight + delta_w
+
+                intruder_results = detect_intruder_dimensions(
+                    w_pretrained=base_weight,
+                    w_finetuned=w_finetuned,
+                    top_k=top_k,
+                    epsilon=threshold_epsilon,
+                )
+
+                if len(intruder_results.intruder_indices) > 0:
+                    delta_w_mitigated = mitigate_intruder_dimensions(
+                        w_pretrained=base_weight,
+                        delta_w=delta_w,
+                        intruder_results=intruder_results.__dict__,
+                        lambda_factor=mitigation_lambda,
+                    )
+
+                    rank = peft_config.r
+                    scaling = module.scaling.get(old_adapter_name, 1.0)
+                    lora_A_new, lora_B_new = project_delta_to_lora(
+                        delta_w=delta_w_mitigated,
+                        rank=rank,
+                        scaling=scaling,
+                    )
+
+                    module.lora_A[new_adapter_name].weight.data = lora_A_new.to(
+                        module.lora_A[new_adapter_name].weight.dtype
+                    ).to(module.lora_A[new_adapter_name].weight.device)
+                    module.lora_B[new_adapter_name].weight.data = lora_B_new.to(
+                        module.lora_B[new_adapter_name].weight.dtype
+                    ).to(module.lora_B[new_adapter_name].weight.device)
+                else:
+                    module.lora_A[new_adapter_name].weight.data = module.lora_A[old_adapter_name].weight.data.clone()
+                    module.lora_B[new_adapter_name].weight.data = module.lora_B[old_adapter_name].weight.data.clone()
+
+            except Exception as e:
+                warnings.warn(
+                    f"Failed to apply mitigation to layer, copying original weights instead: {e}",
+                    UserWarning,
+                )
+                module.lora_A[new_adapter_name].weight.data = module.lora_A[old_adapter_name].weight.data.clone()
+                module.lora_B[new_adapter_name].weight.data = module.lora_B[old_adapter_name].weight.data.clone()
+
+        self.set_adapter(new_adapter_name)
+
+        return self
+
+    def merge_and_unload_with_reduced_intruder_dimensions(
+        self,
+        adapter_name: str = "default",
+        top_k: int = 10,
+        threshold_epsilon: float = 0.5,
+        mitigation_lambda: float = 0.75,
+        progressbar: bool = True,
+    ):
+        """
+        Mitigate catastrophic forgetting and merge into base model (destructive).
+
+        This implements the **destructive** path from "LoRA vs Full Fine-tuning: An Illusion of Equivalence"
+        (https://arxiv.org/abs/2410.21228). It applies mitigation and permanently merges the weights into
+        the base model, removing the LoRA adapter.
+
+        **WARNING**: This operation is destructive and cannot be undone. The LoRA adapter will be removed.
+        Save your original adapter before calling this method if you want to keep it.
+
+        Args:
+            adapter_name (`str`, defaults to `"default"`):
+                Name of the adapter to mitigate and merge.
+            top_k (`int`, defaults to `10`):
+                Number of top singular vectors to check for intruders.
+            threshold_epsilon (`float`, defaults to `0.5`):
+                Cosine similarity threshold below which vectors are considered intruders.
+            mitigation_lambda (`float`, defaults to `0.75`):
+                Scaling factor for intruder dimensions. Values closer to 1.0 mean less mitigation.
+            progressbar (`bool`, defaults to `True`):
+                Whether to show a progress bar during mitigation.
+
+        Returns:
+            `torch.nn.Module`: The base model with mitigated weights merged in (no adapter).
+
+        Example:
+            ```python
+            from peft import PeftModel
+            from transformers import AutoModelForCausalLM
+
+            # Load fine-tuned LoRA model
+            base_model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf")
+            model = PeftModel.from_pretrained(base_model, "path/to/lora/adapter")
+
+            # Apply destructive mitigation
+            base_model = model.merge_and_unload_with_reduced_intruder_dimensions(
+                adapter_name="default",
+                mitigation_lambda=0.75,
+            )
+
+            # base_model now has mitigated weights, no adapter
+            base_model.save_pretrained("./mitigated_base_model")
+            ```
+
+        References:
+            - Paper: https://arxiv.org/abs/2410.21228
+            - Code: https://github.com/reeceshuttle/intruder-dimensions
+        """
+        from .tuners.lora import LoraLayer
 
         if adapter_name not in self.peft_config:
             raise ValueError(
@@ -1673,27 +1846,85 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 f"Adapter '{adapter_name}' is {peft_config.peft_type.name}"
             )
 
-        import warnings
-
         warnings.warn(
-            f"Applying intruder dimension mitigation to adapter '{adapter_name}'. "
-            f"This will permanently merge the mitigated weights into the base model "
-            f"and remove the LoRA adapter. Make sure to save your original adapter first!",
+            f" DESTRUCTIVE OPERATION: Applying intruder dimension mitigation to adapter '{adapter_name}'. "
+            f"This will permanently merge the mitigated weights into the base model and remove the LoRA adapter. "
+            f"This operation cannot be undone. Make sure you have saved your original adapter!",
             UserWarning,
+            stacklevel=2,
         )
 
-        apply_lora_mitigation_merge_and_unload(
-            model=self,
-            adapter_name=adapter_name,
-            top_k=top_k,
-            epsilon=threshold_epsilon,
-            lambda_factor=mitigation_lambda,
-            progressbar=progressbar,
-        )
+        if progressbar:
+            try:
+                from tqdm.auto import tqdm
 
-        self = self.merge_and_unload(adapter_names=[adapter_name])
+                iterator = tqdm(
+                    self.named_modules(),
+                    desc=f"Applying mitigation and merging {adapter_name}",
+                    total=sum(1 for _, m in self.named_modules() if isinstance(m, LoraLayer)),
+                )
+            except ImportError:
+                iterator = self.named_modules()
+        else:
+            iterator = self.named_modules()
 
-        return self
+        for name, module in iterator:
+            if not isinstance(module, LoraLayer):
+                continue
+
+            if adapter_name not in module.lora_A or adapter_name not in module.lora_B:
+                continue
+
+            try:
+                base_weight = module.get_base_layer().weight
+
+                delta_w = module.get_delta_weight(adapter_name)
+
+                w_finetuned = base_weight.data + delta_w
+
+                intruder_results = detect_intruder_dimensions(
+                    w_pretrained=base_weight.data,
+                    w_finetuned=w_finetuned,
+                    top_k=top_k,
+                    epsilon=threshold_epsilon,
+                )
+
+                if len(intruder_results.intruder_indices) > 0:
+                    delta_w_mitigated = mitigate_intruder_dimensions(
+                        w_pretrained=base_weight.data,
+                        delta_w=delta_w,
+                        intruder_results=intruder_results.__dict__,
+                        lambda_factor=mitigation_lambda,
+                    )
+                else:
+                    delta_w_mitigated = delta_w
+
+                base_weight.data += delta_w_mitigated.to(base_weight.dtype).to(base_weight.device)
+
+                module.lora_A[adapter_name].weight.data.zero_()
+                module.lora_B[adapter_name].weight.data.zero_()
+
+            except Exception as e:
+                warnings.warn(
+                    f"Failed to apply mitigation to layer {name}, merging original weights instead: {e}",
+                    UserWarning,
+                )
+                try:
+                    delta_w = module.get_delta_weight(adapter_name)
+                    base_weight.data += delta_w.to(base_weight.dtype).to(base_weight.device)
+
+                    module.lora_A[adapter_name].weight.data.zero_()
+                    module.lora_B[adapter_name].weight.data.zero_()
+                except Exception as e2:
+                    warnings.warn(f"Failed to merge layer {name}: {e2}", UserWarning)
+
+        # Get the clean base model
+        base_model = self.base_model.unload()
+
+        if hasattr(base_model, "peft_config"):
+            delattr(base_model, "peft_config")
+
+        return base_model
 
 
 class PeftModelForSequenceClassification(PeftModel):

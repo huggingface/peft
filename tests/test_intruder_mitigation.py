@@ -48,6 +48,19 @@ class TestIntruderMitigation:
         assert "default_mitigated" in model.peft_config  # New adapter created
         assert model.active_adapter == "default_mitigated"  # New adapter is active
 
+    def test_merge_and_unload_destructive(self, tiny_lora_model):
+        """Test destructive path (merge and unload)."""
+        model = tiny_lora_model
+
+        base_model = model.merge_and_unload_with_reduced_intruder_dimensions(
+            adapter_name="default",
+            mitigation_lambda=0.75,
+            progressbar=False,
+        )
+
+        assert base_model is not None
+        assert not hasattr(base_model, "peft_config")  # No adapter after unload
+
     def test_invalid_adapter_name(self, tiny_lora_model):
         """Test that invalid adapter name raises error."""
         model = tiny_lora_model
