@@ -300,8 +300,8 @@ def project_delta_to_lora(
         lora_B = u[:, :effective_rank] @ s_trunc
         lora_A = v[:effective_rank, :] / scaling
 
-    lora_A = lora_A.to(dtype=delta_w.dtype)
-    lora_B = lora_B.to(dtype=delta_w.dtype)
+    lora_A = lora_A.to(dtype=delta_w.dtype, device=delta_w.device)
+    lora_B = lora_B.to(dtype=delta_w.dtype, device=delta_w.device)
 
     return lora_A, lora_B
 

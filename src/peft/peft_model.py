@@ -1692,19 +1692,15 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         self.add_adapter(new_adapter_name, peft_config)
 
+        lora_layers =[ m for m in self.modules() if isinstance(m, LoraLayer)]
         if progressbar:
             try:
                 from tqdm.auto import tqdm
-
-                iterator = tqdm(
-                    self.modules(),
-                    desc=f"Applying intruder mitigation to {new_adapter_name}",
-                    total=sum(1 for _ in self.modules() if isinstance(_, LoraLayer)),
-                )
+                iterator = tqdm(lora_layers, desc=f"Applying intruder mitigation to {new_adapter_name}")
             except ImportError:
-                iterator = self.modules()
+                iterator = lora_layers
         else:
-            iterator = self.modules()
+            iterator = lora_layers
 
         for module in iterator:
             if not isinstance(module, LoraLayer):
@@ -1854,19 +1850,15 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             stacklevel=2,
         )
 
+        lora_layers = [m for m in self.modules() if isinstance(m, LoraLayer)]
         if progressbar:
             try:
                 from tqdm.auto import tqdm
-
-                iterator = tqdm(
-                    self.named_modules(),
-                    desc=f"Applying mitigation and merging {adapter_name}",
-                    total=sum(1 for _, m in self.named_modules() if isinstance(m, LoraLayer)),
-                )
+                iterator = tqdm(lora_layers, desc=f"Applying mitigation and merging {adapter_name}")
             except ImportError:
-                iterator = self.named_modules()
+                iterator = lora_layers
         else:
-            iterator = self.named_modules()
+            iterator = lora_layers
 
         for name, module in iterator:
             if not isinstance(module, LoraLayer):
