@@ -1879,10 +1879,12 @@ class _LoraParameterProxy(nn.Module):
     def __init__(self, delta_weight):
         super().__init__()
         self.delta_weight = delta_weight
+        self._result = None
 
     def forward(self, W):
-        with nn.utils.parametrize.cached():
-            return W + self.delta_weight
+        if self._result is None:
+            self._result = W + self.delta_weight
+        return self._result
 
 
 # copied from:
