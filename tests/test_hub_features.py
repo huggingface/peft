@@ -75,7 +75,7 @@ class TestBaseModelRevision:
         lora_config = LoraConfig(r=8, lora_alpha=16, lora_dropout=0.0)
         test_inputs = torch.arange(10).reshape(-1, 1)
 
-        base_model_id = "peft-internal-testing/tiny-random-BertModel"
+        base_model_id = "hf-internal-testing/tiny-random-BertModel"
         revision = "v2.0.0"
 
         base_model_revision = AutoModelForCausalLM.from_pretrained(base_model_id, revision=revision).eval()
@@ -100,13 +100,11 @@ class TestBaseModelRevision:
         output_revision_loaded = peft_model_revision_loaded(test_inputs).logits
         assert torch.allclose(output_revision, output_revision_loaded)
 
-    # TODO remove when/if Hub is more stable
-    @pytest.mark.xfail(reason="Test is flaky on CI", raises=ValueError)
     def test_load_different_peft_and_base_model_revision(self, tmp_path):
         r"""
         Test loading an AutoPeftModel from the hub where the base model revision and peft revision differ
         """
-        base_model_id = "peft-internal-testing/tiny-random-BertModel"
+        base_model_id = "hf-internal-testing/tiny-random-BertModel"
         base_model_revision = None
         peft_model_id = "peft-internal-testing/tiny-random-BertModel-lora"
         peft_model_revision = "v1.2.3"
