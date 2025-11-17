@@ -75,7 +75,7 @@ class TestBaseModelRevision:
         lora_config = LoraConfig(r=8, lora_alpha=16, lora_dropout=0.0)
         test_inputs = torch.arange(10).reshape(-1, 1)
 
-        base_model_id = "hf-internal-testing/tiny-random-BertModel"
+        base_model_id = "peft-internal-testing/tiny-random-BertModel"
         revision = "v2.0.0"
 
         base_model_revision = AutoModelForCausalLM.from_pretrained(base_model_id, revision=revision).eval()
