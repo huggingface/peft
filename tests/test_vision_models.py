@@ -40,7 +40,7 @@ from peft import (
     get_peft_model,
 )
 
-from .testing_utils import load_cat_image
+from .testing_utils import hub_online_once, load_cat_image
 
 
 CONFIGS = {
@@ -83,7 +83,8 @@ class TestPastKV:
 
 
 class TestResnet:
-    model_id = "hf-internal-testing/tiny-random-ResNetForImageClassification"
+    # saftensors version of the hf-internal-testing model
+    model_id = "peft-internal-testing/tiny-random-ResNetForImageClassification"
     cat_image = load_cat_image()  # for caching
 
     @pytest.fixture(autouse=True)
@@ -108,52 +109,53 @@ class TestResnet:
     def test_model_with_batchnorm_reproducibility(self, config, tmp_path, data):
         # see 1732
         torch.manual_seed(0)
-        model = AutoModelForImageClassification.from_pretrained(self.model_id)
-        model = get_peft_model(model, config)
+        with hub_online_once(self.model_id):
+            model = AutoModelForImageClassification.from_pretrained(self.model_id)
+            model = get_peft_model(model, config)
 
-        # record outputs before training
-        model.eval()
-        with torch.inference_mode():
-            output_before = model(**data)
-        model.train()
+            # record outputs before training
+            model.eval()
+            with torch.inference_mode():
+                output_before = model(**data)
+            model.train()
 
-        # train the model
-        optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
-        batch_size = 4
-        max_steps = 5 * batch_size
-        labels = torch.zeros(1, 3)
-        labels[0, 1] = 1
-        for i in range(0, max_steps, batch_size):
-            optimizer.zero_grad()
-            outputs = model(**data, labels=labels)
-            loss = outputs.loss
-            loss.backward()
-            optimizer.step()
+            # train the model
+            optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+            batch_size = 4
+            max_steps = 5 * batch_size
+            labels = torch.zeros(1, 3)
+            labels[0, 1] = 1
+            for i in range(0, max_steps, batch_size):
+                optimizer.zero_grad()
+                outputs = model(**data, labels=labels)
+                loss = outputs.loss
+                loss.backward()
+                optimizer.step()
 
-        # record outputs after training
-        model.eval()
-        with torch.inference_mode():
-            output_after = model(**data)
-        assert torch.isfinite(output_after.logits).all()
-        atol, rtol = 1e-4, 1e-4
-        # sanity check: model was updated
-        assert not torch.allclose(output_before.logits, output_after.logits, atol=atol, rtol=rtol)
+            # record outputs after training
+            model.eval()
+            with torch.inference_mode():
+                output_after = model(**data)
+            assert torch.isfinite(output_after.logits).all()
+            atol, rtol = 1e-4, 1e-4
+            # sanity check: model was updated
+            assert not torch.allclose(output_before.logits, output_after.logits, atol=atol, rtol=rtol)
 
-        # check saving the model and loading it
-        model.save_pretrained(tmp_path)
-        del model
+            # check saving the model and loading it
+            model.save_pretrained(tmp_path)
+            del model
 
-        torch.manual_seed(0)
-        model = AutoModelForImageClassification.from_pretrained(self.model_id)
-        model = PeftModel.from_pretrained(model, tmp_path).eval()
-        with torch.inference_mode():
-            output_loaded = model(**data)
-        assert torch.allclose(output_after.logits, output_loaded.logits, atol=atol, rtol=rtol)
+            torch.manual_seed(0)
+            model = AutoModelForImageClassification.from_pretrained(self.model_id)
+            model = PeftModel.from_pretrained(model, tmp_path).eval()
+            with torch.inference_mode():
+                output_loaded = model(**data)
+            assert torch.allclose(output_after.logits, output_loaded.logits, atol=atol, rtol=rtol)
 
-        # ensure that the checkpoint file contains the buffers
-        model_running_mean = len([k for k in model.state_dict().keys() if "running_mean" in k])
-        state_dict = load_file(tmp_path / "adapter_model.safetensors")
-        checkpoint_running_mean = len([k for k in state_dict.keys() if "running_mean" in k])
-        # note that the model has twice as many "running_mean", as there is one copy per ModulesToSaveWrapper, we need
-        # to multiply by 2 to get the same number
-        assert model_running_mean == checkpoint_running_mean * 2
+            # ensure that the checkpoint file contains the buffers
+            model_running_mean = len([k for k in model.state_dict().keys() if "running_mean" in k])
+            state_dict = load_file(tmp_path / "adapter_model.safetensors")
+            checkpoint_running_mean = len([k for k in state_dict.keys() if "running_mean" in k])
+            # note that the model has twice as many "running_mean", as there is one copy per ModulesToSaveWrapper, we need
+            # to multiply by 2 to get the same number
+            assert model_running_mean == checkpoint_running_mean * 2

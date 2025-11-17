@@ -432,7 +432,7 @@ class TestTargetingAuxiliaryTrainingWrapper:
         # will not target the same layer with both a tuner and ModulesToSaveWrapper. However, if modules_to_save is
         # automatically inferred, e.g. when using AutoModelForSequenceClassification, the ModulesToSaveWrapper is applied ex
         # post, which can lead to the double wrapping.
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         model = AutoModelForSequenceClassification.from_pretrained(model_id)
 
         # Note: target_modules="all-linear" would also work and is closer to the original issue, but let's explicitly target
@@ -446,7 +446,7 @@ class TestTargetingAuxiliaryTrainingWrapper:
             get_peft_model(model, peft_config)
 
     def test_targeting_trainable_tokens_raises(self):
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         model = AutoModelForSequenceClassification.from_pretrained(model_id)
 
         peft_config = LoraConfig(target_modules=["embed_tokens"], task_type="SEQ_CLS", trainable_token_indices=[0, 1])

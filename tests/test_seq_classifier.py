@@ -44,9 +44,10 @@ from .testing_common import PeftCommonTester
 from .testing_utils import hub_online_once
 
 
+# Note: models from peft-internal-testing are just the safetensors versions of hf-internal-testing
 PEFT_SEQ_CLS_MODELS_TO_TEST = [
-    "hf-internal-testing/tiny-random-BertForSequenceClassification",
-    "hf-internal-testing/tiny-random-RobertaForSequenceClassification",
+    "peft-internal-testing/tiny-random-BertForSequenceClassification",
+    "peft-internal-testing/tiny-random-RobertaForSequenceClassification",
     "trl-internal-testing/tiny-LlamaForSequenceClassification-3.2",
 ]
 

@@ -2723,7 +2723,7 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_delete_adapter_multiple_adapters_with_trainable_token_indices(self):
         # Same as the previous test, just using trainable_token_indices instead of modules_to_save
         # Note that we need to use a transformers model for trainable_token_indices
-        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
         inputs = {"input_ids": torch.arange(10).view(-1, 1).to(self.torch_device)}
 
         config0 = LoraConfig(target_modules=["q_proj"], trainable_token_indices=[0, 1])
@@ -3146,7 +3146,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # modules_to_save for each adapter. When the first adapter targets embed_tokens with modules_to_save and the
         # second adapter targets lm_head, then embed_tokens will create a copy of the original module for the second
         # adapter, even though it's not needed. The copy still acts as expected but uses unnecessary memory.
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
         config0 = LoraConfig(modules_to_save=["embed_tokens"])
         config1 = LoraConfig(modules_to_save=["lm_head"])

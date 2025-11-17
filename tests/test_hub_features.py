@@ -106,7 +106,7 @@ class TestBaseModelRevision:
         r"""
         Test loading an AutoPeftModel from the hub where the base model revision and peft revision differ
         """
-        base_model_id = "hf-internal-testing/tiny-random-BertModel"
+        base_model_id = "peft-internal-testing/tiny-random-BertModel"
         base_model_revision = None
         peft_model_id = "peft-internal-testing/tiny-random-BertModel-lora"
         peft_model_revision = "v1.2.3"
@@ -136,11 +136,11 @@ class TestModelCard:
                 None,
             ),
             (
-                "hf-internal-testing/tiny-random-BartForConditionalGeneration",
+                "peft-internal-testing/tiny-random-BartForConditionalGeneration",
                 LoraConfig(),
                 [
                     "transformers",
-                    "base_model:adapter:hf-internal-testing/tiny-random-BartForConditionalGeneration",
+                    "base_model:adapter:peft-internal-testing/tiny-random-BartForConditionalGeneration",
                     "lora",
                 ],
                 [],
