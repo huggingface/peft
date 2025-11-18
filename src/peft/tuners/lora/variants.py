@@ -775,13 +775,28 @@ def get_alora_offsets_for_generate(model: nn.module, *args, **kwargs):
 
 
 class BlockDiagonalLinear(nn.Module):
-    def __init__(self, in_features: int, out_features: int, nblocks: int, bias: bool = False):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        nblocks: int,
+        bias: bool = False,
+        init_zero: bool = False,
+        dtype: torch.dtype = torch.float32,
+        device: torch.device = None,
+    ):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.nblocks = nblocks
-        self.weight = nn.Parameter(torch.empty(out_features, in_features // nblocks))
-        torch.nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+
+        # Create weight with specified dtype and device
+        self.weight = nn.Parameter(torch.empty(out_features, in_features // nblocks, dtype=dtype, device=device))
+
+        if init_zero:
+            torch.nn.init.zeros_(self.weight)
+        else:
+            torch.nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
         if bias:
             raise NotImplementedError("Bias is not implemented for BlockDiagonalLinear layer.")
 
@@ -831,11 +846,29 @@ class BdLoraLinearVariant(LoraVariant):
 
         if has_lora_a_blockdiagonal:
             r = module.lora_A[adapter_name].out_features
-            layer = BlockDiagonalLinear(module.in_features, r, nblocks=nblocks, bias=False)
+            base_layer = module.get_base_layer()
+            layer = BlockDiagonalLinear(
+                base_layer.in_features,
+                r,
+                nblocks=nblocks,
+                bias=False,
+                init_zero=False,
+                dtype=base_layer.weight.dtype,
+                device=base_layer.weight.device,
+            )
             module.lora_A[adapter_name] = layer
         elif has_lora_b_blockdiagonal:
             r = module.lora_B[adapter_name].in_features
-            layer = BlockDiagonalLinear(r, module.out_features, nblocks=nblocks, bias=False)
+            base_layer = module.get_base_layer()
+            layer = BlockDiagonalLinear(
+                r,
+                base_layer.out_features,
+                nblocks=nblocks,
+                bias=False,
+                init_zero=True,
+                dtype=base_layer.weight.dtype,
+                device=base_layer.weight.device,
+            )
             module.lora_B[adapter_name] = layer
 
     @staticmethod
@@ -845,6 +878,8 @@ class BdLoraLinearVariant(LoraVariant):
         dropout = module.lora_dropout[active_adapter]
         scaling = module.scaling[active_adapter]
         x = dropout(x)
+        # Cast input dtype to match lora_A weight dtype
+        x = module._cast_input_dtype(x, lora_A.weight.dtype)
         result += lora_B(lora_A(x)) * scaling
         return result
 
@@ -860,7 +895,9 @@ class BdLoraLinearVariant(LoraVariant):
         """Similar to get_delta_weight for a linear module, but we have to eventually reshape the blocks
         of the weights."""
         device = module.lora_B[adapter].weight.device
-        dtype = module.lora_B[adapter].weight.dtype
+        # Use base layer dtype to ensure compatibility with merge/unmerge operations
+        base_layer = module.get_base_layer()
+        dtype = base_layer.weight.dtype
         cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
 
         weight_A = BdLoraLinearVariant._get_weight_from_module_maybe_blockdiagonal(module.lora_A[adapter])
@@ -877,7 +914,8 @@ class BdLoraLinearVariant(LoraVariant):
             module.lora_A[adapter].weight.data = weight_A.to(dtype)
             module.lora_B[adapter].weight.data = weight_B.to(dtype)
 
-        return output_tensor
+        # Ensure output tensor matches base layer dtype
+        return output_tensor.to(dtype=dtype)
 
     @staticmethod
     def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:

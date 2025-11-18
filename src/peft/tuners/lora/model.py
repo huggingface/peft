@@ -238,6 +238,7 @@ class LoraModel(BaseTuner):
                 use_rslora=lora_config.use_rslora,
                 use_dora=lora_config.use_dora,
                 lora_bias=lora_config.lora_bias,
+                target_name=current_key,
                 arrow_config=lora_config.arrow_config,
                 use_bdlora=lora_config.use_bdlora,
                 inference_mode=lora_config.inference_mode,
