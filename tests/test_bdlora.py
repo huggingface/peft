@@ -247,3 +247,52 @@ class TestBdLora:
         # Total: 40 + 160 + 160 + 40 = 400
         expected_params = 400
         assert trainable_params == expected_params
+
+    def test_bdlora_adapter_merging(self, mlp):
+        """Test BD-LoRA adapter merging functionality."""
+        config = LoraConfig(
+            r=8,
+            target_modules=["lin1", "lin2"],
+            use_bdlora=BdLoraConfig(
+                target_modules_bd_a=["lin1"],
+                target_modules_bd_b=["lin2"],
+                nblocks=4,
+            ),
+        )
+        peft_model = get_peft_model(mlp, config)
+
+        x = torch.randn(2, 10)
+        output_before_merge = peft_model(x)
+
+        # Merge adapters
+        peft_model.merge_and_unload()
+
+        # Test that merged model produces same output
+        output_after_merge = peft_model(x)
+        assert torch.allclose(output_before_merge, output_after_merge, atol=1e-5)
+
+    def test_bdlora_adapter_unmerging(self, mlp):
+        """Test BD-LoRA adapter unmerging functionality."""
+        config = LoraConfig(
+            r=8,
+            target_modules=["lin1", "lin2"],
+            use_bdlora=BdLoraConfig(
+                target_modules_bd_a=["lin1"],
+                target_modules_bd_b=["lin2"],
+                nblocks=4,
+            ),
+        )
+        peft_model = get_peft_model(mlp, config)
+
+        x = torch.randn(2, 10)
+        output_original = peft_model(x)
+
+        # Merge then unmerge adapters
+        peft_model.merge_adapter()
+        output_merged = peft_model(x)
+
+        peft_model.unmerge_adapter()
+        output_unmerged = peft_model(x)
+
+        # Test that unmerged model produces same output as original
+        assert torch.allclose(output_original, output_unmerged, atol=1e-5)

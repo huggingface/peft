@@ -787,7 +787,7 @@ class BlockDiagonalLinear(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         first_dims = x.shape[:-1]
-        if not len(x.shape) == 2:
+        if x.dim() != 2:
             x = x.reshape(-1, x.shape[-1])
         B = x.shape[0]
         nb = self.nblocks
@@ -797,6 +797,11 @@ class BlockDiagonalLinear(nn.Module):
         w = self.weight.view(nb, n, m)
         out = torch.einsum("bim,inm->bin", x, w)
         return out.reshape(*first_dims, -1)
+
+    def weight_as_blockdiagonal_matrix(self):
+        """Returns weight in a format similar to a vanilla LoRA adapter. For this, we stack the blocks on the diagonal,
+        leaving the off-diagonals padded with zero."""
+        return torch.block_diag(*torch.chunk(self.weight, self.nblocks, dim=0))
 
 
 class BdLoraLinearVariant(LoraVariant):
@@ -844,13 +849,44 @@ class BdLoraLinearVariant(LoraVariant):
         return result
 
     @staticmethod
+    def _get_weight_from_module_maybe_blockdiagonal(module: nn.Module) -> torch.Tensor:
+        if isinstance(module, BlockDiagonalLinear):
+            return module.weight_as_blockdiagonal_matrix()
+        else:
+            return module.weight  # type: ignore
+
+    @staticmethod
+    def _get_bdlora_delta_weight(module: Linear, adapter: str) -> torch.Tensor:
+        """Similar to get_delta_weight for a linear module, but we have to eventually reshape the blocks
+        of the weights."""
+        device = module.lora_B[adapter].weight.device
+        dtype = module.lora_B[adapter].weight.dtype
+        cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
+
+        weight_A = BdLoraLinearVariant._get_weight_from_module_maybe_blockdiagonal(module.lora_A[adapter])
+        weight_B = BdLoraLinearVariant._get_weight_from_module_maybe_blockdiagonal(module.lora_B[adapter])
+
+        if cast_to_fp32:
+            weight_A = weight_A.float()
+            weight_B = weight_B.float()
+
+        output_tensor = transpose(weight_B @ weight_A, module.fan_in_fan_out) * module.scaling[adapter]
+
+        if cast_to_fp32:
+            output_tensor = output_tensor.to(dtype=dtype)
+            module.lora_A[adapter].weight.data = weight_A.to(dtype)
+            module.lora_B[adapter].weight.data = weight_B.to(dtype)
+
+        return output_tensor
+
+    @staticmethod
     def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
-        return orig_weight + module.get_delta_weight(active_adapter)
+        return orig_weight + BdLoraLinearVariant._get_bdlora_delta_weight(module, active_adapter)
 
     @staticmethod
     def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
-        orig_weight.data += module.get_delta_weight(active_adapter)
+        orig_weight.data += BdLoraLinearVariant._get_bdlora_delta_weight(module, active_adapter)
 
     @staticmethod
     def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
-        return orig_weight - module.get_delta_weight(active_adapter)
+        return orig_weight - BdLoraLinearVariant._get_bdlora_delta_weight(module, active_adapter)
