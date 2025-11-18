@@ -505,3 +505,42 @@ class TestTargetParameters:
         unloaded = model.unload()
         output_unloaded = unloaded(x)
         assert torch.all(output_unloaded == output_parametrized)
+
+    def test_target_parameter_result_caching_works(self, monkeypatch):
+        # See 2912
+        # There was an issue with the caching of _LoraParameterProxy not working correctly. This test checks that the
+        # results returned from the forward call are all identical to ensure they're not recomputed each time.
+        torch.manual_seed(0)
+        model_id = "trl-internal-testing/tiny-GptOssForCausalLM"
+
+        tensor_storage = []
+
+        def store_tensors_deco(fn):
+            def wrapper(*args, **kwargs):
+                result = fn(*args, **kwargs)
+                tensor_storage.append(result)
+                return result
+
+            return wrapper
+
+        monkeypatch.setattr(
+            peft.tuners.lora.layer._LoraParameterProxy,
+            "forward",
+            store_tensors_deco(peft.tuners.lora.layer._LoraParameterProxy.forward),
+        )
+
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            config = LoraConfig(
+                target_modules=[],
+                # for simplicity, only target a single layer
+                target_parameters=["0.mlp.experts.gate_up_proj"],
+            )
+            model = get_peft_model(model, config)
+            x = torch.arange(100).view(2, 50)  # larger input to hit many experts
+            output = model(x, output_hidden_states=True)
+            assert len(set(map(id, tensor_storage))) == 1
+
+            # sanity check: a second forward call _does_ trigger a new forward
+            output = model(x, output_hidden_states=True)
+            assert len(set(map(id, tensor_storage))) == 2
