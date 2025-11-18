@@ -783,7 +783,7 @@ class BlockDiagonalLinear(nn.Module):
         bias: bool = False,
         init_zero: bool = False,
         dtype: torch.dtype = torch.float32,
-        device: torch.device = None,
+        device: torch.device = torch.device("cpu"),
     ):
         super().__init__()
         self.in_features = in_features
