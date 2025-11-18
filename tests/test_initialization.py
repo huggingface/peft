@@ -64,6 +64,7 @@ from peft import (
     set_peft_model_state_dict,
 )
 from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
+from peft.tuners.lokr.layer import LoKrLayer
 from peft.tuners.lora.config import CordaConfig
 from peft.tuners.lora.corda import preprocess_corda
 from peft.tuners.lora.layer import LoraLayer
@@ -5053,8 +5054,6 @@ class TestWeightTying:
             raise NotImplementedError("Layer type {layer} is not supported for this test")
 
     def test_weight_tying_tied_model_target_modules_lokr(self):
-        from peft.tuners.lokr.layer import LoKrLayer
-
         model = self.get_lm_model()
 
         embed_token_config = LoKrConfig(target_modules=["linear", "lm_head"])
