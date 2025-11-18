@@ -775,7 +775,7 @@ def get_alora_offsets_for_generate(model: nn.module, *args, **kwargs):
 
 
 class BlockDiagonalLinear(nn.Module):
-    def __init__(self, in_features: int, out_features: int, nblocks: int, bias: bool = True):
+    def __init__(self, in_features: int, out_features: int, nblocks: int, bias: bool = False):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -783,7 +783,7 @@ class BlockDiagonalLinear(nn.Module):
         self.weight = nn.Parameter(torch.empty(out_features, in_features // nblocks))
         torch.nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
         if bias:
-            raise NotImplementedError
+            raise NotImplementedError("Bias is not implemented for BlockDiagonalLinear layer.")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         first_dims = x.shape[:-1]
