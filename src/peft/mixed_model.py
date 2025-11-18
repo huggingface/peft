@@ -100,6 +100,7 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         _check_config_compatible(peft_config)
         _prepare_model_for_gradient_checkpointing(model)
         self.modules_to_save = None
+        # This line triggers the crash
         self.base_model = MixedModel(model, {adapter_name: peft_config}, adapter_name)
         self.set_modules_to_save(peft_config, adapter_name)
 
