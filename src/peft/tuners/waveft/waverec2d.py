@@ -11,11 +11,11 @@
 
 from collections.abc import Callable, Sequence
 from functools import partial
-from typing import Any, NamedTuple, Protocol, Union, cast, overload
+from typing import Any, NamedTuple, Protocol, TypeAlias, Union, cast, overload
 
 import numpy as np
 import torch
-from typing_extensions import TypeAlias, Unpack
+from typing_extensions import Unpack
 
 from .wavelet import Wavelet as minimal_wavelet
 

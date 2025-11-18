@@ -22,6 +22,7 @@ from peft import (
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
+    GraloraConfig,
     HRAConfig,
     IA3Config,
     LoraConfig,
@@ -96,6 +97,13 @@ ALL_CONFIGS = [
         {
             "task_type": "SEQ_CLS",
             "n_frequency": 10,
+            "target_modules": None,
+        },
+    ),
+    (
+        GraloraConfig,
+        {
+            "task_type": "SEQ_CLS",
             "target_modules": None,
         },
     ),
