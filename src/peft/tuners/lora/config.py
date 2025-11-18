@@ -149,6 +149,14 @@ class BdLoraConfig:
         },
     )
 
+    def __post_init__(self):
+        # check for overlap
+        if self.target_modules_bd_a is None or self.target_modules_bd_b is None:
+            return  # one is empty so no overlap possible
+        for module in self.target_modules_bd_a:
+            if module in self.target_modules_bd_b:
+                raise ValueError(f"{module} is contained in both BD-LoRA target modules lists.")
+
 
 @dataclass
 class EvaConfig:
