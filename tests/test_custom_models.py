@@ -38,6 +38,7 @@ from peft import (
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
+    GraloraConfig,
     HRAConfig,
     IA3Config,
     LNTuningConfig,
@@ -666,6 +667,37 @@ TEST_CASES = [
             "init_weights": True,
         },
     ),
+    ###########
+    # GraLoRA #
+    ###########
+    ("Vanilla MLP 1 GraLoRA", "MLP", GraloraConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 GraLoRA", "MLP", GraloraConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 GraLoRA", "MLP", GraloraConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 GraLoRA", "MLP", GraloraConfig, {"target_modules": ["lin0", "lin1"]}),
+    (
+        "Vanilla MLP 5 GraLoRA",
+        "MLP",
+        GraloraConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"]},
+    ),
+    (
+        "Vanilla MLP 6 GraLoRA",
+        "MLP",
+        GraloraConfig,
+        {"target_modules": ["lin0", "lin1"], "modules_to_save": ["lin1"]},
+    ),
+    (
+        "Vanilla MLP 7 Hybrid GraLoRA",
+        "MLP",
+        GraloraConfig,
+        {"target_modules": ["lin0", "lin1"], "modules_to_save": ["lin1"], "hybrid_r": 4},
+    ),
+    (
+        "Embedding + transformers Conv1D 1 GraLoRA",
+        "EmbConv1D",
+        GraloraConfig,
+        {"target_modules": ["conv1d"], "gralora_k": 1},
+    ),
     ##########
     # VBLoRA #
     ##########
@@ -980,6 +1012,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"n_frequency": 10, "target_modules": ["lin1"]},
     ),
     (
+        "GraLoRA Same",
+        "gralora",
+        GraloraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "GraLoRA Different",
+        "gralora",
+        GraloraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin1"], "init_weights": False},
+    ),
+    (
         "SHiRA Same",
         "shira",
         ShiraConfig,
@@ -1165,6 +1211,7 @@ PREFIXES = {
     VeraConfig: "vera_lambda_",
     RandLoraConfig: "randlora_",
     FourierFTConfig: "fourierft_",
+    GraloraConfig: "gralora_",
     C3AConfig: "c3a_",
     HRAConfig: "hra_",
     ShiraConfig: "shira_",
@@ -3407,6 +3454,24 @@ class TestPeftCustomModel(PeftCommonTester):
         assert state_dict.keys() == state_dict_loaded.keys()
         for k in state_dict:
             assert torch.allclose(state_dict[k], state_dict_loaded[k])
+
+    def test_gralora_and_hybrid_gralora_parameter_count(self):
+        # Here we test the parameter count of GraLoRA is preserved
+        # when rank r + hybrid_r is the same regardless of the value of gralora_k.
+        model1 = MLP()
+        config1 = GraloraConfig(target_modules=["lin0"], r=12, gralora_k=2, hybrid_r=0)
+        model1 = get_peft_model(model1, config1)
+        model2 = MLP()
+        config2 = GraloraConfig(target_modules=["lin0"], r=10, gralora_k=2, hybrid_r=2)
+        model2 = get_peft_model(model2, config2)
+        model3 = MLP()
+        config3 = GraloraConfig(target_modules=["lin0"], r=10, gralora_k=5, hybrid_r=2)
+        model3 = get_peft_model(model3, config3)
+        trainable_params1, all_params1 = model1.get_nb_trainable_parameters()
+        trainable_params2, all_params2 = model2.get_nb_trainable_parameters()
+        trainable_params3, all_params3 = model3.get_nb_trainable_parameters()
+        assert trainable_params1 == trainable_params2 == trainable_params3
+        assert all_params1 == all_params2 == all_params3
 
     @pytest.mark.parametrize("with_forward_call", [False, True])
     def test_mha_gradients_set_correctly(self, with_forward_call):
