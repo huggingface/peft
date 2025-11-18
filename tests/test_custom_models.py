@@ -59,6 +59,7 @@ from peft import (
     WaveFTConfig,
     get_peft_model,
 )
+from peft.tuners.lora.config import BdLoraConfig
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import AuxiliaryTrainingWrapper, infer_device
 
@@ -868,6 +869,40 @@ TEST_CASES = [
         DeloraConfig,
         {"target_modules": ["lin0"], "module_dropout": 0.1},
     ),
+    ##########
+    # BD-LoRA #
+    ##########
+    (
+        "BD-LoRA A only",
+        "MLP",
+        LoraConfig,
+        {"target_modules": ["lin0", "lin1"], "use_bdlora": BdLoraConfig(target_modules_bd_a=["lin0"], nblocks=2)},
+    ),
+    (
+        "BD-LoRA B only",
+        "MLP",
+        LoraConfig,
+        {"target_modules": ["lin0", "lin1"], "use_bdlora": BdLoraConfig(target_modules_bd_b=["lin1"], nblocks=2)},
+    ),
+    (
+        "BD-LoRA both A and B",
+        "MLP",
+        LoraConfig,
+        {
+            "target_modules": ["lin0", "lin1"],
+            "use_bdlora": BdLoraConfig(target_modules_bd_a=["lin0"], target_modules_bd_b=["lin1"], nblocks=2),
+        },
+    ),
+    (
+        "BD-LoRA with modules_to_save",
+        "MLP",
+        LoraConfig,
+        {
+            "target_modules": ["lin0"],
+            "modules_to_save": ["lin1"],
+            "use_bdlora": BdLoraConfig(target_modules_bd_a=["lin0"], nblocks=2),
+        },
+    ),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
 
@@ -1152,6 +1187,7 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_weights": False},
         {"target_modules": ["lin1"], "init_weights": False},
     ),
+    # BD-LoRA different encounters issues as the adapter weights have different shapes then
 ]
 
 PREFIXES = {
