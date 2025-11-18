@@ -130,13 +130,13 @@ class BdLoraConfig:
         nblocks: Number of blocks in block-diagonal matrices
     """
 
-    lora_a_is_blockdiagonal: Optional[list[str]] = field(
+    target_modules_bd_a: Optional[list[str]] = field(
         default=None,
         metadata={
             "help": "Modules where the LoRA-A is block-diagonal. Matches each pattern in the list against the module name via `pattern is in target_name`. Example: ['up_proj', 'q_proj', 'v_proj', 'k_proj']"
         },
     )
-    lora_b_is_blockdiagonal: Optional[list[str]] = field(
+    target_modules_bd_b: Optional[list[str]] = field(
         default=None,
         metadata={
             "help": "Modules where the LoRA-B is block-diagonal. Matches each pattern in the list against the module name via `pattern is in target_name`. Example: ['out_proj', 'down_proj']"

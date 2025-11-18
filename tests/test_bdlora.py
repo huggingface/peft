@@ -54,8 +54,8 @@ class TestBdLora:
     def test_bdlora_config_creation(self):
         """Test that BdLoraConfig can be created with proper parameters."""
         bdlora_config = BdLoraConfig(
-            lora_a_is_blockdiagonal=["lin1"],
-            lora_b_is_blockdiagonal=["lin2"],
+            target_modules_bd_a=["lin1"],
+            target_modules_bd_b=["lin2"],
             nblocks=4,
         )
         config = LoraConfig(
@@ -65,8 +65,8 @@ class TestBdLora:
         )
         assert config.r == 16
         assert set(config.target_modules) == {"lin1", "lin2"}
-        assert config.use_bdlora.lora_a_is_blockdiagonal == ["lin1"]
-        assert config.use_bdlora.lora_b_is_blockdiagonal == ["lin2"]
+        assert config.use_bdlora.target_modules_bd_a == ["lin1"]
+        assert config.use_bdlora.target_modules_bd_b == ["lin2"]
         assert config.use_bdlora.nblocks == 4
 
     def test_bdlora_model_creation(self, mlp):
@@ -75,8 +75,8 @@ class TestBdLora:
             r=8,
             target_modules=["lin1", "lin2"],
             use_bdlora=BdLoraConfig(
-                lora_a_is_blockdiagonal=["lin1"],
-                lora_b_is_blockdiagonal=["lin2"],
+                target_modules_bd_a=["lin1"],
+                target_modules_bd_b=["lin2"],
                 nblocks=4,
             ),
         )
@@ -123,8 +123,8 @@ class TestBdLora:
             r=8,
             target_modules=["lin1", "lin2"],
             use_bdlora=BdLoraConfig(
-                lora_a_is_blockdiagonal=["lin1"],
-                lora_b_is_blockdiagonal=["lin2"],
+                target_modules_bd_a=["lin1"],
+                target_modules_bd_b=["lin2"],
                 nblocks=4,
             ),
         )
@@ -143,8 +143,8 @@ class TestBdLora:
             r=8,
             target_modules=["lin1", "lin2"],
             use_bdlora=BdLoraConfig(
-                lora_a_is_blockdiagonal=["lin1"],
-                lora_b_is_blockdiagonal=["lin2"],
+                target_modules_bd_a=["lin1"],
+                target_modules_bd_b=["lin2"],
                 nblocks=4,
             ),
         )
@@ -172,7 +172,7 @@ class TestBdLora:
             config = LoraConfig(
                 r=16,
                 target_modules=["lin1"],
-                use_bdlora=BdLoraConfig(lora_a_is_blockdiagonal=["lin1"], nblocks=nblocks),
+                use_bdlora=BdLoraConfig(target_modules_bd_a=["lin1"], nblocks=nblocks),
             )
             peft_model = get_peft_model(mlp, config)
 
@@ -190,8 +190,8 @@ class TestBdLora:
             r=8,
             target_modules=["lin1", "lin2", "lin3"],
             use_bdlora=BdLoraConfig(
-                lora_a_is_blockdiagonal=["lin1", "lin2"],
-                lora_b_is_blockdiagonal=["lin3"],
+                target_modules_bd_a=["lin1", "lin2"],
+                target_modules_bd_b=["lin3"],
                 nblocks=4,
             ),
         )
@@ -211,7 +211,7 @@ class TestBdLora:
             r=8,
             target_modules=["lin1", "lin2"],
             use_bdlora=BdLoraConfig(
-                lora_a_is_blockdiagonal=["lin1"],
+                target_modules_bd_a=["lin1"],
                 nblocks=4,
             ),
         )
@@ -228,8 +228,8 @@ class TestBdLora:
             r=8,
             target_modules=["lin1", "lin2"],
             use_bdlora=BdLoraConfig(
-                lora_a_is_blockdiagonal=["lin1"],
-                lora_b_is_blockdiagonal=["lin2"],
+                target_modules_bd_a=["lin1"],
+                target_modules_bd_b=["lin2"],
                 nblocks=4,
             ),
         )

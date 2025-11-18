@@ -814,8 +814,8 @@ class BdLoraLinearVariant(LoraVariant):
 
             use_bdlora = BdLoraConfig(**use_bdlora)
 
-        lora_a_blockdiagonal_pattern = use_bdlora.lora_a_is_blockdiagonal or []
-        lora_b_blockdiagonal_pattern = use_bdlora.lora_b_is_blockdiagonal or []
+        lora_a_blockdiagonal_pattern = use_bdlora.target_modules_bd_a or []
+        lora_b_blockdiagonal_pattern = use_bdlora.target_modules_bd_b or []
         nblocks = use_bdlora.nblocks
 
         has_lora_a_blockdiagonal = any(pattern in target_name for pattern in lora_a_blockdiagonal_pattern)
