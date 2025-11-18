@@ -789,6 +789,10 @@ class BlockDiagonalLinear(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
         self.nblocks = nblocks
+        if self.in_features % nblocks != 0 or self.out_features % nblocks != 0:
+            raise ValueError(
+                f"self.in_features={self.in_features} or self.out_features={self.out_features} not divisble by {self.nblocks}"
+            )
 
         # Create weight with specified dtype and device
         self.weight = nn.Parameter(torch.empty(out_features, in_features // nblocks, dtype=dtype, device=device))
