@@ -122,24 +122,37 @@ class ArrowConfig:
 @dataclass
 class BdLoraConfig:
     """
-    Configuration for BD-LoRA (Block-Diagonal LoRA).
+    Configuration for BD-LoRA (Block-Diagonal LoRA). BD-LoRA is a LoRA variant that can be used for efficient
+    multi-LoRA serving in inference engines. The speedup results from reduced inter-GPU communication by setting
+    certain LoRA modules to be block-diagonal.
+
+    To determine which LoRA factors should be set as block-diagonal, follow these guidelines:
+    - For attention, set
+      - Q,K,V projections to be LoRA-B block-diagonal
+      - Out projection to be LoRA-A block-diagonal
+    - For MLPs, set
+      - Up, Gate projection to be LoRA-B block-diagonal
+      - Down projection to be LoRA-A block-diagonal
+
+    For other modules and/or architectures, look into the code of your target inference engine. Modules that are row-sharded should have LoRA-A block-diagonal,
+    modules that are column-sharded should have LoRA-B block-diagonal.
 
     Args:
-        lora_a_is_blockdiagonal: Modules where LoRA-A is block-diagonal
-        lora_b_is_blockdiagonal: Modules where LoRA-B is block-diagonal
+        target_modules_bd_a: Modules where the LoRA-A is block-diagonal. Matches each pattern in the list against the module name via `pattern is in target_name`. Example: ['up_proj', 'q_proj', 'v_proj', 'k_proj']
+        target_modules_bd_b: Modules where the LoRA-B is block-diagonal. Matches each pattern in the list against the module name via `pattern is in target_name`. Example: ['out_proj', 'down_proj']
         nblocks: Number of blocks in block-diagonal matrices
     """
 
     target_modules_bd_a: Optional[list[str]] = field(
         default=None,
         metadata={
-            "help": "Modules where the LoRA-A is block-diagonal. Matches each pattern in the list against the module name via `pattern is in target_name`. Example: ['up_proj', 'q_proj', 'v_proj', 'k_proj']"
+            "help": "Modules where the LoRA-A is block-diagonal. Matches each pattern in the list against the module name via `pattern is in target_name`. Usually one should specify the q,k,v,up and gate projections here. Example: ['up_proj', 'q_proj', 'v_proj', 'k_proj']"
         },
     )
     target_modules_bd_b: Optional[list[str]] = field(
         default=None,
         metadata={
-            "help": "Modules where the LoRA-B is block-diagonal. Matches each pattern in the list against the module name via `pattern is in target_name`. Example: ['out_proj', 'down_proj']"
+            "help": "Modules where the LoRA-B is block-diagonal. Matches each pattern in the list against the module name via `pattern is in target_name`. Usually, one should specify out and down projections here. Example: ['out_proj', 'down_proj']"
         },
     )
     nblocks: int = field(
