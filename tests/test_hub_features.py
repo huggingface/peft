@@ -100,8 +100,6 @@ class TestBaseModelRevision:
         output_revision_loaded = peft_model_revision_loaded(test_inputs).logits
         assert torch.allclose(output_revision, output_revision_loaded)
 
-    # TODO remove when/if Hub is more stable
-    @pytest.mark.xfail(reason="Test is flaky on CI", raises=ValueError)
     def test_load_different_peft_and_base_model_revision(self, tmp_path):
         r"""
         Test loading an AutoPeftModel from the hub where the base model revision and peft revision differ
@@ -136,11 +134,11 @@ class TestModelCard:
                 None,
             ),
             (
-                "hf-internal-testing/tiny-random-BartForConditionalGeneration",
+                "peft-internal-testing/tiny-random-BartForConditionalGeneration",
                 LoraConfig(),
                 [
                     "transformers",
-                    "base_model:adapter:hf-internal-testing/tiny-random-BartForConditionalGeneration",
+                    "base_model:adapter:peft-internal-testing/tiny-random-BartForConditionalGeneration",
                     "lora",
                 ],
                 [],

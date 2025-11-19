@@ -126,9 +126,9 @@ class TestInjectAdapterFromStateDict:
         "model_cls_and_id",
         [
             (AutoModelForCausalLM, "trl-internal-testing/tiny-random-LlamaForCausalLM"),
-            (AutoModel, "hf-internal-testing/tiny-random-BertModel"),
-            (AutoModelForSeq2SeqLM, "hf-internal-testing/tiny-random-BartForConditionalGeneration"),
-            (AutoModelForSequenceClassification, "hf-internal-testing/tiny-random-RobertaForSequenceClassification"),
+            (AutoModel, "peft-internal-testing/tiny-random-BertModel"),
+            (AutoModelForSeq2SeqLM, "peft-internal-testing/tiny-random-BartForConditionalGeneration"),
+            (AutoModelForSequenceClassification, "peft-internal-testing/tiny-random-RobertaForSequenceClassification"),
         ],
         ids=["Llama", "Bert", "Bart", "Roberta"],
     )
@@ -399,7 +399,7 @@ class TestPeftStateDict:
     # because the adapter_name is removed from/added to the state_dict keys.
     def test_get_peft_model_state_dict_removes_adapter_name(self):
         # ensure that the adapter name, "default", is removed from the state_dict
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
 
@@ -411,7 +411,7 @@ class TestPeftStateDict:
 
     def test_get_peft_model_state_dict_removes_non_defaul_adapter_name(self):
         # ensure that the adapter name is removed from the state_dict, even if it's not "default"
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
 
@@ -423,7 +423,7 @@ class TestPeftStateDict:
     def test_get_peft_model_state_dict_removes_adapter_name_when_same_as_module_name(self):
         # here the adapter is named "v_proj", which is the same name as some modules targeted with lora in the model,
         # which is nefarious
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
 

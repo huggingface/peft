@@ -1437,7 +1437,7 @@ class TestModelAndLayerStatus:
             get_model_status(model)
 
     def test_prefix_tuning(self):
-        model_id = "hf-internal-testing/tiny-random-BartForConditionalGeneration"
+        model_id = "peft-internal-testing/tiny-random-BartForConditionalGeneration"
         with hub_online_once(model_id):
             model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
         config = PromptTuningConfig(task_type="SEQ_2_SEQ_LM", num_virtual_tokens=10)

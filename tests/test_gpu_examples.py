@@ -2788,7 +2788,7 @@ class TestOLoRA:
         import bitsandbytes as bnb
 
         # issue 1999
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         if bits == 4:
             bnb_config = BitsAndBytesConfig(
                 load_in_4bit=True,
@@ -3147,7 +3147,7 @@ class TestLoftQ:
     def test_replace_lora_weights_with_local_model(self):
         # see issue 2020
         torch.manual_seed(0)
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         device = torch_device
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -4738,7 +4738,7 @@ class TestLowCpuMemUsageDifferentDevices:
 
     """
 
-    model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+    model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
     device = infer_device()
 
     @require_non_cpu
@@ -5146,7 +5146,7 @@ class TestHotSwapping:
         """
         torch.manual_seed(0)
         inputs = torch.arange(10).view(-1, 1).to(self.torch_device)
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
         rank0, rank1 = ranks
         alpha0, alpha1 = alpha_scalings
