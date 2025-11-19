@@ -867,7 +867,7 @@ class LoraModel(BaseTuner):
 
         embed_layer_name = find_parameter_name_by_tensor(self.model, self.model.get_input_embeddings().weight)
         # find_parameter_name_by_tensor returns the parameter name, so we need to strip the weight from the name
-        embed_layer_name = embed_layer_name.replace(".weight", "")
+        embed_layer_name = embed_layer_name.replace(".weight", "").replace("model.", "")
 
         if embed_layer_name not in modules_to_save:
             modules_to_save.append(embed_layer_name)
@@ -893,7 +893,7 @@ class LoraModel(BaseTuner):
         raw_target_modules = getattr(peft_config, "target_modules", None)
         embed_layer_name = find_parameter_name_by_tensor(self.model, self.model.get_input_embeddings().weight)
         # find_parameter_name_by_tensor returns the parameter name, so we need to strip the weight from the name
-        embed_layer_name = embed_layer_name.replace(".weight", "")
+        embed_layer_name = embed_layer_name.replace(".weight", "").replace("model.", "")
 
         if isinstance(raw_target_modules, str):
             # The way weight tying is handled for adapters, we always want to add
