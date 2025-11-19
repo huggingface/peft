@@ -2041,6 +2041,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
 @require_torch_gpu
 @require_optimum
+@require_gptqmodel
 class PeftGPTQGPUTests(unittest.TestCase):
     r"""
     GPTQ + peft tests
