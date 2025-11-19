@@ -1469,12 +1469,7 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
                     )
 
         # Check weight tying configuration first to determine which layers to wrap
-        tied_weights_keys = getattr(model, "_tied_weights_keys", None)
-        weights_tied = (
-            model_config.get("tie_word_embeddings", False)
-            # some models may be misconfigured to have weight tying enabled but don't define tied weights keys
-            and tied_weights_keys is not None
-        )
+        weights_tied = model_config.get("tie_word_embeddings", False)
         ensure_weight_tying = getattr(peft_config, "ensure_weight_tying", False)
 
         # When multiple target layers are specified, check if they correspond to tied weights
@@ -1482,9 +1477,9 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
         layers_to_skip = set()
         tied_layer_keys = []
 
-        if len(target_layers) > 1 and weights_tied and tied_weights_keys:
-            # Extract module names from tied weights keys (remove the weight attribute name)
-            tied_module_names = {key.rpartition(".")[0] for key in tied_weights_keys}
+        if len(target_layers) > 1 and weights_tied:
+            # Get module names that are tied with the embedding
+            tied_module_names = set(_get_module_names_tied_with_embedding(model))
 
             # Also get the input embedding layer name as it's the source of tied weights
             embedding_module = model.get_input_embeddings()
