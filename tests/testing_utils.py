@@ -32,7 +32,6 @@ from peft import (
 )
 from peft.import_utils import (
     is_aqlm_available,
-    is_auto_awq_available,
     is_eetq_available,
     is_gptqmodel_available,
     is_hqq_available,
@@ -121,13 +120,6 @@ def require_hqq(test_case):
     Decorator marking a test that requires aqlm. These tests are skipped when aqlm isn't installed.
     """
     return pytest.mark.skipif(not is_hqq_available(), reason="test requires hqq")(test_case)
-
-
-def require_auto_awq(test_case):
-    """
-    Decorator marking a test that requires auto-awq. These tests are skipped when auto-awq isn't installed.
-    """
-    return pytest.mark.skipif(not is_auto_awq_available(), reason="test requires auto-awq")(test_case)
 
 
 def require_eetq(test_case):

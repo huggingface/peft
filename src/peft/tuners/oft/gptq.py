@@ -18,7 +18,6 @@ import torch
 from peft.import_utils import is_gptqmodel_available
 from peft.tuners.oft.layer import OFTLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
-from peft.utils import get_auto_gptq_quant_linear
 
 
 class GPTQOFTLinear(torch.nn.Module, OFTLayer):

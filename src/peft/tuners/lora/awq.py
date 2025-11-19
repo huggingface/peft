@@ -17,7 +17,7 @@ from typing import Any, Optional
 import packaging.version
 import torch
 
-from peft.import_utils import is_auto_awq_available
+from peft.import_utils import is_gptqmodel_available
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 
@@ -101,8 +101,8 @@ def dispatch_awq(
     else:
         target_base_layer = target
 
-    if is_auto_awq_available():
-        from awq.modules.linear import WQLinear_GEMM
+    if is_gptqmodel_available():
+        from gptqmodel.quantization.awq.modules.linear import WQLinear_GEMM
 
         if isinstance(target_base_layer, WQLinear_GEMM):
             # Raise the error only at the dispatch level
