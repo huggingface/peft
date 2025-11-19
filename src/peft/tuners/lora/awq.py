@@ -105,16 +105,6 @@ def dispatch_awq(
         from gptqmodel.quantization.awq.modules.linear import WQLinear_GEMM
 
         if isinstance(target_base_layer, WQLinear_GEMM):
-            # Raise the error only at the dispatch level
-            AUTOAWQ_MINIMUM_VERSION = packaging.version.parse("0.2.0")
-            version_autoawq = packaging.version.parse(importlib_metadata.version("autoawq"))
-
-            if AUTOAWQ_MINIMUM_VERSION > version_autoawq:
-                raise ImportError(
-                    f"Found an incompatible version of auto-awq. Found version {version_autoawq}, "
-                    f"but only versions above {AUTOAWQ_MINIMUM_VERSION} are supported for PEFT."
-                )
-
             new_module = AwqLoraLinear(target, adapter_name, **kwargs)
             target.qweight = target_base_layer.qweight
 
