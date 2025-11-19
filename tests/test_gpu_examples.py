@@ -92,7 +92,6 @@ from .testing_utils import (
     load_dataset_english_quotes,
     require_aqlm,
     require_auto_awq,
-    require_auto_gptq,
     require_bitsandbytes,
     require_deterministic_for_xpu,
     require_eetq,
@@ -2041,7 +2040,6 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
 
 @require_torch_gpu
-@require_auto_gptq
 @require_optimum
 class PeftGPTQGPUTests(unittest.TestCase):
     r"""

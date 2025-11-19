@@ -100,18 +100,10 @@ def dispatch_gptq(
     else:
         target_base_layer = target
 
-    cfg = kwargs.get("gptq_quantization_config", None)
-
     if is_gptqmodel_available():
         from gptqmodel.nn_modules.qlinear import BaseQuantLinear
 
         if isinstance(target_base_layer, BaseQuantLinear):
-            new_module = GPTQOFTLinear(target, adapter_name, **kwargs)
-            target.qweight = target_base_layer.qweight
-    else:
-        quant_linear = get_auto_gptq_quant_linear(cfg)
-
-        if quant_linear is not None and isinstance(target_base_layer, quant_linear):
             new_module = GPTQOFTLinear(target, adapter_name, **kwargs)
             target.qweight = target_base_layer.qweight
 
