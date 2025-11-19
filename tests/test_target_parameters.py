@@ -17,6 +17,7 @@ import torch
 from torch import nn
 from transformers import AutoModelForCausalLM
 
+import peft
 from peft import LoraConfig, TaskType, get_peft_model
 
 from .testing_common import PeftCommonTester
@@ -538,9 +539,12 @@ class TestTargetParameters:
             )
             model = get_peft_model(model, config)
             x = torch.arange(100).view(2, 50)  # larger input to hit many experts
+
+            # forward is called twice, once at initialization of the parametrization and once during the forward pass,
+            # after which it is cached; without caching, it would be called 25 times.
             output = model(x, output_hidden_states=True)
-            assert len(set(map(id, tensor_storage))) == 1
+            assert len(set(map(id, tensor_storage))) == 2
 
             # sanity check: a second forward call _does_ trigger a new forward
             output = model(x, output_hidden_states=True)
-            assert len(set(map(id, tensor_storage))) == 2
+            assert len(set(map(id, tensor_storage))) == 4
