@@ -793,6 +793,8 @@ class BlockDiagonalLinear(nn.Module):
             raise ValueError(
                 f"self.in_features={self.in_features} or self.out_features={self.out_features} not divisble by {self.nblocks}"
             )
+        if bias:
+            raise ValueError("Bias is not implemented for BlockDiagonalLinear layer.")
 
         # Create weight with specified dtype and device
         self.weight = nn.Parameter(torch.empty(out_features, in_features // nblocks, dtype=dtype, device=device))
@@ -801,8 +803,6 @@ class BlockDiagonalLinear(nn.Module):
             torch.nn.init.zeros_(self.weight)
         else:
             torch.nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-        if bias:
-            raise NotImplementedError("Bias is not implemented for BlockDiagonalLinear layer.")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         first_dims = x.shape[:-1]
@@ -827,10 +827,8 @@ class BdLoraLinearVariant(LoraVariant):
     @staticmethod
     def init(module: Linear, adapter_name: str, **kwargs) -> None:
         use_bdlora = kwargs.get("use_bdlora")
-        if not use_bdlora:
-            return
-
         target_name = kwargs.get("target_name", "")
+        assert use_bdlora is not None
 
         # Handle case where use_bdlora is a dict (from saved config) instead of BdLoraConfig object
         if isinstance(use_bdlora, dict):

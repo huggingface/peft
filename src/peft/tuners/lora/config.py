@@ -134,12 +134,16 @@ class BdLoraConfig:
       - Up, Gate projection to be LoRA-B block-diagonal
       - Down projection to be LoRA-A block-diagonal
 
-    For other modules and/or architectures, look into the code of your target inference engine. Modules that are row-sharded should have LoRA-A block-diagonal,
-    modules that are column-sharded should have LoRA-B block-diagonal.
+    For other modules and/or architectures, look into the code of your target inference engine. Modules that are
+    row-sharded should have LoRA-A block-diagonal, modules that are column-sharded should have LoRA-B block-diagonal.
 
     Args:
-        target_modules_bd_a: Modules where the LoRA-A is block-diagonal. Matches each pattern in the list against the module name via `pattern is in target_name`. Example: ['up_proj', 'q_proj', 'v_proj', 'k_proj']
-        target_modules_bd_b: Modules where the LoRA-B is block-diagonal. Matches each pattern in the list against the module name via `pattern is in target_name`. Example: ['out_proj', 'down_proj']
+        target_modules_bd_a:
+            Modules where the LoRA-A is block-diagonal. Matches each pattern in the list against the module name via
+            `pattern is in target_name`. Example: ['up_proj', 'q_proj', 'v_proj', 'k_proj']
+        target_modules_bd_b:
+            Modules where the LoRA-B is block-diagonal. Matches each pattern in the list against the module name via
+            `pattern is in target_name`. Example: ['out_proj', 'down_proj']
         nblocks: Number of blocks in block-diagonal matrices
     """
 
@@ -163,12 +167,11 @@ class BdLoraConfig:
     )
 
     def __post_init__(self):
-        # check for overlap
-        if self.target_modules_bd_a is None or self.target_modules_bd_b is None:
-            return  # one is empty so no overlap possible
-        for module in self.target_modules_bd_a:
-            if module in self.target_modules_bd_b:
-                raise ValueError(f"{module} is contained in both BD-LoRA target modules lists.")
+        overlap = set(self.target_modules_bd_a or []) & set(self.target_modules_bd_b or [])
+        if overlap:
+            raise ValueError(
+                f"Found overlapping modules in target_modules_bd lists: {self.target_modules_bd_a} (A) and {self.target_modules_bd_b} (B)."
+            )
 
 
 @dataclass
