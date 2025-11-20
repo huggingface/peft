@@ -18,7 +18,6 @@ Main entry point to run the experiments. Contains general setup and the proper t
 
 import argparse
 import datetime as dt
-import gc
 import json
 import os
 import random
@@ -58,12 +57,10 @@ from peft import AdaLoraConfig, PeftConfig
 from peft.utils import CONFIG_NAME, infer_device
 
 
-# # suppress all warnings
-# warnings.filterwarnings("ignore") # FIXME?
-
-dtype_to_bytes_linear = {"float32": 4, "float16": 2, "bfloat16": 2, "int8": 1, "int4": 0.5}
-# if lr scheduler with warmup is used, the ratio of warmup steps to total steps
-BUCKET_FACTOR = 20  # number of batches per bucket, increasing this further has diminishing returns
+# number of batches per bucket, increasing this further has diminishing returns
+BUCKET_FACTOR = 20
+# empty device cache every N steps; 10 is a good compromise between keeping memory down while lowering runtime overhead
+ACCELERATOR_EMPTY_CACHE_SCHEDULE = 10
 
 # disable torch inductor caching to keep total runtime numbers comparable when torch.compile is used
 os.environ["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"
@@ -300,9 +297,8 @@ def train(
                 }
                 print_verbose(json.dumps(log_dict))
 
-            # # TODO is this needed?
-            torch_accelerator_module.empty_cache()
-            gc.collect()
+            if step % ACCELERATOR_EMPTY_CACHE_SCHEDULE == 0:
+                torch_accelerator_module.empty_cache()
 
         print_verbose(f"Training finished after {max_steps} steps, evaluation on test set follows.")
         # test set evaluation

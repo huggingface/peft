@@ -51,7 +51,7 @@ def flaky(num_tries: int):
 class TestXlora:
     torch_device = infer_device()
 
-    model_id = "facebook/opt-125m"
+    model_id = "peft-internal-testing/opt-125m"
     num_loras = 4
 
     @pytest.fixture(scope="class")
@@ -356,7 +356,7 @@ class TestXlora:
         # This test also simulatenously tests the loading-from-hub functionality!
         torch.manual_seed(123)
 
-        model_id = "facebook/opt-125m"
+        model_id = "peft-internal-testing/opt-125m"
         model = AutoModelForCausalLM.from_pretrained(model_id)
         model.config.use_cache = False
 
