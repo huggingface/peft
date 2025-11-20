@@ -876,13 +876,19 @@ TEST_CASES = [
         "BD-LoRA A only",
         "MLP",
         LoraConfig,
-        {"target_modules": ["lin0", "lin1"], "use_bdlora": BdLoraConfig(target_modules_bd_a=["lin0"], nblocks=2)},
+        {
+            "target_modules": ["lin0", "lin1"],
+            "use_bdlora": BdLoraConfig(target_modules_bd_a=["lin0"], nblocks=2, match_strict=False),
+        },
     ),
     (
         "BD-LoRA B only",
         "MLP",
         LoraConfig,
-        {"target_modules": ["lin0", "lin1"], "use_bdlora": BdLoraConfig(target_modules_bd_b=["lin1"], nblocks=2)},
+        {
+            "target_modules": ["lin0", "lin1"],
+            "use_bdlora": BdLoraConfig(target_modules_bd_b=["lin1"], nblocks=2, match_strict=False),
+        },
     ),
     (
         "BD-LoRA both A and B",

@@ -159,10 +159,19 @@ class BdLoraConfig:
             "help": "Modules where the LoRA-B is block-diagonal. Matches each pattern in the list against the module name via `pattern is in target_name`. Usually, one should specify out and down projections here. Example: ['out_proj', 'down_proj']"
         },
     )
-    nblocks: int = field(
-        default=1,
+    nblocks: int = (
+        field(
+            default=1,
+            metadata={
+                "help": "Number of blocks each block-diagonal matrix has. If using BD-LoRA to speed up inference, set it to be equal to the desired sharding degree during serving."
+            },
+        ),
+    )
+    match_strict: bool = field(
+        default=True,
         metadata={
-            "help": "Number of blocks each block-diagonal matrix has. If using BD-LoRA to speed up inference, set it to be equal to the desired sharding degree during serving."
+            "help": "If set to true, requires each target_module to have either a block-diagonal LoRA-A or LoRA-B, and raises an error otherwise. "
+            "You can set this to False this to mix LoRA and BD-LoRA training, e.g. if some layers in your module do not benefit from BD-LoRA."
         },
     )
 
