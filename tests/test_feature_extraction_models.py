@@ -22,6 +22,7 @@ from peft import (
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
+    GraloraConfig,
     HRAConfig,
     IA3Config,
     LoraConfig,
@@ -42,11 +43,12 @@ from .testing_common import PeftCommonTester
 from .testing_utils import set_init_weights_false
 
 
+# Note: models from peft-internal-testing are just the safetensors versions of hf-internal-testing
 PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST = [
-    "hf-internal-testing/tiny-random-BertModel",
-    "hf-internal-testing/tiny-random-RobertaModel",
-    "hf-internal-testing/tiny-random-DebertaModel",
-    "hf-internal-testing/tiny-random-DebertaV2Model",
+    "peft-internal-testing/tiny-random-BertModel",
+    "peft-internal-testing/tiny-random-RobertaModel",
+    "peft-internal-testing/tiny-random-DebertaModel",
+    "peft-internal-testing/tiny-random-DebertaV2Model",
 ]
 
 # TODO Missing from this list are LoKr, LoHa, LN Tuning, add them
@@ -95,6 +97,13 @@ ALL_CONFIGS = [
         {
             "task_type": "FEATURE_EXTRACTION",
             "n_frequency": 10,
+            "target_modules": None,
+        },
+    ),
+    (
+        GraloraConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
             "target_modules": None,
         },
     ),
@@ -330,9 +339,10 @@ class TestPeftFeatureExtractionModel(PeftCommonTester):
 
     @pytest.mark.parametrize("model_id", PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
-    def test_training_gradient_checkpointing(self, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("use_reentrant", [True, False])
+    def test_training_gradient_checkpointing(self, model_id, config_cls, config_kwargs, use_reentrant):
         skip_deberta_lora_tests(config_cls, model_id)
-        self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs)
+        self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs, use_reentrant=use_reentrant)
 
     @pytest.mark.parametrize("model_id", PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)

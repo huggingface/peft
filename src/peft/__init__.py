@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.18.0.rc0"
+__version__ = "0.18.1.dev0"
 
 from .auto import (
     MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
@@ -64,6 +64,8 @@ from .tuners import (
     EvaConfig,
     FourierFTConfig,
     FourierFTModel,
+    GraloraConfig,
+    GraloraModel,
     HRAConfig,
     HRAModel,
     IA3Config,
@@ -163,6 +165,8 @@ __all__ = [
     "EvaConfig",
     "FourierFTConfig",
     "FourierFTModel",
+    "GraloraConfig",
+    "GraloraModel",
     "HRAConfig",
     "HRAModel",
     "IA3Config",

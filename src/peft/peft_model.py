@@ -142,6 +142,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if hasattr(self.base_model, "config") and hasattr(self.base_model.config, "pretraining_tp"):
             self.base_model.config.pretraining_tp = 1
 
+        self._adapters_disabled = False
+
     @property
     def peft_config(self) -> dict[str, PeftConfig]:
         if self._is_prompt_learning:
@@ -166,6 +168,17 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if isinstance(adapters, str):
                 adapters = [adapters]
         return adapters
+
+    @property
+    def has_active_enabled_adapter(self) -> bool:
+        """Reflects whether the adapters are purposefully disabled (via disable_adapter) or if there
+        are no active adapters (enabled but inactive). They are two separate mechanisms but sometimes it is helpful to
+        know whether the model has any active/enabled adapter at all.
+        """
+        if self.peft_config[self.active_adapter].is_prompt_learning:
+            return not self._adapters_disabled
+
+        return not self._adapters_disabled or not self.active_adapters
 
     @peft_config.setter
     def peft_config(self, value: dict[str, PeftConfig]):
@@ -894,7 +907,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     def _enable_peft_forward_hooks(self, *args, **kwargs):
         # If the base model has a method called _enable_peft_forward_hooks, it is invoked as a context. Otherwise, this
         # runs without any changes
-        if hasattr(self.base_model, "_enable_peft_forward_hooks"):
+        if hasattr(self.base_model, "_enable_peft_forward_hooks") and self.has_active_enabled_adapter:
             with self.base_model._enable_peft_forward_hooks(*args, **kwargs):
                 yield
             return
@@ -944,17 +957,21 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self.forward = self.base_model.forward
                 old_prepare_inputs_for_generation = self.prepare_inputs_for_generation
                 self.prepare_inputs_for_generation = self.base_model.prepare_inputs_for_generation
+                self._adapters_disabled = True
                 yield
             finally:
                 self.forward = old_forward
                 self.prepare_inputs_for_generation = old_prepare_inputs_for_generation
+                self._adapters_disabled = False
 
         elif self.peft_config[self.active_adapter].is_adaption_prompt:
             try:
                 self.base_model.disable_adapter_layers()
+                self._adapters_disabled = True
                 yield
             finally:
                 self.base_model.enable_adapter_layers()
+                self._adapters_disabled = False
 
         else:  # LoRA, LoHa, etc.
             model_status = self.get_model_status()
@@ -966,11 +983,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 )
             try:
                 self.base_model.disable_adapter_layers()
+                self._adapters_disabled = True
                 yield
             finally:
                 if model_status.enabled is not False:
                     # model_status.enabled is `True` or `"irregular"`
                     self.base_model.enable_adapter_layers()
+                self._adapters_disabled = False
 
     def get_base_model(self) -> torch.nn.Module:
         """
