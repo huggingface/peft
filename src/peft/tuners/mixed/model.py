@@ -16,6 +16,7 @@ from __future__ import annotations
 import warnings
 from typing import Any, Optional, Union
 
+import torch
 from torch import nn
 from tqdm import tqdm
 
@@ -131,13 +132,10 @@ class MixedModel(BaseTuner):
                 new_module.state = child.state
             new_module.to(child.weight.device)
 
-        import torch
         meta = torch.device("meta")
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if any(prefix in name for prefix in PREFIXES):
-                if hasattr(child, "qweight"):
-                    weight = child.qweight
                 if hasattr(child, "qweight"):
                     weight = child.qweight
                 elif hasattr(child, "W_q"):
@@ -151,7 +149,6 @@ class MixedModel(BaseTuner):
 
                 if not any(p.device == meta for p in module.parameters()):
                     module.to(weight.device)
- 
 
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
         for n, p in model.named_parameters():

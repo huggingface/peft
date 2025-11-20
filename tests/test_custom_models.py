@@ -60,6 +60,7 @@ from peft import (
     WaveFTConfig,
     get_peft_model,
 )
+from peft.tuners import lora
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import AuxiliaryTrainingWrapper, infer_device
 
@@ -2770,7 +2771,7 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_delete_adapter_multiple_adapters_with_trainable_token_indices(self):
         # Same as the previous test, just using trainable_token_indices instead of modules_to_save
         # Note that we need to use a transformers model for trainable_token_indices
-        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
         inputs = {"input_ids": torch.arange(10).view(-1, 1).to(self.torch_device)}
 
         config0 = LoraConfig(target_modules=["q_proj"], trainable_token_indices=[0, 1])
@@ -3082,14 +3083,6 @@ class TestPeftCustomModel(PeftCommonTester):
         config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
         model = get_peft_model(model, config, adapter_name="adapter1")
 
-        # Create merged adapter with weight=1.0
-        model.add_weighted_adapter(
-            adapters=["adapter1"],
-            weights=[1.0],
-            adapter_name="merged_positive",
-            combination_type="linear",
-        )
-
         # Create merged adapter with weight=-1.0
         model.add_weighted_adapter(
             adapters=["adapter1"],
@@ -3098,19 +3091,11 @@ class TestPeftCustomModel(PeftCommonTester):
             combination_type="linear",
         )
 
-        # Get the LoRA weights for comparison
-        for name, module in model.named_modules():
-            if hasattr(module, "lora_A") and "merged_positive" in module.lora_A:
-                pos_A = module.lora_A["merged_positive"].weight.data
-                neg_A = module.lora_A["merged_negative"].weight.data
-                pos_B = module.lora_B["merged_positive"].weight.data
-                neg_B = module.lora_B["merged_negative"].weight.data
-
-                # Check that negative adapter is negation of positive
-                # Since we apply sign to both A and B: sign * sqrt(|w|)
-                # For w=1: sqrt(1) = 1, for w=-1: -sqrt(1) = -1
-                assert torch.allclose(neg_A, -pos_A, atol=1e-6), "A matrices should be negated"
-                assert torch.allclose(neg_B, -pos_B, atol=1e-6), "B matrices should be negated"
+        for module in model.modules():
+            if isinstance(module, lora.LoraLayer):
+                dw_adapter1 = module.get_delta_weight("adapter1")
+                dw_negative = module.get_delta_weight("merged_negative")
+                assert torch.allclose(dw_adapter1, -dw_negative, atol=1e-6)
 
     def test_add_weighted_adapter_subtraction_with_negative_weights(self):
         # Test that merging two identical adapters with weights [1.0, -1.0] results in approximately zero weights
@@ -3133,18 +3118,10 @@ class TestPeftCustomModel(PeftCommonTester):
         )
 
         # Verify the merged adapter has weights of approximately 0
-        for name, module in model.named_modules():
-            if hasattr(module, "lora_A") and "cancelled" in module.lora_A:
-                cancelled_A = module.lora_A["cancelled"].weight.data
-                cancelled_B = module.lora_B["cancelled"].weight.data
-
-                # The weights should be approximately zero (they cancel out)
-                assert torch.allclose(cancelled_A, torch.zeros_like(cancelled_A), atol=1e-5), (
-                    f"Cancelled A should be ~0, got max abs value {cancelled_A.abs().max()}"
-                )
-                assert torch.allclose(cancelled_B, torch.zeros_like(cancelled_B), atol=1e-5), (
-                    f"Cancelled B should be ~0, got max abs value {cancelled_B.abs().max()}"
-                )
+        for module in model.modules():
+            if isinstance(module, lora.LoraLayer):
+                dw_cancelled = module.get_delta_weight("cancelled")
+                assert torch.allclose(dw_cancelled, torch.zeros_like(dw_cancelled))
 
     def test_add_weighted_adapter_negative_weight_with_different_scaling(self):
         # Test negative weights with different scaling factors (lora_alpha)
@@ -3193,7 +3170,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # modules_to_save for each adapter. When the first adapter targets embed_tokens with modules_to_save and the
         # second adapter targets lm_head, then embed_tokens will create a copy of the original module for the second
         # adapter, even though it's not needed. The copy still acts as expected but uses unnecessary memory.
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
         config0 = LoraConfig(modules_to_save=["embed_tokens"])
         config1 = LoraConfig(modules_to_save=["lm_head"])
@@ -3424,7 +3401,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # Here we test the refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a ModuleDict
         # with a DoraLayer instance. The old parameter is now the "weight" attribute of that layer. Since we want the
         # state_dict format not to change, we ensure that the ".weight" part of the key is removed.
-        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
         config = LoraConfig(task_type="CAUSAL_LM", use_dora=True)
         model = get_peft_model(model, config)
         state_dict = model.state_dict()
@@ -3442,7 +3419,9 @@ class TestPeftCustomModel(PeftCommonTester):
             assert not any("lora_magnitude_vector.weight" in k for k in state_dict_adapter)
 
             del model
-            loaded = PeftModel.from_pretrained(AutoModelForCausalLM.from_pretrained("facebook/opt-125m"), tmp_dirname)
+            loaded = PeftModel.from_pretrained(
+                AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m"), tmp_dirname
+            )
         finally:
             try:
                 shutil.rmtree(tmp_dirname)
@@ -6052,7 +6031,9 @@ class TestMixedAdapterBatches:
             toc = time.perf_counter()
             logs.append(toc - tic)
 
-        base_model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m").to(self.torch_device).eval()
+        base_model = (
+            AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m").to(self.torch_device).eval()
+        )
         inputs = {"input_ids": torch.randint(0, 1000, (16, 64)).to(self.torch_device)}
         with timed():
             output_base = base_model(**inputs).logits
@@ -6250,7 +6231,7 @@ class TestDynamicDispatch:
     def test_override_lora_linear(self, custom_lora_cls):
         # in this test, we check if users can override default PEFT behavior by supplying a custom lora class that is
         # being used instead of lora.Linear
-        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
         config = LoraConfig(task_type=TaskType.CAUSAL_LM)
         config._register_custom_module({nn.Linear: custom_lora_cls})
         peft_model = get_peft_model(model, config)
@@ -6277,8 +6258,6 @@ class TestDynamicDispatch:
         # It should be possible for users to target layers even if we cannot determine in_features and out_features.
         # Those are only needed to initialize the LoRA layer via update_layer, so as long as users take care of that,
         # they should be good and not require those attributes to exist
-        from peft.tuners import lora
-
         class MyModel(nn.Module):
             def __init__(self):
                 super().__init__()
