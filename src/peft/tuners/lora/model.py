@@ -66,6 +66,19 @@ def _alora_offsets_pre_forward_hook(target, args, kwargs, alora_offsets):
     return args, kwargs
 
 
+def _get_encoder(model: nn.Module) -> nn.Module | None:
+    """Check if the model has an encoder and if it has, returns it; otherwise returns None"""
+    if not hasattr(model, "get_encoder"):
+        return None
+
+    encoder = model.get_encoder()
+    # https://github.com/huggingface/transformers/pull/42156
+    # new logic in transformers v5: all PretrainedModels return a model here, but it is self if there is no encoder
+    if encoder is model:
+        return None
+    return encoder
+
+
 class LoraModel(BaseTuner):
     """
     Creates Low Rank Adapter (LoRA) model from a pretrained transformers model.
@@ -438,10 +451,11 @@ class LoraModel(BaseTuner):
                     handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                     hook_handles.append(handle)
 
-            if uses_beam_search and hasattr(self.model, "get_encoder"):
+            encoder = _get_encoder(self.model)
+            if uses_beam_search and (encoder is not None):
                 # For encoder-decoder models, even when applying beam search, the encoder part of the model should not use
                 # the extended adapter_names. This is because the encoder still uses the original, non-extended samples.
-                for module in self.model.get_encoder().modules():
+                for module in encoder.modules():
                     if isinstance(module, LoraLayer) or isinstance(module, AuxiliaryTrainingWrapper):
                         # Add another hook to overwrite the kwargs with the original adapter names -- this is easier than
                         # trying to exclude the encoder.
