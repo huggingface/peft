@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import collections
-import math
 import warnings
 from typing import Any, Optional
 
@@ -802,7 +801,7 @@ class BlockDiagonalLinear(nn.Module):
         if init_zero:
             torch.nn.init.zeros_(self.weight)
         else:
-            torch.nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+            torch.nn.init.kaiming_uniform_(self.weight)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         first_dims = x.shape[:-1]
