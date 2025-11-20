@@ -3424,7 +3424,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # Here we test the refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a ModuleDict
         # with a DoraLayer instance. The old parameter is now the "weight" attribute of that layer. Since we want the
         # state_dict format not to change, we ensure that the ".weight" part of the key is removed.
-        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
         config = LoraConfig(task_type="CAUSAL_LM", use_dora=True)
         model = get_peft_model(model, config)
         state_dict = model.state_dict()
@@ -3442,7 +3442,9 @@ class TestPeftCustomModel(PeftCommonTester):
             assert not any("lora_magnitude_vector.weight" in k for k in state_dict_adapter)
 
             del model
-            loaded = PeftModel.from_pretrained(AutoModelForCausalLM.from_pretrained("facebook/opt-125m"), tmp_dirname)
+            loaded = PeftModel.from_pretrained(
+                AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m"), tmp_dirname
+            )
         finally:
             try:
                 shutil.rmtree(tmp_dirname)
@@ -6052,7 +6054,9 @@ class TestMixedAdapterBatches:
             toc = time.perf_counter()
             logs.append(toc - tic)
 
-        base_model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m").to(self.torch_device).eval()
+        base_model = (
+            AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m").to(self.torch_device).eval()
+        )
         inputs = {"input_ids": torch.randint(0, 1000, (16, 64)).to(self.torch_device)}
         with timed():
             output_base = base_model(**inputs).logits
@@ -6250,7 +6254,7 @@ class TestDynamicDispatch:
     def test_override_lora_linear(self, custom_lora_cls):
         # in this test, we check if users can override default PEFT behavior by supplying a custom lora class that is
         # being used instead of lora.Linear
-        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
         config = LoraConfig(task_type=TaskType.CAUSAL_LM)
         config._register_custom_module({nn.Linear: custom_lora_cls})
         peft_model = get_peft_model(model, config)

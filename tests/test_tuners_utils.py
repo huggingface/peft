@@ -134,14 +134,14 @@ MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES = [
     # model_name, model_type, initial_target_modules, expected_target_modules
     # test for a causal Llama model
     (
-        "HuggingFaceH4/tiny-random-LlamaForCausalLM",
+        "peft-internal-testing/tiny-random-LlamaForCausalLM",
         "causal",
         INCLUDE_LINEAR_LAYERS_SHORTHAND,
         ["k_proj", "v_proj", "q_proj", "o_proj", "down_proj", "up_proj", "gate_proj"],
     ),
     # test for a Llama model without the LM head
     (
-        "HuggingFaceH4/tiny-random-LlamaForCausalLM",
+        "peft-internal-testing/tiny-random-LlamaForCausalLM",
         "base",
         INCLUDE_LINEAR_LAYERS_SHORTHAND,
         ["k_proj", "v_proj", "q_proj", "o_proj", "down_proj", "up_proj", "gate_proj"],
@@ -150,14 +150,15 @@ MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES = [
     ("hf-internal-testing/tiny-random-gpt2", "causal", INCLUDE_LINEAR_LAYERS_SHORTHAND, ["c_attn", "c_proj", "c_fc"]),
     # test for T5 model
     (
-        "hf-internal-testing/tiny-random-t5",
+        "peft-internal-testing/tiny-random-t5",
         "seq2seq",
         INCLUDE_LINEAR_LAYERS_SHORTHAND,
         ["k", "q", "v", "o", "wi", "wo"],
     ),
-    # test for GPTNeoX. output module list should exclude classification head - which is named as "embed_out" instead of the usual "lm_head" for GPTNeoX
+    # test for GPTNeoX. output module list should exclude classification head - which is named as "embed_out" instead of
+    # the usual "lm_head" for GPTNeoX
     (
-        "hf-internal-testing/tiny-random-GPTNeoXForCausalLM",
+        "peft-internal-testing/tiny-random-GPTNeoXForCausalLM",
         "causal",
         INCLUDE_LINEAR_LAYERS_SHORTHAND,
         ["query_key_value", "dense", "dense_h_to_4h", "dense_4h_to_h"],
@@ -178,7 +179,7 @@ BNB_QUANTIZATIONS = [("4bit",), ("8bit",)]
 BNB_TEST_CASES = [(x + y) for x in MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES for y in BNB_QUANTIZATIONS]
 
 
-class PeftCustomKwargsTester:
+class TestPeftCustomKwargs:
     r"""
     Test if the PeftModel is instantiated with correct behaviour for custom kwargs. This includes:
     - test if regex matching works correctly
@@ -207,7 +208,7 @@ class PeftCustomKwargsTester:
         # users to easily debug their configuration. Here we only test a single case, not all possible combinations of
         # configs that could exist. This is okay as the method calls `check_target_module_exists` internally, which
         # has been extensively tested above.
-        model_id = "hf-internal-testing/tiny-random-BloomForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-BloomForCausalLM"
         with hub_online_once(model_id):
             model = AutoModel.from_pretrained(model_id)
         # by default, this model matches query_key_value
@@ -231,7 +232,7 @@ class PeftCustomKwargsTester:
             assert key not in unmatched
 
     def test_feedforward_matching_ia3(self):
-        model_id = "hf-internal-testing/tiny-random-T5ForConditionalGeneration"
+        model_id = "peft-internal-testing/tiny-random-T5ForConditionalGeneration"
         with hub_online_once(model_id):
             model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
         # simple example for just one t5 block for testing
@@ -313,7 +314,7 @@ class PeftCustomKwargsTester:
 
     def test_maybe_include_all_linear_layers_ia3_loha(self):
         model_id, initial_target_modules, expected_target_modules = (
-            "HuggingFaceH4/tiny-random-LlamaForCausalLM",
+            "peft-internal-testing/tiny-random-LlamaForCausalLM",
             INCLUDE_LINEAR_LAYERS_SHORTHAND,
             ["k_proj", "v_proj", "q_proj", "o_proj", "down_proj", "up_proj", "gate_proj"],
         )
@@ -329,7 +330,7 @@ class PeftCustomKwargsTester:
 
     @parameterized.expand(MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_INTERNALS)
     def test_maybe_include_all_linear_layers_internals(self, initial_target_modules, expected_target_modules):
-        model_id = "HuggingFaceH4/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
         config = LoraConfig(base_model_name_or_path=model_id, target_modules=initial_target_modules)
@@ -356,7 +357,7 @@ class PeftCustomKwargsTester:
         # See issue 2027
         # Ensure that if a SEQ_CLS model is being used with target_modules="all-linear", the classification head is not
         # targeted by the adapter layer.
-        model_id = "HuggingFaceH4/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForSequenceClassification.from_pretrained(model_id, num_labels=10)
         # sanity check
@@ -397,7 +398,7 @@ class PeftCustomKwargsTester:
     def test_add_second_adapter_with_all_linear_works(self):
         # See 2390 Similar test to test_all_linear_nested_targets_correct_layers above, but using add_adapter instead of
         # calling get_peft_model in an already adapted model
-        model_id = "HuggingFaceH4/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
 
@@ -480,7 +481,7 @@ class TestTargetedModuleNames:
         assert model.targeted_module_names == ["lin0", "lin1"]
 
     def test_realistic_example(self):
-        model_id = "hf-internal-testing/tiny-random-BloomForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-BloomForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
         config = LoraConfig(task_type="CAUSAL_LM")
@@ -581,7 +582,7 @@ class TestExcludedModuleNames:
             get_peft_model(model, LoraConfig(target_modules=["lin1"], exclude_modules=["non_existent_module"]))
 
     def test_realistic_example(self):
-        model_id = "hf-internal-testing/tiny-random-BloomForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-BloomForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
         config = LoraConfig(task_type="CAUSAL_LM", exclude_modules="transformer.h.2.self_attention.query_key_value")
@@ -1451,7 +1452,7 @@ class TestModelAndLayerStatus:
             model.get_model_status()
 
     def test_adaption_prompt(self):
-        model_id = "HuggingFaceH4/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
         config = AdaptionPromptConfig(adapter_layers=1, adapter_len=4)
@@ -1545,7 +1546,7 @@ class TestBaseTunerGetModelConfig:
 
 
 class TestBaseTunerWarnForTiedEmbeddings:
-    model_id = "HuggingFaceH4/tiny-random-LlamaForCausalLM"
+    model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
     warn_end_inject = "huggingface/peft/issues/2018."
     warn_end_merge = (
         "# Now use the original model but in untied format\n"
@@ -1686,7 +1687,7 @@ class TestFindMinimalTargetModules:
         # Check that when calling get_peft_model, the target_module optimization is indeed applied if the length of
         # target_modules is big enough. The resulting model itself should be unaffected.
         torch.manual_seed(0)
-        model_id = "facebook/opt-125m"  # must be big enough for optimization to trigger
+        model_id = "peft-internal-testing/opt-125m"  # must be big enough for optimization to trigger
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
 
