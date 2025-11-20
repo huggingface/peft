@@ -150,28 +150,35 @@ class BdLoraConfig:
     target_modules_bd_a: Optional[list[str]] = field(
         default=None,
         metadata={
-            "help": "Modules where the LoRA-A is block-diagonal. Matches each pattern in the list against the module name via `pattern is in target_name`. Usually one should specify the q,k,v,up and gate projections here. Example: ['up_proj', 'q_proj', 'v_proj', 'k_proj']"
+            "help": "Modules where the LoRA-A is block-diagonal. Matches each pattern in the list against the "
+            "module name via `pattern is in target_name`. "
+            "Usually one should specify the q,k,v,up and gate projections here. "
+            "Example: ['up_proj', 'q_proj', 'v_proj', 'k_proj']"
         },
     )
     target_modules_bd_b: Optional[list[str]] = field(
         default=None,
         metadata={
-            "help": "Modules where the LoRA-B is block-diagonal. Matches each pattern in the list against the module name via `pattern is in target_name`. Usually, one should specify out and down projections here. Example: ['out_proj', 'down_proj']"
+            "help": "Modules where the LoRA-B is block-diagonal. Matches each pattern in the list against the module "
+            "name via `pattern is in target_name`. Usually, one should specify out and down projections here. "
+            "Example: ['out_proj', 'down_proj']"
         },
     )
     nblocks: int = (
         field(
             default=1,
             metadata={
-                "help": "Number of blocks each block-diagonal matrix has. If using BD-LoRA to speed up inference, set it to be equal to the desired sharding degree during serving."
+                "help": "Number of blocks each block-diagonal matrix has. If using BD-LoRA to speed up inference, "
+                "set it to be equal to the desired sharding degree during serving."
             },
         ),
     )
     match_strict: bool = field(
         default=True,
         metadata={
-            "help": "If set to true, requires each target_module to have either a block-diagonal LoRA-A or LoRA-B, and raises an error otherwise. "
-            "You can set this to False this to mix LoRA and BD-LoRA training, e.g. if some layers in your module do not benefit from BD-LoRA."
+            "help": "If set to true, requires each target_module to have either a block-diagonal LoRA-A or LoRA-B, "
+            "and raises an error otherwise. You can set this to False this to mix LoRA and BD-LoRA training, "
+            "e.g. if some layers in your module do not benefit from BD-LoRA."
         },
     )
 
@@ -179,7 +186,8 @@ class BdLoraConfig:
         overlap = set(self.target_modules_bd_a or []) & set(self.target_modules_bd_b or [])
         if overlap:
             raise ValueError(
-                f"Found overlapping modules in target_modules_bd lists: {self.target_modules_bd_a} (A) and {self.target_modules_bd_b} (B)."
+                "Found overlapping modules in target_modules_bd lists:"
+                f"{self.target_modules_bd_a} (A) and {self.target_modules_bd_b} (B)."
             )
 
 
