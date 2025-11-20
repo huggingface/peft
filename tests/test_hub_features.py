@@ -51,7 +51,7 @@ class TestLocalModel:
         # However, previously, those checks only covered huggingface hub models.
         # This test makes sure that the local `config.json` is checked as well.
         # If `save_pretrained` could not find the file, it will issue a warning.
-        model_id = "facebook/opt-125m"
+        model_id = "peft-internal-testing/opt-125m"
         model = AutoModelForCausalLM.from_pretrained(model_id)
         local_dir = tmp_path / model_id
         model.save_pretrained(local_dir)

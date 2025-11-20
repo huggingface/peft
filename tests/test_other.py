@@ -524,7 +524,7 @@ class TestGetNoSplitModules:
 
     def test_get_no_split_modules_simple(self):
         # choose a model where recursively visiting children is *not* required
-        model_id = "facebook/opt-125m"
+        model_id = "peft-internal-testing/opt-125m"
         model = AutoModelForCausalLM.from_pretrained(model_id)
         assert model._no_split_modules == ["OPTDecoderLayer"]
         no_split_modules = _get_no_split_modules(model)
@@ -549,7 +549,7 @@ class TestGetModuleNamesTiedWithEmbedding:
             "cls.predictions.decoder.weight": "bert.embeddings.word_embeddings.weight",
             "cls.predictions.decoder.bias": "bert.embeddings.word_embeddings.bias",
         },
-        "peft-internal-testing/tiny-random-OPTForCausalLM": {
+        "peft-internal-testing/opt-125m": {
             "lm_head.weight": "model.decoder.embed_tokens.weight",
         },
         "peft-internal-testing/tiny-random-t5": {
@@ -560,7 +560,7 @@ class TestGetModuleNamesTiedWithEmbedding:
     }
 
     model_ids = [
-        "peft-internal-testing/tiny-random-OPTForCausalLM",
+        "peft-internal-testing/opt-125m",
         "peft-internal-testing/tiny-random-BertModel",
         "peft-internal-testing/tiny-random-t5",
     ]
