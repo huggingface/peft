@@ -32,8 +32,8 @@ When you have access to multiple GPUs, it would be better to use normal LoRA wit
 Note: FSDP is currently not compatible with 8bit bitsandbytes quantization.
 
 
-## Multi-GPU SFT with LoRA and FSDP for GPTQModel:
-As in [Multi-GPU SFT with LoRA and FSDP](https://github.com/huggingface/peft/blob/main/examples/sft/README.md#multi-gpu-sft-with-lora-and-fsdp), we also support other quantization methods like GPTQModel. You may need to install [GPTQModel](https://github.com/ModelCloud/GPTQModel) > v3.0.0 or from source. Here is the launch command for reference: [run_peft_fsdp_gptq.sh]. For the `--model_name_or_path` argument, it is important to pass a model that is already quantized with GPTQModel, like `"hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4"`.
+## Multi-GPU SFT with LoRA and FSDP for GPT-QModel:
+As in [Multi-GPU SFT with LoRA and FSDP](https://github.com/huggingface/peft/blob/main/examples/sft/README.md#multi-gpu-sft-with-lora-and-fsdp), we also support other quantization methods like GPT-QModel. You may need to install [GPT-QModel](https://github.com/ModelCloud/GPTQModel) > v3.0.0 or from source. Here is the launch command for reference: [run_peft_fsdp_gptq.sh]. For the `--model_name_or_path` argument, it is important to pass a model that is already quantized with GPT-QModel, like `"hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4"`.
 
 Note: there is a bug in transformers v4.53.0 for this case, please skip this transformers version.
 
