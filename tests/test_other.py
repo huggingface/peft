@@ -549,10 +549,10 @@ class TestGetModuleNamesTiedWithEmbedding:
             "cls.predictions.decoder.weight": "bert.embeddings.word_embeddings.weight",
             "cls.predictions.decoder.bias": "bert.embeddings.word_embeddings.bias",
         },
-        "facebook/opt-125m": {
+        "peft-internal-testing/tiny-random-OPTForCausalLM": {
             "lm_head.weight": "model.decoder.embed_tokens.weight",
         },
-        "hf-internal-testing/tiny-random-t5": {
+        "peft-internal-testing/tiny-random-t5": {
             "lm_head.weight": "shared.weight",
             "encoder.embed_tokens.weight": "shared.weight",
             "decoder.embed_tokens.weight": "shared.weight",
@@ -560,9 +560,9 @@ class TestGetModuleNamesTiedWithEmbedding:
     }
 
     model_ids = [
-        "facebook/opt-125m",
+        "peft-internal-testing/tiny-random-OPTForCausalLM",
         "peft-internal-testing/tiny-random-BertModel",
-        "hf-internal-testing/tiny-random-t5",
+        "peft-internal-testing/tiny-random-t5",
     ]
 
     @contextmanager
