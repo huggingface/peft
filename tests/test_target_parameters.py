@@ -406,8 +406,8 @@ class TestTargetParameters:
             # step. This may be a bit wasteful but it's not clear how to prevent this and overall is probably negligible
             num_forward_per_step = 2
             # Since https://github.com/huggingface/transformers/pull/39501, one of the parameters is accessed twice per
-            # forward call, so add +1.
-            expected_call_count = num_steps * num_layers * (1 + num_params * num_forward_per_step)
+            # forward call, but we cache all calls after the first.
+            expected_call_count = num_steps * num_layers * num_params * num_forward_per_step
             assert actual_call_count == expected_call_count
 
             actual_shapes = {W.shape for W in weights}
