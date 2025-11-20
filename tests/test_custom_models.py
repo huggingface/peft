@@ -60,6 +60,7 @@ from peft import (
     WaveFTConfig,
     get_peft_model,
 )
+from peft.tuners import lora
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import AuxiliaryTrainingWrapper, infer_device
 
@@ -3082,14 +3083,6 @@ class TestPeftCustomModel(PeftCommonTester):
         config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
         model = get_peft_model(model, config, adapter_name="adapter1")
 
-        # Create merged adapter with weight=1.0
-        model.add_weighted_adapter(
-            adapters=["adapter1"],
-            weights=[1.0],
-            adapter_name="merged_positive",
-            combination_type="linear",
-        )
-
         # Create merged adapter with weight=-1.0
         model.add_weighted_adapter(
             adapters=["adapter1"],
@@ -3098,19 +3091,11 @@ class TestPeftCustomModel(PeftCommonTester):
             combination_type="linear",
         )
 
-        # Get the LoRA weights for comparison
-        for name, module in model.named_modules():
-            if hasattr(module, "lora_A") and "merged_positive" in module.lora_A:
-                pos_A = module.lora_A["merged_positive"].weight.data
-                neg_A = module.lora_A["merged_negative"].weight.data
-                pos_B = module.lora_B["merged_positive"].weight.data
-                neg_B = module.lora_B["merged_negative"].weight.data
-
-                # Check that negative adapter is negation of positive
-                # Since we apply sign to both A and B: sign * sqrt(|w|)
-                # For w=1: sqrt(1) = 1, for w=-1: -sqrt(1) = -1
-                assert torch.allclose(neg_A, -pos_A, atol=1e-6), "A matrices should be negated"
-                assert torch.allclose(neg_B, -pos_B, atol=1e-6), "B matrices should be negated"
+        for module in model.modules():
+            if isinstance(module, lora.LoraLayer):
+                dw_adapter1 = module.get_delta_weight("adapter1")
+                dw_negative = module.get_delta_weight("merged_negative")
+                assert torch.allclose(dw_adapter1, -dw_negative, atol=1e-6)
 
     def test_add_weighted_adapter_subtraction_with_negative_weights(self):
         # Test that merging two identical adapters with weights [1.0, -1.0] results in approximately zero weights
@@ -3133,18 +3118,10 @@ class TestPeftCustomModel(PeftCommonTester):
         )
 
         # Verify the merged adapter has weights of approximately 0
-        for name, module in model.named_modules():
-            if hasattr(module, "lora_A") and "cancelled" in module.lora_A:
-                cancelled_A = module.lora_A["cancelled"].weight.data
-                cancelled_B = module.lora_B["cancelled"].weight.data
-
-                # The weights should be approximately zero (they cancel out)
-                assert torch.allclose(cancelled_A, torch.zeros_like(cancelled_A), atol=1e-5), (
-                    f"Cancelled A should be ~0, got max abs value {cancelled_A.abs().max()}"
-                )
-                assert torch.allclose(cancelled_B, torch.zeros_like(cancelled_B), atol=1e-5), (
-                    f"Cancelled B should be ~0, got max abs value {cancelled_B.abs().max()}"
-                )
+        for module in model.modules():
+            if isinstance(module, lora.LoraLayer):
+                dw_cancelled = module.get_delta_weight("cancelled")
+                assert torch.allclose(dw_cancelled, torch.zeros_like(dw_cancelled))
 
     def test_add_weighted_adapter_negative_weight_with_different_scaling(self):
         # Test negative weights with different scaling factors (lora_alpha)
@@ -6281,8 +6258,6 @@ class TestDynamicDispatch:
         # It should be possible for users to target layers even if we cannot determine in_features and out_features.
         # Those are only needed to initialize the LoRA layer via update_layer, so as long as users take care of that,
         # they should be good and not require those attributes to exist
-        from peft.tuners import lora
-
         class MyModel(nn.Module):
             def __init__(self):
                 super().__init__()
