@@ -1156,21 +1156,6 @@ class BaseTuner(nn.Module, ABC):
                 with onload_layer(module):
                     module.unmerge()
 
-    def set_auxiliary_adapters(self, adapter_name: str | list[str], inference_mode: bool) -> None:
-        """
-        Sets the active adapter(s) on auxiliary modules.
-
-        If the subclass (e.g. `LoraModel`) supports auxiliary modules like `modules_to_save`, it should call this
-        method in `set_adapter` to ensure that those auxiliary modules are being set correctly.
-
-        Args:
-            adapter_name (`str` or `list[str]`):
-                The name(s) of the adapter(s) to be set as active. The adapters must be loaded first.
-            inference_mode (bool, optional):
-                 Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
-        """
-        _set_adapter(self, adapter_name, inference_mode=inference_mode)
-
     def set_adapter(self, adapter_name: str | list[str], inference_mode: bool = False) -> None:
         """Set the active adapter(s).
 
