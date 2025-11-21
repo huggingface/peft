@@ -1194,6 +1194,73 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match="DoRA does not support megatron_core"):
             LoraConfig(target_modules=["linear"], use_dora=True, megatron_config=megatron_config)
 
+    def test_bdlora_lora_a_block_diagonal(self, data):
+        model = self.get_model()
+        output_base = model(data)[0]
+
+        bdlora_config = {"target_modules_bd_a": ["linear"], "target_modules_bd_b": [], "nblocks": 4}
+
+        config = LoraConfig(target_modules=["linear"], use_bdlora=bdlora_config)
+        model = get_peft_model(model, config)
+
+        output_bdlora = model(data)[0]
+        assert output_base.shape == output_bdlora.shape
+
+    def test_bdlora_lora_b_block_diagonal(self, data):
+        model = self.get_model()
+        output_base = model(data)[0]
+
+        bdlora_config = {"target_modules_bd_a": [], "target_modules_bd_b": ["linear"], "nblocks": 4}
+
+        config = LoraConfig(target_modules=["linear"], use_bdlora=bdlora_config)
+        model = get_peft_model(model, config)
+
+        output_bdlora = model(data)[0]
+        assert output_base.shape == output_bdlora.shape
+
+    def test_bdlora_both_patterns_raises(self):
+        model = self.get_model()
+
+        bdlora_config = {"target_modules_bd_a": ["linear"], "target_modules_bd_b": ["linear"], "nblocks": 2}
+
+        config = LoraConfig(target_modules=["linear"], use_bdlora=bdlora_config)
+
+        with pytest.raises(ValueError, match="Found overlapping modules in target_modules_bd lists"):
+            get_peft_model(model, config)
+
+    def test_bdlora_strict_matching_raises(self):
+        model = self.get_model()
+
+        bdlora_config = {
+            "target_modules_bd_a": ["nonexistent"],
+            "target_modules_bd_b": [],
+            "nblocks": 2,
+            "match_strict": True,
+        }
+
+        config = LoraConfig(target_modules=["linear"], use_bdlora=bdlora_config)
+
+        with pytest.raises(ValueError, match="matches neither A nor B block-diagonal patterns"):
+            get_peft_model(model, config)
+
+    def test_bdlora_non_strict_matching_works(self, data):
+        model = self.get_model()
+        output_base = model(data)[0]
+
+        bdlora_config = {
+            "target_modules_bd_a": ["nonexistent"],
+            "target_modules_bd_b": [],
+            "nblocks": 2,
+            "match_strict": False,
+        }
+
+        config = LoraConfig(target_modules=["linear"], use_bdlora=bdlora_config)
+        model = get_peft_model(model, config)
+
+        # works as normal LoRA as no module matches
+        output_bdlora = model(data)[0]
+        assert torch.allclose(output_base, output_bdlora)
+
     @pytest.fixture
     def mha_cls(self):
         class ModelMha(nn.Module):

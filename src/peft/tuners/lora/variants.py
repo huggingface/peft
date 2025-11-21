@@ -846,7 +846,8 @@ class BdLoraLinearVariant(LoraVariant):
             raise ValueError(f"Target {target_name} matches both A and B block-diagonal patterns")
         if use_bdlora.match_strict and not (has_lora_a_blockdiagonal or has_lora_b_blockdiagonal):
             raise ValueError(
-                f"Target {target_name} matches neither A and B block-diagonal patterns.  If this is intentional, set match_strict=False in BdLoraConfig during initialization. "
+                f"Target {target_name} matches neither A nor B block-diagonal patterns."
+                "If this is intentional, set match_strict=False in BdLoraConfig during initialization. "
             )
 
         if has_lora_a_blockdiagonal:
