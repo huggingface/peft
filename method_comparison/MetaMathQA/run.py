@@ -245,7 +245,9 @@ def train(
                 dur_train = sum(durations[-eval_steps:])
                 tokens_per_sec = token_sum / dur_train
 
-                # Note: don't call model.eval() and model.train() before/after this, as it would trigger re-compiles
+                # Note: If we call model.eval() before, and model.train() after this, it would trigger re-compilation if
+                # the model is compiled. Setting the model to eval is not really necessary for validation metrics, so
+                # it's fine to skip this.
                 predictions, responses = evaluate(
                     model=model,
                     tokenizer=tokenizer,
