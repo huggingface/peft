@@ -177,7 +177,7 @@ class BdLoraConfig:
         default=True,
         metadata={
             "help": "If set to true, requires each target_module to have either a block-diagonal LoRA-A or LoRA-B, "
-            "and raises an error otherwise. You can set this to False this to mix LoRA and BD-LoRA training, "
+            "and raises an error otherwise. You can set this to False to mix LoRA and BD-LoRA training, "
             "e.g. if some layers in your module do not benefit from BD-LoRA."
         },
     )

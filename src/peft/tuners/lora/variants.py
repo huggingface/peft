@@ -21,6 +21,7 @@ import torch
 from accelerate.utils.imports import is_xpu_available
 from torch import nn
 
+from peft.tuners.lora.config import BdLoraConfig
 from peft.utils.other import transpose
 
 from .arrow import ArrowLoraLinearLayer
@@ -790,7 +791,7 @@ class BlockDiagonalLinear(nn.Module):
         self.nblocks = nblocks
         if self.in_features % nblocks != 0 or self.out_features % nblocks != 0:
             raise ValueError(
-                f"self.in_features={self.in_features} or self.out_features={self.out_features} not divisble by {self.nblocks}"
+                f"self.in_features={self.in_features} or self.out_features={self.out_features} not divisible by {self.nblocks}"
             )
         if bias:
             raise ValueError("Bias is not implemented for BlockDiagonalLinear layer.")
@@ -827,12 +828,9 @@ class BdLoraLinearVariant(LoraVariant):
     def init(module: Linear, adapter_name: str, **kwargs) -> None:
         use_bdlora = kwargs.get("use_bdlora")
         target_name = kwargs.get("target_name", "")
-        assert use_bdlora is not None
 
         # Handle case where use_bdlora is a dict (from saved config) instead of BdLoraConfig object
         if isinstance(use_bdlora, dict):
-            from peft.tuners.lora.config import BdLoraConfig
-
             use_bdlora = BdLoraConfig(**use_bdlora)
 
         lora_a_blockdiagonal_pattern = use_bdlora.target_modules_bd_a or []
