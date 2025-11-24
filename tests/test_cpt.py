@@ -32,7 +32,7 @@ from peft import CPTConfig, TaskType, get_peft_model
 
 TEMPLATE = {"input": "input: {}", "intra_seperator": " ", "output": "output: {}", "inter_seperator": "\n"}
 
-MODEL_NAME = "hf-internal-testing/tiny-random-OPTForCausalLM"
+MODEL_NAME = "peft-internal-testing/tiny-random-OPTForCausalLM"
 MAX_INPUT_LENGTH = 1024
 
 

@@ -24,6 +24,7 @@ from peft import (
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
+    GraloraConfig,
     HRAConfig,
     IA3Config,
     LoraConfig,
@@ -46,9 +47,10 @@ from .testing_common import PeftCommonTester
 from .testing_utils import set_init_weights_false
 
 
+# Note: models from peft-internal-testing are just the safetensors versions of hf-internal-testing
 PEFT_ENCODER_DECODER_MODELS_TO_TEST = [
-    "ybelkada/tiny-random-T5ForConditionalGeneration-calibrated",
-    "hf-internal-testing/tiny-random-BartForConditionalGeneration",
+    "peft-internal-testing/tiny-random-T5ForConditionalGeneration-calibrated",
+    "peft-internal-testing/tiny-random-BartForConditionalGeneration",
 ]
 
 # TODO Missing from this list are LoKr, LoHa, LN Tuning, add them
@@ -96,6 +98,13 @@ ALL_CONFIGS = [
         FourierFTConfig,
         {
             "n_frequency": 10,
+            "target_modules": None,
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        GraloraConfig,
+        {
             "target_modules": None,
             "task_type": "SEQ_2_SEQ_LM",
         },
@@ -406,7 +415,7 @@ class TestEncoderDecoderModels(PeftCommonTester):
 
     def test_active_adapters_prompt_learning(self):
         model = AutoModelForSeq2SeqLM.from_pretrained(
-            "hf-internal-testing/tiny-random-BartForConditionalGeneration"
+            "peft-internal-testing/tiny-random-BartForConditionalGeneration"
         ).to(self.torch_device)
         # any prompt learning method would work here
         config = PromptEncoderConfig(task_type=TaskType.SEQ_2_SEQ_LM, num_virtual_tokens=10)
@@ -414,7 +423,7 @@ class TestEncoderDecoderModels(PeftCommonTester):
         assert model.active_adapters == ["default"]
 
     def test_save_shared_tensors(self):
-        model_id = "hf-internal-testing/tiny-random-RobertaModel"
+        model_id = "peft-internal-testing/tiny-random-RobertaModel"
         peft_config = LoraConfig(
             task_type=TaskType.TOKEN_CLS,
             inference_mode=False,

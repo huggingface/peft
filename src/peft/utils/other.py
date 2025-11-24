@@ -1026,7 +1026,16 @@ def _set_trainable(
                     f"'{adapter_name}', does not conflict with any of the targeted modules."
                 )
 
-            if isinstance(target, wrapper_cls):
+            # For transformers >=5 we need to check the grandparent to detect already modified tied weights.  The way
+            # the new `get_tied_weights_keys` works is that we resolve the current name of the module tied to the
+            # embeddings. If we replaced the tied weight (i.e. moved it to, say, `lm_head.token_adapter.base_layer`)
+            # we'll get the new name whereas the old way was that we got `lm_head` regardless of whether it was modified
+            # or not. We'll assume that we always have two levels of nesting and therefore do the same check as before
+            # but on the grandparent to accomodate for the new behavior.
+            if isinstance(grandparent, wrapper_cls):
+                grandparent.update(adapter_name, **wrapper_kwargs)
+                grandparent.set_adapter(grandparent.active_adapter, inference_mode=inference_mode)
+            elif isinstance(target, wrapper_cls):
                 target.update(adapter_name, **wrapper_kwargs)
                 target.set_adapter(target.active_adapter, inference_mode=inference_mode)
             else:
