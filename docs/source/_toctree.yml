@@ -90,6 +90,8 @@
       title: LoKr
     - local: package_reference/lora
       title: LoRA
+    - local: package_reference/osf
+      title: OSF
     - local: package_reference/xlora
       title: X-LoRA
     - local: package_reference/adapter_utils
@@ -114,6 +116,8 @@
       title: VeRA
     - local: package_reference/fourierft
       title: FourierFT
+    - local: package_reference/gralora
+      title: GraLoRA
     - local: package_reference/vblora
       title: VB-LoRA
     - local: package_reference/hra

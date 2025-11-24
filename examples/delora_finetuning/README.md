@@ -26,7 +26,7 @@ peft_model.print_trainable_parameters()
 
 dataset = load_dataset("imdb", split="train[:1%]")
 
-training_args = SFTConfig(dataset_text_field="text", max_seq_length=128)
+training_args = SFTConfig(dataset_text_field="text", max_length=128)
 trainer = SFTTrainer(
     model=peft_model,
     args=training_args,
@@ -52,7 +52,7 @@ peft_model = PeftModel.from_pretrained(model, "delora-llama-3-8b")
 ## Advanced Usage
 In this script the default DeLoRA layers are the query and value layers of the Llama model. Adding adapters on more layers will increase memory usage. If you wish to choose a different set of layers for DeLoRA to be applied on, you can simply define it using:
 ```bash
-python examples/delora_finetuning/delora_finetuning.py --base_model meta-llama/Meta-Llama-3-8B --delora_target_modules "q_proj,k_proj,v_proj,o_proj" 
+python examples/delora_finetuning/delora_finetuning.py --base_model meta-llama/Meta-Llama-3-8B --target_modules "q_proj,k_proj,v_proj,o_proj" 
 ```
 
 Using different lambdas for different layers is also possible by setting `lambda_pattern`.
@@ -74,7 +74,7 @@ python delora_finetuning.py \
     --rank 32 \
     --delora_lambda 15 \
     --module_dropout 0.1 \
-    --delora_target_modules "q_proj,v_proj" \
+    --target_modules "q_proj,v_proj" \
     --hub_model_id "YOUR_HF_REPO" \
     --push_to_hub
 ```

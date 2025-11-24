@@ -120,7 +120,12 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         # onto the new values, we would get undefined behavior. By replacing the specific token values we always
         # get defined behavior.
         weight = self.get_base_layer().weight
-        embed_dim = self.get_base_layer().embedding_dim
+
+        if hasattr(self.get_base_layer(), "embedding_dim"):
+            embed_dim = self.get_base_layer().embedding_dim
+        else:
+            # lm_head doesn't have embedding_dim attribute
+            embed_dim = self.get_base_layer().in_features
 
         if init_weights:
             if check_deepspeed_zero3_enabled():

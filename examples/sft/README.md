@@ -5,7 +5,7 @@ In this example, we'll see how to use [PEFT](https://github.com/huggingface/peft
 QLoRA uses 4-bit quantization of the base model to drastically reduce the GPU memory consumed by the base model while using LoRA for parameter-efficient fine-tuning. The command to use QLoRA is present at [run_peft.sh](https://github.com/huggingface/peft/blob/main/examples/sft/run_peft.sh).
 
 Note: 
-1. At present, `use_reentrant` needs to be `True` when using gradient checkpointing with QLoRA else QLoRA leads to high GPU memory consumption.
+1. At present, `use_reentrant` needs to be `True` when using gradient checkpointing with QLoRA or else QLoRA leads to high GPU memory consumption.
 
 
 ## Single GPU SFT with QLoRA using Unsloth
@@ -28,6 +28,8 @@ When you have access to multiple GPUs, it would be better to use normal LoRA wit
 
 ## Multi-GPU SFT with LoRA and FSDP
 When you have access to multiple GPUs, it would be better to use normal LoRA with DeepSpeed/FSDP. To use LoRA with FSDP, refer to the docs at [PEFT with FSDP](https://huggingface.co/docs/peft/accelerate/fsdp).
+
+Note: FSDP is currently not compatible with 8bit bitsandbytes quantization.
 
 
 ## Multi-GPU SFT with LoRA and FSDP for GPTQModel:

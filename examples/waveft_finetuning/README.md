@@ -3,7 +3,7 @@
 # WaveFT: Wavelet Fine-Tuning
 
 ## Introduction
-[WaveFT](https://arxiv.org/abs/2505.12532) is a novel parameter-efficient fine-tuning (PEFT) method that introduces sparse updates in the **wavelet domain** of residual matrices. Unlike LoRA, which is constrained by discrete low-rank choices, WaveFT enables fine-grained control over the number of trainable parameters by directly learning a sparse set of coefficients in the transformed space. These coefficients are then mapped back to the weight domain via the Inverse Discrete Wavelet Transform (IDWT), producing high-rank updates without incurring inference overhead.
+[WaveFT](https://huggingface.co/papers/2505.12532) is a novel parameter-efficient fine-tuning (PEFT) method that introduces sparse updates in the **wavelet domain** of residual matrices. Unlike LoRA, which is constrained by discrete low-rank choices, WaveFT enables fine-grained control over the number of trainable parameters by directly learning a sparse set of coefficients in the transformed space. These coefficients are then mapped back to the weight domain via the Inverse Discrete Wavelet Transform (IDWT), producing high-rank updates without incurring inference overhead.
 
 ## Quick start
 ```python
@@ -20,7 +20,7 @@ waveft_config = WaveFTConfig(
     n_frequency=2592,
 )
 peft_model = get_peft_model(model, waveft_config)
-training_args = SFTConfig(dataset_text_field="text", max_seq_length=128)
+training_args = SFTConfig(dataset_text_field="text", max_length=128)
 trainer = SFTTrainer(
     model=peft_model,
     train_dataset=dataset,

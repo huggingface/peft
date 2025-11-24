@@ -77,7 +77,7 @@ class TestCheckIsPeftModel:
 class TestScalingAdapters:
     @pytest.fixture(scope="class")
     def tokenizer(self):
-        return AutoTokenizer.from_pretrained("facebook/opt-125m")
+        return AutoTokenizer.from_pretrained("peft-internal-testing/opt-125m")
 
     def get_scale_from_modules(self, model):
         layer_to_scale_map = {}
@@ -88,7 +88,7 @@ class TestScalingAdapters:
         return layer_to_scale_map
 
     def test_rescale_adapter_scale(self, tokenizer):
-        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
         lora_config = LoraConfig(
             r=4,
             lora_alpha=4,
@@ -127,7 +127,7 @@ class TestScalingAdapters:
         assert torch.allclose(logits_before_scaling, logits_after_scaling)
 
     def test_wrong_scaling_datatype(self):
-        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
         lora_config = LoraConfig(
             r=4,
             lora_alpha=4,
@@ -146,7 +146,7 @@ class TestScalingAdapters:
                 pass
 
     def test_not_lora_model(self):
-        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
 
         # we expect a value error here because the model
         # does not have lora layers
@@ -155,7 +155,7 @@ class TestScalingAdapters:
                 pass
 
     def test_scaling_set_to_zero(self, tokenizer):
-        base_model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        base_model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
         inputs = tokenizer("hello world", return_tensors="pt")
 
         base_model.eval()
@@ -230,7 +230,7 @@ class TestScalingAdapters:
 
     def test_transformers_pipeline(self, tmp_path, tokenizer):
         # this uses a transformers model that loads the adapter directly
-        model_id = "facebook/opt-125m"
+        model_id = "peft-internal-testing/opt-125m"
         model = AutoModelForCausalLM.from_pretrained(model_id)
         config = LoraConfig(init_lora_weights=False)
         model = get_peft_model(model, config)
@@ -267,7 +267,7 @@ class TestScalingAdapters:
         assert torch.allclose(logits_before_scaling, logits_after_scaling)
 
     def test_multi_adapters(self, tokenizer):
-        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
         lora_config = LoraConfig(
             r=4,
             lora_alpha=4,
@@ -308,7 +308,7 @@ class TestScalingAdapters:
         assert torch.allclose(logits_before, logits_after)
 
     def test_rank_alpha_pattern(self, tokenizer):
-        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
         lora_config = LoraConfig(
             r=4,
             lora_alpha=4,
@@ -349,7 +349,7 @@ class TestScalingAdapters:
         assert torch.allclose(logits_before_scaling, logits_after_scaling)
 
     def test_merging_adapter(self, tokenizer):
-        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
         lora_config = LoraConfig(
             r=4,
             lora_alpha=4,
