@@ -40,7 +40,7 @@ def print_if_process_zero(*args, **kwargs):
     PartialState().print(*args, **kwargs)
 
 
-def main(model_id: str, quant: Literal["4bit", "8bit"] | None = None, target_modules: list[str] | None = None):
+def main(model_id: str, quant: Literal["4bit", "8bit"] | None, target_modules: list[str] | None):
     if target_modules == ["all-linear"]:
         target_modules = "all-linear"
 
@@ -50,6 +50,7 @@ def main(model_id: str, quant: Literal["4bit", "8bit"] | None = None, target_mod
 
     data = load_dataset("ybelkada/english_quotes_copy")
 
+    is_fsdp = "FSDP_VERSION" in os.environ
     if quant == "4bit":
         quant_config = BitsAndBytesConfig(
             load_in_4bit=True,
@@ -59,9 +60,9 @@ def main(model_id: str, quant: Literal["4bit", "8bit"] | None = None, target_mod
             bnb_4bit_use_double_quant=True,
         )
     elif quant == "8bit":
+        if is_fsdp:
+            raise ValueError("QLoRA with 8bit bnb is not supported for FSDP.")
         quant_config = BitsAndBytesConfig(load_in_8bit=True)
-        # cannot use llm_int8_skip_modules=target_modules, see:
-        # https://github.com/bitsandbytes-foundation/bitsandbytes/issues/1634
     elif quant is None:
         quant_config = None
     else:
