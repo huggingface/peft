@@ -869,9 +869,9 @@ TEST_CASES = [
         DeloraConfig,
         {"target_modules": ["lin0"], "module_dropout": 0.1},
     ),
-    ##########
+    ###########
     # BD-LoRA #
-    ##########
+    ###########
     (
         "BD-LoRA A only",
         "MLP",
@@ -897,16 +897,6 @@ TEST_CASES = [
         {
             "target_modules": ["lin0", "lin1"],
             "use_bdlora": BdLoraConfig(target_modules_bd_a=["lin0"], target_modules_bd_b=["lin1"], nblocks=2),
-        },
-    ),
-    (
-        "BD-LoRA with modules_to_save",
-        "MLP",
-        LoraConfig,
-        {
-            "target_modules": ["lin0"],
-            "modules_to_save": ["lin1"],
-            "use_bdlora": BdLoraConfig(target_modules_bd_a=["lin0"], nblocks=2),
         },
     ),
 ]

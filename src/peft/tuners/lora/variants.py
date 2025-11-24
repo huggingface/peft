@@ -780,7 +780,6 @@ class BlockDiagonalLinear(nn.Module):
         in_features: int,
         out_features: int,
         nblocks: int,
-        bias: bool = False,
         init_zero: bool = False,
         dtype: torch.dtype = torch.float32,
         device: torch.device = torch.device("cpu"),
@@ -793,9 +792,6 @@ class BlockDiagonalLinear(nn.Module):
             raise ValueError(
                 f"self.in_features={self.in_features} or self.out_features={self.out_features} not divisible by {self.nblocks}"
             )
-        if bias:
-            raise ValueError("Bias is not implemented for BlockDiagonalLinear layer.")
-
         # Create weight with specified dtype and device
         self.weight = nn.Parameter(torch.empty(out_features, in_features // nblocks, dtype=dtype, device=device))
 
@@ -855,7 +851,6 @@ class BdLoraLinearVariant(LoraVariant):
                 base_layer.in_features,
                 r,
                 nblocks=nblocks,
-                bias=False,
                 init_zero=False,
                 dtype=base_layer.weight.dtype,
                 device=base_layer.weight.device,
@@ -868,7 +863,6 @@ class BdLoraLinearVariant(LoraVariant):
                 r,
                 base_layer.out_features,
                 nblocks=nblocks,
-                bias=False,
                 init_zero=True,
                 dtype=base_layer.weight.dtype,
                 device=base_layer.weight.device,
