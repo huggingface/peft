@@ -58,16 +58,16 @@ class TrainableTokensModel(BaseTuner):
         # not do any changes on its own but solely rely on the weights from the tied adapter. We will search for the
         # tied weights and put tied TrainableTokensLayer adapters on them, all tied to the adapter of the embedding
         # matrix.
+        tied_weights_module_names = self._get_module_names_tied_with_embedding()
+
         if (
-            model_config.get("tie_word_embeddings", False)
-            # some models may be misconfigured to have weight tying enabled but don't define tied weights keys
-            and self.model._tied_weights_keys is not None
+            tied_weights_module_names
+            and model_config.get("tie_word_embeddings", False)
             and isinstance(self.model.get_input_embeddings(), TrainableTokensLayer)
         ):
-            module_keys = [".".join(n.split(".")[:-1]) for n in self.model._tied_weights_keys]
             # disable removing of duplicates since we're essentially only dealing with duplicates (i.e. tied weights)
             for name, module in self.model.named_modules(remove_duplicate=False):
-                matched_keys = [target_key for target_key in module_keys if name.endswith(target_key)]
+                matched_keys = [target_key for target_key in tied_weights_module_names if name.endswith(target_key)]
                 if matched_keys:
                     parent, target, target_name = _get_submodules(model, name)
 

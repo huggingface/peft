@@ -1893,8 +1893,7 @@ class _LoraParameterProxy(nn.Module):
         self.delta_weight = delta_weight
 
     def forward(self, W):
-        with nn.utils.parametrize.cached():
-            return W + self.delta_weight
+        return W + self.delta_weight
 
 
 # copied from:
@@ -2125,7 +2124,8 @@ class ParamWrapper(nn.Module, LoraLayer):
         # set requires_grad, as it defaults to False
         base_layer.parametrizations[self.parameter_name].original.requires_grad_(requires_grad_before)
         try:
-            yield
+            with nn.utils.parametrize.cached():
+                yield
         finally:
             self._remove_parametrizations()
 

@@ -19,8 +19,7 @@ This module contains the implementation of the LoRA-FA optimizer.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable
-from typing import Callable
+from collections.abc import Callable, Iterable
 
 import torch
 import torch.nn as nn

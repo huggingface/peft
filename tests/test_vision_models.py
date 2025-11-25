@@ -83,7 +83,8 @@ class TestPastKV:
 
 
 class TestResnet:
-    model_id = "hf-internal-testing/tiny-random-ResNetForImageClassification"
+    # saftensors version of the hf-internal-testing model
+    model_id = "peft-internal-testing/tiny-random-ResNetForImageClassification"
     cat_image = load_cat_image()  # for caching
 
     @pytest.fixture(autouse=True)
