@@ -497,41 +497,6 @@ class Embedding(nn.Module, HiRALayer):
 
         return output_tensor
 
-    def _mixed_batch_forward(
-        self, x: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
-    ) -> torch.Tensor:
-        # Compute base embedding once for efficiency
-        result = self.base_layer(x, *args, **kwargs)
-
-        # Group batch indices by adapter
-        adapter_to_indices = {}
-        for idx, adapter_name in enumerate(adapter_names):
-            adapter_to_indices.setdefault(adapter_name, []).append(idx)
-
-        # Apply HiRA embedding updates
-        for adapter_name, indices in adapter_to_indices.items():
-            if adapter_name == "__base__":
-                continue
-            if adapter_name not in self.hira_embedding_A:
-                continue
-
-            embedding_A = self.hira_embedding_A[adapter_name]  # shape: (r, num_embeddings)
-            embedding_B = self.hira_embedding_B[adapter_name]  # shape: (embedding_dim, r)
-
-            sub_batch = x[indices]  # shape: (sub_batch_size, sequence_length)
-
-            # Compute the low-rank update: (B @ A)[:, sub_batch].T
-            low_rank_update = F.embedding(sub_batch, (embedding_B @ embedding_A).T)
-
-            # Element-wise modulation with base embedding
-            base_sub_embedding = result[indices]
-            hira_update = base_sub_embedding * low_rank_update
-
-            # Update the result tensor
-            result[indices] += hira_update
-
-        return result
-
     def _embed(self, input: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
         base_layer = self.get_base_layer()
         return F.embedding(
