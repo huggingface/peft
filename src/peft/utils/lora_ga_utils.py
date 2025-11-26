@@ -12,6 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+Utility functions for LoRA-GA (Low-Rank Adaptation with Gradient Approximation).
+
+This module provides gradient estimation, context management, and save/load utilities
+for LoRA-GA initialization.
+
+Reference: https://arxiv.org/abs/2407.05000
+"""
+
 from __future__ import annotations
 
 import os
