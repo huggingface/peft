@@ -178,7 +178,7 @@ class HiraModel(BaseTuner):
             "r": r,
             "hira_dropout": hira_config.hira_dropout,
             "fan_in_fan_out": hira_config.fan_in_fan_out,
-            "init_hira_weights": hira_config.init_hira_weights,
+            "init_weights": hira_config.init_weights,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
@@ -195,7 +195,7 @@ class HiraModel(BaseTuner):
                 adapter_name,
                 r,
                 hira_dropout=hira_config.hira_dropout,
-                init_hira_weights=hira_config.init_hira_weights,
+                init_weights=hira_config.init_weights,
             )
         else:
             device_map = self.model.hf_device_map if hasattr(self.model, "hf_device_map") else None

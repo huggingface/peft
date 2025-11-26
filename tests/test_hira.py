@@ -34,7 +34,7 @@ def test_manual_hira_linear_equivalence():
         adapter_name=adapter_name,
         r=rank,
         hira_dropout=0.0,
-        init_hira_weights=True,
+        init_weights=True,
     )
     # force A, B to known values
     with torch.no_grad():

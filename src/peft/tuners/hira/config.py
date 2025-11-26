@@ -53,9 +53,6 @@ class HiraConfig(PeftConfig):
             `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
-        init_hira_weights (`bool` | `Literal["gaussian"]`):
-            How to initialize the weights of the adapter layers. Passing True (default) results in the default
-            initialization from the reference implementation from Microsoft, with the HiRA B weight being set to 0.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
@@ -99,8 +96,8 @@ class HiraConfig(PeftConfig):
             "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
         },
     )
-    init_hira_weights: bool | Literal["gaussian"] = field(
-        default=True,
+    init_weights: bool | Literal["gaussian"] | None = field(
+        default=None,
         metadata={
             "help": (
                 "How to initialize the weights of the HiRA layers. "
@@ -110,15 +107,6 @@ class HiraConfig(PeftConfig):
                 "Setting the initialization to False leads to random initialization of HiRA A and B, meaning that HiRA "
                 "is not a no-op before training; this setting is intended for debugging purposes. "
                 "Passing `'gaussian'` results in Gaussian initialization scaled by the HiRA rank for linear and layers. "
-            ),
-        },
-    )
-    init_weights: bool | Literal["gaussian"] | None = field(
-        default=None,
-        metadata={
-            "help": (
-                "Compatibility alias for `init_hira_weights`. When provided, this value overrides "
-                "`init_hira_weights`."
             ),
         },
         repr=False,
@@ -160,17 +148,6 @@ class HiraConfig(PeftConfig):
             set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
 
-        default_init = type(self).__dataclass_fields__["init_hira_weights"].default
-        if self.init_weights is not None:
-            if self.init_hira_weights != default_init and self.init_hira_weights != self.init_weights:
-                warnings.warn(
-                    "`init_weights` is deprecated for HiRA. Please use `init_hira_weights` instead.",
-                    UserWarning,
-                )
-            self.init_hira_weights = self.init_weights
-
-        # always keep the alias in sync for downstream helpers relying on `init_weights`
-        self.init_weights = self.init_hira_weights
 
         # if target_modules is a regex expression, then layers_to_transform should be None
         if isinstance(self.target_modules, str) and self.layers_to_transform is not None:

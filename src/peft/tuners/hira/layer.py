@@ -85,7 +85,7 @@ class HiraLayer(BaseTunerLayer):
         adapter_name,
         r,
         hira_dropout,
-        init_hira_weights,
+        init_weights,
         **kwargs,
     ):
         # This code works for linear layers, override for other layer types
@@ -104,24 +104,24 @@ class HiraLayer(BaseTunerLayer):
         self.hira_B.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(self.out_features, r))}))
 
         # for inits that require access to the base weight, use gather_param_ctx so that the weight is gathered when using DeepSpeed
-        if init_hira_weights:
-            self.reset_hira_parameters(adapter_name, init_hira_weights)
+        if init_weights:
+            self.reset_hira_parameters(adapter_name, init_weights)
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
         self.set_adapter(self.active_adapters)
 
-    def reset_hira_parameters(self, adapter_name, init_hira_weights):
-        if init_hira_weights is False:
+    def reset_hira_parameters(self, adapter_name, init_weights):
+        if init_weights is False:
             return
 
         if adapter_name in self.hira_A.keys():
-            if init_hira_weights is True:
+            if init_weights is True:
                 # initialize A the same way as the default for nn.Linear and B to zero
                 nn.init.kaiming_uniform_(self.hira_A[adapter_name], a=math.sqrt(5))
-            elif init_hira_weights.lower() == "gaussian":
+            elif init_weights.lower() == "gaussian":
                 nn.init.normal_(self.hira_A[adapter_name], std=1 / self.r[adapter_name])
             else:
-                raise ValueError(f"Unknown initialization {init_hira_weights=}")
+                raise ValueError(f"Unknown initialization {init_weights=}")
             nn.init.zeros_(self.hira_B[adapter_name])
         if adapter_name in self.hira_embedding_A.keys():
             # Initialize A to zeros and B the same way as the default for nn.Embedding, see:
@@ -139,7 +139,7 @@ class Linear(nn.Module, HiraLayer):
         hira_dropout: float = 0.0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_target_conv_1d_layer: bool = False,
-        init_hira_weights: Union[bool, str] = True,
+        init_weights: Union[bool, str] = True,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -151,7 +151,7 @@ class Linear(nn.Module, HiraLayer):
             adapter_name,
             r,
             hira_dropout=hira_dropout,
-            init_hira_weights=init_hira_weights,
+            init_weights=init_weights,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
@@ -286,7 +286,7 @@ class Embedding(nn.Module, HiraLayer):
         r: int = 0,
         hira_dropout: float = 0.0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
-        init_hira_weights: Union[bool, str] = True,
+        init_weights: Union[bool, str] = True,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -298,10 +298,10 @@ class Embedding(nn.Module, HiraLayer):
             adapter_name,
             r,
             hira_dropout=hira_dropout,
-            init_hira_weights=init_hira_weights,
+            init_weights=init_weights,
         )
 
-    def update_layer(self, adapter_name, r, hira_dropout, init_hira_weights, **kwargs) -> None:
+    def update_layer(self, adapter_name, r, hira_dropout, init_weights, **kwargs) -> None:
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
@@ -317,7 +317,7 @@ class Embedding(nn.Module, HiraLayer):
         weight_B = torch.randn((self.out_features, r))
         self.hira_embedding_A[adapter_name] = nn.Parameter(weight_A)
         self.hira_embedding_B[adapter_name] = nn.Parameter(weight_B)
-        self.reset_hira_parameters(adapter_name, init_hira_weights)
+        self.reset_hira_parameters(adapter_name, init_weights)
 
         # call this before init of the hira variants
         self._move_adapter_to_device_of_base_layer(adapter_name)
@@ -470,7 +470,7 @@ class _ConvNd(nn.Module, HiraLayer):
         adapter_name: str,
         r: int = 0,
         hira_dropout: float = 0.0,
-        init_hira_weights: Union[bool, str] = True,
+        init_weights: Union[bool, str] = True,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -486,10 +486,10 @@ class _ConvNd(nn.Module, HiraLayer):
             adapter_name,
             r,
             hira_dropout=hira_dropout,
-            init_hira_weights=init_hira_weights,
+            init_weights=init_weights,
         )
 
-    def update_layer(self, adapter_name, r, hira_dropout, init_hira_weights, **kwargs):
+    def update_layer(self, adapter_name, r, hira_dropout, init_weights, **kwargs):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
@@ -521,7 +521,7 @@ class _ConvNd(nn.Module, HiraLayer):
         self.hira_B[adapter_name] = nn.Parameter(torch.randn(weight_shape_B))
 
         # Initialize HiRA parameters (A with Kaiming, B zeros)
-        if init_hira_weights:
+        if init_weights:
             # A: same init as base conv weight
             nn.init.kaiming_uniform_(self.hira_A[adapter_name], a=math.sqrt(5))
             # B: initialize to zero
@@ -735,7 +735,7 @@ def dispatch_default(
     module_kwargs = {
         "r": hira_config.r,
         "hira_dropout": hira_config.hira_dropout,
-        "init_hira_weights": hira_config.init_hira_weights,
+        "init_weights": hira_config.init_weights,
     }
     # If fan_in_fan_out present in config, include it
     if hasattr(hira_config, "fan_in_fan_out"):

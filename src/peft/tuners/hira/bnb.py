@@ -38,7 +38,7 @@ if is_bnb_available():
             adapter_name: str,
             r: int = 0,
             hira_dropout: float = 0,
-            init_hira_weights: bool = True,
+            init_weights: bool = True,
             **kwargs,
         ) -> None:
             super().__init__()
@@ -50,7 +50,7 @@ if is_bnb_available():
                 adapter_name,
                 r,
                 hira_dropout=hira_dropout,
-                init_hira_weights=init_hira_weights,
+                init_weights=init_weights,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -269,7 +269,7 @@ if is_bnb_4bit_available():
             adapter_name: str,
             r: int = 0,
             hira_dropout: float = 0.0,
-            init_hira_weights: bool = True,
+            init_weights: bool = True,
             **kwargs,
         ) -> None:
             super().__init__()
@@ -281,7 +281,7 @@ if is_bnb_4bit_available():
                 adapter_name,
                 r,
                 hira_dropout=hira_dropout,
-                init_hira_weights=init_hira_weights,
+                init_weights=init_weights,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:

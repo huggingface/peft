@@ -30,7 +30,7 @@ hira_config = HiraConfig(
     r=32,
     target_modules=["k_proj", "q_proj", "v_proj", "fc1", "fc2"],
     hira_dropout=0.0,
-    init_hira_weights=True,
+    init_weights=True,
 )
 peft_model = get_peft_model(base_model, hira_config)
 
