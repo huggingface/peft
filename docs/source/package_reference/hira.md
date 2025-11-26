@@ -18,7 +18,7 @@ The abstract from the HiRA paper is:
 ```python
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import get_peft_model
-from peft.tuners.hira import HiRAConfig
+from peft.tuners.hira import HiraConfig
 
 # Example 1: HiRA on opt-125m for causal language modeling
 model_id = "facebook/opt-125m"
@@ -26,9 +26,9 @@ base_model = AutoModelForCausalLM.from_pretrained(model_id)
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 
 # Define HiRA configuration: apply to the MLP dense layers in each transformer block
-hira_config = HiRAConfig(
+hira_config = HiraConfig(
     r=32,
-    target_modules=["k_proj", "q_proj","v_proj","fc1","fc2"],
+    target_modules=["k_proj", "q_proj", "v_proj", "fc1", "fc2"],
     hira_dropout=0.0,
     init_hira_weights=True,
 )

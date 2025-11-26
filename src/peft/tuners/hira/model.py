@@ -15,11 +15,9 @@ from __future__ import annotations
 
 import operator
 import warnings
-from contextlib import contextmanager
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from enum import Enum
-from functools import partial, reduce
-from typing import Literal, Optional
+from typing import Optional
 
 import torch
 from torch import nn
@@ -44,8 +42,8 @@ from peft.utils import (
 from peft.utils.other import get_pattern_key
 
 from ...utils.constants import TRANSFORMERS_MODELS_TO_HIRA_TARGET_MODULES_MAPPING
-from .config import HiRAConfig
-from .layer import HiRALayer, dispatch_default
+from .config import HiraConfig
+from .layer import HiraLayer, dispatch_default
 
 
 def _adapter_names_pre_forward_hook(target, args, kwargs, adapter_names):
@@ -54,7 +52,7 @@ def _adapter_names_pre_forward_hook(target, args, kwargs, adapter_names):
     return args, kwargs
 
 
-class HiRAModel(BaseTuner):
+class HiraModel(BaseTuner):
     """
     Creates HiRA Adapter model from a pretrained transformers model.
 
@@ -74,9 +72,9 @@ class HiRAModel(BaseTuner):
 
         ```py
         >>> from transformers import AutoModelForSeq2SeqLM
-        >>> from peft import HiRAModel, HiRAConfig
+        >>> from peft import HiraModel, HiraConfig
 
-        >>> config = HiRAConfig(
+        >>> config = HiraConfig(
         ...     task_type="SEQ_2_SEQ_LM",
         ...     r=32,
         ...     target_modules=["q", "v"],
@@ -84,17 +82,17 @@ class HiRAModel(BaseTuner):
         ... )
 
         >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
-        >>> hira_model = HiRAModel(model, config, "default")
+        >>> hira_model = HiraModel(model, config, "default")
         ```
 
         ```py
         >>> import torch
         >>> import transformers
-        >>> from peft import HiRAConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
+        >>> from peft import HiraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 
         >>> rank = ...
         >>> target_modules = ["q_proj", "k_proj", "v_proj", "out_proj", "fc_in", "fc_out", "wte"]
-        >>> config = HiRAConfig(r=32, target_modules=target_modules, hira_dropout=0.1, task_type="CAUSAL_LM")
+        >>> config = HiraConfig(r=32, target_modules=target_modules, hira_dropout=0.1, task_type="CAUSAL_LM")
         >>> quantization_config = transformers.BitsAndBytesConfig(load_in_8bit=True)
 
         >>> tokenizer = transformers.AutoTokenizer.from_pretrained(
@@ -142,20 +140,12 @@ class HiRAModel(BaseTuner):
             state_dict=state_dict,
         )
 
-    def _check_new_adapter_config(self, config: HiRAConfig) -> None:
-        """
-        A helper method to check the config when a new adapter is being added.
-
-        Raise a ValueError if there is something wrong with the config or if it conflicts with existing adapters.
-
-        """
-        return True
 
     @staticmethod
     def _check_target_module_exists(hira_config, key):
         return check_target_module_exists(hira_config, key)
 
-    def _prepare_model(self, peft_config: HiRAConfig, model: nn.Module):
+    def _prepare_model(self, peft_config: HiraConfig, model: nn.Module):
         r"""
         A private method to modify the model structure before adapter is applied.
 
@@ -200,7 +190,7 @@ class HiRAModel(BaseTuner):
         except AttributeError:
             pass
 
-        if isinstance(target, HiRALayer):
+        if isinstance(target, HiraLayer):
             target.update_layer(
                 adapter_name,
                 r,
@@ -249,7 +239,7 @@ class HiRAModel(BaseTuner):
         # No bias for HiRA, skipping
 
     @staticmethod
-    def _create_new_module(hira_config: HiRAConfig, adapter_name, target, **kwargs):
+    def _create_new_module(hira_config: HiraConfig, adapter_name, target, **kwargs):
         # Collect dispatcher functions to decide what backend to use for the replaced HiRA layer. The order matters,
         # because the first match is always used. Therefore, the default layers should be checked last.
         dispatchers = []
@@ -365,72 +355,12 @@ class HiRAModel(BaseTuner):
         _set_adapter(self.model, adapter_name, inference_mode=inference_mode)
 
         for module in self.model.modules():
-            if isinstance(module, HiRALayer):
+            if isinstance(module, HiraLayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
                 module.set_adapter(adapter_name, inference_mode=inference_mode)
         self.active_adapter = adapter_name
-
-    @contextmanager
-    def _enable_peft_forward_hooks(self, *args, **kwargs):
-        # If adapter_names is passed as an argument, we inject it into the forward arguments.
-        adapter_names = kwargs.pop("adapter_names", None)
-        if adapter_names is None:
-            # nothing to do
-            yield
-            return
-
-        if self.training:
-            raise ValueError("Cannot pass `adapter_names` when the model is in training mode.")
-
-        # Check that users only passed actually existing adapters.
-        # Note: We cannot do this on the layer level, as each individual layer may not have each adapter. Still, we want
-        # to check that there is at least one layer with the given name, or else something like typos can easily slip.
-        expected_adapters = set()
-        for layer in self.modules():
-            if isinstance(layer, HiRALayer):
-                expected_adapters |= layer.hira_A.keys()
-                expected_adapters |= layer.hira_embedding_A.keys()
-        unique_adapters = {name for name in adapter_names if name != "__base__"}
-        unexpected_adapters = unique_adapters - expected_adapters
-        if unexpected_adapters:
-            raise ValueError(f"Trying to infer with non-existing adapter(s): {', '.join(sorted(unexpected_adapters))}")
-
-        # deal with beam search
-        num_beams = kwargs.get("num_beams", None)
-        uses_beam_search = isinstance(num_beams, int) and (num_beams > 1)
-        original_adapter_names = adapter_names[:]
-        if uses_beam_search:
-            if not isinstance(adapter_names, (list, tuple)):
-                raise TypeError(f"Got adapter names of type {type(adapter_names)}, expected a list of str.")
-            # When there is beam search, the inputs are repeated n times, thus we repeat each adapter name n times and
-            # then flatten the nested list. For encoder-decoder models, this extended list should not be applied to the
-            # encoder part. Further below, the original argument is thus restored for the encoder.
-            adapter_names = sum(([n] * kwargs["num_beams"] for n in adapter_names), [])
-
-        hook_handles = []
-        for module in self.modules():
-            if isinstance(module, HiRALayer) or isinstance(module, AuxiliaryTrainingWrapper):
-                pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
-                handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
-                hook_handles.append(handle)
-
-        if uses_beam_search and hasattr(self.model, "get_encoder"):
-            # For encoder-decoder models, even when applying beam search, the encoder part of the model should not use
-            # the extended adapter_names. This is because the encoder still uses the original, non-extended samples.
-            for module in self.model.get_encoder().modules():
-                if isinstance(module, HiRALayer) or isinstance(module, AuxiliaryTrainingWrapper):
-                    # Add another hook to overwrite the kwargs with the original adapter names -- this is easier than
-                    # trying to exclude the encoder.
-                    pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=original_adapter_names)
-                    handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
-                    hook_handles.append(handle)
-
-        yield
-
-        for handle in hook_handles:
-            handle.remove()
 
     def _check_merge_allowed(self):
         """Verify that the configuration supports merging.
@@ -478,214 +408,6 @@ class HiRAModel(BaseTuner):
 
         return self.model
 
-    def _check_add_weighted_adapter(
-        self, adapters: list[str], combination_type: str, svd_rank: int | None
-    ) -> tuple[str, int, str]:
-        """
-        Helper function to check if the arguments to add_weighted_adapter are valid and compatible with the underlying
-        model.
-        """
-        for adapter in adapters:
-            if adapter not in list(self.peft_config.keys()):
-                raise ValueError(f"Adapter {adapter} does not exist")
-
-        # If more than one of the adapters targets the same module with modules_to_save, raise an error, as these
-        # modules cannot be merged. First, find the ModulesToSaveWrapper instances in the model, then check if they
-        # have modules for the adapters to be merged.
-        modules_to_save_wrappers = [module for module in self.modules() if isinstance(module, ModulesToSaveWrapper)]
-        problematic_wrappers = [
-            wrapper
-            for wrapper in modules_to_save_wrappers
-            if sum(adapter in wrapper.modules_to_save for adapter in adapters) > 1
-        ]
-        if problematic_wrappers:
-            raise ValueError(
-                "Cannot add weighted adapters if they target the same module with modules_to_save, but found "
-                f"{len(problematic_wrappers)} such instance(s)."
-            )
-
-        # if there is only one adapter, we can only use linear merging
-        combination_type = "linear" if len(adapters) == 1 else combination_type
-
-        adapters_rs: list[int] = [
-            # When allocating tensors for the new adapter, we need the maximum possible r to not overflow
-            config.r if not config.r_pattern else max(config.r, *config.r_pattern.values())
-            for config in (self.peft_config[adapter] for adapter in adapters)
-        ]
-
-        if combination_type in ("linear", "ties", "dare_ties", "dare_linear", "magnitude_prune"):
-            # all adapters ranks should be same, new rank is just this value
-            if len(set(adapters_rs)) != 1:
-                raise ValueError(
-                    "All adapters must have the same r value when using combination_type linear, ties, dare_ties or "
-                    "dare_linear."
-                )
-            new_r = adapters_rs[0]
-        elif combination_type == "cat":
-            # adapters ranks may be different, new rank is sum of all ranks
-            # be careful, because output adapter rank may be really big if mixing a lot of adapters
-            new_r = sum(adapters_rs)
-        elif combination_type.endswith("svd"):
-            # new rank is the max of all ranks of the adapters if not provided
-            new_r = svd_rank or max(adapters_rs)
-        else:
-            raise ValueError(f"Invalid combination_type: {combination_type}")
-
-        target_module_types = [type(self.peft_config[adapter].target_modules) for adapter in adapters]
-        if not target_module_types:
-            raise ValueError(f"Found no adapter matching the names in {adapters}")
-        if len(set(target_module_types)) > 1:
-            raise ValueError(
-                "all adapter configs should follow the same target modules type. "
-                "Combining adapters with `target_modules` type being a mix of list/set and string is not supported."
-            )
-
-        if target_module_types[0] is str:
-            new_target_modules = "|".join(f"({self.peft_config[adapter].target_modules})" for adapter in adapters)
-        elif target_module_types[0] is set:
-            new_target_modules = reduce(
-                operator.or_, (self.peft_config[adapter].target_modules for adapter in adapters)
-            )
-        else:
-            raise TypeError(f"Invalid type {target_module_types[0]} found in target_modules")
-
-        return combination_type, new_r, new_target_modules
-
-    def add_weighted_adapter(
-        self,
-        adapters: list[str],
-        weights: list[float],
-        adapter_name: str,
-        combination_type: str = "svd",
-        svd_rank: int | None = None,
-        svd_clamp: int | None = None,
-        svd_full_matrices: bool = True,
-        svd_driver: str | None = None,
-        density: float | None = None,
-        majority_sign_method: Literal["total", "frequency"] = "total",
-    ) -> None:
-        """
-        This method adds a new adapter by merging the given adapters with the given weights.
-
-        When using the `cat` combination_type you should be aware that rank of the resulting adapter will be equal to
-        the sum of all adapters ranks. So it's possible that the mixed adapter may become too big and result in OOM
-        errors.
-
-        Args:
-            adapters (`list`):
-                List of adapter names to be merged.
-            weights (`list`):
-                List of weights for each adapter.
-            adapter_name (`str`):
-                Name of the new adapter.
-            combination_type (`str`):
-                The merging type can be one of [`svd`, `linear`, `cat`, `ties`, `ties_svd`, `dare_ties`, `dare_linear`,
-                `dare_ties_svd`, `dare_linear_svd`, `magnitude_prune`, `magnitude_prune_svd`]. When using the `cat`
-                combination_type, the rank of the resulting adapter is equal to the sum of all adapters ranks (the
-                mixed adapter may be too big and result in OOM errors).
-            svd_rank (`int`, *optional*):
-                Rank of output adapter for svd. If None provided, will use max rank of merging adapters.
-            svd_clamp (`float`, *optional*):
-                A quantile threshold for clamping SVD decomposition output. If None is provided, do not perform
-                clamping. Defaults to None.
-            svd_full_matrices (`bool`, *optional*):
-                Controls whether to compute the full or reduced SVD, and consequently, the shape of the returned
-                tensors U and Vh. Defaults to True.
-            svd_driver (`str`, *optional*):
-                Name of the cuSOLVER method to be used. This keyword argument only works when merging on CUDA. Can be
-                one of [None, `gesvd`, `gesvdj`, `gesvda`]. For more info please refer to `torch.linalg.svd`
-                documentation. Defaults to None.
-            density (`float`, *optional*):
-                Value between 0 and 1. 0 means all values are pruned and 1 means no values are pruned. Should be used
-                with [`ties`, `ties_svd`, `dare_ties`, `dare_linear`, `dare_ties_svd`, `dare_linear_svd`,
-                `magnintude_prune`, `magnitude_prune_svd`]
-            majority_sign_method (`str`):
-                The method, should be one of ["total", "frequency"], to use to get the magnitude of the sign values.
-                Should be used with [`ties`, `ties_svd`, `dare_ties`, `dare_ties_svd`]
-        """
-
-        if adapter_name in list(self.peft_config.keys()):
-            return
-
-        combination_type, new_rank, new_target_modules = self._check_add_weighted_adapter(
-            adapters=adapters,
-            combination_type=combination_type,
-            svd_rank=svd_rank,
-        )
-
-        self.peft_config[adapter_name] = replace(
-            self.peft_config[adapters[0]],
-            r=new_rank,
-            target_modules=new_target_modules,
-            alpha_pattern={},
-            r_pattern={},
-        )
-        self.inject_adapter(self.model, adapter_name)
-
-        # Do we really need that?
-        _freeze_adapter(self.model, adapter_name)
-
-        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
-        for key in key_list:
-            _, target, _ = _get_submodules(self.model, key)
-            if isinstance(target, HiRALayer):
-                if adapter_name in target.hira_A:
-                    target_hira_A = target.hira_A[adapter_name]
-                    target_hira_B = target.hira_B[adapter_name]
-                elif adapter_name in target.hira_embedding_A:
-                    target_hira_A = target.hira_embedding_A[adapter_name]
-                    target_hira_B = target.hira_embedding_B[adapter_name]
-                else:
-                    continue
-
-                target_hira_A.data = target_hira_A.data * 0.0
-                target_hira_B.data = target_hira_B.data * 0.0
-                if combination_type == "cat":
-                    hiras_A, hiras_B = [], []
-                    for adapter, weight in zip(adapters, weights):
-                        if adapter in target.hira_A:
-                            current_adapter_hira_A = target.hira_A[adapter]
-                            current_adapter_hira_B = target.hira_B[adapter]
-                        elif adapter in target.hira_embedding_A:
-                            current_adapter_hira_A = target.hira_embedding_A[adapter]
-                            current_adapter_hira_B = target.hira_embedding_B[adapter]
-                        else:
-                            continue
-                        hiras_A.append(current_adapter_hira_A.data * weight)
-                        hiras_B.append(current_adapter_hira_B.data)
-
-                    if len(hiras_A) == 0:
-                        raise ValueError("No matching HiRAs found. Please raise an issue on GitHub.")
-                    hiras_A = torch.cat(hiras_A, dim=0)
-                    hiras_B = torch.cat(hiras_B, dim=1)
-                    target_hira_A.data[: hiras_A.shape[0], :] = hiras_A
-                    target_hira_B.data[:, : hiras_B.shape[1]] = hiras_B
-                elif combination_type in [
-                    "svd",
-                    "ties_svd",
-                    "dare_linear_svd",
-                    "dare_ties_svd",
-                    "magnitude_prune_svd",
-                ]:
-                    target_hira_A.data, target_hira_B.data = self._svd_generalized_task_arithmetic_weighted_adapter(
-                        combination_type,
-                        adapters,
-                        weights,
-                        new_rank,
-                        target,
-                        target_hira_A,
-                        target_hira_B,
-                        density,
-                        majority_sign_method,
-                        svd_clamp,
-                        full_matrices=svd_full_matrices,
-                        driver=svd_driver,
-                    )
-                elif combination_type in ["linear", "ties", "dare_linear", "dare_ties", "magnitude_prune"]:
-                    target_hira_A.data, target_hira_B.data = self._generalized_task_arithmetic_weighted_adapter(
-                        combination_type, adapters, weights, target, density, majority_sign_method
-                    )
-
     def delete_adapter(self, adapter_name: str) -> None:
         """
         Deletes an existing adapter.
@@ -701,7 +423,7 @@ class HiRAModel(BaseTuner):
         new_adapter = None
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
-            if isinstance(target, HiRALayer):
+            if isinstance(target, HiraLayer):
                 target.delete_adapter(adapter_name)
                 if new_adapter is None:
                     new_adapter = target.active_adapters[:]

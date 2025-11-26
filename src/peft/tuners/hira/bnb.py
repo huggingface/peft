@@ -25,12 +25,12 @@ from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.integrations import dequantize_bnb_weight
 from peft.utils.other import transpose
 
-from .layer import HiRALayer
+from .layer import HiraLayer
 
 
 if is_bnb_available():
 
-    class Linear8bitLt(torch.nn.Module, HiRALayer):
+    class Linear8bitLt(torch.nn.Module, HiraLayer):
         # HiRA implemented in a dense layer
         def __init__(
             self,
@@ -42,7 +42,7 @@ if is_bnb_available():
             **kwargs,
         ) -> None:
             super().__init__()
-            HiRALayer.__init__(self, base_layer)
+            HiraLayer.__init__(self, base_layer)
             self.fan_in_fan_out = False
 
             self._active_adapter = adapter_name
@@ -261,7 +261,7 @@ if is_bnb_available():
 
 if is_bnb_4bit_available():
 
-    class Linear4bit(torch.nn.Module, HiRALayer):
+    class Linear4bit(torch.nn.Module, HiraLayer):
         # HiRA implemented in a dense layer
         def __init__(
             self,
@@ -273,7 +273,7 @@ if is_bnb_4bit_available():
             **kwargs,
         ) -> None:
             super().__init__()
-            HiRALayer.__init__(self, base_layer)
+            HiraLayer.__init__(self, base_layer)
             self.fan_in_fan_out = False
 
             self._active_adapter = adapter_name

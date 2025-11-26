@@ -25,10 +25,10 @@ from transformers.pytorch_utils import Conv1D
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.other import transpose
 
-from .config import HiRAConfig
+from .config import HiraConfig
 
 
-class HiRALayer(BaseTunerLayer):
+class HiraLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names: tuple[str, ...] = ("hira_A", "hira_B", "hira_embedding_A", "hira_embedding_B")
     # All names of other parameters that may contain adapter-related parameters
@@ -129,7 +129,7 @@ class HiRALayer(BaseTunerLayer):
             nn.init.normal_(self.hira_embedding_B[adapter_name])
 
 
-class Linear(nn.Module, HiRALayer):
+class Linear(nn.Module, HiraLayer):
     # HiRA implemented in a dense layer
     def __init__(
         self,
@@ -143,7 +143,7 @@ class Linear(nn.Module, HiRALayer):
         **kwargs,
     ) -> None:
         super().__init__()
-        HiRALayer.__init__(self, base_layer, **kwargs)
+        HiraLayer.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = fan_in_fan_out
 
         self._active_adapter = adapter_name
@@ -277,7 +277,7 @@ class Linear(nn.Module, HiRALayer):
         return "hira." + rep
 
 
-class Embedding(nn.Module, HiRALayer):
+class Embedding(nn.Module, HiraLayer):
     # HiRA implemented in a Embedding layer
     def __init__(
         self,
@@ -290,7 +290,7 @@ class Embedding(nn.Module, HiRALayer):
         **kwargs,
     ) -> None:
         super().__init__()
-        HiRALayer.__init__(self, base_layer)
+        HiraLayer.__init__(self, base_layer)
         self.fan_in_fan_out = fan_in_fan_out
 
         self._active_adapter = adapter_name
@@ -462,7 +462,7 @@ class Embedding(nn.Module, HiRALayer):
         return "hira." + rep
 
 
-class _ConvNd(nn.Module, HiRALayer):
+class _ConvNd(nn.Module, HiraLayer):
     # HiRA implemented in a conv(2,3)d layer
     def __init__(
         self,
@@ -474,7 +474,7 @@ class _ConvNd(nn.Module, HiRALayer):
         **kwargs,
     ) -> None:
         super().__init__()
-        HiRALayer.__init__(self, base_layer)
+        HiraLayer.__init__(self, base_layer)
 
         if base_layer.groups > 1:
             warnings.warn("HiRA adapter added to ConvNd layer with groups > 1. Merging is not supported.")
@@ -719,7 +719,7 @@ class Conv3d(_ConvNd):
 def dispatch_default(
     target: torch.nn.Module,
     adapter_name: str,
-    hira_config: HiRAConfig,
+    hira_config: HiraConfig,
     **kwargs,
 ) -> Optional[torch.nn.Module]:
     """

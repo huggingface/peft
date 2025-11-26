@@ -15,22 +15,22 @@
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.utils import register_peft_method
 
-from .config import HiRAConfig
-from .layer import Conv2d, Conv3d, Embedding, HiRALayer, Linear
-from .model import HiRAModel
+from .config import HiraConfig
+from .layer import Conv2d, Conv3d, Embedding, HiraLayer, Linear
+from .model import HiraModel
 
 
 __all__ = [
     "Conv2d",
     "Conv3d",
     "Embedding",
-    "HiRAConfig",
-    "HiRALayer",
-    "HiRAModel",
+    "HiraConfig",
+    "HiraLayer",
+    "HiraModel",
     "Linear",
 ]
 
-register_peft_method(name="hira", config_cls=HiRAConfig, model_cls=HiRAModel, is_mixed_compatible=True)
+register_peft_method(name="hira", config_cls=HiraConfig, model_cls=HiraModel, is_mixed_compatible=True)
 
 
 def __getattr__(name):

@@ -60,7 +60,7 @@ from peft import (
     AdaLoraConfig,
     ArrowConfig,
     EvaConfig,
-    HiRAConfig,
+    HiraConfig,
     LoftQConfig,
     LoraConfig,
     PeftModel,
@@ -2053,7 +2053,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
             model = prepare_model_for_kbit_training(model)
 
-            config = HiRAConfig(
+            config = HiraConfig(
                 r=16,
                 target_modules=["q_proj", "v_proj"],
                 hira_dropout=0.05,
@@ -2109,7 +2109,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
             model = prepare_model_for_kbit_training(model)
 
-            config = HiRAConfig(
+            config = HiraConfig(
                 r=16,
                 target_modules=["q_proj", "v_proj"],
                 hira_dropout=0.05,

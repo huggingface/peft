@@ -27,7 +27,7 @@ from peft.utils import PeftType
 
 
 @dataclass
-class HiRAConfig(PeftConfig):
+class HiraConfig(PeftConfig):
     """
     This is the configuration class to store the configuration of a [`HiRAModel`].
 
