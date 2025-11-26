@@ -86,11 +86,8 @@ class HiRALayer(BaseTunerLayer):
         r,
         hira_dropout,
         init_hira_weights,
+        **kwargs,
     ):
-        # collect the kwargs
-        kwargs = locals().copy()
-        del kwargs["self"]
-
         # This code works for linear layers, override for other layer types
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -304,11 +301,7 @@ class Embedding(nn.Module, HiRALayer):
             init_hira_weights=init_hira_weights,
         )
 
-    def update_layer(self, adapter_name, r, hira_dropout, init_hira_weights):
-        # collect the kwargs
-        kwargs = locals().copy()
-        del kwargs["self"]
-
+    def update_layer(self, adapter_name, r, hira_dropout, init_hira_weights, **kwargs) -> None:
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
@@ -496,11 +489,7 @@ class _ConvNd(nn.Module, HiRALayer):
             init_hira_weights=init_hira_weights,
         )
 
-    def update_layer(self, adapter_name, r, hira_dropout, init_hira_weights):
-        # collect the kwargs
-        kwargs = locals().copy()
-        del kwargs["self"]
-
+    def update_layer(self, adapter_name, r, hira_dropout, init_hira_weights, **kwargs):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
