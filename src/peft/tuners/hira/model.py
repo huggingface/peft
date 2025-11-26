@@ -14,6 +14,8 @@
 from __future__ import annotations
 
 import operator
+from contextlib import contextmanager
+from functools import partial
 from typing import Optional
 
 import torch
@@ -21,11 +23,31 @@ from torch import nn
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, replicate_layers
+from peft.utils import AuxiliaryTrainingWrapper
 from peft.utils.other import get_pattern_key
 
 from ...utils.constants import TRANSFORMERS_MODELS_TO_HIRA_TARGET_MODULES_MAPPING
 from .config import HiraConfig
 from .layer import HiraLayer, dispatch_default
+
+
+def _adapter_names_pre_forward_hook(target, args, kwargs, adapter_names):
+    # pre-forward hook to inject the adapter_names argument when using mixed adapter batches inference
+    kwargs["adapter_names"] = adapter_names
+    return args, kwargs
+
+
+def _get_encoder(model: nn.Module) -> nn.Module | None:
+    """Check if the model has an encoder and if it has, returns it; otherwise returns None"""
+    if not hasattr(model, "get_encoder"):
+        return None
+
+    encoder = model.get_encoder()
+    # https://github.com/huggingface/transformers/pull/42156
+    # new logic in transformers v5: all PretrainedModels return a model here, but it is self if there is no encoder
+    if encoder is model:
+        return None
+    return encoder
 
 
 class HiraModel(BaseTuner):
@@ -248,6 +270,69 @@ class HiraModel(BaseTuner):
             )
 
         return new_module
+
+    @contextmanager
+    def _enable_peft_forward_hooks(self, *args, **kwargs):
+        # If adapter_names is passed as an argument, we inject it into the forward arguments.
+        adapter_names = kwargs.pop("adapter_names", None)
+
+        if adapter_names is None:
+            # nothing to do
+            yield
+            return
+
+        hook_handles = []
+        num_beams = kwargs.get("num_beams", None)
+        uses_beam_search = isinstance(num_beams, int) and (num_beams > 1)
+
+        if self.training:
+            raise ValueError("Cannot pass `adapter_names` when the model is in training mode.")
+
+        # Check that users only passed actually existing adapters.
+        # Note: We cannot do this on the layer level, as each individual layer may not have each adapter. Still, we want
+        # to check that there is at least one layer with the given name, or else something like typos can easily slip.
+        expected_adapters = set()
+        for layer in self.modules():
+            if isinstance(layer, HiraLayer):
+                expected_adapters |= layer.hira_A.keys()
+                expected_adapters |= layer.hira_embedding_A.keys()
+        unique_adapters = {name for name in adapter_names if name != "__base__"}
+        unexpected_adapters = unique_adapters - expected_adapters
+        if unexpected_adapters:
+            raise ValueError(f"Trying to infer with non-existing adapter(s): {', '.join(sorted(unexpected_adapters))}")
+
+        # deal with beam search
+        original_adapter_names = adapter_names[:]
+        if uses_beam_search:
+            if not isinstance(adapter_names, (list, tuple)):
+                raise TypeError(f"Got adapter names of type {type(adapter_names)}, expected a list of str.")
+            # When there is beam search, the inputs are repeated n times, thus we repeat each adapter name n times and
+            # then flatten the nested list. For encoder-decoder models, this extended list should not be applied to the
+            # encoder part. Further below, the original argument is thus restored for the encoder.
+            adapter_names = sum(([n] * kwargs["num_beams"] for n in adapter_names), [])
+
+        for module in self.modules():
+            if isinstance(module, HiraLayer) or isinstance(module, AuxiliaryTrainingWrapper):
+                pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
+                handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
+                hook_handles.append(handle)
+
+        encoder = _get_encoder(self.model)
+        if uses_beam_search and (encoder is not None):
+            # For encoder-decoder models, even when applying beam search, the encoder part of the model should not use
+            # the extended adapter_names. This is because the encoder still uses the original, non-extended samples.
+            for module in encoder.modules():
+                if isinstance(module, HiraLayer) or isinstance(module, AuxiliaryTrainingWrapper):
+                    # Add another hook to overwrite the kwargs with the original adapter names -- this is easier than
+                    # trying to exclude the encoder.
+                    pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=original_adapter_names)
+                    handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
+                    hook_handles.append(handle)
+
+        yield
+
+        for handle in hook_handles:
+            handle.remove()
 
     def _check_merge_allowed(self):
         """Verify that the configuration supports merging.
