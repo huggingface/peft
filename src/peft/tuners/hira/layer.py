@@ -67,31 +67,6 @@ class HiRALayer(BaseTunerLayer):
             in_features, out_features = (
                 base_layer.weight.ds_shape if hasattr(base_layer.weight, "ds_shape") else base_layer.weight.shape
             )
-        elif isinstance(base_layer, nn.MultiheadAttention):
-            if not base_layer._qkv_same_embed_dim:
-                raise ValueError(f"Only same dim for query/key/value is supported as of now for {self.__class__}.")
-            in_features, out_features = base_layer.embed_dim, 3 * base_layer.embed_dim
-        elif hasattr(base_layer, "infeatures") and hasattr(base_layer, "outfeatures"):
-            # QuantLinear
-            in_features, out_features = base_layer.infeatures, base_layer.outfeatures
-        elif hasattr(base_layer, "input_size") and hasattr(base_layer, "output_size"):
-            # Megatron ColumnParallelLinear,RowParallelLinear
-            in_features, out_features = base_layer.input_size, base_layer.output_size
-        elif hasattr(base_layer, "codebooks") and base_layer.__class__.__name__ == "QuantizedLinear":
-            # AQLM QuantLinear
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif hasattr(base_layer, "w_bit") and base_layer.__class__.__name__ == "WQLinear_GEMM":
-            # Awq layers
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif base_layer.__class__.__name__ == "EetqLinear":
-            # Eetq layers
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif hasattr(base_layer, "W_q") and base_layer.__class__.__name__ == "HQQLinear":
-            # HQQ layers
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif base_layer.__class__.__name__ == "PatchedLinear":
-            # INC layers
-            in_features, out_features = base_layer.in_features, base_layer.out_features
         else:
             # possibly support user provided custom layer types using dynamic dispatch
             if hasattr(base_layer, "in_features") and hasattr(base_layer, "out_features"):
