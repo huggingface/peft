@@ -38,6 +38,7 @@ from peft import (
     C3AConfig,
     DeloraConfig,
     EvaConfig,
+    GraloraConfig,
     IA3Config,
     LoftQConfig,
     LoKrConfig,
@@ -1011,7 +1012,7 @@ class TestLoraInitialization:
         # warning. See #2184.
 
         # create an adapter without PiSSA/OloRA
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         model = AutoModelForCausalLM.from_pretrained(model_id)
         model = get_peft_model(model, LoraConfig(init_lora_weights=True))
         model.save_pretrained(tmp_path / "adapter0")
@@ -1147,7 +1148,7 @@ class TestLoraInitialization:
 
     def test_trainable_token_indices_targets_head_and_embedding(self):
         # targeting embedding and LM head explicitly, see #2863
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
             config = LoraConfig(trainable_token_indices={"lm_head": [0], "embed_tokens": [0]})
@@ -2165,6 +2166,56 @@ class TestDeLoRAInitialization:
         assert not torch.allclose(y_base, y_peft, atol=1e-6, rtol=1e-6)
 
 
+class TestGraLoRAInitialization:
+    """Basic sanity tests for the GraLoRA tuner."""
+
+    torch_device = infer_device()
+
+    def get_model(self, bias=True):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 30, bias=bias)
+                self.lin1 = nn.Linear(30, 2, bias=bias)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                return X
+
+        return MLP(bias=bias).to(self.torch_device).eval()
+
+    @pytest.fixture
+    def data(self):
+        torch.manual_seed(0)
+        return torch.randn(4, 10, device=self.torch_device)
+
+    def test_gralora_with_incompatible_gralora_k_and_r_raises(self):
+        model = self.get_model()
+        r = 6
+        gralora_k = 4
+        # msg = f"r should be divisible by gralora_k, but got {config.r} and {config.gralora_k}"
+        msg = f"r should be divisible by gralora_k, but got {r} and {gralora_k}"
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            GraloraConfig(target_modules=["lin0"], r=r, gralora_k=gralora_k)
+
+    def test_gralora_with_incompatible_gralora_k_and_in_features_raises(self):
+        model = self.get_model()
+        config = GraloraConfig(target_modules=["lin0"], r=6, gralora_k=3)
+        msg = f"in_features should be divisible by gralora_k, but got {model.lin0.in_features} and {config.gralora_k}"
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            get_peft_model(model, config)
+
+    def test_gralora_with_incompatible_gralora_k_and_out_features_raises(self):
+        model = self.get_model()
+        config = GraloraConfig(target_modules=["lin1"], r=6, gralora_k=3)
+        msg = (
+            f"out_features should be divisible by gralora_k, but got {model.lin1.out_features} and {config.gralora_k}"
+        )
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            get_peft_model(model, config)
+
+
 class TestNoInfiniteRecursionDeepspeed:
     # see #1892 for details
     classes = [
@@ -2218,7 +2269,7 @@ class TestNoInfiniteRecursionDeepspeed:
 
 
 class TestLoadAdapterOfflineMode:
-    base_model = "hf-internal-testing/tiny-random-OPTForCausalLM"
+    base_model = "peft-internal-testing/tiny-random-OPTForCausalLM"
     peft_model_id = "peft-internal-testing/tiny-OPTForCausalLM-lora"
 
     # make sure that PEFT honors offline mode
@@ -2287,7 +2338,7 @@ class TestCustomModelConfigWarning:
 
     def test_no_warning_by_default_transformers_model(self, recwarn):
         # first a sanity test that there is no warning by default when using a model from transformers
-        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
         get_peft_model(model, LoraConfig())
         for warning in recwarn.list:
             assert "renamed" not in str(warning.message)
@@ -2300,10 +2351,10 @@ class TestCustomModelConfigWarning:
 
     def test_warning_name_transformers_model(self, recwarn):
         # The base_model_name_or_path provided by the user is overridden.
-        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
         custom_name = "custom_name"
         get_peft_model(model, LoraConfig(base_model_name_or_path=custom_name))
-        msg = f"was renamed from '{custom_name}' to 'hf-internal-testing/tiny-random-OPTForCausalLM'"
+        msg = f"was renamed from '{custom_name}' to 'peft-internal-testing/tiny-random-OPTForCausalLM'"
         assert any(msg in str(warning.message) for warning in recwarn.list)
 
     def test_warning_name_custom_model(self, custom_module, recwarn):
@@ -2336,7 +2387,7 @@ class TestLowCpuMemUsage:
     if _device != "cpu":
         devices.append(_device)
 
-    model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+    model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
 
     def get_model(self):
         return AutoModelForCausalLM.from_pretrained(self.model_id)
@@ -2518,7 +2569,7 @@ class TestLowCpuMemUsage:
 def test_from_pretrained_missing_keys_warning(recwarn, tmp_path):
     # For more context, see issue 2115
     # When loading a PEFT adapter and we're missing a PEFT-specific weight, there should be a warning.
-    model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+    model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
     config = LoraConfig()
     model = get_peft_model(model, config)
     state_dict = model.state_dict()
@@ -2526,7 +2577,7 @@ def test_from_pretrained_missing_keys_warning(recwarn, tmp_path):
     # first, sanity check that there are no warnings if no key is missing
     model.save_pretrained(tmp_path)
     del model
-    model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+    model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
     model = PeftModel.from_pretrained(model, tmp_path)
     msg = "Found missing adapter keys"
     assert not any(msg in str(w.message) for w in recwarn.list)
@@ -2541,7 +2592,7 @@ def test_from_pretrained_missing_keys_warning(recwarn, tmp_path):
     model.save_pretrained(tmp_path)
     del model
 
-    model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+    model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
     model = PeftModel.from_pretrained(model, tmp_path)
     assert any(msg in str(w.message) for w in recwarn.list)
     assert any(missing_key in str(w.message) for w in recwarn.list)
@@ -2556,7 +2607,7 @@ class TestNamingConflictWarning:
     def setup(self):
         self.peft_config = LoraConfig()
         self.prefix = PEFT_TYPE_TO_PREFIX_MAPPING[self.peft_config.peft_type]
-        self.base_model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+        self.base_model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
 
     def _save_and_reload_model(self, model, adapter_name, tmp_path):
         # Helper method to save and reload the PEFT model
@@ -4157,7 +4208,7 @@ class TestScaling:
     @pytest.fixture
     def model(self):
         # tiny opt with 5 attention layers
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         return AutoModelForCausalLM.from_pretrained(model_id)
 
     def get_scalings(self, model, adapter_name="default"):

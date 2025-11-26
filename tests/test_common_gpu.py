@@ -897,7 +897,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         EXPECTED_ALL_PARAMS = 125534208
 
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_4bit=True),
         )
 
@@ -917,7 +917,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         )
 
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
         )
 
@@ -972,7 +972,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     def test_8bit_merge_lora(self):
         torch.manual_seed(1000)
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
         )
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
@@ -1005,7 +1005,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     def test_8bit_merge_and_disable_lora(self):
         torch.manual_seed(1000)
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
         )
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
@@ -1042,7 +1042,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         # same as test_8bit_merge_lora but with lora_bias=True
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
         )
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
@@ -1078,7 +1078,7 @@ class PeftGPUCommonTests(unittest.TestCase):
             bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
             dtype=torch.float32,
         )
@@ -1120,7 +1120,7 @@ class PeftGPUCommonTests(unittest.TestCase):
             bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
             dtype=torch.float32,
         )
@@ -1163,7 +1163,7 @@ class PeftGPUCommonTests(unittest.TestCase):
             bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
             dtype=torch.float32,
         )
@@ -1204,11 +1204,11 @@ class PeftGPUCommonTests(unittest.TestCase):
             bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
             dtype=torch.float32,
         ).eval()
-        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
+        tokenizer = AutoTokenizer.from_pretrained("peft-internal-testing/opt-125m")
         # input with 9 samples
         inputs = tokenizer(
             [
@@ -1272,11 +1272,11 @@ class PeftGPUCommonTests(unittest.TestCase):
         torch.manual_seed(3000)
         bnb_config = BitsAndBytesConfig(load_in_8bit=True)
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
             dtype=torch.float32,
         ).eval()
-        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
+        tokenizer = AutoTokenizer.from_pretrained("peft-internal-testing/opt-125m")
         # input with 9 samples
         inputs = tokenizer(
             [
@@ -1357,7 +1357,7 @@ class PeftGPUCommonTests(unittest.TestCase):
             bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
             dtype=torch.float32,
         )
@@ -1370,7 +1370,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         logits_lora = model(random_input).logits
 
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
             dtype=torch.float32,
         )
@@ -1392,7 +1392,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     def test_8bit_dora_inference(self):
         # check for same result with and without DoRA when initializing with init_lora_weights=False
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             dtype=torch.float32,
         ).eval()
@@ -1405,7 +1405,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         logits_lora = model(random_input).logits
 
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             dtype=torch.float32,
         )
@@ -1483,7 +1483,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         # Check results for merging, unmerging, unloading
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             dtype=torch.float32,
         ).eval()
@@ -1533,7 +1533,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         torch.manual_seed(0)
 
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             dtype=torch.float32,
         ).eval()
 
@@ -1585,7 +1585,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         torch.manual_seed(0)
 
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             dtype=torch.float32,
         ).eval()
 
@@ -1616,7 +1616,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         # Check results for merging, unmerging, unloading
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             dtype=torch.float32,
         ).eval()
@@ -1704,7 +1704,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     def test_apply_GS_hra_inference(self):
         # check for different result with and without apply_GS
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             dtype=torch.float32,
         ).eval()
 
@@ -1716,7 +1716,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         logits_hra = model(random_input).logits
 
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             dtype=torch.float32,
         )
         torch.manual_seed(0)
@@ -1758,7 +1758,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         # check that an untrained HRA adapter can't be initialized as an identity tranformation
         # when r is an odd number
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             dtype=torch.float32,
         ).eval()
 

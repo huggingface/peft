@@ -706,7 +706,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         # test a somewhat realistic model instead of a toy model
         torch.manual_seed(0)
 
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         model = AutoModelForCausalLM.from_pretrained(model_id).eval().to(self.torch_device)
         input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
         attention_mask = torch.tensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)

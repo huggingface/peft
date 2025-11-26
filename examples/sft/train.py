@@ -18,10 +18,6 @@ class ModelArguments:
     model_name_or_path: str = field(
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
-    max_seq_length: Optional[int] = field(
-        default=512,
-        metadata={"help": "The maximum total input sequence length after tokenization."},
-    )
     chat_template_format: Optional[str] = field(
         default="none",
         metadata={
@@ -156,4 +152,5 @@ if __name__ == "__main__":
         model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+    model_args.max_length = training_args.max_length
     main(model_args, data_args, training_args)

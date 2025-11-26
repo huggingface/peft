@@ -17,6 +17,7 @@ import torch
 from torch import nn
 from transformers import AutoModelForCausalLM
 
+import peft
 from peft import LoraConfig, TaskType, get_peft_model
 
 from .testing_common import PeftCommonTester
@@ -405,8 +406,8 @@ class TestTargetParameters:
             # step. This may be a bit wasteful but it's not clear how to prevent this and overall is probably negligible
             num_forward_per_step = 2
             # Since https://github.com/huggingface/transformers/pull/39501, one of the parameters is accessed twice per
-            # forward call, so add +1.
-            expected_call_count = num_steps * num_layers * (1 + num_params * num_forward_per_step)
+            # forward call, but we cache all calls after the first.
+            expected_call_count = num_steps * num_layers * num_params * num_forward_per_step
             assert actual_call_count == expected_call_count
 
             actual_shapes = {W.shape for W in weights}
@@ -505,3 +506,45 @@ class TestTargetParameters:
         unloaded = model.unload()
         output_unloaded = unloaded(x)
         assert torch.all(output_unloaded == output_parametrized)
+
+    def test_target_parameter_result_caching_works(self, monkeypatch):
+        # See 2912
+        # There was an issue with the caching of _LoraParameterProxy not working correctly. This test checks that the
+        # results returned from the forward call are all identical to ensure they're not recomputed each time.
+        torch.manual_seed(0)
+        model_id = "trl-internal-testing/tiny-GptOssForCausalLM"
+
+        tensor_storage = []
+
+        def store_tensors_deco(fn):
+            def wrapper(*args, **kwargs):
+                result = fn(*args, **kwargs)
+                tensor_storage.append(result)
+                return result
+
+            return wrapper
+
+        monkeypatch.setattr(
+            peft.tuners.lora.layer._LoraParameterProxy,
+            "forward",
+            store_tensors_deco(peft.tuners.lora.layer._LoraParameterProxy.forward),
+        )
+
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            config = LoraConfig(
+                target_modules=[],
+                # for simplicity, only target a single layer
+                target_parameters=["0.mlp.experts.gate_up_proj"],
+            )
+            model = get_peft_model(model, config)
+            x = torch.arange(100).view(2, 50)  # larger input to hit many experts
+
+            # forward is called twice, once at initialization of the parametrization and once during the forward pass,
+            # after which it is cached; without caching, it would be called 25 times.
+            output = model(x, output_hidden_states=True)
+            assert len(set(map(id, tensor_storage))) == 2
+
+            # sanity check: a second forward call _does_ trigger a new forward
+            output = model(x, output_hidden_states=True)
+            assert len(set(map(id, tensor_storage))) == 4
