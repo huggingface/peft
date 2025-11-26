@@ -203,28 +203,3 @@ class HiRAConfig(PeftConfig):
         # if target_modules is a regex expression, then layers_pattern should be None
         if isinstance(self.target_modules, str) and self.layers_pattern is not None:
             raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
-
-        # check for layers_to_transform and layers_pattern
-        if self.layers_pattern and not self.layers_to_transform:
-            raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
-
-        self._custom_modules: Optional[dict[type[nn.Module], type[nn.Module]]] = None
-
-    def _register_custom_module(self, mapping: dict[type[nn.Module], type[nn.Module]]) -> None:
-        """
-        Experimental API to support providing custom HiRA layers.
-
-        This API is subject to change, you should carefully read the docs before deciding to use it:
-
-        https://huggingface.co/docs/peft/developer_guides/custom_models
-
-        To register custom HiRA module types, call this method with a `mapping` argument that is a dict that maps from
-        the target layer type to the custom HiRA layer type. The dict can contain multiple items if you wish to target
-        multiple layer types. The target layer type can be any nn.Module that we currently don't support in PEFT,
-        whether that is an official PyTorch layer type or a custom layer type. The custom HiRA module class has to be
-        implemented by the user and follow the PEFT conventions for HiRA layers.
-
-        """
-        if self._custom_modules is None:
-            self._custom_modules = {}
-        self._custom_modules.update(mapping)
