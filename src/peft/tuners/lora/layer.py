@@ -224,6 +224,9 @@ class LoraLayer(BaseTunerLayer):
         elif init_lora_weights == "orthogonal":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.orthogonal_init(adapter_name)
+        elif init_lora_weights == "lora_ga":
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.lora_ga_init(adapter_name)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
         # call this before init of the lora variants
@@ -461,6 +464,102 @@ class LoraLayer(BaseTunerLayer):
         lora_B = torch.randn(rank // 2, self.out_features).T.mm(q_even) / 10.0
         self.lora_A[adapter_name].weight = nn.Parameter(lora_A.contiguous().to(dtype))
         self.lora_B[adapter_name].weight = nn.Parameter(lora_B.contiguous().to(dtype))
+
+    def lora_ga_init(self, adapter_name):
+        """
+        Initialize LoRA weights using gradient approximation.
+
+        Uses SVD on the gradient matrix to initialize adapters in a way that
+        aligns with the direction of full fine-tuning.
+        """
+        # Check for gradient from kwargs (if provided directly) or from temporary attributes on base layer
+        grad = None
+        peft_config = None
+
+        if "grad" in self.kwargs:
+            grad = self.kwargs["grad"]
+            peft_config = self.kwargs.get("peft_config")
+        else:
+            # Check for temporary attributes attached by LoraGAModel
+            base_layer = self.get_base_layer()
+            if hasattr(base_layer, '_loraga_temp_grad'):
+                grad = base_layer._loraga_temp_grad
+            if hasattr(base_layer, '_loraga_temp_config'):
+                peft_config = base_layer._loraga_temp_config
+
+        if grad is None:
+            warnings.warn("No gradient provided for LoRA-GA initialization, skipping")
+            return
+
+        if peft_config is None:
+            raise ValueError("peft_config must be provided for LoRA-GA initialization")
+
+        direction = peft_config.direction
+        scale = peft_config.scale
+        stable_gamma = peft_config.stable_gamma
+        dtype = self.get_base_layer().weight.dtype
+
+        grad = grad.to(torch.float32)
+        weight = self.get_base_layer().weight
+
+        grad = transpose(grad, self.fan_in_fan_out)
+
+        r = self.r[adapter_name]
+        U, S, Vh = torch.svd_lowrank(grad, q=min(4 * r, min(grad.shape)), niter=4)
+
+        U = U[:, :2*r]
+        S = S[:2*r]
+        Vh = Vh[:2*r, :]
+
+        if direction == "ArBr":
+            lora_A_weight = Vh[1:2*r:2, :]
+            lora_B_weight = U[:, 0:2*r:2]
+            S_B = S[0:2*r:2]
+            lora_B_weight = lora_B_weight @ torch.diag(S_B)
+
+        elif direction == "A2rBr":
+            lora_A_weight = Vh[r:2*r, :]
+            lora_B_weight = U[:, :r]
+            S_B = S[:r]
+            lora_B_weight = lora_B_weight @ torch.diag(S_B)
+
+        elif direction == "ArB2r":
+            lora_A_weight = Vh[:r, :]
+            lora_B_weight = U[:, r:2*r]
+            S_B = S[r:2*r]
+            lora_B_weight = lora_B_weight @ torch.diag(S_B)
+
+        elif direction == "random":
+            indices = torch.randperm(2 * r)[:r]
+            lora_A_weight = Vh[indices, :]
+            lora_B_weight = U[:, indices] @ torch.diag(S[indices])
+
+        scaling_factor = self.scaling[adapter_name]
+        out_features = weight.shape[0]
+
+        if scale == "stable":
+            scale_factor = (out_features ** 0.25) / (stable_gamma ** 0.5)
+            lora_B_weight = lora_B_weight * scale_factor
+
+        elif scale == "weight_svd":
+            weight_data = transpose(weight.data.to(torch.float32), self.fan_in_fan_out)
+            _, weight_S, _ = torch.svd_lowrank(weight_data, q=r, niter=4)
+            if S_B[0] > 0:
+                scale_factor = weight_S[0] / S_B[0]
+                lora_B_weight = lora_B_weight * scale_factor
+
+        elif scale == "gd_scale":
+            lora_A_weight = lora_A_weight / scaling_factor
+            lora_B_weight = lora_B_weight / scaling_factor
+
+        self.lora_A[adapter_name].weight.data = lora_A_weight.to(dtype)
+        self.lora_B[adapter_name].weight.data = lora_B_weight.to(dtype)
+
+        weight_data = transpose(weight.data.to(torch.float32), self.fan_in_fan_out)
+        weight_offset = scaling_factor * (lora_B_weight @ lora_A_weight)
+        weight_data = weight_data - weight_offset
+        weight_data = transpose(weight_data.to(dtype), self.fan_in_fan_out)
+        self.get_base_layer().weight.data = weight_data
 
     def _cache_store(self, key: str, value: Any) -> None:
         self._caches[key] = value
@@ -2034,6 +2133,9 @@ class ParamWrapper(nn.Module, LoraLayer):
         elif init_lora_weights == "orthogonal":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.orthogonal_init(adapter_name)
+        elif init_lora_weights == "lora_ga":
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.lora_ga_init(adapter_name)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
         # call this before init of the lora variants
