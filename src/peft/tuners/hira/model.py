@@ -200,12 +200,6 @@ class HiRAModel(BaseTuner):
         except AttributeError:
             pass
 
-        quant_methods = ["gptq", "aqlm", "awq"]
-        for quant_method in quant_methods:
-            quantization_config = get_quantization_config(self.model, method=quant_method)
-            if quantization_config is not None:
-                kwargs[f"{quant_method}_quantization_config"] = quantization_config
-
         if isinstance(target, HiRALayer):
             target.update_layer(
                 adapter_name,
