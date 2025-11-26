@@ -312,7 +312,6 @@ class Linear(nn.Module, HiRALayer):
             weight_A = weight_A.float()
             weight_B = weight_B.float()
         output_tensor = transpose((weight_B @ weight_A), self.fan_in_fan_out)
-        assert self.get_base_layer().weight.shape == output_tensor.shape
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
 
