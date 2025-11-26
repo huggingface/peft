@@ -138,75 +138,6 @@ class HiRALayer(BaseTunerLayer):
         value = self._caches.pop(key)
         return value
 
-    def _check_forward_args(self, x, *args, **kwargs):
-        """Check if the arguments are compatible with the configs and state of the model"""
-        adapter_names = kwargs.get("adapter_names", None)
-        if adapter_names is None:
-            return
-
-        if len(x) != len(adapter_names):
-            msg = (
-                "Length of `adapter_names` should be the same as the number of inputs, but got "
-                f"{len(adapter_names)} and {len(x)} respectively."
-            )
-            raise ValueError(msg)
-
-        if self.merged:
-            # It is unclear what would be the right thing to do if users pass adapter_names and there are merged
-            # adapters. Therefore, it is better to raise an error in this case.
-            msg = "Cannot pass `adapter_names` when there are merged adapters, please call `unmerge_adapter` first."
-            raise ValueError(msg)
-
-    def _mixed_batch_forward(
-        self,
-        x: torch.Tensor,
-        *args: Any,
-        adapter_names: list[str],
-        **kwargs: Any,
-    ) -> torch.Tensor:
-        """
-        Forward pass that allows *different* adapters to be used for different examples in the same batch
-        (``adapter_names`` must have length == len(x)).
-
-        The base projection is computed once; the HiRA update is then added separately for each sub-batch that shares
-        the same adapter.
-        """
-        # 0. run the expensive base layer once for the whole batch
-        result = self.base_layer(x, *args, **kwargs)
-        torch_result_dtype = result.dtype
-
-        # 1. collect indices for each adapter in the batch
-        adapter_to_indices: dict[str, list[int]] = {}
-        for idx, name in enumerate(adapter_names):
-            adapter_to_indices.setdefault(name, []).append(idx)
-
-        # 2. apply the HiRA update for each (adapter, sub-batch)
-        for active_adapter, idxs in adapter_to_indices.items():
-            if active_adapter == "__base__":
-                continue  # base only → nothing to add
-            if active_adapter not in self.hira_A:
-                continue  # adapter not initialised
-
-            # --- grab HiRA params & dropout ---
-            hira_A = self.hira_A[active_adapter]  # (r, in_dim)
-            hira_B = self.hira_B[active_adapter]  # (out_dim, r)
-            dropout = self.hira_dropout[active_adapter]
-
-            # --- slice out sub-batch for this adapter ---
-            sub_batch = x[idxs]
-            sub_batch = self._cast_input_dtype(sub_batch, hira_A.dtype)
-            sub_batch = dropout(sub_batch)
-
-            # --- compute element-wise modulated weight: W0 ⊙ (B @ A) ---
-            prod_AB = torch.mm(hira_A.T, hira_B.T)  # (in_dim, out_dim)
-            assert prod_AB.T.shape == self.get_base_layer().weight.shape
-            eff_weight = transpose(self.get_base_layer().weight, self.fan_in_fan_out) * prod_AB.T
-
-            hira_out = F.linear(sub_batch, eff_weight)
-            result[idxs] += hira_out.to(torch_result_dtype)
-
-        return result
-
 
 class Linear(nn.Module, HiRALayer):
     # HiRA implemented in a dense layer
@@ -322,15 +253,10 @@ class Linear(nn.Module, HiRALayer):
         return output_tensor
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
-        self._check_forward_args(x, *args, **kwargs)
-        adapter_names = kwargs.pop("adapter_names", None)
-
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
             result = self.base_layer(x, *args, **kwargs)
-        elif adapter_names is not None:
-            result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
@@ -513,16 +439,12 @@ class Embedding(nn.Module, HiRALayer):
         """
         HiRA forward for Embedding layer. Supports mixed adapters per batch or single adapter.
         """
-        self._check_forward_args(x, *args, **kwargs)
-        adapter_names = kwargs.pop("adapter_names", None)
 
         # Adapter disabled or after merge: use base embedding
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
             return self.base_layer(x, *args, **kwargs)
-        if adapter_names is not None:
-            return self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
         if self.merged:
             return self.base_layer(x, *args, **kwargs)
 
@@ -733,15 +655,10 @@ class _ConvNd(nn.Module, HiRALayer):
         return output_tensor
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        self._check_forward_args(x, *args, **kwargs)
-        adapter_names = kwargs.pop("adapter_names", None)
-
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
             result = self.base_layer(x, *args, **kwargs)
-        elif adapter_names is not None:
-            result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
 
