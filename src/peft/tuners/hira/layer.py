@@ -131,13 +131,6 @@ class HiRALayer(BaseTunerLayer):
             nn.init.zeros_(self.hira_embedding_A[adapter_name])
             nn.init.normal_(self.hira_embedding_B[adapter_name])
 
-    def _cache_store(self, key: str, value: Any) -> None:
-        self._caches[key] = value
-
-    def _cache_pop(self, key: str) -> Any:
-        value = self._caches.pop(key)
-        return value
-
 
 class Linear(nn.Module, HiRALayer):
     # HiRA implemented in a dense layer
