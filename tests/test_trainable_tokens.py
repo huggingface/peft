@@ -1084,12 +1084,23 @@ class TestTrainableTokens:
         with pytest.raises(ValueError, match=msg):
             peft_model = get_peft_model(model_weight_tied, peft_config)
 
-    def test_ensure_weight_tying_applied_with_same_indices(self, model_weight_tied):
+    @pytest.mark.parametrize(
+        "trainable_token_indices, ensure_weight_tying",
+        [
+            ([1, 2], True),
+            ([1, 2], False),
+            ({"lm_head": [1, 2], "embed_tokens": [1, 2]}, True),
+            ({"lm_head": [1, 2], "embed_tokens": [1, 2]}, False),
+        ],
+    )
+    def test_ensure_weight_tying_applied_with_same_indices(
+        self, model_weight_tied, trainable_token_indices, ensure_weight_tying
+    ):
         """Should apply weight tying when ensure_weight_tying=True with same indices"""
         peft_config = LoraConfig(
             target_modules="all-linear",
-            trainable_token_indices={"lm_head": [1, 2], "embed_tokens": [1, 2]},
-            ensure_weight_tying=True,
+            trainable_token_indices=trainable_token_indices,
+            ensure_weight_tying=ensure_weight_tying,
         )
         peft_model = get_peft_model(model_weight_tied, peft_config)
 
