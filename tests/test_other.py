@@ -627,8 +627,8 @@ class TestGetModuleNamesTiedWithEmbedding:
 class TestModulesToSaveInferenceMode:
     """Test that modules_to_save respects inference_mode when set_adapter is called.
 
-    This test addresses issue #2928 where modules_to_save had requires_grad=True
-    even when inference_mode=True was passed to set_adapter.
+    This test addresses issue #2928 where modules_to_save had requires_grad=True even when inference_mode=True was
+    passed to set_adapter.
     """
 
     def test_modules_to_save_inference_mode_requires_grad_false(self):
