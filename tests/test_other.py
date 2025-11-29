@@ -622,3 +622,114 @@ class TestGetModuleNamesTiedWithEmbedding:
             modules = peft_model._get_module_names_tied_with_embedding()
 
             assert expected == modules
+
+
+class TestModulesToSaveInferenceMode:
+    """Test that modules_to_save respects inference_mode when set_adapter is called.
+
+    This test addresses issue #2928 where modules_to_save had requires_grad=True
+    even when inference_mode=True was passed to set_adapter.
+    """
+
+    def test_modules_to_save_inference_mode_requires_grad_false(self):
+        """Test that modules_to_save have requires_grad=False when inference_mode=True."""
+        from transformers import AutoModelForSequenceClassification
+
+        model_id = "hf-internal-testing/tiny-random-BertModel"
+        model = AutoModelForSequenceClassification.from_pretrained(model_id)
+
+        # Create LoRA config with modules_to_save (classification head)
+        config = LoraConfig(
+            r=8,
+            lora_alpha=16,
+            target_modules=["query", "value"],
+            modules_to_save=["classifier"],
+            task_type="SEQ_CLS",
+        )
+
+        peft_model = get_peft_model(model, config)
+
+        # Set model to eval mode and set adapter with inference_mode=True
+        peft_model.eval()
+        peft_model.set_adapter("default", inference_mode=True)
+
+        # Check that modules_to_save parameters have requires_grad=False
+        for name, param in peft_model.named_parameters():
+            if "modules_to_save" in name and "classifier" in name:
+                assert not param.requires_grad, (
+                    f"Parameter {name} should have requires_grad=False in inference mode, "
+                    f"but it has requires_grad={param.requires_grad}"
+                )
+
+    def test_modules_to_save_training_mode_requires_grad_true(self):
+        """Test that modules_to_save have requires_grad=True when inference_mode=False (training mode)."""
+        from transformers import AutoModelForSequenceClassification
+
+        model_id = "hf-internal-testing/tiny-random-BertModel"
+        model = AutoModelForSequenceClassification.from_pretrained(model_id)
+
+        # Create LoRA config with modules_to_save (classification head)
+        config = LoraConfig(
+            r=8,
+            lora_alpha=16,
+            target_modules=["query", "value"],
+            modules_to_save=["classifier"],
+            task_type="SEQ_CLS",
+        )
+
+        peft_model = get_peft_model(model, config)
+
+        # Set model to training mode and set adapter with inference_mode=False
+        peft_model.train()
+        peft_model.set_adapter("default", inference_mode=False)
+
+        # Check that modules_to_save parameters have requires_grad=True
+        modules_to_save_params = [
+            (name, param)
+            for name, param in peft_model.named_parameters()
+            if "modules_to_save" in name and "classifier" in name
+        ]
+
+        assert len(modules_to_save_params) > 0, "No modules_to_save parameters found"
+
+        for name, param in modules_to_save_params:
+            assert param.requires_grad, (
+                f"Parameter {name} should have requires_grad=True in training mode, "
+                f"but it has requires_grad={param.requires_grad}"
+            )
+
+    def test_modules_to_save_inference_mode_with_torch_inference_mode(self):
+        """Test that modules_to_save work correctly with torch.inference_mode() context manager."""
+        from transformers import AutoModelForSequenceClassification
+
+        model_id = "hf-internal-testing/tiny-random-BertModel"
+        model = AutoModelForSequenceClassification.from_pretrained(model_id)
+
+        # Create LoRA config with modules_to_save (classification head)
+        config = LoraConfig(
+            r=8,
+            lora_alpha=16,
+            target_modules=["query", "value"],
+            modules_to_save=["classifier"],
+            task_type="SEQ_CLS",
+        )
+
+        peft_model = get_peft_model(model, config)
+        peft_model.eval()
+
+        # Test with torch.inference_mode() context manager
+        with torch.inference_mode():
+            peft_model.set_adapter("default", inference_mode=True)
+
+            # Check that modules_to_save parameters have requires_grad=False
+            for name, param in peft_model.named_parameters():
+                if "modules_to_save" in name and "classifier" in name:
+                    assert not param.requires_grad, (
+                        f"Parameter {name} should have requires_grad=False in inference mode, "
+                        f"but it has requires_grad={param.requires_grad}"
+                    )
+
+            # Verify we can still do forward pass
+            inputs = torch.randint(0, 1000, (1, 10))
+            output = peft_model(inputs)
+            assert output is not None
