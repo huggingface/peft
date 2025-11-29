@@ -1066,10 +1066,12 @@ def _set_adapter(model, adapter_name: str | list[str], inference_mode: bool = Fa
             # if the adapter is found in this module, set it as the active adapter, else disable the adapters of this
             # module
             if adapter_name_to_set in module._adapters:
-                module.enable_adapters(True)
+                if not inference_mode:
+                    module.enable_adapters(True)
                 module.set_adapter(adapter_name_to_set, inference_mode=inference_mode)
             else:
-                module.enable_adapters(False)
+                if not inference_mode:
+                    module.enable_adapters(False)
                 module.set_adapter([], inference_mode=inference_mode)
 
 
