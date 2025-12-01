@@ -6,30 +6,27 @@ LoRA-GA improves upon standard LoRA by using gradient information during initial
 achieving 2-4x faster convergence while maintaining the same final performance.
 
 This example shows:
-1. How to estimate gradients for LoRA-GA initialization
-2. How to use the LoraGAContext for proper initialization
-3. How to save initial and final adapter states for delta computation
-4. Training with standard Hugging Face Trainer
+1. How to define a train_step callback for gradient estimation
+2. How to use preprocess_loraga for LoRA-GA initialization
+3. Training with standard Hugging Face Trainer
+4. Saving the trained adapter
 """
 
 import argparse
 import os
 
 import torch
-from accelerate import Accelerator
 from datasets import load_dataset
-from torch.utils.data import DataLoader
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     DataCollatorForLanguageModeling,
     Trainer,
     TrainingArguments,
-    default_data_collator,
 )
 
-from peft import LoraGAConfig, get_peft_model
-from peft.utils import LoraGAContext, estimate_gradient, save_loraga_model_final, save_loraga_model_init
+from peft import LoraConfig, get_peft_model
+from peft.tuners.lora import LoraGAConfig, preprocess_loraga
 
 
 def parse_args():
@@ -73,7 +70,6 @@ def parse_args():
 
     # Other arguments
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--device", type=str, default="auto", help="Device to use (auto/cuda/cpu)")
 
     return parser.parse_args()
 
@@ -113,13 +109,6 @@ def main():
     # Set random seed
     torch.manual_seed(args.seed)
 
-    # Setup device
-    if args.device == "auto":
-        device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
-    else:
-        device = torch.device(args.device)
-    print(f"Using device: {device}")
-
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -140,16 +129,21 @@ def main():
 
     # Create LoRA-GA configuration
     print("\nCreating LoRA-GA configuration...")
-    peft_config = LoraGAConfig(
+    lora_ga_config = LoraGAConfig(
+        direction=args.direction,
+        scale=args.scale,
+        stable_gamma=args.stable_gamma,
+    )
+
+    lora_config = LoraConfig(
         r=args.r,
         lora_alpha=args.lora_alpha,
         lora_dropout=args.lora_dropout,
         target_modules=["c_attn"],  # For GPT-2; adjust based on your model
-        direction=args.direction,
-        scale=args.scale,
-        stable_gamma=args.stable_gamma,
         bias="none",
         task_type="CAUSAL_LM",
+        init_lora_weights="lora_ga",
+        lora_ga_config=lora_ga_config,
     )
     print(f"  Direction: {args.direction}")
     print(f"  Scale: {args.scale}")
@@ -164,6 +158,11 @@ def main():
 
     # Prepare gradient estimation dataloader
     train_dataset = tokenized_datasets["train"]
+
+    # Create a simple DataLoader for gradient estimation
+    from torch.utils.data import DataLoader
+    from transformers import default_data_collator
+
     grad_dataloader = DataLoader(
         train_dataset,
         batch_size=args.grad_estimate_batch_size,
@@ -171,21 +170,39 @@ def main():
         collate_fn=default_data_collator,
     )
 
-    # Initialize Accelerator for gradient estimation
-    accelerator = Accelerator()
-    model_for_grad = accelerator.prepare(model)
-    grad_dataloader = accelerator.prepare(grad_dataloader)
+    # Move model to GPU if available
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
+    model.train()
 
-    # Estimate gradients
-    named_grad = estimate_gradient(
-        model_for_grad,
-        grad_dataloader,
-        accelerator,
-        iters=args.grad_estimate_iters,
-        quant_flag=False,
-    )
+    # Define train_step callback
+    grad_iter = iter(grad_dataloader)
+    def train_step():
+        """Run forward and backward passes for gradient estimation."""
+        for _ in range(args.grad_estimate_iters):
+            try:
+                batch = next(grad_iter)
+            except StopIteration:
+                # Reset iterator if we run out of data
+                nonlocal grad_iter
+                grad_iter = iter(grad_dataloader)
+                batch = next(grad_iter)
 
-    print(f"✓ Gradient estimation complete! Estimated gradients for {len(named_grad)} modules.")
+            # Move batch to device
+            batch = {k: v.to(device) for k, v in batch.items()}
+
+            # Forward pass
+            model.zero_grad()
+            outputs = model(**batch)
+            loss = outputs.loss
+
+            # Backward pass
+            loss.backward()
+
+    # Preprocess with LoRA-GA
+    print("Running gradient estimation...")
+    preprocess_loraga(model, lora_config, train_step)
+    print(f"✓ Gradient estimation complete!")
 
     # ===== MODEL INITIALIZATION PHASE =====
     print("\n" + "="*70)
@@ -194,15 +211,10 @@ def main():
     print("Initializing LoRA adapters with gradient information...")
 
     # Create PEFT model with LoRA-GA initialization
-    with LoraGAContext(model, named_grad):
-        peft_model = get_peft_model(model, peft_config)
+    peft_model = get_peft_model(model, lora_config)
 
     # Print trainable parameters
     peft_model.print_trainable_parameters()
-
-    # Save initial adapter state (required for delta computation)
-    print("\nSaving initial adapter state...")
-    save_loraga_model_init(peft_model, args.output_dir)
 
     # ===== TRAINING PHASE =====
     print("\n" + "="*70)
@@ -248,15 +260,14 @@ def main():
     print("\n" + "="*70)
     print("SAVING PHASE")
     print("="*70)
-    print("Computing adapter delta (final - initial) and saving...")
+    print("Saving trained adapter...")
 
-    # Save final adapter state with delta computation
-    save_loraga_model_final(peft_model, args.output_dir)
+    # Save the trained adapter
+    peft_model.save_pretrained(args.output_dir)
 
     print(f"\n✓ Training complete! Model saved to: {args.output_dir}")
-    print("\nLoRA-GA specific files saved:")
-    print(f"  - adapter_model_init.safetensors: Initial adapter state")
-    print(f"  - adapter_model.safetensors: Adapter delta (final - initial)")
+    print("\nSaved files:")
+    print(f"  - adapter_model.safetensors: Trained adapter weights")
     print(f"  - adapter_config.json: Configuration file")
 
     print("\n" + "="*70)
@@ -264,6 +275,7 @@ def main():
     print("="*70)
     print("\nYou can now use the trained adapter with:")
     print(f"  from peft import PeftModel")
+    print(f"  from transformers import AutoModelForCausalLM")
     print(f"  model = AutoModelForCausalLM.from_pretrained('{args.base_model}')")
     print(f"  model = PeftModel.from_pretrained(model, '{args.output_dir}')")
 
