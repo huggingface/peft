@@ -133,4 +133,5 @@ __all__ = [
     "create_arrow_model",
     "get_eva_state_dict",
     "initialize_lora_eva_weights",
+    "preprocess_loraga",
 ]
