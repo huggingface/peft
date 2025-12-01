@@ -78,7 +78,7 @@ from peft import (
     replace_lora_weights_loftq,
     set_peft_model_state_dict,
 )
-from peft.import_utils import is_diffusers_available, is_xpu_available
+from peft.import_utils import is_diffusers_available, is_xpu_available, is_gptqmodel_available
 from peft.tuners import boft
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
@@ -91,8 +91,7 @@ from .testing_utils import (
     device_count,
     load_dataset_english_quotes,
     require_aqlm,
-    require_auto_awq,
-    require_auto_gptq,
+    require_gptqmodel,
     require_bitsandbytes,
     require_deterministic_for_xpu,
     require_eetq,
@@ -106,6 +105,10 @@ from .testing_utils import (
     require_torchao,
     torch_device,
 )
+
+if is_gptqmodel_available():
+    from gptqmodel import BACKEND
+
 
 
 device, _, _ = get_backend()
@@ -2041,7 +2044,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
 
 @require_torch_gpu
-@require_auto_gptq
+@require_gptqmodel
 @require_optimum
 class PeftGPTQGPUTests(unittest.TestCase):
     r"""
@@ -2052,8 +2055,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
         from transformers import GPTQConfig
 
         self.causal_lm_model_id = "marcsun13/opt-350m-gptq-4bit"
-        # TODO : check if it works for Exllamav2 kernels
-        self.quantization_config = GPTQConfig(bits=4, use_exllama=False)
+        self.quantization_config = GPTQConfig(bits=4, backend=BACKEND.AUTO_TRAINABLE)
         self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
 
     def tearDown(self):
@@ -3725,7 +3727,7 @@ class PeftHqqGPUTests(unittest.TestCase):
 
 
 @require_non_cpu
-@require_auto_awq
+@require_gptqmodel
 class PeftAwqGPUTests(unittest.TestCase):
     r"""
     Awq + peft tests
@@ -3813,13 +3815,6 @@ class PeftAwqGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
-    # TODO remove marker if/once issue is resolved, most likely requiring a fix in AutoAWQ:
-    # https://github.com/casper-hansen/AutoAWQ/issues/754
-    @pytest.mark.xfail(
-        condition=is_torch_version(">=", "2.7.0"),
-        reason="Multi-GPU test currently not working with AutoAWQ and PyTorch 2.7+",
-        strict=True,
-    )
     @require_torch_multi_accelerator
     def test_causal_lm_training_multi_accelerator(self):
         r"""
