@@ -471,32 +471,34 @@ class LoraLayer(BaseTunerLayer):
 
         Uses SVD on the gradient matrix to initialize adapters in a way that
         aligns with the direction of full fine-tuning.
+
+        Expects that `preprocess_loraga` has been called before this, which attaches
+        the `loraga_grad` attribute to the base layer.
+
+        If gradients are not available (e.g., when loading from a saved adapter), falls back
+        to gaussian initialization. The weights will be overwritten by the state_dict anyway.
         """
-        # Check for gradient from kwargs (if provided directly) or from temporary attributes on base layer
-        grad = None
-        peft_config = None
+        base_layer = self.get_base_layer()
 
-        if "grad" in self.kwargs:
-            grad = self.kwargs["grad"]
-            peft_config = self.kwargs.get("peft_config")
-        else:
-            # Check for temporary attributes attached by LoraGAModel
-            base_layer = self.get_base_layer()
-            if hasattr(base_layer, '_loraga_temp_grad'):
-                grad = base_layer._loraga_temp_grad
-            if hasattr(base_layer, '_loraga_temp_config'):
-                peft_config = base_layer._loraga_temp_config
-
-        if grad is None:
-            warnings.warn("No gradient provided for LoRA-GA initialization, skipping")
+        # Check for gradient attached by preprocess_loraga
+        if not hasattr(base_layer, 'loraga_grad'):
+            # When loading from saved adapter, gradients won't be available
+            # Fall back to gaussian initialization (weights will be overwritten by state_dict)
+            self.reset_lora_parameters(adapter_name, init_lora_weights=True)
             return
 
-        if peft_config is None:
-            raise ValueError("peft_config must be provided for LoRA-GA initialization")
+        grad = base_layer.loraga_grad
 
-        direction = peft_config.direction
-        scale = peft_config.scale
-        stable_gamma = peft_config.stable_gamma
+        # Check for lora_ga_config attached by preprocess_loraga
+        if not hasattr(base_layer, 'lora_ga_config'):
+            # Fall back to gaussian initialization
+            self.reset_lora_parameters(adapter_name, init_lora_weights=True)
+            return
+
+        lora_ga_config = base_layer.lora_ga_config
+        direction = lora_ga_config.direction
+        scale = lora_ga_config.scale
+        stable_gamma = lora_ga_config.stable_gamma
         dtype = self.get_base_layer().weight.dtype
 
         grad = grad.to(torch.float32)
@@ -505,34 +507,43 @@ class LoraLayer(BaseTunerLayer):
         grad = transpose(grad, self.fan_in_fan_out)
 
         r = self.r[adapter_name]
-        U, S, Vh = torch.svd_lowrank(grad, q=min(4 * r, min(grad.shape)), niter=4)
+
+        # torch.svd_lowrank returns (U, S, V) where grad ≈ U @ diag(S) @ V.T
+        # So V is shape (in_features, k) and we need V.T which is (k, in_features) for lora_A
+        U, S, V = torch.svd_lowrank(grad, q=min(4 * r, min(grad.shape)), niter=4)
+
+        # V is (in_features, k), we need Vh = V.T which is (k, in_features)
+        Vh = V.t()
 
         U = U[:, :2*r]
         S = S[:2*r]
         Vh = Vh[:2*r, :]
 
         if direction == "ArBr":
-            lora_A_weight = Vh[1:2*r:2, :]
-            lora_B_weight = U[:, 0:2*r:2]
+            # Alternating: A takes rows at odd indices [1,3,5,7], B takes columns at even indices [0,2,4,6]
+            lora_A_weight = Vh[1:2*r:2, :]     # Shape: (r, in_features)
+            lora_B_weight = U[:, 0:2*r:2]      # Shape: (out_features, r)
             S_B = S[0:2*r:2]
             lora_B_weight = lora_B_weight @ torch.diag(S_B)
 
         elif direction == "A2rBr":
-            lora_A_weight = Vh[r:2*r, :]
-            lora_B_weight = U[:, :r]
+            # A takes second half rows [r:2r], B takes first half columns [:r]
+            lora_A_weight = Vh[r:2*r, :]  # Shape: (r, in_features)
+            lora_B_weight = U[:, :r]      # Shape: (out_features, r)
             S_B = S[:r]
             lora_B_weight = lora_B_weight @ torch.diag(S_B)
 
         elif direction == "ArB2r":
-            lora_A_weight = Vh[:r, :]
-            lora_B_weight = U[:, r:2*r]
+            # A takes first half rows [:r], B takes second half columns [r:2r]
+            lora_A_weight = Vh[:r, :]     # Shape: (r, in_features)
+            lora_B_weight = U[:, r:2*r]   # Shape: (out_features, r)
             S_B = S[r:2*r]
             lora_B_weight = lora_B_weight @ torch.diag(S_B)
 
         elif direction == "random":
             indices = torch.randperm(2 * r)[:r]
-            lora_A_weight = Vh[indices, :]
-            lora_B_weight = U[:, indices] @ torch.diag(S[indices])
+            lora_A_weight = Vh[indices, :]  # Shape: (r, in_features)
+            lora_B_weight = U[:, indices] @ torch.diag(S[indices])  # Shape: (out_features, r)
 
         scaling_factor = self.scaling[adapter_name]
         out_features = weight.shape[0]
@@ -552,14 +563,21 @@ class LoraLayer(BaseTunerLayer):
             lora_A_weight = lora_A_weight / scaling_factor
             lora_B_weight = lora_B_weight / scaling_factor
 
-        self.lora_A[adapter_name].weight.data = lora_A_weight.to(dtype)
-        self.lora_B[adapter_name].weight.data = lora_B_weight.to(dtype)
+        # Assign LoRA weights
+        # lora_A should be (r, in_features), lora_B should be (out_features, r)
+        self.lora_A[adapter_name].weight.data = lora_A_weight.contiguous().to(dtype)
+        self.lora_B[adapter_name].weight.data = lora_B_weight.contiguous().to(dtype)
 
+        # Modify base weights: W_new = W_old - scaling * (B @ A)
         weight_data = transpose(weight.data.to(torch.float32), self.fan_in_fan_out)
         weight_offset = scaling_factor * (lora_B_weight @ lora_A_weight)
         weight_data = weight_data - weight_offset
         weight_data = transpose(weight_data.to(dtype), self.fan_in_fan_out)
         self.get_base_layer().weight.data = weight_data
+
+        # Remove redundant fields
+        del base_layer.loraga_grad
+        del base_layer.lora_ga_config
 
     def _cache_store(self, key: str, value: Any) -> None:
         self._caches[key] = value
