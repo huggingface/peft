@@ -20,7 +20,8 @@ from .config import ArrowConfig, EvaConfig, LoftQConfig, LoraConfig, LoraGAConfi
 from .eva import get_eva_state_dict, initialize_lora_eva_weights
 from .gptq import GPTQLoraLinear
 from .layer import Conv2d, Conv3d, Embedding, Linear, LoraLayer, ParamWrapper
-from .model import LoraGAModel, LoraModel
+from .loraga import preprocess_loraga
+from .model import LoraModel
 
 
 __all__ = [
@@ -34,7 +35,6 @@ __all__ = [
     "LoftQConfig",
     "LoraConfig",
     "LoraGAConfig",
-    "LoraGAModel",
     "LoraLayer",
     "LoraModel",
     "LoraRuntimeConfig",
@@ -42,10 +42,10 @@ __all__ = [
     "create_arrow_model",
     "get_eva_state_dict",
     "initialize_lora_eva_weights",
+    "preprocess_loraga",
 ]
 
 register_peft_method(name="lora", config_cls=LoraConfig, model_cls=LoraModel, is_mixed_compatible=True)
-register_peft_method(name="loraga", config_cls=LoraGAConfig, model_cls=LoraGAModel, prefix="lora_", is_mixed_compatible=True)
 
 
 def __getattr__(name):
