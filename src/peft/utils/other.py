@@ -1257,7 +1257,9 @@ def get_gptqmodel_quant_linear(gptq_quantization_config, device_map=None):
     if not is_gptqmodel_available():
         return None
 
-    from gptqmodel.utils.importer import hf_select_quant_linear
+    from gptqmodel.utils.importer import hf_select_quant_linear_v2
+    from gptqmodel.quantization import METHOD
+    from gptqmodel import BACKEND
 
     desc_act = gptq_quantization_config.desc_act
     group_size = gptq_quantization_config.group_size
@@ -1270,15 +1272,17 @@ def get_gptqmodel_quant_linear(gptq_quantization_config, device_map=None):
     sym = gptq_quantization_config.sym
     meta = gptq_quantization_config.meta if hasattr(gptq_quantization_config, "meta") else None
 
-    QuantLinear = hf_select_quant_linear(
+    QuantLinear = hf_select_quant_linear_v2(
         bits=bits,
         group_size=group_size,
         desc_act=desc_act,
         sym=sym,
         device_map=device_map,
-        checkpoint_format=checkpoint_format,
+        format=checkpoint_format,
+        quant_method=METHOD.GPTQ,
         meta=meta,
-        backend="auto_trainable",
+        backend=BACKEND.AUTO_TRAINABLE,
+        pack=False,
     )
 
     return QuantLinear
