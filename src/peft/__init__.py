@@ -118,6 +118,7 @@ from .tuners import (
     create_arrow_model,
     get_eva_state_dict,
     initialize_lora_eva_weights,
+    preprocess_loraga,
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
@@ -244,6 +245,7 @@ __all__ = [
     "inject_adapter_in_model",
     "load_peft_weights",
     "prepare_model_for_kbit_training",
+    "preprocess_loraga",
     "replace_lora_weights_loftq",
     "set_peft_model_state_dict",
     "shift_tokens_right",
