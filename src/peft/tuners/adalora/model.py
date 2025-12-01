@@ -24,7 +24,6 @@ from peft.utils import (
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
     _freeze_adapter,
     _get_submodules,
-    get_auto_gptq_quant_linear,
     get_gptqmodel_quant_linear,
     get_quantization_config,
 )
@@ -164,10 +163,7 @@ class AdaLoraModel(LoraModel):
 
         gptq_quantization_config = kwargs.get("gptq_quantization_config", None)
 
-        if is_gptqmodel_available():
-            QuantLinear = get_gptqmodel_quant_linear(gptq_quantization_config, device_map=device_map)
-        else:
-            QuantLinear = get_auto_gptq_quant_linear(gptq_quantization_config)
+        QuantLinear = get_gptqmodel_quant_linear(gptq_quantization_config, device_map=device_map)
 
         loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
         loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)

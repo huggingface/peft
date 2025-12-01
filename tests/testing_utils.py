@@ -32,8 +32,6 @@ from peft import (
 )
 from peft.import_utils import (
     is_aqlm_available,
-    is_auto_awq_available,
-    is_auto_gptq_available,
     is_eetq_available,
     is_gptqmodel_available,
     is_hqq_available,

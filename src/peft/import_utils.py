@@ -36,20 +36,6 @@ def is_bnb_4bit_available() -> bool:
 
 
 @lru_cache
-def is_auto_gptq_available():
-    if importlib.util.find_spec("auto_gptq") is not None:
-        AUTOGPTQ_MINIMUM_VERSION = packaging.version.parse("0.5.0")
-        version_autogptq = packaging.version.parse(importlib_metadata.version("auto_gptq"))
-        if AUTOGPTQ_MINIMUM_VERSION <= version_autogptq:
-            return True
-        else:
-            raise ImportError(
-                f"Found an incompatible version of auto-gptq. Found version {version_autogptq}, "
-                f"but only versions above {AUTOGPTQ_MINIMUM_VERSION} are supported"
-            )
-
-
-@lru_cache
 def is_gptqmodel_available():
     if importlib.util.find_spec("gptqmodel") is not None:
         GPTQMODEL_MINIMUM_VERSION = packaging.version.parse("2.0.0")
