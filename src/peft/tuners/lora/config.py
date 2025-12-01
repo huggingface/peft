@@ -559,6 +559,15 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    lora_ga_config: Optional[LoraGAConfig] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The configuration of LoRA-GA. If this is passed, then LoRA-GA will be used to initialize the adapter layers. "
+                "Also set `init_lora_weights='lora_ga'` in this case."
+            )
+        },
+    )
     use_dora: bool = field(
         default=False,
         metadata={
@@ -799,21 +808,17 @@ class LoraConfig(PeftConfig):
 
 
 @dataclass
-class LoraGAConfig(LoraConfig):
+class LoraGAConfig:
     """
-    Configuration for LoRA-GA (Low-Rank Adaptation with Gradient Approximation).
+    This is the sub-configuration class to store the configuration for LoRA-GA initialization.
 
-    LoRA-GA is a technique that improves upon standard LoRA by using gradient information during initialization.
-    This leads to faster convergence (2-4x speedup) by aligning the initial adapter weights with the direction
+    LoRA-GA (Low-Rank Adaptation with Gradient Approximation) uses gradient information during initialization
+    to achieve faster convergence (2-4x speedup) by aligning the initial adapter weights with the direction
     of full fine-tuning gradients.
 
     Reference: https://arxiv.org/abs/2407.05000
 
     Args:
-        bsz (`int`):
-            Batch size for gradient estimation. Default: 2
-        iters (`int`):
-            Number of iterations (batches) to use for gradient estimation. Default: 64
         direction (`Literal["ArBr", "A2rBr", "ArB2r", "random"]`):
             Strategy for distributing gradient SVD components to lora_A and lora_B matrices.
             - "ArBr": Alternating indices (A takes odd, B takes even)
@@ -821,10 +826,6 @@ class LoraGAConfig(LoraConfig):
             - "ArB2r": A takes indices [:r], B takes indices [r:2r] (recommended)
             - "random": Random selection of indices
             Default: "ArB2r"
-        max_length (`int`):
-            Maximum sequence length for gradient estimation. Default: 1024
-        dtype (`str`):
-            Data type for gradient computation. Default: "fp32"
         scale (`Literal["stable", "weight_svd", "gd_scale", "unit"]`):
             Scaling strategy for adapter initialization.
             - "stable": Stable scaling with gamma parameter
@@ -834,34 +835,21 @@ class LoraGAConfig(LoraConfig):
             Default: "stable"
         stable_gamma (`int`):
             Gamma parameter for stable scaling method. Default: 16
+        cache_file (`Optional[str]`):
+            File to store the gradient cache. If specified, gradients will be saved to this file
+            and can be reused for multiple training runs. Default: None
     """
 
-    bsz: int = field(default=2, metadata={"help": "Batch size for gradient estimation"})
-    iters: int = field(default=64, metadata={"help": "Number of iterations for gradient estimation"})
     direction: Literal["ArBr", "A2rBr", "ArB2r", "random"] = field(
         default="ArB2r",
         metadata={"help": "Component distribution strategy from gradient SVD"}
     )
-    max_length: int = field(default=1024, metadata={"help": "Maximum sequence length"})
-    dtype: str = field(default="fp32", metadata={"help": "Data type for gradient computation"})
     scale: Literal["stable", "weight_svd", "gd_scale", "unit"] = field(
         default="stable",
         metadata={"help": "Scaling strategy for initialization"}
     )
     stable_gamma: int = field(default=16, metadata={"help": "Gamma parameter for stable scaling"})
-
-    def __post_init__(self):
-        super().__post_init__()
-        self.peft_type = PeftType.LORAGA
-        self.init_lora_weights = "lora_ga"
-
-        if self.direction not in ["ArBr", "A2rBr", "ArB2r", "random"]:
-            raise ValueError(
-                f"direction must be one of 'ArBr', 'A2rBr', 'ArB2r', 'random', got {self.direction}"
-            )
-        if self.scale not in ["stable", "weight_svd", "gd_scale", "unit"]:
-            raise ValueError(
-                f"scale must be one of 'stable', 'weight_svd', 'gd_scale', 'unit', got {self.scale}"
-            )
-        if self.stable_gamma <= 0:
-            raise ValueError(f"stable_gamma must be positive, got {self.stable_gamma}")
+    cache_file: Optional[str] = field(
+        default=None,
+        metadata={"help": "File to store gradient cache for reuse"}
+    )
