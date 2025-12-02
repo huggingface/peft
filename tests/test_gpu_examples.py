@@ -3731,13 +3731,6 @@ class PeftHqqGPUTests(unittest.TestCase):
 class PeftAwqGPUTests(unittest.TestCase):
     r"""
     Awq + peft tests
-
-    Note that AWQ is no longer being maintained:
-
-    https://github.com/casper-hansen/AutoAWQ/blob/88e4c76b20755db275574e6a03c83c84ba3bece5/README.md
-
-    It is therefore expected that more tests will start failing in the future. If this happens, remove AWQ support from
-    PEFT.
     """
 
     def setUp(self):

@@ -156,6 +156,7 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     This function covers a broad range of layers, some of which the caller might not support. Therefore, just because
     this function returns a valid result does not imply that the layer type is supported.
     """
+    print("_get_in_out_features",module)
     if isinstance(module, nn.Linear):
         torch_supports_dtensor = version.parse(torch.__version__) >= version.parse("2.5.0")
         if torch_supports_dtensor and isinstance(module.weight, torch.distributed.tensor.DTensor):
@@ -188,7 +189,7 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     elif hasattr(module, "codebooks") and module.__class__.__name__ == "QuantizedLinear":
         # AQLM QuantLinear
         in_features, out_features = module.in_features, module.out_features
-    elif hasattr(module, "w_bit") and module.__class__.__name__ == "WQLinear_GEMM":
+    elif hasattr(module, "bits") and module.__class__.__name__ == "AwqGEMMQuantLinear":
         # Awq layers
         in_features, out_features = module.in_features, module.out_features
     elif module.__class__.__name__ == "EetqLinear":
