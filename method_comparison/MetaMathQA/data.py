@@ -16,8 +16,8 @@
 All utilities related to data handling.
 """
 
+from collections.abc import Callable
 from functools import partial
-from typing import Callable
 
 import datasets
 import numpy as np

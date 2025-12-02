@@ -24,12 +24,12 @@ import random
 import sys
 import textwrap
 import time
+from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from functools import partial
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Literal, Optional
 
 import torch
-from data import get_train_valid_test_datasets
 from torch import nn
 from torch.amp import GradScaler, autocast
 from tqdm import tqdm
@@ -53,6 +53,7 @@ from utils import (
     validate_experiment_path,
 )
 
+from data import get_train_valid_test_datasets
 from peft import AdaLoraConfig, PeftConfig
 from peft.utils import CONFIG_NAME, infer_device
 
@@ -245,9 +246,7 @@ def train(
                 dur_train = sum(durations[-eval_steps:])
                 tokens_per_sec = token_sum / dur_train
 
-                # Note: If we call model.eval() before, and model.train() after this, it would trigger re-compilation if
-                # the model is compiled. Setting the model to eval is not really necessary for validation metrics, so
-                # it's fine to skip this.
+                model.eval()
                 predictions, responses = evaluate(
                     model=model,
                     tokenizer=tokenizer,
@@ -255,6 +254,7 @@ def train(
                     batch_size=batch_size_eval,
                     generate_kwargs={**generation_kwargs},
                 )
+                model.train()
 
                 example = random.choice(predictions)
                 example = textwrap.shorten(example, width=750)
@@ -397,28 +397,23 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
     print_verbose(model)
 
     # train model
-    # context is only relevant if compile=True, as it errors on re-compile & graph breaks
-    with (
-        torch._dynamo.config.patch(error_on_recompile=True, inline_inbuilt_nn_modules=False),
-        torch._inductor.config.patch("triton.cudagraph_support_input_mutation", False),
-    ):
-        train_result = train(
-            model=model,
-            max_steps=train_config.max_steps,
-            batch_size=train_config.batch_size,
-            batch_size_eval=train_config.batch_size_eval,
-            tokenizer=tokenizer,
-            accelerator_memory_init=accelerator_memory_init,
-            eval_steps=train_config.eval_steps,
-            generation_kwargs=train_config.generation_kwargs,
-            grad_norm_clip=train_config.grad_norm_clip,
-            optimizer_type=train_config.optimizer_type,
-            optimizer_kwargs=train_config.optimizer_kwargs,
-            query_template=train_config.query_template,
-            lr_scheduler_arg=train_config.lr_scheduler,
-            use_amp=train_config.use_amp,
-            is_adalora=isinstance(peft_config, AdaLoraConfig),
-        )
+    train_result = train(
+        model=model,
+        max_steps=train_config.max_steps,
+        batch_size=train_config.batch_size,
+        batch_size_eval=train_config.batch_size_eval,
+        tokenizer=tokenizer,
+        accelerator_memory_init=accelerator_memory_init,
+        eval_steps=train_config.eval_steps,
+        generation_kwargs=train_config.generation_kwargs,
+        grad_norm_clip=train_config.grad_norm_clip,
+        optimizer_type=train_config.optimizer_type,
+        optimizer_kwargs=train_config.optimizer_kwargs,
+        query_template=train_config.query_template,
+        lr_scheduler_arg=train_config.lr_scheduler,
+        use_amp=train_config.use_amp,
+        is_adalora=isinstance(peft_config, AdaLoraConfig),
+    )
 
     if train_result.status == TrainStatus.FAILED:
         print_verbose("Training failed, not logging results")

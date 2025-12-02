@@ -23,9 +23,10 @@ import platform
 import subprocess
 import tempfile
 import warnings
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from decimal import Decimal, DivisionByZero, InvalidOperation
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Literal, Optional
 
 import bitsandbytes
 import datasets
