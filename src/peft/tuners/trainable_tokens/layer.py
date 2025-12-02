@@ -199,7 +199,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             originals = self.trainable_tokens_original[adapter_name].to(self.base_layer.weight)
             self.base_layer.weight.data.index_copy_(dim=0, index=index, source=originals)
 
-    def get_merged_weights(self, active_adapters) -> nn.Parameter:
+    def get_merged_weights(self, active_adapters) -> torch.Tensor:
         W = self.base_layer.weight
 
         for adapter_name in active_adapters:
