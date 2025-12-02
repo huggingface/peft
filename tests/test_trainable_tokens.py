@@ -1016,16 +1016,3 @@ class TestTrainableTokens:
             orig_embedding.embed_scale.fill_(0)
             embedding_output = peft_embedding(x)
             assert (embedding_output == 0.0).all()
-
-    def test_trainable_tokens_wrapper_weight_attribute(self, model):
-        # There was a bug that the .weight attribute of the TrainableTokensWrapper would return a tensor and not an
-        # nn.Parameter. This doesn't matter for training etc. since only the deltas are trained. This attribute is only
-        # provided so that code that accesses it doesn't fail. However, for model.get_parameter, PyTorch implements a
-        # check that the return value is an nn.Parameter, which raises if not explicitly wrapped.`
-        peft_config = LoraConfig(
-            target_modules="all-linear",
-            trainable_token_indices={"embed_tokens": [0, 1, 3]},
-        )
-        peft_model = get_peft_model(model, peft_config)
-        # does not raise
-        peft_model.get_parameter("base_model.model.model.embed_tokens.weight")

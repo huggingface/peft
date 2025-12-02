@@ -1610,7 +1610,9 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
             if not module_tied_weights_keys:
                 continue
             for key in module_tied_weights_keys:
-                param = module.get_parameter(key)
+                # note: use attrgetter here, not module.get_parameter. This is because for TrainableTokensWrapper, the
+                # weight can be a torch.Tensor, which results in get_parameter raising an error.
+                param = attrgetter(key)(module)
                 # 2. check if the tied param is really the input embed
                 if param in input_embedding_params:
                     tied_weights.append(key)

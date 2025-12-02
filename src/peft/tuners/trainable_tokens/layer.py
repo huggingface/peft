@@ -205,9 +205,12 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         for adapter_name in active_adapters:
             index = torch.tensor(self.token_indices[adapter_name]).to(W.device)
             deltas = self.trainable_tokens_delta[adapter_name].to(W)
-            W_data = W.index_copy(dim=0, index=index, source=deltas)
+            W = W.index_copy(dim=0, index=index, source=deltas)
 
-        return nn.Parameter(W_data, requires_grad=self.base_layer.weight.requires_grad)
+        # Note: the return type is a Tensor, not an nn.Parameter. This can lead to some errors, e.g. torch's
+        # model.get_parameter fails as it does a type check. But we cannot return an nn.Parameter here, as it can lead
+        # to other failures, as this is not a true nn.Parameter of the model.
+        return W
 
     def forward_adapters(self, x: torch.Tensor, active_adapters, *args, **kwargs) -> torch.Tensor:
         if self.disable_adapters or not active_adapters:
