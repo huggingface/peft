@@ -603,8 +603,8 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
             self.modules_to_save[adapter_name].requires_grad_(True)
 
     def enable_adapters(self, enabled: bool):
-        """Takes care of setting the required_grad flag on the wrapped module.
-        If adapters are enabled, gradients for the module are required as well.
+        """Takes care of setting the required_grad flag on the modules_to_save.
+        If adapters are enabled, gradients for the modules_to_save are required as well.
         """
         super().enable_adapters(enabled)
 
