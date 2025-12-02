@@ -78,6 +78,8 @@ jobs:
           pip install setuptools
           # cpu version of pytorch
           pip install -e .[test]
+          # FIXME
+          pip install -U "transformers==5.0.0rc0"
       - name: Test with pytest
         shell: bash
         env:

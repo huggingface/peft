@@ -24,6 +24,9 @@ import transformers
 from torch import nn
 
 
+is_transformers_ge_v5 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.0.0rc0")
+
+
 def check_deepspeed_zero3_enabled() -> bool:
     if packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.33.0"):
         from transformers.integrations import is_deepspeed_zero3_enabled
