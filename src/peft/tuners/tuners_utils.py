@@ -156,7 +156,6 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     This function covers a broad range of layers, some of which the caller might not support. Therefore, just because
     this function returns a valid result does not imply that the layer type is supported.
     """
-    print("_get_in_out_features",module)
     if isinstance(module, nn.Linear):
         torch_supports_dtensor = version.parse(torch.__version__) >= version.parse("2.5.0")
         if torch_supports_dtensor and isinstance(module.weight, torch.distributed.tensor.DTensor):
