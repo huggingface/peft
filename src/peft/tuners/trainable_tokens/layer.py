@@ -199,15 +199,15 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             originals = self.trainable_tokens_original[adapter_name].to(self.base_layer.weight)
             self.base_layer.weight.data.index_copy_(dim=0, index=index, source=originals)
 
-    def get_merged_weights(self, active_adapters):
+    def get_merged_weights(self, active_adapters) -> nn.Parameter:
         W = self.base_layer.weight
 
         for adapter_name in active_adapters:
             index = torch.tensor(self.token_indices[adapter_name]).to(W.device)
             deltas = self.trainable_tokens_delta[adapter_name].to(W)
-            W = W.index_copy(dim=0, index=index, source=deltas)
+            W_data = W.index_copy(dim=0, index=index, source=deltas)
 
-        return W
+        return nn.Parameter(W_data, requires_grad=self.base_layer.weight.requires_grad)
 
     def forward_adapters(self, x: torch.Tensor, active_adapters, *args, **kwargs) -> torch.Tensor:
         if self.disable_adapters or not active_adapters:
