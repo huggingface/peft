@@ -1582,7 +1582,7 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
     that the weight tying definition is present but the tying is disabled via `model_config.tie_word_embeddings=False`.
     You have to check that yourself.
     """
-    tied_weights = []
+    tied_weights: list[str] = []
 
     if hasattr(model, "get_base_model"):
         # unpack PeftModel
@@ -1595,8 +1595,6 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
     if not hasattr(model, "_tied_weights_keys"):
         return []
 
-    base_layer_pattern = re.compile(r"[^.]+\.base_layer\.")
-
     if isinstance(model._tied_weights_keys, dict):
         if not hasattr(model, "get_input_embeddings"):
             raise ValueError(
@@ -1604,30 +1602,22 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
                 "'get_input_embeddings' so we can't determine which weights are tied to embeddings."
             )
 
-        # technically it would be sufficient to just return candidates since that contains all the keys of
-        # all models that are tied (not just equal!) to the input embeddings. the only reason why we aren't
-        # doing that is because we need to filter out the original embedding name since we promise to just
-        # return the keys of the tying targets.
+        tied_weights = []
         input_embedding_params = set(model.get_input_embeddings().parameters())
-        candidates = [n for n, p in model.named_parameters(remove_duplicate=False) if p in input_embedding_params]
-
-        # Consider the case that sources and targets are already wrapped by a PEFT method. In that case we won't
-        # find them by their old names. Therefore, we need to create a map of the new names to the old names so
-        # that we can translate back and forth.
-        peft_reverse_mapping = {base_layer_pattern.sub("", name): name for name in candidates}
-
-        # AuxiliaryTrainingWrapper don't have an adapter suffix but still have a base_layer attribute,
-        # add those as a potential translation.
-        peft_reverse_mapping.update(**{name.replace("base_layer.", ""): name for name in candidates})
-
-        tied_weights.extend(
-            peft_reverse_mapping.get(k, k)
-            for k, v in model._tied_weights_keys.items()
-            if peft_reverse_mapping.get(v, v) in candidates
-        )
+        for module_name, module in model.named_modules():
+            # 1. identify modules that have declared tied weights
+            module_tied_weights_keys = getattr(module, "_tied_weights_keys", None)
+            if not module_tied_weights_keys:
+                continue
+            for key in module_tied_weights_keys:
+                param = module.get_parameter(key)
+                # 2. check if the tied param is really the input embed
+                if param in input_embedding_params:
+                    tied_weights.append(key)
 
     elif model._tied_weights_keys is not None:
         # TODO remove this when transformers <v5 is no longer supported
         tied_weights.extend(model._tied_weights_keys)
 
+    # get module names from parameter names
     return sorted({name.rpartition(".")[0] for name in tied_weights})
