@@ -18,6 +18,7 @@ import torch
 from peft.tuners.oft.layer import OFTLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 
+
 class GPTQOFTLinear(torch.nn.Module, OFTLayer):
     def __init__(
         self,

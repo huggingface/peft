@@ -88,6 +88,7 @@ def is_torch_tpu_available(check_device=True):
 def is_aqlm_available():
     return importlib.util.find_spec("aqlm") is not None
 
+
 @lru_cache
 def is_eetq_available():
     return importlib.util.find_spec("eetq") is not None

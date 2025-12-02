@@ -31,7 +31,6 @@ from accelerate.test_utils.testing import get_backend, run_command
 from accelerate.utils import patch_environment
 from accelerate.utils.imports import is_bf16_available
 from accelerate.utils.memory import clear_device_cache
-from accelerate.utils.versions import is_torch_version
 from datasets import Audio, Dataset, DatasetDict, load_dataset
 from packaging import version
 from parameterized import parameterized
@@ -78,7 +77,7 @@ from peft import (
     replace_lora_weights_loftq,
     set_peft_model_state_dict,
 )
-from peft.import_utils import is_diffusers_available, is_xpu_available, is_gptqmodel_available
+from peft.import_utils import is_diffusers_available, is_gptqmodel_available, is_xpu_available
 from peft.tuners import boft
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
@@ -91,10 +90,10 @@ from .testing_utils import (
     device_count,
     load_dataset_english_quotes,
     require_aqlm,
-    require_gptqmodel,
     require_bitsandbytes,
     require_deterministic_for_xpu,
     require_eetq,
+    require_gptqmodel,
     require_hqq,
     require_non_cpu,
     require_non_xpu,
@@ -106,9 +105,9 @@ from .testing_utils import (
     torch_device,
 )
 
+
 if is_gptqmodel_available():
     from gptqmodel import BACKEND
-
 
 
 device, _, _ = get_backend()
