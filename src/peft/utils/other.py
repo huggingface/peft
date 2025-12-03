@@ -463,6 +463,9 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
     def set_adapter(self, adapter_names: Union[str, list[str]], inference_mode: bool = False) -> None:
         """Set the active adapter
 
+        Note: This only deals with active_adapters, not with requires_grad. If the latter needs changing, handle it via
+        the subclass.
+
         Args:
             adapter_names (str or list[str]):
                 The name(s) of the adapter(s) to set as active
@@ -652,6 +655,9 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         if len(adapter_names) > 1:
             raise ValueError(f"Attempted to set multiple ({adapter_names}) adapters at once for modules_to_save.")
 
+        for currently_active_adapter_name in self.active_adapters:
+            self.modules_to_save[currently_active_adapter_name].requires_grad_(False)
+
         if len(adapter_names) == 0:
             # when calling model.add_adapter, the new adapter is not automatically active
             self._active_adapter = []
@@ -662,8 +668,6 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         if adapter_name not in self._adapters:
             raise ValueError(f"Adapter {adapter_name} not found in {self._adapters}")
 
-        for currently_active_adapter_name in self.active_adapters:
-            self.modules_to_save[currently_active_adapter_name].requires_grad_(False)
         self.modules_to_save[adapter_name].requires_grad_(not inference_mode)
         self._active_adapter = adapter_name
 
