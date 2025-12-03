@@ -909,8 +909,6 @@ class BdLoraLinearVariant(LoraVariant):
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
-            module.lora_A[adapter].weight.data = weight_A.to(dtype)
-            module.lora_B[adapter].weight.data = weight_B.to(dtype)
 
         # Ensure output tensor matches base layer dtype
         return output_tensor.to(dtype=dtype)
