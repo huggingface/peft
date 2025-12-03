@@ -1583,7 +1583,7 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
     that the weight tying definition is present but the tying is disabled via `model_config.tie_word_embeddings=False`.
     You have to check that yourself.
     """
-    tied_weights = []
+    tied_weights: list[str] = []
 
     if hasattr(model, "get_base_model"):
         # unpack PeftModel
@@ -1605,6 +1605,17 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
                 "'get_input_embeddings' so we can't determine which weights are tied to embeddings."
             )
 
+        # collect all _tied_weights_keys, as sub-modules may have additional entries
+        tied_weights_keys: dict[str, str] = {}
+        for module_name, module in model.named_modules():
+            module_tied_weights_keys = getattr(module, "_tied_weights_keys", None)
+            if module_tied_weights_keys and not module_name:
+                tied_weights_keys.update(module_tied_weights_keys)
+            elif module_tied_weights_keys:
+                tied_weights_keys.update(
+                    {f"{module_name}.{k}": f"{module_name}.{v}" for k, v in module_tied_weights_keys.items()}
+                )
+
         # technically it would be sufficient to just return candidates since that contains all the keys of
         # all models that are tied (not just equal!) to the input embeddings. the only reason why we aren't
         # doing that is because we need to filter out the original embedding name since we promise to just
@@ -1623,7 +1634,7 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
 
         tied_weights.extend(
             peft_reverse_mapping.get(k, k)
-            for k, v in model._tied_weights_keys.items()
+            for k, v in tied_weights_keys.items()
             if peft_reverse_mapping.get(v, v) in candidates
         )
 
@@ -1631,4 +1642,5 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
         # TODO remove this when transformers <v5 is no longer supported
         tied_weights.extend(model._tied_weights_keys)
 
+    # get module names from parameter names
     return sorted({name.rpartition(".")[0] for name in tied_weights})
