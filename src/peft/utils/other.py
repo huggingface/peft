@@ -604,11 +604,9 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         super().enable_adapters(enabled)
 
         if enabled:
-            self.original_module.requires_grad_(False)
             for adapter_name in self.active_adapters:
                 self.modules_to_save[adapter_name].requires_grad_(True)
         else:
-            self.original_module.requires_grad_(True)
             self.modules_to_save.requires_grad_(False)
 
     def check_set_adapter(self, adapter_name: str | list[str]) -> str | None:
@@ -1057,7 +1055,8 @@ def _set_trainable(
     return trainable_modules
 
 
-def _set_adapter(model, adapter_name: str | list[str], inference_mode: bool = False):
+def _set_adapter(model, adapter_name: str | list[str], inference_mode: bool = False) -> None:
+    """Call set_adapter on the AuxiliaryTrainingWrapper modules"""
     for module in model.modules():
         if isinstance(module, AuxiliaryTrainingWrapper):
             # only check the adapter_name if we actually encounter a AuxiliaryTrainingWrapper, otherwise we don't care
@@ -1066,10 +1065,8 @@ def _set_adapter(model, adapter_name: str | list[str], inference_mode: bool = Fa
             # if the adapter is found in this module, set it as the active adapter, else disable the adapters of this
             # module
             if adapter_name_to_set in module._adapters:
-                module.enable_adapters(True)
                 module.set_adapter(adapter_name_to_set, inference_mode=inference_mode)
             else:
-                module.enable_adapters(False)
                 module.set_adapter([], inference_mode=inference_mode)
 
 
