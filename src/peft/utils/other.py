@@ -340,7 +340,8 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         # Could not find the attribute the PyTorch way. So let's check if it's an attribute on the
         # original_module or the module further down (e.g., `modules_to_save[active_adapter]`).
         modules = self.__dict__["_modules"]
-        if self.disable_adapters:
+        if self.disable_adapters or (not self.active_adapters):
+            # no PEFT adapter is active, thus refer to original module
             return getattr(self.original_module, name)
         elif self._hasattr_wrapped(name, modules):
             return self._getattr_wrapped(name, modules)
@@ -558,6 +559,8 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         return self.original_module(x, *args, **kwargs)
 
     def _hasattr_wrapped(self, name, modules):
+        if not self.active_adapters:
+            return False
         return self.active_adapters[0] in modules["modules_to_save"]
 
     def _getattr_wrapped(self, name, modules):
