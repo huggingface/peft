@@ -2375,18 +2375,19 @@ class PeftGPTQGPUTests(unittest.TestCase):
 
 
 @require_non_cpu
-class OffloadSaveTests(unittest.TestCase):
-    def setUp(self):
-        self.causal_lm_model_id = "gpt2"
+class TestOffloadSave:
+    causal_lm_model_id = "gpt2"
 
-    def tearDown(self):
+    @pytest.fixture(scope="class")
+    def tear_down(self):
         r"""
         Efficient mechanism to free GPU memory after each test. Based on
         https://github.com/huggingface/transformers/issues/21094
         """
+        yield
         clear_device_cache(garbage_collection=True)
 
-    def test_offload_load(self):
+    def test_offload_load(self, tmp_path):
         r"""
         Test the loading of a LoRA model with CPU- and disk-offloaded modules
         """
@@ -2403,22 +2404,27 @@ class OffloadSaveTests(unittest.TestCase):
         config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["c_attn"])
 
         model = get_peft_model(model, config)
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            model.save_pretrained(tmp_dir)
-            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map="cpu")
-            lora_model = PeftModel.from_pretrained(model, tmp_dir).eval()
-            input_tokens = tokenizer.encode("Four score and seven years ago", return_tensors="pt")
-            output = lora_model(input_tokens)[0]
+        model.save_pretrained(tmp_path)
+        del model
 
-            # load the model with device_map
-            offloaded_model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map=device_map)
-            assert len({p.device for p in offloaded_model.parameters()}) == 2  # 'cpu' and 'meta'
-            offloaded_lora_model = PeftModel.from_pretrained(offloaded_model, tmp_dir, max_memory=memory_limits).eval()
-            offloaded_output = offloaded_lora_model(input_tokens)[0]
+        model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map="cpu")
+        lora_model = PeftModel.from_pretrained(model, tmp_path).eval()
+        input_tokens = tokenizer.encode("Four score and seven years ago", return_tensors="pt")
+        output = lora_model(input_tokens)[0]
+
+        # load the model with device_map
+        offloaded_model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id, device_map=device_map, offload_folder=tmp_path
+        )
+        assert len({p.device for p in offloaded_model.parameters()}) == 2  # 'cpu' and 'meta'
+        offloaded_lora_model = PeftModel.from_pretrained(
+            offloaded_model, tmp_path, max_memory=memory_limits, offload_folder=tmp_path
+        ).eval()
+        offloaded_output = offloaded_lora_model(input_tokens)[0]
         assert torch.allclose(output, offloaded_output, atol=1e-5)
 
     @pytest.mark.single_gpu_tests
-    def test_offload_merge(self):
+    def test_offload_merge(self, tmp_path):
         r"""
         Test merging, unmerging, and unloading of a model with CPU- and disk- offloaded modules.
         """
@@ -2435,13 +2441,15 @@ class OffloadSaveTests(unittest.TestCase):
         config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["c_attn"])
 
         model = get_peft_model(model, config)
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            model.save_pretrained(tmp_dir)
-            # load the model with device_map
-            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map=device_map).eval()
-            assert len({p.device for p in model.parameters()}) == 2
+        model.save_pretrained(tmp_path)
+        del model
+        # load the model with device_map
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id, device_map=device_map, offload_folder=tmp_path
+        ).eval()
+        assert len({p.device for p in model.parameters()}) == 2
 
-            model = PeftModel.from_pretrained(model, tmp_dir, max_memory=memory_limits)
+        model = PeftModel.from_pretrained(model, tmp_path, max_memory=memory_limits, offload_folder=tmp_path)
 
         input_tokens = tokenizer.encode("Four score and seven years ago", return_tensors="pt")
         model.eval()
