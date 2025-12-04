@@ -28,11 +28,6 @@ from peft.tuners.lora.model import LoraModel
 from peft.utils.other import get_pattern_key
 
 
-@dataclass
-class LoraGAGradient:
-    gradient: torch.Tensor
-
-
 def target_modules(model: nn.Module, config: LoraConfig):
     """
     Iterate over LoRA-GA target name and modules of a model. A module is a target if its name is in
@@ -54,6 +49,7 @@ def preprocess_loraga(
     model: nn.Module,
     lora_config: LoraConfig,
     train_step: Callable[[], None],
+    cache_file: Optional[str] = None,
 ):
     """
     Build necessary LoRA-GA fields for a model by estimating gradients.
@@ -70,21 +66,23 @@ def preprocess_loraga(
             Callback to run gradient estimation. Typically you should run model forward and backward
             passes in this callback. The gradients will be accumulated across all calls within this
             callback.
+        cache_file (`Optional[str]`):
+            Optional path to cache file for saving/loading gradients. If provided and the file exists,
+            gradients will be loaded from cache. Otherwise, gradients will be estimated and saved to
+            this path.
 
     Upon completion, the following fields are set for each target module:
-        loraga_grad (`torch.Tensor`):
+        _peft_loraga_grad (`torch.Tensor`):
             Accumulated gradient for the weight matrix.
     """
     if lora_config.lora_ga_config is None:
         raise ValueError("`lora_config.lora_ga_config` must be set when using LoRA-GA initialization.")
 
-    cache_file = lora_config.lora_ga_config.cache_file
-
     # If cache exists, load from cache
     if cache_file is not None and os.path.exists(cache_file) and os.path.getsize(cache_file) > 0:
         cache = torch.load(cache_file, map_location=get_model_device(model))
         for name, module in target_modules(model, lora_config):
-            module.loraga_grad = cache[f"{name}.loraga_grad"]
+            module._peft_loraga_grad = cache[f"{name}._peft_loraga_grad"]
     else:
         # Estimate gradients by running train_step
         estimate_gradients(model, lora_config, train_step)
@@ -93,14 +91,14 @@ def preprocess_loraga(
         if cache_file is not None:
             cache: dict[str, Any] = {}
             for name, module in target_modules(model, lora_config):
-                cache[f"{name}.loraga_grad"] = module.loraga_grad
+                cache[f"{name}._peft_loraga_grad"] = module._peft_loraga_grad
 
             os.makedirs(os.path.dirname(cache_file), exist_ok=True)
             torch.save(cache, cache_file)
 
     # Attach lora_ga_config to each target module for layer initialization
     for name, module in target_modules(model, lora_config):
-        module.lora_ga_config = lora_config.lora_ga_config
+        module._peft_lora_ga_config = lora_config.lora_ga_config
 
 
 def estimate_gradients(
@@ -114,16 +112,15 @@ def estimate_gradients(
     This function enables gradient computation on model parameters and runs the train_step callback.
     After backward passes, gradients are accumulated from the .grad attribute of each module's weight.
     """
+    # Remember original training state
+    was_training = model.training
     model.train()
-
-    # Ensure parameters require gradients
-    for param in model.parameters():
-        param.requires_grad_(True)
 
     # Initialize gradient storage for each target module
     for name, module in target_modules(model, lora_config):
-        module.loraga_grad = torch.zeros_like(module.weight.data, dtype=torch.float32)
-        module.grad_count = 0
+        # Use same dtype as module weight
+        module._peft_loraga_grad = torch.zeros_like(module.weight.data, dtype=module.weight.dtype)
+        module._peft_loraga_grad_count = 0
 
     # Enable gradient computation
     with torch.enable_grad():
@@ -133,11 +130,16 @@ def estimate_gradients(
     # Accumulate gradients from each target module's weight.grad
     for name, module in target_modules(model, lora_config):
         if module.weight.grad is not None:
-            module.loraga_grad += module.weight.grad.detach().float()
-            module.grad_count += 1
+            # Convert to same dtype as stored gradient
+            module._peft_loraga_grad += module.weight.grad.detach().to(module._peft_loraga_grad.dtype)
+            module._peft_loraga_grad_count += 1
 
     # Average gradients and clean up temporary fields
     for name, module in target_modules(model, lora_config):
-        if module.grad_count > 0:
-            module.loraga_grad /= module.grad_count
-        del module.grad_count
+        if module._peft_loraga_grad_count > 0:
+            module._peft_loraga_grad /= module._peft_loraga_grad_count
+        del module._peft_loraga_grad_count
+
+    # Restore original training state
+    if not was_training:
+        model.eval()
