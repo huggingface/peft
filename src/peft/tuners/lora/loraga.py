@@ -96,10 +96,6 @@ def preprocess_loraga(
             os.makedirs(os.path.dirname(cache_file), exist_ok=True)
             torch.save(cache, cache_file)
 
-    # Attach lora_ga_config to each target module for layer initialization
-    for name, module in target_modules(model, lora_config):
-        module._peft_lora_ga_config = lora_config.lora_ga_config
-
 
 def estimate_gradients(
     model: nn.Module,

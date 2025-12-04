@@ -156,6 +156,7 @@ class LoraLayer(BaseTunerLayer):
         arrow_config: ArrowConfig = None,
         qalora_group_size: int = 32,
         inference_mode: bool = False,
+        lora_ga_config=None,
         **kwargs,
     ):
         # collect the kwargs
@@ -226,7 +227,7 @@ class LoraLayer(BaseTunerLayer):
                 self.orthogonal_init(adapter_name)
         elif init_lora_weights == "lora_ga":
             with gather_params_ctx(self.get_base_layer().weight):
-                self.lora_ga_init(adapter_name)
+                self.lora_ga_init(adapter_name, lora_ga_config)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
         # call this before init of the lora variants
@@ -465,7 +466,7 @@ class LoraLayer(BaseTunerLayer):
         self.lora_A[adapter_name].weight = nn.Parameter(lora_A.contiguous().to(dtype))
         self.lora_B[adapter_name].weight = nn.Parameter(lora_B.contiguous().to(dtype))
 
-    def lora_ga_init(self, adapter_name):
+    def lora_ga_init(self, adapter_name, lora_ga_config):
         """
         Initialize LoRA weights using gradient approximation.
 
@@ -489,13 +490,11 @@ class LoraLayer(BaseTunerLayer):
 
         grad = base_layer._peft_loraga_grad
 
-        # Check for lora_ga_config attached by preprocess_loraga
-        if not hasattr(base_layer, '_peft_lora_ga_config'):
+        # Check for lora_ga_config
+        if lora_ga_config is None:
             # Fall back to gaussian initialization
             self.reset_lora_parameters(adapter_name, init_lora_weights=True)
             return
-
-        lora_ga_config = base_layer._peft_lora_ga_config
         direction = lora_ga_config.direction
         scale = lora_ga_config.scale
         stable_gamma = lora_ga_config.stable_gamma
@@ -577,7 +576,6 @@ class LoraLayer(BaseTunerLayer):
 
         # Remove redundant fields
         del base_layer._peft_loraga_grad
-        del base_layer._peft_lora_ga_config
 
     def _cache_store(self, key: str, value: Any) -> None:
         self._caches[key] = value
@@ -730,6 +728,7 @@ class Linear(nn.Module, LoraLayer):
         use_alora: bool = False,
         arrow_config: ArrowConfig = None,
         lora_bias: bool = False,
+        lora_ga_config=None,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -748,6 +747,7 @@ class Linear(nn.Module, LoraLayer):
             use_alora=use_alora,
             lora_bias=lora_bias,
             arrow_config=arrow_config,
+            lora_ga_config=lora_ga_config,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
@@ -956,6 +956,7 @@ class Embedding(nn.Module, LoraLayer):
         use_dora: bool = False,
         arrow_config: ArrowConfig = None,
         lora_bias: bool = False,
+        lora_ga_config=None,
         **kwargs,
     ) -> None:
         if lora_bias:
@@ -977,6 +978,7 @@ class Embedding(nn.Module, LoraLayer):
             use_dora=use_dora,
             lora_bias=lora_bias,
             arrow_config=arrow_config,
+            lora_ga_config=lora_ga_config,
         )
 
     def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
@@ -1266,6 +1268,7 @@ class _ConvNd(nn.Module, LoraLayer):
         use_dora: bool = False,
         arrow_config: ArrowConfig = None,
         lora_bias: bool = False,
+        lora_ga_config=None,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -1295,6 +1298,7 @@ class _ConvNd(nn.Module, LoraLayer):
             use_dora=use_dora,
             lora_bias=lora_bias,
             arrow_config=arrow_config,
+            lora_ga_config=lora_ga_config,
         )
 
     def update_layer(
@@ -1638,6 +1642,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        lora_ga_config=None,
         **kwargs,
     ) -> None:
         # TODO work with separate weights
@@ -1666,13 +1671,14 @@ class MultiheadAttention(nn.Module, LoraLayer):
                 init_lora_weights=init_lora_weights,
                 use_rslora=use_rslora,
                 use_dora=use_dora,
+                lora_ga_config=lora_ga_config,
                 **kwargs,
             )
         else:
             raise ValueError(f"out_proj must be an instance of nn.Linear for {self.__class__.__name__}.")
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
+        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, lora_ga_config=lora_ga_config)
 
     @property
     def embed_dim(self) -> int:
@@ -2035,6 +2041,7 @@ class ParamWrapper(nn.Module, LoraLayer):
         use_rslora: bool = False,
         use_dora: bool = False,
         lora_bias: bool = False,
+        lora_ga_config=None,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -2075,6 +2082,7 @@ class ParamWrapper(nn.Module, LoraLayer):
             use_rslora=use_rslora,
             use_dora=use_dora,
             lora_bias=lora_bias,
+            lora_ga_config=lora_ga_config,
         )
 
     def update_layer(
@@ -2153,7 +2161,7 @@ class ParamWrapper(nn.Module, LoraLayer):
                 self.orthogonal_init(adapter_name)
         elif init_lora_weights == "lora_ga":
             with gather_params_ctx(self.get_base_layer().weight):
-                self.lora_ga_init(adapter_name)
+                self.lora_ga_init(adapter_name, lora_ga_config)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
         # call this before init of the lora variants
