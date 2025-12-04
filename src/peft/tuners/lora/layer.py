@@ -481,21 +481,21 @@ class LoraLayer(BaseTunerLayer):
         base_layer = self.get_base_layer()
 
         # Check for gradient attached by preprocess_loraga
-        if not hasattr(base_layer, 'loraga_grad'):
+        if not hasattr(base_layer, '_peft_loraga_grad'):
             # When loading from saved adapter, gradients won't be available
             # Fall back to gaussian initialization (weights will be overwritten by state_dict)
             self.reset_lora_parameters(adapter_name, init_lora_weights=True)
             return
 
-        grad = base_layer.loraga_grad
+        grad = base_layer._peft_loraga_grad
 
         # Check for lora_ga_config attached by preprocess_loraga
-        if not hasattr(base_layer, 'lora_ga_config'):
+        if not hasattr(base_layer, '_peft_lora_ga_config'):
             # Fall back to gaussian initialization
             self.reset_lora_parameters(adapter_name, init_lora_weights=True)
             return
 
-        lora_ga_config = base_layer.lora_ga_config
+        lora_ga_config = base_layer._peft_lora_ga_config
         direction = lora_ga_config.direction
         scale = lora_ga_config.scale
         stable_gamma = lora_ga_config.stable_gamma
@@ -576,8 +576,8 @@ class LoraLayer(BaseTunerLayer):
         self.get_base_layer().weight.data = weight_data
 
         # Remove redundant fields
-        del base_layer.loraga_grad
-        del base_layer.lora_ga_config
+        del base_layer._peft_loraga_grad
+        del base_layer._peft_lora_ga_config
 
     def _cache_store(self, key: str, value: Any) -> None:
         self._caches[key] = value
