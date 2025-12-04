@@ -31,19 +31,16 @@ class TestLoraGAConfig:
         assert config.direction == "ArB2r"
         assert config.scale == "stable"
         assert config.stable_gamma == 16
-        assert config.cache_file is None
 
     def test_custom_config(self):
         config = LoraGAConfig(
             direction="ArBr",
             scale="weight_svd",
             stable_gamma=8,
-            cache_file="/tmp/cache.pt"
         )
         assert config.direction == "ArBr"
         assert config.scale == "weight_svd"
         assert config.stable_gamma == 8
-        assert config.cache_file == "/tmp/cache.pt"
 
 
 class TestLoraGAPreprocessing:
@@ -84,10 +81,10 @@ class TestLoraGAPreprocessing:
         preprocess_loraga(model, lora_config, train_step)
 
         # Check that gradients were attached
-        assert hasattr(model[0], "loraga_grad")
-        assert hasattr(model[2], "loraga_grad")
-        assert model[0].loraga_grad.shape == model[0].weight.shape
-        assert model[2].loraga_grad.shape == model[2].weight.shape
+        assert hasattr(model[0], "_peft_loraga_grad")
+        assert hasattr(model[2], "_peft_loraga_grad")
+        assert model[0]._peft_loraga_grad.shape == model[0].weight.shape
+        assert model[2]._peft_loraga_grad.shape == model[2].weight.shape
 
     def test_preprocess_without_lora_ga_config_raises(self):
         model = self.get_dummy_model()
@@ -124,8 +121,8 @@ class TestLoraGAPreprocessing:
 
         preprocess_loraga(model, lora_config, train_step)
 
-        assert hasattr(model, "loraga_grad")
-        assert model.loraga_grad.shape == model.weight.shape
+        assert hasattr(model, "_peft_loraga_grad")
+        assert model._peft_loraga_grad.shape == model.weight.shape
 
 
 class TestLoraGAInitialization:
