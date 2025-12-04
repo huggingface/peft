@@ -176,17 +176,11 @@ def main():
     model.train()
 
     # Define train_step callback
-    grad_iter = iter(grad_dataloader)
     def train_step():
         """Run forward and backward passes for gradient estimation."""
+        grad_iter = iter(grad_dataloader)
         for _ in range(args.grad_estimate_iters):
-            try:
-                batch = next(grad_iter)
-            except StopIteration:
-                # Reset iterator if we run out of data
-                nonlocal grad_iter
-                grad_iter = iter(grad_dataloader)
-                batch = next(grad_iter)
+            batch = next(grad_iter)
 
             # Move batch to device
             batch = {k: v.to(device) for k, v in batch.items()}

@@ -6,6 +6,8 @@
 
 ## Quick start
 
+This example script demonstrates how to fine-tune a language model using LoRA-GA on the WikiText-2 dataset. The script performs gradient estimation on a small number of batches, uses those gradients to initialize LoRA adapters, and then trains the model with the Hugging Face Trainer.
+
 ```python
 import torch
 from datasets import load_dataset
@@ -23,16 +25,11 @@ dataset = load_dataset("wikitext", "wikitext-2-raw-v1")
 train_dataloader = DataLoader(dataset["train"], batch_size=2, shuffle=True)
 
 # Define train_step callback for gradient estimation
-data_iter = iter(train_dataloader)
 def train_step():
     """Run forward and backward passes for gradient estimation."""
+    data_iter = iter(train_dataloader)
     for _ in range(64):  # 64 iterations
-        try:
-            batch = next(data_iter)
-        except StopIteration:
-            nonlocal data_iter
-            data_iter = iter(train_dataloader)
-            batch = next(data_iter)
+        batch = next(data_iter)
 
         model.zero_grad()
         outputs = model(**batch)
