@@ -25,7 +25,6 @@ from operator import attrgetter
 
 import pytest
 import torch
-import transformers
 import yaml
 from diffusers import StableDiffusionPipeline
 from packaging import version
@@ -63,6 +62,7 @@ from peft.utils import (
     TrainableTokensWrapper,
     _get_submodules,
     infer_device,
+    is_transformers_ge_v5,
 )
 
 from .testing_utils import get_state_dict, hub_online_once
@@ -1021,8 +1021,6 @@ class PeftCommonTester:
             assert model.base_model_torch_dtype == torch.float16
 
     def _test_training(self, model_id, config_cls, config_kwargs):
-        if issubclass(config_cls, PromptLearningConfig):
-            pytest.skip("Prompt learning does not support merging, skipping this test.")
         if (config_cls == AdaLoraConfig) and ("roberta" in model_id.lower()):
             # TODO: no gradients on the "dense" layer, other layers work, not sure why
             pytest.skip("AdaLora with RoBERTa does not work correctly")
@@ -1042,6 +1040,10 @@ class PeftCommonTester:
             output = model(**inputs)[0]
             loss = output.sum()
             loss.backward()
+
+            if not issubclass(config_cls, PromptLearningConfig):
+                # we cannot reliably identify the trainable part of the prompt learning method, thus skipping this check
+                return
 
             for n, param in model.named_parameters():
                 if (model.prefix in n) or ("modules_to_save" in n) or ("token_adapter.trainable_tokens" in n):
@@ -1174,11 +1176,14 @@ class PeftCommonTester:
             # TODO: no gradients on the "dense" layer, other layers work, not sure why
             pytest.skip("AdaLora with RoBERTa does not work correctly")
 
-        if "gptbigcode" in model_id.lower():
-            pytest.skip("GPTBigCode currently doesn't implement gradient checkpointing correctly.")
-        if "bart" in model_id.lower() and version.parse(transformers.__version__) <= version.parse("5.0"):
-            # TODO: remove once torch < 5.0 no longer supported
-            pytest.skip("Bart in transformers < 5.0 doesn't handle input sharing well enough. See transformers#41821")
+        if not is_transformers_ge_v5:
+            # TODO: remove once transformers < 5.0 no longer supported
+            if "gptbigcode" in model_id.lower():
+                pytest.skip("GPTBigCode doesn't implement gradient checkpointing correctly in transformers < 5.0.")
+            if "bart" in model_id.lower():
+                pytest.skip(
+                    "Bart in transformers < 5.0 doesn't handle input sharing well enough. See transformers#41821"
+                )
 
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
