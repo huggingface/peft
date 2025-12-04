@@ -48,6 +48,12 @@ jobs:
         with:
           persist-credentials: false
       - name: Make space for cache + models
+        # Ubuntu runner have less space free which is problematic since the model
+        # cache + dependencies fill up the disk, leaving no space for execution.
+        # So we remove some of the stuff we don't need (Java, .NET, etc.)
+        #
+        # Idea: https://dev.to/mathio/squeezing-disk-space-from-github-actions-runners-an-engineers-guide-3pjg
+        if: matrix.os != 'windows-latest'
         run: |
           df -h
 
