@@ -107,9 +107,10 @@ QLoRA adds trainable weights to all the linear layers in the transformer archite
 config = LoraConfig(target_modules="all-linear", ...)
 ```
 
-## GPTQ quantization
+## GPTQ/AWQ quantization
 
-You can learn more about gptq based `[2, 3, 4, 8]` bits quantization at [GPTQModel](https://github.com/ModelCloud/GPTQModel) and the Transformers [GPTQ](https://huggingface.co/docs/transformers/quantization/gptq) doc. Post-quant training, PEFT can use both [GPTQModel](https://github.com/ModelCloud/GPTQModel) or [AutoGPTQ](https://github.com/autogptq/autogptq) libraries, but we recommend GPTQModel because AutoGPTQ will be deprecated in a future release. 
+You can learn more about GPTQ/AWQ-based `[2, 3, 4, 8]`-bit quantization at the **[GPT-QModel](https://github.com/ModelCloud/GPTQModel)** repository and the Transformers **[GPTQ documentation](https://huggingface.co/docs/transformers/quantization/gptq)**.  
+After post-quantization training, **PEFT now exclusively supports GPT-QModel**.
 
 ```bash
 # gptqmodel install

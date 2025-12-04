@@ -91,11 +91,10 @@ from .testing_utils import (
     device_count,
     load_dataset_english_quotes,
     require_aqlm,
-    require_auto_awq,
-    require_auto_gptq,
     require_bitsandbytes,
     require_deterministic_for_xpu,
     require_eetq,
+    require_gptqmodel,
     require_hqq,
     require_non_cpu,
     require_non_xpu,
@@ -2041,8 +2040,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
 
 @require_torch_gpu
-@require_auto_gptq
 @require_optimum
+@require_gptqmodel
 class PeftGPTQGPUTests(unittest.TestCase):
     r"""
     GPTQ + peft tests
@@ -3725,7 +3724,7 @@ class PeftHqqGPUTests(unittest.TestCase):
 
 
 @require_non_cpu
-@require_auto_awq
+@require_gptqmodel
 class PeftAwqGPUTests(unittest.TestCase):
     r"""
     Awq + peft tests

@@ -36,7 +36,7 @@ from packaging import version
 from safetensors.torch import storage_ptr, storage_size
 from transformers import PreTrainedModel
 
-from ..import_utils import is_auto_gptq_available, is_gptqmodel_available, is_torch_tpu_available
+from ..import_utils import is_gptqmodel_available, is_torch_tpu_available
 from .constants import (
     CONFIG_NAME,
     EMBEDDING_LAYER_NAMES,
@@ -1245,42 +1245,6 @@ def get_quantization_config(model: torch.nn.Module, method: str):
     ):
         return model.config.quantization_config
     return None
-
-
-def get_auto_gptq_quant_linear(gptq_quantization_config):
-    """
-    Get the right AutoGPTQQuantLinear class based on the quantization config file
-    """
-    if gptq_quantization_config is None:
-        return None
-
-    if is_auto_gptq_available():
-        from auto_gptq.utils.import_utils import dynamically_import_QuantLinear
-    else:
-        return None
-
-    desc_act = gptq_quantization_config.desc_act
-    group_size = gptq_quantization_config.group_size
-    bits = gptq_quantization_config.bits
-    if hasattr(gptq_quantization_config, "use_exllama"):
-        use_exllama = gptq_quantization_config.use_exllama
-    else:
-        use_exllama = not gptq_quantization_config.disable_exllama
-    if hasattr(gptq_quantization_config, "exllama_config"):
-        exllama_version = gptq_quantization_config.exllama_config["version"]
-    else:
-        exllama_version = 1
-
-    QuantLinear = dynamically_import_QuantLinear(
-        use_triton=False,
-        desc_act=desc_act,
-        group_size=group_size,
-        bits=bits,
-        disable_exllama=not (use_exllama and exllama_version == 1),
-        disable_exllamav2=not (use_exllama and exllama_version == 2),
-    )
-
-    return QuantLinear
 
 
 def get_gptqmodel_quant_linear(gptq_quantization_config, device_map=None):

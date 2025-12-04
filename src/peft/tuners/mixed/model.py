@@ -27,7 +27,7 @@ from peft.utils import (
     ModulesToSaveWrapper,
     PeftType,
     _get_submodules,
-    get_auto_gptq_quant_linear,
+    get_gptqmodel_quant_linear,
 )
 from peft.utils.other import _set_adapter
 
@@ -175,8 +175,8 @@ class MixedModel(BaseTuner):
     @staticmethod
     def _create_new_module(config, adapter_name, target, **kwargs):
         gptq_quantization_config = kwargs.get("gptq_quantization_config", None)
-        AutoGPTQQuantLinear = get_auto_gptq_quant_linear(gptq_quantization_config)
-        if (gptq_quantization_config is not None) or (AutoGPTQQuantLinear is not None):
+        GPTQQuantLinear = get_gptqmodel_quant_linear(gptq_quantization_config)
+        if (gptq_quantization_config is not None) or (GPTQQuantLinear is not None):
             raise ValueError(f"GPTQ quantization not supported for {config.peft_type.value} (yet).")
 
         loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
