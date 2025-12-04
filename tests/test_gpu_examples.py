@@ -105,11 +105,6 @@ from .testing_utils import (
     torch_device,
 )
 
-
-if is_gptqmodel_available():
-    from gptqmodel import BACKEND
-
-
 device, _, _ = get_backend()
 if device == "cpu":
     pytest.skip(allow_module_level=True, reason="GPU tests require hardware accelerator, got CPU only")
@@ -2052,9 +2047,10 @@ class PeftGPTQGPUTests(unittest.TestCase):
 
     def setUp(self):
         from transformers import GPTQConfig
+        from transformers.utils.quantization_config import AwqBackend
 
         self.causal_lm_model_id = "marcsun13/opt-350m-gptq-4bit"
-        self.quantization_config = GPTQConfig(bits=4, backend=BACKEND.AUTO_TRAINABLE)
+        self.quantization_config = GPTQConfig(bits=4, backend=AwqBackend.AUTO_TRAINABLE)
         self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
 
     def tearDown(self):
@@ -3733,7 +3729,11 @@ class PeftAwqGPUTests(unittest.TestCase):
     """
 
     def setUp(self):
+        from transformers import AwqConfig
+        from transformers.utils.quantization_config import AwqBackend
+
         self.causal_lm_model_id = "peft-internal-testing/opt-125m-awq"
+        self.quantization_config = AwqConfig(backend=AwqBackend.AUTO_TRAINABLE)
         self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
 
     def tearDown(self):
@@ -3761,6 +3761,7 @@ class PeftAwqGPUTests(unittest.TestCase):
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
                 device_map="auto",
+                quantization_config=self.quantization_config,
             )
 
             model = prepare_model_for_kbit_training(model)
@@ -3838,6 +3839,7 @@ class PeftAwqGPUTests(unittest.TestCase):
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
                 device_map=device_map,
+                quantization_config=self.quantization_config,
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
