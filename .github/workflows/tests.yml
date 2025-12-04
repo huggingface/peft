@@ -86,7 +86,9 @@ jobs:
           CI: 1
         run: |
           make test
-          # clean up all pytest temporary directories that are kept due to retention
+          # clean up all pytest temporary directories that are kept due to retention since space
+          # is a scarce resource on the runners and tasks like model cache creation (further below)
+          # fail if there's not enough space available.
           (rm -r "/tmp/pytest-of-$(id -u -n)" || true)
       - name: Dump cache content and diff
         # This is just debug info so that we can monitor if the model cache diverges substantially
