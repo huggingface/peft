@@ -31,11 +31,13 @@ from .lora import (
     EvaConfig,
     LoftQConfig,
     LoraConfig,
+    LoraGAConfig,
     LoraModel,
     LoraRuntimeConfig,
     create_arrow_model,
     get_eva_state_dict,
     initialize_lora_eva_weights,
+    preprocess_loraga,
 )
 from .miss import MissConfig, MissModel
 from .mixed import MixedModel
@@ -89,6 +91,7 @@ __all__ = [
     "LoKrModel",
     "LoftQConfig",
     "LoraConfig",
+    "LoraGAConfig",
     "LoraModel",
     "LoraRuntimeConfig",
     "MissConfig",
@@ -130,4 +133,5 @@ __all__ = [
     "create_arrow_model",
     "get_eva_state_dict",
     "initialize_lora_eva_weights",
+    "preprocess_loraga",
 ]
