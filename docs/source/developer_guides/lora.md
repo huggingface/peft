@@ -299,17 +299,37 @@ from peft import PeftModel
 model = PeftModel.from_pretrained(base_model, peft_model_id, ephemeral_gpu_offload=True)
 ```
 
+#### Optimization
+
 DoRA is optimized (computes faster and takes less memory) for models in the evaluation mode, or when dropout is set to 0. We reuse the
 base result at those times to get the speedup.
 Running [dora finetuning](https://github.com/huggingface/peft/blob/main/examples/dora_finetuning/dora_finetuning.py)
-with `CUDA_VISIBLE_DEVICES=0 ZE_AFFINITY_MASK=0 time python examples/dora_finetuning/dora_finetuning.py --quantize --lora_dropout 0 --batch_size 16 --eval_step 2 --use_dora`
-on a 4090 with gradient accumulation set to 2 and max step to 20 resulted with the following observations:
+with `CUDA_VISIBLE_DEVICES=0 ZE_AFFINITY_MASK=0 time python examples/dora_finetuning/dora_finetuning.py --quantize --lora_dropout 0 --batch_size 16 --eval_step 2 --use_dora` on a 4090 with gradient accumulation set to 2 and max step to 20 resulted with the following observations:
 
 | | Without Optimization | With Optimization |
 | :--: | :--: | :--: |
-| train_runtime | 359.7298 | **279.2676** |
-| train_samples_per_second | 1.779 | **2.292** |
-| train_steps_per_second | 0.056 | **0.072** |
+| train runtime (sec) | 359.7298 | **279.2676** |
+| train samples per second | 1.779 | **2.292** |
+| train steps per second | 0.056 | **0.072** |
+
+Moreover, it is possible to further increase runtime performance of DoRA by using the [`DoraCaching`] helper context. This requires the model to be in `eval` mode:
+
+```py
+from peft.helpers import DoraCaching
+
+model.eval()
+with DoraCaching():
+    output = model(inputs)
+```
+
+For [`meta-llama/Llama-3.1-8B`](https://huggingface.co/meta-llama/Llama-3.1-8B), the [DoRA caching benchmark script](https://github.com/huggingface/peft/blob/main/examples/dora_finetuning/dora-caching.py) shows that, compared to LoRA:
+
+- DoRA without caching requires 139% more time
+- DoRA without caching requires 4% more memory
+- DoRA with caching requires 17% more time
+- DoRA with caching requires 41% more memory
+
+Caching can thus make inference with DoRA significantly faster but it also requires signficantly more memory. Ideally, if the use case allows it, just merge the DoRA adapter to avoid both memory and runtime overhead.
 
 #### Caveats
 
