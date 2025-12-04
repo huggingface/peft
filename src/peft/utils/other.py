@@ -559,8 +559,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         return self.original_module(x, *args, **kwargs)
 
     def _hasattr_wrapped(self, name, modules):
-        if not self.active_adapters:
-            return False
+        # this method is only called if there is at least one active adapter
         return self.active_adapters[0] in modules["modules_to_save"]
 
     def _getattr_wrapped(self, name, modules):
