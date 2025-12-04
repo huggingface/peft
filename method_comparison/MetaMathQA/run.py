@@ -24,12 +24,12 @@ import random
 import sys
 import textwrap
 import time
-from contextlib import nullcontext
+from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from functools import partial
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Literal, Optional
 
 import torch
-from data import get_train_valid_test_datasets, get_wiki_small
 from torch import nn
 from torch.amp import GradScaler, autocast
 from tqdm import tqdm
@@ -53,6 +53,7 @@ from utils import (
     validate_experiment_path,
 )
 
+from data import get_train_valid_test_datasets, get_wiki_small
 from peft import AdaLoraConfig, PeftConfig
 from peft.utils import CONFIG_NAME, infer_device
 
@@ -61,6 +62,9 @@ from peft.utils import CONFIG_NAME, infer_device
 BUCKET_FACTOR = 20
 # empty device cache every N steps; 10 is a good compromise between keeping memory down while lowering runtime overhead
 ACCELERATOR_EMPTY_CACHE_SCHEDULE = 10
+
+# disable torch inductor caching to keep total runtime numbers comparable when torch.compile is used
+os.environ["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"
 
 
 def get_generation_config(*, seq_len, generate_kwargs) -> GenerationConfig:
@@ -164,7 +168,7 @@ def train(
     torch_accelerator_module = getattr(torch, device_type, torch.cuda)
     if use_amp:
         grad_scaler: GradScaler | DummyGradScaler = GradScaler(device=device_type)
-        autocast_ctx: Callable[[], ContextManager[Any]] = partial(autocast, device_type=device_type)
+        autocast_ctx: Callable[[], AbstractContextManager[Any]] = partial(autocast, device_type=device_type)
     else:
         grad_scaler = DummyGradScaler()
         autocast_ctx = nullcontext
