@@ -83,8 +83,11 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           TRANSFORMERS_IS_CI: 1
+          CI: 1
         run: |
           make test
+          # clean up all pytest temporary directories that are kept due to retention
+          (rm -r "/tmp/pytest-of-$(id -u -n)" || true)
       - name: Dump cache content and diff
         # This is just debug info so that we can monitor if the model cache diverges substantially
         # over time and what the diverging model is.
