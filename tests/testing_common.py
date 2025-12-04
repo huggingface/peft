@@ -1043,13 +1043,11 @@ class PeftCommonTester:
             loss = output.sum()
             loss.backward()
 
-            parameter_prefix = getattr(model, "prefix", None)
-            if parameter_prefix is not None:  # can only check PEFT methods that allow to identify PEFT params
-                for n, param in model.named_parameters():
-                    if (parameter_prefix in n) or ("modules_to_save" in n) or ("token_adapter.trainable_tokens" in n):
-                        assert param.grad is not None
-                    else:
-                        assert param.grad is None
+            for n, param in model.named_parameters():
+                if (model.prefix in n) or ("modules_to_save" in n) or ("token_adapter.trainable_tokens" in n):
+                    assert param.grad is not None
+                else:
+                    assert param.grad is None
 
     def _test_inference_safetensors(self, model_id, config_cls, config_kwargs):
         if (config_cls == PrefixTuningConfig) and ("deberta" in model_id.lower()):
