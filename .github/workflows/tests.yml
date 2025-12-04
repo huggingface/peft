@@ -47,6 +47,50 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
         with:
           persist-credentials: false
+      - name: Make space for cache + models
+        # Ubuntu runner have less space free which is problematic since the model
+        # cache + dependencies fill up the disk, leaving no space for execution.
+        # So we remove some of the stuff we don't need (Java, .NET, etc.)
+        #
+        # Idea: https://dev.to/mathio/squeezing-disk-space-from-github-actions-runners-an-engineers-guide-3pjg
+        if: matrix.os != 'windows-latest'
+        run: |
+          df -h
+
+          # Remove Java (JDKs)
+          sudo rm -rf /usr/lib/jvm
+
+          # Remove .NET SDKs
+          sudo rm -rf /usr/share/dotnet
+
+          # Remove Swift toolchain
+          sudo rm -rf /usr/share/swift
+
+          # Remove Haskell (GHC)
+          sudo rm -rf /usr/local/.ghcup
+
+          # Remove Julia
+          sudo rm -rf /usr/local/julia*
+
+          # Remove Android SDKs
+          sudo rm -rf /usr/local/lib/android
+
+          # Remove Chromium (optional if not using for browser tests)
+          sudo rm -rf /usr/local/share/chromium
+
+          # Remove Microsoft/Edge and Google Chrome builds
+          sudo rm -rf /opt/microsoft /opt/google
+
+          # Remove Azure CLI
+          sudo rm -rf /opt/az
+
+          # Remove PowerShell
+          sudo rm -rf /usr/local/share/powershell
+
+          # Remove CodeQL and other toolcaches
+          sudo rm -rf /opt/hostedtoolcache
+
+          df -h
       - name: Model cache
         uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809  # v4.2.4
         with:
@@ -59,6 +103,7 @@ jobs:
           key: model-cache-${{ github.run_id }}
           restore-keys: model-cache-
           enableCrossOsArchive: true
+
       - name: Dump cache content
         # TODO: remove this step after 2025-02-15
         if: matrix.os != 'windows-latest'
@@ -83,8 +128,13 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           TRANSFORMERS_IS_CI: 1
+          CI: 1
         run: |
           make test
+          # clean up all pytest temporary directories that are kept due to retention since space
+          # is a scarce resource on the runners and tasks like model cache creation (further below)
+          # fail if there's not enough space available.
+          (rm -r "/tmp/pytest-of-$(id -u -n)" || true)
       - name: Dump cache content and diff
         # This is just debug info so that we can monitor if the model cache diverges substantially
         # over time and what the diverging model is.
