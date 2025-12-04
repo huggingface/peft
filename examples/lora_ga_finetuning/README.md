@@ -70,6 +70,43 @@ trainer.train()
 peft_model.save_pretrained("./output")
 ```
 
+## Saving with Modified Base Weights
+
+**Important**: LoRA-GA modifies the base model weights during initialization (unlike standard LoRA). This means you need to handle saving carefully if you want to restore the original base weights.
+
+### Option 1: Save adapter only (default)
+
+The standard `save_pretrained()` saves the adapter with the modified base weights embedded:
+
+```python
+# This saves the adapter - base weights remain modified
+peft_model.save_pretrained("./output")
+```
+
+### Option 2: Restore original base weights
+
+If you need to restore the original base weights (e.g., for model merging or sharing), use `path_initial_model_for_weight_conversion`:
+
+```python
+# Save the original model BEFORE LoRA-GA preprocessing
+model.save_pretrained("./original_model")
+
+# ... do preprocessing and training ...
+
+# Save adapter and convert back to original base weights
+peft_model.save_pretrained(
+    "./output",
+    path_initial_model_for_weight_conversion="./original_model"
+)
+```
+
+This is useful when:
+- You want to merge the adapter with the original base weights later
+- You're sharing the adapter and want users to apply it to the unmodified base model
+- You need the base model weights in their original state for other purposes
+
+**Note**: This follows the same pattern as PiSSA, CorDA, and OLoRA, which also modify base weights during initialization.
+
 ## Run the finetuning script
 
 Simply run:
