@@ -107,3 +107,11 @@ def tokenize_wo_answer(samples, tokenizer, template):
         input_ids[: tokenizer.model_max_length] for input_ids in tokenized["attention_mask"]
     ]
     return tokenized
+
+
+def get_wiki_small(num_samples: int = 100) -> list[str]:
+    # This way of loading the dataset avoid having to download whole shards
+    ds = load_dataset("HuggingFaceFW/finewiki", split="train", streaming=True)
+    dataset_head = ds.take(num_samples)
+    rows = [row["text"] for row in dataset_head]
+    return rows
