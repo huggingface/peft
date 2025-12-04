@@ -1,4 +1,4 @@
-<!--Copyright 2024 The HuggingFace Team. All rights reserved.
+<!--Copyright 2025 The HuggingFace Team. All rights reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
 the License. You may obtain a copy of the License at
@@ -24,19 +24,16 @@ The abstract from the paper is:
 
 ## Usage Tips
 
-- **Gradient Estimation**: LoRA-GA requires a gradient estimation phase before model initialization. Use `estimate_gradient()` to compute gradients over a small number of training batches (typically 64-128 batches).
+- **Gradient Estimation**: LoRA-GA requires a gradient estimation phase before model initialization. Use `preprocess_loraga()` with a `train_step` callback to compute gradients over a small number of training batches (typically 64-128 batches).
 
-- **Context Manager**: Always use the `LoraGAContext` context manager when creating the PEFT model to properly attach gradients during initialization.
 
 - **Initialization Strategies**: LoRA-GA supports four direction strategies (`direction`): `"ArBr"`, `"A2rBr"`, `"ArB2r"` (default), and `"random"`, and four scaling strategies (`scale`): `"stable"` (default), `"weight_svd"`, `"gd_scale"`, and `"unit"`. The default combination provides the best balance of convergence speed and stability.
 
-- **Base Weight Modification**: Unlike standard LoRA, LoRA-GA modifies the base model weights during initialization by subtracting a scaled version of the low-rank approximation. This enables better alignment with full fine-tuning gradients.
-
-- **Delta Saving**: Since base weights are modified, use the special save functions `save_loraga_model_init()` and `save_loraga_model_final()` to properly track adapter deltas. Call `save_loraga_model_init()` immediately after initialization and `save_loraga_model_final()` after training to compute the actual parameter update.
+- **Base Weight Modification**: Unlike standard LoRA, LoRA-GA modifies the base model weights during initialization by subtracting a scaled version of the low-rank approximation. This enables better alignment with full fine-tuning gradients. Since base weights are modified, use `save_pretrained()` with the `save_embedding_layers` argument or `save_mutated_as_lora` pattern to properly save the adapter.
 
 - **Computational Overhead**: The gradient estimation adds a small overhead during initialization (typically 1-2 minutes for 64 batches), but this is quickly amortized by faster convergence during training.
 
-- **Compatibility**: LoRA-GA is compatible with quantized models (4-bit, 8-bit), distributed training, and can be combined with other LoRA variants like DoRA.
+- **Compatibility**: LoRA-GA is compatible with quantized models (4-bit, 8-bit) and can be combined with other LoRA variants like DoRA.
 
 ## LoraGAConfig
 
