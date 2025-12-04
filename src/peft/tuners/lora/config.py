@@ -835,9 +835,6 @@ class LoraGAConfig:
             Default: "stable"
         stable_gamma (`int`):
             Gamma parameter for stable scaling method. Default: 16
-        cache_file (`Optional[str]`):
-            File to store the gradient cache. If specified, gradients will be saved to this file
-            and can be reused for multiple training runs. Default: None
     """
 
     direction: Literal["ArBr", "A2rBr", "ArB2r", "random"] = field(
@@ -849,7 +846,3 @@ class LoraGAConfig:
         metadata={"help": "Scaling strategy for initialization"}
     )
     stable_gamma: int = field(default=16, metadata={"help": "Gamma parameter for stable scaling"})
-    cache_file: Optional[str] = field(
-        default=None,
-        metadata={"help": "File to store gradient cache for reuse"}
-    )
