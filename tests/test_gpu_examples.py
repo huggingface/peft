@@ -4568,7 +4568,7 @@ class TestAutoCast(unittest.TestCase):
         input_ids = torch.randint(0, 1000, (2, 10)).to(self.device)
         if precision == torch.bfloat16:
             if not is_bf16_available():
-                self.skipTest("Bfloat16 not supported on this device")
+                pytest.skip("Bfloat16 not supported on this device")
 
         # Forward pass with test precision
         with torch.autocast(enabled=True, dtype=precision, device_type=self.device):

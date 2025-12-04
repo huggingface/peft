@@ -1770,21 +1770,21 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
-        _skip_if_merging_not_supported(model_id, config_cls)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
-        _skip_if_merging_not_supported(model_id, config_cls)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers_fp16(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_is_idempotent(self, test_name, model_id, config_cls, config_kwargs):
-        _skip_if_merging_not_supported(model_id, config_cls)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
         # calling merge twice with the same arguments should not change the output
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
@@ -1792,7 +1792,7 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_safe_merge(self, test_name, model_id, config_cls, config_kwargs):
-        _skip_if_merging_not_supported(model_id, config_cls)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
         # calling merge twice with the same arguments should not change the output
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
@@ -1910,7 +1910,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        _skip_if_merging_not_supported(model_id, config_cls)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
         model.merge_adapter(safe_merge=False)
         model(**X)
@@ -1950,7 +1950,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        _skip_if_merging_not_supported(model_id, config_cls)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
         model.merge_adapter(safe_merge=False)
         model(**X)
@@ -1989,7 +1989,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        _skip_if_merging_not_supported(model_id, config_cls)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
         model.merge_adapter(safe_merge=False)
         model(**X)
@@ -2028,7 +2028,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        _skip_if_merging_not_supported(model_id, config_cls)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
         model.merge_adapter(safe_merge=False)
         model(**X)
@@ -2207,7 +2207,7 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_disable_adapters_with_merging(self, test_name, model_id, config_cls, config_kwargs):
-        _skip_if_merging_not_supported(model_id, config_cls)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
         # same as test_disable_adapters, but with merging
         X = self.prepare_inputs_for_testing()
