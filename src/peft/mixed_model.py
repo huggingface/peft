@@ -200,7 +200,13 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         finally:
             self.base_model.enable_adapter_layers()
 
-    def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
+    def add_adapter(
+        self,
+        adapter_name: str,
+        peft_config: PeftConfig,
+        low_cpu_mem_usage: bool = False,
+        autocast_adapter_dtype: bool = True,
+    ) -> None:
         """
         Add an adapter to the model based on the passed configuration.
 
@@ -222,6 +228,11 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
 
                 > [!TIP] > Don't use `low_cpu_mem_usage=True` when creating a new PEFT adapter for training (training
                 is untested > and discouraged for PeftMixedModel in general).
+            autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
+                Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter
+                weights using float16 and bfloat16 to float32, as this is typically required for stable training, and
+                only affect select PEFT tuners. If set to `False`, the dtypes will stay the same as those of the
+                corresponding layer.
         """
         _check_config_compatible(peft_config)
 
@@ -232,6 +243,8 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
             if adapter_name in self.peft_config:
                 del self.peft_config[adapter_name]
             raise
+
+        self.base_model._cast_adapter_dtype(adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)
 
         self.set_modules_to_save(peft_config, adapter_name)
 
