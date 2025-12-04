@@ -764,7 +764,7 @@ class LoraConfig(PeftConfig):
         if self.alora_invocation_tokens is not None and self.task_type != "CAUSAL_LM":
             warnings.warn("aLoRA is currently only supported for CAUSAL_LM task.")
 
-        # Using post training conversion of modified base weights to restore their initial values PiSSA/CorDA/OLoRA cannot
+        # Using post training conversion of modified base weights to restore their initial values PiSSA/CorDA/OLoRA/LoRA-GA cannot
         # be correctly done when using rslora + rank_pattern/alpha_pattern. We can't really know if the user intends
         # this when they'll eventually call save_pretrained (i.e. if they'll pass
         # path_initial_model_for_weight_conversionl). Therefore, we only warn but don't raise an error here.
@@ -775,11 +775,12 @@ class LoraConfig(PeftConfig):
                 (isinstance(self.init_lora_weights, str) and (self.init_lora_weights.startswith("pissa")))
                 or (self.init_lora_weights == "olora")
                 or (self.init_lora_weights == "corda")
+                or (self.init_lora_weights == "lora_ga")
             )
         ):
             msg = (
                 "Using Rank-Stabilized LoRA with rank_pattern/alpha_pattern and post-training conversion of modified "
-                "base weights PiSSA/CorDA/OLoRA means that you won't be able to pass "
+                "base weights PiSSA/CorDA/OLoRA/LoRA-GA means that you won't be able to pass "
                 "`path_initial_model_for_weight_conversion` to `save_pretrained` to restore the initial values of the "
                 "base weights; if you intend to do this, please ensure not to use rslora or rank_pattern/alpha_pattern."
             )
