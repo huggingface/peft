@@ -114,9 +114,11 @@ from .tuners import (
     WaveFTModel,
     XLoraConfig,
     XLoraModel,
+    convert_to_lora,
     create_arrow_model,
     get_eva_state_dict,
     initialize_lora_eva_weights,
+    save_as_lora,
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
@@ -231,6 +233,7 @@ __all__ = [
     "XLoraModel",
     "bloom_model_postprocess_past_key_value",
     "cast_mixed_precision_params",
+    "convert_to_lora",
     "create_arrow_model",
     "get_eva_state_dict",
     "get_layer_status",
@@ -243,6 +246,7 @@ __all__ = [
     "load_peft_weights",
     "prepare_model_for_kbit_training",
     "replace_lora_weights_loftq",
+    "save_as_lora",
     "set_peft_model_state_dict",
     "shift_tokens_right",
 ]
