@@ -31,7 +31,6 @@ from accelerate.test_utils.testing import get_backend, run_command
 from accelerate.utils import patch_environment
 from accelerate.utils.imports import is_bf16_available
 from accelerate.utils.memory import clear_device_cache
-from accelerate.utils.versions import is_torch_version
 from datasets import Audio, Dataset, DatasetDict, load_dataset
 from packaging import version
 from parameterized import parameterized
@@ -78,7 +77,7 @@ from peft import (
     replace_lora_weights_loftq,
     set_peft_model_state_dict,
 )
-from peft.import_utils import is_diffusers_available, is_xpu_available
+from peft.import_utils import is_diffusers_available, is_gptqmodel_available, is_xpu_available
 from peft.tuners import boft
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
@@ -91,11 +90,10 @@ from .testing_utils import (
     device_count,
     load_dataset_english_quotes,
     require_aqlm,
-    require_auto_awq,
-    require_auto_gptq,
     require_bitsandbytes,
     require_deterministic_for_xpu,
     require_eetq,
+    require_gptqmodel,
     require_hqq,
     require_non_cpu,
     require_non_xpu,
@@ -106,7 +104,6 @@ from .testing_utils import (
     require_torchao,
     torch_device,
 )
-
 
 device, _, _ = get_backend()
 if device == "cpu":
@@ -2041,7 +2038,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
 
 @require_torch_gpu
-@require_auto_gptq
+@require_gptqmodel
 @require_optimum
 class PeftGPTQGPUTests(unittest.TestCase):
     r"""
@@ -2050,10 +2047,10 @@ class PeftGPTQGPUTests(unittest.TestCase):
 
     def setUp(self):
         from transformers import GPTQConfig
+        from transformers.utils.quantization_config import AwqBackend
 
         self.causal_lm_model_id = "marcsun13/opt-350m-gptq-4bit"
-        # TODO : check if it works for Exllamav2 kernels
-        self.quantization_config = GPTQConfig(bits=4, use_exllama=False)
+        self.quantization_config = GPTQConfig(bits=4, backend=AwqBackend.AUTO_TRAINABLE)
         self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
 
     def tearDown(self):
@@ -3733,21 +3730,18 @@ class PeftHqqGPUTests(unittest.TestCase):
 
 
 @require_non_cpu
-@require_auto_awq
+@require_gptqmodel
 class PeftAwqGPUTests(unittest.TestCase):
     r"""
     Awq + peft tests
-
-    Note that AWQ is no longer being maintained:
-
-    https://github.com/casper-hansen/AutoAWQ/blob/88e4c76b20755db275574e6a03c83c84ba3bece5/README.md
-
-    It is therefore expected that more tests will start failing in the future. If this happens, remove AWQ support from
-    PEFT.
     """
 
     def setUp(self):
+        from transformers import AwqConfig
+        from transformers.utils.quantization_config import AwqBackend
+
         self.causal_lm_model_id = "peft-internal-testing/opt-125m-awq"
+        self.quantization_config = AwqConfig(backend=AwqBackend.AUTO_TRAINABLE)
         self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
 
     def tearDown(self):
@@ -3775,6 +3769,7 @@ class PeftAwqGPUTests(unittest.TestCase):
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
                 device_map="auto",
+                quantization_config=self.quantization_config,
             )
 
             model = prepare_model_for_kbit_training(model)
@@ -3821,13 +3816,6 @@ class PeftAwqGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
-    # TODO remove marker if/once issue is resolved, most likely requiring a fix in AutoAWQ:
-    # https://github.com/casper-hansen/AutoAWQ/issues/754
-    @pytest.mark.xfail(
-        condition=is_torch_version(">=", "2.7.0"),
-        reason="Multi-GPU test currently not working with AutoAWQ and PyTorch 2.7+",
-        strict=True,
-    )
     @require_torch_multi_accelerator
     def test_causal_lm_training_multi_accelerator(self):
         r"""
@@ -3859,6 +3847,7 @@ class PeftAwqGPUTests(unittest.TestCase):
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
                 device_map=device_map,
+                quantization_config=self.quantization_config,
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
