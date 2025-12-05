@@ -38,29 +38,30 @@ RUN apt-get update && \
 
 RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
-RUN source activate peft && \ 
-    python3 -m pip install --no-cache-dir bitsandbytes optimum gptqmodel && \
-    # Add eetq for quantization testing
-    python3 -m pip install git+https://github.com/NetEase-FuXi/EETQ.git
+
+RUN conda run -n peft pip install --no-cache-dir bitsandbytes optimum gptqmodel
+
+RUN \
+    # Add eetq for quantization testing; needs to run without build isolation since the setup
+    # script directly imports torch from the environment which would fail with isolation.
+    conda run -n peft pip install --no-build-isolation git+https://github.com/NetEase-FuXi/EETQ.git
 
 # Activate the conda env and install transformers + accelerate from source
-RUN source activate peft && \
-    python3 -m pip install -U --no-cache-dir \
-    librosa \
-    "soundfile>=0.12.1" \
-    scipy \
-    torchao \
-    fbgemm-gpu-genai>=1.2.0 \
-    git+https://github.com/huggingface/transformers \
-    git+https://github.com/huggingface/accelerate \
-    peft[test]@git+https://github.com/huggingface/peft \
-    # Add aqlm for quantization testing
-    aqlm[gpu]>=1.0.2 \
-    # Add HQQ for quantization testing
-    hqq
+RUN conda run -n peft pip install -U --no-cache-dir \
+        librosa \
+        "soundfile>=0.12.1" \
+        scipy \
+        torchao \
+        fbgemm-gpu-genai>=1.2.0 \
+        git+https://github.com/huggingface/transformers \
+        git+https://github.com/huggingface/accelerate \
+        peft[test]@git+https://github.com/huggingface/peft \
+        # Add aqlm for quantization testing
+        aqlm[gpu]>=1.0.2 \
+        # Add HQQ for quantization testing
+        hqq
 
-RUN source activate peft && \
-    pip freeze | grep transformers
+RUN conda run -n peft pip freeze | grep transformers
 
 RUN echo "source activate peft" >> ~/.profile
 

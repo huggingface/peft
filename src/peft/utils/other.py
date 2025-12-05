@@ -340,7 +340,8 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         # Could not find the attribute the PyTorch way. So let's check if it's an attribute on the
         # original_module or the module further down (e.g., `modules_to_save[active_adapter]`).
         modules = self.__dict__["_modules"]
-        if self.disable_adapters:
+        if self.disable_adapters or (not self.active_adapters):
+            # no PEFT adapter is active, thus refer to original module
             return getattr(self.original_module, name)
         elif self._hasattr_wrapped(name, modules):
             return self._getattr_wrapped(name, modules)
@@ -463,6 +464,9 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
     def set_adapter(self, adapter_names: Union[str, list[str]], inference_mode: bool = False) -> None:
         """Set the active adapter
 
+        Note: This only deals with active_adapters, not with requires_grad. If the latter needs changing, handle it via
+        the subclass.
+
         Args:
             adapter_names (str or list[str]):
                 The name(s) of the adapter(s) to set as active
@@ -555,6 +559,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         return self.original_module(x, *args, **kwargs)
 
     def _hasattr_wrapped(self, name, modules):
+        # this method is only called if there is at least one active adapter
         return self.active_adapters[0] in modules["modules_to_save"]
 
     def _getattr_wrapped(self, name, modules):
@@ -604,11 +609,9 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         super().enable_adapters(enabled)
 
         if enabled:
-            self.original_module.requires_grad_(False)
             for adapter_name in self.active_adapters:
                 self.modules_to_save[adapter_name].requires_grad_(True)
         else:
-            self.original_module.requires_grad_(True)
             self.modules_to_save.requires_grad_(False)
 
     def check_set_adapter(self, adapter_name: str | list[str]) -> str | None:
@@ -654,6 +657,9 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         if len(adapter_names) > 1:
             raise ValueError(f"Attempted to set multiple ({adapter_names}) adapters at once for modules_to_save.")
 
+        for currently_active_adapter_name in self.active_adapters:
+            self.modules_to_save[currently_active_adapter_name].requires_grad_(False)
+
         if len(adapter_names) == 0:
             # when calling model.add_adapter, the new adapter is not automatically active
             self._active_adapter = []
@@ -664,8 +670,6 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         if adapter_name not in self._adapters:
             raise ValueError(f"Adapter {adapter_name} not found in {self._adapters}")
 
-        for currently_active_adapter_name in self.active_adapters:
-            self.modules_to_save[currently_active_adapter_name].requires_grad_(False)
         self.modules_to_save[adapter_name].requires_grad_(not inference_mode)
         self._active_adapter = adapter_name
 
@@ -1057,7 +1061,8 @@ def _set_trainable(
     return trainable_modules
 
 
-def _set_adapter(model, adapter_name: str | list[str], inference_mode: bool = False):
+def _set_adapter(model, adapter_name: str | list[str], inference_mode: bool = False) -> None:
+    """Call set_adapter on the AuxiliaryTrainingWrapper modules"""
     for module in model.modules():
         if isinstance(module, AuxiliaryTrainingWrapper):
             # only check the adapter_name if we actually encounter a AuxiliaryTrainingWrapper, otherwise we don't care
@@ -1066,10 +1071,8 @@ def _set_adapter(model, adapter_name: str | list[str], inference_mode: bool = Fa
             # if the adapter is found in this module, set it as the active adapter, else disable the adapters of this
             # module
             if adapter_name_to_set in module._adapters:
-                module.enable_adapters(True)
                 module.set_adapter(adapter_name_to_set, inference_mode=inference_mode)
             else:
-                module.enable_adapters(False)
                 module.set_adapter([], inference_mode=inference_mode)
 
 
@@ -1550,7 +1553,7 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
     that the weight tying definition is present but the tying is disabled via `model_config.tie_word_embeddings=False`.
     You have to check that yourself.
     """
-    tied_weights = []
+    tied_weights: list[str] = []
 
     if hasattr(model, "get_base_model"):
         # unpack PeftModel
@@ -1572,6 +1575,17 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
                 "'get_input_embeddings' so we can't determine which weights are tied to embeddings."
             )
 
+        # collect all _tied_weights_keys, as sub-modules may have additional entries
+        tied_weights_keys: dict[str, str] = {}
+        for module_name, module in model.named_modules():
+            module_tied_weights_keys = getattr(module, "_tied_weights_keys", None)
+            if module_tied_weights_keys and not module_name:
+                tied_weights_keys.update(module_tied_weights_keys)
+            elif module_tied_weights_keys:
+                tied_weights_keys.update(
+                    {f"{module_name}.{k}": f"{module_name}.{v}" for k, v in module_tied_weights_keys.items()}
+                )
+
         # technically it would be sufficient to just return candidates since that contains all the keys of
         # all models that are tied (not just equal!) to the input embeddings. the only reason why we aren't
         # doing that is because we need to filter out the original embedding name since we promise to just
@@ -1590,7 +1604,7 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
 
         tied_weights.extend(
             peft_reverse_mapping.get(k, k)
-            for k, v in model._tied_weights_keys.items()
+            for k, v in tied_weights_keys.items()
             if peft_reverse_mapping.get(v, v) in candidates
         )
 
@@ -1598,4 +1612,5 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
         # TODO remove this when transformers <v5 is no longer supported
         tied_weights.extend(model._tied_weights_keys)
 
+    # get module names from parameter names
     return sorted({name.rpartition(".")[0] for name in tied_weights})

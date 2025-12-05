@@ -199,7 +199,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             originals = self.trainable_tokens_original[adapter_name].to(self.base_layer.weight)
             self.base_layer.weight.data.index_copy_(dim=0, index=index, source=originals)
 
-    def get_merged_weights(self, active_adapters):
+    def get_merged_weights(self, active_adapters) -> torch.Tensor:
         W = self.base_layer.weight
 
         for adapter_name in active_adapters:
@@ -207,6 +207,9 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             deltas = self.trainable_tokens_delta[adapter_name].to(W)
             W = W.index_copy(dim=0, index=index, source=deltas)
 
+        # Note: the return type is a Tensor, not an nn.Parameter. This can lead to some errors, e.g. torch's
+        # model.get_parameter fails as it does a type check. But we cannot return an nn.Parameter here, as it can lead
+        # to other failures, as this is not a true nn.Parameter of the model.
         return W
 
     def forward_adapters(self, x: torch.Tensor, active_adapters, *args, **kwargs) -> torch.Tensor:

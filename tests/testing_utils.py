@@ -38,6 +38,7 @@ from peft.import_utils import (
     is_optimum_available,
     is_torchao_available,
 )
+from peft.utils import is_transformers_ge_v5
 
 
 # Globally shared model cache used by `hub_online_once`.
@@ -262,18 +263,23 @@ def hub_online_once(model_id: str):
         if model_id in _HUB_MODEL_ACCESSES:
             override = {"HF_HUB_OFFLINE": "1"}
             _HUB_MODEL_ACCESSES[model_id] += 1
-        else:
-            if model_id not in _HUB_MODEL_ACCESSES:
-                _HUB_MODEL_ACCESSES[model_id] = 0
+        elif model_id not in _HUB_MODEL_ACCESSES:
+            _HUB_MODEL_ACCESSES[model_id] = 0
+        is_offline = override.get("HF_HUB_OFFLINE", False) == "1"
+
         with (
             # strictly speaking it is not necessary to set the environment variable since most code that's out there
             # is evaluating it at import time and we'd have to reload the modules for it to take effect. It's
             # probably still a good idea to have it if there's some dynamic code that checks it.
             mock.patch.dict(os.environ, override),
-            mock.patch("huggingface_hub.constants.HF_HUB_OFFLINE", override.get("HF_HUB_OFFLINE", False) == "1"),
-            mock.patch("transformers.utils.hub._is_offline_mode", override.get("HF_HUB_OFFLINE", False) == "1"),
+            mock.patch("huggingface_hub.constants.HF_HUB_OFFLINE", is_offline),
         ):
-            yield
+            if is_transformers_ge_v5:
+                with mock.patch("transformers.utils.hub.is_offline_mode", lambda: is_offline):
+                    yield
+            else:  # TODO remove if transformers <= 4 no longer supported
+                with mock.patch("transformers.utils.hub._is_offline_mode", is_offline):
+                    yield
     except Exception:
         # in case of an error we have to assume that we didn't access the model properly from the hub
         # for the first time, so the next call cannot be considered cached.
