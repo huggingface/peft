@@ -526,7 +526,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
     def test_deeply_nested(self):
         # a somewhat absurdly nested model using different adapter types
         if platform.system() == "Linux":
-            self.skipTest("This test fails but only on GitHub CI with Linux systems.")
+            pytest.skip("This test fails but only on GitHub CI with Linux systems.")
 
         atol = 1e-5
         rtol = 1e-5
@@ -706,7 +706,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         # test a somewhat realistic model instead of a toy model
         torch.manual_seed(0)
 
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         model = AutoModelForCausalLM.from_pretrained(model_id).eval().to(self.torch_device)
         input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
         attention_mask = torch.tensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)

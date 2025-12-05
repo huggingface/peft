@@ -22,6 +22,7 @@ from peft import (
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
+    GraloraConfig,
     HRAConfig,
     IA3Config,
     LoraConfig,
@@ -44,9 +45,10 @@ from .testing_common import PeftCommonTester
 from .testing_utils import hub_online_once
 
 
+# Note: models from peft-internal-testing are just the safetensors versions of hf-internal-testing
 PEFT_SEQ_CLS_MODELS_TO_TEST = [
-    "hf-internal-testing/tiny-random-BertForSequenceClassification",
-    "hf-internal-testing/tiny-random-RobertaForSequenceClassification",
+    "peft-internal-testing/tiny-random-BertForSequenceClassification",
+    "peft-internal-testing/tiny-random-RobertaForSequenceClassification",
     "trl-internal-testing/tiny-LlamaForSequenceClassification-3.2",
 ]
 
@@ -96,6 +98,13 @@ ALL_CONFIGS = [
         {
             "task_type": "SEQ_CLS",
             "n_frequency": 10,
+            "target_modules": None,
+        },
+    ),
+    (
+        GraloraConfig,
+        {
+            "task_type": "SEQ_CLS",
             "target_modules": None,
         },
     ),
@@ -233,10 +242,6 @@ class TestSequenceClassificationModels(PeftCommonTester):
     """
 
     transformers_class = AutoModelForSequenceClassification
-
-    def skipTest(self, reason=""):
-        #  for backwards compatibility with unittest style test classes
-        pytest.skip(reason)
 
     def prepare_inputs_for_testing(self):
         input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)

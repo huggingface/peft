@@ -56,6 +56,7 @@ def preprocess(rows, task_name: str, print_fn=print):
             "train_loss": train_metrics["train loss"],
             "train_samples": train_metrics["train samples"],
             "train_total_tokens": train_metrics["train total tokens"],
+            "forgetting*": train_metrics.get("forgetting", 123),
             "peft_version": meta_info["package_info"]["peft-version"],
             "peft_branch": run_info["peft_branch"],
             "transformers_version": meta_info["package_info"]["transformers-version"],
@@ -104,6 +105,7 @@ def load_df(path, task_name, print_fn=print):
         "train_loss": float,
         "train_samples": int,
         "train_total_tokens": int,
+        "forgetting*": float,
         "num_trainable_params": int,
         "peft_version": "string",
         "peft_branch": "string",
@@ -137,6 +139,7 @@ def load_df(path, task_name, print_fn=print):
         "file_size",
         "created_at",
         "task_name",
+        "forgetting*",
     ]
     other_columns = [col for col in df if col not in important_columns]
     df = df[important_columns + other_columns]

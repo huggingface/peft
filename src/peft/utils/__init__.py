@@ -130,6 +130,7 @@ __all__ = [
     "get_quantization_config",
     "id_tensor_storage",
     "infer_device",
+    "is_transformers_ge_v5",
     "load_peft_weights",
     "map_cache_to_layer_device_map",
     "mitigate_intruder_dimensions",
