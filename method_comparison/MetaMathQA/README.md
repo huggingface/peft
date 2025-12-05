@@ -64,6 +64,12 @@ There is a default file for the non-PEFT parameters: `default_training_params.js
 
 For an overview of all possible arguments, you can also check the `TrainConfig` `dataclass` in `utils.py`.
 
+#### About `torch.compile`
+
+Right now, compilation is a simple on/off switch in `training_params.json`. There is probably room for optimization here.
+
+Due to the model being switched to `eval` mode for the validation metrics and then back to `train` mode, we will incur a re-compilation. This is acceptable to ensure that validation runs correctly. However, this prevents us from using `torch._dynamo.config.patch(error_on_recompile=True, inline_inbuilt_nn_modules=False)` to detect frequent recompilations. It should be noticeable from the duration of training steps, though, so we're fine with that.
+
 ### Runtime performance
 
 Several factors should be considered to achieve a fast runtime performance. Besides the obvious factors like `max_steps` or the base model size, we found the following factors to have a significant impact:
@@ -235,7 +241,6 @@ Python 3.12+ is required.
 - consider adding `weight` argument to cross entropy calculation to downweight the EOS token, but it would require calculating the loss manually instead of relying on transformers (see https://github.com/huggingface/transformers/blob/6a876462c308bd7cd7d3ca8e93abaa7d5b02e90e/src/transformers/loss/loss_utils.py#L24-L48)
 - do a sanity check against/comparison with transformers Trainer
 - consider using vLLM to potentially speed up generations, at least for the test set
-- using `torch.compile` leads to a huge slowdown, investigate (maybe recompiles), although it does save memory
 - AMP does not appear to help, investigate
 - packing of sequences (but this probably requires adjusting the attention matrix)
 - clean up what gets printed and where (stdout, stderr)
