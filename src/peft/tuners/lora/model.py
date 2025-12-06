@@ -155,6 +155,29 @@ class LoraModel(BaseTuner):
     prefix: str = "lora_"
     tuner_layer_cls = LoraLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING
+    
+    def _check_new_adapter_config(self, config: LoraConfig) -> None:
+        """
+        A helper method to check the config when a new adapter is being added.
+
+        Raise a ValueError if there is something wrong with the config or if it conflicts with existing adapters.
+
+        """
+        # TODO: there should be a check if any of the existing adapters actually has bias != "none", or else the check
+        # does not fully correspond to the error message.
+        if (len(self.peft_config) > 1) and (config.bias != "none"):
+            raise ValueError(
+                f"{self.__class__.__name__} supports only 1 adapter with bias. When using multiple adapters, "
+                "set bias to 'none' for all adapters."
+            )
+
+        # Check KaSA adapter compatibility (only when adding additional adapters)
+        if len(self.peft_config) > 1:
+            kasa_count = sum(1 for cfg in self.peft_config.values() if cfg.use_kasa)
+            non_kasa_count = len(self.peft_config) - kasa_count
+
+            if kasa_count > 0 and non_kasa_count > 0:
+                raise ValueError("KaSA adapters cannot be mixed with other adapter types.")
 
     def _prepare_model(self, peft_config: LoraConfig, model: nn.Module):
         r"""
@@ -211,6 +234,7 @@ class LoraModel(BaseTuner):
             "use_dora": lora_config.use_dora,
             "use_alora": lora_config.alora_invocation_tokens is not None,
             "use_qalora": lora_config.use_qalora,
+            "use_kasa": lora_config.use_kasa,
             "qalora_group_size": lora_config.qalora_group_size,
             "ephemeral_gpu_offload": lora_config.runtime_config.ephemeral_gpu_offload,
             "lora_bias": lora_config.lora_bias,
@@ -248,6 +272,7 @@ class LoraModel(BaseTuner):
                 init_lora_weights=lora_config.init_lora_weights,
                 use_rslora=lora_config.use_rslora,
                 use_dora=lora_config.use_dora,
+                use_kasa=lora_config.use_kasa,
                 lora_bias=lora_config.lora_bias,
                 arrow_config=lora_config.arrow_config,
                 inference_mode=lora_config.inference_mode,
