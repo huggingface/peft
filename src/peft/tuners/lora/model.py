@@ -158,7 +158,7 @@ class LoraModel(BaseTuner):
                 f"{self.__class__.__name__} supports only 1 adapter with bias. When using multiple adapters, "
                 "set bias to 'none' for all adapters."
             )
-        
+
         # Check KaSA adapter compatibility (only when adding additional adapters)
         if len(self.peft_config) > 1:
             kasa_count = sum(1 for cfg in self.peft_config.values() if cfg.use_kasa)

@@ -1485,7 +1485,7 @@ class TestLoraInitialization:
     def test_kasa_mixed_adapter_error(self):
         """Test that KaSA adapters cannot be mixed with other adapter types."""
         model = self.get_model()
-        
+
         # Add regular LoRA adapter first
         config1 = LoraConfig(
             r=8,
@@ -1493,7 +1493,7 @@ class TestLoraInitialization:
             init_lora_weights=True,
         )
         model = get_peft_model(model, config1, adapter_name="lora1")
-        
+
         # Try to add KaSA adapter - should raise error
         config2 = LoraConfig(
             r=16,
@@ -1506,7 +1506,7 @@ class TestLoraInitialization:
     def test_kasa_mixed_adapter_error_reverse(self):
         """Test that other adapters cannot be added after KaSA adapters."""
         model = self.get_model()
-        
+
         # Add KaSA adapter first
         config1 = LoraConfig(
             r=8,
@@ -1514,7 +1514,7 @@ class TestLoraInitialization:
             use_kasa=True,
         )
         model = get_peft_model(model, config1, adapter_name="kasa1")
-        
+
         # Try to add regular LoRA adapter - should raise error
         config2 = LoraConfig(
             r=16,
@@ -1523,6 +1523,7 @@ class TestLoraInitialization:
         )
         with pytest.raises(ValueError, match="KaSA adapters cannot be mixed with other adapter types"):
             model.add_adapter("lora1", config2)
+
 
 class TestLokrInitialization:
     torch_device = infer_device()
