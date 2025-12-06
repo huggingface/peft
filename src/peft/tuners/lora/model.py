@@ -160,41 +160,12 @@ class LoraModel(BaseTuner):
             )
         
         # Check KaSA adapter compatibility (only when adding additional adapters)
-        existing_adapters = list(self.peft_config.keys())
-        if len(existing_adapters) > 1:
-            new_adapter_name = None
-            for name, existing_config in self.peft_config.items():
-                if existing_config is config:
-                    new_adapter_name = name
-                    break
-            
-            if new_adapter_name is not None:
-                existing_adapters_without_new = [
-                    name for name in existing_adapters 
-                    if name != new_adapter_name  
-                ]
-                has_kasa = any(
-                    getattr(self.peft_config[name], 'use_kasa', False) 
-                    for name in existing_adapters_without_new
-                )
-                is_new_kasa = getattr(config, 'use_kasa', False)
-            else:
-                has_kasa = any(
-                    getattr(self.peft_config[name], 'use_kasa', False) 
-                    for name in existing_adapters
-                )
-                is_new_kasa = getattr(config, 'use_kasa', False)
-            
-            if has_kasa and not is_new_kasa:
-                raise ValueError(
-                    f"KaSA adapters cannot be mixed with other adapter types. "
-                    f"Existing adapters include KaSA, but new adapter is not KaSA."
-                )
-            elif not has_kasa and is_new_kasa:
-                raise ValueError(
-                    f"KaSA adapters cannot be mixed with other adapter types. "
-                    f"New adapter is KaSA, but existing adapters are not KaSA."
-                )
+        if len(self.peft_config) > 1:
+            kasa_count = sum(1 for cfg in self.peft_config.values() if cfg.use_kasa)
+            non_kasa_count = len(self.peft_config) - kasa_count
+
+            if kasa_count > 0 and non_kasa_count > 0:
+                raise ValueError("KaSA adapters cannot be mixed with other adapter types.")
 
     @staticmethod
     def _check_target_module_exists(lora_config, key):
