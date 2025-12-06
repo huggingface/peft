@@ -43,7 +43,7 @@ python -m pip install git+https://github.com/huggingface/peft
 
 ### ValueError: Attempting to unscale FP16 gradients
 
-This error probably occurred because the model was loaded with `torch_dtype=torch.float16` and then used in an automatic mixed precision (AMP) context, e.g. by setting `fp16=True` in the [`~transformers.Trainer`] class from 🤗 Transformers. The reason is that when using AMP, trainable weights should never use fp16. To make this work without loading the whole model in fp32, add the following to your code:
+This error probably occurred because the model was loaded with `dtype=torch.float16` and then used in an automatic mixed precision (AMP) context, e.g. by setting `fp16=True` in the [`~transformers.Trainer`] class from 🤗 Transformers. The reason is that when using AMP, trainable weights should never use fp16. To make this work without loading the whole model in fp32, add the following to your code:
 
 ```python
 peft_model = get_peft_model(...)
@@ -71,11 +71,8 @@ trainer = Trainer(model=peft_model, fp16=True, ...)
 trainer.train()
 ```
 
-<Tip>
-
-Starting from PEFT version v0.12.0, PEFT automatically promotes the dtype of adapter weights from `torch.float16` and `torch.bfloat16` to `torch.float32` where appropriate. To _prevent_ this behavior, you can pass `autocast_adapter_dtype=False` to [`~get_peft_model`], to [`~PeftModel.from_pretrained`], and to [`~PeftModel.load_adapter`].
-
-</Tip>
+> [!TIP]
+> Starting from PEFT version v0.12.0, PEFT automatically promotes the dtype of adapter weights from `torch.float16` and `torch.bfloat16` to `torch.float32` where appropriate. To _prevent_ this behavior, you can pass `autocast_adapter_dtype=False` to [`~get_peft_model`], to [`~PeftModel.from_pretrained`], and to [`~PeftModel.load_adapter`].
 
 ### Selecting the dtype of the adapter
 
@@ -137,11 +134,8 @@ You should probably TRAIN this model on a down-stream task to be able to use it 
 
 The mentioned layers should be added to `modules_to_save` in the config to avoid the described problem.
 
-<Tip>
-
-As an example, when loading a model that is using the DeBERTa architecture for sequence classification, you'll see a warning that the following weights are newly initialized: `['classifier.bias', 'classifier.weight', 'pooler.dense.bias', 'pooler.dense.weight']`. From this, it follows that the `classifier` and `pooler` layers should be added to: `modules_to_save=["classifier", "pooler"]`.
-
-</Tip>
+> [!TIP]
+> As an example, when loading a model that is using the DeBERTa architecture for sequence classification, you'll see a warning that the following weights are newly initialized: `['classifier.bias', 'classifier.weight', 'pooler.dense.bias', 'pooler.dense.weight']`. From this, it follows that the `classifier` and `pooler` layers should be added to: `modules_to_save=["classifier", "pooler"]`.
 
 ### Extending the vocabulary
 
@@ -300,7 +294,7 @@ It is possible to get this information for non-PEFT models if they are using PEF
 
 >>> path = "runwayml/stable-diffusion-v1-5"
 >>> lora_id = "takuma104/lora-test-text-encoder-lora-target"
->>> pipe = StableDiffusionPipeline.from_pretrained(path, torch_dtype=torch.float16)
+>>> pipe = StableDiffusionPipeline.from_pretrained(path, dtype=torch.float16)
 >>> pipe.load_lora_weights(lora_id, adapter_name="adapter-1")
 >>> pipe.load_lora_weights(lora_id, adapter_name="adapter-2")
 >>> pipe.set_lora_device(["adapter-2"], "cuda")
@@ -345,11 +339,8 @@ TunerModelStatus(
 
 Loading adapters like LoRA weights should generally be fast compared to loading the base model. However, there can be use cases where the adapter weights are quite large or where users need to load a large number of adapters -- the loading time can add up in this case. The reason for this is that the adapter weights are first initialized and then overridden by the loaded weights, which is wasteful. To speed up the loading time, you can pass the `low_cpu_mem_usage=True` argument to [`~PeftModel.from_pretrained`] and [`~PeftModel.load_adapter`].
 
-<Tip>
-
-If this option works well across different use cases, it may become the default for adapter loading in the future.
-
-</Tip>
+> [!TIP]
+> If this option works well across different use cases, it may become the default for adapter loading in the future.
 
 
 ## Reproducibility
@@ -401,3 +392,67 @@ If it is not possible for you to upgrade PEFT, there is a workaround you can try
 Assume the error message says that the unknown keyword argument is named `foobar`. Search inside the `adapter_config.json` of this PEFT adapter for the `foobar` entry and delete it from the file. Then save the file and try loading the model again.
 
 This solution works most of the time. As long as it is the default value for `foobar`, it can be ignored. However, when it is set to some other value, you will get incorrect results. Upgrading PEFT is the recommended solution.
+
+## Adapter handling
+
+### Using multiple adapters at the same time
+
+PEFT allows you to create more than one adapter on the same model. This can be useful in many situations. For example, for inference, you may want to serve two fine-tuned models from the same base model instead of loading the base model once for each fine-tuned model, which would cost more memory. However, multiple adapters can be activated at the same time. This way, the model may leverage the learnings from all those adapters at the same time. As an example, if you have a diffusion model, you may want to use one LoRA adapter to change the style and a different one to change the subject.
+
+Activating multiple adapters at the same time is generally possible on all PEFT methods (LoRA, LoHa, IA³, etc.) except for prompt learning methods (p-tuning, prefix tuning, etc.). The following example illustrates how to achieve this:
+
+```python
+from transformers import AutoModelForCausalLM
+from peft import PeftModel
+
+model_id = ...
+base_model = AutoModelForCausalLM.from_pretrained(model_id)
+model = PeftModel.from_pretrained(base_model, lora_path_0)  # default adapter_name is 'default'
+model.load_adapter(lora_path_1, adapter_name="other")
+# the 'other' adapter was loaded but it's not active yet, so to activate both adapters:
+model.base_model.set_adapter(["default", "other"])
+```
+
+> [!TIP]
+> In the example above, you can see that we need to call `model.base_model.set_adapter(["default", "other"])`. Why can we not call `model.set_adapter(["default", "other"])`? This is unfortunately not possible because, as explained earlier, some PEFT methods don't support activating more than one adapter at a time.
+
+It is also possible to train two adapters at the same time, but you should be careful to ensure that the weights of both adapters are known to the optimizer. Otherwise, only one adapter will receive updates.
+
+```python
+from transformers import AutoModelForCausalLM
+from peft import LoraConfig, get_peft_model
+
+model_id = ...
+base_model = AutoModelForCausalLM.from_pretrained(model_id)
+lora_config_0 = LoraConfig(...)
+lora_config_1 = LoraConfig(...)
+model = get_peft_model(base_model, lora_config_0)
+model.add_adapter(adapter_name="other", peft_config=lora_config_1)
+```
+
+If we would now call:
+
+```python
+from transformers import Trainer
+
+trainer = Trainer(model=model,  ...)
+trainer.train()
+```
+
+or
+
+```python
+optimizer = torch.optim.AdamW([param for param in model.parameters() if param.requires_grad], ...)
+```
+
+then the second LoRA adapter (`"other"`) would not be trained. This is because it is inactive at this moment, which means the `requires_grad` attribute on its parameters is set to `False` and the optimizer will ignore it. Therefore, make sure to activate all adapters that should be trained _before_ initializing the optimizer:
+
+```python
+# activate all adapters
+model.base_model.set_adapter(["default", "other"])
+trainer = Trainer(model=model,  ...)
+trainer.train()
+```
+
+> [!TIP]
+> This section deals with using multiple adapters _of the same type_ on the same model, for example, using multiple LoRA adapters at the same time. It does not apply to using _different types_ of adapters on the same model, for example one LoRA adapter and one LoHa adapter. For this, please check [`PeftMixedModel`](https://huggingface.co/docs/peft/developer_guides/mixed_models).

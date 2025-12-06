@@ -47,7 +47,7 @@ def _create_and_save_adapter(out_dir: Path, rank: int = 4):
     """Helper: build a LoRA adapter around `model` and save into `out_dir`."""
     # fan_in_fan_out is set to True because of GPT2 model that we use to avoid warning
     cfg = LoraConfig(r=rank, target_modules=["c_attn"], fan_in_fan_out=True, init_lora_weights=False)
-    model_id = "hf-internal-testing/tiny-random-gpt2"
+    model_id = "peft-internal-testing/tiny-random-gpt2"
     with hub_online_once(model_id):
         model = AutoModelForCausalLM.from_pretrained(model_id)
     peft_model = get_peft_model(model, cfg)
@@ -86,7 +86,7 @@ class TestArrowRouting:
         _create_and_save_adapter(sub_r4, rank=4)
         _create_and_save_adapter(sub_r8, rank=8)
 
-        model_id = "hf-internal-testing/tiny-random-gpt2"
+        model_id = "peft-internal-testing/tiny-random-gpt2"
         with hub_online_once(model_id):
             base = AutoModelForCausalLM.from_pretrained(model_id)
 
@@ -103,7 +103,7 @@ class TestArrowRouting:
         Arrow with 2 experts vs Arrow with 3 experts must produce different logits.
         """
         # Arrow over first 2 experts
-        model_id = "hf-internal-testing/tiny-random-gpt2"
+        model_id = "peft-internal-testing/tiny-random-gpt2"
         with hub_online_once(model_id):
             base_model_1 = AutoModelForCausalLM.from_pretrained(model_id)
             base_model_2 = copy.deepcopy(base_model_1)
@@ -131,7 +131,7 @@ class TestArrowRouting:
         experts at once in create_arrow_model(), when forward path is called before adding the new adapter.
         """
         # Arrow over all three experts
-        model_id = "hf-internal-testing/tiny-random-gpt2"
+        model_id = "peft-internal-testing/tiny-random-gpt2"
         with hub_online_once(model_id):
             base_model_1 = AutoModelForCausalLM.from_pretrained(model_id)
             base_model_2 = copy.deepcopy(base_model_1)
@@ -179,7 +179,7 @@ class TestArrowRouting:
         to the case where arrow_router is activate, and the model's using arrow.
         """
         # Arrow over all three experts
-        model_id = "hf-internal-testing/tiny-random-gpt2"
+        model_id = "peft-internal-testing/tiny-random-gpt2"
         with hub_online_once(model_id):
             base_model_1 = AutoModelForCausalLM.from_pretrained(model_id)
             base_model_2 = copy.deepcopy(base_model_1)
@@ -222,7 +222,7 @@ class TestArrowRouting:
         experts at once in create_arrow_model()
         """
         # Arrow over all three experts
-        model_id = "hf-internal-testing/tiny-random-gpt2"
+        model_id = "peft-internal-testing/tiny-random-gpt2"
         with hub_online_once(model_id):
             base_model_1 = AutoModelForCausalLM.from_pretrained(model_id)
             base_model_2 = copy.deepcopy(base_model_1)
@@ -258,7 +258,7 @@ class TestArrowRouting:
         Arrow+GenKnowSub vs plain Arrow must change logits.
         """
         # Plain Arrow
-        model_id = "hf-internal-testing/tiny-random-gpt2"
+        model_id = "peft-internal-testing/tiny-random-gpt2"
         with hub_online_once(model_id):
             base_model_1 = AutoModelForCausalLM.from_pretrained(model_id)
             base_model_2 = copy.deepcopy(base_model_1)
@@ -286,7 +286,7 @@ class TestArrowRouting:
         Merging/unmerging is not allowed while an ArrowLinearLayer is loaded on the model and active.
         """
         # Arrow over first 2 experts
-        model_id = "hf-internal-testing/tiny-random-gpt2"
+        model_id = "peft-internal-testing/tiny-random-gpt2"
         with hub_online_once(model_id):
             base_model = AutoModelForCausalLM.from_pretrained(model_id)
         cfg_small = ArrowConfig(top_k=2)
@@ -305,7 +305,7 @@ class TestArrowRouting:
         targets.
         """
 
-        model_id = "hf-internal-testing/tiny-random-ResNetForImageClassification"
+        model_id = "peft-internal-testing/tiny-random-ResNetForImageClassification"
         with hub_online_once(model_id):
             base = AutoModelForImageClassification.from_pretrained(model_id)
 
@@ -339,11 +339,11 @@ class TestArrowRouting:
         if platform.system() == "Darwin":
             pytest.skip(reason="MacOS does not support multiple ops in float16")
 
-        model_id = "hf-internal-testing/tiny-random-gpt2"
+        model_id = "peft-internal-testing/tiny-random-gpt2"
 
         # Create base in fp16 (no manual assignment to .dtype)
         with hub_online_once(model_id):
-            base = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float16)
+            base = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch.float16)
 
         cfg = ArrowConfig(top_k=2)
 
@@ -353,7 +353,7 @@ class TestArrowRouting:
             task_specific_adapter_paths=ts_adapters,
             arrow_config=cfg,
             autocast_adapter_dtype=False,
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
         ).eval()
 
         X = {
@@ -376,7 +376,7 @@ class TestArrowRouting:
         Repeated calls to forward should not recompute prototypes. We verify by spying on
         ArrowLoraLinearLayer.top_right_singular_vec_from_BA(), which is only called when prototypes are (re)built.
         """
-        model_id = "hf-internal-testing/tiny-random-gpt2"
+        model_id = "peft-internal-testing/tiny-random-gpt2"
         with hub_online_once(model_id):
             base = AutoModelForCausalLM.from_pretrained(model_id)
 
@@ -417,7 +417,7 @@ def test_training_updates_when_task_adapter_active(ts_adapters):
     Ensure a simple training step works: compute a dummy loss, backward, and take an optimizer step. Verify that
     task-adapter parameters update.
     """
-    model_id = "hf-internal-testing/tiny-random-gpt2"
+    model_id = "peft-internal-testing/tiny-random-gpt2"
     with hub_online_once(model_id):
         base = AutoModelForCausalLM.from_pretrained(model_id)
 

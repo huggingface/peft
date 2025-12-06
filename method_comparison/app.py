@@ -33,6 +33,8 @@ metric_preferences = {
     "file_size": "lower",
     "test_accuracy": "higher",
     "train_loss": "lower",
+    "num_trainable_params": "lower",
+    "forgetting*": "lower",
 }
 
 
@@ -229,6 +231,11 @@ def build_app(df):
             )
             apply_filter_button = gr.Button("Apply Filter")
             reset_filter_button = gr.Button("Reset Filter")
+
+        gr.Markdown(
+            "*forgetting: This is the reduction in CE loss on a sample of Wikipedia data and reflects how much the "
+            "model 'forgot' during training. The lower the number, the better."
+        )
 
         gr.Markdown("## Pareto plot")
         gr.Markdown(

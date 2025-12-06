@@ -39,7 +39,10 @@ def train_model(
     hf_token = os.getenv("HF_TOKEN")
 
     # Setup device
-    device = torch.device(device)
+    if device == "auto":
+        device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
+    else:
+        device = torch.device(device)
     print(f"Using device: {device}")
 
     # load tokenizer
@@ -47,14 +50,16 @@ def train_model(
 
     # QDoRA (quantized dora): IF YOU WANNA QUANTIZE THE MODEL
     if quantize:
+        if (torch.cuda.is_available() and torch.cuda.is_bf16_supported()) or torch.xpu.is_available():
+            bnb_4bit_compute_dtype = torch.bfloat16
+        else:
+            bnb_4bit_compute_dtype = torch.float16
         model = AutoModelForCausalLM.from_pretrained(
             base_model,
             token=hf_token,
             quantization_config=BitsAndBytesConfig(
                 load_in_4bit=True,
-                bnb_4bit_compute_dtype=(
-                    torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
-                ),
+                bnb_4bit_compute_dtype=bnb_4bit_compute_dtype,
                 bnb_4bit_use_double_quant=True,
                 bnb_4bit_quant_type="nf4",
             ),
@@ -117,8 +122,11 @@ def train_model(
         hub_token=hf_token,
     )
 
-    # Clear CUDA cache to free memory
-    torch.cuda.empty_cache()
+    # Clear device cache to free memory
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    elif torch.xpu.is_available():
+        torch.xpu.empty_cache()
 
     # Initialize the Trainer
     trainer = Trainer(
@@ -162,7 +170,7 @@ if __name__ == "__main__":
     parser.add_argument("--quantize", action="store_true", help="Use quantization")
     parser.add_argument("--eval_step", type=int, default=10, help="Evaluation step interval")
     parser.add_argument("--save_step", type=int, default=100, help="Save step interval")
-    parser.add_argument("--device", type=str, default="cuda:0", help="Device to use for training")
+    parser.add_argument("--device", type=str, default="auto", help="Device to use for training")
     parser.add_argument("--lora_r", type=int, default=8, help="LoRA rank")
     parser.add_argument("--lora_alpha", type=int, default=16, help="LoRA alpha")
     parser.add_argument("--lora_dropout", type=float, default=0.05, help="LoRA dropout rate")

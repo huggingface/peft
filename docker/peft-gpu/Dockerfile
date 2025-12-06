@@ -38,31 +38,33 @@ RUN apt-get update && \
 
 RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
-RUN source activate peft && \ 
-    python3 -m pip install --no-cache-dir bitsandbytes optimum auto-gptq && \
+
+RUN conda run -n peft pip install --no-cache-dir bitsandbytes optimum auto-gptq
+
+RUN \
     # Add autoawq for quantization testing
-    python3 -m pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ/releases/download/v0.2.7.post2/autoawq-0.2.7.post2-py3-none-any.whl && \
-    python3 -m pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ_kernels/releases/download/v0.0.9/autoawq_kernels-0.0.9-cp311-cp311-linux_x86_64.whl && \
-    # Add eetq for quantization testing
-    python3 -m pip install git+https://github.com/NetEase-FuXi/EETQ.git
+    conda run -n peft pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ/releases/download/v0.2.7.post2/autoawq-0.2.7.post2-py3-none-any.whl && \
+    conda run -n peft pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ_kernels/releases/download/v0.0.9/autoawq_kernels-0.0.9-cp311-cp311-linux_x86_64.whl && \
+    # Add eetq for quantization testing; needs to run without build isolation since the setup
+    # script directly imports torch from the environment which would fail with isolation.
+    conda run -n peft pip install --no-build-isolation git+https://github.com/NetEase-FuXi/EETQ.git
 
 # Activate the conda env and install transformers + accelerate from source
-RUN source activate peft && \
-    python3 -m pip install -U --no-cache-dir \
-    librosa \
-    "soundfile>=0.12.1" \
-    scipy \
-    torchao \
-    git+https://github.com/huggingface/transformers \
-    git+https://github.com/huggingface/accelerate \
-    peft[test]@git+https://github.com/huggingface/peft \
-    # Add aqlm for quantization testing
-    aqlm[gpu]>=1.0.2 \
-    # Add HQQ for quantization testing
-    hqq
+RUN conda run -n peft pip install -U --no-cache-dir \
+        librosa \
+        "soundfile>=0.12.1" \
+        scipy \
+        torchao \
+        fbgemm-gpu-genai>=1.2.0 \
+        git+https://github.com/huggingface/transformers \
+        git+https://github.com/huggingface/accelerate \
+        peft[test]@git+https://github.com/huggingface/peft \
+        # Add aqlm for quantization testing
+        aqlm[gpu]>=1.0.2 \
+        # Add HQQ for quantization testing
+        hqq
 
-RUN source activate peft && \
-    pip freeze | grep transformers
+RUN conda run -n peft pip freeze | grep transformers
 
 RUN echo "source activate peft" >> ~/.profile
 

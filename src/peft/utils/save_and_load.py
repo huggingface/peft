@@ -58,7 +58,15 @@ def get_peft_model_state_dict(
     model, state_dict=None, adapter_name="default", unwrap_compiled=False, save_embedding_layers="auto"
 ):
     """
-    Get the state dict of the Peft model.
+    Get the state dict of the given adapter of the PEFT model.
+
+    This only includes the PEFT parameters, not the parameters of the base model. Thus the returned `state_dict` is
+    generally small compared to the full model size. To retrieve the full `state_dict`, just call `model.state_dict()`.
+
+    Note that the adapter name is removed from the `state_dict`, as this is just an arbitrary name that can be changed
+    when loading the adapter. So e.g. if the adapter name is `'default'` and the original key is
+    `'model.q_proj.lora_A.default.weight'`, the returned key will be `'model.q_proj.lora_A.weight'`. Use this function
+    in conjunction with [`set_peft_model_state_dict`] to take care of the adapter name when loading weights.
 
     Args:
         model ([`PeftModel`]): The Peft model. When using torch.nn.DistributedDataParallel, DeepSpeed or FSDP,
@@ -73,6 +81,7 @@ def get_peft_model_state_dict(
             If `True`, save the embedding layers in addition to adapter weights. If `auto`, checks the common embedding
             layers `peft.utils.other.EMBEDDING_LAYER_NAMES` in config's `target_modules` when available. Based on it
             sets the boolean flag. This only works for 🤗 transformers models.
+
     """
     if unwrap_compiled:
         model = getattr(model, "_orig_mod", model)
@@ -316,7 +325,31 @@ def get_peft_model_state_dict(
         warnings.warn("Could not identify embedding layer(s) because the model is not a 🤗 transformers model.")
 
     # REMOVE ADAPTER NAME
-    to_return = {k.replace(f".{adapter_name}", ""): v for k, v in to_return.items()}
+    # Ensure not to replace in the middle of the key because a module happens to have the same name as the adapter.
+    pattern = re.compile(re.escape(f".{adapter_name}") + r"$")
+
+    def remove_adapter_name(key):
+        if "." not in key:
+            # nothing to do
+            return key
+
+        if key.endswith(f".{adapter_name}"):
+            # comes from an nn.Parameter, so no .weight suffix, the adapter name is directly at the end
+            return key.removesuffix(f".{adapter_name}")
+
+        # comes from an nn.Module, i.e. the adapter name is the 2nd to last element, e.g. v_proj.lora_A.default.weight
+        key, _, suffix = key.rpartition(".")  # split, e.g. v_proj.lora_A.default + weight
+
+        if (config.peft_type == PeftType.VBLORA) and suffix.startswith(f"{adapter_name}_"):
+            # special case: VBLoRA creates keys that require this replacement:
+            # base_model.model.lin0.vblora_logits_A.default_topk_indices =>
+            # base_model.model.lin0.vblora_logits_A_topk_indices
+            return key + "_" + suffix.removeprefix(f"{adapter_name}_")
+
+        key = pattern.sub("", key)  # remove adapter name, e.g. v_proj.lora_A
+        return f"{key}.{suffix}"  # stitch the suffix back, e.g, v_proj.lora_A.weight
+
+    to_return = {remove_adapter_name(k): v for k, v in to_return.items()}
     return to_return
 
 
@@ -355,10 +388,12 @@ def _insert_adapter_name_into_state_dict(
     peft_model_state_dict = {}
     for key, val in state_dict.items():
         if parameter_prefix in key:
-            suffix = key.split(parameter_prefix)[1]
+            _, _, suffix = key.rpartition(parameter_prefix)
             if "." in suffix:
                 suffix_to_replace = ".".join(suffix.split(".")[1:])
-                key = key.replace(suffix_to_replace, f"{adapter_name}.{suffix_to_replace}")
+                # only replace the substring if the key ends on the substring to avoid accidental replacement inside of
+                # the key if a module happens to have a name that contains the substring
+                key = re.sub(re.escape(suffix_to_replace) + r"$", f"{adapter_name}.{suffix_to_replace}", key)
             else:
                 key = f"{key}.{adapter_name}"
             peft_model_state_dict[key] = val
@@ -373,9 +408,15 @@ def set_peft_model_state_dict(
     adapter_name="default",
     ignore_mismatched_sizes: bool = False,
     low_cpu_mem_usage: bool = False,
-):
+) -> None:
     """
-    Set the state dict of the Peft model.
+    Set the state dict of the PEFT model.
+
+    Given a PEFT `state_dict` (as returned by [`get_peft_model_state_dict`]), insert the weights into the model. The
+    model needs to have the PEFT adapters already in place (e.g. via [`inject_adapter_in_model`]).
+
+    Setting the adapter weights also takes care of re-inserting the adapter name. This name may be a different name
+    than the one originally used to train the adapter.
 
     Args:
         model ([`PeftModel`]):

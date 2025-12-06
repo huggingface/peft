@@ -23,7 +23,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import LoraConfig, PeftType, TaskType, XLoraConfig, get_peft_model
 from peft.peft_model import PeftModel
+from peft.tuners.xlora.layer import XLoraLayer
 from peft.utils import infer_device
+
+from .testing_utils import hub_online_once
 
 
 def flaky(num_tries: int):
@@ -48,7 +51,7 @@ def flaky(num_tries: int):
 class TestXlora:
     torch_device = infer_device()
 
-    model_id = "facebook/opt-125m"
+    model_id = "peft-internal-testing/opt-125m"
     num_loras = 4
 
     @pytest.fixture(scope="class")
@@ -353,7 +356,7 @@ class TestXlora:
         # This test also simulatenously tests the loading-from-hub functionality!
         torch.manual_seed(123)
 
-        model_id = "facebook/opt-125m"
+        model_id = "peft-internal-testing/opt-125m"
         model = AutoModelForCausalLM.from_pretrained(model_id)
         model.config.use_cache = False
 
@@ -381,3 +384,90 @@ class TestXlora:
         w1 = sd["base_model.model.model.decoder.layers.0.self_attn.q_proj.lora_A.weight"]
 
         assert torch.allclose(w0, w1)
+
+    def test_scalings_storage(self, tokenizer, model):
+        model.enable_scalings_logging()
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        outputs = model.generate(
+            input_ids=inputs.to(self.torch_device),
+            max_new_tokens=10,
+        )
+
+        latest_scalings = model.get_latest_scalings()
+        assert latest_scalings is not None, "get_latest_scalings() should not return None after generation"
+        assert isinstance(latest_scalings, torch.Tensor)
+        assert torch.isfinite(latest_scalings).all(), "Scalings should contain finite values"
+
+    def test_per_token_normalization_with_softmax_topk(self, tokenizer, model, monkeypatch):
+        model.internal_xlora_classifier.config.top_k_lora = 2
+        model.internal_xlora_classifier.config.enable_softmax = False
+        model.internal_xlora_classifier.config.enable_softmax_topk = True
+
+        captured_data = []
+        orig_get_maybe_topk_scalings = XLoraLayer.get_maybe_topk_scalings
+
+        def mock_get_maybe_topk_scalings(self, scalings):
+            result = orig_get_maybe_topk_scalings(self, scalings)
+            if getattr(model, "internal_xlora_scalings", None) is not None:
+                captured_data.append(result)
+            return result
+
+        monkeypatch.setattr(XLoraLayer, "get_maybe_topk_scalings", mock_get_maybe_topk_scalings)
+
+        model.enable_scalings_logging()
+        inputs = tokenizer.encode("Test per token normalization", add_special_tokens=False, return_tensors="pt")
+        outputs = model.generate(
+            input_ids=inputs.to(self.torch_device),
+            max_new_tokens=1,
+        )
+
+        for scaling in captured_data:
+            weight_sums = scaling.sum(dim=-1)
+            assert torch.allclose(weight_sums, torch.ones_like(weight_sums), atol=1e-5), (
+                "Per-token scaling weights are not normalized to sum to 1."
+            )
+
+    def test_xlora_embed_scale_is_applied(self, tmp_path):
+        """Test that X-LoRA correctly handles embeddings with scaling (e.g., Gemma3)."""
+        model_id = "hf-internal-testing/tiny-random-Gemma3ForCausalLM"
+        with hub_online_once(model_id):
+            # Create and save Gemma3-compatible LoRA adapters
+            adapters = {}
+            for i in range(2):
+                torch.manual_seed(i + 1)
+                lora_config = LoraConfig(
+                    task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["embed_tokens"]
+                )
+                model = AutoModelForCausalLM.from_pretrained(model_id)
+                peft_model = get_peft_model(model, lora_config)
+                adapter_path = os.path.join(tmp_path, f"checkpoint-{i + 1}")
+                peft_model.save_pretrained(adapter_path)
+                adapters[str(i)] = adapter_path
+
+            # Load base model and test X-LoRA with embed_scale
+            base_model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
+            base_model.config.use_cache = False
+            orig_embedding = base_model.get_input_embeddings()
+
+            xlora_config = XLoraConfig(
+                task_type=TaskType.CAUSAL_LM,
+                hidden_size=base_model.config.hidden_size,
+                adapters=adapters,
+            )
+            xlora_model = get_peft_model(base_model, xlora_config)
+
+            x = torch.arange(10).to(self.torch_device)
+            xlora_embedding = xlora_model.base_model.model.get_input_embeddings()
+            max_embedding_output = xlora_embedding(x).abs().max(0)[0]
+            assert (max_embedding_output < 100.0).all()
+
+            # set embed_scale to an absurdly high value, then check that the embedding output is also scaled to a high
+            # value
+            orig_embedding.embed_scale.fill_(10000.0)
+            max_embedding_output = xlora_embedding(x).abs().max(0)[0]
+            assert (max_embedding_output > 100.0).all()
+
+            # set embed_scale to zero, then check that the embedding output is also zero
+            orig_embedding.embed_scale.fill_(0)
+            embedding_output = xlora_embedding(x)
+            assert (embedding_output == 0.0).all()

@@ -13,7 +13,8 @@
 # limitations under the License.
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -73,10 +74,12 @@ class XLoraLayer:
 
             xlora_scalings = xlora_scalings * mask.to(xlora_scalings.dtype)
 
+        # Apply per-token normalization to the xLoRA scaling factors using a softmax
         if self.config.enable_softmax_topk:
             nonzero_mask = xlora_scalings != 0
-            softmax_res_nonzero = torch.softmax(xlora_scalings[nonzero_mask], dim=-1)
-            xlora_scalings[nonzero_mask] = softmax_res_nonzero
+            full = xlora_scalings.masked_fill(~nonzero_mask, float("-inf"))
+            new_scalings = torch.softmax(full, dim=-1)
+            xlora_scalings = new_scalings.masked_fill(~nonzero_mask, 0.0)
 
         return xlora_scalings
 
@@ -151,6 +154,10 @@ class XLoraEmbeddingLayer(XLoraLayer):
 
         result = self.target.base_layer(x, *args, **kwargs)
 
+        # Some embedding layers (e.g., Gemma3TextScaledWordEmbedding) apply scaling in their forward method.
+        # Since base_layer(x) already includes this scaling, we need to apply it to X-LoRA contributions too.
+        embed_scale = self.target._get_embed_scale()
+
         # Ignore if disabled. We want to make sure this is always run.
         if not self.target.merged:
             for adapter_n, active_adapter in enumerate(self.target.active_adapters):
@@ -169,7 +176,14 @@ class XLoraEmbeddingLayer(XLoraLayer):
                 else:
                     after_A_mod = after_A
                     scaling_weight = 1
-                result += (after_A_mod @ embedding_B) * scaling * scaling_weight
+
+                adapter_output = (after_A_mod @ embedding_B) * scaling * scaling_weight
+
+                # Apply embed_scale to match the base layer's scaling
+                if embed_scale is not None:
+                    adapter_output = adapter_output * embed_scale.to(adapter_output.dtype)
+
+                result += adapter_output
 
         return result
 

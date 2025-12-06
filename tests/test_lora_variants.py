@@ -15,8 +15,9 @@
 import pytest
 import torch
 from torch import nn
+from transformers import AutoModelForCausalLM
 
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, TaskType, get_peft_model
 from peft.tuners.lora.layer import Conv1d as LoraConv1d
 from peft.tuners.lora.layer import Conv2d as LoraConv2d
 from peft.tuners.lora.layer import Embedding as LoraEmbedding
@@ -31,6 +32,8 @@ from peft.tuners.lora.variants import (
     get_alora_offsets_for_forward,
     get_alora_offsets_for_generate,
 )
+
+from .testing_common import hub_online_once
 
 
 # Custom model featuring embeddings and a 'visual stack'
@@ -73,6 +76,9 @@ class DummyLM(nn.Module):
         self.embed = nn.Embedding(vocab_size, hidden_dim)
         self.linear = nn.Linear(hidden_dim, vocab_size)
 
+    def prepare_inputs_for_generation(self, *args, **kwargs):
+        return kwargs
+
     def forward(self, X=None, embeds=None, num_beams=None, alora_offsets=None):
         if X is not None:
             embeds = self.embed(X)
@@ -91,9 +97,9 @@ class MockTransformerWrapper:
         # set the seed so that from_pretrained always returns the same model
         torch.manual_seed(0)
 
-        torch_dtype = torch.float32
+        dtype = torch.float32
 
-        return DummyLM().to(torch_dtype)
+        return DummyLM().to(dtype)
 
 
 VARIANT_MAP = {
@@ -181,7 +187,7 @@ class TestActivatedLora:
     )
     # Verify alora_offsets are calculated correctly
     def test_calculate_alora_offsets(self, input_ids, alora_invocation_tokens, expected_offsets):
-        config = LoraConfig(alora_invocation_tokens=alora_invocation_tokens)
+        config = LoraConfig(task_type=TaskType.CAUSAL_LM, alora_invocation_tokens=alora_invocation_tokens)
         peft_config = {"default": config}
 
         # compute offsets
@@ -233,7 +239,12 @@ class TestActivatedLora:
     def test_input_embeds_warning(self):
         transformers_class = MockTransformerWrapper
         base_model = transformers_class.from_pretrained()
-        cfg = LoraConfig(target_modules=["linear"], alora_invocation_tokens=[2], init_lora_weights=False)
+        cfg = LoraConfig(
+            task_type=TaskType.CAUSAL_LM,
+            target_modules=["linear"],
+            alora_invocation_tokens=[2],
+            init_lora_weights=False,
+        )
         lora_model = get_peft_model(base_model, cfg)
         lora_model.eval()
 
@@ -265,3 +276,41 @@ class TestActivatedLora:
             with torch.no_grad():
                 lora_out = lora_model(X=input_ids, num_beams=2, alora_offsets=[3])
         assert "Beam search not yet supported for aLoRA." in str(e.value)
+
+    def test_gradient_checkpointing_double_forward_raises(self):
+        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+
+        with hub_online_once(model_id):
+            base_model = AutoModelForCausalLM.from_pretrained(model_id)
+            cfg = LoraConfig(task_type=TaskType.CAUSAL_LM, target_modules="all-linear", alora_invocation_tokens=[0])
+            lora_model = get_peft_model(base_model, cfg)
+            lora_model.train()
+
+            lora_model.prepare_model_for_gradient_checkpointing(lora_model)
+            lora_model.gradient_checkpointing_enable()
+
+            inputs = {"input_ids": torch.tensor([[0, 1, 2, 3]])}
+
+            lora_model.forward(**inputs)
+
+            with pytest.raises(ValueError, match="Multiple invocations of PEFT forward hooks.*"):
+                lora_model.forward(**inputs)
+
+    def test_gradient_checkpointing_dpo_doesnt_raise(self):
+        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+
+        with hub_online_once(model_id):
+            base_model = AutoModelForCausalLM.from_pretrained(model_id)
+            cfg = LoraConfig(task_type=TaskType.CAUSAL_LM, target_modules="all-linear", alora_invocation_tokens=[0])
+            lora_model = get_peft_model(base_model, cfg)
+            lora_model.train()
+
+            lora_model.prepare_model_for_gradient_checkpointing(lora_model)
+            lora_model.gradient_checkpointing_enable()
+
+            inputs = {"input_ids": torch.tensor([[0, 1, 2, 3]])}
+
+            with lora_model.disable_adapter():
+                lora_model.forward(**inputs)
+
+            lora_model.forward(**inputs)

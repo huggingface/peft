@@ -19,6 +19,7 @@ import copy
 import inspect
 import os
 import warnings
+from collections.abc import Sequence
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass
@@ -40,9 +41,10 @@ from transformers.utils import PushToHubMixin
 
 from peft.tuners.lora.variants import get_alora_offsets_for_forward, get_alora_offsets_for_generate
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
+from peft.utils import AuxiliaryTrainingWrapper
 from peft.utils.constants import DUMMY_MODEL_CONFIG
 from peft.utils.integrations import init_empty_weights
-from peft.utils.other import create_attention_mask, set_additional_trainable_modules
+from peft.utils.other import TrainableTokensWrapper, create_attention_mask, set_additional_trainable_modules
 
 from . import __version__
 from .config import PeftConfig
@@ -82,11 +84,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
             Create empty adapter weights on meta device. Useful to speed up the loading loading process.
 
-            <Tip>
-
-            Don't use `low_cpu_mem_usage=True` when creating a new PEFT adapter for training.
-
-            </Tip>
+            > [!TIP] > Don't use `low_cpu_mem_usage=True` when creating a new PEFT adapter for training.
 
     **Attributes**:
         - **base_model** ([`torch.nn.Module`]) -- The base transformer model used for Peft.
@@ -144,6 +142,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if hasattr(self.base_model, "config") and hasattr(self.base_model.config, "pretraining_tp"):
             self.base_model.config.pretraining_tp = 1
 
+        self._adapters_disabled = False
+
     @property
     def peft_config(self) -> dict[str, PeftConfig]:
         if self._is_prompt_learning:
@@ -168,6 +168,17 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if isinstance(adapters, str):
                 adapters = [adapters]
         return adapters
+
+    @property
+    def has_active_enabled_adapter(self) -> bool:
+        """Reflects whether the adapters are purposefully disabled (via disable_adapter) or if there
+        are no active adapters (enabled but inactive). They are two separate mechanisms but sometimes it is helpful to
+        know whether the model has any active/enabled adapter at all.
+        """
+        if self.peft_config[self.active_adapter].is_prompt_learning:
+            return not self._adapters_disabled
+
+        return not self._adapters_disabled or not self.active_adapters
 
     @peft_config.setter
     def peft_config(self, value: dict[str, PeftConfig]):
@@ -437,16 +448,17 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         # load the config
         if config is None:
-            config = PEFT_TYPE_TO_CONFIG_MAPPING[
-                PeftConfig._get_peft_type(
-                    model_id,
-                    subfolder=kwargs.get("subfolder", None),
-                    revision=kwargs.get("revision", None),
-                    cache_dir=kwargs.get("cache_dir", None),
-                    use_auth_token=kwargs.get("use_auth_token", None),
-                    token=kwargs.get("token", None),
-                )
-            ].from_pretrained(model_id, **kwargs)
+            hf_kwargs = {
+                "subfolder": kwargs.get("subfolder", None),
+                "revision": kwargs.get("revision", None),
+                "cache_dir": kwargs.get("cache_dir", None),
+                "token": kwargs.get("token", None),
+            }
+            if use_auth_token := kwargs.get("use_auth_token", None):
+                hf_kwargs["use_auth_token"] = use_auth_token
+            config = PEFT_TYPE_TO_CONFIG_MAPPING[PeftConfig._get_peft_type(model_id, **hf_kwargs)].from_pretrained(
+                model_id, **kwargs
+            )
         elif isinstance(config, PeftConfig):
             config.inference_mode = not is_trainable
         else:
@@ -578,10 +590,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
             prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(config.peft_type)
             if prefix and adapter_name in prefix:
-                warn_message += (
-                    f"Adapter name {adapter_name} should not be contained in the prefix {prefix}."
-                    "This could be the potential reason for missing adapter keys."
-                )
+                warn_message = (
+                    f"Adapter name '{adapter_name}' should not be contained in the prefix '{prefix}'. "
+                    "This could be the potential reason for missing adapter keys. "
+                ) + warn_message
 
             warnings.warn(warn_message)
 
@@ -891,7 +903,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     def _enable_peft_forward_hooks(self, *args, **kwargs):
         # If the base model has a method called _enable_peft_forward_hooks, it is invoked as a context. Otherwise, this
         # runs without any changes
-        if hasattr(self.base_model, "_enable_peft_forward_hooks"):
+        if hasattr(self.base_model, "_enable_peft_forward_hooks") and self.has_active_enabled_adapter:
             with self.base_model._enable_peft_forward_hooks(*args, **kwargs):
                 yield
             return
@@ -941,17 +953,21 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self.forward = self.base_model.forward
                 old_prepare_inputs_for_generation = self.prepare_inputs_for_generation
                 self.prepare_inputs_for_generation = self.base_model.prepare_inputs_for_generation
+                self._adapters_disabled = True
                 yield
             finally:
                 self.forward = old_forward
                 self.prepare_inputs_for_generation = old_prepare_inputs_for_generation
+                self._adapters_disabled = False
 
         elif self.peft_config[self.active_adapter].is_adaption_prompt:
             try:
                 self.base_model.disable_adapter_layers()
+                self._adapters_disabled = True
                 yield
             finally:
                 self.base_model.enable_adapter_layers()
+                self._adapters_disabled = False
 
         else:  # LoRA, LoHa, etc.
             model_status = self.get_model_status()
@@ -963,11 +979,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 )
             try:
                 self.base_model.disable_adapter_layers()
+                self._adapters_disabled = True
                 yield
             finally:
                 if model_status.enabled is not False:
                     # model_status.enabled is `True` or `"irregular"`
                     self.base_model.enable_adapter_layers()
+                self._adapters_disabled = False
 
     def get_base_model(self) -> torch.nn.Module:
         """
@@ -999,7 +1017,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(peft_config.peft_type)
         if prefix and adapter_name in prefix:
             warnings.warn(
-                f"Adapter name {adapter_name} should not be contained in the prefix {prefix}."
+                f"Adapter name '{adapter_name}' should not be contained in the prefix '{prefix}'. "
                 "This may lead to reinitialization of the adapter weights during loading."
             )
 
@@ -1459,6 +1477,26 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         else:
             # handle auxiliary modules
             _set_adapter(self, adapter_name)
+
+    def set_requires_grad(self, adapter_names: str | Sequence[str], requires_grad: bool = True) -> None:
+        """
+        Enable or disable gradients on the given adapter(s).
+
+        Note: Not supported for prompt learning methods like prompt tuning.
+
+        Args:
+            adapter_name (`str` or `Sequence[str]`):
+                The name of the adapter(s) whose gradients should be enabled/disabled.
+            requires_grad (`bool`, *optional*)
+                Whether to enable (`True`, default) or disable (`False`).
+        """
+        if self.active_peft_config.is_prompt_learning:
+            raise TypeError(
+                "Setting `requires_grad` is not supported for prompt learning methods like "
+                f"{self.active_peft_config.peft_type.value}."
+            )
+
+        self.base_model.set_requires_grad(adapter_names=adapter_names, requires_grad=requires_grad)
 
     @property
     def base_model_torch_dtype(self):
@@ -3047,7 +3085,11 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
 
     layer_status: list[TunerLayerStatus] = []
     for name, module in base_model.named_modules():
-        if not isinstance(module, BaseTunerLayer):
+        if not isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
+            continue
+        if isinstance(module, TrainableTokensWrapper):
+            # Skip TrainableTokensWrapper, since it wraps TrainableTokensLayer, which is the actual PEFT layer we're
+            # interested in.
             continue
 
         # determine if all submodules/parameters if this module require grad or not

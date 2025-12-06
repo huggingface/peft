@@ -11,7 +11,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import SFTConfig, SFTTrainer
 from datasets import load_dataset
 
-model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf", torch_dtype=torch.bfloat16, device_map="auto")
+model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf", dtype=torch.bfloat16, device_map="auto")
 tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf")
 tokenizer.pad_token_id = tokenizer.eos_token_id
 
@@ -36,7 +36,7 @@ peft_model.print_trainable_parameters()
 
 dataset = load_dataset("imdb", split="train[:1%]")
 
-training_args = SFTConfig(dataset_text_field="text", max_seq_length=128)
+training_args = SFTConfig(dataset_text_field="text", max_length=128)
 trainer = SFTTrainer(
     model=peft_model,
     args=training_args,
@@ -55,7 +55,7 @@ from peft import PeftModel
 from transformers import AutoModelForCausalLM
 
 model = AutoModelForCausalLM.from_pretrained(
-    "meta-llama/Llama-2-7b-hf", torch_dtype=torch.bfloat16, device_map="auto"
+    "meta-llama/Llama-2-7b-hf", dtype=torch.bfloat16, device_map="auto"
 )
 peft_model = PeftModel.from_pretrained(model, "miss-llama-2-7b")
 ```

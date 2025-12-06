@@ -368,6 +368,8 @@ class XLoraModel(BaseTuner):
                     self.lora_model.enable_adapter_layers()
 
             xlora_scalings = self.internal_xlora_classifier(result=base_output, *args_real, **kwargs_real)
+            # Store computed scalings to fix get_latest_scalings() returning None
+            self.internal_xlora_scalings = xlora_scalings
 
             # =========================== Real forward pass with calculated scalings ==================
 

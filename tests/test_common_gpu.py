@@ -527,7 +527,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         quantization_config = GPTQConfig(bits=4, use_exllama=False)
         kwargs = {
             "pretrained_model_name_or_path": model_id,
-            "torch_dtype": torch.float16,
+            "dtype": torch.float16,
             "device_map": "auto",
             "quantization_config": quantization_config,
         }
@@ -850,7 +850,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         model = LlamaForCausalLM.from_pretrained(
             "trl-internal-testing/tiny-random-LlamaForCausalLM",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
             device_map="auto",
         )
 
@@ -873,7 +873,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         model = LlamaForCausalLM.from_pretrained(
             "trl-internal-testing/tiny-random-LlamaForCausalLM",
             quantization_config=BitsAndBytesConfig(load_in_4bit=True),
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
             device_map="auto",
         )
 
@@ -897,7 +897,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         EXPECTED_ALL_PARAMS = 125534208
 
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_4bit=True),
         )
 
@@ -917,7 +917,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         )
 
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
         )
 
@@ -939,7 +939,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         model = AutoModelForSequenceClassification.from_pretrained(
             model_id,
             quantization_config=BitsAndBytesConfig(load_in_4bit=True),
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         )
 
         model = prepare_model_for_kbit_training(model)
@@ -972,7 +972,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     def test_8bit_merge_lora(self):
         torch.manual_seed(1000)
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
         )
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
@@ -1005,7 +1005,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     def test_8bit_merge_and_disable_lora(self):
         torch.manual_seed(1000)
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
         )
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
@@ -1040,9 +1040,9 @@ class PeftGPUCommonTests(unittest.TestCase):
     @require_bitsandbytes
     def test_8bit_merge_lora_with_bias(self):
         # same as test_8bit_merge_lora but with lora_bias=True
-        torch.manual_seed(1000)
+        torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
         )
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
@@ -1078,9 +1078,9 @@ class PeftGPUCommonTests(unittest.TestCase):
             bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         )
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
         # compare outputs in probability space, because logits can have outliers
@@ -1120,9 +1120,9 @@ class PeftGPUCommonTests(unittest.TestCase):
             bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         )
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
         # compare outputs in probability space, because logits can have outliers
@@ -1163,9 +1163,9 @@ class PeftGPUCommonTests(unittest.TestCase):
             bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         )
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
         # compare outputs in probability space, because logits can have outliers
@@ -1204,11 +1204,11 @@ class PeftGPUCommonTests(unittest.TestCase):
             bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         ).eval()
-        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
+        tokenizer = AutoTokenizer.from_pretrained("peft-internal-testing/opt-125m")
         # input with 9 samples
         inputs = tokenizer(
             [
@@ -1272,11 +1272,11 @@ class PeftGPUCommonTests(unittest.TestCase):
         torch.manual_seed(3000)
         bnb_config = BitsAndBytesConfig(load_in_8bit=True)
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         ).eval()
-        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
+        tokenizer = AutoTokenizer.from_pretrained("peft-internal-testing/opt-125m")
         # input with 9 samples
         inputs = tokenizer(
             [
@@ -1357,9 +1357,9 @@ class PeftGPUCommonTests(unittest.TestCase):
             bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         )
 
         torch.manual_seed(0)
@@ -1370,9 +1370,9 @@ class PeftGPUCommonTests(unittest.TestCase):
         logits_lora = model(random_input).logits
 
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         )
         torch.manual_seed(0)
         config_dora = LoraConfig(r=8, init_lora_weights=False, use_dora=True)
@@ -1392,9 +1392,9 @@ class PeftGPUCommonTests(unittest.TestCase):
     def test_8bit_dora_inference(self):
         # check for same result with and without DoRA when initializing with init_lora_weights=False
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         ).eval()
 
         torch.manual_seed(0)
@@ -1405,9 +1405,9 @@ class PeftGPUCommonTests(unittest.TestCase):
         logits_lora = model(random_input).logits
 
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         )
         torch.manual_seed(0)
         config_dora = LoraConfig(r=8, init_lora_weights=False, use_dora=True)
@@ -1434,7 +1434,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         model = AutoModelForCausalLM.from_pretrained(
             "trl-internal-testing/tiny-random-LlamaForCausalLM",
             quantization_config=bnb_config,
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         ).eval()
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
         # compare outputs in probability space, because logits can have outliers
@@ -1483,9 +1483,9 @@ class PeftGPUCommonTests(unittest.TestCase):
         # Check results for merging, unmerging, unloading
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         ).eval()
 
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
@@ -1533,8 +1533,8 @@ class PeftGPUCommonTests(unittest.TestCase):
         torch.manual_seed(0)
 
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
-            torch_dtype=torch.float32,
+            "peft-internal-testing/opt-125m",
+            dtype=torch.float32,
         ).eval()
 
         config = LoraConfig(
@@ -1585,8 +1585,8 @@ class PeftGPUCommonTests(unittest.TestCase):
         torch.manual_seed(0)
 
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
-            torch_dtype=torch.float32,
+            "peft-internal-testing/opt-125m",
+            dtype=torch.float32,
         ).eval()
 
         config = LoraConfig(
@@ -1616,9 +1616,9 @@ class PeftGPUCommonTests(unittest.TestCase):
         # Check results for merging, unmerging, unloading
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         ).eval()
 
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
@@ -1665,7 +1665,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         model = AutoModelForCausalLM.from_pretrained(
             "trl-internal-testing/tiny-random-LlamaForCausalLM",
             quantization_config=bnb_config,
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         ).eval()
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
         # compare outputs in probability space, because logits can have outliers
@@ -1704,8 +1704,8 @@ class PeftGPUCommonTests(unittest.TestCase):
     def test_apply_GS_hra_inference(self):
         # check for different result with and without apply_GS
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
-            torch_dtype=torch.float32,
+            "peft-internal-testing/opt-125m",
+            dtype=torch.float32,
         ).eval()
 
         torch.manual_seed(0)
@@ -1716,8 +1716,8 @@ class PeftGPUCommonTests(unittest.TestCase):
         logits_hra = model(random_input).logits
 
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
-            torch_dtype=torch.float32,
+            "peft-internal-testing/opt-125m",
+            dtype=torch.float32,
         )
         torch.manual_seed(0)
         config_hra_GS = HRAConfig(r=8, init_weights=True, apply_GS=True)
@@ -1758,8 +1758,8 @@ class PeftGPUCommonTests(unittest.TestCase):
         # check that an untrained HRA adapter can't be initialized as an identity tranformation
         # when r is an odd number
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
-            torch_dtype=torch.float32,
+            "peft-internal-testing/opt-125m",
+            dtype=torch.float32,
         ).eval()
 
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.17.2.dev0"
+__version__ = "0.18.1.dev0"
 
 from .auto import (
     MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
@@ -59,9 +59,13 @@ from .tuners import (
     C3AModel,
     CPTConfig,
     CPTEmbedding,
+    DeloraConfig,
+    DeloraModel,
     EvaConfig,
     FourierFTConfig,
     FourierFTModel,
+    GraloraConfig,
+    GraloraModel,
     HRAConfig,
     HRAModel,
     IA3Config,
@@ -82,6 +86,8 @@ from .tuners import (
     MultitaskPromptTuningInit,
     OFTConfig,
     OFTModel,
+    OSFConfig,
+    OSFModel,
     PolyConfig,
     PolyModel,
     PrefixEncoder,
@@ -104,6 +110,8 @@ from .tuners import (
     VBLoRAModel,
     VeraConfig,
     VeraModel,
+    WaveFTConfig,
+    WaveFTModel,
     XLoraConfig,
     XLoraModel,
     create_arrow_model,
@@ -152,9 +160,13 @@ __all__ = [
     "C3AModel",
     "CPTConfig",
     "CPTEmbedding",
+    "DeloraConfig",
+    "DeloraModel",
     "EvaConfig",
     "FourierFTConfig",
     "FourierFTModel",
+    "GraloraConfig",
+    "GraloraModel",
     "HRAConfig",
     "HRAModel",
     "IA3Config",
@@ -175,6 +187,8 @@ __all__ = [
     "MultitaskPromptTuningInit",
     "OFTConfig",
     "OFTModel",
+    "OSFConfig",
+    "OSFModel",
     "PeftConfig",
     "PeftMixedModel",
     "PeftModel",
@@ -211,6 +225,8 @@ __all__ = [
     "VBLoRAModel",
     "VeraConfig",
     "VeraModel",
+    "WaveFTConfig",
+    "WaveFTModel",
     "XLoraConfig",
     "XLoraModel",
     "bloom_model_postprocess_past_key_value",

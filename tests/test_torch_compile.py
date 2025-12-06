@@ -115,7 +115,7 @@ class TestTorchCompileCausalLM:
     """
 
     fake_compile = False
-    model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+    model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
     max_train_loss = 15.0  # generous threshold for maximum loss after training
 
     @pytest.fixture(autouse=True)

@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import copy
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -578,11 +579,36 @@ class TestTrainableTokens:
 
     @pytest.fixture()
     def model_id_weight_tied(self):
-        return "facebook/opt-125m"
+        return "peft-internal-testing/opt-125m"
 
     @pytest.fixture()
-    def model_weight_tied(self, model_id_weight_tied):
-        return AutoModelForCausalLM.from_pretrained(model_id_weight_tied)
+    def model_weight_tied(self, request, model_id_weight_tied):
+        model_weight_tied = AutoModelForCausalLM.from_pretrained(model_id_weight_tied)
+        tied_keys = model_weight_tied._tied_weights_keys
+
+        # TODO remove when transformers <5 is not supported anymore
+        if not hasattr(request, "param") or request.param == "list":
+            if isinstance(tied_keys, list):
+                # transformers <5, list is already the default
+                yield model_weight_tied
+            else:
+                # simulate transformers <5 for backward compatibility testing
+                with patch.object(model_weight_tied, "_tied_weights_keys", list(tied_keys.keys())):
+                    yield model_weight_tied
+
+        elif request.param == "mapping":
+            if isinstance(tied_keys, dict):
+                # transformers >=5, mapping is already the default
+                yield model_weight_tied
+            else:
+                # simulate transformers >=5
+                mapping = {"lm_head.weight": "model.decoder.embed_tokens.weight"}
+
+                with patch.object(model_weight_tied, "_tied_weights_keys", mapping):
+                    yield model_weight_tied
+
+        else:
+            raise RuntimeError("Invalid request")
 
     @pytest.mark.parametrize(
         "peft_config",
@@ -603,13 +629,24 @@ class TestTrainableTokens:
         assert not hasattr(peft_model.model.lm_head, "token_adapter")
 
     @pytest.mark.parametrize(
-        "peft_config",
+        "peft_config, model_weight_tied",
         [
-            LoraConfig(
-                target_modules="all-linear",
-                trainable_token_indices={"embed_tokens": [0, 1, 3]},
+            (
+                LoraConfig(
+                    target_modules="all-linear",
+                    trainable_token_indices={"embed_tokens": [0, 1, 3]},
+                ),
+                "list",
+            ),
+            (
+                LoraConfig(
+                    target_modules="all-linear",
+                    trainable_token_indices={"embed_tokens": [0, 1, 3]},
+                ),
+                "mapping",
             ),
         ],
+        indirect=["model_weight_tied"],
     )
     def test_weight_tying_applied_when_model_is_tied(self, model_weight_tied, peft_config, tmp_path):
         # test if the weight tying is affected as well when we modified the embedding.
@@ -641,6 +678,7 @@ class TestTrainableTokens:
 
         assert merged_model.model.decoder.embed_tokens.weight.data_ptr() == merged_model.lm_head.weight.data_ptr()
 
+    @pytest.mark.parametrize("model_weight_tied", ["list", "mapping"], indirect=["model_weight_tied"])
     def test_weight_tying_applied_when_model_is_tied_standalone(self, model_weight_tied):
         # since weight tying is currently not supported make sure that an error is raised when attempting
         # to use a model that has tied input/output embeddings
@@ -719,7 +757,7 @@ class TestTrainableTokens:
         ],
     )
     def test_weight_tying_applied_when_model_is_tied_encoder_decoder(self, peft_config):
-        model_id = "hf-internal-testing/tiny-random-t5"
+        model_id = "peft-internal-testing/tiny-random-t5"
         base_model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
 
         peft_model = get_peft_model(base_model, peft_config)
@@ -918,3 +956,63 @@ class TestTrainableTokens:
             assert contains_embedding
         else:
             assert not contains_embedding
+
+    def test_embed_scale_is_applied(self):
+        """Test that TrainableTokens correctly handles embeddings with scaling (e.g., Gemma3)."""
+        model_id = "hf-internal-testing/tiny-random-Gemma3ForCausalLM"
+        with hub_online_once(model_id):
+            base_model = AutoModelForCausalLM.from_pretrained(model_id)
+            orig_embedding = base_model.get_input_embeddings()
+
+            peft_config = TrainableTokensConfig(target_modules=["embed_tokens"], token_indices=[0, 1, 3])
+            peft_model = get_peft_model(base_model, peft_config)
+
+            # sanity check: with the default embed_scale, the embedding output should be reasonably sized
+            peft_embedding = peft_model.base_model.model.get_input_embeddings()
+            max_embedding_output = peft_embedding(torch.arange(10)).abs().max(0)[0]
+            assert (max_embedding_output < 100.0).all()
+
+            # set embed_scale to an absurdly high value, then check that the embedding output is also scaled to a high
+            # value
+            orig_embedding.embed_scale.fill_(10000.0)
+            max_embedding_output = peft_embedding(torch.arange(10)).abs().max(0)[0]
+            assert (max_embedding_output > 100.0).all()
+
+            # set embed_scale to zero, then check that the embedding output is also zero
+            orig_embedding.embed_scale.fill_(0)
+            embedding_output = peft_embedding(torch.arange(10))
+            assert (embedding_output == 0.0).all()
+
+    def test_scaled_embedding_with_lora(self):
+        """
+        Test that TrainableTokens works with LoRA on scaled embeddings when both are active simultaneously.
+        """
+        model_id = "hf-internal-testing/tiny-random-Gemma3ForCausalLM"
+        with hub_online_once(model_id):
+            base_model = AutoModelForCausalLM.from_pretrained(model_id)
+            orig_embedding = base_model.get_input_embeddings()
+
+            # Apply both TrainableTokens and LoRA to the same model
+            peft_config = LoraConfig(target_modules=["q_proj"], trainable_token_indices={"embed_tokens": [0, 1, 3]})
+            peft_model = get_peft_model(base_model, peft_config)
+
+            x = torch.arange(10)
+            peft_embedding = peft_model.base_model.model.get_input_embeddings()
+            embedding_output = peft_embedding(x)
+            max_embedding_output = embedding_output.abs().max(0)[0]
+            assert (max_embedding_output < 100.0).all()
+            peft_model.merge_adapter()
+            embedding_merged = peft_embedding(x)
+            assert torch.allclose(embedding_output, embedding_merged)
+            peft_model.unmerge_adapter()
+
+            # set embed_scale to an absurdly high value, then check that the embedding output is also scaled to a high
+            # value
+            orig_embedding.embed_scale.fill_(10000.0)
+            max_embedding_output = peft_embedding(x).abs().max(0)[0]
+            assert (max_embedding_output > 100.0).all()
+
+            # set embed_scale to zero, then check that the embedding output is also zero
+            orig_embedding.embed_scale.fill_(0)
+            embedding_output = peft_embedding(x)
+            assert (embedding_output == 0.0).all()

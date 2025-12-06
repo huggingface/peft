@@ -21,12 +21,11 @@ from typing import Any, Optional, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from packaging import version
 from torch import svd_lowrank
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners._buffer_dict import BufferDict
-from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
 from peft.utils.integrations import (
     dequantize_module_weight,
     gather_params_ctx,
@@ -124,60 +123,7 @@ class LoraLayer(BaseTunerLayer):
         self.kwargs = kwargs
 
         base_layer = self.get_base_layer()
-        if isinstance(base_layer, nn.Linear):
-            torch_supports_dtensor = version.parse(torch.__version__) >= version.parse("2.5.0")
-            if torch_supports_dtensor and isinstance(self.base_layer.weight, torch.distributed.tensor.DTensor):
-                # If Tensor Parallel is used, the weight is sharded, so we need to get the local shape
-                out_features, in_features = self.base_layer.weight.to_local().shape
-            else:
-                in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif isinstance(base_layer, nn.Conv1d):
-            in_features, out_features = base_layer.in_channels, base_layer.out_channels
-        elif isinstance(base_layer, nn.Conv2d):
-            in_features, out_features = base_layer.in_channels, base_layer.out_channels
-        elif isinstance(base_layer, nn.Conv3d):
-            in_features, out_features = base_layer.in_channels, base_layer.out_channels
-        elif isinstance(base_layer, nn.Embedding):
-            in_features, out_features = base_layer.num_embeddings, base_layer.embedding_dim
-        elif isinstance(base_layer, Conv1D):
-            in_features, out_features = (
-                base_layer.weight.ds_shape if hasattr(base_layer.weight, "ds_shape") else base_layer.weight.shape
-            )
-        elif isinstance(base_layer, nn.MultiheadAttention):
-            if not base_layer._qkv_same_embed_dim:
-                raise ValueError(f"Only same dim for query/key/value is supported as of now for {self.__class__}.")
-            in_features, out_features = base_layer.embed_dim, 3 * base_layer.embed_dim
-        elif hasattr(base_layer, "infeatures") and hasattr(base_layer, "outfeatures"):
-            # QuantLinear
-            in_features, out_features = base_layer.infeatures, base_layer.outfeatures
-        elif hasattr(base_layer, "input_size") and hasattr(base_layer, "output_size"):
-            # Megatron ColumnParallelLinear,RowParallelLinear
-            in_features, out_features = base_layer.input_size, base_layer.output_size
-        elif hasattr(base_layer, "codebooks") and base_layer.__class__.__name__ == "QuantizedLinear":
-            # AQLM QuantLinear
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif hasattr(base_layer, "w_bit") and base_layer.__class__.__name__ == "WQLinear_GEMM":
-            # Awq layers
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif base_layer.__class__.__name__ == "EetqLinear":
-            # Eetq layers
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif hasattr(base_layer, "W_q") and base_layer.__class__.__name__ == "HQQLinear":
-            # HQQ layers
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif base_layer.__class__.__name__ == "PatchedLinear":
-            # INC layers
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        else:
-            # possibly support user provided custom layer types using dynamic dispatch
-            if hasattr(base_layer, "in_features") and hasattr(base_layer, "out_features"):
-                in_features, out_features = base_layer.in_features, base_layer.out_features
-            else:
-                in_features, out_features = None, None
-            warnings.warn(
-                f"Unsupported layer type '{type(base_layer)}' encountered, proceed at your own risk.", UserWarning
-            )
-
+        in_features, out_features = _get_in_out_features(base_layer)
         self.in_features = in_features
         self.out_features = out_features
 
@@ -1098,6 +1044,10 @@ class Embedding(nn.Module, LoraLayer):
         # extra argument that allows mixing different adapters in the same batch at inference time.
         result = self.base_layer(x, *args, **kwargs)
 
+        # Some embedding layers (e.g., Gemma3TextScaledWordEmbedding) apply scaling in their forward method.
+        # Since base_layer(x) already includes this scaling, we need to apply it to LoRA contributions too.
+        embed_scale = self._get_embed_scale()
+
         unique_adapters = set(adapter_names)
         sub_batch_indices_list = []
         for adapter in unique_adapters:
@@ -1117,7 +1067,13 @@ class Embedding(nn.Module, LoraLayer):
             # layer output
             sub_batch = x[sub_batch_indices_list[i]]
             after_A = self._embed(sub_batch, embedding_A)
-            result[sub_batch_indices_list[i]] += (after_A @ embedding_B) * scaling
+            adapter_output = (after_A @ embedding_B) * scaling
+
+            # Apply embed_scale to match the base layer's scaling
+            if embed_scale is not None:
+                adapter_output = adapter_output * embed_scale.to(adapter_output.dtype)
+
+            result[sub_batch_indices_list[i]] += adapter_output
 
         return result
 
@@ -1149,6 +1105,11 @@ class Embedding(nn.Module, LoraLayer):
         else:
             result = self.base_layer(x, *args, **kwargs)
             torch_result_dtype = result.dtype
+
+            # Some embedding layers (e.g., Gemma3TextScaledWordEmbedding) apply scaling in their forward method.
+            # Since base_layer(x) already includes this scaling, we need to apply it to LoRA contributions too.
+            embed_scale = self._get_embed_scale()
+
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.lora_embedding_A:
                     continue
@@ -1158,7 +1119,13 @@ class Embedding(nn.Module, LoraLayer):
                     embedding_B = self.lora_embedding_B[active_adapter].T
                     scaling = self.scaling[active_adapter]
                     after_A = self._embed(x, embedding_A)
-                    result = result + (after_A @ embedding_B) * scaling
+                    adapter_output = (after_A @ embedding_B) * scaling
+
+                    # Apply embed_scale to match the base layer's scaling
+                    if embed_scale is not None:
+                        adapter_output = adapter_output * embed_scale.to(adapter_output.dtype)
+
+                    result = result + adapter_output
                 else:
                     result = self.lora_variant[active_adapter].forward(
                         self,
@@ -1925,8 +1892,7 @@ class _LoraParameterProxy(nn.Module):
         self.delta_weight = delta_weight
 
     def forward(self, W):
-        with nn.utils.parametrize.cached():
-            return W + self.delta_weight
+        return W + self.delta_weight
 
 
 # copied from:
@@ -2158,7 +2124,8 @@ class ParamWrapper(nn.Module, LoraLayer):
         # set requires_grad, as it defaults to False
         base_layer.parametrizations[self.parameter_name].original.requires_grad_(requires_grad_before)
         try:
-            yield
+            with nn.utils.parametrize.cached():
+                yield
         finally:
             self._remove_parametrizations()
 

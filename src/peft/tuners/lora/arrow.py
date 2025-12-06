@@ -164,8 +164,8 @@ class ArrowLoraLinearLayer(nn.Module):
         This function performs General Knowledge Subtraction. It takes an average of provided general_adapters, and
         subtract it from each task_adapter. This subtraction tries to purify the task adapters, based on
         "forgetting-via-negation" principle. Forgetting-via-negation is a task-arithmetic operation, explained in:
-        https://arxiv.org/abs/2212.04089 The task adapters will be more focused and isolated, enhancing the performance
-        on new tasks.
+        https://huggingface.co/papers/2212.04089 The task adapters will be more focused and isolated, enhancing the
+        performance on new tasks.
 
         Args:
             lora_A : Matrices A in LoRA layer.

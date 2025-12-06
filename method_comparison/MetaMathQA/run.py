@@ -18,16 +18,16 @@ Main entry point to run the experiments. Contains general setup and the proper t
 
 import argparse
 import datetime as dt
-import gc
 import json
 import os
 import random
 import sys
 import textwrap
 import time
+from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from functools import partial
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Literal, Optional
 
 import torch
 from torch import nn
@@ -53,17 +53,18 @@ from utils import (
     validate_experiment_path,
 )
 
-from data import get_train_valid_test_datasets
+from data import get_train_valid_test_datasets, get_wiki_small
 from peft import AdaLoraConfig, PeftConfig
-from peft.utils import infer_device, CONFIG_NAME
+from peft.utils import CONFIG_NAME, infer_device
 
 
-# # suppress all warnings
-# warnings.filterwarnings("ignore") # FIXME?
+# number of batches per bucket, increasing this further has diminishing returns
+BUCKET_FACTOR = 20
+# empty device cache every N steps; 10 is a good compromise between keeping memory down while lowering runtime overhead
+ACCELERATOR_EMPTY_CACHE_SCHEDULE = 10
 
-dtype_to_bytes_linear = {"float32": 4, "float16": 2, "bfloat16": 2, "int8": 1, "int4": 0.5}
-# if lr scheduler with warmup is used, the ratio of warmup steps to total steps
-BUCKET_FACTOR = 20  # number of batches per bucket, increasing this further has diminishing returns
+# disable torch inductor caching to keep total runtime numbers comparable when torch.compile is used
+os.environ["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"
 
 
 def get_generation_config(*, seq_len, generate_kwargs) -> GenerationConfig:
@@ -95,6 +96,30 @@ def evaluate(model, tokenizer, ds, batch_size, generate_kwargs, use_tqdm: bool =
             outputs = model.generate(**batch, generation_config=generation_config, pad_token_id=tokenizer.eos_token_id)
             predictions += tokenizer.batch_decode(outputs, skip_special_tokens=True)
     return predictions, responses
+
+
+@torch.inference_mode  # type: ignore
+def calculate_mean_per_token_loss(model, tokenizer, rows: list[str], batch_size: int, max_length: int) -> float:
+    """Calculate the mean loss per token on the given dataset.
+
+    Useful to determine general model performance before and after training to get an estimate of the magnitude of
+    'forgetting'. Note that for Wikipedia data, since the information density is quite high, the loss can be
+    surprisingly large.
+
+    """
+    losses: list[float] = []
+    for j in range(0, len(rows), batch_size):
+        sliced = rows[j : j + batch_size]
+        batch = tokenizer(sliced, truncation=True, max_length=max_length)
+        batch = tokenizer.pad(batch, return_tensors="pt", padding_side="left").to(model.device)
+        outputs = model(**batch, pad_token_id=tokenizer.eos_token_id)
+        logits = outputs.logits
+        for logit, target, mask in zip(logits, batch["input_ids"], batch["attention_mask"]):
+            # calculate loss per token so that the mean is not skewed by sequence length of sample
+            num_tokens = mask.sum()
+            token_losses = torch.nn.functional.cross_entropy(logit[:num_tokens], target[:num_tokens], reduction="none")
+            losses.extend(loss.item() for loss in token_losses)
+    return torch.tensor(losses).mean().item()
 
 
 class DummyGradScaler:
@@ -143,7 +168,7 @@ def train(
     torch_accelerator_module = getattr(torch, device_type, torch.cuda)
     if use_amp:
         grad_scaler: GradScaler | DummyGradScaler = GradScaler(device=device_type)
-        autocast_ctx: Callable[[], ContextManager[Any]] = partial(autocast, device_type=device_type)
+        autocast_ctx: Callable[[], AbstractContextManager[Any]] = partial(autocast, device_type=device_type)
     else:
         grad_scaler = DummyGradScaler()
         autocast_ctx = nullcontext
@@ -170,6 +195,14 @@ def train(
     tic_train = time.perf_counter()
     eval_time = 0.0
     error_msg = ""
+
+    rows_wiki = get_wiki_small()
+    model.eval()
+    # use small batch_size, not batch_size_eval, to prevent this from taking too much memory and affecting the max memory metric
+    wiki_loss_before = calculate_mean_per_token_loss(
+        model=model, tokenizer=tokenizer, rows=rows_wiki, batch_size=batch_size, max_length=768
+    )
+    model.train()
 
     ds_train, ds_valid, ds_test = get_train_valid_test_datasets(
         tokenizer=tokenizer, query_template=query_template, print_fn=print_verbose
@@ -298,9 +331,8 @@ def train(
                 }
                 print_verbose(json.dumps(log_dict))
 
-            # # TODO is this needed?
-            torch_accelerator_module.empty_cache()
-            gc.collect()
+            if step % ACCELERATOR_EMPTY_CACHE_SCHEDULE == 0:
+                torch_accelerator_module.empty_cache()
 
         print_verbose(f"Training finished after {max_steps} steps, evaluation on test set follows.")
         # test set evaluation
@@ -314,6 +346,11 @@ def train(
             use_tqdm=len(ds_test) > 100,
         )
         accuracy = get_accuracy(predictions=predictions, responses=responses)
+        # use small batch_size, not batch_size_eval, to prevent this from taking too much memory and affecting the max memory metric
+        wiki_loss_after = calculate_mean_per_token_loss(
+            model=model, tokenizer=tokenizer, rows=rows_wiki, batch_size=batch_size, max_length=768
+        )
+        forgetting = wiki_loss_after - wiki_loss_before
         metrics.append(
             {
                 "step": step,
@@ -321,6 +358,7 @@ def train(
                 "train loss": sum(losses[-eval_steps:]) / eval_steps,
                 "train samples": total_samples,
                 "train total tokens": sum(total_tokens),
+                "forgetting": forgetting,
             }
         )
         print_verbose(f"Test accuracy: {accuracy:.3f}")

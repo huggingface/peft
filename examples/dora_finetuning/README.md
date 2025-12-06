@@ -13,7 +13,7 @@ from peft import LoraConfig, get_peft_model
 from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer
 from datasets import load_dataset
 
-model = AutoModelForCausalLM.from_pretrained("huggyllama/llama-7b", device_map="cuda")
+model = AutoModelForCausalLM.from_pretrained("huggyllama/llama-7b", device_map="auto")
 tokenizer = AutoTokenizer.from_pretrained("huggyllama/llama-7b")
 dataset = load_dataset("timdettmers/openassistant-guanaco", split="train")
 lora_config = LoraConfig(
@@ -24,7 +24,7 @@ trainer = transformers.Trainer(
     model=peft_model,
     train_dataset=dataset,
     dataset_text_field="text",
-    max_seq_length=2048,
+    max_length=2048,
     tokenizer=tokenizer,
 )
 trainer.train()
@@ -70,7 +70,6 @@ python dora_finetuning.py \
     --quantize \
     --eval_step 10 \
     --save_step 100 \
-    --device "cuda:0" \
     --lora_r 16 \
     --lora_alpha 32 \
     --lora_dropout 0.05 \
