@@ -97,7 +97,7 @@ class HiraConfig(PeftConfig):
         },
     )
     init_weights: bool | Literal["gaussian"] | None = field(
-        default=None,
+        default=True,
         metadata={
             "help": (
                 "How to initialize the weights of the HiRA layers. "
