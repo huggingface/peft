@@ -1,12 +1,16 @@
 # Copyright 2023-present the HuggingFace Inc. team.
+import re
+from itertools import chain
 import torch
 import torch.nn as nn
-from peft.tuners.lora import LoraModel
+from peft.tuners.lora import LoraModel, LoraLayer
+from peft.utils import get_quantization_config
 from .layer import MonteCLoraLinear
 
 class MonteCLoraModel(LoraModel):
     """
     Creates a Monte Carlo Low Rank Adapter (MonteCLoRA) model.
+    Inherits from LoraModel but overrides creation logic to handle MonteCLoRA targeting.
     ```python
     from transformers import AutoModelForCausalLM
     from peft import MonteCLoraConfig, TaskType, get_peft_model, LoraConfig
@@ -28,30 +32,105 @@ class MonteCLoraModel(LoraModel):
     model = get_peft_model(model, peft_config)
     ```
     """
-    
+
+    def _create_and_replace(
+        self,
+        lora_config,
+        adapter_name,
+        target,
+        target_name,
+        parent,
+        current_key,
+    ):
+        """
+        Overridden from LoraModel to explicitly pass `current_key` to `_create_new_module`.
+        Standard LoraModel logic calculates rank/alpha patterns but does not forward the key.
+        """
+        if current_key is None:
+            raise ValueError("Current Key shouldn't be `None`")
+
+        # 1. Pattern matching logic (Copied from LoraModel)
+        pattern_keys = list(chain(lora_config.rank_pattern.keys(), lora_config.alpha_pattern.keys()))
+        target_name_key = next(filter(lambda key: re.match(rf".*\.{key}$", current_key), pattern_keys), current_key)
+        r = lora_config.rank_pattern.get(target_name_key, lora_config.r)
+        alpha = lora_config.alpha_pattern.get(target_name_key, lora_config.lora_alpha)
+
+        # 2. Prepare kwargs, INCLUDING current_key
+        kwargs = {
+            "r": r,
+            "lora_alpha": alpha,
+            "lora_dropout": lora_config.lora_dropout,
+            "fan_in_fan_out": lora_config.fan_in_fan_out,
+            "init_lora_weights": lora_config.init_lora_weights,
+            "use_rslora": lora_config.use_rslora,
+            "use_dora": lora_config.use_dora,
+            "ephemeral_gpu_offload": lora_config.runtime_config.ephemeral_gpu_offload,
+            "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
+            "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
+            # CRITICAL FIX: Pass current_key so _create_new_module can decide on MonteCLoRA application
+            "current_key": current_key, 
+        }
+
+        # 3. Quantization handling
+        quant_methods = ["gptq", "aqlm", "awq"]
+        for quant_method in quant_methods:
+            quantization_config = get_quantization_config(self.model, method=quant_method)
+            if quantization_config is not None:
+                kwargs[f"{quant_method}_quantization_config"] = quantization_config
+
+        # 4. Handle existing LoraLayers (updates) vs New Modules (creation)
+        if isinstance(target, LoraLayer):
+            # If target is already a LoraLayer (e.g. MonteCLoraLinear inherits LoraLayer), update it
+            target.update_layer(
+                adapter_name,
+                r,
+                lora_alpha=alpha,
+                lora_dropout=lora_config.lora_dropout,
+                init_lora_weights=lora_config.init_lora_weights,
+                use_rslora=lora_config.use_rslora,
+                use_dora=lora_config.use_dora,
+                # If the existing layer is MonteCLoraLinear, it will accept this:
+                monteclora_config=lora_config.monteclora_config
+            )
+        else:
+            # Create new module
+            new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
+            if adapter_name not in self.active_adapters:
+                # Adding an additional adapter: it is not automatically trainable
+                new_module.requires_grad_(False)
+            self._replace_module(parent, target_name, new_module, target)
 
     def _create_new_module(self, lora_config, adapter_name, target, **kwargs):
+        """
+        Interprets `current_key` to check against `monteclora_targets` and instantiates MonteCLoraLinear.
+        """
         current_key = kwargs.get("current_key", "")
         
-        monteclora_targets = lora_config.monteclora_config.monteclora_targets
+        # Access config via the property backward-compatibility wrapper or direct attribute
+        mc_config = getattr(lora_config, "monteclora_config", lora_config) 
+        monteclora_targets = mc_config.monteclora_targets
         target_suffix = current_key.split('.')[-1]
         
         # Determine if this specific module should use MonteCLoRA
-        if monteclora_targets is None:
-            # If not specified, apply to all LoRA targets
-            should_apply = True
-        else:
-            should_apply = target_suffix in monteclora_targets
+        should_apply = False
+        if mc_config.use_monteclora:
+            if monteclora_targets is None:
+                should_apply = True
+            else:
+                should_apply = target_suffix in monteclora_targets
 
-        if should_apply and lora_config.monteclora_config.use_monteclora:
+        if should_apply:
             kwargs.update({
-                "monteclora_config": lora_config.monteclora_config,
+                "monteclora_config": mc_config,
             })
 
         if isinstance(target, torch.nn.Linear):
             if kwargs.get("fan_in_fan_out", False):
                 kwargs["fan_in_fan_out"] = False
+            
+            # Dispatch to MonteCLoraLinear
             new_module = MonteCLoraLinear(target, adapter_name, **kwargs)
             return new_module
 
+        # Fallback to standard LoRA dispatch for other layer types
         return super()._create_new_module(lora_config, adapter_name, target, **kwargs)

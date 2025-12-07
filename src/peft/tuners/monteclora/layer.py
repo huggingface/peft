@@ -33,14 +33,16 @@ class MonteCLoraLayer(LoraLayer):
 
         if monteclora_config is not None and monteclora_config.use_monteclora:
             self.use_monteclora = True
-            
+
             # CRITICAL FIX 1: Register new parameter dict in adapter_layer_names 
             # so set_adapter() can toggle requires_grad
             self.adapter_layer_names = self.adapter_layer_names + ("lora_mc_sampler_A",)
 
             if "lora_A" in monteclora_config.monteclora_at:
+
                 # CRITICAL FIX 2: Rename to include "lora_" prefix.
                 # BaseTuner freezes ANY parameter that doesn't contain the prefix "lora_".
+                
                 if not hasattr(self, "lora_mc_sampler_A"):
                     self.lora_mc_sampler_A = nn.ModuleDict({})
                 
