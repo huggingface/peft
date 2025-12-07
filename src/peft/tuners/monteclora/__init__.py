@@ -16,15 +16,15 @@ from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_eetq_a
 from peft.utils import register_peft_method
 
 from .config import MonteCLoraConfig
+from .layer import MonteCLoraLinear
 from .model import MonteCLoraModel
 
 
-__all__ = [
-    "MonteCLoraConfig",
-    "MonteCLoraModel",
-]
+__all__ = ["MonteCLoraConfig", "MonteCLoraLinear", "MonteCLoraModel"]
 
-register_peft_method(name="monteclora", prefix="lora_", config_cls=MonteCLoraConfig, model_cls=MonteCLoraModel, is_mixed_compatible=True)
+register_peft_method(
+    name="monteclora", prefix="lora_", config_cls=MonteCLoraConfig, model_cls=MonteCLoraModel, is_mixed_compatible=True
+)
 
 
 def __getattr__(name):
