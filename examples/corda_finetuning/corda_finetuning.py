@@ -229,7 +229,7 @@ def train():
         print("Train in Full Finetuning mode")
         model = transformers.AutoModelForCausalLM.from_pretrained(
             script_args.model_name_or_path,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             device_map="auto",
         )
     trainable_params, all_param = get_nb_trainable_parameters(model)
@@ -266,7 +266,7 @@ def train():
         "train_dataset": train_dataset,
         "data_collator": data_collator,
     }
-    trainer = Trainer(model=model, tokenizer=tokenizer, args=script_args, **data_module)
+    trainer = Trainer(model=model, processing_class=tokenizer, args=script_args, **data_module)
     trainer.train()
     trainer.save_state()
     model.save_pretrained(os.path.join(script_args.output_dir, "ft"))

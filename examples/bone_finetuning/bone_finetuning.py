@@ -57,7 +57,7 @@ elif script_args.base_model_name_or_path is not None:
     print(f"No available pre-processed model, manually initialize a Bone using {script_args.base_model_name_or_path}.")
     model = AutoModelForCausalLM.from_pretrained(
         script_args.base_model_name_or_path,
-        torch_dtype=(
+        dtype=(
             torch.float16
             if script_args.bits == "fp16"
             else (torch.bfloat16 if script_args.bits == "bf16" else torch.float32)
@@ -90,7 +90,7 @@ trainer = SFTTrainer(
     model=peft_model,
     args=script_args,
     train_dataset=dataset,
-    tokenizer=tokenizer,
+    processing_class=tokenizer,
 )
 trainer.train()
 trainer.save_state()

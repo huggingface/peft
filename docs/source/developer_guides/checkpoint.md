@@ -129,21 +129,15 @@ Let's break this down:
 - By default, LoRA isn't applied to BERT's embedding layer, so there are _no entries_ for `lora_A_embedding` and `lora_B_embedding`.
 - The keys of the `state_dict` always start with `"base_model.model."`. The reason is that, in PEFT, we wrap the base model inside a tuner-specific model (`LoraModel` in this case), which itself is wrapped in a general PEFT model (`PeftModel`). For this reason, these two prefixes are added to the keys. When converting to the PEFT format, it is required to add these prefixes.
 
-<Tip>
-
-This last point is not true for prefix tuning techniques like prompt tuning. There, the extra embeddings are directly stored in the `state_dict` without any prefixes added to the keys.
-
-</Tip>
+> [!TIP]
+> This last point is not true for prefix tuning techniques like prompt tuning. There, the extra embeddings are directly stored in the `state_dict` without any prefixes added to the keys.
 
 When inspecting the parameter names in the loaded model, you might be surprised to find that they look a bit different, e.g. `base_model.model.encoder.layer.0.attention.self.query.lora_A.default.weight`. The difference is the *`.default`* part in the second to last segment. This part exists because PEFT generally allows the addition of multiple adapters at once (using an `nn.ModuleDict` or `nn.ParameterDict` to store them). For example, if you add another adapter called "other", the key for that adapter would be `base_model.model.encoder.layer.0.attention.self.query.lora_A.other.weight`.
 
 When you call [`~PeftModel.save_pretrained`], the adapter name is stripped from the keys. The reason is that the adapter name is not an important part of the model architecture; it is just an arbitrary name. When loading the adapter, you could choose a totally different name, and the model would still work the same way. This is why the adapter name is not stored in the checkpoint file.
 
-<Tip>
-
-If you call `save_pretrained("some/path")` and the adapter name is not `"default"`, the adapter is stored in a sub-directory with the same name as the adapter. So if the name is "other", it would be stored inside of `some/path/other`.
-
-</Tip>
+> [!TIP]
+> If you call `save_pretrained("some/path")` and the adapter name is not `"default"`, the adapter is stored in a sub-directory with the same name as the adapter. So if the name is "other", it would be stored inside of `some/path/other`.
 
 In some circumstances, deciding which values to add to the checkpoint file can become a bit more complicated. For example, in PEFT, DoRA is implemented as a special case of LoRA. If you want to convert a DoRA model to PEFT, you should create a LoRA checkpoint with extra entries for DoRA. You can see this in the `__init__` of the previous `LoraLayer` code:
 

@@ -49,8 +49,15 @@ def train_model(
 ):
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-    compute_dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
-    device_map = "cuda" if torch.cuda.is_available() else None
+    is_bf16_supported = False
+    device_map = "cpu"
+    if torch.cuda.is_available():
+        is_bf16_supported = torch.cuda.is_bf16_supported()
+        device_map = "cuda"
+    elif torch.xpu.is_available():
+        is_bf16_supported = torch.xpu.is_bf16_supported()
+        device_map = "xpu"
+    compute_dtype = torch.bfloat16 if is_bf16_supported else torch.float16
 
     # load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(base_model_name_or_path)
@@ -65,14 +72,14 @@ def train_model(
                 bnb_4bit_use_double_quant=False,
                 bnb_4bit_quant_type="nf4",
             ),
-            torch_dtype=compute_dtype,
+            dtype=compute_dtype,
             device_map=device_map,
         )
         # setup for quantized training
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
     else:
         model = AutoModelForCausalLM.from_pretrained(
-            base_model_name_or_path, torch_dtype=compute_dtype, device_map=device_map
+            base_model_name_or_path, dtype=compute_dtype, device_map=device_map
         )
 
     # LoRA config for the PEFT model

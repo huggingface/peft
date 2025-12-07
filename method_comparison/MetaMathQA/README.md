@@ -19,6 +19,34 @@ Create an experiment in the `experiment/<peft-method>` folder of your choice and
 - `adapter_config.json`
 - Optional: `training_parameters.json`
 
+Once you created these two files, you can either
+
+- run the whole suite using by simply calling `make` (takes >24h)
+- run one specific experiment by calling `make results/<experiment_name>-<experiment_variation>.json`,
+  for example `results/vblora-llama-3.2-3B-default.json`
+
+You can get a list of all runnable experiments by running `make list`, e.g.:
+```
+% make list                                                                                                                                                              (git)-[method-comparison-results]  ⛓ peft
+Discovered experiment configurations:
+  - experiments/ptuning/llama-3.2-3B-default/adapter_config.json
+  [...]
+  - experiments/vblora/llama-3.2-3B-default/adapter_config.json
+
+Target result files:
+  - results/ptuning-llama-3.2-3B-default.json
+  [...]
+  - results/vblora-llama-3.2-3B-default.json
+```
+
+In case you want to force the execution of an experiment, you can simply `touch` the respective adapter config
+without modifying it. For example:
+
+    touch experiments/vblora/llama-3.2-3B-default/adapter_config.json
+    make
+
+to run the VBLoRA default experiment again.
+
 ### `adapter_config.json`
 
 This must be a valid PEFT configuration. It is easiest to create it programmatically, e.g.:
@@ -35,6 +63,12 @@ config.save_pretrained(<path-to-experiment>)
 There is a default file for the non-PEFT parameters: `default_training_params.json`. This contains all the other parameters that are relevant for training, e.g. the base model id, number of steps, batch size, learning rate, etc. If parameters that differ from the defaults are needed for a specific experiment, place a `training_parameters.json` into the experiment directory and adjust the parameters that need changing. The other parametes are taken from the aforementioned default config.
 
 For an overview of all possible arguments, you can also check the `TrainConfig` `dataclass` in `utils.py`.
+
+#### About `torch.compile`
+
+Right now, compilation is a simple on/off switch in `training_params.json`. There is probably room for optimization here.
+
+Due to the model being switched to `eval` mode for the validation metrics and then back to `train` mode, we will incur a re-compilation. This is acceptable to ensure that validation runs correctly. However, this prevents us from using `torch._dynamo.config.patch(error_on_recompile=True, inline_inbuilt_nn_modules=False)` to detect frequent recompilations. It should be noticeable from the duration of training steps, though, so we're fine with that.
 
 ### Runtime performance
 
@@ -131,9 +165,9 @@ Results are stored in one of the result directories. An example output could loo
     }
   },
   "train_info": {
-    "cuda_memory_reserved_avg": 14229219940,
-    "cuda_memory_max": 24847056896,
-    "cuda_memory_reserved_99th": 19115624366,
+    "accelerator_memory_reserved_avg": 14229219940,
+    "accelerator_memory_max": 24847056896,
+    "accelerator_memory_reserved_99th": 19115624366,
     "train_time": 2238.65277833899,
     "file_size": 1157064,
     "status": "success",
@@ -183,7 +217,7 @@ Results are stored in one of the result directories. An example output could loo
       "version": "#17~24.04.2-Ubuntu SMP PREEMPT_DYNAMIC Mon Jan 20 22:48:29 UTC 2",
       "machine": "x86_64",
       "processor": "x86_64",
-      "gpu": "NVIDIA GeForce RTX 4090"
+      "accelerator": "NVIDIA GeForce RTX 4090"
     },
     "pytorch_info": "PyTorch built with: [...]"
   }
@@ -207,7 +241,6 @@ Python 3.12+ is required.
 - consider adding `weight` argument to cross entropy calculation to downweight the EOS token, but it would require calculating the loss manually instead of relying on transformers (see https://github.com/huggingface/transformers/blob/6a876462c308bd7cd7d3ca8e93abaa7d5b02e90e/src/transformers/loss/loss_utils.py#L24-L48)
 - do a sanity check against/comparison with transformers Trainer
 - consider using vLLM to potentially speed up generations, at least for the test set
-- using `torch.compile` leads to a huge slowdown, investigate (maybe recompiles), although it does save memory
 - AMP does not appear to help, investigate
 - packing of sequences (but this probably requires adjusting the attention matrix)
 - clean up what gets printed and where (stdout, stderr)

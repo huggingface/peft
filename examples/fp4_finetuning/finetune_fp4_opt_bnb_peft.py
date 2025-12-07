@@ -9,8 +9,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import LoraConfig, get_peft_model
 
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # force to use CUDA GPU device 0
+os.environ["ZE_AFFINITY_MASK"] = "0"  # force to use Intel XPU device 0
 # -*- coding: utf-8 -*-
 """Finetune-opt-bnb-peft.ipynb
 
@@ -36,11 +36,12 @@ First, run the cells below to install the requirements:
 Here let's load the `opt-6.7b` model, its weights in half-precision (float16) are about 13GB on the Hub! If we load them in 8-bit we would require around 7GB of memory instead.
 """
 
-
-free_in_GB = int(torch.cuda.mem_get_info()[0] / 1024**3)
+device_type = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
+device_module = getattr(torch, device_type, torch.cuda)
+free_in_GB = int(device_module.mem_get_info()[0] / 1024**3)
 max_memory = f"{free_in_GB - 2}GB"
 
-n_gpus = torch.cuda.device_count()
+n_gpus = device_module.device_count()
 max_memory = {i: max_memory for i in range(n_gpus)}
 
 model = AutoModelForCausalLM.from_pretrained(
@@ -54,7 +55,7 @@ model = AutoModelForCausalLM.from_pretrained(
         bnb_4bit_use_double_quant=True,
         bnb_4bit_quant_type="nf4",
     ),
-    torch_dtype=torch.float16,
+    dtype=torch.float16,
 )
 
 tokenizer = AutoTokenizer.from_pretrained("facebook/opt-350m")
@@ -180,11 +181,12 @@ You can also directly load adapters from the Hub using the commands below:
 # You can then directly use the trained model or the model that you have loaded from the 🤗 Hub for inference as you would do it usually in `transformers`.
 # """
 #
-batch = tokenizer("Two things are infinite: ", return_tensors="pt")
+batch = tokenizer("Two things are infinite: ", return_tensors="pt").to(model.device)
 
 model.config.use_cache = False  # silence the warnings. Please re-enable for inference!
 model.eval()
-with torch.cuda.amp.autocast():
+
+with torch.amp.autocast(device_type=device_type):
     output_tokens = model.generate(**batch, max_new_tokens=50)
 
 print("\n\n", tokenizer.decode(output_tokens[0], skip_special_tokens=True))

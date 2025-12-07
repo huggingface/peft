@@ -12,10 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
+import copy
 import itertools
+import math
 import platform
 import re
+import warnings
 from collections import defaultdict
 from contextlib import contextmanager
 from copy import deepcopy
@@ -25,8 +27,6 @@ import pytest
 import torch
 from datasets import Dataset
 from huggingface_hub import snapshot_download
-from huggingface_hub.errors import HfHubHTTPError, LocalEntryNotFoundError
-from huggingface_hub.utils import reset_sessions
 from safetensors.torch import load_file
 from scipy import stats
 from torch import nn
@@ -35,7 +35,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import (
     AdaLoraConfig,
+    C3AConfig,
+    DeloraConfig,
     EvaConfig,
+    GraloraConfig,
     IA3Config,
     LoftQConfig,
     LoKrConfig,
@@ -48,9 +51,13 @@ from peft import (
     PeftModelForSeq2SeqLM,
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
+    PeftWarning,
+    PrefixTuningConfig,
     PromptTuningConfig,
+    RoadConfig,
     VBLoRAConfig,
     VeraConfig,
+    WaveFTConfig,
     get_eva_state_dict,
     get_peft_model,
     initialize_lora_eva_weights,
@@ -63,8 +70,16 @@ from peft.tuners.lora.corda import preprocess_corda
 from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
+from peft.utils.other import ModulesToSaveWrapper
 
-from .testing_utils import load_dataset_english_quotes, require_deterministic_for_xpu
+from .testing_utils import hub_online_once, load_dataset_english_quotes, require_deterministic_for_xpu
+
+
+try:
+    from huggingface_hub.utils import reset_sessions
+except ImportError:
+    # this function was removed in hfh v1.0.0
+    reset_sessions = None
 
 
 class TestLoraInitialization:
@@ -82,14 +97,14 @@ class TestLoraInitialization:
         samples = normal.sample(size)
         return samples
 
-    def get_model(self):
+    def get_model(self, bias=True):
         class MyModule(nn.Module):
             def __init__(self):
                 super().__init__()
                 # choose a large weight so that averages are close to expected values
-                self.linear = nn.Linear(1000, 1000)
+                self.linear = nn.Linear(1000, 1000, bias=bias)
                 self.embed = nn.Embedding(1000, 1000)
-                self.conv2d = nn.Conv2d(100, 100, 3)
+                self.conv2d = nn.Conv2d(100, 100, 3, bias=bias)
 
             def forward(self, x):
                 x_int = (100 * x).int()
@@ -276,6 +291,48 @@ class TestLoraInitialization:
         # with init_lora_weights=False, weight B should *not* be zero. We don't care so much about the actual values
         # as long as they are not zero, in order to avoid identity transformation.
         assert not torch.allclose(weight_B, torch.zeros_like(weight_B))
+
+    def test_lora_init_orthogonal(self):
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        config = LoraConfig(target_modules=["linear"], init_lora_weights="orthogonal")
+        model = get_peft_model(model, config)
+
+        weight_A = model.linear.lora_A["default"].weight
+        weight_B = model.linear.lora_B["default"].weight
+
+        assert not torch.allclose(weight_A, torch.zeros_like(weight_A))
+        assert not torch.allclose(weight_B, torch.zeros_like(weight_B))
+        assert (weight_B @ weight_A).abs().max() < 1e-6
+
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_lora_init_orthogonal_half_precision_dtype(self, dtype):
+        try:
+            torch.zeros(1, dtype=dtype)
+        except Exception:
+            pytest.skip(f"dtype {dtype} not supported on this system, skipping test")
+
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        config = LoraConfig(target_modules=["linear"], init_lora_weights="orthogonal")
+        model = get_peft_model(model, config).to(dtype)
+
+        weight_A = model.linear.lora_A["default"].weight
+        weight_B = model.linear.lora_B["default"].weight
+
+        assert weight_A.dtype == dtype
+        assert weight_B.dtype == dtype
+
+    def test_lora_init_orthogonal_odd_rank_raises(self):
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        config = LoraConfig(target_modules=["linear"], init_lora_weights="orthogonal", r=7)
+        msg = "Orthogonal initialization requires the LoRA rank to be even, got 7 instead."
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
 
     def test_lora_scaling_default(self):
         # default is True
@@ -955,7 +1012,7 @@ class TestLoraInitialization:
         # warning. See #2184.
 
         # create an adapter without PiSSA/OloRA
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         model = AutoModelForCausalLM.from_pretrained(model_id)
         model = get_peft_model(model, LoraConfig(init_lora_weights=True))
         model.save_pretrained(tmp_path / "adapter0")
@@ -1053,6 +1110,50 @@ class TestLoraInitialization:
         assert model.embed.scaling["default"] == expected_scaling["embed"]
         assert model.conv2d.scaling["default"] == expected_scaling["conv2d"]
 
+    def test_modules_to_save_targets_lora_layer_raises(self):
+        # There is no good reason to have auxiliary modules to target a LoRA layer. As auxiliary modules are applied
+        # *after* BaseTunerLayers, a possible way for this to happen accidentally is if the
+        # modules_to_save/trainable_token_indices coincide with the adapter name, e.g. if the adapter name is "foobar",
+        # we can have a module named model.base_model.model.self_attn.lora_A.foobar. If
+        # modules_to_save/trainable_token_indices is also "foobar", there would be a match.
+        # Note: Theoretically, a lot more PEFT methods support modules_to_save, so would have to be tested, but the code
+        # path is the same for all of them, so only testing LoRA.
+        model = self.get_model()
+
+        config = LoraConfig(
+            target_modules=["linear"],
+            modules_to_save=["foobar"],
+        )
+        msg = (
+            "You are trying to target a module with <class 'peft.utils.other.ModulesToSaveWrapper'> that is a child of "
+            "<class 'peft.tuners.lora.layer.Linear'>. This is almost certainly not the intended behavior. Please "
+            "ensure that the adapter name, 'foobar', does not conflict with any of the targeted modules."
+        )
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config, adapter_name="foobar")
+
+    def test_trainable_token_indices_targets_lora_layer_raises(self):
+        # Same test as test_modules_to_save_targets_lora_layer_raises, but using trainable_token_indices
+        model = self.get_model()
+
+        # check scaling factor use_rslora=True with rank and alpha pattern
+        config = LoraConfig(target_modules=["embed"], trainable_token_indices={"foobar": [1, 2, 3]})
+        msg = (
+            "You are trying to target a module with <class 'peft.utils.other.TrainableTokensWrapper'> that is a child "
+            "of <class 'peft.tuners.lora.layer.Embedding'>. This is almost certainly not the intended behavior. Please "
+            "ensure that the adapter name, 'foobar', does not conflict with any of the targeted modules."
+        )
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config, adapter_name="foobar")
+
+    def test_trainable_token_indices_targets_head_and_embedding(self):
+        # targeting embedding and LM head explicitly, see #2863
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            config = LoraConfig(trainable_token_indices={"lm_head": [0], "embed_tokens": [0]})
+            get_peft_model(model, config)  # does not raise
+
     @require_deterministic_for_xpu
     def test_lora_use_dora_linear(self, data):
         # check that dora is a no-op when initialized
@@ -1071,6 +1172,7 @@ class TestLoraInitialization:
         assert torch.allclose(output_base, output_disabled)
         assert torch.allclose(output_base, output_dora)
 
+    @require_deterministic_for_xpu
     def test_lora_use_dora_linear_init_false(self, data):
         # with init_lora_weights=False, dora should not be a no-op
         torch.manual_seed(0)
@@ -1211,6 +1313,28 @@ class TestLoraInitialization:
         assert torch.allclose(merged_mask0, merged_mask1)
         assert mask_type0 == mask_type1
 
+    @pytest.mark.parametrize("bias", ["none", "all", "lora_only", "invalid"])
+    def test_lora_with_bias_argument(self, bias):
+        model = self.get_model()
+        config = LoraConfig(target_modules=["linear", "conv2d"], bias=bias)
+
+        if bias == "invalid":
+            with pytest.raises(NotImplementedError):
+                get_peft_model(model, config)
+            return
+
+        model = get_peft_model(model, config)  # does not raise
+        for name, param in model.named_parameters():
+            if not name.endswith("bias"):
+                continue
+            if bias == "none":
+                assert param.requires_grad is False
+            elif bias == "all":
+                assert param.requires_grad is True
+            elif bias == "lora_only":
+                # only layers targeted with target_modules
+                assert param.requires_grad is ("linear" in name) or ("conv2d" in name)
+
     def test_lora_with_bias_extra_params(self):
         # lora with lora_bias=True
         model = self.get_model()
@@ -1255,6 +1379,7 @@ class TestLoraInitialization:
             {"init_lora_weights": "olora"},
             {"init_lora_weights": "pissa"},
             {"init_lora_weights": "pissa_niter_3"},
+            {"init_lora_weights": "orthogonal"},
         ],
     )
     def test_lora_with_bias_incompatible_arguments(self, extra_kwargs):
@@ -1263,6 +1388,194 @@ class TestLoraInitialization:
         msg = "The argument lora_bias=True is"
         with pytest.raises(ValueError, match=msg):
             LoraConfig(target_modules=["linear"], lora_bias=True, **extra_kwargs)
+
+    def test_lora_linear_with_bias_when_base_layer_has_no_bias_warns(self):
+        model = self.get_model(bias=False)
+        config = LoraConfig(target_modules=["linear"], lora_bias=True)
+        msg = re.escape("`lora_bias=True` was passed but the targeted layer of type Linear has no bias")
+        with pytest.warns(PeftWarning, match=msg):
+            get_peft_model(model, config)
+
+    def test_lora_conv2d_with_bias_when_base_layer_has_no_bias_warns(self):
+        model = self.get_model(bias=False)
+        config = LoraConfig(target_modules=["conv2d"], lora_bias=True)
+        msg = re.escape("`lora_bias=True` was passed but the targeted layer of type Conv2d has no bias")
+        with pytest.warns(PeftWarning, match=msg):
+            get_peft_model(model, config)
+
+    def test_lora_incompatible_mamba_modules(self):
+        # Ensure LoRA raises an error when applying to forbidden modules
+        # ('out_proj', 'conv1d') in Mamba-based architectures like Falcon-Mamba tiny.
+        model = AutoModelForCausalLM.from_pretrained("tiiuae/falcon-mamba-tiny-dev")
+
+        config = LoraConfig(
+            task_type="CAUSAL_LM",
+            target_modules=["out_proj", "conv1d"],  # Forbidden modules for Mamba-based models
+        )
+        msg = "is incompatible with Mamba-based models"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+    def get_model_conv2d_groups(self):
+        class ModelConv2DGroups(nn.Module):
+            """For testing when groups argument is used in conv layer"""
+
+            def __init__(self):
+                super().__init__()
+                self.conv2d = nn.Conv2d(16, 32, 3, padding=1, groups=2)
+                self.relu = nn.ReLU()
+                self.flat = nn.Flatten()
+                self.lin0 = nn.Linear(12800, 2)
+                self.sm = nn.LogSoftmax(dim=-1)
+                self.dtype = torch.float
+
+            def forward(self, X):
+                # This is ignoring input since main usage is for checking raising of error when peft is applied
+                X = torch.arange(9 * 16 * 20 * 20).view([9, 16, 20, 20]).to(self.conv2d.weight.device)
+                X = X.to(self.dtype)
+                X = self.conv2d(X)
+                X = self.relu(X)
+                X = self.flat(X)
+                X = self.lin0(X)
+                X = self.sm(X)
+                return X
+
+        return ModelConv2DGroups().eval().to(self.torch_device)
+
+    @pytest.mark.parametrize(
+        "config_cls, config_kwargs",
+        [
+            pytest.param(LoraConfig, {"r": 8, "target_modules": ["conv2d"]}, id="lora with rank divisible by groups"),
+            pytest.param(LoraConfig, {"r": 2, "target_modules": ["conv2d"]}, id="lora with rank equal to groups"),
+            pytest.param(
+                LoraConfig, {"r": 1, "target_modules": ["conv2d"]}, id="lora with rank not divisible by groups"
+            ),
+            pytest.param(
+                LoraConfig,
+                {"r": 8, "target_modules": ["conv2d"], "use_dora": True},
+                id="dora with rank divisible by groups",
+            ),
+            pytest.param(
+                LoraConfig,
+                {"r": 2, "target_modules": ["conv2d"], "use_dora": True},
+                id="dora with rank equal to groups",
+            ),
+            pytest.param(
+                LoraConfig,
+                {"r": 1, "target_modules": ["conv2d"], "use_dora": True},
+                id="dora with rank not divisible by groups",
+            ),
+        ],
+    )
+    def test_error_raised_if_rank_not_divisible_by_groups(self, config_cls, config_kwargs):
+        # This test checks if error is raised when rank is not divisible by groups for conv layer since
+        # currently, support is limited to conv layers where the rank is divisible by groups in lora and dora
+        base_model = self.get_model_conv2d_groups()
+        peft_config = config_cls(**config_kwargs)
+        r = config_kwargs["r"]
+        base_layer = base_model.conv2d
+        groups = base_layer.groups
+        if r % groups != 0:
+            with pytest.raises(
+                ValueError,
+                match=(
+                    f"Targeting a {base_layer.__class__.__name__} with groups={base_layer.groups} and rank {r}. "
+                    "Currently, support is limited to conv layers where the rank is divisible by groups. "
+                    "Either choose a different rank or do not target this specific layer."
+                ),
+            ):
+                peft_model = get_peft_model(base_model, peft_config)
+        else:
+            # No error should be raised
+            peft_model = get_peft_model(base_model, peft_config)
+
+    def test_target_module_and_target_parameter_on_same_layer(self):
+        # When targeting an nn.Parameter with LoRA using target_parameters, ensure that this is not already another LoRA
+        # layer (i.e. avoid double wrapping).
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(10, 10)
+
+        base_model = MyModule()
+        config = LoraConfig(target_modules=["linear"], target_parameters=["linear.weight"])
+        msg = "Trying to wrap an `nn.Parameter` of layer 'linear' of type Linear, which is not a valid target."
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(base_model, config)
+
+    @pytest.mark.parametrize("target_parameters", [["linear"], ["foobar"], ["foobar.weight"], ["foo", "bar"]])
+    @pytest.mark.parametrize("target_modules", [None, [], ""])
+    def test_valid_no_target_module_nor_target_parameter_match_raises(self, target_parameters, target_modules):
+        model = self.get_model()
+        config = LoraConfig(target_modules=target_modules, target_parameters=target_parameters)
+        msg = re.escape(
+            "No `target_modules` passed but also no `target_parameters` found. Please check the values for "
+            "these arguments."
+        )
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+    def test_target_parameters_wrong_type_raises(self):
+        # Check that target_parameters being a string raises a useful error message -- this is an easy mistake to make
+        # because strings are allowed for target_modules
+        model = self.get_model()
+        msg = "`target_parameters` must be a list of strings or None."
+        with pytest.raises(TypeError, match=msg):
+            LoraConfig(target_parameters="linear.weight")
+
+    def test_valid_target_parameters_invalid_target_modules_warns(self):
+        model = self.get_model()
+        config = LoraConfig(target_modules=["foobar"], target_parameters=["linear.weight"])
+        msg = re.escape("target_modules={'foobar'} were set but no module was matched.")
+        with pytest.warns(RuntimeWarning, match=msg):
+            get_peft_model(model, config)
+
+    def test_valid_target_modules_invalid_target_parameters_warns(self):
+        model = self.get_model()
+        config = LoraConfig(target_modules=["linear"], target_parameters=["foobar.weight"])
+        msg = re.escape("target_parameters=['foobar.weight'] were set but no parameter was matched.")
+        with pytest.warns(RuntimeWarning, match=msg):
+            get_peft_model(model, config)
+
+    def test_adding_multiple_adapters_with_target_parameters_raises(self):
+        model = self.get_model()
+        config = LoraConfig(target_modules=[], target_parameters=["linear.weight"])
+        model = get_peft_model(model, config)
+        msg = re.escape("only one LoRA adapter per model with `target_parameters` is allowed")
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter(adapter_name="other", peft_config=config)
+
+    def test_loading_loading_adapters_with_target_parameters_raises(self, tmp_path):
+        model = self.get_model()
+        config = LoraConfig(target_modules=[], target_parameters=["linear.weight"])
+        model = get_peft_model(model, config)
+        model.save_pretrained(tmp_path)
+
+        model = self.get_model()
+        model = PeftModel.from_pretrained(model, tmp_path)
+        msg = re.escape("only one LoRA adapter per model with `target_parameters` is allowed")
+        with pytest.raises(ValueError, match=msg):
+            model.load_adapter(tmp_path, adapter_name="other")
+
+    def test_multiple_configs_with_bias_raises(self, tmp_path):
+        # There cannot be more than one config with bias != "none".
+        # Note: This would need to be tested for all PEFT methods that support the bias parameter, but as this method
+        # comes from BaseTuner, it's fine to only check LoRA.
+        model = self.get_model()
+        config0 = LoraConfig(target_modules=["linear"], bias="all")
+        model = get_peft_model(model, config0)
+
+        config1 = LoraConfig(target_modules=["linear"], bias="lora_only")
+        msg = "supports only 1 adapter with bias. When using multiple adapters"
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("other", config1)
+
+        # the invalid peft config was not added
+        assert len(model.peft_config) == 1
+
+        # it's okay to add a config with bias="none" (the default)
+        config2 = LoraConfig(target_modules=["linear"], bias="none")
+        model.add_adapter("other", config2)  # does not raise
 
 
 class TestLokrInitialization:
@@ -1309,6 +1622,7 @@ class TestLokrInitialization:
 
         assert not torch.allclose(output_before, output_after)
 
+    @require_deterministic_for_xpu
     def test_lokr_linear_init_lycoris(self, data):
         torch.manual_seed(0)
 
@@ -1517,6 +1831,391 @@ class TestVBLoraInitialization:
             get_peft_model(model, config)
 
 
+class TestC3AInitialization:
+    torch_device = infer_device()
+
+    def get_model(self):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 30, bias=bias)
+                self.lin1 = nn.Linear(30, 2, bias=bias)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                return X
+
+        return MLP().to(self.torch_device)
+
+    def test_c3a_with_incompatible_block_size_with_in_features(self):
+        block_size = 3
+        model = self.get_model()
+        config = C3AConfig(target_modules=["lin0"], block_size=block_size)
+        msg = f"The block size should be a factor of the input size. However, the input size is {model.lin0.in_features} and the block size is {block_size}"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+    def test_c3a_with_incompatible_block_size_with_out_features(self):
+        block_size = 3
+        model = self.get_model()
+        config = C3AConfig(target_modules=["lin1"], block_size=block_size)
+        msg = f"The block size should be a factor of the output size. However, the output size is {model.lin1.out_features} and the block size is {block_size}"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
+
+class TestWaveFTInitialization:
+    """Test class to check the initialization of WaveFT adapters."""
+
+    torch_device = infer_device()
+
+    def get_model(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Choose a large weight so that averages are close to expected values.
+                self.linear = nn.Linear(1000, 1000)
+                self.conv2d = nn.Conv2d(100, 100, 3)
+
+            def forward(self, x):
+                x_4d = x.flatten().reshape(1, 100, 10, 10)
+                return self.linear(x), self.conv2d(x_4d)
+
+        return MyModule().eval().to(self.torch_device)
+
+    @pytest.fixture
+    def data(self):
+        return torch.rand(10, 1000).to(self.torch_device)
+
+    @require_deterministic_for_xpu
+    def test_waveft_linear_init_default(self, data):
+        # Default initialization should result in no change to output (zeros initialization)
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        output_before = model(data)[0]
+        config = WaveFTConfig(target_modules=["linear"], n_frequency=100, init_weights=True)
+        model = get_peft_model(model, config)
+        output_after = model(data)[0]
+
+        assert torch.allclose(output_before, output_after, atol=1e-6)
+
+    def test_waveft_linear_init_false(self, data):
+        # With init_weights=False, output should change (random initialization)
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        output_before = model(data)[0]
+        config = WaveFTConfig(target_modules=["linear"], n_frequency=100, init_weights=False)
+        model = get_peft_model(model, config)
+        output_after = model(data)[0]
+
+        assert not torch.allclose(output_before, output_after, atol=1e-6)
+
+    @require_deterministic_for_xpu
+    def test_waveft_linear_with_scaling(self, data):
+        # Test that scaling parameter affects output correctly
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        output_before = model(data)[0]
+        config = WaveFTConfig(target_modules=["linear"], n_frequency=100, init_weights=False, scaling=10.0)
+        model = get_peft_model(model, config)
+        output_after = model(data)[0]
+
+        assert not torch.allclose(output_before, output_after, atol=1e-6)
+
+    @require_deterministic_for_xpu
+    def test_waveft_different_wavelet_families(self, data):
+        # Test different wavelet families
+        torch.manual_seed(0)
+
+        model1 = self.get_model()
+        config1 = WaveFTConfig(target_modules=["linear"], n_frequency=100, wavelet_family="db1", init_weights=False)
+        model1 = get_peft_model(model1, config1)
+        output1 = model1(data)[0]
+
+        torch.manual_seed(0)
+        model2 = self.get_model()
+        config2 = WaveFTConfig(target_modules=["linear"], n_frequency=100, wavelet_family="sym2", init_weights=False)
+        model2 = get_peft_model(model2, config2)
+        output2 = model2(data)[0]
+
+        # Different wavelet families should produce different results
+        assert not torch.allclose(output1, output2, atol=1e-6)
+
+    @require_deterministic_for_xpu
+    def test_waveft_use_idwt_flag(self, data):
+        # Test use_idwt flag
+        torch.manual_seed(0)
+
+        model1 = self.get_model()
+        config1 = WaveFTConfig(target_modules=["linear"], n_frequency=100, use_idwt=True, init_weights=False)
+        model1 = get_peft_model(model1, config1)
+        output1 = model1(data)[0]
+
+        torch.manual_seed(0)
+        model2 = self.get_model()
+        config2 = WaveFTConfig(target_modules=["linear"], n_frequency=100, use_idwt=False, init_weights=False)
+        model2 = get_peft_model(model2, config2)
+        output2 = model2(data)[0]
+
+        # Different use_idwt settings should produce different results
+        assert not torch.allclose(output1, output2, atol=1e-6)
+
+    def test_waveft_non_positive_n_frequency_raises(self):
+        # Test that n_frequency <= 0 raises appropriate error
+        model = self.get_model()
+
+        # Test with n_frequency = 0
+        n_frequency = 0
+        msg = f"`n_frequency` should be a positive integer value but the value passed is {n_frequency}"
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            config = WaveFTConfig(target_modules=["linear"], n_frequency=n_frequency)
+            get_peft_model(model, config)
+
+        # Test with negative n_frequency
+        n_frequency = -1
+        msg = f"`n_frequency` should be a positive integer value but the value passed is {n_frequency}"
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            config = WaveFTConfig(target_modules=["linear"], n_frequency=n_frequency)
+            get_peft_model(model, config)
+
+    def test_waveft_excessive_n_frequency_raises(self):
+        # Test that n_frequency > in_features * out_features raises appropriate error
+        model = self.get_model()
+
+        # The model has a linear layer with 1000 in_features and 1000 out_features
+        # So the maximum n_frequency should be 1000 * 1000 = 1,000,000
+        max_allowed = 1000 * 1000
+        n_frequency = max_allowed + 1
+        msg = (
+            f"`n_frequency` should be less than or equal to the product of the input and output dimensions "
+            f"but the value passed is {n_frequency} and the product is {max_allowed}"
+        )
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            config = WaveFTConfig(target_modules=["linear"], n_frequency=n_frequency)
+            get_peft_model(model, config)
+
+    def test_waveft_n_frequency_pattern(self, data):
+        # Test n_frequency_pattern functionality
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        config = WaveFTConfig(
+            target_modules=["linear"], n_frequency=50, n_frequency_pattern={"linear": 100}, init_weights=True
+        )
+        model = get_peft_model(model, config)
+
+        # Check that the pattern was applied
+        waveft_layer = model.base_model.model.linear
+        assert hasattr(waveft_layer, "waveft_n_frequency")
+        assert waveft_layer.waveft_n_frequency["default"] == 100
+
+    def test_waveft_layers_pattern_without_layers_to_transform_raises(self):
+        # Test that when layers_pattern is specified, layers_to_transform must also be specified
+        msg = "When `layers_pattern` is specified, `layers_to_transform` must also be specified."
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            WaveFTConfig(target_modules=["linear"], layers_pattern=["layers"], layers_to_transform=None)
+
+    def test_waveft_invalid_wavelet_family_raises(self):
+        # Test that invalid wavelet families raise appropriate errors
+        invalid_family = "invalid_wavelet"
+        msg = f"Wavelet family {invalid_family} not supported. Supported wavelet families are:"
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            WaveFTConfig(target_modules=["linear"], wavelet_family=invalid_family)
+
+
+class TestRoadInitialization:
+    torch_device = infer_device()
+
+    def get_model(self):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 30, bias=bias)
+                self.lin1 = nn.Linear(30, 2, bias=bias)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                return X
+
+        return MLP().to(self.torch_device)
+
+    def get_conv2d_model(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                # choose a large weight so that averages are close to expected values
+                self.linear = nn.Linear(1000, 1000)
+                self.embed = nn.Embedding(1000, 1000)
+                self.conv2d = nn.Conv2d(100, 100, 3)
+
+            def forward(self, x):
+                x_int = (100 * x).int()
+                x_4d = x.flatten().reshape(1, 100, 10, 10)
+                return self.linear(x), self.embed(x_int), self.conv2d(x_4d)
+
+        return MyModule().eval().to(self.torch_device)
+
+    def test_road_default_initialization(self):
+        torch.manual_seed(0)
+        model = self.get_model()
+        config = RoadConfig(target_modules=["lin0"], group_size=2)
+        model = get_peft_model(model, config)
+        weight_alpha = model.lin0.road_alpha["default"].data
+        weight_theta = model.lin0.road_theta["default"].data
+        torch.allclose(weight_alpha, torch.ones_like(weight_alpha))
+        torch.allclose(weight_theta, torch.zeros_like(weight_theta))
+
+    def test_road_with_odd_group_size(self):
+        group_size = 3  # odd values are not allowed
+        msg = f"The group_size must be divisible by 2 when using RoadLayer, but got {group_size}."
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            RoadConfig(group_size=group_size)
+
+    def test_road_with_too_large_group_size(self):
+        group_size = 64  # larger than out_features
+        msg = (
+            f"The out_features of the base layer must be divisible by group_size ({group_size}) when using RoadLayer."
+        )
+        model = self.get_model()
+        config = RoadConfig(target_modules=["lin0"], group_size=group_size)
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            get_peft_model(model, config)
+
+    def test_road_with_incompatible_group_size_with_out_features(self):
+        group_size = 4  # even, but 30 does not divide by 4
+        model = self.get_model()
+        config = RoadConfig(target_modules=["lin0"], group_size=group_size)
+        msg = (
+            f"The out_features of the base layer must be divisible by group_size ({group_size}) when using RoadLayer."
+        )
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            get_peft_model(model, config)
+
+    def test_road_with_conv2d_layer(self):
+        model = self.get_conv2d_model()
+        config = RoadConfig(target_modules=["conv2d"], group_size=2)
+        msg = "Target module Conv2d(100, 100, kernel_size=(3, 3), stride=(1, 1)) is not supported. Currently, only the following modules are supported: `torch.nn.Linear`."
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            get_peft_model(model, config)
+
+
+class TestDeLoRAInitialization:
+    """Basic sanity tests for the DeLoRA tuner."""
+
+    torch_device = infer_device()
+
+    def get_model(self, bias=True):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 30, bias=bias)
+                self.lin1 = nn.Linear(30, 2, bias=bias)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                return X
+
+        return MLP(bias=bias).to(self.torch_device).eval()
+
+    @pytest.fixture
+    def data(self):
+        torch.manual_seed(0)
+        return torch.randn(4, 10, device=self.torch_device)
+
+    def test_delora_injection_keeps_output_default(self, data):
+        # With init_weights=True (default), initial forward should match base model
+        torch.manual_seed(0)
+        base = self.get_model()
+        y_base = base(data)
+
+        cfg = DeloraConfig(target_modules=["lin0"], r=8, delora_lambda=15, init_weights=True)
+        model = get_peft_model(base, cfg)
+        y_peft = model(data)
+
+        assert torch.allclose(y_base, y_peft, atol=1e-6, rtol=1e-6)
+
+    def test_delora_param_shapes(self):
+        base = self.get_model()
+        in_f, out_f = base.lin0.in_features, base.lin0.out_features
+        r = 4
+        cfg = DeloraConfig(target_modules=["lin0"], r=r, delora_lambda=15, init_weights=True)
+        model = get_peft_model(base, cfg)
+
+        layer = model.lin0  # DeloraLinear wrapper
+        assert hasattr(layer, "delora_A") and hasattr(layer, "delora_B") and hasattr(layer, "delora_lambda")
+        A = layer.delora_A["default"]
+        B = layer.delora_B["default"]
+        delora_lambda = layer.delora_lambda["default"]
+        assert tuple(A.shape) == (r, in_f)
+        assert tuple(B.shape) == (out_f, r)
+        assert tuple(delora_lambda.shape) == (1,)
+
+    def test_init_weights_false_shifts_output(self, data):
+        # With init_weights=False, there should be an initial delta to the base model output
+        base = self.get_model()
+        y_base = base(data)
+        cfg = DeloraConfig(target_modules=["lin0"], r=8, delora_lambda=15, init_weights=False)
+        model = get_peft_model(base, cfg)
+        y_peft = model(data)
+        assert not torch.allclose(y_base, y_peft, atol=1e-6, rtol=1e-6)
+
+
+class TestGraLoRAInitialization:
+    """Basic sanity tests for the GraLoRA tuner."""
+
+    torch_device = infer_device()
+
+    def get_model(self, bias=True):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 30, bias=bias)
+                self.lin1 = nn.Linear(30, 2, bias=bias)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                return X
+
+        return MLP(bias=bias).to(self.torch_device).eval()
+
+    @pytest.fixture
+    def data(self):
+        torch.manual_seed(0)
+        return torch.randn(4, 10, device=self.torch_device)
+
+    def test_gralora_with_incompatible_gralora_k_and_r_raises(self):
+        model = self.get_model()
+        r = 6
+        gralora_k = 4
+        # msg = f"r should be divisible by gralora_k, but got {config.r} and {config.gralora_k}"
+        msg = f"r should be divisible by gralora_k, but got {r} and {gralora_k}"
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            GraloraConfig(target_modules=["lin0"], r=r, gralora_k=gralora_k)
+
+    def test_gralora_with_incompatible_gralora_k_and_in_features_raises(self):
+        model = self.get_model()
+        config = GraloraConfig(target_modules=["lin0"], r=6, gralora_k=3)
+        msg = f"in_features should be divisible by gralora_k, but got {model.lin0.in_features} and {config.gralora_k}"
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            get_peft_model(model, config)
+
+    def test_gralora_with_incompatible_gralora_k_and_out_features_raises(self):
+        model = self.get_model()
+        config = GraloraConfig(target_modules=["lin1"], r=6, gralora_k=3)
+        msg = (
+            f"out_features should be divisible by gralora_k, but got {model.lin1.out_features} and {config.gralora_k}"
+        )
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            get_peft_model(model, config)
+
+
 class TestNoInfiniteRecursionDeepspeed:
     # see #1892 for details
     classes = [
@@ -1570,7 +2269,7 @@ class TestNoInfiniteRecursionDeepspeed:
 
 
 class TestLoadAdapterOfflineMode:
-    base_model = "hf-internal-testing/tiny-random-OPTForCausalLM"
+    base_model = "peft-internal-testing/tiny-random-OPTForCausalLM"
     peft_model_id = "peft-internal-testing/tiny-OPTForCausalLM-lora"
 
     # make sure that PEFT honors offline mode
@@ -1578,13 +2277,19 @@ class TestLoadAdapterOfflineMode:
     def hub_offline_ctx(self):
         # this is required to simulate offline mode, setting the env var dynamically inside the test does not work
         # because the value is checked only once at the start of the session
-        with patch("huggingface_hub.constants.HF_HUB_OFFLINE", True):
-            reset_sessions()
-            yield
-        reset_sessions()
 
-    # TODO remove when/if Hub is more stable
-    @pytest.mark.xfail(reason="Test is flaky on CI", raises=HfHubHTTPError)
+        if reset_sessions is None:
+            # this means we're using huggingface_hub >= 1.0.0, there is no need to call reset_sessions() anymore
+            with patch("huggingface_hub.constants.HF_HUB_OFFLINE", True):
+                yield
+        else:
+            # in huggingface_hub < 1.0.0, it's necessary to reset the session
+            # TODO: remove once huggingface_hub < 1.0.0 is no longer supported
+            with patch("huggingface_hub.constants.HF_HUB_OFFLINE", True):
+                reset_sessions()
+                yield
+            reset_sessions()
+
     def test_load_from_hub_then_offline_model(self):
         # this uses LoRA but it's the same mechanism for other methods
         base_model = AutoModelForCausalLM.from_pretrained(self.base_model)
@@ -1611,8 +2316,6 @@ class TestLoadAdapterOfflineMode:
         snapshot_download(self.base_model, cache_dir=cache_dir)
         snapshot_download(self.peft_model_id, cache_dir=cache_dir)
 
-    # TODO remove when/if Hub is more stable
-    @pytest.mark.xfail(reason="Test is flaky on CI", raises=LocalEntryNotFoundError)
     def test_load_checkpoint_offline_non_default_cache_dir(self, changed_default_cache_dir, tmp_path):
         # See #2373 for context
         self.load_checkpoints(tmp_path)
@@ -1635,7 +2338,7 @@ class TestCustomModelConfigWarning:
 
     def test_no_warning_by_default_transformers_model(self, recwarn):
         # first a sanity test that there is no warning by default when using a model from transformers
-        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
         get_peft_model(model, LoraConfig())
         for warning in recwarn.list:
             assert "renamed" not in str(warning.message)
@@ -1648,10 +2351,10 @@ class TestCustomModelConfigWarning:
 
     def test_warning_name_transformers_model(self, recwarn):
         # The base_model_name_or_path provided by the user is overridden.
-        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
         custom_name = "custom_name"
         get_peft_model(model, LoraConfig(base_model_name_or_path=custom_name))
-        msg = f"was renamed from '{custom_name}' to 'hf-internal-testing/tiny-random-OPTForCausalLM'"
+        msg = f"was renamed from '{custom_name}' to 'peft-internal-testing/tiny-random-OPTForCausalLM'"
         assert any(msg in str(warning.message) for warning in recwarn.list)
 
     def test_warning_name_custom_model(self, custom_module, recwarn):
@@ -1684,7 +2387,7 @@ class TestLowCpuMemUsage:
     if _device != "cpu":
         devices.append(_device)
 
-    model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+    model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
 
     def get_model(self):
         return AutoModelForCausalLM.from_pretrained(self.model_id)
@@ -1722,7 +2425,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
     @pytest.mark.parametrize("device", devices)
     def test_load_adapter_low_cpu_mem_usage_works(self, device, inputs, lora_path, lora_config):
@@ -1749,7 +2452,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
     @pytest.mark.parametrize("device", devices)
     def test_get_peft_model_low_cpu_mem_usage_works(self, device, inputs):
@@ -1811,7 +2514,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
     ############################
     # tests for PeftMixedModel #
@@ -1833,7 +2536,7 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
     @pytest.mark.parametrize("device", devices)
     def test_mixed_model_load_adapter_low_cpu_mem_usage_works(self, device, inputs, lora_path, lora_config):
@@ -1860,13 +2563,13 @@ class TestLowCpuMemUsage:
         logits_low_cpu_mem = model(**inputs).logits
 
         assert device_set_low_cpu_mem == device_set_not_low_cpu_mem
-        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem)
+        assert torch.allclose(logits_low_cpu_mem, logits_not_low_cpu_mem, atol=1e-6, rtol=1e-6)
 
 
 def test_from_pretrained_missing_keys_warning(recwarn, tmp_path):
     # For more context, see issue 2115
     # When loading a PEFT adapter and we're missing a PEFT-specific weight, there should be a warning.
-    model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+    model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
     config = LoraConfig()
     model = get_peft_model(model, config)
     state_dict = model.state_dict()
@@ -1874,7 +2577,7 @@ def test_from_pretrained_missing_keys_warning(recwarn, tmp_path):
     # first, sanity check that there are no warnings if no key is missing
     model.save_pretrained(tmp_path)
     del model
-    model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+    model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
     model = PeftModel.from_pretrained(model, tmp_path)
     msg = "Found missing adapter keys"
     assert not any(msg in str(w.message) for w in recwarn.list)
@@ -1889,7 +2592,7 @@ def test_from_pretrained_missing_keys_warning(recwarn, tmp_path):
     model.save_pretrained(tmp_path)
     del model
 
-    model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+    model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
     model = PeftModel.from_pretrained(model, tmp_path)
     assert any(msg in str(w.message) for w in recwarn.list)
     assert any(missing_key in str(w.message) for w in recwarn.list)
@@ -1904,7 +2607,7 @@ class TestNamingConflictWarning:
     def setup(self):
         self.peft_config = LoraConfig()
         self.prefix = PEFT_TYPE_TO_PREFIX_MAPPING[self.peft_config.peft_type]
-        self.base_model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+        self.base_model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
 
     def _save_and_reload_model(self, model, adapter_name, tmp_path):
         # Helper method to save and reload the PEFT model
@@ -1917,7 +2620,7 @@ class TestNamingConflictWarning:
         # No warning should be raised when there is no naming conflict during get_peft_model.
         non_conflict_adapter = "adapter"
         _ = get_peft_model(self.base_model, self.peft_config, adapter_name=non_conflict_adapter)
-        expected_msg = f"Adapter name {non_conflict_adapter} should not be contained in the prefix {self.prefix}."
+        expected_msg = f"Adapter name '{non_conflict_adapter}' should not be contained in the prefix '{self.prefix}'."
         assert not any(expected_msg in str(w.message) for w in recwarn.list)
 
     def test_no_warning_without_naming_conflict_add_adapter(self, recwarn):
@@ -1927,7 +2630,7 @@ class TestNamingConflictWarning:
         model = get_peft_model(self.base_model, self.peft_config, adapter_name=non_conflict_adapter)
         _ = model.add_adapter(other_non_conflict_adapter, self.peft_config)
         expected_msg = (
-            f"Adapter name {other_non_conflict_adapter} should not be contained in the prefix {self.prefix}."
+            f"Adapter name '{other_non_conflict_adapter}' should not be contained in the prefix '{self.prefix}'."
         )
         assert not any(expected_msg in str(w.message) for w in recwarn.list)
 
@@ -1936,14 +2639,16 @@ class TestNamingConflictWarning:
         non_conflict_adapter = "adapter"
         model = get_peft_model(self.base_model, self.peft_config, adapter_name=non_conflict_adapter)
         _ = self._save_and_reload_model(model, non_conflict_adapter, tmp_path)
-        expected_msg = f"Adapter name {non_conflict_adapter} should not be contained in the prefix {self.prefix}."
+        expected_msg = f"Adapter name '{non_conflict_adapter}' should not be contained in the prefix '{self.prefix}'."
         assert not any(expected_msg in str(w.message) for w in recwarn.list)
 
     def test_warning_naming_conflict_get_peft_model(self, recwarn):
         # Warning is raised when the adapter name conflicts with the prefix in get_peft_model.
         conflicting_adapter_name = self.prefix[:-1]
         _ = get_peft_model(self.base_model, self.peft_config, adapter_name=conflicting_adapter_name)
-        expected_msg = f"Adapter name {conflicting_adapter_name} should not be contained in the prefix {self.prefix}."
+        expected_msg = (
+            f"Adapter name '{conflicting_adapter_name}' should not be contained in the prefix '{self.prefix}'."
+        )
         assert any(expected_msg in str(w.message) for w in recwarn.list)
 
     def test_warning_naming_conflict_add_adapter(self, recwarn):
@@ -1952,7 +2657,7 @@ class TestNamingConflictWarning:
         non_conflict_adapter = "adapter"
         model = get_peft_model(self.base_model, self.peft_config, adapter_name=non_conflict_adapter)
         _ = model.add_adapter(conflicting_adapter, self.peft_config)
-        expected_msg = f"Adapter name {conflicting_adapter} should not be contained in the prefix {self.prefix}."
+        expected_msg = f"Adapter name '{conflicting_adapter}' should not be contained in the prefix '{self.prefix}'."
         assert any(expected_msg in str(w.message) for w in recwarn.list)
 
     def test_warning_naming_conflict_save_and_load(self, recwarn, tmp_path):
@@ -1960,7 +2665,7 @@ class TestNamingConflictWarning:
         conflicting_adapter = self.prefix[:-1]
         model = get_peft_model(self.base_model, self.peft_config, adapter_name=conflicting_adapter)
         _ = self._save_and_reload_model(model, conflicting_adapter, tmp_path)
-        expected_msg = f"Adapter name {conflicting_adapter} should not be contained in the prefix {self.prefix}."
+        expected_msg = f"Adapter name '{conflicting_adapter}' should not be contained in the prefix '{self.prefix}'."
         assert any(expected_msg in str(w.message) for w in recwarn.list)
 
 
@@ -3503,7 +4208,7 @@ class TestScaling:
     @pytest.fixture
     def model(self):
         # tiny opt with 5 attention layers
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         return AutoModelForCausalLM.from_pretrained(model_id)
 
     def get_scalings(self, model, adapter_name="default"):
@@ -3560,6 +4265,44 @@ class TestScaling:
         self.unscale_layer(model, 3)
         scalings = self.get_scalings(model)
         expected = [2.0] * n_layers
+        assert scalings == expected
+
+    def test_scaling_with_rslora(self, model):
+        n_layers = 5
+        rank, lora_alpha = 8, 16
+        config = LoraConfig(
+            r=rank,
+            lora_alpha=lora_alpha,
+            use_rslora=True,
+            target_modules=["k_proj"],
+        )
+        model = get_peft_model(model, config)
+        scalings = self.get_scalings(model)
+        expected = [lora_alpha / math.sqrt(rank)] * n_layers
+        assert scalings == expected
+
+        # double
+        self.scale_layer(model, 2)
+        scalings = self.get_scalings(model)
+        expected = [2 * lora_alpha / math.sqrt(rank)] * n_layers
+        assert scalings == expected
+
+        # back to original
+        self.unscale_layer(model, None)
+        scalings = self.get_scalings(model)
+        expected = [lora_alpha / math.sqrt(rank)] * n_layers
+        assert scalings == expected
+
+        # triple
+        self.set_scale(model, "default", 3)
+        scalings = self.get_scalings(model)
+        expected = [3 * lora_alpha / math.sqrt(rank)] * n_layers
+        assert scalings == expected
+
+        # back to original
+        self.unscale_layer(model, 3)
+        scalings = self.get_scalings(model)
+        expected = [lora_alpha / math.sqrt(rank)] * n_layers
         assert scalings == expected
 
     def test_scaling_rank_pattern_alpha_pattern(self, model):
@@ -3757,3 +4500,492 @@ class TestScaling:
         expected_other = [3 * lora_alpha1 / rank1] * n_layers
         assert scalings_default == expected_default
         assert scalings_other == expected_other
+
+
+class TestLoadPeftKeyMapping:
+    # See discussion in https://github.com/huggingface/transformers/pull/38627
+
+    # transformers PR #37033 re-arranges the way visual language models are built by moving the LM head from the
+    # language model to the top-level VLM (among other things). A consequence of this is that the keys in the PEFT
+    # state_dict now also follow the new architecture. This test class serves to ensure that old checkpoints can be
+    # loaded with the changed architecture. Unfortunately, new checkpoints cannot be loaded with the old architecture,
+    # the corresponding test is marked as xfail.
+
+    # Note: We only test prefix tuning (prompt learning method), LoRA (non-prompt learning method), and VBLoRA (shared
+    # parameters) as the other PEFT methods should work the same way. It would be excessive to test all of them here.
+
+    @pytest.fixture
+    def fake_model_config(self):
+        # mimics a transformers model config
+        class FakeConfig(dict):
+            def __init__(self):
+                self.vocab_size = 10
+
+            def __getattr__(self, item):
+                if item in self:
+                    return self[item]
+                raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'")
+
+        return FakeConfig()
+
+    @pytest.fixture
+    def old_model(self, fake_model_config):
+        # create a small model that mimics the old architecture of, for instance, Qwen/Qwen2-VL-2B-Instruct
+        # Qwen2VLForConditionalGeneration(
+        #   (visual): Qwen2VisionTransformerPretrainedModel(
+        #     (patch_embed): PatchEmbed(
+        #       (proj): Conv3d(3, 1280, kernel_size=(2, 14, 14), stride=(2, 14, 14), bias=False)
+        #     )
+        #     (rotary_pos_emb): VisionRotaryEmbedding()
+        #     (blocks): ModuleList(
+        #       (0-31): 32 x Qwen2VLVisionBlock(
+        #         (norm1): LayerNorm((1280,), eps=1e-06, elementwise_affine=True)
+        #         (norm2): LayerNorm((1280,), eps=1e-06, elementwise_affine=True)
+        #         (attn): VisionSdpaAttention(
+        #           (qkv): Linear(in_features=1280, out_features=3840, bias=True)
+        #           (proj): Linear(in_features=1280, out_features=1280, bias=True)
+        #         )
+        #         (mlp): VisionMlp(
+        #           (fc1): Linear(in_features=1280, out_features=5120, bias=True)
+        #           (act): QuickGELUActivation()
+        #           (fc2): Linear(in_features=5120, out_features=1280, bias=True)
+        #         )
+        #       )
+        #     )
+        #     (merger): PatchMerger(
+        #       (ln_q): LayerNorm((1280,), eps=1e-06, elementwise_affine=True)
+        #       (mlp): Sequential(
+        #         (0): Linear(in_features=5120, out_features=5120, bias=True)
+        #         (1): GELU(approximate='none')
+        #         (2): Linear(in_features=5120, out_features=1536, bias=True)
+        #       )
+        #     )
+        #   )
+        #   (model): Qwen2VLModel(
+        #     (embed_tokens): Embedding(151936, 1536)
+        #     (layers): ModuleList(
+        #       (0-27): 28 x Qwen2VLDecoderLayer(
+        #         (self_attn): Qwen2VLSdpaAttention(
+        #           (q_proj): Linear(in_features=1536, out_features=1536, bias=True)
+        #           (k_proj): Linear(in_features=1536, out_features=256, bias=True)
+        #           (v_proj): Linear(in_features=1536, out_features=256, bias=True)
+        #           (o_proj): Linear(in_features=1536, out_features=1536, bias=False)
+        #           (rotary_emb): Qwen2VLRotaryEmbedding()
+        #         )
+        #         (mlp): Qwen2MLP(
+        #           (gate_proj): Linear(in_features=1536, out_features=8960, bias=False)
+        #           (up_proj): Linear(in_features=1536, out_features=8960, bias=False)
+        #           (down_proj): Linear(in_features=8960, out_features=1536, bias=False)
+        #           (act_fn): SiLU()
+        #         )
+        #         (input_layernorm): Qwen2RMSNorm((1536,), eps=1e-06)
+        #         (post_attention_layernorm): Qwen2RMSNorm((1536,), eps=1e-06)
+        #       )
+        #     )
+        #     (norm): Qwen2RMSNorm((1536,), eps=1e-06)
+        #     (rotary_emb): Qwen2VLRotaryEmbedding()
+        #   )
+        #   (lm_head): Linear(in_features=1536, out_features=151936, bias=False)
+        # )
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attn = nn.Linear(10, 10)
+
+        class OldModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.config = fake_model_config
+                self.device = "cpu"
+                self.proj = nn.Conv3d(3, 10, 3)
+                self.visual = nn.ModuleDict(
+                    {
+                        "blocks": nn.ModuleList([Block() for _ in range(2)]),
+                    }
+                )
+                self.model = nn.ModuleDict(
+                    {
+                        "layers": nn.ModuleList([Block() for _ in range(2)]),
+                    }
+                )
+                self.lm_head = nn.Linear(10, 10)
+
+            def prepare_inputs_for_generation(self):
+                return
+
+        model = OldModel()
+        return model
+
+    @pytest.fixture
+    def new_model(self, fake_model_config):
+        # create a small model that mimics the new architecture of, for instance, Qwen/Qwen2-VL-2B-Instruct
+        # Qwen2VLForConditionalGeneration(
+        #   (model): Qwen2VLModel(
+        #     (visual): Qwen2VisionTransformerPretrainedModel(
+        #       (patch_embed): PatchEmbed(
+        #         (proj): Conv3d(3, 1280, kernel_size=(2, 14, 14), stride=(2, 14, 14), bias=False)
+        #       )
+        #       (rotary_pos_emb): VisionRotaryEmbedding()
+        #       (blocks): ModuleList(
+        #         (0-31): 32 x Qwen2VLVisionBlock(
+        #           (norm1): LayerNorm((1280,), eps=1e-06, elementwise_affine=True)
+        #           (norm2): LayerNorm((1280,), eps=1e-06, elementwise_affine=True)
+        #           (attn): VisionSdpaAttention(
+        #             (qkv): Linear(in_features=1280, out_features=3840, bias=True)
+        #             (proj): Linear(in_features=1280, out_features=1280, bias=True)
+        #           )
+        #           (mlp): VisionMlp(
+        #             (fc1): Linear(in_features=1280, out_features=5120, bias=True)
+        #             (act): QuickGELUActivation()
+        #             (fc2): Linear(in_features=5120, out_features=1280, bias=True)
+        #           )
+        #         )
+        #       )
+        #       (merger): PatchMerger(
+        #         (ln_q): LayerNorm((1280,), eps=1e-06, elementwise_affine=True)
+        #         (mlp): Sequential(
+        #           (0): Linear(in_features=5120, out_features=5120, bias=True)
+        #           (1): GELU(approximate='none')
+        #           (2): Linear(in_features=5120, out_features=1536, bias=True)
+        #         )
+        #       )
+        #     )
+        #     (language_model): Qwen2VLTextModel(
+        #       (embed_tokens): Embedding(151936, 1536)
+        #       (layers): ModuleList(
+        #         (0-27): 28 x Qwen2VLDecoderLayer(
+        #           (self_attn): Qwen2VLAttention(
+        #             (q_proj): Linear(in_features=1536, out_features=1536, bias=True)
+        #             (k_proj): Linear(in_features=1536, out_features=256, bias=True)
+        #             (v_proj): Linear(in_features=1536, out_features=256, bias=True)
+        #             (o_proj): Linear(in_features=1536, out_features=1536, bias=False)
+        #             (rotary_emb): Qwen2VLRotaryEmbedding()
+        #           )
+        #           (mlp): Qwen2MLP(
+        #             (gate_proj): Linear(in_features=1536, out_features=8960, bias=False)
+        #             (up_proj): Linear(in_features=1536, out_features=8960, bias=False)
+        #             (down_proj): Linear(in_features=8960, out_features=1536, bias=False)
+        #             (act_fn): SiLU()
+        #           )
+        #           (input_layernorm): Qwen2RMSNorm((1536,), eps=1e-06)
+        #           (post_attention_layernorm): Qwen2RMSNorm((1536,), eps=1e-06)
+        #         )
+        #       )
+        #       (norm): Qwen2RMSNorm((1536,), eps=1e-06)
+        #       (rotary_emb): Qwen2VLRotaryEmbedding()
+        #     )
+        #   )
+        #   (lm_head): Linear(in_features=1536, out_features=151936, bias=False)
+        # )
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attn = nn.Linear(10, 10)
+
+        class InnerModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.visual = nn.ModuleDict(
+                    {
+                        "blocks": nn.ModuleList([Block() for _ in range(2)]),
+                    }
+                )
+                self.language_model = nn.ModuleDict(
+                    {
+                        "layers": nn.ModuleList([Block() for _ in range(2)]),
+                    }
+                )
+
+        class NewModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.config = fake_model_config
+                self.device = "cpu"
+                self.model = InnerModel()
+                self.lm_head = nn.Linear(10, 10)
+                # new transformers models have this attribute to map old checkpoints to new ones:
+                self._checkpoint_conversion_mapping = {
+                    "^visual": "model.visual",
+                    "^model(?!\\.(language_model|visual))": "model.language_model",
+                }
+
+            def prepare_inputs_for_generation(self):
+                return
+
+        model = NewModel()
+        return model
+
+    def check_lora_load_no_warning(self, model1, model2, path):
+        # helper method: save with model1, load with model2, ensure that there is no warning about missing keys and that
+        # the parameters are loaded correctly
+        model1 = copy.deepcopy(model1)
+        model2 = copy.deepcopy(model2)
+        config = LoraConfig(target_modules=["attn"])
+        peft_model = get_peft_model(copy.deepcopy(model1), config)
+
+        # set all values to 1.0 or 2.0 so we can check that they are loaded correctly
+        for name, param in peft_model.named_parameters():
+            if name.endswith("lora_A.default.weight"):
+                param.data.fill_(1.0)
+            elif name.endswith("lora_B.default.weight"):
+                param.data.fill_(2.0)
+
+        peft_model.save_pretrained(path)
+        del peft_model
+
+        # ensure that there is no warning: UserWarning: Found missing adapter keys while loading the checkpoint
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            loaded = PeftModel.from_pretrained(copy.deepcopy(model2), path)
+            assert not any("Found missing adapter keys" in str(warning.message) for warning in w)
+
+        # sanity check on parameter values to not only rely on the absence of warnings
+        for name, param in loaded.named_parameters():
+            if name.endswith("lora_A.default.weight"):
+                assert torch.allclose(param, torch.full_like(param, 1.0))
+            elif name.endswith("lora_B.default.weight"):
+                assert torch.allclose(param, torch.full_like(param, 2.0))
+
+    def check_prefix_tuning_load_no_warning(self, model1, model2, path):
+        # helper method: save with model1, load with model2, ensure that there is no warning about missing keys and that
+        # the parameters are loaded correctly.
+        model1 = copy.deepcopy(model1)
+        model2 = copy.deepcopy(model2)
+        config = PrefixTuningConfig(
+            task_type="CAUSAL_LM", num_virtual_tokens=5, num_layers=2, token_dim=10, num_attention_heads=2
+        )
+        peft_model = get_peft_model(copy.deepcopy(model1), config)
+
+        # set all values to 1.0 so we can check that they are loaded correctly
+        peft_model.prompt_encoder.default.embedding.weight.data.fill_(1.0)
+
+        peft_model.save_pretrained(path)
+        del peft_model
+
+        # ensure that there is no warning: UserWarning: Found missing adapter keys while loading the checkpoint
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            loaded = PeftModel.from_pretrained(copy.deepcopy(model2), path)
+            assert not any("Found missing adapter keys" in str(warning.message) for warning in w)
+
+        # sanity check on parameter values to not only rely on the absence of warnings
+        weight = loaded.prompt_encoder.default.embedding.weight
+        assert torch.allclose(weight, torch.full_like(weight, 1.0))
+
+    def check_vblora_load_no_warning(self, model1, model2, path):
+        # helper method: save with model1, load with model2, ensure that there is no warning about missing keys and that
+        # the parameters are loaded correctly
+        model1 = copy.deepcopy(model1)
+        model2 = copy.deepcopy(model2)
+
+        config = VBLoRAConfig(target_modules=["attn"], vector_length=2, num_vectors=4)
+        peft_model = get_peft_model(copy.deepcopy(model1), config)
+
+        # set all values to 1.0 or 2.0 so we can check that they are loaded correctly
+        peft_model.base_model.vblora_vector_bank["default"].data.fill_(1.0)
+        for name, param in peft_model.named_parameters():
+            if "logits" in name:
+                param.data.fill_(2.0)
+
+        peft_model.save_pretrained(path)
+        del peft_model
+
+        # ensure that there is no warning: UserWarning: Found missing adapter keys while loading the checkpoint
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            loaded = PeftModel.from_pretrained(copy.deepcopy(model2), path)
+            assert not any("Found missing adapter keys" in str(warning.message) for warning in w)
+
+        # sanity check on parameter values to not only rely on the absence of warnings
+        param = loaded.base_model.vblora_vector_bank["default"]
+        assert torch.allclose(param, torch.full_like(param, 1.0))
+        for name, param in loaded.named_parameters():
+            if "logits" in name:
+                assert torch.allclose(param, torch.full_like(param, 2.0))
+
+    def test_key_mapping_save_new_load_new_lora(self, new_model, tmp_path):
+        # save and load the new model, should work without issues
+        self.check_lora_load_no_warning(new_model, new_model, tmp_path)
+
+    def test_key_mapping_save_old_load_old_lora(self, old_model, tmp_path):
+        # save and load the old model, should work without issues
+        self.check_lora_load_no_warning(old_model, old_model, tmp_path)
+
+    def test_key_mapping_save_old_load_new_lora(self, old_model, new_model, tmp_path):
+        # save the old model, load it into the new model, should work without issues (backwards compatibility)
+        self.check_lora_load_no_warning(old_model, new_model, tmp_path)
+
+    @pytest.mark.xfail(reason="Loading new checkpoints with old transformers is not supported.", strict=True)
+    def test_key_mapping_save_new_load_old_lora(self, old_model, new_model, tmp_path):
+        # save the new model, load it into the old model, should work without issues (forwards compatibility)
+        self.check_lora_load_no_warning(new_model, old_model, tmp_path)
+
+    def test_key_mapping_save_new_load_new_prefix_tuning(self, new_model, tmp_path):
+        # save and load the new model, should work without issues
+        self.check_prefix_tuning_load_no_warning(new_model, new_model, tmp_path)
+
+    def test_key_mapping_save_old_load_old_prefix_tuning(self, old_model, tmp_path):
+        # save and load the old model, should work without issues
+        self.check_prefix_tuning_load_no_warning(old_model, old_model, tmp_path)
+
+    def test_key_mapping_save_old_load_new_prefix_tuning(self, old_model, new_model, tmp_path):
+        # save the old model, load it into the new model, should work without issues (backwards compatibility)
+        self.check_prefix_tuning_load_no_warning(old_model, new_model, tmp_path)
+
+    def test_key_mapping_save_new_load_old_prefix_tuning(self, old_model, new_model, tmp_path):
+        # save the new model, load it into the old model, should work without issues (forwards compatibility)
+        self.check_prefix_tuning_load_no_warning(new_model, old_model, tmp_path)
+
+    def test_key_mapping_save_new_load_new_vblora(self, new_model, tmp_path):
+        # save and load the new model, should work without issues
+        self.check_vblora_load_no_warning(new_model, new_model, tmp_path)
+
+    def test_key_mapping_save_old_load_old_vblora(self, old_model, tmp_path):
+        # save and load the old model, should work without issues
+        self.check_vblora_load_no_warning(old_model, old_model, tmp_path)
+
+    def test_key_mapping_save_old_load_new_vblora(self, old_model, new_model, tmp_path):
+        # save the old model, load it into the new model, should work without issues (backwards compatibility)
+        self.check_vblora_load_no_warning(old_model, new_model, tmp_path)
+
+    @pytest.mark.xfail(reason="Loading new checkpoints with old transformers is not supported.", strict=True)
+    def test_key_mapping_save_new_load_old_vblora(self, old_model, new_model, tmp_path):
+        # save the new model, load it into the old model, should work without issues (forwards compatibility)
+        self.check_vblora_load_no_warning(new_model, old_model, tmp_path)
+
+
+class TestWeightTying:
+    """Test class to check the weight tying of adapters."""
+
+    torch_device = infer_device()
+
+    def get_lm_model(self, tie_weights=True):
+        # Mimicking a LM with embed_tokens and lm_head layers
+        # to test weight tying of adapters
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+                self.embed_tokens = nn.Embedding(1000, 1000)
+                self.linear = nn.Linear(1000, 1000, bias=False)
+
+        class CausalLM(nn.Module):
+            if tie_weights:
+                _tied_weights_keys = ["lm_head.weight"]
+
+            def __init__(self):
+                super().__init__()
+                self.model = MyModule()
+                self.config = {"tie_word_embeddings": tie_weights}
+                self.lm_head = nn.Linear(1000, 1000, bias=False)
+
+                if tie_weights:
+                    self.lm_head.weight = self.model.embed_tokens.weight
+
+            def prepare_inputs_for_generation(self):
+                return
+
+            def get_input_embeddings(self):
+                return self.model.embed_tokens
+
+        return CausalLM().eval().to(self.torch_device)
+
+    def test_weight_tying_tied_model_lora(self):
+        # If weight tying is enabled and `embed_tokens`
+        # is passed as a `modules_to_save`, it needs to be ensured
+        # that lm_head is tied to the adapter added to `embed_tokens`
+
+        model = self.get_lm_model()
+
+        embed_token_config = LoraConfig(
+            modules_to_save=["embed_tokens"],
+            target_modules=["linear"],
+            ensure_weight_tying=True,
+        )
+
+        model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper), (
+            "Embed tokens is not added in Modules to Save"
+        )
+        assert type(model.base_model.model.model.embed_tokens) is type(model.base_model.model.lm_head), (
+            "Embed tokens and LM head types are not same"
+        )
+
+        # Validating that all model parameters are same
+        embed_np = dict(model.base_model.model.model.embed_tokens.named_parameters())
+        lm_head_np = dict(model.base_model.model.lm_head.named_parameters())
+
+        for k in embed_np.keys():
+            assert torch.allclose(embed_np[k], lm_head_np[k])
+            assert embed_np[k] is lm_head_np[k]
+
+    def test_weight_tying_non_tied_model_lora(self):
+        model = self.get_lm_model(tie_weights=False)
+        embed_token_config = LoraConfig(
+            modules_to_save=["embed_tokens"],
+            target_modules=["linear"],
+            ensure_weight_tying=True,
+        )
+        with pytest.warns(UserWarning, match="no tied modules were found in the model"):
+            model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper), (
+            "Embed tokens is not added in Modules to Save"
+        )
+        assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear), (
+            "LM head is not of type nn.linear"
+        )
+
+    def test_not_weight_tying_tied_model_lora(self):
+        model = self.get_lm_model()
+        embed_token_config = LoraConfig(
+            modules_to_save=["embed_tokens"],
+            target_modules=["linear"],
+            ensure_weight_tying=False,
+        )
+        with pytest.warns(UserWarning, match="`ensure_weight_tying` is not set to True"):
+            model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper), (
+            "Embed tokens is not added in Modules to Save"
+        )
+        assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear), (
+            "LM head is not of type nn.linear"
+        )
+
+    def test_weight_tying_tied_model_no_embed_lora(self):
+        model = self.get_lm_model()
+        embed_token_config = LoraConfig(
+            target_modules=["linear"],
+            ensure_weight_tying=True,
+        )
+
+        with pytest.warns(UserWarning, match="no tied modules are added in `modules_to_save`"):
+            model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.embed_tokens, torch.nn.modules.Embedding)
+        assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear)
+
+        # Validating that all model parameters are same
+        embed_np = dict(model.base_model.model.model.embed_tokens.named_parameters())
+        lm_head_np = dict(model.base_model.model.lm_head.named_parameters())
+
+        for k in embed_np.keys():
+            assert torch.allclose(embed_np[k], lm_head_np[k])
+            assert embed_np[k] is lm_head_np[k]
+
+    def test_weight_tying_tied_model_lokr(self):
+        model = self.get_lm_model()
+
+        embed_token_config = LoKrConfig(modules_to_save=["embed_tokens"], target_modules=["linear"])
+
+        with pytest.warns(UserWarning, match="no implementation exists to tie the adapters"):
+            model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper), (
+            "Embed tokens is not added in Modules to Save"
+        )
+        assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear), (
+            "LM head is not of type nn.linear"
+        )

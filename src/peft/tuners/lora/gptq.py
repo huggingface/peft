@@ -20,6 +20,8 @@ from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import get_auto_gptq_quant_linear
 
+from .layer import LoraVariant
+
 
 class GPTQLoraLinear(torch.nn.Module, LoraLayer):
     def __init__(
@@ -32,7 +34,9 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
         init_lora_weights: bool = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        use_qalora: bool = False,
         lora_bias: bool = False,
+        qalora_group_size: int = 32,
         **kwargs,
     ):
         super().__init__()
@@ -53,8 +57,27 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
+            use_qalora=use_qalora,
             lora_bias=lora_bias,
+            qalora_group_size=qalora_group_size,
         )
+
+    def resolve_lora_variant(self, *, use_dora: bool, use_qalora: bool, **kwargs) -> Optional[LoraVariant]:
+        if use_dora and use_qalora:
+            raise NotImplementedError(
+                f"Dora and QA_lora at the same time is not supported for {self.__class__.__name__} (yet)."
+            )
+        elif use_dora:
+            from .variants import DoraLinearVariant
+
+            variant = DoraLinearVariant()
+        elif use_qalora:
+            from .variants import QALoraLinearVariant
+
+            variant = QALoraLinearVariant()
+        else:
+            variant = None
+        return variant
 
     def forward(self, x: torch.Tensor):
         # note: logic differs from default Linear because merging is not supported
@@ -64,29 +87,30 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
             return result
 
         lora_A_keys = self.lora_A.keys()
+
         for active_adapter in self.active_adapters:
             if active_adapter not in lora_A_keys:
                 continue
+            torch_result_dtype = result.dtype
 
             lora_A = self.lora_A[active_adapter]
             lora_B = self.lora_B[active_adapter]
             dropout = self.lora_dropout[active_adapter]
             scaling = self.scaling[active_adapter]
 
-            requires_conversion = not torch.is_autocast_enabled()
-            if requires_conversion:
-                expected_dtype = result.dtype
-                x = self._cast_input_dtype(x, lora_A.weight.dtype)
+            x = self._cast_input_dtype(x, lora_A.weight.dtype)
 
-            output = lora_B(lora_A(dropout(x)))
+            if active_adapter not in self.lora_variant:  # vanilla LoRA
+                result = result + lora_B(lora_A(dropout(x))) * scaling
+            else:
+                result = self.lora_variant[active_adapter].forward(
+                    self,
+                    active_adapter=active_adapter,
+                    x=x,
+                    result=result,
+                )
 
-            if requires_conversion:
-                output = output.to(expected_dtype)
-
-            if scaling != 1:  # skip scaling == 1 no-op
-                output = output * scaling
-
-            result += output
+            result = result.to(torch_result_dtype)
         return result
 
     def __repr__(self) -> str:

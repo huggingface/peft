@@ -20,11 +20,8 @@ rendered properly in your Markdown viewer.
 
 This guide will show you how to train a sequence-to-sequence model with IA3 to *generate a sentiment* given some financial news.
 
-<Tip>
-
-Some familiarity with the general process of training a sequence-to-sequence would be really helpful and allow you to focus on how to apply IA3. If you’re new, we recommend taking a look at the [Translation](https://huggingface.co/docs/transformers/tasks/translation) and [Summarization](https://huggingface.co/docs/transformers/tasks/summarization) guides first from the Transformers documentation. When you’re ready, come back and see how easy it is to drop PEFT in to your training!
-
-</Tip>
+> [!TIP]
+> Some familiarity with the general process of training a sequence-to-sequence would be really helpful and allow you to focus on how to apply IA3. If you’re new, we recommend taking a look at the [Translation](https://huggingface.co/docs/transformers/tasks/translation) and [Summarization](https://huggingface.co/docs/transformers/tasks/summarization) guides first from the Transformers documentation. When you’re ready, come back and see how easy it is to drop PEFT in to your training!
 
 ## Dataset
 
@@ -92,7 +89,7 @@ processed_ds = ds.map(
 )
 ```
 
-Create a training and evaluation [`DataLoader`](https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader), and set `pin_memory=True` to speed up data transfer to the GPU during training if your dataset samples are on a CPU.
+Create a training and evaluation [`DataLoader`](https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader), and set `pin_memory=True` to speed up data transfer to the accelerator during training if your dataset samples are on a CPU.
 
 ```py
 from torch.utils.data import DataLoader
@@ -123,11 +120,8 @@ model = AutoModelForSeq2SeqLM.from_pretrained("bigscience/mt0-large")
 
 All PEFT methods need a configuration that contains and specifies all the parameters for how the PEFT method should be applied. Create an [`IA3Config`] with the task type and set the inference mode to `False`. You can find additional parameters for this configuration in the [API reference](../package_reference/ia3#ia3config).
 
-<Tip>
-
-Call the [`~PeftModel.print_trainable_parameters`] method to compare the number of trainable parameters of [`PeftModel`] versus the number of parameters in the base model!
-
-</Tip>
+> [!TIP]
+> Call the [`~PeftModel.print_trainable_parameters`] method to compare the number of trainable parameters of [`PeftModel`] versus the number of parameters in the base model!
 
 Once the configuration is setup, pass it to the [`get_peft_model`] function along with the base model to create a trainable [`PeftModel`].
 
@@ -159,12 +153,12 @@ lr_scheduler = get_linear_schedule_with_warmup(
 )
 ```
 
-Move the model to the GPU and create a training loop that reports the loss and perplexity for each epoch.
+Move the model to the accelerator and create a training loop that reports the loss and perplexity for each epoch.
 
 ```py
 from tqdm import tqdm
 
-device = "cuda"
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
 model = model.to(device)
 
 for epoch in range(num_epochs):
@@ -219,7 +213,9 @@ To load the model for inference, use the [`~AutoPeftModelForSeq2SeqLM.from_pretr
 ```py
 from peft import AutoPeftModelForSeq2SeqLM
 
-model = AutoPeftModelForSeq2SeqLM.from_pretrained("<your-hf-account-name>/mt0-large-ia3").to("cuda")
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
+
+model = AutoPeftModelForSeq2SeqLM.from_pretrained("<your-hf-account-name>/mt0-large-ia3").to(device)
 tokenizer = AutoTokenizer.from_pretrained("bigscience/mt0-large")
 
 i = 15

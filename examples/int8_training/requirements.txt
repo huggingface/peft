@@ -1,0 +1,9 @@
+accelerate
+git+https://github.com/bitsandbytes-foundation/bitsandbytes.git
+datasets==3.6.0
+evaluate
+jiwer
+librosa
+soundfile
+transformers==4.52.4
+wandb

@@ -45,6 +45,7 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
+    MissConfig,
     OFTConfig,
     PeftModel,
     TaskType,
@@ -86,6 +87,15 @@ SETTINGS = {
         BoneConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], r=2, init_weights="bat"),
         {},
     ),
+    "miss": (MissConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], r=2), {}),
+    "miss-bat": (
+        MissConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], r=2, init_weights="bat"),
+        {},
+    ),
+    "miss-mini": (
+        MissConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], r=2, init_weights="mini"),
+        {},
+    ),
 }
 
 
@@ -105,7 +115,7 @@ class TestTorchCompileCausalLM:
     """
 
     fake_compile = False
-    model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+    model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
     max_train_loss = 15.0  # generous threshold for maximum loss after training
 
     @pytest.fixture(autouse=True)

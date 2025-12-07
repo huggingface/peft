@@ -10,7 +10,7 @@ from peft import RandLoraConfig, get_peft_model
 from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer
 from datasets import load_dataset
 
-model = AutoModelForCausalLM.from_pretrained("huggyllama/llama-7b", device_map="cuda")
+model = AutoModelForCausalLM.from_pretrained("huggyllama/llama-7b", device_map="auto")
 tokenizer = AutoTokenizer.from_pretrained("huggyllama/llama-7b")
 dataset = load_dataset("timdettmers/openassistant-guanaco", split="train")
 randlora_config = RandLoraConfig()
@@ -20,8 +20,8 @@ trainer = transformers.Trainer(
     model=peft_model,
     train_dataset=dataset,
     dataset_text_field="text",
-    max_seq_length=2048,
-    tokenizer=tokenizer,
+    max_length=2048,
+    processing_class=tokenizer,
 )
 trainer.train()
 peft_model.save_pretrained("randlora-llama-7b")
@@ -70,7 +70,7 @@ python randlora_finetuning.py \
     --quantize \
     --eval_step 10 \
     --save_step 100 \
-    --device "cuda:0" \
+    --device "auto" \
     --rank 32 \
     --randlora_alpha 640 \
     --randlora_dropout 0.05 \

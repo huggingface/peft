@@ -6,20 +6,17 @@ on:
     paths-ignore:
         - 'docs/**'
 
-env:
-  TRANSFORMERS_IS_CI: 1
-
 permissions: {}
 
 jobs:
   tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
         with:
           persist-credentials: false
       - name: Set up Python 3.11
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c  # v6.0.0
         with:
           python-version: 3.11
           cache: "pip"
@@ -31,6 +28,9 @@ jobs:
           pip install -U git+https://github.com/huggingface/transformers.git
           pip install -e .[test]
       - name: Test with pytest
+        env:
+          TRANSFORMERS_IS_CI: 1
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           make test
       - name: Post to Slack

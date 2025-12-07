@@ -55,6 +55,7 @@ class HRALayer(BaseTunerLayer):
         r: int,
         apply_GS: bool,
         init_weights: bool,
+        inference_mode: bool = False,
         **kwargs,
     ) -> None:
         """Internal function to create hra adapter
@@ -91,7 +92,7 @@ class HRALayer(BaseTunerLayer):
 
         # Move new weights to device
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def reset_hra_parameters(self, adapter_name: str):
         if self.hra_r[adapter_name] % 2 != 0:

@@ -12,29 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import warnings
-from dataclasses import asdict
-from enum import Enum
-from typing import Optional
 
-import torch
-from torch import nn
-from tqdm import tqdm
-
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import (
     BaseTuner,
-    BaseTunerLayer,
-    check_target_module_exists,
-    onload_layer,
 )
 from peft.utils import (
-    TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
-    ModulesToSaveWrapper,
-    _get_submodules,
+    TRANSFORMERS_MODELS_TO_OFT_TARGET_MODULES_MAPPING,
+    get_quantization_config,
 )
 
-from .config import OFTConfig
-from .layer import Conv2d, Linear, OFTLayer
+from .aqlm import dispatch_aqlm
+from .awq import dispatch_awq
+from .eetq import dispatch_eetq
+from .gptq import dispatch_gptq
+from .hqq import dispatch_hqq
+from .inc import dispatch_inc
+from .layer import OFTLayer, dispatch_default
 
 
 class OFTModel(BaseTuner):
@@ -90,28 +84,8 @@ class OFTModel(BaseTuner):
     """
 
     prefix: str = "oft_"
-
-    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
-        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
-
-    def _check_new_adapter_config(self, config: OFTConfig) -> None:
-        """
-        A helper method to check the config when a new adapter is being added.
-
-        Raise a ValueError if there is something wrong with the config or if it conflicts with existing adapters.
-
-        """
-        # TODO: there should be a check if any of the existing adapters actually has bias != "none", or else the check
-        # does not fully correspond to the error message.
-        if (len(self.peft_config) > 1) and (config.bias != "none"):
-            raise ValueError(
-                f"{self.__class__.__name__} supports only 1 adapter with bias. When using multiple adapters, "
-                "set bias to 'none' for all adapters."
-            )
-
-    @staticmethod
-    def _check_target_module_exists(oft_config, key):
-        return check_target_module_exists(oft_config, key)
+    tuner_layer_cls = OFTLayer
+    target_module_mapping = TRANSFORMERS_MODELS_TO_OFT_TARGET_MODULES_MAPPING
 
     def _create_and_replace(
         self,
@@ -126,7 +100,6 @@ class OFTModel(BaseTuner):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
 
-        bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "r": oft_config.r,
             "oft_block_size": oft_config.oft_block_size,
@@ -134,14 +107,24 @@ class OFTModel(BaseTuner):
             "coft": oft_config.coft,
             "eps": oft_config.eps,
             "block_share": oft_config.block_share,
+            "use_cayley_neumann": oft_config.use_cayley_neumann,
+            "num_cayley_neumann_terms": oft_config.num_cayley_neumann_terms,
             "fan_in_fan_out": oft_config.fan_in_fan_out,
             "init_weights": oft_config.init_weights,
+            "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
+            "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
-        kwargs["bias"] = bias
+
+        quant_methods = ["gptq", "aqlm", "awq"]
+        for quant_method in quant_methods:
+            quantization_config = get_quantization_config(self.model, method=quant_method)
+            if quantization_config is not None:
+                kwargs[f"{quant_method}_quantization_config"] = quantization_config
 
         # If it is not a OFTLayer, create a new module, else update it with new adapters
         if not isinstance(target, OFTLayer):
-            new_module = self._create_new_module(oft_config, adapter_name, target, **kwargs)
+            device_map = self.model.hf_device_map if hasattr(self.model, "hf_device_map") else None
+            new_module = self._create_new_module(oft_config, adapter_name, target, device_map=device_map, **kwargs)
             if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
@@ -155,221 +138,62 @@ class OFTModel(BaseTuner):
                 coft=oft_config.coft,
                 eps=oft_config.eps,
                 block_share=oft_config.block_share,
+                use_cayley_neumann=oft_config.use_cayley_neumann,
+                num_cayley_neumann_terms=oft_config.num_cayley_neumann_terms,
                 init_weights=oft_config.init_weights,
             )
 
-    def _replace_module(self, parent, child_name, new_module, child):
-        setattr(parent, child_name, new_module)
-        # It's not necessary to set requires_grad here, as that is handled by
-        # _mark_only_adapters_as_trainable
-
-        # child layer wraps the original module, unpack it
-        if hasattr(child, "base_layer"):
-            child = child.base_layer
-
-        if not hasattr(new_module, "base_layer"):
-            new_module.weight = child.weight
-            if hasattr(child, "bias"):
-                new_module.bias = child.bias
-
-        if getattr(child, "state", None) is not None:
-            if hasattr(new_module, "base_layer"):
-                new_module.base_layer.state = child.state
-            else:
-                new_module.state = child.state
-            new_module.to(child.weight.device)
-
-        meta = torch.device("meta")
-        # dispatch to correct device
-        for name, module in new_module.named_modules():
-            if self.prefix in name:
-                if not any(p.device == meta for p in module.parameters()):
-                    module.to(child.weight.device)
-
-    def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
-        for n, p in model.named_parameters():
-            if self.prefix not in n:
-                p.requires_grad = False
-
-        for active_adapter in self.active_adapters:
-            bias = self.peft_config[active_adapter].bias
-            if bias == "none":
-                continue
-
-            if bias == "all":
-                for n, p in model.named_parameters():
-                    if "bias" in n:
-                        p.requires_grad = True
-            elif bias == "oft_only":
-                for name, m in model.named_modules():
-                    if isinstance(m, OFTLayer) and hasattr(m, "bias") and m.bias is not None:
-                        m.bias.requires_grad = True
-            else:
-                raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
-
     @staticmethod
     def _create_new_module(oft_config, adapter_name, target, **kwargs):
-        if isinstance(target, BaseTunerLayer):
-            target_base_layer = target.get_base_layer()
-        else:
-            target_base_layer = target
+        # Collect dispatcher functions to decide what backend to use for the replaced OFT layer. The order matters,
+        # because the first match is always used. Therefore, the default layers should be checked last.
+        dispatchers = []
 
-        if isinstance(target_base_layer, torch.nn.Linear):
-            if kwargs["fan_in_fan_out"]:
-                warnings.warn(
-                    "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
-                    "Setting fan_in_fan_out to False."
-                )
-                kwargs["fan_in_fan_out"] = oft_config.fan_in_fan_out = False
-            new_module = Linear(target, adapter_name, **kwargs)
-        elif isinstance(target_base_layer, torch.nn.Conv2d):
-            new_module = Conv2d(target, adapter_name, **kwargs)
-        else:
+        # avoid eager bnb import
+        if is_bnb_available():
+            from .bnb import dispatch_bnb_8bit
+
+            dispatchers.append(dispatch_bnb_8bit)
+
+        if is_bnb_4bit_available():
+            from .bnb import dispatch_bnb_4bit
+
+            dispatchers.append(dispatch_bnb_4bit)
+
+        dispatchers.extend(
+            [
+                dispatch_eetq,
+                dispatch_aqlm,
+                dispatch_awq,
+                dispatch_gptq,
+                dispatch_hqq,
+                dispatch_inc,
+                dispatch_default,
+            ]
+        )
+
+        new_module = None
+        for dispatcher in dispatchers:
+            new_module = dispatcher(target, adapter_name, oft_config=oft_config, **kwargs)
+            if new_module is not None:  # first match wins
+                break
+
+        if new_module is None:
+            # no module could be matched
             raise ValueError(
-                f"Target module {target} is not supported. "
-                "Currently, only `torch.nn.Linear` and `torch.nn.Conv2d` are supported."
+                f"Target module {target} is not supported. Currently, only the following modules are supported: "
+                "`torch.nn.Linear`, `torch.nn.Conv2d`."
             )
 
         return new_module
 
-    def __getattr__(self, name: str):
-        """Forward missing attributes to the wrapped module."""
-        try:
-            return super().__getattr__(name)  # defer to nn.Module's logic
-        except AttributeError:
-            if name == "model":  # see #1892: prevent infinite recursion if class is not initialized
-                raise
-            return getattr(self.model, name)
+    def _check_merge_allowed(self):
+        """Verify that the configuration supports merging.
 
-    def get_peft_config_as_dict(self, inference: bool = False):
-        config_dict = {}
-        for key, value in self.peft_config.items():
-            config = {k: v.value if isinstance(v, Enum) else v for k, v in asdict(value).items()}
-            if inference:
-                config["inference_mode"] = True
-        config_dict[key] = config
-        return config
-
-    def _set_adapter_layers(self, enabled=True):
-        for module in self.model.modules():
-            if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
-                module.enable_adapters(enabled)
-
-    def enable_adapter_layers(self):
-        self._set_adapter_layers(enabled=True)
-
-    def disable_adapter_layers(self):
-        for active_adapter in self.active_adapters:
-            val = self.peft_config[active_adapter].bias
-            if val != "none":
-                msg = (
-                    f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
-                    "output as the base model would without adaption."
-                )
-                warnings.warn(msg)
-        self._set_adapter_layers(enabled=False)
-
-    def set_adapter(self, adapter_name):
-        for module in self.model.modules():
-            if isinstance(module, OFTLayer):
-                if module.merged:
-                    warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
-                    module.unmerge()
-                module.set_adapter(adapter_name)
-        self.active_adapter = adapter_name
-
-    @staticmethod
-    def _prepare_adapter_config(peft_config, model_config):
-        if peft_config.target_modules is None:
-            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
-                raise ValueError("Please specify `target_modules` in `peft_config`")
-            peft_config.target_modules = set(
-                TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
-            )
-        return peft_config
-
-    def _unload_and_optionally_merge(
-        self,
-        merge=True,
-        progressbar: bool = False,
-        safe_merge: bool = False,
-        adapter_names: Optional[list[str]] = None,
-    ):
-        if merge:
-            self._check_merge_allowed()
-
-        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
-        desc = "Unloading " + ("and merging " if merge else "") + "model"
-        for key in tqdm(key_list, disable=not progressbar, desc=desc):
-            try:
-                parent, target, target_name = _get_submodules(self.model, key)
-            except AttributeError:
-                continue
-            with onload_layer(target):
-                if hasattr(target, "base_layer"):
-                    if merge:
-                        target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
-                    self._replace_module(parent, target_name, target.get_base_layer(), target)
-                elif isinstance(target, ModulesToSaveWrapper):
-                    # save any additional trainable modules part of `modules_to_save`
-                    new_module = target.modules_to_save[target.active_adapter]
-                    if hasattr(new_module, "base_layer"):
-                        # check if the module is itself a tuner layer
-                        if merge:
-                            new_module.merge(safe_merge=safe_merge, adapter_names=adapter_names)
-                        new_module = new_module.get_base_layer()
-                    setattr(parent, target_name, new_module)
-
-        return self.model
-
-    def delete_adapter(self, adapter_name: str) -> None:
+        Currently gptq quantization and replicated layers do not support merging.
         """
-        Deletes an existing adapter.
-
-        Args:
-            adapter_name (str): Name of the adapter to be deleted.
-        """
-        if adapter_name not in list(self.peft_config.keys()):
-            raise ValueError(f"Adapter {adapter_name} does not exist")
-        del self.peft_config[adapter_name]
-
-        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
-        new_adapter = None
-        for key in key_list:
-            _, target, _ = _get_submodules(self.model, key)
-            if isinstance(target, OFTLayer):
-                target.delete_adapter(adapter_name)
-                if new_adapter is None:
-                    new_adapter = target.active_adapters[:]
-
-        self.active_adapter = new_adapter or []
-        self._delete_auxiliary_adapter(adapter_name, new_active_adapters=new_adapter)
-
-    def merge_and_unload(
-        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
-    ) -> torch.nn.Module:
-        r"""
-        This method merges the OFT layers into the base model. This is needed if someone wants to use the base model as
-        a standalone model.
-
-        Args:
-            progressbar (`bool`):
-                whether to show a progressbar indicating the unload and merge process
-            safe_merge (`bool`):
-                whether to activate the safe merging check to check if there is any potential Nan in the adapter
-                weights
-            adapter_names (`List[str]`, *optional*):
-                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
-                to `None`.
-
-        """
-        return self._unload_and_optionally_merge(
-            progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
-        )
-
-    def unload(self) -> torch.nn.Module:
-        """
-        Gets back the base model by removing all the oft modules without merging. This gives back the original base
-        model.
-        """
-        return self._unload_and_optionally_merge(merge=False)
+        super()._check_merge_allowed()
+        if getattr(self.model, "quantization_method", None) == "gptq":
+            raise ValueError("Cannot merge OFT layers when the model is gptq quantized")
+        if self.peft_config.get("layer_replication"):
+            raise ValueError("Cannot merge OFT layers when base model layers are replicated")

@@ -16,25 +16,30 @@ from __future__ import annotations
 
 import functools
 from contextlib import contextmanager
-from typing import Literal
+from typing import Literal, Optional
 
 import packaging.version
 import torch
 import transformers
 from torch import nn
 
-from peft.import_utils import is_xpu_available
+
+is_transformers_ge_v5 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.0.0.dev0")
 
 
-@contextmanager
-def gather_params_ctx(param, modifier_rank: int = 0, fwd_module: torch.nn.Module = None):
-    """Call DeepSpeed GatheredParameters context manager if DeepSpeed is enabled, otherwise do nothing."""
+def check_deepspeed_zero3_enabled() -> bool:
     if packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.33.0"):
         from transformers.integrations import is_deepspeed_zero3_enabled
     else:
         from transformers.deepspeed import is_deepspeed_zero3_enabled
+    return is_deepspeed_zero3_enabled()
 
-    if not is_deepspeed_zero3_enabled():
+
+@contextmanager
+def gather_params_ctx(param, modifier_rank: Optional[int] = 0, fwd_module: torch.nn.Module = None):
+    """Call DeepSpeed GatheredParameters context manager if DeepSpeed is enabled, otherwise do nothing."""
+
+    if not check_deepspeed_zero3_enabled():
         yield
         return
 
@@ -83,27 +88,22 @@ def dequantize_module_weight(module: torch.nn.Module) -> torch.nn.Parameter:
 
 
 def dequantize_bnb_weight(weight: torch.nn.Parameter, state=None):
-    """Helper function to dequantize 4bit or 8bit bnb weights.
-
-    Since dequantization is not supported on CPU, the weight will be temporarily moved to CUDA if necessary.
-    """
+    """Helper function to dequantize 4bit or 8bit bnb weights."""
     import bitsandbytes as bnb
 
-    # BNB requires CUDA weights
     device = weight.device
-    is_cpu = device.type == torch.device("cpu").type
-    if is_cpu:
-        if torch.cuda.is_available():
-            weight = weight.to(torch.device("cuda"))
-        elif is_xpu_available():
-            weight = weight.to(torch.device("xpu"))
 
     cls_name = weight.__class__.__name__
     if cls_name == "Params4bit":
         dequantized = bnb.functional.dequantize_4bit(weight.data, weight.quant_state)
-        if is_cpu:
-            dequantized = dequantized.to(device)
         return dequantized
+
+    # 8bit case
+    if state is None:
+        raise ValueError(
+            "No `state` was passed for bnb 8bit quantized weights. Please open an issue on the PEFT repository and "
+            "report the error: https://github.com/huggingface/peft/issues"
+        )
 
     if state.SCB is None:
         state.SCB = weight.SCB
@@ -115,8 +115,6 @@ def dequantize_bnb_weight(weight: torch.nn.Parameter, state=None):
         # Multiply by (scale/127) to dequantize.
         dequantized = weight.data * state.SCB.view(-1, 1) * 7.874015718698502e-3
 
-    if is_cpu:
-        dequantized = dequantized.to(device)
     return dequantized
 
 
@@ -175,8 +173,16 @@ def map_cache_to_layer_device_map(model, cache) -> None:
     layer_device_map = get_layer_device_map(model)
     for idx in range(model.config.num_hidden_layers):
         layer_device = layer_device_map[idx]
-        cache.key_cache[idx] = cache.key_cache[idx].to(layer_device)
-        cache.value_cache[idx] = cache.value_cache[idx].to(layer_device)
+        if hasattr(cache, "layers"):
+            # new transformers uses cache.layers (>v4.55)
+            layer = cache.layers[idx]
+            layer.keys = layer.keys.to(layer_device)
+            layer.values = layer.values.to(layer_device)
+        else:
+            # old transformers uses cache.{key,value}_cache (<=v4.55)
+            # TODO: remove if we drop support for transformers <= 4.55
+            cache.key_cache[idx] = cache.key_cache[idx].to(layer_device)
+            cache.value_cache[idx] = cache.value_cache[idx].to(layer_device)
 
 
 ##################################

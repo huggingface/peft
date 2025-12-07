@@ -48,6 +48,7 @@ from peft import (
     OFTConfig,
     PeftModel,
     RandLoraConfig,
+    RoadConfig,
     TaskType,
     VBLoRAConfig,
     VeraConfig,
@@ -74,12 +75,14 @@ if is_bnb_available():
     from peft.tuners.ia3 import Linear8bitLt as IA3Linear8bitLt
     from peft.tuners.lora import Linear8bitLt as LoraLinear8bitLt
     from peft.tuners.randlora import Linear8bitLt as RandLoraLinear8bitLt
+    from peft.tuners.road import Linear8bitLt as RoadLinear8bitLt
     from peft.tuners.vera import Linear8bitLt as VeraLinear8bitLt
 
     if is_bnb_4bit_available():
         from peft.tuners.ia3 import Linear4bit as IA3Linear4bit
         from peft.tuners.lora import Linear4bit as LoraLinear4bit
         from peft.tuners.randlora import Linear4bit as RandLoraLinear4bit
+        from peft.tuners.road import Linear4bit as RoadLinear4bit
         from peft.tuners.vera import Linear4bit as VeraLinear4bit
 
 
@@ -295,6 +298,49 @@ class PeftGPUCommonTests(unittest.TestCase):
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
     @pytest.mark.single_gpu_tests
+    def test_road_bnb_8bit_quantization(self):
+        r"""
+        Test that tests if the 8bit quantization using Road works as expected
+        """
+        whisper_8bit = WhisperForConditionalGeneration.from_pretrained(
+            self.audio_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+        )
+
+        opt_8bit = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+        )
+
+        flan_8bit = AutoModelForSeq2SeqLM.from_pretrained(
+            self.seq2seq_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+        )
+
+        flan_road_config = RoadConfig(target_modules=["q", "v"], task_type="SEQ_2_SEQ_LM")
+
+        opt_road_config = RoadConfig(
+            target_modules=["q_proj", "v_proj", "fc2"],
+            task_type="CAUSAL_LM",
+        )
+
+        config = RoadConfig(target_modules=["q_proj", "v_proj", "fc2"])
+
+        flan_8bit = get_peft_model(flan_8bit, flan_road_config)
+        assert isinstance(flan_8bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, RoadLinear8bitLt)
+
+        opt_8bit = get_peft_model(opt_8bit, opt_road_config)
+        assert isinstance(opt_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, RoadLinear8bitLt)
+
+        whisper_8bit = get_peft_model(whisper_8bit, config)
+        assert isinstance(whisper_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, RoadLinear8bitLt)
+
+    @require_bitsandbytes
+    @pytest.mark.multi_gpu_tests
+    @pytest.mark.single_gpu_tests
     @parameterized.expand(["4bit", "8bit"])
     def test_lora_bnb_quantization_from_pretrained_safetensors(self, quantization):
         r"""
@@ -481,7 +527,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         quantization_config = GPTQConfig(bits=4, use_exllama=False)
         kwargs = {
             "pretrained_model_name_or_path": model_id,
-            "torch_dtype": torch.float16,
+            "dtype": torch.float16,
             "device_map": "auto",
             "quantization_config": quantization_config,
         }
@@ -697,6 +743,49 @@ class PeftGPUCommonTests(unittest.TestCase):
         whisper_4bit = get_peft_model(whisper_4bit, config)
         assert isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, IA3Linear4bit)
 
+    @require_bitsandbytes
+    @pytest.mark.multi_gpu_tests
+    @pytest.mark.single_gpu_tests
+    def test_road_bnb_4bit_quantization(self):
+        r"""
+        Test that tests if the 4bit quantization using IA3 works as expected
+        """
+        whisper_4bit = WhisperForConditionalGeneration.from_pretrained(
+            self.audio_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+        )
+
+        opt_4bit = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+        )
+
+        flan_4bit = AutoModelForSeq2SeqLM.from_pretrained(
+            self.seq2seq_model_id,
+            device_map="auto",
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+        )
+
+        flan_road_config = RoadConfig(target_modules=["q", "v"], task_type="SEQ_2_SEQ_LM")
+
+        opt_road_config = RoadConfig(
+            target_modules=["q_proj", "v_proj", "fc2"],
+            task_type="CAUSAL_LM",
+        )
+
+        config = RoadConfig(target_modules=["q_proj", "v_proj", "fc2"])
+
+        flan_4bit = get_peft_model(flan_4bit, flan_road_config)
+        assert isinstance(flan_4bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, RoadLinear4bit)
+
+        opt_4bit = get_peft_model(opt_4bit, opt_road_config)
+        assert isinstance(opt_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, RoadLinear4bit)
+
+        whisper_4bit = get_peft_model(whisper_4bit, config)
+        assert isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, RoadLinear4bit)
+
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_accelerator
     def test_lora_causal_lm_multi_gpu_inference(self):
@@ -761,7 +850,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         model = LlamaForCausalLM.from_pretrained(
             "trl-internal-testing/tiny-random-LlamaForCausalLM",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
             device_map="auto",
         )
 
@@ -784,7 +873,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         model = LlamaForCausalLM.from_pretrained(
             "trl-internal-testing/tiny-random-LlamaForCausalLM",
             quantization_config=BitsAndBytesConfig(load_in_4bit=True),
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
             device_map="auto",
         )
 
@@ -808,7 +897,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         EXPECTED_ALL_PARAMS = 125534208
 
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_4bit=True),
         )
 
@@ -828,7 +917,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         )
 
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
         )
 
@@ -850,7 +939,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         model = AutoModelForSequenceClassification.from_pretrained(
             model_id,
             quantization_config=BitsAndBytesConfig(load_in_4bit=True),
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         )
 
         model = prepare_model_for_kbit_training(model)
@@ -883,7 +972,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     def test_8bit_merge_lora(self):
         torch.manual_seed(1000)
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
         )
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
@@ -916,7 +1005,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     def test_8bit_merge_and_disable_lora(self):
         torch.manual_seed(1000)
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
         )
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
@@ -951,9 +1040,9 @@ class PeftGPUCommonTests(unittest.TestCase):
     @require_bitsandbytes
     def test_8bit_merge_lora_with_bias(self):
         # same as test_8bit_merge_lora but with lora_bias=True
-        torch.manual_seed(1000)
+        torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
         )
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
@@ -989,9 +1078,9 @@ class PeftGPUCommonTests(unittest.TestCase):
             bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         )
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
         # compare outputs in probability space, because logits can have outliers
@@ -1031,9 +1120,9 @@ class PeftGPUCommonTests(unittest.TestCase):
             bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         )
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
         # compare outputs in probability space, because logits can have outliers
@@ -1074,9 +1163,9 @@ class PeftGPUCommonTests(unittest.TestCase):
             bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         )
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
         # compare outputs in probability space, because logits can have outliers
@@ -1115,11 +1204,11 @@ class PeftGPUCommonTests(unittest.TestCase):
             bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         ).eval()
-        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
+        tokenizer = AutoTokenizer.from_pretrained("peft-internal-testing/opt-125m")
         # input with 9 samples
         inputs = tokenizer(
             [
@@ -1183,11 +1272,11 @@ class PeftGPUCommonTests(unittest.TestCase):
         torch.manual_seed(3000)
         bnb_config = BitsAndBytesConfig(load_in_8bit=True)
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         ).eval()
-        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
+        tokenizer = AutoTokenizer.from_pretrained("peft-internal-testing/opt-125m")
         # input with 9 samples
         inputs = tokenizer(
             [
@@ -1268,9 +1357,9 @@ class PeftGPUCommonTests(unittest.TestCase):
             bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         )
 
         torch.manual_seed(0)
@@ -1281,9 +1370,9 @@ class PeftGPUCommonTests(unittest.TestCase):
         logits_lora = model(random_input).logits
 
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=bnb_config,
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         )
         torch.manual_seed(0)
         config_dora = LoraConfig(r=8, init_lora_weights=False, use_dora=True)
@@ -1303,9 +1392,9 @@ class PeftGPUCommonTests(unittest.TestCase):
     def test_8bit_dora_inference(self):
         # check for same result with and without DoRA when initializing with init_lora_weights=False
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         ).eval()
 
         torch.manual_seed(0)
@@ -1316,9 +1405,9 @@ class PeftGPUCommonTests(unittest.TestCase):
         logits_lora = model(random_input).logits
 
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         )
         torch.manual_seed(0)
         config_dora = LoraConfig(r=8, init_lora_weights=False, use_dora=True)
@@ -1345,7 +1434,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         model = AutoModelForCausalLM.from_pretrained(
             "trl-internal-testing/tiny-random-LlamaForCausalLM",
             quantization_config=bnb_config,
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         ).eval()
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
         # compare outputs in probability space, because logits can have outliers
@@ -1394,9 +1483,9 @@ class PeftGPUCommonTests(unittest.TestCase):
         # Check results for merging, unmerging, unloading
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "peft-internal-testing/opt-125m",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         ).eval()
 
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
@@ -1444,8 +1533,8 @@ class PeftGPUCommonTests(unittest.TestCase):
         torch.manual_seed(0)
 
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
-            torch_dtype=torch.float32,
+            "peft-internal-testing/opt-125m",
+            dtype=torch.float32,
         ).eval()
 
         config = LoraConfig(
@@ -1496,8 +1585,8 @@ class PeftGPUCommonTests(unittest.TestCase):
         torch.manual_seed(0)
 
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
-            torch_dtype=torch.float32,
+            "peft-internal-testing/opt-125m",
+            dtype=torch.float32,
         ).eval()
 
         config = LoraConfig(
@@ -1520,11 +1609,103 @@ class PeftGPUCommonTests(unittest.TestCase):
                 layer.lora_A, layer.lora_B = la, lb
                 layer.lora_variant[adapter_name].init(layer, adapter_name=adapter_name)  # should not raise an error
 
+    @require_non_cpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_8bit_road_merging(self):
+        # Check results for merging, unmerging, unloading
+        torch.manual_seed(0)
+        model = AutoModelForCausalLM.from_pretrained(
+            "peft-internal-testing/opt-125m",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+            dtype=torch.float32,
+        ).eval()
+
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        # compare outputs in probability space, because logits can have outliers
+        # and token ids are not precise enough
+        out_base = F.softmax(model(random_input).logits, dim=-1)
+
+        config = RoadConfig(
+            init_weights=False,
+        )
+        model = get_peft_model(model, config).eval()
+
+        with torch.inference_mode():
+            out_road = F.softmax(model(random_input).logits, dim=-1)
+
+            model.merge_adapter()
+            out_merged = F.softmax(model(random_input).logits, dim=-1)
+
+            model.unmerge_adapter()
+            out_unmerged = F.softmax(model(random_input).logits, dim=-1)
+
+            model = model.merge_and_unload()
+            out_unloaded = F.softmax(model(random_input).logits, dim=-1)
+
+        atol = 1e-3
+        rtol = 1
+        # sanity check that using DoRA changes the results
+        assert not torch.allclose(out_base, out_road, atol=atol, rtol=rtol)
+        assert torch.allclose(out_road, out_merged, atol=atol, rtol=rtol)
+        assert torch.allclose(out_road, out_unmerged, atol=atol, rtol=rtol)
+        assert torch.allclose(out_road, out_unloaded, atol=atol, rtol=rtol)
+
+    @require_non_cpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_4bit_road_merging(self):
+        # Check results for merging, unmerging, unloading
+        torch.manual_seed(0)
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=False,
+            bnb_4bit_compute_dtype=torch.float32,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            "trl-internal-testing/tiny-random-LlamaForCausalLM",
+            quantization_config=bnb_config,
+            dtype=torch.float32,
+        ).eval()
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        # compare outputs in probability space, because logits can have outliers
+        # and token ids are not precise enough
+        out_base = model(random_input).logits
+        probs_base = F.softmax(out_base, dim=-1)
+
+        config = RoadConfig(
+            init_weights=False,
+            group_size=4,
+        )
+        model = get_peft_model(model, config).eval()
+
+        with torch.inference_mode():
+            out_road = model(random_input).logits
+            probs_road = F.softmax(out_road, dim=-1)
+
+            model.merge_adapter()
+            probs_merged = F.softmax(model(random_input).logits, dim=-1)
+
+            model.unmerge_adapter()
+            probs_unmerged = F.softmax(model(random_input).logits, dim=-1)
+
+            model = model.merge_and_unload()
+            probs_unloaded = F.softmax(model(random_input).logits, dim=-1)
+
+        atol = 1e-5
+        rtol = 1e-3
+        # sanity check that using DoRA changes the results
+        # we compare outputs instead of logits because they may not be sensitive enough
+        assert not torch.allclose(out_base, out_road, atol=atol, rtol=rtol)
+        assert torch.allclose(probs_road, probs_merged, atol=atol, rtol=rtol)
+        assert torch.allclose(probs_road, probs_unmerged, atol=atol, rtol=rtol)
+        assert torch.allclose(probs_road, probs_unloaded, atol=atol, rtol=rtol)
+
     def test_apply_GS_hra_inference(self):
         # check for different result with and without apply_GS
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
-            torch_dtype=torch.float32,
+            "peft-internal-testing/opt-125m",
+            dtype=torch.float32,
         ).eval()
 
         torch.manual_seed(0)
@@ -1535,8 +1716,8 @@ class PeftGPUCommonTests(unittest.TestCase):
         logits_hra = model(random_input).logits
 
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
-            torch_dtype=torch.float32,
+            "peft-internal-testing/opt-125m",
+            dtype=torch.float32,
         )
         torch.manual_seed(0)
         config_hra_GS = HRAConfig(r=8, init_weights=True, apply_GS=True)
@@ -1577,8 +1758,8 @@ class PeftGPUCommonTests(unittest.TestCase):
         # check that an untrained HRA adapter can't be initialized as an identity tranformation
         # when r is an odd number
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
-            torch_dtype=torch.float32,
+            "peft-internal-testing/opt-125m",
+            dtype=torch.float32,
         ).eval()
 
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
@@ -1884,18 +2065,18 @@ class TestSameAdapterDifferentDevices:
         config = OFTConfig(target_modules=["lin0"])
         model = get_peft_model(mlp, config)
         model = model.to(self.device)
-        model.lin0.oft_r.cpu()
+        model.lin0.oft_R.default.cpu()
 
         # check that the adapter is indeed on CPU and the base model on GPU
-        assert model.lin0.oft_r.default.device.type == "cpu"
+        assert model.lin0.oft_R.default.weight.device.type == "cpu"
         assert model.lin0.base_layer.weight.device.type == self.device
 
         model.add_adapter("other", config)
         # check that after adding a new adapter, the old adapter is still on CPU
-        assert model.lin0.oft_r.default.device.type == "cpu"
+        assert model.lin0.oft_R.default.weight.device.type == "cpu"
         # the rest should be on GPU
         assert model.lin0.base_layer.weight.device.type == self.device
-        assert model.lin0.oft_r.other.device.type == self.device
+        assert model.lin0.oft_R.other.weight.device.type == self.device
 
     def test_vera_add_new_adapter_does_not_change_device(self, mlp):
         # same as first test, but using VERA
@@ -1984,3 +2165,21 @@ class TestSameAdapterDifferentDevices:
         # the rest should be on GPU
         assert model.lin0.base_layer.weight.device.type == self.device
         assert model.lin0.hra_u.other.device.type == self.device
+
+    def test_road_add_new_adapter_does_not_change_device(self, mlp):
+        # same as first test, but using HRA
+        config = RoadConfig(target_modules=["lin0"], group_size=2)
+        model = get_peft_model(mlp, config)
+        model = model.to(self.device)
+        model.lin0.road_theta.cpu()
+
+        # check that the adapter is indeed on CPU and the base model on GPU
+        assert model.lin0.road_theta.default.device.type == "cpu"
+        assert model.lin0.base_layer.weight.device.type == self.device
+
+        model.add_adapter("other", config)
+        # check that after adding a new adapter, the old adapter is still on CPU
+        assert model.lin0.road_theta.default.device.type == "cpu"
+        # the rest should be on GPU
+        assert model.lin0.base_layer.weight.device.type == self.device
+        assert model.lin0.road_theta.other.device.type == self.device

@@ -21,17 +21,20 @@ import gradio as gr
 import plotly.express as px
 import plotly.graph_objects as go
 from processing import load_df
+from sanitizer import parse_and_filter
 
 
 metric_preferences = {
-    "cuda_memory_reserved_avg": "lower",
-    "cuda_memory_max": "lower",
-    "cuda_memory_reserved_99th": "lower",
+    "accelerator_memory_reserved_avg": "lower",
+    "accelerator_memory_max": "lower",
+    "accelerator_memory_reserved_99th": "lower",
     "total_time": "lower",
     "train_time": "lower",
     "file_size": "lower",
     "test_accuracy": "higher",
-    "test_loss": "lower",
+    "train_loss": "lower",
+    "num_trainable_params": "lower",
+    "forgetting*": "lower",
 }
 
 
@@ -145,7 +148,7 @@ def generate_pareto_plot(df, metric_x, metric_y):
         title=f"Pareto Frontier for {metric_x} vs {metric_y}",
         template="seaborn",
         height=700,
-        width=900,
+        autosize=True,
         xaxis_title=metric_x,
         yaxis_title=metric_y,
     )
@@ -180,6 +183,10 @@ def export_csv(df):
     return tmp_path
 
 
+def format_df(df):
+    return df.style.format(precision=3, thousands=",", decimal=".")
+
+
 def build_app(df):
     with gr.Blocks(theme=gr.themes.Soft()) as demo:
         gr.Markdown("# PEFT method comparison")
@@ -201,7 +208,20 @@ def build_app(df):
                 label="Select Model ID", choices=get_model_ids(sorted(df["task_name"].unique())[0], df)
             )
 
-        data_table = gr.DataFrame(label="Results", value=df, interactive=False)
+        # Make dataframe columns all equal in width so that they are good enough for numbers but don't
+        # get hugely extended by columns like `train_config`.
+        column_widths = ["150px" for _ in df.columns]
+        column2index = dict(zip(df.columns, range(len(df.columns))))
+        column_widths[column2index['experiment_name']] = '300px'
+
+        data_table = gr.DataFrame(
+            label="Results",
+            value=format_df(df),
+            interactive=False,
+            max_chars=100,
+            wrap=False,
+            column_widths=column_widths,
+        )
 
         with gr.Row():
             filter_textbox = gr.Textbox(
@@ -212,6 +232,11 @@ def build_app(df):
             apply_filter_button = gr.Button("Apply Filter")
             reset_filter_button = gr.Button("Reset Filter")
 
+        gr.Markdown(
+            "*forgetting: This is the reduction in CE loss on a sample of Wikipedia data and reflects how much the "
+            "model 'forgot' during training. The lower the number, the better."
+        )
+
         gr.Markdown("## Pareto plot")
         gr.Markdown(
             "Select 2 criteria to plot the Pareto frontier. This will show the best PEFT methods along this axis and "
@@ -221,7 +246,9 @@ def build_app(df):
 
         with gr.Row():
             x_default = (
-                "cuda_memory_max" if "cuda_memory_max" in metric_preferences else list(metric_preferences.keys())[0]
+                "accelerator_memory_max"
+                if "accelerator_memory_max" in metric_preferences
+                else list(metric_preferences.keys())[0]
             )
             y_default = (
                 "test_accuracy" if "test_accuracy" in metric_preferences else list(metric_preferences.keys())[1]
@@ -246,13 +273,14 @@ def build_app(df):
             filtered = filter_data(task_name, new_models[0] if new_models else "", df)
             if current_filter.strip():
                 try:
-                    df_queried = filtered.query(current_filter)
+                    mask = parse_and_filter(filtered, current_filter)
+                    df_queried = filtered[mask]
                     if not df_queried.empty:
                         filtered = df_queried
                 except Exception:
                     # invalid filter query
                     pass
-            return gr.update(choices=new_models, value=new_models[0] if new_models else None), filtered
+            return gr.update(choices=new_models, value=new_models[0] if new_models else None), format_df(filtered)
 
         task_dropdown.change(
             fn=update_on_task, inputs=[task_dropdown, filter_state], outputs=[model_dropdown, data_table]
@@ -262,10 +290,11 @@ def build_app(df):
             filtered = filter_data(task_name, model_id, df)
             if current_filter.strip():
                 try:
-                    filtered = filtered.query(current_filter)
+                    mask = parse_and_filter(filtered, current_filter)
+                    filtered = filtered[mask]
                 except Exception:
                     pass
-            return filtered
+            return format_df(filtered)
 
         model_dropdown.change(
             fn=update_on_model, inputs=[task_dropdown, model_dropdown, filter_state], outputs=data_table
@@ -275,7 +304,8 @@ def build_app(df):
             filtered = filter_data(task_name, model_id, df)
             if current_filter.strip():
                 try:
-                    filtered = filtered.query(current_filter)
+                    mask = parse_and_filter(filtered, current_filter)
+                    filtered = filtered[mask]
                 except Exception as e:
                     return generate_pareto_plot(filtered, metric_x, metric_y), f"Filter error: {e}"
 
@@ -295,7 +325,8 @@ def build_app(df):
             filtered = filter_data(task_name, model_id, df)
             if filter_query.strip():
                 try:
-                    filtered = filtered.query(filter_query)
+                    mask = parse_and_filter(filtered, filter_query)
+                    filtered = filtered[mask]
                 except Exception as e:
                     # Update the table, plot, and summary even if there is a filter error.
                     return (
@@ -308,7 +339,7 @@ def build_app(df):
             pareto_df = compute_pareto_frontier(filtered, metric_x, metric_y)
             fig = generate_pareto_plot(filtered, metric_x, metric_y)
             summary = compute_pareto_summary(filtered, pareto_df, metric_x, metric_y)
-            return filter_query, filtered, fig, summary
+            return filter_query, format_df(filtered), fig, summary
 
         apply_filter_button.click(
             fn=apply_filter,
@@ -322,7 +353,7 @@ def build_app(df):
             fig = generate_pareto_plot(filtered, metric_x, metric_y)
             summary = compute_pareto_summary(filtered, pareto_df, metric_x, metric_y)
             # Return empty strings to clear the filter state and textbox.
-            return "", "", filtered, fig, summary
+            return "", "", format_df(filtered), fig, summary
 
         reset_filter_button.click(
             fn=reset_filter,
@@ -348,8 +379,7 @@ def build_app(df):
     return demo
 
 
-# TODO only 1 task, using temporary results for now
-path = os.path.join(os.path.dirname(__file__), "MetaMathQA", "temporary_results")
+path = os.path.join(os.path.dirname(__file__), "MetaMathQA", "results")
 df = load_df(path, task_name="MetaMathQA")
 demo = build_app(df)
 demo.launch()

@@ -1,6 +1,16 @@
+---
+title: PEFT Method Comparison
+sdk: gradio
+app_file: app.py
+pinned: false
+emoji: ⚖️
+---
+
 # Comparison of PEFT Methods
 
 The goal of this project is to provide replicable experiments that produce outcomes allowing us to compare different PEFT methods with one another. This gives you more information to make an informed decision about which methods best fit your use case and what trade-offs to expect.
+
+Visit our [Gradio Space](https://huggingface.co/spaces/peft-internal-testing/PEFT-method-comparison) to check the results.
 
 ## Community Contributions
 
@@ -89,7 +99,9 @@ After adding the dataset, ensure it functions correctly and produces meaningful 
 
 ## Result dashboard
 
-For convenience, we included a [Gradio](https://www.gradio.app/) app that shows the results of the experiments. It allows you to filter down the task and base model and show the experiment results for this selection. Give it a try!
+For convenience, we included a [Gradio](https://www.gradio.app/) app that shows the results of the experiments. It allows you to filter down the task and base model and show the experiment results for this selection. Give it a try [here](https://huggingface.co/spaces/peft-internal-testing/PEFT-method-comparison).
+
+### Local deployment
 
 This app requires additional packages to be installed, please install the packages listed in `requirements-app.txt`, e.g. via:
 

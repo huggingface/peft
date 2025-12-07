@@ -14,8 +14,11 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
+
+import packaging.version
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
@@ -67,9 +70,9 @@ class OFTConfig(PeftConfig):
             Whether to share the OFT parameters between blocks or not. This is `False` by default.
     """
 
-    r: int = field(default=8, metadata={"help": "OFT rank, number of OFT blocks per injected layer."})
+    r: int = field(default=0, metadata={"help": "OFT rank, number of OFT blocks per injected layer."})
     oft_block_size: int = field(
-        default=0,
+        default=32,
         metadata={
             "help": "OFT block size across different layers.",
             "note": "You can only specify either r or oft_block_size, but not both simultaneously, because r x oft_block_size = layer dimension.",
@@ -144,6 +147,18 @@ class OFTConfig(PeftConfig):
         default=False,
         metadata={"help": "Whether to share the OFT parameters between blocks or not."},
     )
+    use_cayley_neumann: bool = field(
+        default=True,
+        metadata={
+            "help": "Whether to use the Cayley-Neumann Formulation of OFT or not. Set to True to improve computational efficiency but comes at costs of bigger approximation error for orthogonality."
+        },
+    )
+    num_cayley_neumann_terms: int = field(
+        default=5,
+        metadata={
+            "help": "Number of Cayley-Neumann terms to use. Higher number results in less approximation error for orthogonality."
+        },
+    )
 
     def __post_init__(self):
         super().__post_init__()
@@ -181,4 +196,18 @@ class OFTConfig(PeftConfig):
                 "with the latest version of OFT. Please retrain your adapter weights with newer PEFT versions. "
                 "Alternatively, downgrade PEFT to version 0.13.0 to use the old adapter weights."
             )
+        if kwargs.get("use_cayley_neumann", False):
+            peft_version = kwargs.get("peft_version", "0.0.0")  # if not present, set a low dummy version
+            # remove commit hash, if present
+            peft_version = peft_version.partition("@")[0]
+            parsed_version = packaging.version.Version(peft_version)
+            min_version = packaging.version.Version("0.18.0")
+            # note: config.peft_version was added in 0.18.0, so if it's missing, it means we're below min version
+            if parsed_version < min_version:
+                msg = (
+                    "The cayley-neumann parameterization has been slightly changed to be more numerically stable in "
+                    "PEFT 0.18.0. Please retrain your adapter weights with newer PEFT versions. Alternatively, "
+                    "downgrade PEFT to version 0.17.0 to use the old parameterization."
+                )
+                warnings.warn(msg)
         return super().check_kwargs(**kwargs)

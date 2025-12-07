@@ -38,15 +38,18 @@ def main(args):
     # Setting random seed of numpy and torch
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    torch.cuda.manual_seed_all(args.seed)
-    torch.backends.cudnn.deterministic = True
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+    elif torch.xpu.is_available():
+        torch.xpu.manual_seed_all(args.seed)
+    torch.use_deterministic_algorithms(True)
 
     # Load model
     model_id = args.model_id
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
 
     model = AutoModelForCausalLM.from_pretrained(
-        model_id, device_map="auto", torch_dtype=torch.float16, trust_remote_code=True
+        model_id, device_map="auto", dtype=torch.float16, trust_remote_code=True
     )
 
     # Collect data

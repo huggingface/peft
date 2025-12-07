@@ -16,7 +16,7 @@ jobs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
       - name: Check out code
-        uses: actions/checkout@v3
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
         with:
           persist-credentials: false
       - name: Get changed files
@@ -36,7 +36,7 @@ jobs:
     needs: get_changed_files
     name: Build Docker images on modified files
     runs-on: ubuntu-latest
-    if: ${{ needs.get_changed_files.outputs.matrix }} != ''
+    if: ${{ needs.get_changed_files.outputs.matrix != '[]' }}
     strategy:
       fail-fast: false
       matrix:
@@ -55,7 +55,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2  # v3.10.0
       - name: Check out code
-        uses: actions/checkout@v3
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
         with:
           persist-credentials: false
       - name: Build Docker image

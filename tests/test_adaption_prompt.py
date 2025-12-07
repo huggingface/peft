@@ -29,6 +29,7 @@ from peft.utils.save_and_load import get_peft_model_state_dict
 
 
 MODELS_TO_TEST = [
+    "hf-internal-testing/tiny-random-gpt2",
     "trl-internal-testing/tiny-random-LlamaForCausalLM",
     "hf-internal-testing/tiny-random-MistralForCausalLM",
 ]
@@ -387,7 +388,7 @@ class TestAdaptionPrompt:
 
         """Test that AdaptionPrompt works when Llama using a half-precision model."""
         input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
-        original = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16)
+        original = self.transformers_class.from_pretrained(model_id, dtype=torch.bfloat16)
         adapted = get_peft_model(
             original, AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
         )

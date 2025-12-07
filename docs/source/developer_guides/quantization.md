@@ -144,7 +144,7 @@ The models support LoRA adapter tuning. To tune the quantized model you'll need 
 ```py
 quantized_model = AutoModelForCausalLM.from_pretrained(
     "BlackSamorez/Mixtral-8x7b-AQLM-2Bit-1x16-hf-test-dispatch",
-    torch_dtype="auto", device_map="auto", low_cpu_mem_usage=True,
+    dtype="auto", device_map="auto", low_cpu_mem_usage=True,
 )
 
 peft_config = LoraConfig(...)
@@ -197,7 +197,9 @@ The models that are quantized using Half-Quadratic Quantization of Large Machine
 ```python
 from hqq.engine.hf import HQQModelForCausalLM
 
-quantized_model = HQQModelForCausalLM.from_quantized(save_dir_or_hfhub, device='cuda')
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
+
+quantized_model = HQQModelForCausalLM.from_quantized(save_dir_or_hfhub, device=device)
 peft_config = LoraConfig(...)
 quantized_model = get_peft_model(quantized_model, peft_config)
 ```

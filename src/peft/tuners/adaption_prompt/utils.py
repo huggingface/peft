@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import inspect
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -125,6 +126,31 @@ def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
         sin = sin.unsqueeze(1)
 
     return (query_states * cos) + (llama_rotate_half(query_states) * sin)
+
+
+def gpt2_compute_query_states(
+    model: nn.Module,
+    hidden_states: Optional[tuple[torch.FloatTensor]],
+    encoder_hidden_states: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """
+    Compute query states for GPT2 models. They need to be recomputed as the forward() method of the GPT@ in the
+    transformers library does not return them. See the related discussion in the PR:
+    """
+    if encoder_hidden_states is not None:
+        if not hasattr(model, "q_attn"):
+            raise ValueError(
+                f"If `{model.__class__.__name__}` is used as cross attention, the weights `q_attn` must be defined. "
+                f"Please make sure to instantiate it with `GPT2Attention(..., is_cross_attention=True)`."
+            )
+        query_states = model.q_attn(hidden_states)
+    else:
+        query_states, _, _ = model.c_attn(hidden_states).split(model.split_size, dim=2)
+
+    shape_q = (*query_states.shape[:-1], -1, model.head_dim)
+    query_states = query_states.view(shape_q).transpose(1, 2)
+
+    return query_states
 
 
 def is_adaption_prompt_trainable(params: str) -> bool:
