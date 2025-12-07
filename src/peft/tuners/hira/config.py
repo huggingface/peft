@@ -16,14 +16,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
-import warnings
-
-from torch import nn
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
-
-
 
 
 @dataclass
@@ -33,7 +28,8 @@ class HiraConfig(PeftConfig):
 
     Args:
         r (`int`):
-            Rank of the low-rank component in HiRA. Although HiRA achieves a high-rank adaptation through Hadamard fusion, this value defines the dimension of the underlying low-rank factorization (matrices A and B).
+            Rank of the low-rank component in HiRA. Although HiRA achieves a high-rank adaptation through Hadamard
+            fusion, this value defines the dimension of the underlying low-rank factorization (matrices A and B).
         target_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
             names will be replaced. When passing a string, a regex match will be performed. When passing a list of
@@ -136,8 +132,6 @@ class HiraConfig(PeftConfig):
         },
     )
 
-
-
     def __post_init__(self):
         super().__post_init__()
         self.peft_type = PeftType.HIRA
@@ -147,7 +141,6 @@ class HiraConfig(PeftConfig):
         self.exclude_modules = (
             set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
-
 
         # if target_modules is a regex expression, then layers_to_transform should be None
         if isinstance(self.target_modules, str) and self.layers_to_transform is not None:

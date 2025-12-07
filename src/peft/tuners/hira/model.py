@@ -22,7 +22,7 @@ import torch
 from torch import nn
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, replicate_layers
+from peft.tuners.tuners_utils import BaseTuner
 from peft.utils import AuxiliaryTrainingWrapper
 from peft.utils.other import get_pattern_key
 
