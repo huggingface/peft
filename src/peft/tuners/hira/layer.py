@@ -208,7 +208,11 @@ class Linear(nn.Module, HiraLayer):
                 weight = self.get_base_layer().weight
                 orig_dtype = weight.dtype
                 delta_weight = self.get_delta_weight(active_adapter)
-                weight.data /= 1 + delta_weight.to(orig_dtype)
+                # avoid NaN error, cast to fp32
+                w32 = weight.data.to(torch.float32)
+                den32 = (1 + delta_weight.to(torch.float32)).clamp(min=1e-9)
+                w32 = w32 / den32
+                weight.data.copy_(w32.to(orig_dtype))
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -374,7 +378,11 @@ class Embedding(nn.Module, HiraLayer):
             orig_dtype = self.get_base_layer().weight.dtype
             if active_adapter in self.hira_embedding_A.keys():
                 weight = self.get_base_layer().weight
-                weight.data /= 1 + self.get_delta_weight(active_adapter).to(orig_dtype)
+                # avoid NaN error
+                w32 = weight.data.to(torch.float32)
+                den32 = (1 + self.get_delta_weight(active_adapter).to(torch.float32)).clamp(min=1e-9)
+                w32 = w32 / den32
+                weight.data.copy_(w32.to(orig_dtype))
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -591,7 +599,11 @@ class _ConvNd(nn.Module, HiraLayer):
                 weight = self.get_base_layer().weight
                 orig_dtype = weight.dtype
                 delta_weight = self.get_delta_weight(active_adapter)
-                weight.data /= 1 + delta_weight.to(orig_dtype)
+                # avoid NaN error
+                w32 = weight.data.to(torch.float32)
+                den32 = (1 + delta_weight.to(torch.float32)).clamp(min=1e-9)
+                w32 = w32 / den32
+                weight.data.copy_(w32.to(orig_dtype))
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """

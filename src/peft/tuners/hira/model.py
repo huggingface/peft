@@ -124,19 +124,6 @@ class HiraModel(BaseTuner):
     tuner_layer_cls = HiraLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_HIRA_TARGET_MODULES_MAPPING
 
-    def _prepare_model(self, peft_config: HiraConfig, model: nn.Module):
-        r"""
-        A private method to modify the model structure before adapter is applied.
-
-        Args:
-            peft_config (`PeftConfig`):
-                The prepared adapter config.
-            model (`nn.Module`):
-                The model that is going to be adapted.
-        """
-        if peft_config.layer_replication:
-            replicate_layers(model, peft_config.layer_replication)
-
     def _create_and_replace(
         self,
         hira_config,
@@ -218,26 +205,6 @@ class HiraModel(BaseTuner):
         # Collect dispatcher functions to decide what backend to use for the replaced HiRA layer. The order matters,
         # because the first match is always used. Therefore, the default layers should be checked last.
         dispatchers = []
-
-        if hira_config._custom_modules:
-            # Experimental custom HiRA module support. Allows users to pass a custom mapping for unsupported layer
-            # types by impelementing their own LoRA layers.
-            def dynamic_dispatch_func(target, adapter_name, hira_config, **kwargs):
-                new_module = None
-
-                if isinstance(target, BaseTunerLayer):
-                    target_base_layer = target.get_base_layer()
-                else:
-                    target_base_layer = target
-
-                for key, custom_cls in hira_config._custom_modules.items():
-                    if isinstance(target_base_layer, key):
-                        new_module = custom_cls(target, adapter_name, **kwargs)
-                        break
-
-                return new_module
-
-            dispatchers.append(dynamic_dispatch_func)
 
         # avoid eager bnb import
         if is_bnb_available():
@@ -342,8 +309,6 @@ class HiraModel(BaseTuner):
         super()._check_merge_allowed()
         if getattr(self.model, "quantization_method", None) == "gptq":
             raise ValueError("Cannot merge HiRA layers when the model is gptq quantized")
-        if self.peft_config.get("layer_replication"):
-            raise ValueError("Cannot merge HiRA layers when base model layers are replicated")
 
     def _prepare_adapter_config(self, peft_config, model_config):
         if peft_config.target_modules is None:
