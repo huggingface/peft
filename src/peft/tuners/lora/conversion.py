@@ -15,6 +15,7 @@
 import copy
 import os
 import pathlib
+import warnings
 
 import torch
 from safetensors.torch import save_file
@@ -126,6 +127,7 @@ def convert_to_lora(
         ValueError:
             If a dynamic threshold was chosen that's too high, so that no layer can be converted, raise a `ValueError`.
     """
+    from peft import PeftType  # local to avoid circular import
 
     ##########
     # CHECKS #
@@ -157,13 +159,19 @@ def convert_to_lora(
     if num_modules_with_support == 0:
         raise TypeError("Could not detect any layer that supports LoRA conversion.")
 
+    peft_config = getattr(model, "peft_config", {}).get(adapter_name)
+    if (peft_config is not None) and (peft_config.peft_type == PeftType.LORA):
+        warnings.warn(
+            "Converting a PEFT adapter to LoRA that is already a LoRA adapter. There is typically no need for that."
+        )
+
     ###############
     # PREPARATION #
     ###############
 
     peft_prefix = "base_model.model."
 
-    if getattr(model, "peft_config", {}).get(adapter_name) is not None:
+    if peft_config is not None:
         # use the model's PEFT config, if it exists, to initialize the new LoraConfig
         peft_config = model.peft_config[adapter_name]
         config_kwargs = {
