@@ -51,7 +51,7 @@ def _convert_module_to_lora(
             "Please open an issue: https://github.com/huggingface/peft/issues"
         )
 
-    delta_weight = module.get_delta_weight("default")
+    delta_weight = module.get_delta_weight(adapter_name)
     U, S, V = torch.linalg.svd(delta_weight, full_matrices=False)
     if isinstance(rank, int):
         effective_rank = rank
