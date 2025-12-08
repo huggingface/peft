@@ -31,7 +31,6 @@ class LilyLayer(BaseTunerLayer):
     def __init__(
         self,
         base_layer: nn.Module, 
-        ephemeral_gpu_offload: bool = False,
         **kwargs
     ) -> None:
         self.base_layer = base_layer

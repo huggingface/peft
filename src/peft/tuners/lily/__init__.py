@@ -19,6 +19,6 @@ from .layer import Conv2d, Linear, LilyLayer
 from .model import LilyModel
 
 
-__all__ = ["Conv2d", "Linear", "LilyConfig", "LilyLayer", "LilyModel"]
+__all__ = ["Linear", "LilyConfig", "LilyLayer", "LilyModel"]
 
 register_peft_method(name="lily", config_cls=LilyConfig, model_cls=LilyModel, prefix="lily_", is_mixed_compatible=True)
