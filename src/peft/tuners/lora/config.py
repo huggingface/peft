@@ -120,6 +120,78 @@ class ArrowConfig:
 
 
 @dataclass
+class BdLoraConfig:
+    """
+    Configuration for BD-LoRA (Block-Diagonal LoRA). BD-LoRA is a LoRA variant that can be used for efficient
+    multi-LoRA serving in inference engines. The speedup results from reduced inter-GPU communication by setting
+    certain LoRA modules to be block-diagonal.
+
+    To determine which LoRA factors should be set as block-diagonal, follow these guidelines:
+    - For attention, set
+      - Q,K,V projections to be LoRA-B block-diagonal
+      - Out projection to be LoRA-A block-diagonal
+    - For MLPs, set
+      - Up, Gate projection to be LoRA-B block-diagonal
+      - Down projection to be LoRA-A block-diagonal
+
+    For other modules and/or architectures, look into the code of your target inference engine. Modules that are
+    row-sharded should have LoRA-A block-diagonal, modules that are column-sharded should have LoRA-B block-diagonal.
+
+    Args:
+        target_modules_bd_a:
+            Modules where the LoRA-A is block-diagonal. Matches each pattern in the list against the module name via
+            `pattern is in target_name`. Example: ['up_proj', 'q_proj', 'v_proj', 'k_proj']
+        target_modules_bd_b:
+            Modules where the LoRA-B is block-diagonal. Matches each pattern in the list against the module name via
+            `pattern is in target_name`. Example: ['out_proj', 'down_proj']
+        nblocks: Number of blocks in block-diagonal matrices
+    """
+
+    target_modules_bd_a: Optional[list[str]] = field(
+        default=None,
+        metadata={
+            "help": "Modules where the LoRA-A is block-diagonal. Matches each pattern in the list against the "
+            "module name via `pattern is in target_name`. "
+            "Usually one should specify the q,k,v,up and gate projections here. "
+            "Example: ['up_proj', 'q_proj', 'v_proj', 'k_proj']"
+        },
+    )
+    target_modules_bd_b: Optional[list[str]] = field(
+        default=None,
+        metadata={
+            "help": "Modules where the LoRA-B is block-diagonal. Matches each pattern in the list against the module "
+            "name via `pattern is in target_name`. Usually, one should specify out and down projections here. "
+            "Example: ['out_proj', 'down_proj']"
+        },
+    )
+    nblocks: int = (
+        field(
+            default=1,
+            metadata={
+                "help": "Number of blocks each block-diagonal matrix has. If using BD-LoRA to speed up inference, "
+                "set it to be equal to the desired sharding degree during serving."
+            },
+        ),
+    )
+    match_strict: bool = field(
+        default=True,
+        metadata={
+            "help": "If set to true, requires each target_module to have either a block-diagonal LoRA-A or LoRA-B, "
+            "and raises an error otherwise. You can set this to False to mix LoRA and BD-LoRA training, "
+            "e.g. if some layers in your module do not benefit from BD-LoRA."
+        },
+    )
+
+    def __post_init__(self):
+        overlap = set(self.target_modules_bd_a or []) & set(self.target_modules_bd_b or [])
+        if overlap:
+            raise ValueError(
+                "Found overlapping modules in target_modules_bd lists:"
+                f"{self.target_modules_bd_a} (A) and {self.target_modules_bd_b} (B)."
+            )
+
+
+@dataclass
 class EvaConfig:
     """
     This is the sub-configuration class to store the configuration for a data-driven initialization via EVA. EVA was
@@ -666,6 +738,15 @@ class LoraConfig(PeftConfig):
                 "it needs to be targeted with `target_parameters`. As an example, for Llama4, you can pass: "
                 "`target_parameters=['feed_forward.experts.gate_up_proj', 'feed_forward.experts.down_proj]`. Passing a "
                 "string for regex matching is not implemented yet."
+            )
+        },
+    )
+    use_bdlora: Optional[BdLoraConfig] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Enable BD-LoRA (Block-Diagonal LoRA) by providing a BdLoraConfig. This technique uses block-diagonal matrices for LoRA-A or LoRA-B "
+                "factors to enable faster multi-LoRA serving by eliminating communication overheads in distributed settings."
             )
         },
     )

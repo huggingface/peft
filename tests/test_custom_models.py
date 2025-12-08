@@ -61,6 +61,7 @@ from peft import (
     get_peft_model,
 )
 from peft.tuners import lora
+from peft.tuners.lora.config import BdLoraConfig
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import AuxiliaryTrainingWrapper, infer_device
 
@@ -901,6 +902,36 @@ TEST_CASES = [
         DeloraConfig,
         {"target_modules": ["lin0"], "module_dropout": 0.1},
     ),
+    ###########
+    # BD-LoRA #
+    ###########
+    (
+        "BD-LoRA A only",
+        "MLP",
+        LoraConfig,
+        {
+            "target_modules": ["lin0", "lin1"],
+            "use_bdlora": BdLoraConfig(target_modules_bd_a=["lin0"], nblocks=2, match_strict=False),
+        },
+    ),
+    (
+        "BD-LoRA B only",
+        "MLP",
+        LoraConfig,
+        {
+            "target_modules": ["lin0", "lin1"],
+            "use_bdlora": BdLoraConfig(target_modules_bd_b=["lin1"], nblocks=2, match_strict=False),
+        },
+    ),
+    (
+        "BD-LoRA both A and B",
+        "MLP",
+        LoraConfig,
+        {
+            "target_modules": ["lin0", "lin1"],
+            "use_bdlora": BdLoraConfig(target_modules_bd_a=["lin0"], target_modules_bd_b=["lin1"], nblocks=2),
+        },
+    ),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
 
@@ -1199,6 +1230,7 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_weights": False},
         {"target_modules": ["lin1"], "init_weights": False},
     ),
+    # BD-LoRA different encounters issues as the adapter weights have different shapes then
 ]
 
 PREFIXES = {
@@ -1770,21 +1802,21 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
-        _skip_if_merging_not_supported(model_id, config_cls)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
-        _skip_if_merging_not_supported(model_id, config_cls)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers_fp16(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_is_idempotent(self, test_name, model_id, config_cls, config_kwargs):
-        _skip_if_merging_not_supported(model_id, config_cls)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
         # calling merge twice with the same arguments should not change the output
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
@@ -1792,7 +1824,7 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_safe_merge(self, test_name, model_id, config_cls, config_kwargs):
-        _skip_if_merging_not_supported(model_id, config_cls)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
         # calling merge twice with the same arguments should not change the output
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
@@ -1910,7 +1942,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        _skip_if_merging_not_supported(model_id, config_cls)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
         model.merge_adapter(safe_merge=False)
         model(**X)
@@ -1950,7 +1982,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        _skip_if_merging_not_supported(model_id, config_cls)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
         model.merge_adapter(safe_merge=False)
         model(**X)
@@ -1989,7 +2021,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        _skip_if_merging_not_supported(model_id, config_cls)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
         model.merge_adapter(safe_merge=False)
         model(**X)
@@ -2028,7 +2060,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # check that none of this raises an error
         model(**X)
 
-        _skip_if_merging_not_supported(model_id, config_cls)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
         model.merge_adapter(safe_merge=False)
         model(**X)
@@ -2207,7 +2239,7 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_disable_adapters_with_merging(self, test_name, model_id, config_cls, config_kwargs):
-        _skip_if_merging_not_supported(model_id, config_cls)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
         # same as test_disable_adapters, but with merging
         X = self.prepare_inputs_for_testing()
@@ -3852,13 +3884,9 @@ class TestRequiresGrad:
         config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
         peft_model = get_peft_model(MLP(), config)
 
-        # when disabling the adapter, the original module's grad should be enabled and vice versa
+        # no layer should have requires_grad
         peft_model.disable_adapter_layers()
-        self.check_requires_grad(
-            peft_model,
-            "base_model.model.lin1.original_module.weight",
-            "base_model.model.lin1.original_module.bias",
-        )
+        self.check_requires_grad(peft_model)
 
         # when re-enabling the adapter, the original module's grad should be disabled and vice versa
         peft_model.enable_adapter_layers()
@@ -3870,13 +3898,9 @@ class TestRequiresGrad:
             "base_model.model.lin0.lora_B.default.weight",
         )
 
-        # when using the disable_adapter context, the original module's grad should be enabled and vice versa
+        # when using the disable_adapter context, no layer should have requires_grad
         with peft_model.disable_adapter():
-            self.check_requires_grad(
-                peft_model,
-                "base_model.model.lin1.original_module.weight",
-                "base_model.model.lin1.original_module.bias",
-            )
+            self.check_requires_grad(peft_model)
 
         # after context is exited, return to the previous state
         self.check_requires_grad(

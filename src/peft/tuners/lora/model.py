@@ -216,6 +216,8 @@ class LoraModel(BaseTuner):
             "lora_bias": lora_config.lora_bias,
             "arrow_config": lora_config.arrow_config,
             "lora_ga_config": lora_config.lora_ga_config,
+            "use_bdlora": lora_config.use_bdlora,
+            "target_name": current_key,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
             "parameter_name": parameter_name,
@@ -252,7 +254,9 @@ class LoraModel(BaseTuner):
                 lora_bias=lora_config.lora_bias,
                 arrow_config=lora_config.arrow_config,
                 lora_ga_config=lora_config.lora_ga_config,
+                use_bdlora=lora_config.use_bdlora,
                 inference_mode=lora_config.inference_mode,
+                target_name=current_key,
             )
         else:
             if isinstance(target, ParamWrapper) and (parameter_name == target.parameter_name):
