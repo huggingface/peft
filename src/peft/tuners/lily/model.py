@@ -52,7 +52,7 @@ class LilyModel(BaseTuner):
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
 
     Returns:
-        `torch.nn.Module`: The Lily model.
+        `torch.nn.Module`: The Lily PEFT model.
 
     **Attributes**:
         - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
