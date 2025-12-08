@@ -46,6 +46,10 @@ class TestLoraConversion:
     involves disk IO, which we want to avoid as much as possible. For most users, save_as_lora will most likely be the
     main entry point,
 
+    For comparing outputs, it's not ideal to check the logits, as most of them are close to zero and we cannot use
+    torch.allclose, as a certain deviation is expected from conversion. A robust way would be to check the hidden
+    states after subtracting the base model's hidden states (since the contribution of the adapter is what we want to
+    compare).
     """
 
     model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
@@ -61,6 +65,13 @@ class TestLoraConversion:
         torch.manual_seed(0)
         return get_peft_model(self.get_base_model(), LoKrConfig(init_weights=False))
 
+    @staticmethod
+    def get_mse(output1, output2, output_base):
+        # compare the hidden states of output1 and output2 compared to output_base
+        diff1 = output1.hidden_states[-1] - output_base.hidden_states[-1]
+        diff2 = output2.hidden_states[-1] - output_base.hidden_states[-1]
+        return nn.functional.mse_loss(diff1, diff2).item()
+
     def test_no_peft_layer_raises(self):
         # Model without any PEFT layer should raise
         base_model = self.get_base_model()
@@ -72,6 +83,8 @@ class TestLoraConversion:
         # Prefix Tuning does not support LoRA conversion
         base_model = self.get_base_model()
         prefix_model = get_peft_model(base_model, PrefixTuningConfig(num_virtual_tokens=10, task_type="CAUSAL_LM"))
+        assert not prefix_model.supports_lora_conversion()
+
         msg = "Could not detect any layer that supports LoRA conversion"
         with pytest.raises(TypeError, match=msg):
             convert_to_lora(prefix_model, rank=8)
@@ -80,6 +93,8 @@ class TestLoraConversion:
         # IA3 has BaseTunerLayers but does not support LoRA conversion
         base_model = self.get_base_model()
         ia3_model = get_peft_model(base_model, IA3Config())
+        assert not ia3_model.supports_lora_conversion()
+
         msg = "Some module types on this model do not support LoRA conversion"
         with pytest.raises(TypeError, match=msg):
             convert_to_lora(ia3_model, rank=8)
@@ -94,6 +109,8 @@ class TestLoraConversion:
                 self.lin = nn.Linear(16, 16)
 
         lokr_model = get_peft_model(MyModule(), LoKrConfig(target_modules=["conv", "lin"]))
+        assert not lokr_model.supports_lora_conversion()
+
         msg = "Some module types on this model do not support LoRA conversion"
         with pytest.raises(TypeError, match=msg):
             convert_to_lora(lokr_model, rank=8)
@@ -155,19 +172,23 @@ class TestLoraConversion:
 
     def test_converting_transformers_model_works(self, lokr_model, tmp_path):
         # test that we can convert a transformers model that has loaded LoKr directly
+        assert lokr_model.supports_lora_conversion()
+
         inputs = torch.arange(10).view(1, -1).to(self.torch_device)
         with torch.inference_mode():
-            output_lokr = lokr_model(inputs).logits
+            with lokr_model.disable_adapter():
+                output_base = lokr_model(inputs, output_hidden_states=True)
+            output_lokr = lokr_model(inputs, output_hidden_states=True)
 
         lokr_model.save_pretrained(tmp_path)
         # load directly with transformers
         loaded_model = AutoModelForCausalLM.from_pretrained(tmp_path).to(self.torch_device)
         with torch.inference_mode():
-            output_loaded = loaded_model(inputs).logits
+            output_loaded = loaded_model(inputs, output_hidden_states=True)
 
         # sanity check
         atol, rtol = 1e-4, 1e-4
-        assert torch.allclose(output_lokr, output_loaded, atol=atol, rtol=rtol)
+        assert torch.allclose(output_lokr.logits, output_loaded.logits, atol=atol, rtol=rtol)
 
         save_as_lora(tmp_path / "converted", lokr_model, rank=8)
         lora_model = AutoModelForCausalLM.from_pretrained(tmp_path / "converted").to(self.torch_device)
@@ -179,21 +200,19 @@ class TestLoraConversion:
                 assert not torch.all(param == 0)
 
         with torch.inference_mode():
-            output_converted = lora_model(inputs).logits
-        corr_converted = torch.corrcoef(torch.stack((output_lokr.flatten(), output_converted.flatten())))[0, 1]
-        # the converted LoRA's correlation should be very high
-        assert corr_converted > 0.9
+            output_converted = lora_model(inputs, output_hidden_states=True)
+        assert 0.0 < self.get_mse(output_converted, output_lokr, output_base) < 0.1
 
     def test_converted_lora_approximates_original_adapter(self, lokr_model):
         inputs = torch.arange(10).view(1, -1).to(self.torch_device)
         with torch.inference_mode():
             with lokr_model.disable_adapter():
-                output_base = lokr_model(inputs).logits
-            output_lokr = lokr_model(inputs).logits
+                output_base = lokr_model(inputs, output_hidden_states=True)
+            output_lokr = lokr_model(inputs, output_hidden_states=True)
 
         # sanity check
         atol, rtol = 1e-4, 1e-4
-        assert not torch.allclose(output_base, output_lokr, atol=atol, rtol=rtol)
+        assert not torch.allclose(output_base.logits, output_lokr.logits, atol=atol, rtol=rtol)
 
         ##############
         # fixed rank #
@@ -205,8 +224,8 @@ class TestLoraConversion:
 
         # by default, the LoRA model should be an identity transform
         with torch.inference_mode():
-            output_lora = lora_model(inputs).logits
-        assert torch.allclose(output_base, output_lora, atol=atol, rtol=rtol)
+            output_lora = lora_model(inputs, output_hidden_states=True)
+        assert torch.allclose(output_base.logits, output_lora.logits, atol=atol, rtol=rtol)
 
         # load the converted LoRA weights
         load_result = set_peft_model_state_dict(lora_model, state_dict)
@@ -217,16 +236,12 @@ class TestLoraConversion:
         assert 100 < num_train_params < 0.1 * total_params
 
         with torch.inference_mode():
-            output_converted = lora_model(inputs).logits
+            output_converted = lora_model(inputs, output_hidden_states=True)
 
-        # note the corr coeff matrix is 2x2, we want the off-diagonal entry
-        corr_lora = torch.corrcoef(torch.stack((output_lokr.flatten(), output_lora.flatten())))[0, 1]
-        corr_converted = torch.corrcoef(torch.stack((output_lokr.flatten(), output_converted.flatten())))[0, 1]
-
-        # sanity check: the base LoRA's correlation should not be too high
-        assert corr_lora < 0.8
-        # the converted LoRA's correlation should be very high
-        assert corr_converted > 0.9
+        mse_lora = self.get_mse(output_lora, output_lokr, output_base)
+        mse_converted = self.get_mse(output_converted, output_lokr, output_base)
+        assert mse_lora > 0.5
+        assert 0.0 < mse_converted < 0.1
 
         ###############################
         # this time with dynamic rank #
@@ -243,9 +258,9 @@ class TestLoraConversion:
         assert 100 < num_train_params < 0.1 * total_params
 
         with torch.inference_mode():
-            output_converted = lora_model(inputs).logits
-        corr_converted = torch.corrcoef(torch.stack((output_lokr.flatten(), output_converted.flatten())))[0, 1]
-        assert corr_converted > 0.9
+            output_converted = lora_model(inputs, output_hidden_states=True)
+        mse_converted = self.get_mse(output_converted, output_lokr, output_base)
+        assert 0.0 < mse_converted < 0.1
 
     def test_with_tqdm_works(self, lokr_model, capsys):
         # pass progressbar=True to use tqdm
@@ -254,6 +269,7 @@ class TestLoraConversion:
         assert "Converting to LoRA" in captured.err
 
     def test_save_as_lora(self, lokr_model, tmp_path):
+        # whether using save_as_lora gives the same result as convert_to_lora
         inputs = torch.arange(10).view(1, -1).to(self.torch_device)
         atol, rtol = 1e-4, 1e-4
 
@@ -286,7 +302,9 @@ class TestLoraConversion:
 
         inputs = torch.arange(10).view(1, -1).to(self.torch_device)
         with torch.inference_mode():
-            output_lokr = lokr_model(inputs).logits
+            with lokr_model.disable_adapter():
+                output_base = lokr_model(inputs, output_hidden_states=True)
+            output_lokr = lokr_model(inputs, output_hidden_states=True)
 
         # remove the PeftModel wrapper and the peft_config attribute -- this should still work
         unwrapped_lokr_model = unwrap(lokr_model)
@@ -309,8 +327,93 @@ class TestLoraConversion:
         assert not load_result.unexpected_keys
 
         with torch.inference_mode():
-            output_converted = lora_model(inputs).logits
+            output_converted = lora_model(inputs, output_hidden_states=True)
 
-        corr_converted = torch.corrcoef(torch.stack((output_lokr.flatten(), output_converted.flatten())))[0, 1]
-        # the converted LoRA's correlation should be very high
-        assert corr_converted > 0.9
+        mse = self.get_mse(output_converted, output_lokr, output_base)
+        assert 0.0 < mse < 0.1
+
+    def test_converted_lora_to_lora_works_and_warns(self):
+        # In general, there is no need to convert LoRA to LoRA, but it should still work. One possible use case would be
+        # to shrink the rank of an existing LoRA adapter. The resulting correlation in this test is surprisingly high,
+        # probably because the initial LoRA was not trained but initialized with random weights.
+        inputs = torch.arange(10).view(1, -1).to(self.torch_device)
+        base_model = self.get_base_model()
+        with torch.inference_mode():
+            output_base = base_model(inputs, output_hidden_states=True)
+
+        orig_lora_config = LoraConfig(r=16, init_lora_weights=False)
+        orig_lora_model = get_peft_model(base_model, orig_lora_config)
+
+        with torch.inference_mode():
+            output_orig_lora = orig_lora_model(inputs, output_hidden_states=True)
+
+        # sanity check
+        atol, rtol = 1e-4, 1e-4
+        assert not torch.allclose(output_base.logits, output_orig_lora.logits)
+
+        # convert from rank 16 to rank 8
+        msg = "Converting a PEFT adapter to LoRA that is already a LoRA adapter"
+        with pytest.warns(UserWarning, match=msg):
+            # check that a warning was issued
+            lora_config, state_dict = convert_to_lora(orig_lora_model, rank=8)
+
+        base_model = self.get_base_model()
+        lora_model = get_peft_model(base_model, lora_config)
+
+        # load the converted LoRA weights
+        load_result = set_peft_model_state_dict(lora_model, state_dict)
+        assert not load_result.unexpected_keys
+
+        with torch.inference_mode():
+            output_converted = lora_model(inputs, output_hidden_states=True)
+
+        mse_converted = self.get_mse(output_converted, output_orig_lora, output_base)
+        assert 0.0 < mse_converted < 0.1
+
+    def test_converted_lora_with_multiple_adapters(self, lokr_model):
+        # ensure that we can convert specific adapters when multiple are present
+        lokr_config = LoKrConfig(r=16, init_weights=False)
+        lokr_model.add_adapter("other", lokr_config)
+
+        inputs = torch.arange(10).view(1, -1).to(self.torch_device)
+        with torch.inference_mode():
+            with lokr_model.disable_adapter():
+                output_base = lokr_model(inputs, output_hidden_states=True)
+            output_lokr_default = lokr_model(inputs, output_hidden_states=True)
+            lokr_model.set_adapter("other")
+            output_lokr_other = lokr_model(inputs, output_hidden_states=True)
+
+        # sanity check
+        atol, rtol = 1e-4, 1e-4
+        assert not torch.allclose(output_lokr_default.logits, output_lokr_other.logits, atol=atol, rtol=rtol)
+
+        # convert the default adapter
+        lora_config_default, state_dict_default = convert_to_lora(lokr_model, rank=8)
+        base_model = self.get_base_model()
+        lora_model_default = get_peft_model(base_model, lora_config_default)
+
+        # load the converted LoRA weights for the default adapter
+        load_result = set_peft_model_state_dict(lora_model_default, state_dict_default)
+        assert not load_result.unexpected_keys
+        with torch.inference_mode():
+            output_converted_default = lora_model_default(inputs, output_hidden_states=True)
+
+        # convert the other adapter
+        lora_config_other, state_dict_other = convert_to_lora(lokr_model, rank=8, adapter_name="other")
+        base_model = self.get_base_model()
+        lora_model_other = get_peft_model(base_model, lora_config_other)
+        # load the converted LoRA weights for the other adapter
+        load_result = set_peft_model_state_dict(lora_model_other, state_dict_other)
+        assert not load_result.unexpected_keys
+        with torch.inference_mode():
+            output_converted_other = lora_model_other(inputs, output_hidden_states=True)
+
+        mse_default_default = self.get_mse(output_converted_default, output_lokr_default, output_base)
+        mse_other_other = self.get_mse(output_converted_other, output_lokr_other, output_base)
+        mse_default_other = self.get_mse(output_converted_default, output_lokr_other, output_base)
+        mse_other_default = self.get_mse(output_converted_other, output_lokr_default, output_base)
+
+        assert 0.0 < mse_default_default < 0.1
+        assert 0.0 < mse_other_other < 0.1
+        assert mse_default_other > 0.5
+        assert mse_other_default > 0.5

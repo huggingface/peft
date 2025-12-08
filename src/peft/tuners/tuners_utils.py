@@ -1221,7 +1221,9 @@ class BaseTuner(nn.Module, ABC):
 
         Normally, this works if the PEFT method is additive, i.e. W' = W_base + delta_weight.
         """
-        return all(module.supports_lora_conversion() for module in self.modules() if isinstance(module, BaseTunerLayer))
+        return all(
+            module.supports_lora_conversion() for module in self.modules() if isinstance(module, BaseTunerLayer)
+        )
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
