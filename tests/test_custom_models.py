@@ -1201,31 +1201,6 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
     ),
 ]
 
-PREFIXES = {
-    IA3Config: "ia3_",
-    LoraConfig: "lora_",
-    LoHaConfig: "hada_",
-    LoKrConfig: "lokr_",
-    OFTConfig: "oft_",
-    BOFTConfig: "boft_",
-    LNTuningConfig: "ln_tuning_",
-    VeraConfig: "vera_lambda_",
-    RandLoraConfig: "randlora_",
-    FourierFTConfig: "fourierft_",
-    GraloraConfig: "gralora_",
-    C3AConfig: "c3a_",
-    HRAConfig: "hra_",
-    ShiraConfig: "shira_",
-    VBLoRAConfig: "vblora_",
-    BoneConfig: "bone_",
-    RoadConfig: "road_",
-    MissConfig: "miss_",
-    DeloraConfig: "delora_",
-    TrainableTokensConfig: "trainable_tokens_",
-    WaveFTConfig: "waveft_",
-    OSFConfig: "osf_",
-}
-
 
 def _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs):
     if (config_cls == LoraConfig) and config_kwargs.get("target_parameters"):
@@ -2078,10 +2053,9 @@ class TestPeftCustomModel(PeftCommonTester):
         params_after = dict(model.named_parameters())
         assert params_before.keys() == params_after.keys()
 
-        prefix = PREFIXES[config_cls]
         for name, param_before in params_before.items():
             param_after = params_after[name]
-            if (prefix in name) or ("modules_to_save" in name) or ("token_adapter.trainable_tokens" in name):
+            if (model.prefix in name) or ("modules_to_save" in name) or ("token_adapter.trainable_tokens" in name):
                 # target_modules, modules_to_save and modules of `NewTokensWrapper` _are_ updated
                 assert not torch.allclose(param_before, param_after, atol=tol, rtol=tol)
             else:
