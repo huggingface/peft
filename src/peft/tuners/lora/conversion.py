@@ -170,18 +170,18 @@ def convert_to_lora(
     ###############
 
     peft_prefix = "base_model.model."
+    config_kwargs = {
+        "rank_pattern": {},
+        "alpha_pattern": {},
+        "exclude_modules": set(),
+    }
 
     if peft_config is not None:
         # use the model's PEFT config, if it exists, to initialize the new LoraConfig
         peft_config = model.peft_config[adapter_name]
-        config_kwargs = {
-            "target_modules": copy.copy(peft_config.target_modules),
-            "rank_pattern": {},
-            "alpha_pattern": {},
-            "exclude_modules": set(),
-            "base_model_name_or_path": peft_config.base_model_name_or_path,
-        }
-        if hasattr(peft_config, "layers_patter"):
+        config_kwargs["target_modules"] = copy.copy(peft_config.target_modules)
+        config_kwargs["base_model_name_or_path"] = peft_config.base_model_name_or_path
+        if hasattr(peft_config, "layers_pattern"):
             # those two go hand in hand
             config_kwargs["layers_pattern"] = peft_config.layers_pattern
             config_kwargs["layers_to_transform"] = peft_config.layers_to_transform
@@ -196,9 +196,7 @@ def convert_to_lora(
         lora_config = LoraConfig(
             r=rank if isinstance(rank, int) else 1,  # 1 is a dummy value, actual values will come from rank_pattern
             target_modules=[],
-            rank_pattern={},
-            alpha_pattern={},
-            exclude_modules=set(),
+            **config_kwargs,
         )
 
     ##############
@@ -213,14 +211,20 @@ def convert_to_lora(
             continue
 
         lora_A, lora_B, effective_rank = _convert_module_to_lora(module, rank=rank, adapter_name=adapter_name)
-        lora_config.target_modules.add(name)
-
         if effective_rank == 0:
             # This shouldn't really happen, as we ensure that the rank is greater than 0 (int) or, for tresholds
             # (float), at least one SV is included. But better be safe than sorry, as, in principle, it is fine to
             # exclude some layers.
             lora_config.exclude_modules.add(name.removeprefix(peft_prefix))
             continue
+
+        # if we get here, it means the module is being targeted
+        if isinstance(lora_config.target_modules, set):
+            lora_config.target_modules.add(name.removeprefix(peft_prefix))
+        else:
+            # it's a string, we cannot simply add to it, need to workaround with rank_pattern
+            lora_config.rank_pattern[name.removeprefix(peft_prefix)] = effective_rank
+            lora_config.alpha_pattern[name.removeprefix(peft_prefix)] = effective_rank
 
         # the rank was dynamically adjusted, store it in rank and alpha pattern
         if effective_rank != rank:

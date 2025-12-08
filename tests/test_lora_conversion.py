@@ -131,6 +131,25 @@ class TestLoraConversion:
         new_lora_state_dict = get_peft_model_state_dict(new_lora_model)
         assert lora_state_dict.keys() == new_lora_state_dict.keys()
 
+    def test_targeted_modules_identical_target_modules_str(self):
+        base_model = self.get_base_model()
+        lokr_config = LoKrConfig(target_modules=r".*\.q_proj", r=16, init_weights=False)
+        lokr_model = get_peft_model(base_model, lokr_config)
+        lora_config, lora_state_dict = convert_to_lora(lokr_model, rank=8)
+        lokr_state_dict = lokr_model.state_dict()
+
+        # LoRA should have an entry for each layer targeted by LoKr
+        # cut off parameter name and PEFT method specific part of the name to obtain module name
+        modules_lokr = {k.rsplit(".", 2)[0] for k in lokr_state_dict.keys() if ".lokr" in k}
+        modules_lora = {k.rsplit(".", 2)[0] for k in lora_state_dict.keys() if ".lora" in k}
+        assert modules_lokr == modules_lora
+
+        # creating a new LoRA model based on the returned config should give the same state dict keys
+        base_model = self.get_base_model()
+        new_lora_model = get_peft_model(base_model, lora_config)
+        new_lora_state_dict = get_peft_model_state_dict(new_lora_model)
+        assert lora_state_dict.keys() == new_lora_state_dict.keys()
+
     def test_fixed_rank_lora_config(self, lokr_model):
         # with a fixed rank, we expect target_modules to be set on the LoRA config but not rank_pattern, alpha_pattern
         lora_config, _ = convert_to_lora(lokr_model, rank=8)
