@@ -126,8 +126,8 @@ class LoraLayer(BaseTunerLayer):
         in_features, out_features = _get_in_out_features(base_layer)
         self.in_features = in_features
         self.out_features = out_features
-
-    def resolve_lora_variant(self, *, use_dora: bool, use_kasa: bool, **kwargs) -> Optional[LoraVariant]:
+        
+    def resolve_lora_variant(self, *, use_dora: bool, use_kasa: bool, use_bdlora=None, **kwargs) -> Optional[LoraVariant]:
         """Return a matching LoRA variant for this layer type.
 
         Given the init arguments of this layer, return the correct LoRA variant, if any. E.g., if `use_dora=True`, this
@@ -157,11 +157,14 @@ class LoraLayer(BaseTunerLayer):
         arrow_config: ArrowConfig = None,
         qalora_group_size: int = 32,
         inference_mode: bool = False,
+        use_bdlora=None,
         **kwargs,
     ):
         # collect the kwargs
+        target_name = kwargs.get("target_name", "")  # preserve target_name before overwriting kwargs
         kwargs = locals().copy()
         del kwargs["self"]
+        kwargs["target_name"] = target_name  # restore target_name
 
         # This code works for linear layers, override for other layer types
         if r <= 0:
@@ -181,6 +184,7 @@ class LoraLayer(BaseTunerLayer):
             use_qalora=use_qalora,
             qalora_group_size=qalora_group_size,
             arrow_config=arrow_config,
+            use_bdlora=use_bdlora,
         )
 
         if lora_variant is not None:
@@ -616,6 +620,7 @@ class Linear(nn.Module, LoraLayer):
         use_kasa: bool = False,
         use_alora: bool = False,
         arrow_config: ArrowConfig = None,
+        use_bdlora=None,
         lora_bias: bool = False,
         **kwargs,
     ) -> None:
@@ -636,16 +641,23 @@ class Linear(nn.Module, LoraLayer):
             use_alora=use_alora,
             lora_bias=lora_bias,
             arrow_config=arrow_config,
+            use_bdlora=use_bdlora,
+            **kwargs,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def resolve_lora_variant(
-        self, *, arrow_config: ArrowConfig, use_dora: bool, use_alora: bool, use_kasa: bool, **kwargs
+        self, *, arrow_config: ArrowConfig, use_dora: bool, use_alora: bool, use_kasa: bool, use_bdlora=None, **kwargs
     ) -> Optional[LoraVariant]:
         if arrow_config is not None:
             from .variants import ArrowLinearVariant
 
             return ArrowLinearVariant()
+
+        if use_bdlora is not None:
+            from .variants import BdLoraLinearVariant
+
+            return BdLoraLinearVariant()
 
         if not use_dora and not use_alora and not use_kasa:
             return None
