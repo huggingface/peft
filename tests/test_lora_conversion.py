@@ -38,6 +38,16 @@ from .testing_utils import hub_online_once
 
 
 class TestLoraConversion:
+    """Test functionality to convert non-LoRA adapters to LoRA adapters
+
+    This is mainly testing with LoKr, as it would be wasteful to test with all compatible PEFT methods.
+
+    We mainly use convert_to_lora and not save_as_lora here, as is just a thin wrapper around convert_to_lora and
+    involves disk IO, which we want to avoid as much as possible. For most users, save_as_lora will most likely be the
+    main entry point,
+
+    """
+
     model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
     torch_device = infer_device()
     with hub_online_once(model_id):
@@ -74,13 +84,14 @@ class TestLoraConversion:
         with pytest.raises(TypeError, match=msg):
             convert_to_lora(ia3_model, rank=8)
 
-    def test_model_with_only_conv_layers_raises(self):
+    def test_model_with_unsupported_layers_raises(self):
         # conv layers do not support LoRA conversion (yet)
+        # note: change this test if we add support for conv layer conversion
         class MyModule(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.conv = nn.Conv2d(3, 3, 3)
-                self.lin = nn.Linear(3, 3)
+                self.conv = nn.Conv2d(16, 16, 3)
+                self.lin = nn.Linear(16, 16)
 
         lokr_model = get_peft_model(MyModule(), LoKrConfig(target_modules=["conv", "lin"]))
         msg = "Some module types on this model do not support LoRA conversion"
@@ -144,9 +155,34 @@ class TestLoraConversion:
 
     def test_converting_transformers_model_works(self, lokr_model, tmp_path):
         # test that we can convert a transformers model that has loaded LoKr directly
+        inputs = torch.arange(10).view(1, -1).to(self.torch_device)
+        with torch.inference_mode():
+            output_lokr = lokr_model(inputs).logits
+
         lokr_model.save_pretrained(tmp_path)
+        # load directly with transformers
         loaded_model = AutoModelForCausalLM.from_pretrained(tmp_path).to(self.torch_device)
-        lora_config, state_dict = convert_to_lora(loaded_model, rank=8)
+        with torch.inference_mode():
+            output_loaded = loaded_model(inputs).logits
+
+        # sanity check
+        atol, rtol = 1e-4, 1e-4
+        assert torch.allclose(output_lokr, output_loaded, atol=atol, rtol=rtol)
+
+        save_as_lora(tmp_path / "converted", lokr_model, rank=8)
+        lora_model = AutoModelForCausalLM.from_pretrained(tmp_path / "converted").to(self.torch_device)
+
+        # With from_pretrained, we don't get a load_result and thus cannot check for missing keys. As a proxy,
+        # instead check that no LoRA weight is all zeros (which would indicate a missing weight)
+        for name, param in lora_model.named_parameters():
+            if (".lora_A" in name) or (".lora_B" in name):
+                assert not torch.all(param == 0)
+
+        with torch.inference_mode():
+            output_converted = lora_model(inputs).logits
+        corr_converted = torch.corrcoef(torch.stack((output_lokr.flatten(), output_converted.flatten())))[0, 1]
+        # the converted LoRA's correlation should be very high
+        assert corr_converted > 0.9
 
     def test_converted_lora_approximates_original_adapter(self, lokr_model):
         inputs = torch.arange(10).view(1, -1).to(self.torch_device)
@@ -173,7 +209,9 @@ class TestLoraConversion:
         assert torch.allclose(output_base, output_lora, atol=atol, rtol=rtol)
 
         # load the converted LoRA weights
-        set_peft_model_state_dict(lora_model, state_dict)
+        load_result = set_peft_model_state_dict(lora_model, state_dict)
+        assert not load_result.unexpected_keys
+
         # sanity check the number of trainable parameters
         num_train_params, total_params = lora_model.get_nb_trainable_parameters()
         assert 100 < num_train_params < 0.1 * total_params
@@ -197,7 +235,8 @@ class TestLoraConversion:
         lora_config, state_dict = convert_to_lora(lokr_model, rank=0.9)
         base_model = self.get_base_model()
         lora_model = get_peft_model(base_model, lora_config)
-        set_peft_model_state_dict(lora_model, state_dict)
+        load_result = set_peft_model_state_dict(lora_model, state_dict)
+        assert not load_result.unexpected_keys
 
         # sanity check the number of trainable parameters
         num_train_params, total_params = lora_model.get_nb_trainable_parameters()
@@ -221,7 +260,8 @@ class TestLoraConversion:
         lora_config, state_dict = convert_to_lora(lokr_model, rank=8)
         base_model = self.get_base_model()
         lora_model = get_peft_model(base_model, lora_config)
-        set_peft_model_state_dict(lora_model, state_dict)
+        load_result = set_peft_model_state_dict(lora_model, state_dict)
+        assert not load_result.unexpected_keys
 
         with torch.inference_mode():
             output_before = lora_model(inputs).logits
@@ -235,3 +275,42 @@ class TestLoraConversion:
             output_after = loaded_model(inputs).logits
 
         assert torch.allclose(output_before, output_after, atol=atol, rtol=rtol)
+
+    def test_model_without_peft_config(self, lokr_model):
+        # Conversion also works with models that don't have a PeftConfig on them. This is a bit of a convoluted case,
+        # but conversion doesn't strictly rely on an existing peft_config, so it should still work.
+        def unwrap(peft_model):
+            unwrapped = peft_model.get_base_model()
+            del unwrapped.peft_config
+            return unwrapped
+
+        inputs = torch.arange(10).view(1, -1).to(self.torch_device)
+        with torch.inference_mode():
+            output_lokr = lokr_model(inputs).logits
+
+        # remove the PeftModel wrapper and the peft_config attribute -- this should still work
+        unwrapped_lokr_model = unwrap(lokr_model)
+        lora_config, state_dict = convert_to_lora(unwrapped_lokr_model, rank=8)
+
+        base_model = self.get_base_model()
+        lora_model = get_peft_model(base_model, lora_config)
+        unwrapped_lora_model = unwrap(lora_model)
+
+        # Note: On the unwrapped model, we cannot use set_peft_model_state_dict, as that requires a peft_config. Thus,
+        # we need to manually inject the adapter name into state_dict keys, which is done automatically when using
+        # set_peft_model_state_dict.
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            new_k = k.replace(".lora_A.weight", ".lora_A.default.weight")
+            new_k = new_k.replace(".lora_B.weight", ".lora_B.default.weight")
+            new_state_dict[new_k] = v
+
+        load_result = unwrapped_lora_model.load_state_dict(new_state_dict, strict=False)
+        assert not load_result.unexpected_keys
+
+        with torch.inference_mode():
+            output_converted = lora_model(inputs).logits
+
+        corr_converted = torch.corrcoef(torch.stack((output_lokr.flatten(), output_converted.flatten())))[0, 1]
+        # the converted LoRA's correlation should be very high
+        assert corr_converted > 0.9

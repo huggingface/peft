@@ -126,7 +126,6 @@ def convert_to_lora(
         ValueError:
             If a dynamic threshold was chosen that's too high, so that no layer can be converted, raise a `ValueError`.
     """
-    from peft import PeftModel  # circular import of at root
 
     ##########
     # CHECKS #
@@ -162,49 +161,56 @@ def convert_to_lora(
     # PREPARATION #
     ###############
 
-    if isinstance(model, PeftModel):
-        peft_prefix = "base_model.model."
-    else:
-        # we assume that it's a transformers model with the adapter loaded directly
-        peft_prefix = ""
+    peft_prefix = "base_model.model."
 
     if getattr(model, "peft_config", {}).get(adapter_name) is not None:
+        # use the model's PEFT config, if it exists, to initialize the new LoraConfig
         peft_config = model.peft_config[adapter_name]
+        config_kwargs = {
+            "target_modules": copy.copy(peft_config.target_modules),
+            "rank_pattern": {},
+            "alpha_pattern": {},
+            "exclude_modules": set(),
+            "base_model_name_or_path": peft_config.base_model_name_or_path,
+        }
+        if hasattr(peft_config, "layers_patter"):
+            # those two go hand in hand
+            config_kwargs["layers_pattern"] = peft_config.layers_pattern
+            config_kwargs["layers_to_transform"] = peft_config.layers_to_transform
+        if isinstance(rank, int):
+            # hard-coded rank
+            lora_config = LoraConfig(r=rank, lora_alpha=rank, **config_kwargs)
+        else:
+            # r and lora_alpha shouldn't matter, as the rank will be determined by rank/alpha pattern
+            lora_config = LoraConfig(r=1, lora_alpha=1, **config_kwargs)
     else:
-        # we should not need a PEFT config, instead we should be able to build the target_modules on the fly
-        raise ValueError("TODO")
-
-    state_dict = {}
-    config_kwargs = {"target_modules": [], "rank_pattern": {}, "alpha_pattern": {}, "exclude_modules": set()}
-    if hasattr(peft_config, "layers_patter"):
-        # those two go hand in hand
-        config_kwargs["layers_pattern"] = peft_config.layers_pattern
-        config_kwargs["layers_to_transform"] = peft_config.layers_to_transform
-    if isinstance(rank, int):
-        # hard-coded rank
-        lora_config = LoraConfig(r=rank, lora_alpha=rank, **config_kwargs)
-    else:
-        # r and lora_alpha shouldn't matter, as the rank will be determined by rank/alpha pattern
-        lora_config = LoraConfig(r=1, lora_alpha=1, **config_kwargs)
-
-    lora_config.target_modules = copy.copy(peft_config.target_modules)
+        # create a new LoraConfig from scratch, inferring the target modules from the model
+        lora_config = LoraConfig(
+            r=rank if isinstance(rank, int) else 1,  # 1 is a dummy value, actual values will come from rank_pattern
+            target_modules=[],
+            rank_pattern={},
+            alpha_pattern={},
+            exclude_modules=set(),
+        )
 
     ##############
     # CONVERSION #
     ##############
 
+    state_dict = {}
     for name, module in tqdm(
         model.named_modules(), disable=not progressbar, desc="Converting to LoRA", total=num_modules_total
     ):
         if not isinstance(module, BaseTunerLayer):
-            continue
-        if not module.supports_lora_conversion(adapter_name):
             continue
 
         lora_A, lora_B, effective_rank = _convert_module_to_lora(module, rank=rank, adapter_name=adapter_name)
         lora_config.target_modules.add(name)
 
         if effective_rank == 0:
+            # This shouldn't really happen, as we ensure that the rank is greater than 0 (int) or, for tresholds
+            # (float), at least one SV is included. But better be safe than sorry, as, in principle, it is fine to
+            # exclude some layers.
             lora_config.exclude_modules.add(name.removeprefix(peft_prefix))
             continue
 
@@ -234,7 +240,7 @@ def save_as_lora(
     adapter_name: str = "default",
     peft_config=None,
     progressbar: bool = False,
-) -> tuple[LoraConfig, dict[str, torch.Tensor]]:
+) -> None:
     """
     Convert a non-LoRA model with PEFT layers to a LoRA, then save the checkpoint file and PEFT config.
 
