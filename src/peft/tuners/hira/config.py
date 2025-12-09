@@ -56,7 +56,7 @@ class HiraConfig(PeftConfig):
         layers_pattern (`Optional[Union[List[str], str]]`):
             The layer pattern name, used only if `layers_to_transform` is different from `None`. This should target the
             `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
-        r_pattern (`dict`):
+        rank_pattern (`dict`):
             The mapping from layer names or regexp expression to ranks which are different from the default r specified
             by `r`. For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`.
     """
@@ -122,11 +122,11 @@ class HiraConfig(PeftConfig):
             "model, which is often called `'layers'` or `'h'`."
         },
     )
-    r_pattern: Optional[dict] = field(
+    rank_pattern: Optional[dict] = field(
         default_factory=dict,
         metadata={
             "help": (
-                "The mapping from layer names or regexp expression to r which are different from the default rank specified by `r`. "
+                "The mapping from layer names or regexp expression to rank of AB which are different from the default rank specified by `rank` of AB. "
                 "For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`."
             )
         },

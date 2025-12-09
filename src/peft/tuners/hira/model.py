@@ -139,8 +139,8 @@ class HiraModel(BaseTuner):
             raise ValueError("Current Key shouldn't be `None`")
 
         # Regexp matching - Find key which matches current target_name in patterns provided
-        r_key = get_pattern_key(hira_config.r_pattern.keys(), current_key)
-        r = hira_config.r_pattern.get(r_key, hira_config.r)
+        r_key = get_pattern_key(hira_config.rank_pattern.keys(), current_key)
+        r = hira_config.rank_pattern.get(r_key, hira_config.r)
 
         kwargs = {
             "r": r,
