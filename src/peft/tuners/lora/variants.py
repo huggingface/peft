@@ -21,6 +21,7 @@ import torch
 from accelerate.utils.imports import is_xpu_available
 from torch import nn
 
+from peft.tuners.lora.config import BdLoraConfig
 from peft.utils.other import transpose
 
 from .arrow import ArrowLoraLinearLayer
@@ -771,3 +772,155 @@ def get_alora_offsets_for_generate(model: nn.module, *args, **kwargs):
 
             kwargs["alora_offsets"] = None
     return kwargs
+
+
+class BlockDiagonalLinear(nn.Module):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        nblocks: int,
+        init_zero: bool = False,
+        dtype: torch.dtype = torch.float32,
+        device: torch.device = torch.device("cpu"),
+    ):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.nblocks = nblocks
+        if self.in_features % nblocks != 0 or self.out_features % nblocks != 0:
+            raise ValueError(
+                f"self.in_features={self.in_features} or self.out_features={self.out_features} not divisible by {self.nblocks}"
+            )
+        # Create weight with specified dtype and device
+        self.weight = nn.Parameter(torch.empty(out_features, in_features // nblocks, dtype=dtype, device=device))
+
+        if init_zero:
+            torch.nn.init.zeros_(self.weight)
+        else:
+            torch.nn.init.kaiming_uniform_(self.weight)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        first_dims = x.shape[:-1]
+        if x.dim() != 2:
+            x = x.reshape(-1, x.shape[-1])
+        B = x.shape[0]
+        nb = self.nblocks
+        m = x.shape[-1] // nb
+        n = self.out_features // nb
+        x = x.reshape(B, nb, m)
+        w = self.weight.view(nb, n, m)
+        out = torch.einsum("bim,inm->bin", x, w)
+        return out.reshape(*first_dims, -1)
+
+    def weight_as_blockdiagonal_matrix(self):
+        """Returns weight in a format similar to a vanilla LoRA adapter. For this, we stack the blocks on the diagonal,
+        leaving the off-diagonals padded with zero."""
+        return torch.block_diag(*torch.chunk(self.weight, self.nblocks, dim=0))
+
+
+class BdLoraLinearVariant(LoraVariant):
+    @staticmethod
+    def init(module: Linear, adapter_name: str, **kwargs) -> None:
+        use_bdlora = kwargs.get("use_bdlora")
+        target_name = kwargs.get("target_name", "")
+
+        # Handle case where use_bdlora is a dict (from saved config) instead of BdLoraConfig object
+        if isinstance(use_bdlora, dict):
+            use_bdlora = BdLoraConfig(**use_bdlora)
+
+        lora_a_blockdiagonal_pattern = use_bdlora.target_modules_bd_a or []
+        lora_b_blockdiagonal_pattern = use_bdlora.target_modules_bd_b or []
+        nblocks = use_bdlora.nblocks
+
+        has_lora_a_blockdiagonal = any(pattern in target_name for pattern in lora_a_blockdiagonal_pattern)
+        has_lora_b_blockdiagonal = any(pattern in target_name for pattern in lora_b_blockdiagonal_pattern)
+
+        if has_lora_a_blockdiagonal and has_lora_b_blockdiagonal:
+            raise ValueError(f"Target {target_name} matches both A and B block-diagonal patterns")
+        if use_bdlora.match_strict and not (has_lora_a_blockdiagonal or has_lora_b_blockdiagonal):
+            raise ValueError(
+                f"Target {target_name} matches neither A nor B block-diagonal patterns."
+                "If this is intentional, set match_strict=False in BdLoraConfig during initialization. "
+            )
+
+        if has_lora_a_blockdiagonal:
+            r = module.lora_A[adapter_name].out_features
+            base_layer = module.get_base_layer()
+            layer = BlockDiagonalLinear(
+                base_layer.in_features,
+                r,
+                nblocks=nblocks,
+                init_zero=False,
+                dtype=base_layer.weight.dtype,
+                device=base_layer.weight.device,
+            )
+            module.lora_A[adapter_name] = layer
+        elif has_lora_b_blockdiagonal:
+            r = module.lora_B[adapter_name].in_features
+            base_layer = module.get_base_layer()
+            layer = BlockDiagonalLinear(
+                r,
+                base_layer.out_features,
+                nblocks=nblocks,
+                init_zero=True,
+                dtype=base_layer.weight.dtype,
+                device=base_layer.weight.device,
+            )
+            module.lora_B[adapter_name] = layer
+
+    @staticmethod
+    def forward(module: Linear, active_adapter: str, x: torch.Tensor, result: torch.Tensor, **kwargs) -> torch.Tensor:
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        dropout = module.lora_dropout[active_adapter]
+        scaling = module.scaling[active_adapter]
+        x = dropout(x)
+        # Cast input dtype to match lora_A weight dtype
+        x = module._cast_input_dtype(x, lora_A.weight.dtype)
+        result += lora_B(lora_A(x)) * scaling
+        return result
+
+    @staticmethod
+    def _get_weight_from_module_maybe_blockdiagonal(module: nn.Module) -> torch.Tensor:
+        if isinstance(module, BlockDiagonalLinear):
+            return module.weight_as_blockdiagonal_matrix()
+        else:
+            return module.weight  # type: ignore
+
+    @staticmethod
+    def _get_bdlora_delta_weight(module: Linear, adapter: str) -> torch.Tensor:
+        """Similar to get_delta_weight for a linear module, but we have to eventually reshape the blocks
+        of the weights."""
+        device = module.lora_B[adapter].weight.device
+        # Use base layer dtype to ensure compatibility with merge/unmerge operations
+        base_layer = module.get_base_layer()
+        dtype = base_layer.weight.dtype
+        cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
+
+        weight_A = BdLoraLinearVariant._get_weight_from_module_maybe_blockdiagonal(module.lora_A[adapter])
+        weight_B = BdLoraLinearVariant._get_weight_from_module_maybe_blockdiagonal(module.lora_B[adapter])
+
+        if cast_to_fp32:
+            weight_A = weight_A.float()
+            weight_B = weight_B.float()
+
+        output_tensor = transpose(weight_B @ weight_A, module.fan_in_fan_out) * module.scaling[adapter]
+
+        if cast_to_fp32:
+            output_tensor = output_tensor.to(dtype=dtype)
+
+        # Ensure output tensor matches base layer dtype
+        return output_tensor.to(dtype=dtype)
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        return orig_weight + BdLoraLinearVariant._get_bdlora_delta_weight(module, active_adapter)
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        orig_weight.data += BdLoraLinearVariant._get_bdlora_delta_weight(module, active_adapter)
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        return orig_weight - BdLoraLinearVariant._get_bdlora_delta_weight(module, active_adapter)
