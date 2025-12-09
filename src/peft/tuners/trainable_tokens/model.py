@@ -79,7 +79,9 @@ class TrainableTokensModel(BaseTuner):
                         peft_config = self.peft_config[adapter_name].to_dict()
                         peft_config["tied_adapter"] = self.model.get_input_embeddings()
 
-                        new_module = self._create_new_module(peft_config, adapter_name, target.base_layer, **peft_config)
+                        new_module = self._create_new_module(
+                            peft_config, adapter_name, target.base_layer, **peft_config
+                        )
                         self._replace_module(parent, target_name, new_module, target.base_layer)
                     else:
                         # Module hasn't been wrapped yet, create and replace normally
