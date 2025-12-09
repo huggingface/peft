@@ -1488,8 +1488,8 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
 
             # Find which target layers are in the tied weights (including the embedding source)
             for target_layer_name in target_layers:
-                # Check if this is the embedding layer
-                if target_layer_name == embedding_name:
+                # Check if this is the embedding layer (check both exact match and endswith for nested structures)
+                if target_layer_name == embedding_name or target_layer_name.endswith(embedding_name):
                     tied_layer_keys.append(target_layer_name)
                     continue
                 # Check if this target layer matches any tied module (considering nested structures)
