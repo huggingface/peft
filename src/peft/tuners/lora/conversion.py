@@ -20,6 +20,7 @@ import warnings
 import torch
 from safetensors.torch import save_file
 from tqdm import tqdm
+from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import SAFETENSORS_WEIGHTS_NAME
@@ -68,6 +69,10 @@ def _convert_module_to_lora(
 
     lora_B = U[:, :effective_rank] * S[:effective_rank]
     lora_A = V[:effective_rank]
+
+    if isinstance(module.get_base_layer(), Conv1D):
+        # Conv1D => original weight is transposed compared to Linear
+        return lora_B.T.contiguous(), lora_A.T.contiguous(), effective_rank
     return lora_A.contiguous(), lora_B.contiguous(), effective_rank
 
 
