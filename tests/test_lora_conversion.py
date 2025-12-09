@@ -83,7 +83,8 @@ class TestLoraConversion:
     def test_prompt_learning_model_raises(self):
         # Prefix Tuning does not support LoRA conversion
         base_model = self.get_base_model()
-        prefix_model = get_peft_model(base_model, PrefixTuningConfig(num_virtual_tokens=10, task_type="CAUSAL_LM"))
+        config = PrefixTuningConfig(num_virtual_tokens=10, task_type="CAUSAL_LM")
+        prefix_model = get_peft_model(base_model, config).eval()
         assert not prefix_model.supports_lora_conversion()
 
         msg = "Could not detect any layer that supports LoRA conversion"
@@ -93,7 +94,7 @@ class TestLoraConversion:
     def test_peft_model_but_no_support_raises(self):
         # IA3 has BaseTunerLayers but does not support LoRA conversion
         base_model = self.get_base_model()
-        ia3_model = get_peft_model(base_model, IA3Config())
+        ia3_model = get_peft_model(base_model, IA3Config()).eval()
         assert not ia3_model.supports_lora_conversion()
 
         msg = "Some module types on this model do not support LoRA conversion"
@@ -109,7 +110,7 @@ class TestLoraConversion:
                 self.conv = nn.Conv2d(16, 16, 3)
                 self.lin = nn.Linear(16, 16)
 
-        lokr_model = get_peft_model(MyModule(), LoKrConfig(target_modules=["conv", "lin"]))
+        lokr_model = get_peft_model(MyModule(), LoKrConfig(target_modules=["conv", "lin"])).eval()
         assert not lokr_model.supports_lora_conversion()
 
         msg = "Some module types on this model do not support LoRA conversion"
@@ -128,14 +129,14 @@ class TestLoraConversion:
 
         # creating a new LoRA model based on the returned config should give the same state dict keys
         base_model = self.get_base_model()
-        new_lora_model = get_peft_model(base_model, lora_config)
+        new_lora_model = get_peft_model(base_model, lora_config).eval()
         new_lora_state_dict = get_peft_model_state_dict(new_lora_model)
         assert lora_state_dict.keys() == new_lora_state_dict.keys()
 
     def test_targeted_modules_identical_target_modules_str(self):
         base_model = self.get_base_model()
         lokr_config = LoKrConfig(target_modules=r".*\.q_proj", r=16, init_weights=False)
-        lokr_model = get_peft_model(base_model, lokr_config)
+        lokr_model = get_peft_model(base_model, lokr_config).eval()
         lora_config, lora_state_dict = convert_to_lora(lokr_model, rank=8)
         lokr_state_dict = lokr_model.state_dict()
 
@@ -147,7 +148,7 @@ class TestLoraConversion:
 
         # creating a new LoRA model based on the returned config should give the same state dict keys
         base_model = self.get_base_model()
-        new_lora_model = get_peft_model(base_model, lora_config)
+        new_lora_model = get_peft_model(base_model, lora_config).eval()
         new_lora_state_dict = get_peft_model_state_dict(new_lora_model)
         assert lora_state_dict.keys() == new_lora_state_dict.keys()
 
@@ -240,7 +241,7 @@ class TestLoraConversion:
 
         lora_config, state_dict = convert_to_lora(lokr_model, rank=8)
         base_model = self.get_base_model()
-        lora_model = get_peft_model(base_model, lora_config)
+        lora_model = get_peft_model(base_model, lora_config).eval()
 
         # by default, the LoRA model should be an identity transform
         with torch.inference_mode():
@@ -269,7 +270,7 @@ class TestLoraConversion:
 
         lora_config, state_dict = convert_to_lora(lokr_model, rank=0.9)
         base_model = self.get_base_model()
-        lora_model = get_peft_model(base_model, lora_config)
+        lora_model = get_peft_model(base_model, lora_config).eval()
         load_result = set_peft_model_state_dict(lora_model, state_dict)
         assert not load_result.unexpected_keys
 
@@ -295,7 +296,7 @@ class TestLoraConversion:
 
         lora_config, state_dict = convert_to_lora(lokr_model, rank=8)
         base_model = self.get_base_model()
-        lora_model = get_peft_model(base_model, lora_config)
+        lora_model = get_peft_model(base_model, lora_config).eval()
         load_result = set_peft_model_state_dict(lora_model, state_dict)
         assert not load_result.unexpected_keys
 
@@ -331,7 +332,7 @@ class TestLoraConversion:
         lora_config, state_dict = convert_to_lora(unwrapped_lokr_model, rank=8)
 
         base_model = self.get_base_model()
-        lora_model = get_peft_model(base_model, lora_config)
+        lora_model = get_peft_model(base_model, lora_config).eval()
         unwrapped_lora_model = unwrap(lora_model)
 
         # Note: On the unwrapped model, we cannot use set_peft_model_state_dict, as that requires a peft_config. Thus,
@@ -362,7 +363,7 @@ class TestLoraConversion:
             output_base = base_model(inputs, output_hidden_states=True)
 
         orig_lora_config = LoraConfig(r=16, init_lora_weights=False)
-        orig_lora_model = get_peft_model(base_model, orig_lora_config)
+        orig_lora_model = get_peft_model(base_model, orig_lora_config).eval()
 
         with torch.inference_mode():
             output_orig_lora = orig_lora_model(inputs, output_hidden_states=True)
@@ -378,7 +379,7 @@ class TestLoraConversion:
             lora_config, state_dict = convert_to_lora(orig_lora_model, rank=8)
 
         base_model = self.get_base_model()
-        lora_model = get_peft_model(base_model, lora_config)
+        lora_model = get_peft_model(base_model, lora_config).eval()
 
         # load the converted LoRA weights
         load_result = set_peft_model_state_dict(lora_model, state_dict)
@@ -410,7 +411,7 @@ class TestLoraConversion:
         # convert the default adapter
         lora_config_default, state_dict_default = convert_to_lora(lokr_model, rank=8)
         base_model = self.get_base_model()
-        lora_model_default = get_peft_model(base_model, lora_config_default)
+        lora_model_default = get_peft_model(base_model, lora_config_default).eval()
 
         # load the converted LoRA weights for the default adapter
         load_result = set_peft_model_state_dict(lora_model_default, state_dict_default)
@@ -421,7 +422,7 @@ class TestLoraConversion:
         # convert the other adapter
         lora_config_other, state_dict_other = convert_to_lora(lokr_model, rank=8, adapter_name="other")
         base_model = self.get_base_model()
-        lora_model_other = get_peft_model(base_model, lora_config_other)
+        lora_model_other = get_peft_model(base_model, lora_config_other).eval()
         # load the converted LoRA weights for the other adapter
         load_result = set_peft_model_state_dict(lora_model_other, state_dict_other)
         assert not load_result.unexpected_keys
