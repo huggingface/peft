@@ -1,11 +1,14 @@
 # Copyright 2023-present the HuggingFace Inc. team.
 import re
 from itertools import chain
+
 import torch
-import torch.nn as nn
-from peft.tuners.lora import LoraModel, LoraLayer
+
+from peft.tuners.lora import LoraLayer, LoraModel
 from peft.utils import get_quantization_config
+
 from .layer import MonteCLoraLinear
+
 
 class MonteCLoraModel(LoraModel):
     """
@@ -30,6 +33,62 @@ class MonteCLoraModel(LoraModel):
                 task_type="CAUSAL_LM",
             )
     model = get_peft_model(model, peft_config)
+
+    ### Important: MonteCLoraModel requires additional loss functions. Use the following code in Huggingface Trainer class.
+
+    from transformers import Trainer
+
+    class MonteCLoRATrainer(Trainer):
+        def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+            # 1. Compute the standard task loss (e.g., CrossEntropy)
+            # We call the parent class's compute_loss to handle the forward pass and label smoothing
+            if return_outputs:
+                task_loss, outputs = super().compute_loss(model, inputs, return_outputs=True)
+            else:
+                task_loss = super().compute_loss(model, inputs, return_outputs=False)
+                outputs = None # Placeholder if return_outputs is False
+            # 2. Calculate Variational Loss (KLD + Entropy)
+            # We iterate through modules to find MonteCLoRA layers
+            var_loss_sum = 0.0
+            num_monte_layers = 0
+            # We assume the model might be wrapped (DDP, FSDP, etc.), so we look at named_modules
+            for name, module in model.named_modules():
+                # Using string checks prevents import errors if MonteCLoRA isn't imported globally
+                if module.__class__.__name__ in ['MonteCLoRASampler', 'MonteCLoRALinear']:
+                    if hasattr(module, 'get_variational_loss'):
+                        # Retrieve the losses
+                        l1, l2 = module.get_variational_loss()
+
+                        # Ensure they are on the correct device and connected to the graph
+                        var_loss_sum += l1 + l2
+                        num_monte_layers += 1
+            # 3. Normalize the Variational Loss
+            # Logic from your file: Average the var loss over the number of active MonteCLoRA layers
+            regularization_loss = 0.0
+            if num_monte_layers > 0:
+                regularization_loss = var_loss_sum / num_monte_layers
+            # 4. Combine losses
+            total_loss = task_loss + regularization_loss
+
+            return (total_loss, outputs) if return_outputs else total_loss
+
+    training_args = TrainingArguments(
+            output_dir="./results",
+            num_train_epochs=3,
+            per_device_train_batch_size=4,
+            # ... other args
+    )
+
+    # Instantiate the CUSTOM trainer
+    trainer = MonteCLoRATrainer(
+            model=model,
+            args=training_args,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            processing_class=tokenizer, # Note: 'tokenizer' arg is deprecated in HF v5+, use processing_class
+    )
+
+    trainer.train()
     ```
     """
 
@@ -68,7 +127,7 @@ class MonteCLoraModel(LoraModel):
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
             # CRITICAL FIX: Pass current_key so _create_new_module can decide on MonteCLoRA application
-            "current_key": current_key, 
+            "current_key": current_key,
         }
 
         # 3. Quantization handling
@@ -90,7 +149,7 @@ class MonteCLoraModel(LoraModel):
                 use_rslora=lora_config.use_rslora,
                 use_dora=lora_config.use_dora,
                 # If the existing layer is MonteCLoraLinear, it will accept this:
-                monteclora_config=lora_config.monteclora_config
+                monteclora_config=lora_config.monteclora_config,
             )
         else:
             # Create new module
@@ -105,12 +164,12 @@ class MonteCLoraModel(LoraModel):
         Interprets `current_key` to check against `monteclora_targets` and instantiates MonteCLoraLinear.
         """
         current_key = kwargs.get("current_key", "")
-        
+
         # Access config via the property backward-compatibility wrapper or direct attribute
-        mc_config = getattr(lora_config, "monteclora_config", lora_config) 
+        mc_config = getattr(lora_config, "monteclora_config", lora_config)
         monteclora_targets = mc_config.monteclora_targets
-        target_suffix = current_key.split('.')[-1]
-        
+        target_suffix = current_key.split(".")[-1]
+
         # Determine if this specific module should use MonteCLoRA
         should_apply = False
         if mc_config.use_monteclora:
@@ -120,14 +179,16 @@ class MonteCLoraModel(LoraModel):
                 should_apply = target_suffix in monteclora_targets
 
         if should_apply:
-            kwargs.update({
-                "monteclora_config": mc_config,
-            })
+            kwargs.update(
+                {
+                    "monteclora_config": mc_config,
+                }
+            )
 
         if isinstance(target, torch.nn.Linear):
             if kwargs.get("fan_in_fan_out", False):
                 kwargs["fan_in_fan_out"] = False
-            
+
             # Dispatch to MonteCLoraLinear
             new_module = MonteCLoraLinear(target, adapter_name, **kwargs)
             return new_module
