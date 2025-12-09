@@ -36,7 +36,10 @@ def _find_cutoff_index(S: torch.Tensor, threshold: float) -> int:
     energy = S**2
     cs = torch.cumsum(energy, dim=0)
     total = cs[-1]
-    k = (cs / total > threshold).nonzero()[0].item()
+
+    cutoff = threshold * total
+    # smallest index i with cs[i] >= cutoff
+    k = torch.searchsorted(cs, cutoff).item()
     # k is the index of the first item that surpasses the threshold; since we want to include it, add + 1
     return k + 1
 

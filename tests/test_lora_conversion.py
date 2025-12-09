@@ -175,6 +175,19 @@ class TestLoraConversion:
         # for each module, two LoRA weights
         assert 2 * len(lora_config.rank_pattern) == len(state_dict)
 
+    def test_dynamic_rank_1_lora_config(self, lokr_model):
+        # with a dynmaic rank, we expect rank_pattern and alpha_pattern to be set
+        lora_config, state_dict = convert_to_lora(lokr_model, rank=1.0)
+        assert lora_config.r == 1  # dummy value
+        assert lora_config.lora_alpha == 1  # dummy value
+        assert lora_config.rank_pattern
+        assert lora_config.alpha_pattern
+
+        # rank and alpha are always the same, i.e. scaling is 1
+        assert lora_config.rank_pattern == lora_config.alpha_pattern
+        # for each module, two LoRA weights
+        assert 2 * len(lora_config.rank_pattern) == len(state_dict)
+
     def test_threshold_wrong_value_raises(self, lokr_model):
         # if a threshold is used, it must be between 0 and 1
         msg = "If rank is a float, it is interpreted as a threshold. It must be between 0 and 1 but got 123.0"
