@@ -45,10 +45,3 @@ def __getattr__(name):
         return Linear4bit
 
 
-#
-#     if (name == "EetqLoraLinear") and is_eetq_available():
-#         from .eetq import EetqLoraLinear
-#
-#         return EetqLoraLinear
-#
-#     raise AttributeError(f"module {__name__} has no attribute {name}")
