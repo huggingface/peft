@@ -204,6 +204,11 @@ class TestLoraConversion:
         with pytest.raises(ValueError, match=msg):
             convert_to_lora(lokr_model, rank=123)
 
+    def test_fixed_rank_0_raises(self, lokr_model):
+        msg = "Passing a rank of 0 doesn't make sense"
+        with pytest.raises(ValueError, match=msg):
+            convert_to_lora(lokr_model, rank=0)
+
     def test_converting_transformers_model_works(self, lokr_model, tmp_path):
         # test that we can convert a transformers model that has loaded LoKr directly
         assert lokr_model.supports_lora_conversion()

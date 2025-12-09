@@ -145,6 +145,8 @@ def convert_to_lora(
         raise ValueError(
             f"If rank is a float, it is interpreted as a threshold. It must be between 0 and 1 but got {rank}."
         )
+    elif rank == 0:
+        raise ValueError("Passing a rank of 0 doesn't make sense, please pass a valid value.")
 
     # check if LoRA conversion is supported at all
     modules_not_supporting_lora = []
