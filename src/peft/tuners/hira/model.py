@@ -301,15 +301,6 @@ class HiraModel(BaseTuner):
         for handle in hook_handles:
             handle.remove()
 
-    def _check_merge_allowed(self):
-        """Verify that the configuration supports merging.
-
-        Currently gptq quantization and replicated layers do not support merging.
-        """
-        super()._check_merge_allowed()
-        if getattr(self.model, "quantization_method", None) == "gptq":
-            raise ValueError("Cannot merge HiRA layers when the model is gptq quantized")
-
     def _prepare_adapter_config(self, peft_config, model_config):
         if peft_config.target_modules is None:
             if model_config["model_type"] in self.target_module_mapping:

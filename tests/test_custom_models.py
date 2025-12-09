@@ -2132,7 +2132,7 @@ class TestPeftCustomModel(PeftCommonTester):
         model.train()
 
         lr = 0.5
-        if config_kwargs.get("use_dora") or config.__class__ == HiraConfig:
+        if config_kwargs.get("use_dora") or (config_cls == HiraConfig):
             lr = 0.1  # otherwise we get nan
         elif "mha" in model_id.lower():
             lr = 1e-3  # we get exploding gradients with MHA when learning rate is too high
