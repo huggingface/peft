@@ -66,7 +66,7 @@ def _convert_module_to_lora(
 
     if effective_rank > U.shape[1]:
         raise ValueError(
-            f"The chosen rank {effective_rank} is larger then the weight shape ({U.shape[1]}), please choose a lower "
+            f"The chosen rank {effective_rank} is larger than the weight shape ({U.shape[1]}), please choose a lower "
             "rank."
         )
 
@@ -109,13 +109,13 @@ def convert_to_lora(
             The desired rank for the returned LoRA adapter. A higher rank results in a LoRA adapter that more
             accurately mirrors the original adapter. It will, however, also require more memory, compute, and disk
             space. Therefore, choose a value that represents the best trade off for your use case and validate the
-            final adapter. If a float is passed, it will be interpreted as the desired minimum threshold for underlying
-            singular values to be included. So e.g. a threshold of 0.5 means that the top K singular values are
-            included so that they explained variance is greater or equal to that threshold. This effectively results in
-            lower ranks being assigned if a few singular can capture the adaptation of this layer. A lower float means
-            the rank is lower and vice versa. Be aware that dynamic ranks can lead to very unequal ranks per layer,
-            which means that some layers may require a disproportionally high amount of memory for activations.
-            Choosing a fixed (int) rank is better to achieve predictable memory requirement.
+            final adapter. If a float is passed, it is interpreted as an explained variance / energy threshold: we pick
+            the smallest rank k such that the top k singular values account for at least that fraction of the total
+            squared singular values. This effectively results in lower ranks being assigned if a few singular can
+            capture the adaptation of this layer. A lower float means the rank is lower and vice versa. Be aware that
+            dynamic ranks can lead to very unequal ranks per layer, which means that some layers may require a
+            disproportionally high amount of memory for activations. Choosing a fixed (int) rank is better to achieve
+            predictable memory requirement.
         adapter_name (`str`, *optional*):
             The name of the adapter to be converted. Can only convert a single adapter at a time. Defaults to
             `"default"`.
@@ -133,7 +133,7 @@ def convert_to_lora(
         TypeError:
             If the provided model does not have any layers that can be converted to LoRA, a `TypeError` is raised.
         ValueError:
-            If a dynamic threshold was chosen that's too high, so that no layer can be converted, raise a `ValueError`.
+            If an invalid rank was chosen (too high or too low).
     """
     from peft import PeftType  # local to avoid circular import
 
@@ -260,7 +260,6 @@ def save_as_lora(
     model: torch.nn.Module,
     rank: int | float,
     adapter_name: str = "default",
-    peft_config=None,
     progressbar: bool = False,
 ) -> None:
     """
@@ -299,13 +298,13 @@ def save_as_lora(
             The desired rank for the returned LoRA adapter. A higher rank results in a LoRA adapter that more
             accurately mirrors the original adapter. It will, however, also require more memory, compute, and disk
             space. Therefore, choose a value that represents the best trade off for your use case and validate the
-            final adapter. If a float is passed, it will be interpreted as the desired minimum threshold for underlying
-            singular values to be included. So e.g. a threshold of 0.5 means that the top K singular values are
-            included so that they explained variance is greater or equal to that threshold. This effectively results in
-            lower ranks being assigned if a few singular can capture the adaptation of this layer. A lower float means
-            the rank is lower and vice versa. Be aware that dynamic ranks can lead to very unequal ranks per layer,
-            which means that some layers may require a disproportionally high amount of memory for activations.
-            Choosing a fixed (int) rank is better to achieve predictable memory requirement.
+            final adapter. If a float is passed, it is interpreted as an explained variance / energy threshold: we pick
+            the smallest rank k such that the top k singular values account for at least that fraction of the total
+            squared singular values. This effectively results in lower ranks being assigned if a few singular can
+            capture the adaptation of this layer. A lower float means the rank is lower and vice versa. Be aware that
+            dynamic ranks can lead to very unequal ranks per layer, which means that some layers may require a
+            disproportionally high amount of memory for activations. Choosing a fixed (int) rank is better to achieve
+            predictable memory requirement.
         adapter_name (`str`, *optional*):
             The name of the adapter to be converted. Can only convert a single adapter at a time. Defaults to
             `"default"`.
@@ -313,17 +312,11 @@ def save_as_lora(
             whether to show a progressbar indicating the progress of the conversion (it can take a few minutes for big
             models).
 
-    Returns:
-        lora_config (`LoraConfig`)
-            The `LoraConfig` that corresponds to the converted LoRA adapter.
-        state_dict (`dict[str, torch.Tensor]`)
-            The `state_dict` containing the LoRA weights.
-
     Raises
         TypeError:
             If the provided model does not have any layers that can be converted to LoRA, a `TypeError` is raised.
         ValueError:
-            If a dynamic threshold was chosen that's too high, so that no layer can be converted, raise a `ValueError`.
+            If an invalid rank was chosen (too high or too low).
     """
     path = pathlib.Path(path)
     if not path.exists():

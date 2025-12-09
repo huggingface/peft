@@ -200,7 +200,7 @@ class TestLoraConversion:
 
     def test_rank_higher_than_weight_dim_raises(self, lokr_model):
         # if the requested rank is higher than the weight dimension, we should raise
-        msg = re.escape("The chosen rank 123 is larger then the weight shape (16), please choose a lower rank")
+        msg = re.escape("The chosen rank 123 is larger than the weight shape (16), please choose a lower rank")
         with pytest.raises(ValueError, match=msg):
             convert_to_lora(lokr_model, rank=123)
 
