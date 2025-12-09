@@ -287,6 +287,10 @@ class WaveFTLinear(nn.Module, WaveFTLayer):
         return result
 
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        if isinstance(self.get_base_layer(), Conv1D):
+            # get_delta_weight does not transpose Conv1D because it is used in forward, therefore, it has the wrong
+            # shape for conversion
+            return False
         return True
 
     def __repr__(self) -> str:

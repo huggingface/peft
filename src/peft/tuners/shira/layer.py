@@ -213,7 +213,8 @@ class Linear(nn.Module, ShiraLayer):
         return result
 
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
-        return True
+        # delta weight is sparse, which does not work with SVD
+        return False
 
     def __repr__(self) -> str:
         rep = super().__repr__()
