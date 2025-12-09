@@ -21,6 +21,7 @@ from torch import nn
 from transformers import AutoModelForCausalLM
 
 from peft import (
+    C3AConfig,
     IA3Config,
     LoKrConfig,
     LoraConfig,
@@ -456,3 +457,57 @@ class TestLoraConversion:
         assert 0.0 < mse_other_other < 0.1
         assert mse_default_other > 0.5
         assert mse_other_default > 0.5
+
+    def test_convert_model_with_modules_to_save(self):
+        # If the original adapter defines modules_to_save, these need to be included in the LoRA adapter
+        model = self.get_base_model()
+        inputs = torch.arange(10).view(1, -1).to(self.torch_device)
+        with torch.inference_mode():
+            output_base = model(inputs, output_hidden_states=True)
+
+        # lokr is initialized as identity transform to ensure that modules_to_save is the thing that impacts the output
+        lokr_config = LoKrConfig(modules_to_save=["0.fc1"])
+        lokr_model = get_peft_model(model, lokr_config)
+
+        # ensure that the modules_to_save affects the output
+        lokr_model.base_model.model.model.decoder.layers[0].fc1.modules_to_save.default.weight.data.mul_(-10.0)
+        lokr_model.base_model.model.model.decoder.layers[0].fc1.modules_to_save.default.bias.data.mul_(-10.0)
+
+        with torch.inference_mode():
+            output_lokr = lokr_model(inputs, output_hidden_states=True)
+
+        # sanity check
+        atol, rtol = 1e-4, 1e-4
+        assert not torch.allclose(output_base.logits, output_lokr.logits, atol=atol, rtol=rtol)
+
+        lora_config, state_dict = convert_to_lora(lokr_model, rank=8)
+        assert lora_config.modules_to_save == lokr_config.modules_to_save
+
+        base_model = self.get_base_model()
+        lora_model = get_peft_model(base_model, lora_config).eval()
+
+        # load the converted LoRA weights
+        load_result = set_peft_model_state_dict(lora_model, state_dict)
+        assert not load_result.unexpected_keys
+
+        with torch.inference_mode():
+            output_converted = lora_model(inputs, output_hidden_states=True)
+
+        mse_converted = self.get_mse(output_converted, output_lokr, output_base)
+        # here we expect an actual loss of 0, since only the modules_to_save affect the result, and those are identical
+        assert mse_converted == 0.0
+
+    @pytest.mark.parametrize("bias", ["c3a_only", "all"])
+    def test_convert_model_with_trainable_bias_raises(self, bias):
+        # If the original adapter includes trainable bias terms, we raise. LoKr doesn't support this, so taking C3A
+        model = self.get_base_model()
+        inputs = torch.arange(10).view(1, -1).to(self.torch_device)
+        with torch.inference_mode():
+            output_base = model(inputs, output_hidden_states=True)
+
+        c3a_config = C3AConfig(block_size=4, bias=bias)
+        c3a_model = get_peft_model(model, c3a_config)
+
+        msg = "The adapter's config sets bias"
+        with pytest.raises(ValueError, match=msg):
+            convert_to_lora(c3a_model, rank=8)

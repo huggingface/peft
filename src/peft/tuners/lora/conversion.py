@@ -24,6 +24,7 @@ from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import SAFETENSORS_WEIGHTS_NAME
+from peft.utils.other import ModulesToSaveWrapper
 
 from .config import LoraConfig
 
@@ -175,6 +176,11 @@ def convert_to_lora(
             "Converting a PEFT adapter to LoRA that is already a LoRA adapter. There is typically no need for that."
         )
 
+    config_bias = getattr(peft_config, "bias", getattr(peft_config, "lora_bias", "none"))
+    if config_bias != "none":
+        # TODO: remove if/when we remove support for bias completely
+        raise ValueError(f"The adapter's config sets bias={config_bias}, this is not supported right now.")
+
     ###############
     # PREPARATION #
     ###############
@@ -249,6 +255,23 @@ def convert_to_lora(
             "Did not convert a single layer, this means that something went wrong. Please open an issue: "
             "Please open an issue: https://github.com/huggingface/peft/issues"
         )
+
+    ##################
+    # NON-LORA PARTS #
+    ##################
+
+    if (peft_config is not None) and getattr(peft_config, "modules_to_save", None):
+        # logic to take care of modules_to_save; might not cover all edge cases, like sharded model
+        lora_config.modules_to_save = copy.copy(peft_config.modules_to_save)
+
+        for module_name, module in model.named_modules():
+            if isinstance(module, ModulesToSaveWrapper):
+                for param_name, param in module.modules_to_save.named_parameters():
+                    # it is expected that '.modules_to_save.' is not part of the key
+                    prefix, _, _ = module_name.partition(".modules_to_save.")
+                    # remove the adapter name
+                    _, _, suffix = param_name.rpartition(".")
+                    state_dict[f"{prefix}.{suffix}"] = param.data
 
     return lora_config, state_dict
 
