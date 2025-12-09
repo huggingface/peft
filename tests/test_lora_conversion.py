@@ -40,7 +40,8 @@ from .testing_utils import hub_online_once
 class TestLoraConversion:
     """Test functionality to convert non-LoRA adapters to LoRA adapters
 
-    This is mainly testing with LoKr, as it would be wasteful to test with all compatible PEFT methods.
+    This is mainly testing with LoKr, as it would be wasteful to test with all compatible PEFT methods in detail. For a
+    broad suite of tests across PEFT methods, check test_decoder_models.py::test_lora_conversion.
 
     We mainly use convert_to_lora and not save_as_lora here, as is just a thin wrapper around convert_to_lora and
     involves disk IO, which we want to avoid as much as possible. For most users, save_as_lora will most likely be the
