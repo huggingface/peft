@@ -194,6 +194,9 @@ def evaluate_model(model, eval_dataset, data_collator, tokenizer, task_name, tas
         model=model,
         data_collator=data_collator,
         eval_dataset=eval_dataset,
+        args=TrainingArguments(
+            label_names=["labels"],
+        ),
     )
     results = trainer.evaluate()
     loss = results["eval_loss"]
@@ -234,7 +237,7 @@ def train_with_osf(
     tokenizer.pad_token = tokenizer.eos_token
 
     base_model = AutoModelForCausalLM.from_pretrained(
-        model_name, torch_dtype=torch.bfloat16, device_map="auto", trust_remote_code=True
+        model_name, torch_dtype=torch.bfloat16, device_map="auto"
     )
 
     # Load all datasets with task-specific sizes

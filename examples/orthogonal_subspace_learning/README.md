@@ -292,7 +292,7 @@ If you use OSF in your research, please cite:
 
 - [OSF Documentation](../../docs/source/package_reference/osf.md)
 - [PEFT Documentation](https://huggingface.co/docs/peft)
-- [Original Paper](https://arxiv.org/abs/2504.07097)
+- [Original Paper](https://huggingface.co/papers/2504.07097)
 
 ## License
 
