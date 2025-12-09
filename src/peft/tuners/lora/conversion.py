@@ -228,18 +228,16 @@ def convert_to_lora(
             lora_config.exclude_modules.add(name.removeprefix(peft_prefix))
             continue
 
-        # if we get here, it means the module is being targeted
-        if isinstance(lora_config.target_modules, set):
-            lora_config.target_modules.add(name.removeprefix(peft_prefix))
-        else:
-            # it's a string, we cannot simply add to it, need to workaround with rank_pattern
-            lora_config.rank_pattern[name.removeprefix(peft_prefix)] = effective_rank
-            lora_config.alpha_pattern[name.removeprefix(peft_prefix)] = effective_rank
-
         # the rank was dynamically adjusted, store it in rank and alpha pattern
-        if effective_rank != rank:
+        if (effective_rank != rank) or isinstance(lora_config.target_modules, str):
+            # we need to add an entry to rank/alpha pattern iff:
+            #   1) The effective rank differs from the general rank
+            #   2) target modules is a string, as we cannot simply append the name to target_modules regex
             lora_config.rank_pattern[name.removeprefix(peft_prefix)] = effective_rank
             lora_config.alpha_pattern[name.removeprefix(peft_prefix)] = effective_rank
+        else:
+            # effective rank is the same and target_modules are a set, just add the name
+            lora_config.target_modules.add(name.removeprefix(peft_prefix))
 
         # don't include adapter_name in key
         state_dict[f"{name}.lora_A.weight"] = lora_A
