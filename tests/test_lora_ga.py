@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 import tempfile
 import unittest
 
@@ -113,7 +114,6 @@ class TestLoraGASaveLoad:
         with tempfile.TemporaryDirectory() as tmp_dir:
             peft_model.save_pretrained(tmp_dir)
 
-            import os
             assert os.path.exists(os.path.join(tmp_dir, "adapter_config.json"))
             assert os.path.exists(os.path.join(tmp_dir, "adapter_model.safetensors"))
 
