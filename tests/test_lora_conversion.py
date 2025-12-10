@@ -56,10 +56,12 @@ class TestLoraConversion:
 
     model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
     torch_device = infer_device()
-    with hub_online_once(model_id):
-        base_model = AutoModelForCausalLM.from_pretrained(model_id).to(torch_device)
+    base_model = None
 
     def get_base_model(self):
+        if self.base_model is None:
+            with hub_online_once(self.model_id):
+                self.base_model = AutoModelForCausalLM.from_pretrained(self.model_id).to(self.torch_device)
         return copy.deepcopy(self.base_model)
 
     @pytest.fixture
@@ -68,11 +70,8 @@ class TestLoraConversion:
         return get_peft_model(self.get_base_model(), LoKrConfig(init_weights=False))
 
     @staticmethod
-    def get_mse(output1, output2, output_base):
-        # compare the hidden states of output1 and output2 compared to output_base
-        diff1 = output1.hidden_states[-1] - output_base.hidden_states[-1]
-        diff2 = output2.hidden_states[-1] - output_base.hidden_states[-1]
-        return nn.functional.mse_loss(diff1, diff2).item()
+    def get_mse(output1, output2):
+        return nn.functional.mse_loss(output1.hidden_states[-1], output2.hidden_states[-1]).item()
 
     def test_no_peft_layer_raises(self):
         # Model without any PEFT layer should raise
@@ -216,8 +215,6 @@ class TestLoraConversion:
 
         inputs = torch.arange(10).view(1, -1).to(self.torch_device)
         with torch.inference_mode():
-            with lokr_model.disable_adapter():
-                output_base = lokr_model(inputs, output_hidden_states=True)
             output_lokr = lokr_model(inputs, output_hidden_states=True)
 
         lokr_model.save_pretrained(tmp_path)
@@ -241,7 +238,7 @@ class TestLoraConversion:
 
         with torch.inference_mode():
             output_converted = lora_model(inputs, output_hidden_states=True)
-        assert 0.0 < self.get_mse(output_converted, output_lokr, output_base) < 0.1
+        assert 0.0 < self.get_mse(output_converted, output_lokr) < 0.1
 
     def test_converted_lora_approximates_original_adapter(self, lokr_model):
         inputs = torch.arange(10).view(1, -1).to(self.torch_device)
@@ -278,8 +275,8 @@ class TestLoraConversion:
         with torch.inference_mode():
             output_converted = lora_model(inputs, output_hidden_states=True)
 
-        mse_lora = self.get_mse(output_lora, output_lokr, output_base)
-        mse_converted = self.get_mse(output_converted, output_lokr, output_base)
+        mse_lora = self.get_mse(output_lora, output_lokr)
+        mse_converted = self.get_mse(output_converted, output_lokr)
         assert mse_lora > 0.5
         assert 0.0 < mse_converted < 0.1
 
@@ -299,7 +296,7 @@ class TestLoraConversion:
 
         with torch.inference_mode():
             output_converted = lora_model(inputs, output_hidden_states=True)
-        mse_converted = self.get_mse(output_converted, output_lokr, output_base)
+        mse_converted = self.get_mse(output_converted, output_lokr)
         assert 0.0 < mse_converted < 0.1
 
     def test_with_tqdm_works(self, lokr_model, capsys):
@@ -342,8 +339,6 @@ class TestLoraConversion:
 
         inputs = torch.arange(10).view(1, -1).to(self.torch_device)
         with torch.inference_mode():
-            with lokr_model.disable_adapter():
-                output_base = lokr_model(inputs, output_hidden_states=True)
             output_lokr = lokr_model(inputs, output_hidden_states=True)
 
         # remove the PeftModel wrapper and the peft_config attribute -- this should still work
@@ -369,7 +364,7 @@ class TestLoraConversion:
         with torch.inference_mode():
             output_converted = lora_model(inputs, output_hidden_states=True)
 
-        mse = self.get_mse(output_converted, output_lokr, output_base)
+        mse = self.get_mse(output_converted, output_lokr)
         assert 0.0 < mse < 0.1
 
     def test_converted_lora_to_lora_works_and_warns(self):
@@ -407,7 +402,7 @@ class TestLoraConversion:
         with torch.inference_mode():
             output_converted = lora_model(inputs, output_hidden_states=True)
 
-        mse_converted = self.get_mse(output_converted, output_orig_lora, output_base)
+        mse_converted = self.get_mse(output_converted, output_orig_lora)
         assert 0.0 < mse_converted < 0.1
 
     def test_converted_lora_with_multiple_adapters(self, lokr_model):
@@ -417,8 +412,6 @@ class TestLoraConversion:
 
         inputs = torch.arange(10).view(1, -1).to(self.torch_device)
         with torch.inference_mode():
-            with lokr_model.disable_adapter():
-                output_base = lokr_model(inputs, output_hidden_states=True)
             output_lokr_default = lokr_model(inputs, output_hidden_states=True)
             lokr_model.set_adapter("other")
             output_lokr_other = lokr_model(inputs, output_hidden_states=True)
@@ -448,10 +441,10 @@ class TestLoraConversion:
         with torch.inference_mode():
             output_converted_other = lora_model_other(inputs, output_hidden_states=True)
 
-        mse_default_default = self.get_mse(output_converted_default, output_lokr_default, output_base)
-        mse_other_other = self.get_mse(output_converted_other, output_lokr_other, output_base)
-        mse_default_other = self.get_mse(output_converted_default, output_lokr_other, output_base)
-        mse_other_default = self.get_mse(output_converted_other, output_lokr_default, output_base)
+        mse_default_default = self.get_mse(output_converted_default, output_lokr_default)
+        mse_other_other = self.get_mse(output_converted_other, output_lokr_other)
+        mse_default_other = self.get_mse(output_converted_default, output_lokr_other)
+        mse_other_default = self.get_mse(output_converted_other, output_lokr_default)
 
         assert 0.0 < mse_default_default < 0.1
         assert 0.0 < mse_other_other < 0.1
@@ -493,7 +486,7 @@ class TestLoraConversion:
         with torch.inference_mode():
             output_converted = lora_model(inputs, output_hidden_states=True)
 
-        mse_converted = self.get_mse(output_converted, output_lokr, output_base)
+        mse_converted = self.get_mse(output_converted, output_lokr)
         # here we expect an actual loss of 0, since only the modules_to_save affect the result, and those are identical
         assert mse_converted == 0.0
 
@@ -502,8 +495,6 @@ class TestLoraConversion:
         # If the original adapter includes trainable bias terms, we raise. LoKr doesn't support this, so taking C3A
         model = self.get_base_model()
         inputs = torch.arange(10).view(1, -1).to(self.torch_device)
-        with torch.inference_mode():
-            output_base = model(inputs, output_hidden_states=True)
 
         c3a_config = C3AConfig(block_size=4, bias=bias)
         c3a_model = get_peft_model(model, c3a_config)
@@ -516,7 +507,9 @@ class TestLoraConversion:
         # ensure that we can call lora conversion with compilation
         lora_config_no_comp, state_dict_no_comp = convert_to_lora(lokr_model, rank=8)
         dynamo_counter_before = len(torch._dynamo.utils.counters)
-        lora_config_comp, state_dict_comp = convert_to_lora(lokr_model, rank=8, compile_kwargs={"mode": "max-autotune-no-cudagraphs"})
+        lora_config_comp, state_dict_comp = convert_to_lora(
+            lokr_model, rank=8, compile_kwargs={"mode": "max-autotune-no-cudagraphs"}
+        )
         dynamo_counter_after = len(torch._dynamo.utils.counters)
 
         # roundabout way to check if compilation happened
