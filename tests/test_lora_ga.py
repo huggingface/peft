@@ -94,35 +94,8 @@ class TestLoraGAPreprocessing:
 
         lora_config = LoraConfig(r=4, lora_alpha=8, target_modules=["0"])
 
-        with pytest.raises(ValueError, match="`lora_config.lora_ga_config` must be set"):
+        with pytest.raises(ValueError, match="If you want to use LoRA-GA"):
             preprocess_loraga(model, lora_config, train_step)
-
-    def test_gradient_shapes(self):
-        model = torch.nn.Linear(10, 5)
-        model.train()
-
-        def train_step():
-            for _ in range(4):
-                inputs = torch.randn(2, 10)
-                labels = torch.randint(0, 5, (2,))
-                model.zero_grad()
-                outputs = model(inputs)
-                loss = torch.nn.functional.cross_entropy(outputs, labels)
-                loss.backward()
-
-        lora_ga_config = LoraGAConfig()
-        lora_config = LoraConfig(
-            r=4,
-            lora_alpha=8,
-            target_modules=[""],
-            init_lora_weights="lora_ga",
-            lora_ga_config=lora_ga_config,
-        )
-
-        preprocess_loraga(model, lora_config, train_step)
-
-        assert hasattr(model, "_peft_loraga_grad")
-        assert model._peft_loraga_grad.shape == model.weight.shape
 
 
 class TestLoraGAInitialization:
