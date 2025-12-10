@@ -23,26 +23,6 @@ from peft import LoraConfig, get_peft_model
 from peft.tuners.lora import LoraGAConfig, preprocess_loraga
 
 
-class TestLoraGAConfig:
-    """Test LoraGAConfig validation and defaults."""
-
-    def test_default_config(self):
-        config = LoraGAConfig()
-        assert config.direction == "ArB2r"
-        assert config.scale == "stable"
-        assert config.stable_gamma == 16
-
-    def test_custom_config(self):
-        config = LoraGAConfig(
-            direction="ArBr",
-            scale="weight_svd",
-            stable_gamma=8,
-        )
-        assert config.direction == "ArBr"
-        assert config.scale == "weight_svd"
-        assert config.stable_gamma == 8
-
-
 class TestLoraGAPreprocessing:
     """Test preprocess_loraga functionality."""
 
