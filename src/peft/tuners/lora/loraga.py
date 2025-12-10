@@ -22,6 +22,7 @@ from typing import Any, Optional
 import torch
 import torch.nn as nn
 from attr import dataclass
+from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.lora.config import LoraConfig
 from peft.tuners.lora.model import LoraModel
@@ -31,10 +32,10 @@ from peft.utils.other import get_pattern_key
 def target_modules(model: nn.Module, config: LoraConfig):
     """
     Iterate over LoRA-GA target name and modules of a model. A module is a target if its name is in
-    `config.target_modules` and is `nn.Linear`.
+    `config.target_modules` and is `nn.Linear` or `Conv1D`.
     """
     for name, module in model.named_modules():
-        if LoraModel._check_target_module_exists(config, name) and isinstance(module, nn.Linear):
+        if LoraModel._check_target_module_exists(config, name) and isinstance(module, (nn.Linear, Conv1D)):
             yield name, module
 
 
@@ -78,6 +79,14 @@ def preprocess_loraga(
     if lora_config.lora_ga_config is None:
         raise ValueError("`lora_config.lora_ga_config` must be set when using LoRA-GA initialization.")
 
+    # Check for quantized models - LoRA-GA requires full-precision gradients
+    for name, module in target_modules(model, lora_config):
+        if hasattr(module, 'quant_state'):
+            raise ValueError(
+                f"LoRA-GA does not support quantized models. Found quantized module: '{name}'. "
+                "LoRA-GA requires full-precision gradients during preprocessing."
+            )
+
     # If cache exists, load from cache
     if cache_file is not None and os.path.exists(cache_file) and os.path.getsize(cache_file) > 0:
         cache = torch.load(cache_file, map_location=get_model_device(model))
@@ -105,33 +114,45 @@ def estimate_gradients(
     """
     Estimate gradients for LoRA-GA initialization.
 
-    This function enables gradient computation on model parameters and runs the train_step callback.
-    After backward passes, gradients are accumulated from the .grad attribute of each module's weight.
+    This function enables gradient computation ONLY on target module weights and runs the train_step
+    callback. This is more memory-efficient than enabling gradients globally.
     """
     # Remember original training state
     was_training = model.training
     model.train()
 
+    # Get target modules list once for efficiency
+    target_module_list = list(target_modules(model, lora_config))
+
     # Initialize gradient storage for each target module
-    for name, module in target_modules(model, lora_config):
-        # Use same dtype as module weight
+    for name, module in target_module_list:
         module._peft_loraga_grad = torch.zeros_like(module.weight.data, dtype=module.weight.dtype)
         module._peft_loraga_grad_count = 0
+
+    # Enable gradients ONLY for target module weights (memory efficient)
+    original_requires_grad = {}
+    for name, module in target_module_list:
+        original_requires_grad[name] = module.weight.requires_grad
+        module.weight.requires_grad = True
 
     # Enable gradient computation
     with torch.enable_grad():
         # Run train_step to accumulate gradients
         train_step()
 
+    # Restore original requires_grad state for target modules
+    for name, module in target_module_list:
+        module.weight.requires_grad = original_requires_grad[name]
+
     # Accumulate gradients from each target module's weight.grad
-    for name, module in target_modules(model, lora_config):
+    for name, module in target_module_list:
         if module.weight.grad is not None:
             # Convert to same dtype as stored gradient
             module._peft_loraga_grad += module.weight.grad.detach().to(module._peft_loraga_grad.dtype)
             module._peft_loraga_grad_count += 1
 
     # Average gradients and clean up temporary fields
-    for name, module in target_modules(model, lora_config):
+    for name, module in target_module_list:
         if module._peft_loraga_grad_count > 0:
             module._peft_loraga_grad /= module._peft_loraga_grad_count
         del module._peft_loraga_grad_count
