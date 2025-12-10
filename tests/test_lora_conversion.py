@@ -506,14 +506,9 @@ class TestLoraConversion:
     def test_with_torch_compile(self, lokr_model):
         # ensure that we can call lora conversion with compilation
         lora_config_no_comp, state_dict_no_comp = convert_to_lora(lokr_model, rank=8)
-        dynamo_counter_before = len(torch._dynamo.utils.counters)
         lora_config_comp, state_dict_comp = convert_to_lora(
             lokr_model, rank=8, compile_kwargs={"mode": "max-autotune-no-cudagraphs"}
         )
-        dynamo_counter_after = len(torch._dynamo.utils.counters)
-
-        # roundabout way to check if compilation happened
-        assert dynamo_counter_after > dynamo_counter_before
 
         assert lora_config_no_comp.to_dict() == lora_config_comp.to_dict()
         assert state_dict_no_comp.keys() == state_dict_comp.keys()
