@@ -78,25 +78,33 @@ class TestLoraGAPreprocessing:
             preprocess_loraga(model, lora_config, train_step)
 
 
+@pytest.fixture
+def simple_model():
+    """Fixture providing a simple sequential model for testing."""
+    model = torch.nn.Sequential(torch.nn.Linear(10, 10))
+    model.train()
+    return model
+
+
+@pytest.fixture
+def simple_train_step(simple_model):
+    """Fixture providing a train step function for the simple model."""
+    def train_step():
+        for _ in range(4):
+            inputs = torch.randn(2, 10)
+            outputs = simple_model(inputs)
+            loss = outputs.sum()
+            simple_model.zero_grad()
+            loss.backward()
+    return train_step
+
+
 class TestLoraGASaveLoad:
     """Test save/load with mutated weights."""
 
-    def get_model_and_train_step(self):
-        model = torch.nn.Sequential(torch.nn.Linear(10, 10))
-        model.train()
-
-        def train_step():
-            for _ in range(4):
-                inputs = torch.randn(2, 10)
-                outputs = model(inputs)
-                loss = outputs.sum()
-                model.zero_grad()
-                loss.backward()
-
-        return model, train_step
-
-    def test_save_pretrained_creates_file(self, tmp_path):
-        model, train_step = self.get_model_and_train_step()
+    def test_save_pretrained_creates_file(self, tmp_path, simple_model, simple_train_step):
+        model = simple_model
+        train_step = simple_train_step
 
         lora_ga_config = LoraGAConfig()
         lora_config = LoraConfig(
