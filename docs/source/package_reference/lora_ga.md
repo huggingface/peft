@@ -33,7 +33,7 @@ The abstract from the paper is:
 
 - **Computational Overhead**: The gradient estimation adds a small overhead during initialization (typically 1-2 minutes for 64 batches), but this is quickly amortized by faster convergence during training.
 
-- **Compatibility**: LoRA-GA is compatible with quantized models (4-bit, 8-bit) and can be combined with other LoRA variants like DoRA.
+- **Compatibility**: LoRA-GA requires full-precision weights and does not support quantized models. Can be combined with other LoRA variants like DoRA.
 
 ## LoraGAConfig
 
