@@ -50,13 +50,6 @@ def _convert_module_to_lora(
     module: BaseTunerLayer, rank: int | float, adapter_name: str = "default"
 ) -> tuple[torch.Tensor, torch.Tensor, int]:
     """Convert a single BaseTunerLayer's adapter weight to a LoRA weight, return A, B, and the effective rank."""
-    if not hasattr(module, "get_delta_weight"):
-        # if we arrive here, it means that the layer actually does not support LoRA conversion, which should not happen
-        raise TypeError(
-            f"Module of type {type(module)} does not have a get_delta_weight method, which is required for conversion. "
-            "Please open an issue: https://github.com/huggingface/peft/issues"
-        )
-
     delta_weight = module.get_delta_weight(adapter_name)
     U, S, V = torch.linalg.svd(delta_weight, full_matrices=False)
     if isinstance(rank, int):
@@ -102,6 +95,8 @@ def convert_to_lora(
 
     The LoRA scaling factor is already baked into the LoRA weights, thus the scaling will always be one (i.e. rank and
     alpha are chosen to be identical).
+
+    Note: This function does not support sharded models (yet).
 
     Args:
         model:
@@ -225,6 +220,13 @@ def convert_to_lora(
     ):
         if not isinstance(module, BaseTunerLayer):
             continue
+        if not hasattr(module, "get_delta_weight"):
+            # if we arrive here, it means that the layer actually does not support LoRA conversion, which should not
+            # happen
+            raise TypeError(
+                f"Module of type {type(module)} does not have a get_delta_weight method, which is required for "
+                "conversion. Please open an issue: https://github.com/huggingface/peft/issues"
+            )
 
         lora_A, lora_B, effective_rank = _convert_module_to_lora(module, rank=rank, adapter_name=adapter_name)
         if effective_rank == 0:
@@ -311,6 +313,8 @@ def save_as_lora(
     >>> base_model = AutoModel.from_pretrained(...)
     >>> lora_model = PeftModel.from_pretrained(base_model, lora_path)
     ```
+
+    Note: This function does not support sharded models (yet).
 
     Args:
         model:
