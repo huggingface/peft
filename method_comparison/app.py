@@ -188,7 +188,7 @@ def format_df(df):
 
 
 def build_app(df):
-    with gr.Blocks(theme=gr.themes.Soft()) as demo:
+    with gr.Blocks() as demo:
         gr.Markdown("# PEFT method comparison")
         gr.Markdown(
             "Find more information [on the PEFT GitHub repo](https://github.com/huggingface/peft/tree/main/method_comparison)"
@@ -382,4 +382,4 @@ def build_app(df):
 path = os.path.join(os.path.dirname(__file__), "MetaMathQA", "results")
 df = load_df(path, task_name="MetaMathQA")
 demo = build_app(df)
-demo.launch()
+demo.launch(theme=gr.themes.Soft())
