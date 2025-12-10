@@ -2101,7 +2101,7 @@ class TestPeftCustomModel(PeftCommonTester):
         if autocast_adapter_dtype and (config_cls == LNTuningConfig):
             # LN Tuning basically copies the base weight and makes it trainable, hence it makes sense to keep the dtype
             # of the base model weight.
-            pytest.skip("LNTuning and OSF are exempted from casting the adapter weights to float32")
+            pytest.skip("LNTuning is exempted from casting the adapter weights to float32")
 
         if autocast_adapter_dtype:
             expected_dtype = torch.float32
