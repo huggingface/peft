@@ -894,9 +894,9 @@ class LoraGAConfig:
     """
     This is the sub-configuration class to store the configuration for LoRA-GA initialization.
 
-    LoRA-GA (Low-Rank Adaptation with Gradient Approximation) uses gradient information during initialization
-    to achieve faster convergence (2-4x speedup) by aligning the initial adapter weights with the direction
-    of full fine-tuning gradients.
+    LoRA-GA (Low-Rank Adaptation with Gradient Approximation) uses gradient information during initialization to
+    achieve faster convergence (2-4x speedup) by aligning the initial adapter weights with the direction of full
+    fine-tuning gradients.
 
     Reference: https://arxiv.org/abs/2407.05000
 
@@ -920,11 +920,9 @@ class LoraGAConfig:
     """
 
     direction: Literal["ArBr", "A2rBr", "ArB2r", "random"] = field(
-        default="ArB2r",
-        metadata={"help": "Component distribution strategy from gradient SVD"}
+        default="ArB2r", metadata={"help": "Component distribution strategy from gradient SVD"}
     )
     scale: Literal["stable", "weight_svd", "gd_scale", "unit"] = field(
-        default="stable",
-        metadata={"help": "Scaling strategy for initialization"}
+        default="stable", metadata={"help": "Scaling strategy for initialization"}
     )
     stable_gamma: int = field(default=16, metadata={"help": "Gamma parameter for stable scaling"})

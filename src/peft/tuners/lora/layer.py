@@ -474,19 +474,19 @@ class LoraLayer(BaseTunerLayer):
         """
         Initialize LoRA weights using gradient approximation.
 
-        Uses SVD on the gradient matrix to initialize adapters in a way that
-        aligns with the direction of full fine-tuning.
+        Uses SVD on the gradient matrix to initialize adapters in a way that aligns with the direction of full
+        fine-tuning.
 
-        Expects that `preprocess_loraga` has been called before this, which attaches
-        the `loraga_grad` attribute to the base layer.
+        Expects that `preprocess_loraga` has been called before this, which attaches the `loraga_grad` attribute to the
+        base layer.
 
-        If gradients are not available (e.g., when loading from a saved adapter), falls back
-        to gaussian initialization. The weights will be overwritten by the state_dict anyway.
+        If gradients are not available (e.g., when loading from a saved adapter), falls back to gaussian
+        initialization. The weights will be overwritten by the state_dict anyway.
         """
         base_layer = self.get_base_layer()
 
         # Check for gradient attached by preprocess_loraga
-        if not hasattr(base_layer, '_peft_loraga_grad'):
+        if not hasattr(base_layer, "_peft_loraga_grad"):
             # When loading from saved adapter, gradients won't be available
             # Fall back to gaussian initialization (weights will be overwritten by state_dict)
             self.reset_lora_parameters(adapter_name, init_lora_weights=True)
@@ -519,29 +519,29 @@ class LoraLayer(BaseTunerLayer):
         # V is (in_features, k), we need Vh = V.T which is (k, in_features)
         Vh = V.t()
 
-        U = U[:, :2*r]
-        S = S[:2*r]
-        Vh = Vh[:2*r, :]
+        U = U[:, : 2 * r]
+        S = S[: 2 * r]
+        Vh = Vh[: 2 * r, :]
 
         if direction == "ArBr":
             # Alternating: A takes rows at odd indices [1,3,5,7], B takes columns at even indices [0,2,4,6]
-            lora_A_weight = Vh[1:2*r:2, :]     # Shape: (r, in_features)
-            lora_B_weight = U[:, 0:2*r:2]      # Shape: (out_features, r)
-            S_B = S[0:2*r:2]
+            lora_A_weight = Vh[1 : 2 * r : 2, :]  # Shape: (r, in_features)
+            lora_B_weight = U[:, 0 : 2 * r : 2]  # Shape: (out_features, r)
+            S_B = S[0 : 2 * r : 2]
             lora_B_weight = lora_B_weight @ torch.diag(S_B)
 
         elif direction == "A2rBr":
             # A takes second half rows [r:2r], B takes first half columns [:r]
-            lora_A_weight = Vh[r:2*r, :]  # Shape: (r, in_features)
-            lora_B_weight = U[:, :r]      # Shape: (out_features, r)
+            lora_A_weight = Vh[r : 2 * r, :]  # Shape: (r, in_features)
+            lora_B_weight = U[:, :r]  # Shape: (out_features, r)
             S_B = S[:r]
             lora_B_weight = lora_B_weight @ torch.diag(S_B)
 
         elif direction == "ArB2r":
             # A takes first half rows [:r], B takes second half columns [r:2r]
-            lora_A_weight = Vh[:r, :]     # Shape: (r, in_features)
-            lora_B_weight = U[:, r:2*r]   # Shape: (out_features, r)
-            S_B = S[r:2*r]
+            lora_A_weight = Vh[:r, :]  # Shape: (r, in_features)
+            lora_B_weight = U[:, r : 2 * r]  # Shape: (out_features, r)
+            S_B = S[r : 2 * r]
             lora_B_weight = lora_B_weight @ torch.diag(S_B)
 
         elif direction == "random":
@@ -554,7 +554,7 @@ class LoraLayer(BaseTunerLayer):
         out_features = weight.shape[0]
 
         if scale == "stable":
-            scale_factor = (out_features ** 0.25) / (stable_gamma ** 0.5)
+            scale_factor = (out_features**0.25) / (stable_gamma**0.5)
             lora_B_weight = lora_B_weight * scale_factor
 
         elif scale == "weight_svd":
@@ -1692,7 +1692,9 @@ class MultiheadAttention(nn.Module, LoraLayer):
             raise ValueError(f"out_proj must be an instance of nn.Linear for {self.__class__.__name__}.")
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, lora_ga_config=lora_ga_config)
+        self.update_layer(
+            adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, lora_ga_config=lora_ga_config
+        )
 
     @property
     def embed_dim(self) -> int:
@@ -2112,6 +2114,7 @@ class ParamWrapper(nn.Module, LoraLayer):
         lora_bias: bool = False,
         qalora_group_size: int = 32,
         inference_mode: bool = False,
+        lora_ga_config=None,
         **kwargs,
     ):
         # same method as in lora.Linear but taking into account that there can be multiple experts (3d parameter)

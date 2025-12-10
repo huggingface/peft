@@ -12,12 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
-import unittest
 
 import pytest
 import torch
-from transformers import AutoModelForCausalLM
 
 from peft import LoraConfig, PeftModel, get_peft_model
 from peft.tuners.lora import LoraGAConfig, preprocess_loraga
@@ -118,16 +115,19 @@ class TestLoraGAPreprocessing:
 @pytest.fixture
 def simple_model():
     """Fixture providing a fresh simple sequential model for each test."""
+
     def _make_model():
         model = torch.nn.Sequential(torch.nn.Linear(10, 10))
         model.train()
         return model
+
     return _make_model
 
 
 @pytest.fixture
 def simple_train_step():
     """Fixture providing a train step function factory."""
+
     def _make_train_step(model):
         def train_step():
             for _ in range(4):
@@ -136,7 +136,9 @@ def simple_train_step():
                 loss = outputs.sum()
                 model.zero_grad()
                 loss.backward()
+
         return train_step
+
     return _make_train_step
 
 
@@ -219,10 +221,7 @@ class TestLoraGAIntegration:
 
         # Save with weight conversion
         adapter_path = tmp_path / "adapter"
-        peft_model.save_pretrained(
-            str(adapter_path),
-            path_initial_model_for_weight_conversion=str(init_adapter_path)
-        )
+        peft_model.save_pretrained(str(adapter_path), path_initial_model_for_weight_conversion=str(init_adapter_path))
 
         # Load with original base model
         base_model = simple_model()

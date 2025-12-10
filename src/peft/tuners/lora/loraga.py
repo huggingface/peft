@@ -21,12 +21,10 @@ from typing import Any, Optional
 
 import torch
 import torch.nn as nn
-from attr import dataclass
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.lora.config import LoraConfig
 from peft.tuners.lora.model import LoraModel
-from peft.utils.other import get_pattern_key
 
 
 def get_target_modules(model: nn.Module, config: LoraConfig):
@@ -55,8 +53,8 @@ def preprocess_loraga(
     """
     Build necessary LoRA-GA fields for a model by estimating gradients.
 
-    For each linear layer, gradients will be estimated by running the provided train_step callback.
-    These gradients are then attached to the modules and used during initialization.
+    For each linear layer, gradients will be estimated by running the provided train_step callback. These gradients are
+    then attached to the modules and used during initialization.
 
     Args:
         model (`nn.Module`):
@@ -64,13 +62,11 @@ def preprocess_loraga(
         lora_config (`LoraConfig`):
             Lora configuration of the model. `lora_config.lora_ga_config` should be set.
         train_step (`Callable[[], None]`):
-            Callback to run gradient estimation. Typically you should run model forward and backward
-            passes in this callback. The gradients will be accumulated across all calls within this
-            callback.
+            Callback to run gradient estimation. Typically you should run model forward and backward passes in this
+            callback. The gradients will be accumulated across all calls within this callback.
         cache_file (`Optional[str]`):
-            Optional path to cache file for saving/loading gradients. If provided and the file exists,
-            gradients will be loaded from cache. Otherwise, gradients will be estimated and saved to
-            this path.
+            Optional path to cache file for saving/loading gradients. If provided and the file exists, gradients will
+            be loaded from cache. Otherwise, gradients will be estimated and saved to this path.
 
     Upon completion, the following fields are set for each target module:
         _peft_loraga_grad (`torch.Tensor`):
@@ -84,7 +80,7 @@ def preprocess_loraga(
 
     # Check for quantized models - LoRA-GA requires full-precision gradients
     for name, module in get_target_modules(model, lora_config):
-        if hasattr(module, 'quant_state'):
+        if hasattr(module, "quant_state"):
             raise ValueError(
                 f"LoRA-GA does not support quantized models. Found quantized module: '{name}'. "
                 "LoRA-GA requires full-precision gradients during preprocessing."
@@ -117,8 +113,8 @@ def estimate_gradients(
     """
     Estimate gradients for LoRA-GA initialization.
 
-    This function enables gradient computation ONLY on target module weights and runs the train_step
-    callback. This is more memory-efficient than enabling gradients globally.
+    This function enables gradient computation ONLY on target module weights and runs the train_step callback. This is
+    more memory-efficient than enabling gradients globally.
     """
     # Remember original training state
     was_training = model.training

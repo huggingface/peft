@@ -45,19 +45,27 @@ def parse_args():
     parser.add_argument("--r", type=int, default=8, help="LoRA rank")
     parser.add_argument("--lora_alpha", type=int, default=16, help="LoRA alpha")
     parser.add_argument("--lora_dropout", type=float, default=0.1, help="LoRA dropout")
-    parser.add_argument("--direction", type=str, default="ArB2r",
-                       choices=["ArBr", "A2rBr", "ArB2r", "random"],
-                       help="Direction strategy for LoRA-GA initialization")
-    parser.add_argument("--scale", type=str, default="stable",
-                       choices=["stable", "weight_svd", "gd_scale", "unit"],
-                       help="Scaling strategy for LoRA-GA initialization")
+    parser.add_argument(
+        "--direction",
+        type=str,
+        default="ArB2r",
+        choices=["ArBr", "A2rBr", "ArB2r", "random"],
+        help="Direction strategy for LoRA-GA initialization",
+    )
+    parser.add_argument(
+        "--scale",
+        type=str,
+        default="stable",
+        choices=["stable", "weight_svd", "gd_scale", "unit"],
+        help="Scaling strategy for LoRA-GA initialization",
+    )
     parser.add_argument("--stable_gamma", type=int, default=16, help="Gamma for stable scaling")
 
     # Gradient estimation arguments
-    parser.add_argument("--grad_estimate_iters", type=int, default=64,
-                       help="Number of iterations for gradient estimation")
-    parser.add_argument("--grad_estimate_batch_size", type=int, default=2,
-                       help="Batch size for gradient estimation")
+    parser.add_argument(
+        "--grad_estimate_iters", type=int, default=64, help="Number of iterations for gradient estimation"
+    )
+    parser.add_argument("--grad_estimate_batch_size", type=int, default=2, help="Batch size for gradient estimation")
 
     # Training arguments
     parser.add_argument("--num_epochs", type=int, default=3, help="Number of training epochs")
@@ -82,11 +90,7 @@ def prepare_dataset(dataset_name, dataset_config, tokenizer, max_length):
     def tokenize_function(examples):
         # For causal language modeling, we tokenize and set labels = input_ids
         result = tokenizer(
-            examples["text"],
-            padding="max_length",
-            truncation=True,
-            max_length=max_length,
-            return_tensors="pt"
+            examples["text"], padding="max_length", truncation=True, max_length=max_length, return_tensors="pt"
         )
         result["labels"] = result["input_ids"].clone()
         return result
@@ -94,10 +98,7 @@ def prepare_dataset(dataset_name, dataset_config, tokenizer, max_length):
     # Tokenize the dataset
     print("Tokenizing dataset...")
     tokenized_datasets = dataset.map(
-        tokenize_function,
-        batched=True,
-        remove_columns=dataset["train"].column_names,
-        desc="Tokenizing"
+        tokenize_function, batched=True, remove_columns=dataset["train"].column_names, desc="Tokenizing"
     )
 
     return tokenized_datasets
@@ -120,12 +121,7 @@ def main():
     model = AutoModelForCausalLM.from_pretrained(args.base_model)
 
     # Prepare dataset
-    tokenized_datasets = prepare_dataset(
-        args.dataset_name,
-        args.dataset_config,
-        tokenizer,
-        args.max_length
-    )
+    tokenized_datasets = prepare_dataset(args.dataset_name, args.dataset_config, tokenizer, args.max_length)
 
     # Create LoRA-GA configuration
     print("\nCreating LoRA-GA configuration...")
@@ -150,9 +146,9 @@ def main():
     print(f"  Rank: {args.r}, Alpha: {args.lora_alpha}")
 
     # ===== GRADIENT ESTIMATION PHASE =====
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("GRADIENT ESTIMATION PHASE")
-    print("="*70)
+    print("=" * 70)
     print(f"Estimating gradients over {args.grad_estimate_iters} iterations...")
     print("This allows LoRA-GA to initialize adapters aligned with full fine-tuning.")
 
@@ -196,12 +192,12 @@ def main():
     # Preprocess with LoRA-GA
     print("Running gradient estimation...")
     preprocess_loraga(model, lora_config, train_step)
-    print(f"✓ Gradient estimation complete!")
+    print("✓ Gradient estimation complete!")
 
     # ===== MODEL INITIALIZATION PHASE =====
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("LORA-GA INITIALIZATION PHASE")
-    print("="*70)
+    print("=" * 70)
     print("Initializing LoRA adapters with gradient information...")
 
     # Create PEFT model with LoRA-GA initialization
@@ -211,9 +207,9 @@ def main():
     peft_model.print_trainable_parameters()
 
     # ===== TRAINING PHASE =====
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("TRAINING PHASE")
-    print("="*70)
+    print("=" * 70)
     print("Starting training with LoRA-GA initialized adapters...")
     print("LoRA-GA achieves 2-4x faster convergence compared to random initialization!\n")
 
@@ -251,9 +247,9 @@ def main():
     trainer.train()
 
     # ===== SAVING PHASE =====
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("SAVING PHASE")
-    print("="*70)
+    print("=" * 70)
     print("Saving trained adapter...")
 
     # Save the trained adapter
@@ -261,15 +257,15 @@ def main():
 
     print(f"\n✓ Training complete! Model saved to: {args.output_dir}")
     print("\nSaved files:")
-    print(f"  - adapter_model.safetensors: Trained adapter weights")
-    print(f"  - adapter_config.json: Configuration file")
+    print("  - adapter_model.safetensors: Trained adapter weights")
+    print("  - adapter_config.json: Configuration file")
 
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("DONE!")
-    print("="*70)
+    print("=" * 70)
     print("\nYou can now use the trained adapter with:")
-    print(f"  from peft import PeftModel")
-    print(f"  from transformers import AutoModelForCausalLM")
+    print("  from peft import PeftModel")
+    print("  from transformers import AutoModelForCausalLM")
     print(f"  model = AutoModelForCausalLM.from_pretrained('{args.base_model}')")
     print(f"  model = PeftModel.from_pretrained(model, '{args.output_dir}')")
 
