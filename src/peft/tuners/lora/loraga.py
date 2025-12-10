@@ -77,7 +77,10 @@ def preprocess_loraga(
             Accumulated gradient for the weight matrix.
     """
     if lora_config.lora_ga_config is None:
-        raise ValueError("`lora_config.lora_ga_config` must be set when using LoRA-GA initialization.")
+        raise ValueError(
+            "If you want to use LoRA-GA, please initialize the LoraConfig with "
+            "init_lora_weights='lora_ga' and lora_ga_config=LoraGAConfig(...)."
+        )
 
     # Check for quantized models - LoRA-GA requires full-precision gradients
     for name, module in target_modules(model, lora_config):
